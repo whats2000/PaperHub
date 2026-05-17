@@ -386,9 +386,7 @@ class LaunchedMcpSessions:
     def __init__(self, settings: Any) -> None:
         self._settings = settings
         self._arxiv = _ArxivSession(arxiv_command=settings.mcp_arxiv_command)
-        self._arxiv_latex = _ArxivLatexSession(
-            command=settings.mcp_arxiv_latex_command
-        )
+        self._arxiv_latex = _ArxivLatexSession(command=settings.mcp_arxiv_latex_command)
         self._grobid = _GrobidSession()
         self._arxiv_started: bool = False
         self._arxiv_latex_started: bool = False
@@ -517,6 +515,11 @@ def make_dispatcher(
         "arxiv": _arxiv.call,
         "arxiv_latex": _arxiv_latex.call,
         "grobid": _grobid.call,
+        # TODO(phase-b): wrap Marker container — add "pdf_extract" route here
+        # pointing to a _MarkerSession that calls settings.marker_url when
+        # settings.marker_enabled is True.  The container image is
+        # datalab-to/marker (Docker Hub).  Phase B drops the container in and
+        # flips marker_enabled=True in Settings.
     }
 
     async def dispatch(invocation: McpInvocation) -> dict[str, object]:

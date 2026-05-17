@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Tier 2 (Marker) is deferred to Phase B — heavyweight ML models (~2-4 GB).
     # Phase B flips this to True and implements the Marker call in the import ladder.
     marker_enabled: bool = False
+    # Marker container base URL (Phase B deployment).  Phase A scaffolding only —
+    # no live Marker call is made until Phase B sets marker_enabled=True.
+    marker_url: str = "http://localhost:8080"
 
 
 def get_settings() -> Settings:

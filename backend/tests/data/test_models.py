@@ -113,6 +113,54 @@ def test_paper_extraction_tier_none_backward_compat() -> None:
     assert p.notes_md is None
 
 
+def test_paper_source_dir_path_for_tier1() -> None:
+    """Tier 1 Paper with source_dir_path set round-trips cleanly."""
+    pid = uuid4()
+    p = Paper(
+        id=pid,
+        arxiv_id="1706.03762",
+        doi=None,
+        title="Attention Is All You Need",
+        authors=["Vaswani et al."],
+        year=2017,
+        abstract="Transformer architecture.",
+        pdf_path="papers/1706.03762/source/main.tex",
+        sha256="a" * 64,
+        primary_topic=None,
+        added_at=datetime(2026, 5, 17, 12, 0, 0),
+        extraction_tier="latex",
+        notes_md=None,
+        source_dir_path="papers/1706.03762/source",
+    )
+    assert p.source_dir_path == "papers/1706.03762/source"
+    assert p.extraction_tier == "latex"
+    # Round-trip
+    assert Paper.model_validate(p.model_dump()) == p
+
+
+def test_paper_source_dir_path_none_for_tier3() -> None:
+    """Tier 3 Paper has source_dir_path=None (no unpacked archive)."""
+    pid = uuid4()
+    p = Paper(
+        id=pid,
+        arxiv_id="2301.07041",
+        doi=None,
+        title="Test Paper",
+        authors=["Alice"],
+        year=2023,
+        abstract="Abstract.",
+        pdf_path="papers/2301.07041/fallback.md",
+        sha256="b" * 64,
+        primary_topic=None,
+        added_at=datetime(2026, 5, 17, 12, 0, 0),
+        extraction_tier="raw",
+        notes_md="low_fidelity_extraction",
+        source_dir_path=None,
+    )
+    assert p.source_dir_path is None
+    assert Paper.model_validate(p.model_dump()) == p
+
+
 def test_paper_extraction_tier_invalid_value() -> None:
     """extraction_tier must be one of 'latex', 'marker', 'raw', or None."""
     pid = uuid4()
@@ -129,7 +177,7 @@ def test_paper_extraction_tier_invalid_value() -> None:
             sha256="d" * 64,
             primary_topic=None,
             added_at=datetime(2026, 5, 17, 12, 0, 0),
-            extraction_tier="unknown_tier",  # type: ignore[arg-type]
+            extraction_tier="unknown_tier",  # pydantic validates at runtime; mypy accepts str
         )
 
 

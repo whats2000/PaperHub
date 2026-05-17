@@ -69,9 +69,7 @@ async def test_latex_first_import_real_arxiv(
     async with LaunchedMcpSessions(e2e_settings) as mcp_sessions:
         app.state.mcp_dispatcher = mcp_sessions.make_dispatcher()
 
-        async with httpx.AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://e2e"
-        ) as ac:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://e2e") as ac:
             r = await ac.post(
                 "/papers/import",
                 json={"arxiv_id": "1706.03762"},
@@ -96,8 +94,78 @@ async def test_latex_first_import_real_arxiv(
             assert tex_path.exists(), f".tex file not found at {tex_path}"
             content = tex_path.read_text(encoding="utf-8")
             assert "\\" in content, "Expected LaTeX backslash commands in .tex file"
-            assert len(content) > 1000, (
-                f"Expected substantial LaTeX body, got {len(content)} chars"
+            assert len(content) > 1000, f"Expected substantial LaTeX body, got {len(content)} chars"
+
+
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_latex_first_import_preserves_raw_source_and_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Import a real arXiv paper; verify the unpacked e-print is on disk
+    AND figures (.png/.pdf/.jpg/.eps) are present in source/.
+
+    Uses 1706.03762 (Attention Is All You Need) — has figures in the source.
+    Per SRS v1.10 §1.1 Tier 1: the primary artifact is the UNPACKED e-print
+    archive (figures + bib + sty + .tex), not just flattened LaTeX text.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GEMINI_API_KEY")):
+        pytest.skip("No LLM API key configured — skipping e2e")
+
+    monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_DB_PATH", str(tmp_path / "paperhub.db"))
+
+    from paperhub.api.app import create_app
+    from paperhub.config import get_settings
+    from paperhub.data.db import apply_migrations
+    from paperhub.mcp.launchers import LaunchedMcpSessions
+
+    e2e_settings = get_settings()
+    apply_migrations(e2e_settings.db_path)
+
+    app = create_app()
+
+    async with LaunchedMcpSessions(e2e_settings) as mcp_sessions:
+        app.state.mcp_dispatcher = mcp_sessions.make_dispatcher()
+
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://e2e") as ac:
+            r = await ac.post(
+                "/papers/import",
+                json={"arxiv_id": "1706.03762"},
+                timeout=300.0,
+            )
+            assert r.status_code == 200, f"import failed: {r.status_code} {r.text}"
+            paper = r.json()
+            assert paper["extraction_tier"] == "latex"
+            assert paper["source_dir_path"], "source_dir_path must be set for Tier 1 imports"
+
+            source_dir = tmp_path / paper["source_dir_path"]
+            assert source_dir.exists() and source_dir.is_dir(), (
+                f"source/ directory not found at {source_dir}"
+            )
+
+            # At least one .tex file must be present
+            tex_files = list(source_dir.rglob("*.tex"))
+            assert tex_files, f"Expected at least one .tex file in {source_dir}"
+
+            # At least one figure (.png / .pdf / .jpg / .jpeg / .eps)
+            figure_exts = {".png", ".pdf", ".jpg", ".jpeg", ".eps"}
+            figures = [p for p in source_dir.rglob("*") if p.suffix.lower() in figure_exts]
+            assert figures, (
+                f"Expected at least one figure (.png/.pdf/.jpg/.jpeg/.eps) in "
+                f"{source_dir}; got files: "
+                f"{[p.relative_to(source_dir) for p in source_dir.rglob('*') if p.is_file()][:20]}"
+            )
+
+            # pdf_path (primary .tex) must be inside source/
+            pdf_path = tmp_path / paper["pdf_path"]
+            assert pdf_path.exists(), f"Primary .tex not found at {pdf_path}"
+            assert str(pdf_path).startswith(str(source_dir)), (
+                f"pdf_path {pdf_path} is not inside source_dir {source_dir}"
             )
 
 
@@ -140,18 +208,14 @@ async def test_chat_paper_qa_against_latex_import(
         dispatcher = mcp_sessions.make_dispatcher()
         app.state.mcp_dispatcher = dispatcher
 
-        async with httpx.AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://e2e"
-        ) as ac:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://e2e") as ac:
             import_r = await ac.post(
                 "/papers/import", json={"arxiv_id": "1706.03762"}, timeout=180.0
             )
             assert import_r.status_code == 200, (
                 f"import failed: {import_r.status_code} {import_r.text}"
             )
-            assert import_r.json()["extraction_tier"] == "latex", (
-                "Expected Tier 1 (latex) import"
-            )
+            assert import_r.json()["extraction_tier"] == "latex", "Expected Tier 1 (latex) import"
 
             # Chat: ask about the architecture
             events: list[dict[str, object]] = []
@@ -164,9 +228,7 @@ async def test_chat_paper_qa_against_latex_import(
                 },
                 timeout=120.0,
             ) as response:
-                assert response.status_code == 200, (
-                    f"chat failed: {response.status_code}"
-                )
+                assert response.status_code == 200, f"chat failed: {response.status_code}"
                 buf = ""
                 async for chunk in response.aiter_text():
                     buf += chunk
@@ -179,7 +241,7 @@ async def test_chat_paper_qa_against_latex_import(
                         normalized = remainder
                         for line in frame.splitlines():
                             if line.startswith("data: "):
-                                events.append(json.loads(line[len("data: "):]))
+                                events.append(json.loads(line[len("data: ") :]))
 
         event_types = [e.get("type") for e in events]
         assert "routing_decision" in event_types, (

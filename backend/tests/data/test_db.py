@@ -42,7 +42,7 @@ def test_apply_migrations_is_idempotent(tmp_path: Path) -> None:
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
         ]
-    assert versions == [1, 2]
+    assert versions == [1, 2, 3]
 
 
 def test_migration_0002_adds_extraction_tier_and_notes_md(tmp_path: Path) -> None:
@@ -51,16 +51,11 @@ def test_migration_0002_adds_extraction_tier_and_notes_md(tmp_path: Path) -> Non
     apply_migrations(db_path)
     with connect(db_path) as conn:
         # PRAGMA table_info returns (cid, name, type, notnull, dflt_value, pk)
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(papers)").fetchall()
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
     assert "extraction_tier" in columns, (
         "papers.extraction_tier column missing after migration 0002"
     )
-    assert "notes_md" in columns, (
-        "papers.notes_md column missing after migration 0002"
-    )
+    assert "notes_md" in columns, "papers.notes_md column missing after migration 0002"
 
 
 def test_migration_0002_backfill_sets_raw_for_existing_rows(tmp_path: Path) -> None:
@@ -88,8 +83,15 @@ def test_migration_0002_backfill_sets_raw_for_existing_rows(tmp_path: Path) -> N
             "INSERT INTO papers (id, arxiv_id, doi, title, authors_json, year, abstract,"
             " pdf_path, sha256, added_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
             (
-                paper_id, "old-arxiv-001", "Old Paper", "[]",
-                None, None, "papers/old.md", "a" * 64, added_at,
+                paper_id,
+                "old-arxiv-001",
+                "Old Paper",
+                "[]",
+                None,
+                None,
+                "papers/old.md",
+                "a" * 64,
+                added_at,
             ),
         )
 
@@ -101,11 +103,35 @@ def test_migration_0002_backfill_sets_raw_for_existing_rows(tmp_path: Path) -> N
 
     # Verify backfill
     with connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT extraction_tier FROM papers WHERE id=?", (paper_id,)
-        ).fetchone()
+        row = conn.execute("SELECT extraction_tier FROM papers WHERE id=?", (paper_id,)).fetchone()
     assert row is not None
     assert row[0] == "raw", f"Expected 'raw' backfill, got: {row[0]}"
+
+
+def test_migration_0003_adds_source_dir_path(tmp_path: Path) -> None:
+    """Migration 0003 must add source_dir_path column to papers."""
+    db_path = tmp_path / "paperhub.db"
+    apply_migrations(db_path)
+    with connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+    assert "source_dir_path" in columns, (
+        "papers.source_dir_path column missing after migration 0003"
+    )
+
+
+def test_apply_migrations_is_idempotent_three_migrations(tmp_path: Path) -> None:
+    """Three migrations applied twice must be idempotent (versions = [1, 2, 3])."""
+    db_path = tmp_path / "paperhub.db"
+    apply_migrations(db_path)
+    apply_migrations(db_path)
+    with connect(db_path) as conn:
+        versions = [
+            r[0]
+            for r in conn.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            ).fetchall()
+        ]
+    assert versions == [1, 2, 3]
 
 
 def test_connect_enables_foreign_keys(tmp_path: Path) -> None:

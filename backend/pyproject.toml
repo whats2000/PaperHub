@@ -20,6 +20,7 @@ dependencies = [
   "sse-starlette>=2.1",
   "tiktoken>=0.7",
   "mcp>=1.27.1",
+  "arxiv>=2.0",
 ]
 
 [dependency-groups]

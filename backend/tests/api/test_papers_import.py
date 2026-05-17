@@ -7,6 +7,10 @@ fake content (matching the §1.1 three-tier source-fidelity ladder).
 Tier 1 (arxiv-latex-mcp / LaTeX)  — happy path and metadata-enrichment path
 Tier 3 (arxiv-mcp-server markdown) — fallback when Tier 1 fails
 Both fail                           — HTTP 502 with named tiers
+
+Tier 1 unit tests also patch ``_download_and_unpack_eprint`` to write a
+minimal fake unpacked source directory (a single ``main.tex`` with
+``\\documentclass``) rather than hitting the real arXiv network.
 """
 
 from __future__ import annotations
@@ -194,6 +198,36 @@ def _make_fake_dispatcher(
     return _fake_dispatcher
 
 
+def _make_fake_source_dir(paper_dir: Path, arxiv_id: str) -> Path:
+    """Write a minimal fake unpacked e-print source directory.
+
+    Creates ``paper_dir/source/main.tex`` containing ``\\documentclass``
+    so that ``_find_main_tex`` identifies it as the primary artifact.
+    Also writes a tiny fake figure file to exercise the figure-presence
+    assertion in the e2e test (not needed here, but keeps parity).
+
+    Returns the ``source/`` directory path.
+    """
+    source_dir = paper_dir / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    main_tex = source_dir / "main.tex"
+    main_tex.write_text(
+        r"""\documentclass{article}
+\begin{document}
+Hello from fake e-print for """
+        + arxiv_id
+        + r""".
+\end{document}
+""",
+        encoding="utf-8",
+    )
+    # Fake figure so the source dir is non-trivial.
+    figs = source_dir / "figures"
+    figs.mkdir(exist_ok=True)
+    (figs / "fig1.png").write_bytes(b"\x89PNG\r\n")
+    return source_dir
+
+
 def _make_client(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -215,6 +249,16 @@ def _make_client(
     monkeypatch.setattr(
         "paperhub.api.routes.papers.make_dispatcher",
         lambda **kwargs: fake_dispatcher,
+    )
+
+    # Patch the raw e-print download so unit tests never hit the real arXiv
+    # network.  The fake writes a minimal source/ dir with main.tex.
+    def _fake_download_and_unpack(arxiv_id: str, paper_dir: Path) -> Path:
+        return _make_fake_source_dir(paper_dir, arxiv_id)
+
+    monkeypatch.setattr(
+        "paperhub.api.routes.papers._download_and_unpack_eprint",
+        _fake_download_and_unpack,
     )
 
     import paperhub.api.app as _app_module
@@ -285,28 +329,47 @@ def test_tier1_latex_success(
     client_tier1: TestClient,
     workspace: Path,
 ) -> None:
-    """Tier 1 (arxiv-latex-mcp) success: artifact is .tex, tier='latex', notes_md=None."""
+    """Tier 1 success: primary artifact is inside source/, source_dir_path is set."""
     r = client_tier1.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
     assert r.status_code == 200, r.text
 
     data = r.json()
     assert data["arxiv_id"] == _STUB_ARXIV_ID
     assert data["extraction_tier"] == "latex"
-    assert data["pdf_path"].endswith(".tex"), f"Expected .tex, got: {data['pdf_path']}"
     assert data["notes_md"] is None, "Tier 1 artifact should not be flagged as low-fidelity"
 
-    # Verify the .tex file exists and has content
+    # pdf_path must point inside the unpacked source/ directory
+    assert data["pdf_path"].endswith(".tex"), f"Expected .tex, got: {data['pdf_path']}"
+    assert "source" in data["pdf_path"], (
+        f"pdf_path should be inside source/ dir, got: {data['pdf_path']}"
+    )
+
+    # source_dir_path must be set for Tier 1
+    assert data["source_dir_path"] is not None, "source_dir_path must be set for Tier 1"
+    assert "source" in data["source_dir_path"], (
+        f"source_dir_path should point to source/ dir, got: {data['source_dir_path']}"
+    )
+
+    # Verify the source/ directory exists with at least one .tex file
+    source_dir = workspace / data["source_dir_path"]
+    assert source_dir.exists() and source_dir.is_dir(), f"source_dir not found: {source_dir}"
+    tex_files = list(source_dir.rglob("*.tex"))
+    assert tex_files, f"Expected at least one .tex file in {source_dir}"
+
+    # Verify primary .tex file exists and has LaTeX markup
     tex_path = workspace / data["pdf_path"]
     assert tex_path.exists(), f".tex file not found at {tex_path}"
     content = tex_path.read_text(encoding="utf-8")
-    assert "\\section" in content or "\\begin" in content, "Expected LaTeX markup in artifact"
+    assert "\\documentclass" in content or "\\begin" in content, (
+        "Expected LaTeX markup in primary artifact"
+    )
 
 
 def test_tier1_paper_stored_in_db(
     client_tier1: TestClient,
     workspace: Path,
 ) -> None:
-    """Tier 1 import: DB row has extraction_tier='latex' and non-null title."""
+    """Tier 1 import: DB row has extraction_tier='latex', source_dir_path set, notes_md=None."""
     r = client_tier1.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
     assert r.status_code == 200, r.text
 
@@ -315,12 +378,16 @@ def test_tier1_paper_stored_in_db(
     db_path = workspace / "paperhub.db"
     with connect(db_path) as conn:
         row = conn.execute(
-            "SELECT title, extraction_tier, notes_md FROM papers WHERE arxiv_id=?",
+            "SELECT title, extraction_tier, notes_md, source_dir_path FROM papers WHERE arxiv_id=?",
             (_STUB_ARXIV_ID,),
         ).fetchone()
     assert row is not None
     assert row["extraction_tier"] == "latex"
     assert row["notes_md"] is None
+    assert row["source_dir_path"] is not None, (
+        "DB row source_dir_path must be set for Tier 1 imports"
+    )
+    assert "source" in row["source_dir_path"]
 
 
 def test_tier3_fallback_when_tier1_fails(

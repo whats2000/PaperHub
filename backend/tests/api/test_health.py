@@ -22,4 +22,4 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestCli
 def test_health_endpoint_returns_ok(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "app": "paperhub", "schema_version": 2}
+    assert r.json() == {"status": "ok", "app": "paperhub", "schema_version": 3}

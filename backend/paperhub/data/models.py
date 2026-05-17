@@ -38,13 +38,18 @@ class Paper(_Frozen):
 
     ``pdf_path`` is the path to the **primary artifact** relative to the
     workspace root.  The artifact format depends on the extraction tier:
-      - Tier 1 (``extraction_tier='latex'``) → ``.tex`` file
-        (``papers/<arxiv_id>/source.tex``)
+      - Tier 1 (``extraction_tier='latex'``) → primary ``.tex`` file inside
+        the unpacked e-print archive (``papers/<arxiv_id>/source/<main>.tex``)
       - Tier 2 (``extraction_tier='marker'``) → ``.md`` file (Phase B)
       - Tier 3 (``extraction_tier='raw'``) → ``.md`` file
         (``papers/<arxiv_id>/fallback.md``)
     The column name ``pdf_path`` is kept as-is to avoid breaking existing
     tests and migrations; its semantics have been broadened.
+
+    ``source_dir_path`` is the path to the **unpacked e-print directory**
+    relative to the workspace root.  Set only for Tier 1 imports (the full
+    archive is needed by the Phase B slide pipeline to resolve
+    ``\\includegraphics`` paths at compile time).  ``None`` for Tier 2/3.
 
     ``notes_md`` carries import-time annotations.  When ``'low_fidelity_extraction'``
     the artifact is a lossy Tier-3 raw-markdown extract; downstream consumers
@@ -64,6 +69,7 @@ class Paper(_Frozen):
     added_at: datetime
     extraction_tier: Literal["latex", "marker", "raw"] | None = None
     notes_md: str | None = None
+    source_dir_path: str | None = None
 
 
 class ProjectPaper(_Frozen):
