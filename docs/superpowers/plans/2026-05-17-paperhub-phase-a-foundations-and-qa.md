@@ -1148,3 +1148,59 @@ Phase B widens the vertical slice from binary `{paper_qa, chitchat}` routing to 
 - Cytoscape relation-graph layout algorithm (Phase B)
 - Exact prompt content per intent slot beyond `router` and `research_qa` (Phase B adds the remaining slots)
 - Eval-harness rubric prompt + 20-item human-calibration set (Phase C)
+
+---
+
+## Phase A actual completion (post-plan-execution addendum, 2026-05-17)
+
+The original "Phase A complete" section above captured the state right after Tasks 1–10 landed (commit `d0687db`, 64 unit + 2 e2e skipped). After that, a user-driven live-API review surfaced six integration defects and a series of SRS-principle clarifications drove substantial follow-on work. This appendix records what actually shipped on the `feat/phase-a-foundations` branch as of tag `phase-a-complete` (commit `1ed15f0`, **29 commits ahead of `main`**).
+
+### Final test gates
+
+- Backend: **94 unit tests passed** (up from 64), 5 e2e tests deselected/runnable
+- Backend `mypy --strict`: clean across **63 source files** (up from 62)
+- Backend `ruff check` + `ruff format --check`: clean
+- Frontend: **5 vitest tests passed**; typecheck + lint + build clean
+- **Live e2e (against real arxiv-latex-mcp + real Gemini 2.5 Flash/Pro):**
+  - `test_latex_first_import_real_arxiv` ✅ — imports `1706.03762` via Tier 1 LaTeX path
+  - `test_latex_first_import_preserves_raw_source_and_figures` ✅ — verifies unpacked e-print directory contains `.tex` + figures
+  - `test_chat_paper_qa_against_latex_import` ✅ — full chat round-trip with Gemini answering "What architecture does this paper propose?" with citation
+
+### Post-plan work that landed (chronological by commit)
+
+1. **`fix(phase-a)` — final review polish** (`6599e52`) — Important findings from the static final review: e2e final-event shape, MCP settings threading, type-ignore documentation.
+2. **`fix(phase-a)` — live-API integration fixes** (`a1a2aeb`) — Six defects surfaced by the user's first live probe: arXiv MCP method realignment (`fetch_metadata`/`download_pdf` were nonexistent; corrected to `get_abstract`/`download_paper`); upstream `isError` checking; lifespan-owned MCP sessions (fixed anyio cancel-scope crash); `try/finally` on run-status update (caught `CancelledError`); user-message persistence (was never written); typed `ToolCallTracer` parameter via `TYPE_CHECKING`; binary-content redaction end-to-end; typed `GrobidArgs` so GROBID flows through `McpClient`.
+3. **`docs(srs)` v1.7 / v1.8 / v1.9 / v1.10** (`c32c398` / `1134161` / `2bb02aa` / `17a6d77`) — Added **§1.1 First Principle**: *modernizing the framework MUST NOT destroy working logic the predecessor already delivers*. Added the **three-tier source-fidelity ladder** (Tier 1 = raw LaTeX source via `arxiv-latex-mcp` + unpacked e-print archive; Tier 2 = Marker containerized service; Tier 3 = raw text extraction as last resort with `notes_md='low_fidelity_extraction'`).
+4. **`feat(env)` — live-smoke support** (`26f7423`) — `backend/.env.example` with Gemini preset; `python-dotenv` integration so LiteLLM sees `.env` keys via `os.environ`; lazy `Embedder` model loading (defers HuggingFace model download to first `embed()` call — was crashing with Windows OS error 1455 "paging file too small" when loaded eagerly during `Depends(get_retriever)`); env-isolated config tests.
+5. **`feat(import)` — three-tier ladder** (`f08a1f4`) — `/papers/import` now follows the SRS §1.1 ladder. Tier 1 = `takashiishida/arxiv-latex-mcp::get_paper_prompt` (flattened LaTeX). Tier 2 = deferred to Phase B (Marker container). Tier 3 = existing `blazickjp/arxiv-mcp-server::download_paper` markdown as last-resort fallback. Migration `0002_papers_extraction_tier.sql` adds `extraction_tier` + `notes_md` columns. Two new live e2e tests against real arxiv-latex-mcp + real Gemini.
+6. **`feat(import)` — raw e-print archive** (`49c0892`) — Discovered Tier 1 was incomplete: `get_paper_prompt` returns only flattened text, no figures/bib/sty. Added `arxiv.Result.download_source()` to download the raw `.tar.gz` and unpack to `workspace/papers/<id>/source/` (safe extraction; refuses tarball escape). Migration `0003_papers_source_dir.sql` adds `source_dir_path`. New live e2e `test_latex_first_import_preserves_raw_source_and_figures` verifies actual figures (`.png` / `.pdf` / `.eps`) end up on disk. **Critical for FR-05 / FR-07 slide pipeline — the Phase B Report Agent needs these.**
+7. **`chore` — formatter + gitignore widening** (`1ed15f0`) — Ruff format cleanups; `.gitignore` widened from `.paperhub-workspace` to `.*workspace`.
+
+### What actually ships in Phase A (concrete capabilities)
+
+- **`POST /papers/import {arxiv_id}`** — three-tier source-fidelity ladder. Tier 1 (`arxiv_latex` MCP) is the primary path; Tier 3 (`arxiv` MCP markdown) is the fallback. Tier 2 (Marker) is scaffolded but skipped per "demo defers Marker." Tier-1 imports save:
+  - `workspace/papers/<id>/source/` — unpacked e-print archive (figures + bib + sty + .tex files)
+  - `workspace/papers/<id>/source.flattened.tex` (or equivalent) — flattened LaTeX text for RAG indexing
+- **`POST /chat`** SSE — Router (binary `paper_qa` | `chitchat`) → Research Agent (RAG over indexed chunks) → Gemini-generated answer with inline `(§sec, p.N)` citations → SSE events: `routing_decision` → `tool_step` → `token` → `citation` → `final`. User and assistant messages persisted to `messages`; `runs.status` finalized in `try/finally` to survive client disconnects.
+- **`GET /health`** — returns `{status, app, schema_version}`; lifespan-applied migrations ensure schema is up-to-date.
+- **Chat UI** — React + Vite + Tailwind. Sidebar (chat history placeholder), ChatPane (Composer, RoutingBadge, Message, TraceInline), SSE client via `fetch` + `ReadableStream`, zustand store.
+- **Tool-Call Tracer** — every MCP call, scope rejection, and agent step writes a `tool_calls` row with redacted args; the Trace UI surfaces this. Bytes redacted as `<bytes:N>`; home-dir paths redacted.
+- **MCP scope-checker** — every outbound MCP call validated against typed `McpToolScope` before dispatch (path-traversal-safe; `..` rejected; CVE-2025-53109 regression test).
+- **Settings + .env** — `pydantic-settings` with `PAPERHUB_` env prefix + `AliasChoices` for bare-name API keys. Supports Anthropic, OpenAI, Gemini (LiteLLM picks provider by model-ID prefix).
+- **CI** — GitHub Actions runs `ruff format --check` + `ruff check` + `mypy --strict` + `pytest -m "not e2e"` on backend; `typecheck` + `lint` + `test` + `build` on frontend. Pre-commit hooks mirror the backend gates.
+
+### What Phase A does NOT ship (deferred to Phase B per SRS)
+
+- **Marker container** for high-fidelity PDF→Markdown (Tier 2 of the §1.1 ladder). Scaffolded via `Settings.marker_url` + `Settings.marker_enabled=False`; Phase B deploys the container and flips the flag. `# TODO(phase-b): wrap Marker container` in `mcp/launchers.py`.
+- **Agentic search → read → decide → download flow.** The user-confirmed Phase B work: Router gains a `paper_import` intent; ImportAgent uses `arxiv.search_papers` → LLM picks the best match → `arxiv.get_abstract` → LLM confirms → triggers internal import. Phase A only supports direct `POST /papers/import {arxiv_id}` (user knows the ID).
+- **All other Phase B / C deliverables** per the design's §4 phase table — see the Handoff to Phase B section above.
+
+### Lessons applied to the SRS
+
+The user's live review and the resulting fix cycles drove several SRS clarifications that are now binding:
+- v1.7: §1.1 First Principle — preserve paper2slides-plus capabilities; no feature removal.
+- v1.8: Sharpened to "improve, don't simplify" — performance/fidelity improvements OK; capability simplifications prohibited.
+- v1.9: Three-tier ladder cleanly characterized (LaTeX > Marker-Markdown > raw extraction).
+- v1.10: Tier 1 = unpacked e-print archive, not just flattened text; Marker is a containerized service, not a Python dep.
+
+These principles apply to Phase B work too.
