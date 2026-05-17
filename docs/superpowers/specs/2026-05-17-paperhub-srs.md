@@ -13,7 +13,7 @@ scope: full-system
 
 | Field | Value |
 | --- | --- |
-| Version | v1.2 |
+| Version | v1.3 |
 | Date | May 2026 |
 | Predecessor | [paper2slides-plus](https://github.com/whats2000/paper2slides-plus) |
 
@@ -25,7 +25,8 @@ scope: full-system
 | --- | --- | --- |
 | v1.0 | 2026-05-03 | Initial release covering all three parts. |
 | v1.1 | 2026-05-03 | UI switched from Streamlit to custom React (Open WebUI style); data layer simplified from four components (Postgres + Qdrant + MinIO + Redis) to two (SQLite + vector store); architecture diagrams rendered with Graphviz. |
-| v1.2 | 2026-05-17 | Repositioned as a **multi-model and tool-routing AI platform**: orchestrator refactored into a Router Agent + Research / SQL / Report sub-agents; added NL2SQL over a SQLite/DuckDB demo table; added MCP tool integration (filesystem, SQLite, web search) with explicit tool descriptions and security boundaries; added traceable tool-call audit log; added a model/tool comparison evaluation harness for the final demo. |
+| v1.2 | 2026-05-17 | Repositioned as a **multi-model and tool-routing AI platform**: orchestrator refactored into a Router Agent + Research / SQL / Report sub-agents; added NL2SQL over SQLite (with optional DuckDB analytics view); added MCP tool integration (filesystem, SQLite, web search) with explicit tool descriptions and security boundaries; added traceable tool-call audit log; added a model/tool comparison evaluation harness wired into CI as a regression gate. |
+| v1.3 | 2026-05-17 | **Merged §⑤ External APIs and §⑧ MCP Tool Layer.** Every external integration except the LLM provider adapter is now exposed as an MCP tool: bibliographic APIs (`arxiv`, `semantic_scholar`, `crossref`, `web_search`), local deterministic tools (`grobid`, `latex`), and existing `filesystem` / `sqlite` — eight client-side MCP tools total, plus a richer `paperhub.*` server-side tool surface (`search_library`, `get_paper`, `find_related`, `summarize_paper`, `compose_slides`, `list_runs`, `get_trace`). This gives every external call uniform tracing, uniform scope-checking, and uniform exposure to external MCP clients (Claude Desktop, Cursor). LLM providers stay separate because their hot-path streaming / structured-output interface doesn't map cleanly onto MCP. |
 
 ---
 
@@ -37,7 +38,7 @@ Modern researchers must read dozens to hundreds of academic papers each year, an
 
 This project extends the author's previous open-source work, **paper2slides-plus** (a tool that converts a single paper into a Beamer presentation), into a modular research-assistant platform. On top of the original "paper → slides" flow, **PaperHub** adds indexing, cross-paper relation analysis, semantic Q&A, research-direction suggestion, and multi-paper integrated slide generation — enabling users to complete the full research loop ("read papers → manage papers → explore directions → produce reports") inside a single system.
 
-Beyond the research-assistant use case, PaperHub also serves as a concrete reference implementation of a **multi-model and tool-routing AI platform**. A single user task may require very different capabilities — paper retrieval, structured-database querying, report generation, or external MCP tool calls — and no single model or tool is best at all of them. PaperHub therefore exposes an explicit **Router Agent** that classifies the incoming task, picks an appropriate sub-agent (Research / SQL / Report) and the right model tier, invokes the chosen tools (vector search, NL2SQL over SQLite/DuckDB, MCP servers, LaTeX compiler), and records every routing decision in a traceable audit log. The final-demo emphasis is therefore not only on answer quality, but on **whether the agent picks the correct tool, whether the SQL it emits is executable, and whether every tool call can be reproduced from the log**.
+Beyond the research-assistant use case, PaperHub also serves as a concrete reference implementation of a **multi-model and tool-routing AI platform**. A single user task may require very different capabilities — paper retrieval, structured-database querying, report generation, or external MCP tool calls — and no single model or tool is best at all of them. PaperHub therefore exposes an explicit **Router Agent** that classifies the incoming task, picks an appropriate sub-agent (Research / SQL / Report) and the right model tier, invokes the chosen tools (vector search, NL2SQL over SQLite/DuckDB, MCP servers, LaTeX compiler), and records every routing decision in a traceable audit log. PaperHub is intended as a **complete production system**, not a course demo: the routing-quality, source-citation, SQL-executability, and trace-reproducibility properties below are continuous quality bars that every release must clear via the CI-gated evaluation harness, not one-off targets to hit at a final presentation.
 
 ## 2. Problem Statement
 
@@ -99,7 +100,7 @@ Alex pastes a colleague's pre-print URL into the chat and asks: *"Save this PDF 
 | **FR-09** | NL2SQL over the local library | The SQL Agent translates natural-language statistical questions ("how many papers about X in the past 6 months", "top 5 most-cited authors in my library") into parameterized SQL against the SQLite metadata schema (and optionally DuckDB for ad-hoc analytics). Queries execute in a **read-only** connection. The emitted SQL, the row count, and the execution time are surfaced in the UI; invalid SQL triggers a self-repair loop (max 3 retries). |
 | **FR-10** | MCP tool integration | The system exposes MCP-compatible tools to the agents — at minimum: `filesystem` (sandboxed to a user-configured root), `sqlite` (read-only over the metadata DB), and `web_search`. Each tool ships with a structured description (purpose, arguments schema, scope/permission boundary). A custom MCP server demonstrating PaperHub-specific tools (e.g. `paperhub.find_related`) is also provided. |
 | **FR-11** | Tool-call audit log and trace UI | Every agent step persists `(run_id, step_index, agent, tool, model, args_redacted, result_summary, latency_ms, token_in, token_out, status, error)` to a `tool_calls` SQLite table. A "Tool Trace" panel in the UI renders the full DAG for any run, supports single-step replay, and exports the trace as JSON for grading / reproducibility. |
-| **FR-12** | Model and tool evaluation harness | A built-in evaluation harness runs a fixed task suite (paper_qa / library_stats / mcp_tool / mixed) across configurable model × tool-routing combinations, scoring: (a) routing accuracy vs gold labels, (b) answer correctness, (c) source-citation rate, (d) SQL executability, (e) end-to-end latency and cost. Results are emitted as a comparison table for the final demo. |
+| **FR-12** | Model and tool evaluation harness | A built-in evaluation harness runs a fixed task suite (paper_qa / library_stats / mcp_tool / mixed) across configurable model × tool-routing combinations, scoring: (a) routing accuracy vs gold labels, (b) answer correctness, (c) source-citation rate, (d) SQL executability, (e) end-to-end latency and cost. Results are emitted as a regression-tracked comparison table that runs in CI on every release. |
 
 ## 6. Non-Functional Requirements
 
@@ -142,8 +143,8 @@ The following criteria correspond to FR-01 through FR-12; all must pass for deli
 7. Per-slide recompilation finishes within 30 seconds and does not affect other slides.
 8. On the held-out routing test set (≥ 30 labeled prompts spanning all intents), Router Agent top-1 accuracy ≥ 75%; out-of-scope MCP calls (e.g. filesystem write outside the configured root) are rejected by the orchestrator in 100% of attempted cases.
 9. On a 10-question NL2SQL test set, ≥ 70% of generated queries are executable on first attempt and ≥ 85% after the self-repair loop; for the executable subset, numeric answers match the gold result row-for-row.
-10. At least three MCP tools are demonstrably callable end-to-end (filesystem write, sqlite read, web search); the demo includes at least one explicitly out-of-scope call that the orchestrator rejects.
-11. For each demo run, the Tool Trace UI renders the full step DAG and exports it as JSON; replaying any single read-only step (e.g. retrieval, SQL query) in isolation reproduces the same `result_summary`.
+10. All eight client-side MCP tools (`arxiv`, `semantic_scholar`, `crossref`, `web_search`, `grobid`, `latex`, `filesystem`, `sqlite`) are callable end-to-end; at least one explicitly out-of-scope call per tool is rejected by the orchestrator in tests. The `paperhub.*` server-side MCP surface (≥ 5 methods) is reachable from an external MCP client and round-trips through the same scope-checker + tracer.
+11. For every chat run, the Tool Trace UI renders the full step DAG and exports it as JSON; replaying any single read-only step (e.g. retrieval, SQL query) in isolation reproduces the same `result_summary`.
 12. The evaluation harness produces a side-by-side comparison table across at least two model tiers × two routing strategies, reporting routing accuracy, answer correctness, SQL executability, latency, and cost per task.
 
 ---
@@ -244,11 +245,16 @@ flowchart TB
         O5["Tool-Call Tracer<br/>(audit log)"]
     end
 
-    subgraph MCP["⑧ MCP Tool Layer"]
+    subgraph MCP["⑧ MCP Tool Layer (client-side + paperhub.* server)"]
         M1["filesystem (scoped)"]
         M2["sqlite (read-only)"]
-        M3["web search"]
-        M4["custom: paperhub.*"]
+        M3["web_search"]
+        M4["arxiv"]
+        M5["semantic_scholar"]
+        M6["crossref"]
+        M7["grobid"]
+        M8["latex (pdflatex+chktex)"]
+        M9["custom: paperhub.*<br/>server"]
     end
 
     subgraph LLM["③ LLM Module"]
@@ -263,12 +269,6 @@ flowchart TB
         R3["Vector Search + Reranker"]
     end
 
-    subgraph EXT["⑤ External APIs"]
-        E1["arXiv API"]
-        E2["Semantic Scholar"]
-        E3["Crossref / DOI"]
-    end
-
     subgraph DB["⑥ Data Layer — SQLite (+ optional DuckDB) + Vector Store"]
         D1[("SQLite<br/>metadata, projects, notes,<br/>chat history, tool_calls log")]
         D2[("sqlite-vss / Chroma<br/>paper chunk vectors")]
@@ -276,17 +276,9 @@ flowchart TB
         D4[("DuckDB (optional)<br/>ad-hoc analytics<br/>for SQL Agent")]
     end
 
-    subgraph TOOL["⑦ Rules / Tools"]
-        T1["GROBID"]
-        T2["pdflatex"]
-        T3["chktex"]
-    end
-
     UI -- "REST / WebSocket" --> ORC
     ORC --> LLM
     ORC --> RAG
-    ORC --> EXT
-    ORC --> TOOL
     ORC --> MCP
     ORC --> DB
     O5 -. "writes trace" .-> D1
@@ -301,22 +293,18 @@ flowchart TB
     classDef orc  fill:#FFF2CC,stroke:#BF8F00,color:#5C4400;
     classDef llm  fill:#E2EFDA,stroke:#548235,color:#1F3F1F;
     classDef rag  fill:#FCE4D6,stroke:#C65911,color:#5B2C0E;
-    classDef ext  fill:#EDEDED,stroke:#7F7F7F,color:#262626;
     classDef db   fill:#F4CCCC,stroke:#A61C00,color:#5B0F00;
-    classDef tool fill:#D9E1F2,stroke:#4472C4,color:#1F3864;
     classDef mcp  fill:#EFE3FA,stroke:#7030A0,color:#3B1B5B;
 
     class UI,U1,U2,U3,U4 ui
     class ORC,O0,O1,O2,O3,O4,O5 orc
     class LLM,L1,L2,L3 llm
     class RAG,R1,R2,R3 rag
-    class EXT,E1,E2,E3 ext
     class DB,D1,D2,D3,D4 db
-    class TOOL,T1,T2,T3 tool
-    class MCP,M1,M2,M3,M4 mcp
+    class MCP,M1,M2,M3,M4,M5,M6,M7,M8,M9 mcp
 ```
 
-*Figure 1. PaperHub system overview: an eight-block modular architecture (seven core layers + the MCP tool layer). The orchestrator is decomposed into a Router Agent + Research / SQL / Report sub-agents, with a Tool-Call Tracer writing every step to the SQLite audit log. The data layer uses a minimalist design — SQLite (+ optional DuckDB) + vector store.*
+*Figure 1. PaperHub system overview (v1.3). Six top-level blocks: ① UI, ② Orchestrator (Router + sub-agents + tracer), ③ LLM Module (only kept-separate external integration), ④ RAG / Knowledge Base, ⑥ Data Layer, ⑧ MCP Tool Layer (every other external or deterministic integration). The previous §⑤ External APIs and §⑦ Rules/Tools blocks are folded into §⑧.*
 
 ## 2. Layer-by-layer Responsibilities
 
@@ -356,14 +344,11 @@ The system's memory core. Each imported paper is split into 500–1000-token chu
 
 The vector store's metadata filter supports filtering by user, project, and paper ID, ensuring User A never retrieves papers uploaded by User B.
 
-### ⑤ External APIs
+### ⑤ External APIs *(LLM providers only — bibliographic APIs moved to §⑧)*
 
-All adapters for external data sources and model providers are concentrated here.
+As of v1.3, the only external integrations that remain in this layer are **LLM provider APIs** (OpenAI, Anthropic, and local Ollama via the OpenAI-compatible interface). They have a hot-path streaming + structured-output interface that doesn't map cleanly onto MCP, so they keep their own `llm/adapter.py` module.
 
-- **arXiv API.** Retrieve PDF and LaTeX source by arXiv ID.
-- **Semantic Scholar API.** Citation links, citation counts, related works by the same author.
-- **Crossref API.** Reverse-lookup metadata by DOI.
-- **LLM provider APIs.** OpenAI, Anthropic, and local Ollama (via OpenAI-compatible interface).
+All other external integrations — `arxiv`, `semantic_scholar`, `crossref`, `web_search` — are now exposed as MCP tools so they share the same scope-checker, audit log, and external-client surface as the rest of the tool palette. See §⑧.
 
 ### ⑥ Data Layer — Two-component minimalist design
 
@@ -379,22 +364,40 @@ The data layer is deliberately minimal: all structured data (accounts, projects,
 | Vector store (sqlite-vss / Chroma) | Vector index | Paper-chunk embeddings; metadata filters (`user_id`, `project_id`, `paper_id`, `page`). |
 | Local filesystem | Binary storage | Original PDFs, extracted figures, generated `.tex` / `.pdf` decks. |
 
-### ⑦ Rules / Tools Module
+### ⑦ Rules / Tools Module *(folded into §⑧ as MCP tools)*
 
-Encapsulates all deterministic tools: GROBID for structured metadata extraction from PDFs, `pdflatex` for Beamer compilation, `chktex` as the LaTeX linter. These tools output facts, not inferences, and are placed in their own layer to avoid being conflated with the LLM module.
+As of v1.3, the deterministic tools previously listed here — `grobid` (structured PDF metadata + reference extraction), `pdflatex` + `chktex` (LaTeX compile + lint) — are exposed as MCP tools (`grobid`, `latex`). The rationale is the same as for the bibliographic APIs: uniform tracing, uniform scope-checking, and the ability for external MCP clients to reuse them. They remain deterministic in behavior; only the calling convention changed. See §⑧.
 
 ### ⑧ MCP Tool Layer
 
-Exposes a small, carefully-bounded set of MCP (Model Context Protocol) tools that any sub-agent can call through the Router. Every tool ships with a structured description — purpose, JSON argument schema, and an **explicit scope/permission boundary** — and the orchestrator rejects any call whose arguments fall outside the declared scope *before* the request reaches the MCP server. The same Tool-Call Tracer that records internal steps also records every MCP invocation.
+The unified tool surface for every non-LLM external integration. Every tool ships with a structured description — purpose, JSON argument schema, and an **explicit scope/permission boundary** — and the orchestrator rejects any call whose arguments fall outside the declared scope *before* the request reaches the MCP server. The same Tool-Call Tracer that records internal steps also records every MCP invocation.
+
+**Client-side MCP tools** (called by PaperHub agents; replace the v1.2 §⑤ External APIs and §⑦ Rules / Tools):
 
 | MCP Tool | Scope / Allow-list | Typical Use |
 | --- | --- | --- |
+| `arxiv` | Domain pinned to `arxiv.org`; per-arXiv-ToS rate limit | Resolve arXiv IDs to metadata; download PDF and LaTeX source. |
+| `semantic_scholar` | Domain pinned to `api.semanticscholar.org`; per-API-key rate limit | Citation graph, related works, author lookup; primary source for the relation-graph and research-direction features. |
+| `crossref` | Domain pinned to `api.crossref.org` | Reverse-lookup metadata by DOI when arXiv has no record. |
+| `web_search` | Domain allow-list (`arxiv.org`, `semanticscholar.org`, `doi.org`, `openreview.net`); rate-limited | Fallback general lookup when none of the structured APIs resolve. |
+| `grobid` | Localhost only (`http://localhost:8070`); request-size capped | Structured header + reference extraction from PDF. |
+| `latex` | Sandboxed to workspace root; per-call timeout | `pdflatex` compile + `chktex` lint; backs the Beamer feedback loop. |
 | `filesystem` | A single user-configured root (default: `~/PaperHub/workspace`); read + write inside the root only | Save downloaded PDFs, export decks / trace JSON. |
-| `sqlite` | Read-only connection; allow-list of safe tables (`papers`, `tags`, `notes`, `tool_calls`) | Power the SQL Agent's NL2SQL queries against the metadata DB. |
-| `web_search` | Domain allow-list (arxiv.org, semanticscholar.org, doi.org); rate-limited | Light external lookup when a paper isn't in the local library. |
-| `paperhub.*` (custom) | In-process; exposes `find_related`, `summarize_paper`, `compose_slides` | Lets external MCP-aware clients (e.g. Claude Desktop, Cursor) reuse PaperHub capabilities. |
+| `sqlite` | Read-only connection; allow-list of safe tables (`papers`, `tags`, `notes`, `citations`, `tool_calls`, `runs`, `chat_sessions`, `messages`) | Power the SQL Agent's NL2SQL queries against the metadata DB. |
 
-The custom `paperhub.*` server demonstrates the inverse direction: PaperHub is not only an MCP *client* of external tools, but also an MCP *server* that exposes its own primitives to other AI clients — useful both as a course-demo talking point and as a path toward future integration.
+**Server-side MCP surface** (`paperhub.*`, exposed to external clients such as Claude Desktop, Cursor, automation workflows):
+
+| Method | Backing sub-agent | Purpose |
+| --- | --- | --- |
+| `paperhub.search_library(query, project_id?)` | Research Agent (single-step RAG) | Top-k chunks with citations from the user's library. |
+| `paperhub.get_paper(paper_id)` | Data layer | Full metadata + notes + tags. |
+| `paperhub.find_related(paper_id, limit?)` | Relation analysis | Related papers + edge weights. |
+| `paperhub.summarize_paper(paper_id, max_words?)` | Research Agent | Grounded summary with section citations. |
+| `paperhub.compose_slides(paper_ids[], options?)` | Report Agent | Returns PDF path + per-page metadata. |
+| `paperhub.list_runs(session_id?, since?)` | Trace store | Enumerate audit trails. |
+| `paperhub.get_trace(run_id)` | Trace store | Full `tool_calls` DAG as JSON, for replay or external review. |
+
+PaperHub is therefore both an MCP *client* (calling external tools) and an MCP *server* (exposing its own primitives) — the same scope-checker and tracer govern both directions.
 
 ## 3. End-to-End Data Flow: Q&A Pipeline
 

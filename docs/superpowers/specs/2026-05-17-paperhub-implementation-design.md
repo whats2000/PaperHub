@@ -53,14 +53,19 @@ paperhub/
 │   │   │   ├── chunker.py
 │   │   │   ├── embedder.py
 │   │   │   └── retriever.py          # 2-stage: dense search + reranker
-│   │   ├── tools/                    # Deterministic tools (rules layer ⑦)
-│   │   │   ├── grobid.py
-│   │   │   ├── latex.py              # pdflatex + chktex feedback loop
-│   │   │   └── arxiv.py
 │   │   ├── mcp/
 │   │   │   ├── server.py             # custom paperhub.* MCP server
 │   │   │   ├── client.py             # MCP client + scope-checker
-│   │   │   └── tools/                # filesystem, sqlite, web_search wrappers
+│   │   │   ├── scopes.py             # typed McpToolScope declarations
+│   │   │   └── tools/                # one wrapper per MCP tool
+│   │   │       ├── arxiv.py
+│   │   │       ├── semantic_scholar.py
+│   │   │       ├── crossref.py
+│   │   │       ├── web_search.py
+│   │   │       ├── grobid.py
+│   │   │       ├── latex.py
+│   │   │       ├── filesystem.py
+│   │   │       └── sqlite.py
 │   │   ├── data/
 │   │   │   ├── db.py                 # SQLite (+ DuckDB optional) connection
 │   │   │   ├── models.py             # Pydantic data models
@@ -113,17 +118,17 @@ Built once in Phase 0 and used by every later phase. Each is independently testa
 
 Phase 0 is foundation; each subsequent phase delivers a working end-to-end slice that lights up another set of SRS FRs.
 
-| Phase | Goal | FRs lit up | Demoable result |
+| Phase | Goal | FRs lit up | End-of-phase verification |
 |---|---|---|---|
 | **0 — Foundations** | Repo scaffold, FastAPI app shell, React+Tailwind shell, SQLite schema + migrations applied at startup, Pydantic models, LLM Provider Adapter, prompt registry, **Tool-Call Tracer** wired into the call graph, scope-checked MCP client (stub), strict-typing CI. | NFR-11; groundwork for FR-08 and FR-11 | App boots; `/health` returns; `tool_calls` is empty but writable. |
-| **1 — First vertical slice: `paper_qa`** | Manual single-paper import (arXiv ID *or* local PDF; batch import deferred to Phase 8) → text extraction → **500–1000-token** chunking (per SRS §RAG) → embedding → vector store → Research Agent (**two-stage retrieval: dense top-50 → cross-encoder reranker top-5**, per SRS §RAG) → grounded generation with page-level source annotation → Chat UI shows answer + inline citation + Tool-Trace panel populated from `tool_calls`. Router Agent is a hard-coded stub that always returns `intent=paper_qa, confidence=1.0` — the structured-output contract is exercised end-to-end from day 1; only the classification logic is deferred to Phase 2. | FR-01 (manual import), FR-03, FR-11, partial FR-08 | Ask a question about an imported paper, get a cited answer, see the full trace. |
+| **1 — First vertical slice: `paper_qa`** | Manual single-paper import (arXiv ID *or* local PDF; batch import deferred to Phase 8) via **`arxiv` MCP tool** (PDF fetch + header metadata) → **`grobid` MCP tool** (structured header extraction) → text extraction → **500–1000-token** chunking (per SRS §RAG) → embedding → vector store → Research Agent (**two-stage retrieval: dense top-50 → cross-encoder reranker top-5**, per SRS §RAG) → grounded generation with page-level source annotation → Chat UI shows answer + inline citation + Tool-Trace panel populated from `tool_calls`. Router Agent is a hard-coded stub that always returns `intent=paper_qa, confidence=1.0` — the structured-output contract is exercised end-to-end from day 1; only the classification logic is deferred to Phase 2. | FR-01 (manual import), FR-03, FR-11, partial FR-08, partial FR-10 (`arxiv`, `grobid` tools) | Ask a question about an imported paper, get a cited answer, see the full trace. |
 | **2 — Router + `library_stats` via SQL Agent** | Router becomes real: classifies between `paper_qa` and `library_stats`. SQL Agent: schema-aware NL2SQL against SQLite (read-only), self-repair loop (≤ 3), result formatting, "Show SQL" toggle in UI. | FR-08, FR-09 | Same chat box answers both *"What metric did Chen 2024 use?"* and *"How many RAG papers did I add this year?"* with visible routing decision. |
-| **3 — MCP layer** | Wire scope-checker properly, ship 3 MCP tools (filesystem scoped to a workspace root, sqlite read-only, web_search domain-allow-listed). Custom `paperhub.*` MCP server exposing `find_related`, `summarize_paper`. Router adds `mcp_tool` intent. Trace UI shows MCP calls and scope decisions. | FR-10, NFR-10 | *"Save this PDF to `~/Papers/inbox` and summarize §3"* succeeds; an out-of-scope path is rejected by the orchestrator. |
-| **4 — Report Agent: multi-paper slides + page-level editing** | Slide pipeline: structure planning → per-page generation → `pdflatex` + `chktex` feedback loop (≤ 3 retries) → PDF. **Slide caps enforced as rules**: ≤ 5 input papers, ≤ 20 pages per run (per SRS Part 2 cost-guardrail row). Slide Editor UI for per-page regeneration. Router adds `slides` intent. | FR-05, FR-07 | Pick N papers, click *Compose Slides*, edit page 4, recompile that page only. |
-| **5 — Relation analysis + research-direction suggestion** | Citation extraction (GROBID + Semantic Scholar), semantic-similarity edges, author overlap; Cytoscape relation graph in Paper Panel. Research Agent gains topic clustering + gap analysis → recommendation. Router adds `research_suggest` intent. **UC-3 of the SRS (research-direction → multi-paper slides) is realized by chaining Phase 5 output into Phase 4's Report Agent**; the split is implementation-only and transparent to the user. | FR-02, FR-04 | Relation graph renders; topic-driven suggestions return 3–5 directions with supporting papers, *Compose Slides* one-click hand-off works. |
+| **3 — MCP layer hardening + remaining tools** | Promote the Phase-0 scope-checker stub to production: typed `McpToolScope` declarations in `mcp/scopes.py`, rejection rows in `tool_calls` with `status='rejected'`. Ship the rest of the client-side MCP tools not yet built: `filesystem`, `sqlite`, `web_search`, `crossref`. Stand up the `paperhub.*` MCP server (`search_library`, `get_paper`, `summarize_paper`, `list_runs`, `get_trace`). Router adds `mcp_tool` intent. Trace UI shows MCP calls and scope decisions; rejected calls render with a clear reason. | FR-10 (bulk), NFR-10 | *"Save this PDF to `~/Papers/inbox` and summarize §3"* succeeds; an out-of-scope path is rejected by the orchestrator; an external Claude Desktop client can call `paperhub.search_library`. |
+| **4 — Report Agent: multi-paper slides + page-level editing** | Slide pipeline: structure planning → per-page generation → **`latex` MCP tool** (`compile` + `chktex`) with feedback loop (≤ 3 retries) → PDF. Adds `paperhub.compose_slides` to the server-side MCP surface. **Slide caps enforced as rules**: ≤ 5 input papers, ≤ 20 pages per run (per SRS Part 2 cost-guardrail row). Slide Editor UI for per-page regeneration. Router adds `slides` intent. | FR-05, FR-07, partial FR-10 (`latex` tool + `paperhub.compose_slides`) | Pick N papers, click *Compose Slides*, edit page 4, recompile that page only. |
+| **5 — Relation analysis + research-direction suggestion** | **`semantic_scholar` MCP tool** for citation graph, related-paper lookup, author overlap; **`grobid` MCP tool** (already present from Phase 1) reused for in-PDF reference extraction; semantic-similarity edges from the vector store. Cytoscape relation graph in Paper Panel. Research Agent gains topic clustering + gap analysis → recommendation. Adds `paperhub.find_related` to the server-side MCP surface. Router adds `research_suggest` intent. **UC-3 of the SRS (research-direction → multi-paper slides) is realized by chaining Phase 5 output into Phase 4's Report Agent**; the split is implementation-only and transparent to the user. | FR-02, FR-04, partial FR-10 (`semantic_scholar` tool + `paperhub.find_related`) | Relation graph renders; topic-driven suggestions return 3–5 directions with supporting papers, *Compose Slides* one-click hand-off works. |
 | **6 — Project management + tagging + notes** | Projects CRUD, tags, reading-status, notes, chat-history per project, sidebar navigation. | FR-06, NFR-05 | Multi-project workflow; tag / note operations within 1 s. |
-| **7 — Evaluation harness** | Task-suite YAML, runner that sweeps `model × routing_strategy`, scores: routing accuracy, answer correctness, citation rate, SQL executability, latency, cost; exports comparison table. | FR-12, NFR-08 | One command produces the demo comparison table. |
-| **8 — NFR polish + batch import** | **FR-01 hardening**: batch import for 10+ arXiv IDs (per Acceptance #1), DOI import path, exponential-backoff retry on external APIs. Cost dashboard. Latency tuning to hit **NFR-01 targets** (single-paper indexing < 60 s; RAG first-token < 5 s; slide generation < 15 min; Acceptance #1: 95% of a 10-paper batch under 60 s). Cost-guardrail enforcement (≤ USD 0.30 per paper, NFR-07). Trace JSON export, replay-step verification, redaction audit, full `mypy --strict` clean. | FR-01 (full), NFR-01, NFR-02, NFR-07, NFR-09 (full) | All NFR acceptance criteria pass; Acceptance #1 batch-import target met. |
+| **7 — Evaluation harness** | Task-suite YAML, runner that sweeps `model × routing_strategy`, scores: routing accuracy, answer correctness, citation rate, SQL executability, latency, cost; exports comparison table. Wired into CI as a regression gate. | FR-12, NFR-08 | One command produces the comparison table; CI fails if routing accuracy or SQL executability regresses. |
+| **8 — NFR polish + batch import** | **FR-01 hardening**: batch import for 10+ arXiv IDs (per Acceptance #1) parallelizing `arxiv` + `grobid` MCP calls under their rate-limit scopes, DOI import path via the **`crossref` MCP tool**, exponential-backoff retry on external MCP calls. Cost dashboard. Latency tuning to hit **NFR-01 targets** (single-paper indexing < 60 s; RAG first-token < 5 s; slide generation < 15 min; Acceptance #1: 95% of a 10-paper batch under 60 s). Cost-guardrail enforcement (≤ USD 0.30 per paper, NFR-07). Trace JSON export, replay-step verification, redaction audit, full `mypy --strict` clean. | FR-01 (full), NFR-01, NFR-02, NFR-07, NFR-09 (full) | All NFR acceptance criteria pass; Acceptance #1 batch-import target met. |
 
 ## 5. Agent topology
 
@@ -319,15 +324,50 @@ class McpInvocation(BaseModel):
 
 Scope declarations live in `config.py` (typed `Settings`), not in YAML — they're code, they get type-checked, and changes to them show up in `git blame`.
 
-**Three external MCP tools consumed at v1** (client-side, called by PaperHub agents):
+**Design refinement on the SRS:** SRS §⑤ ("External APIs": arXiv, Semantic Scholar, Crossref) and §⑧ ("MCP Tools": filesystem, sqlite, web_search, paperhub.*) are merged in this implementation. Every external integration *except* the LLM provider adapter is exposed as an MCP tool. The benefits are uniform: every external call goes through the same tracer, the same scope-checker, and the same `tool_calls` audit row, and external MCP clients (Claude Desktop, Cursor, future Slack bots) get the full integration surface for free. LLM providers stay separate because they have a hot-path interface (`llm/adapter.py`) with token-streaming and structured-output concerns that don't map cleanly onto MCP. This is recorded as a deliberate SRS-level deviation — the upcoming SRS v1.3 patch should reflect it.
 
-| Tool | Scope | Use |
-|---|---|---|
-| `filesystem` | Sandboxed to `~/PaperHub/workspace` by default; read + write inside the root only | Save downloaded PDFs, export decks / trace JSON. |
-| `sqlite` | Read-only; allow-list = `papers, tags, notes, tool_calls` | Power the SQL Agent's NL2SQL queries. |
-| `web_search` | Domain allow-list = `arxiv.org, semanticscholar.org, doi.org`; rate-limited | Light external lookup when a paper isn't in the local library. |
+### 7.1 Client-side MCP tools (called by PaperHub agents)
 
-**Server side (fourth tool surface)** — a `paperhub.*` MCP server exposes `find_related(paper_id)`, `summarize_paper(paper_id)`, `compose_slides(paper_ids[])`. Implemented as thin wrappers over the existing sub-agents, so external MCP clients (e.g. Claude Desktop, Cursor) get the same capabilities the in-app UI uses. Together with the three client-side tools above, this matches the four-tool surface listed in SRS §⑧.
+Eight tools across four groups. Each declares a typed `McpToolScope` and is enforced by `mcp/client.py` before dispatch.
+
+**Bibliographic / metadata APIs** *(replace SRS §⑤ "External APIs" except LLM providers)*
+
+| Tool | Scope | Methods | Notes |
+|---|---|---|---|
+| `arxiv` | Domain pinned to `arxiv.org`; rate-limit 1 req/3 s (arXiv ToS) | `search(query)`, `fetch_metadata(arxiv_id)`, `download_pdf(arxiv_id) -> path` | Used by Phase 1 (single-paper import) and Phase 8 (batch import). Wraps `arxiv` Python client; result models are Pydantic. |
+| `semantic_scholar` | Domain pinned to `api.semanticscholar.org`; rate-limit per API key | `paper(paper_id)`, `citations(paper_id)`, `references(paper_id)`, `recommended(paper_ids[])`, `author(author_id)` | Used by Phase 5 (citation graph + research-direction); also useful in Phase 3 for `paper_qa`-adjacent enrichment. |
+| `crossref` | Domain pinned to `api.crossref.org` | `lookup_doi(doi)` | DOI → metadata fallback when arXiv has no record. Used in Phase 8 for the DOI import path. |
+| `web_search` | Domain allow-list = `arxiv.org, semanticscholar.org, doi.org, openreview.net`; rate-limited | `search(query, max_results)` | General fallback when none of the above resolve a query. |
+
+**Local deterministic tools** *(replace SRS §⑦ "Rules / Tools" with the same MCP surface, for tracing uniformity)*
+
+| Tool | Scope | Methods | Notes |
+|---|---|---|---|
+| `grobid` | Localhost only (`http://localhost:8070` by default); request-size cap | `process_fulltext(pdf_path)`, `process_header(pdf_path)`, `process_references(pdf_path)` | Structured PDF metadata + reference list. Used by Phase 1 (header) and Phase 5 (references). |
+| `latex` | Workspace-root sandboxed; per-call timeout 60 s | `compile(tex_path)`, `chktex(tex_path)` | `pdflatex` + linter feedback loop; used by Phase 4 (slides). Exposing as MCP lets external clients also drive the slide pipeline. |
+
+**Filesystem & local DB**
+
+| Tool | Scope | Methods | Notes |
+|---|---|---|---|
+| `filesystem` | Sandboxed to `~/PaperHub/workspace` by default; read + write inside the root only | `read_file`, `write_file`, `list_dir`, `delete_file` | Save downloaded PDFs, export decks / trace JSON. |
+| `sqlite` | Read-only; allow-list = `papers, tags, notes, citations, tool_calls, runs, chat_sessions, messages` | `query(sql, params)`, `schema()` | Power the SQL Agent's NL2SQL queries; the `schema()` method feeds the SQL Agent's prompt. |
+
+### 7.2 Server-side MCP tools (PaperHub-as-server, exposed to external clients)
+
+The `paperhub.*` MCP server makes PaperHub's own capabilities available to external MCP clients (Claude Desktop, Cursor, future automation). Each method is a thin wrapper over an existing sub-agent so external callers get the same logic the UI does, with the same audit log.
+
+| Tool | Method | Backing sub-agent | Notes |
+|---|---|---|---|
+| `paperhub.search_library` | `search(query, project_id?)` | Research Agent (RAG, single-step) | Returns top-k chunks with citations. |
+| `paperhub.get_paper` | `get(paper_id)` | Data layer | Full metadata + notes + tags. |
+| `paperhub.find_related` | `find_related(paper_id, limit)` | Relation analysis (Phase 5) | Returns related papers + edge weights. |
+| `paperhub.summarize_paper` | `summarize(paper_id, max_words?)` | Research Agent | Grounded summary with section citations. |
+| `paperhub.compose_slides` | `compose(paper_ids[], options?)` | Report Agent (Phase 4) | Returns PDF path + per-page metadata. |
+| `paperhub.list_runs` | `list(session_id?, since?)` | Trace store | Lets external clients enumerate audit trails. |
+| `paperhub.get_trace` | `get(run_id)` | Trace store | Returns the full `tool_calls` DAG as JSON. |
+
+**Fifteen tools total at v1** (8 client-side + 7 `paperhub.*` server methods). This is a real working tool palette for a complete system, not a token set for a demo — a meaningful fraction of production user tasks will genuinely require selecting between `arxiv` vs `semantic_scholar` vs `web_search`, between `sqlite` vs the Research Agent, between in-app slide generation vs `paperhub.compose_slides` over MCP from an external client. That richness is what gives the Router Agent something real to decide.
 
 ## 8. Frontend architecture
 
@@ -360,7 +400,7 @@ type SseEvent =
   | { type: "error";            data: { message: string; rejected_scope?: McpToolScope } };
 ```
 
-The UI renders the routing decision **before** the first token, so the user can see `intent=paper_qa, model=flagship` *before* the answer streams in. That visibility is the whole point of the routing demo.
+The UI renders the routing decision **before** the first token, so the user can see `intent=paper_qa, model=flagship` *before* the answer streams in. This visibility is a core product feature — users (and operators reviewing the audit log) need to know which capability handled their request without inspecting backend logs.
 
 ## 9. Testing strategy
 
@@ -402,7 +442,7 @@ Every SRS FR and NFR maps to a concrete phase or cross-cutting foundation. If a 
 | FR-07 interactive slide editing | Phase 4 |
 | FR-08 Router Agent + classification | Phase 1 (stub) → **Phase 2 (real)** |
 | FR-09 NL2SQL | Phase 2 |
-| FR-10 MCP tool integration | Phase 3 |
+| FR-10 MCP tool integration | Phase 1 (`arxiv`, `grobid`) → Phase 3 (bulk: `filesystem`, `sqlite`, `web_search`, `crossref`, plus `paperhub.*` server) → Phase 4 (`latex`, `paperhub.compose_slides`) → Phase 5 (`semantic_scholar`, `paperhub.find_related`) |
 | FR-11 tool-call audit log + trace UI | Phase 0 (tracer) + Phase 1 (UI surfacing) |
 | FR-12 evaluation harness | Phase 7 |
 | NFR-01 performance targets | Phase 8 |
