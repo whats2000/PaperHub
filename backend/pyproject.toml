@@ -36,6 +36,9 @@ package = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+  "e2e: end-to-end tests requiring real APIs and services (ANTHROPIC_API_KEY, GROBID, network)",
+]
 
 [tool.mypy]
 python_version = "3.12"
