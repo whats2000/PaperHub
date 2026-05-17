@@ -15,7 +15,7 @@ The SRS is decomposed into 7 sequential plans, each producing working/testable s
 | Plan | Status | Document |
 | --- | --- | --- |
 | A — Backend foundation + Router-only chat | **complete** | [2026-05-17-paperhub-A-backend-foundation.md](docs/superpowers/plans/2026-05-17-paperhub-A-backend-foundation.md) |
-| B — Frontend foundation | pending | not yet written |
+| B — Frontend foundation | **complete** (see [implementation notes](docs/superpowers/plans/2026-05-18-paperhub-B-frontend-foundation-NOTES.md) for tooling-version deviations) | [2026-05-18-paperhub-B-frontend-foundation.md](docs/superpowers/plans/2026-05-18-paperhub-B-frontend-foundation.md) |
 | C — Paper Pipeline + Research Agent | pending | not yet written |
 | D — Search results + Reference Sources + Citation Canvas | pending | not yet written |
 | E — SQL Agent + sqlite MCP | pending | not yet written |
