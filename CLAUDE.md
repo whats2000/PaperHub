@@ -100,6 +100,19 @@ Non-blocking polish flagged during Plan A reviews. Pick these up in a cleanup PR
 7. Sanitise exception strings before writing them to `messages.content` on the error path of `api/chat.py`.
 8. Add SSE error-path + mid-stream cancellation tests for `api/chat.py`.
 
+## Plan B known follow-ups
+
+Tracked in detail in `docs/superpowers/plans/2026-05-18-paperhub-B-frontend-foundation-NOTES.md`. Highlights:
+
+1. **Assistant content not sanitised.** `MessageBubble.tsx` still runs assistant content through `marked.parse` + `dangerouslySetInnerHTML`. Safe while LLM is the only source — **Plan D must switch to `react-markdown` (or pipe through `DOMPurify`) before Plan C pipes tool results (paper titles, SQL outputs) back into assistant messages**.
+2. Pre-event SSE failure surfaces both an in-bubble error AND a toast — intentional but slightly noisy. Future cleanup: split by phase (pre-event = both, mid-stream = inline-only).
+3. Bundle size 418 KB JS raw — code-split when Citation Canvas + Compare-split land.
+4. Drop dead deps in `frontend/package.json`: `autoprefixer`, `postcss`, `tailwindcss-animate`, redundant `@typescript-eslint/*`.
+5. Refactor 5 chat-store actions to a shared `updateAssistantMessage` helper.
+6. Replace hardcoded `session_id: null` in `useChatStream.ts` once backend session persistence ships.
+7. Wire `RejectionPill` when Plan E/G surfaces `status==="rejected"` tool_calls.
+8. Replace MessageBubble's inline streaming-dots markup with `<LoadingDots />`.
+
 ## Restricted operations
 
 Per the user's global CLAUDE.md, the following require **explicit per-instance approval** — do not auto-run:
