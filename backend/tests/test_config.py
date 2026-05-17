@@ -17,13 +17,23 @@ def test_settings_defaults_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # load_dotenv() and pollutes os.environ with PAPERHUB_* keys; explicit delenv
     # ensures isolation regardless of test order.
     for var in (
-        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-        "PAPERHUB_ANTHROPIC_API_KEY", "PAPERHUB_OPENAI_API_KEY", "PAPERHUB_GEMINI_API_KEY",
-        "PAPERHUB_ROUTER_MODEL", "PAPERHUB_GENERATION_MODEL", "PAPERHUB_JUDGE_MODEL",
-        "PAPERHUB_EMBEDDING_MODEL", "PAPERHUB_RERANKER_MODEL",
-        "PAPERHUB_VECTOR_BACKEND", "PAPERHUB_CHROMA_PATH",
-        "PAPERHUB_OLLAMA_BASE_URL", "PAPERHUB_MCP_ARXIV_COMMAND",
-        "PAPERHUB_MCP_FILESYSTEM_COMMAND", "PAPERHUB_GROBID_URL",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "PAPERHUB_ANTHROPIC_API_KEY",
+        "PAPERHUB_OPENAI_API_KEY",
+        "PAPERHUB_GEMINI_API_KEY",
+        "PAPERHUB_ROUTER_MODEL",
+        "PAPERHUB_GENERATION_MODEL",
+        "PAPERHUB_JUDGE_MODEL",
+        "PAPERHUB_EMBEDDING_MODEL",
+        "PAPERHUB_RERANKER_MODEL",
+        "PAPERHUB_VECTOR_BACKEND",
+        "PAPERHUB_CHROMA_PATH",
+        "PAPERHUB_OLLAMA_BASE_URL",
+        "PAPERHUB_MCP_ARXIV_COMMAND",
+        "PAPERHUB_MCP_FILESYSTEM_COMMAND",
+        "PAPERHUB_GROBID_URL",
     ):
         monkeypatch.delenv(var, raising=False)
 

@@ -70,4 +70,4 @@ desktop.ini
 *.out
 
 # workspace files
-.paperhub-workspace
+.*workspace

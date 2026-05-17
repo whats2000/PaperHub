@@ -65,7 +65,7 @@ def strip_latex_preamble(text: str) -> str:
     """
     m = _BEGIN_DOCUMENT.search(text)
     if m:
-        text = text[m.end():]
+        text = text[m.end() :]
     # Strip trailing \\end{document}
     m_end = _END_DOCUMENT.search(text)
     if m_end:
