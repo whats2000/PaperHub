@@ -24,23 +24,35 @@ class Embedder:
     model_name:
         HuggingFace model ID.  Default is ``BAAI/bge-small-en-v1.5`` per
         settings (fast, high-quality asymmetric retrieval encoder, 384-dim).
+
+    The actual ``SentenceTransformer`` model is constructed lazily on the
+    first ``embed()`` call — construction can mmap multi-GB safetensors and
+    on memory-constrained Windows boxes will raise OS error 1455 ("paging
+    file too small") if attempted eagerly. Lazy load means non-RAG code
+    paths (chitchat, /health, /papers/import metadata-only) don't pay the
+    cost and don't risk the failure.
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
-        # Import lazily so unit tests that use FakeEmbedder never load the
-        # sentence-transformers heavy dependency.
-        from sentence_transformers import SentenceTransformer
+        self._model_name = model_name
+        self._model: object | None = None  # populated on first embed()
 
-        self._model = SentenceTransformer(model_name)
+    def _ensure_loaded(self) -> object:
+        if self._model is None:
+            # Import lazily so unit tests that use FakeEmbedder never load the
+            # sentence-transformers heavy dependency.
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
+        return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Return one embedding vector per text (length == model dimension)."""
         # sentence-transformers has no py.typed; encode() return type is Any.
-        # We request numpy output so .tolist() gives list[list[float]]; the cast
-        # is required because mypy cannot verify the no-stubs return type.
         from typing import cast
 
-        raw = self._model.encode(texts, convert_to_numpy=True)
+        model = self._ensure_loaded()
+        raw = model.encode(texts, convert_to_numpy=True)  # type: ignore[attr-defined]
         return cast(list[list[float]], raw.tolist())
 
 

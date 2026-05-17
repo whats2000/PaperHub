@@ -63,3 +63,11 @@ desktop.ini
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.shared.json
+
+# logs
+*.log
+*.err
+*.out
+
+# workspace files
+.paperhub-workspace

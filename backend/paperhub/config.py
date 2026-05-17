@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("PAPERHUB_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PAPERHUB_GEMINI_API_KEY", "GEMINI_API_KEY"),
+    )
 
     ollama_base_url: str = "http://localhost:11434"
 
@@ -50,7 +56,27 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
+    # Load .env into os.environ so downstream libraries (LiteLLM reads provider keys
+    # from os.environ directly: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY)
+    # see what the user wrote in .env. `override=False` means existing shell-set
+    # env vars (e.g. those set by pytest's monkeypatch.setenv) still win — safe
+    # for tests.
+    load_dotenv(override=False)
+
     # pydantic-settings resolves required fields from env vars, not kwargs.
     # This version of pydantic-settings has a mypy plugin that makes Settings()
     # valid without kwargs — no type: ignore needed.
-    return Settings()
+    settings = Settings()
+
+    # Export typed API keys back to os.environ so LiteLLM (which reads via
+    # os.environ.get) picks them up uniformly whether they came from .env, the
+    # shell, or PAPERHUB_-prefixed aliases. No-op if the key is None.
+    for env_name, secret in (
+        ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
+        ("OPENAI_API_KEY", settings.openai_api_key),
+        ("GEMINI_API_KEY", settings.gemini_api_key),
+    ):
+        if secret is not None and env_name not in os.environ:
+            os.environ[env_name] = secret.get_secret_value()
+
+    return settings
