@@ -1,0 +1,16 @@
+{"prompt": "Find recent papers on mixture of experts routing", "expected": "paper_search"}
+{"prompt": "Search arXiv for transformer interpretability work from 2024", "expected": "paper_search"}
+{"prompt": "Look up the latest survey on RAG", "expected": "paper_search"}
+{"prompt": "Show me papers about diffusion model alignment", "expected": "paper_search"}
+{"prompt": "How do these two papers differ on expert collapse?", "expected": "paper_qa"}
+{"prompt": "What does Section 3 of this paper say about variance?", "expected": "paper_qa"}
+{"prompt": "Summarise the methodology of the paper I just added", "expected": "paper_qa"}
+{"prompt": "Compare the loss functions in these two references", "expected": "paper_qa"}
+{"prompt": "Make me slides comparing the two enabled papers", "expected": "slides"}
+{"prompt": "Generate a deck on this paper's contributions", "expected": "slides"}
+{"prompt": "Build a presentation summarising the references", "expected": "slides"}
+{"prompt": "I need slides for tomorrow on these papers", "expected": "slides"}
+{"prompt": "How many papers did I add this week?", "expected": "library_stats"}
+{"prompt": "List the sessions that reference paper 2403.01234", "expected": "library_stats"}
+{"prompt": "Count my papers by year", "expected": "library_stats"}
+{"prompt": "Which session has the most enabled references?", "expected": "library_stats"}

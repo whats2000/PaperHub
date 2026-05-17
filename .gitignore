@@ -71,3 +71,6 @@ desktop.ini
 
 # workspace files
 .*workspace
+
+# local configuration files
+*.local.json
