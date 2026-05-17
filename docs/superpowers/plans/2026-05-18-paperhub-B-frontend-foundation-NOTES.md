@@ -30,7 +30,7 @@ Anyone reading the plan-doc alongside the diff should consult this file first.
 
 ## Known follow-ups from post-merge review
 
-These are intentional carries from Plan B; do NOT relitigate during Plan C/D review unless the underlying assumption changes.
+(Both items below were addressed in follow-up commits on the Plan B branch — no longer outstanding.)
 
-- **Double error surface on pre-event failure** (`useChatStream.ts`). When the SSE request fails before any event arrives, `onError` flips the assistant placeholder to `status:"error"` via `failPendingAssistant`, AND the outer catch re-throws so `ChatPage` toasts `"Request failed"`. The user sees both an in-bubble error and a toast for the same event. Intentional ("better than silent") but slightly noisy. A future cleanup would split by phase: pre-event = toast + bubble error (catastrophic, both surfaces warranted); mid-stream = inline-only (bubble carries enough context).
-- **Assistant content still rendered via `dangerouslySetInnerHTML`** (`MessageBubble.tsx`). The Plan B critical-fix only sanitised user content (rendered as plain text). Assistant content still flows through `marked.parse` + `dangerouslySetInnerHTML`. Safe today because the LLM is the only source — but Plan C will pipe tool results (paper titles, abstracts, SQL outputs) back into assistant messages. **Plan D must switch the assistant renderer to `react-markdown` or pipe through `DOMPurify` before that lands**, or content-origin XSS becomes possible.
+- ~~Double error surface on pre-event failure~~ — resolved: `useChatStream.ts` now splits by phase. Pre-event errors keep both surfaces (toast + bubble error); mid-stream errors are inline-only.
+- ~~Assistant content rendered via `dangerouslySetInnerHTML`~~ — resolved: `MessageBubble.tsx` uses `react-markdown` (with `remark-gfm`) for assistant content. Raw HTML in source is escaped, not executed. `marked` + `@types/marked` removed from deps.
