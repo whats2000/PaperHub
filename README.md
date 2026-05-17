@@ -60,6 +60,12 @@ Replay any past chat turn from SQLite:
 uv run paperhub-replay --run-id 1
 ```
 
+End-to-end smoke (backend + frontend together, mocked LLM):
+
+```powershell
+.\scripts\smoke_e2e.ps1
+```
+
 Full quality gates (must pass before any PR):
 
 ```powershell
