@@ -45,8 +45,10 @@ node_modules/
 *.db-journal
 *.sqlite
 *.sqlite3
-chroma/
-workspace/
+/chroma/
+/workspace/
+/backend/chroma/
+/backend/workspace/
 .env
 .env.*
 !.env.example
