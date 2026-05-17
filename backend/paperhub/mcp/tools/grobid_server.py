@@ -87,9 +87,12 @@ def _call_grobid(method: str, pdf_path: Path) -> str:
     try:
         # grobid-client-python uses a synchronous requests-based API.
         # The package has no py.typed marker; suppress the missing-stubs error.
-        import grobid_client.grobid_client as _gc  # type: ignore[import-untyped]  # no stubs
+        import grobid_client.grobid_client as _gc  # type: ignore[import-untyped]
 
-        client = _gc.GrobidClient(config_path=None)
+        from paperhub.config import get_settings
+
+        settings = get_settings()
+        client = _gc.GrobidClient(grobid_server=settings.grobid_url)
         # processHeaderDocument / processFulltextDocument accept a single file path
         service = (
             "processHeaderDocument" if method == "process_header" else "processFulltextDocument"

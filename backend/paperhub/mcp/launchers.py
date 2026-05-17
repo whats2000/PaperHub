@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -55,12 +56,13 @@ class _ArxivSession:
     deferred to process exit — Phase A does not need graceful teardown.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, arxiv_command: str = "uvx arxiv-mcp-server") -> None:
         self._lock = asyncio.Lock()
         self._session: Any = None
         # Keep references to the context managers so they aren't GC'd.
         self._stdio_ctx: Any = None
         self._session_ctx: Any = None
+        self._arxiv_command = arxiv_command
 
     async def _ensure_connected(self) -> Any:
         """Start the subprocess on first call; return cached session thereafter."""
@@ -72,9 +74,14 @@ class _ArxivSession:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
 
+            # Parse the arxiv command into command and args
+            command_parts = shlex.split(self._arxiv_command)
+            command = command_parts[0]
+            args = command_parts[1:] if len(command_parts) > 1 else []
+
             params = StdioServerParameters(
-                command="uvx",
-                args=["arxiv-mcp-server"],
+                command=command,
+                args=args,
                 env=None,
             )
             # Enter the stdio_client context manager to get the (read, write) streams.
@@ -133,7 +140,7 @@ class _GrobidSession:
 
 def make_dispatcher(
     scopes: dict[str, Any] | None = None,  # reserved for future scope filtering
-    settings: Any = None,  # reserved for future settings plumbing
+    settings: Any = None,
 ) -> McpDispatcher:
     """Return a :data:`McpDispatcher` that routes calls to the correct upstream.
 
@@ -144,15 +151,21 @@ def make_dispatcher(
         Currently unused — scope enforcement happens in
         :class:`~paperhub.mcp.client.McpClient`.
     settings:
-        Reserved for future configuration (e.g. GROBID host/port).
-        Currently unused.
+        A :class:`~paperhub.config.Settings` instance. If not provided, uses
+        :func:`~paperhub.config.get_settings()`. Supplies the ``mcp_arxiv_command``
+        for the subprocess dispatcher.
 
     Returns
     -------
     McpDispatcher
         An async callable ``(McpInvocation) -> dict[str, object]``.
     """
-    _arxiv = _ArxivSession()
+    if settings is None:
+        from paperhub.config import get_settings
+
+        settings = get_settings()
+
+    _arxiv = _ArxivSession(arxiv_command=settings.mcp_arxiv_command)
     _grobid = _GrobidSession()
 
     _ROUTES: dict[str, _ToolHandler] = {

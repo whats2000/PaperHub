@@ -80,12 +80,10 @@ async def test_paper_qa_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         final_events = [e for e in sse_events if e.get("type") == "final"]
         assert final_events, "no final event"
         final_event = final_events[-1]
-        final_data = final_event.get("data")
-        if not isinstance(final_data, dict):
-            raise AssertionError(f"final_data is not a dict: {type(final_data)}")
-        answer_text = final_data.get("answer")
-        if not isinstance(answer_text, str) or not answer_text:
-            raise AssertionError(f"empty answer: {answer_text}")
+        answer_text = final_event.get("answer")
+        assert isinstance(answer_text, str) and answer_text, (
+            f"missing or empty answer in final event: {final_event}"
+        )
         citation_pattern = re.compile(r"\(§[^)]+,\s*p\.\d+\)")
         assert citation_pattern.search(answer_text), (
             f"answer missing (§sec, p.N) citation marker: {answer_text[:200]}"
