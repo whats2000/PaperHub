@@ -2,16 +2,19 @@
 
 Pipeline (per design §8):
 1. Insert a ``runs`` row with ``status='running'``.
-2. Emit ``routing_decision`` event (Router.classify).
-3. If intent == ``paper_qa``:
+2. Insert the user ``messages`` row immediately (D5 fix — was missing).
+3. Emit ``routing_decision`` event (Router.classify).
+4. If intent == ``paper_qa``:
    a. ResearchAgent.answer → retrieves chunks + generates answer.
    b. Emit one ``tool_step`` event per tool_call row recorded for this run.
    c. Emit one ``token`` event with the full answer text (Phase A; Phase B streams).
    d. Emit ``citation`` events.
-4. If intent == ``chitchat``:
+5. If intent == ``chitchat``:
    Emit ``final`` with a polite out-of-scope message.
-5. Insert assistant ``messages`` row, update ``runs.status='ok'``, emit ``final``.
-6. On any exception: emit ``error``, update ``runs.status='failed'``.
+6. Insert assistant ``messages`` row, update ``runs.status='ok'``, emit ``final``.
+7. On any exception: emit ``error``, update ``runs.status='failed'``.
+8. D4: ``try/finally`` ensures run is finalized on client disconnect
+   (``asyncio.CancelledError`` is a ``BaseException``, not caught by ``except Exception``).
 
 HTTP transport: ``sse_starlette.sse.EventSourceResponse`` (sets
 ``Cache-Control: no-cache`` / ``Connection: keep-alive`` automatically).
@@ -28,7 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -86,12 +89,26 @@ def get_adapter(settings: Settings = Depends(get_settings)) -> LlmAdapter:  # no
     )
 
 
-def get_retriever(settings: Settings = Depends(get_settings)) -> Retriever:  # noqa: B008
-    """Return a production Retriever configured from settings."""
+def get_retriever(request: Request, settings: Settings = Depends(get_settings)) -> Retriever:  # noqa: B008
+    """Return a per-app-state cached Retriever (D6 fix).
+
+    The first call constructs ``Embedder`` + ``ChromaVectorStore`` + ``Retriever``
+    and caches the result on ``request.app.state.retriever``.  All subsequent
+    requests reuse the cached instance so the HuggingFace model (~80 MB) is
+    only downloaded and loaded once per process.
+
+    Tests that use ``dependency_overrides[get_retriever]`` bypass this entirely.
+    """
+    cached: Retriever | None = getattr(request.app.state, "retriever", None)
+    if cached is not None:
+        return cached
+    # Build once and cache for subsequent requests (D6: avoids per-request HF download)
     chroma_path = settings.chroma_path or (settings.workspace_root / "chroma")
     store = ChromaVectorStore(chroma_path)
     embedder = Embedder(settings.embedding_model)
-    return Retriever(store, embedder)
+    retriever = Retriever(store, embedder)
+    request.app.state.retriever = retriever
+    return retriever
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +129,8 @@ def _update_run_status(
     db_path: object,
     run_id: UUID,
     status: str,
-    routing_decision: RoutingDecision | None,
+    routing_decision: RoutingDecision | None = None,
+    error: str | None = None,
 ) -> None:
     assert isinstance(db_path, Path)
     rd_json = routing_decision.model_dump_json() if routing_decision is not None else None
@@ -200,9 +218,10 @@ async def _chat_stream(
     session_id: UUID = request.session_id or uuid4()
 
     routing_decision: RoutingDecision | None = None
+    finalized: bool = False  # Track whether the run was already finalized
 
     try:
-        # --- 1. Insert run + user message rows ---
+        # --- 1. Insert run row ---
         with connect(settings.db_path) as conn:
             # Create the session row if needed (implicit session)
             conn.execute(
@@ -211,6 +230,9 @@ async def _chat_stream(
                 (str(session_id), started_at),
             )
             _insert_run(conn, run_id, session_id, started_at)
+
+        # --- D5 fix: persist user message immediately after run row ---
+        _insert_message(settings.db_path, session_id, "user", request.message, run_id)
 
         # --- 2. Route the message ---
         router_obj = Router(adapter, prompts)
@@ -279,18 +301,20 @@ async def _chat_stream(
                 yield json.dumps(citation_event.model_dump(mode="json"))
 
             # Persist assistant message
-            if session_id is not None:
-                _insert_message(settings.db_path, session_id, "assistant", answer, run_id)
+            _insert_message(settings.db_path, session_id, "assistant", answer, run_id)
 
             # Finalize run
             _update_run_status(settings.db_path, run_id, "ok", routing_decision)
+            finalized = True
 
             final_event = FinalEvent(run_id=run_id, answer=answer)
             yield json.dumps(final_event.model_dump(mode="json"))
 
         else:
-            # chitchat or any other intent
+            # chitchat or any other intent — no assistant message persisted
+            # (user already persisted above; for out-of-scope we skip assistant row)
             _update_run_status(settings.db_path, run_id, "ok", routing_decision)
+            finalized = True
             final_event = FinalEvent(run_id=run_id, answer=_CHITCHAT_REPLY)
             yield json.dumps(final_event.model_dump(mode="json"))
 
@@ -298,10 +322,32 @@ async def _chat_stream(
         log.exception("Error in /chat stream: %s", exc)
         try:
             _update_run_status(settings.db_path, run_id, "failed", routing_decision)
+            finalized = True
         except Exception:
             log.exception("Failed to update run status to 'failed'")
         error_event = ErrorEvent(message=str(exc))
         yield json.dumps(error_event.model_dump(mode="json"))
+
+    finally:
+        # D4 fix: ensure the run row is never left in 'running' status on any
+        # exit path — including asyncio.CancelledError (client disconnect),
+        # which is a BaseException and bypasses ``except Exception``.
+        if not finalized:
+            try:
+                with connect(settings.db_path) as conn:
+                    row = conn.execute(
+                        "SELECT status FROM runs WHERE id = ?", (str(run_id),)
+                    ).fetchone()
+                if row and row["status"] == "running":
+                    _update_run_status(
+                        settings.db_path,
+                        run_id,
+                        "failed",
+                        routing_decision,
+                        error="generator exited without finalization (likely client disconnect)",
+                    )
+            except Exception:
+                log.exception("Failed to finalize run %s in finally block", run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +357,8 @@ async def _chat_stream(
 
 @router.post("/chat")
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    body: ChatRequest,
     settings: Settings = Depends(get_settings),  # noqa: B008
     adapter: LlmAdapter = Depends(get_adapter),  # noqa: B008
     retriever: Retriever = Depends(get_retriever),  # noqa: B008
@@ -324,7 +371,7 @@ async def chat(
     """
 
     async def _generator() -> AsyncIterator[dict[str, str]]:
-        async for data in _chat_stream(request, settings, adapter, retriever, prompts):
+        async for data in _chat_stream(body, settings, adapter, retriever, prompts):
             yield {"data": data}
 
     return EventSourceResponse(_generator())

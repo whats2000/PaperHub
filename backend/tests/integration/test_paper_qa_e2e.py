@@ -1,14 +1,16 @@
 """End-to-end smoke test for the Phase A paper_qa vertical slice.
 
-This test exercises the real stack against the live arXiv API, a local
-GROBID instance, and a real LiteLLM-backed Anthropic call. It is SKIPPED
-by default; run via:
+This test exercises the real stack against the live arXiv API (via the
+``arxiv-mcp-server`` MCP tool: ``get_abstract`` + ``download_paper``) and a
+real LiteLLM-backed Anthropic call. GROBID is skipped in Phase A — the
+markdown returned by ``download_paper`` is used directly.
+
+Skipped by default; run via:
 
     cd backend; uv run pytest -m e2e -v
 
 Required environment:
 - ANTHROPIC_API_KEY     — set in your shell or .env
-- PAPERHUB_GROBID_URL   — default http://localhost:8070 (override if needed)
 - network access to arxiv.org and api.anthropic.com
 - uvx and `arxiv-mcp-server` installed (auto-fetched via uvx on first call)
 """

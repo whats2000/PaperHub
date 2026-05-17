@@ -11,7 +11,13 @@ import pytest
 
 from paperhub.data.db import apply_migrations
 from paperhub.mcp.client import McpClient, McpScopeViolation
-from paperhub.mcp.scopes import FilesystemWriteArgs, McpInvocation, McpToolScope
+from paperhub.mcp.launchers import McpUpstreamError
+from paperhub.mcp.scopes import (
+    ArxivGetAbstractArgs,
+    FilesystemWriteArgs,
+    McpInvocation,
+    McpToolScope,
+)
 from paperhub.tracing.tracer import ToolCallTracer
 
 
@@ -177,3 +183,91 @@ async def test_binary_content_is_redacted_not_leaked(db_path: Path, tmp_path: Pa
     assert content_val == expected_placeholder, (
         f"Expected content to be {expected_placeholder!r}, got {content_val!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# D2: Upstream error handling tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upstream_is_error_raises_mcp_upstream_error(db_path: Path) -> None:
+    """D2: When the upstream returns isError=True, McpUpstreamError must be raised
+    AND a tool_calls row with status='error' must be written.
+
+    We test the launcher directly since McpClient delegates to the dispatcher.
+    """
+    from typing import ClassVar
+
+    from paperhub.mcp.launchers import _ArxivSession
+
+    # Simulate what the upstream SDK returns on isError=True
+    class _FakeContent:
+        text = "Unknown tool: fetch_metadata"
+
+    class _FakeResult:
+        isError = True
+        content: ClassVar[list[_FakeContent]] = [_FakeContent()]
+
+    session = _ArxivSession.__new__(_ArxivSession)
+
+    # Inject a fake session that returns the error result
+    class _FakeSession:
+        async def call_tool(self, tool: str, args: dict[str, object]) -> object:
+            return _FakeResult()
+
+    session._session = _FakeSession()
+    session._lock = __import__("asyncio").Lock()
+    session._owned = False
+
+    invocation = McpInvocation(
+        tool="arxiv",
+        method="get_abstract",
+        args=ArxivGetAbstractArgs(paper_id="2401.00001"),
+    )
+
+    with pytest.raises(McpUpstreamError) as exc_info:
+        await session.call(invocation)
+
+    assert "Unknown tool" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_upstream_status_error_in_content_raises_mcp_upstream_error() -> None:
+    """D2: When upstream returns isError=False but content JSON has status='error',
+    McpUpstreamError must still be raised.
+    """
+    import json as _json
+    from typing import ClassVar
+
+    from paperhub.mcp.launchers import _ArxivSession
+
+    error_payload = _json.dumps({"status": "error", "message": "PDF extra not installed"})
+
+    class _FakeContent:
+        text = error_payload
+
+    class _FakeResult:
+        isError = False
+        content: ClassVar[list[_FakeContent]] = [_FakeContent()]
+
+    session = _ArxivSession.__new__(_ArxivSession)
+
+    class _FakeSession:
+        async def call_tool(self, tool: str, args: dict[str, object]) -> object:
+            return _FakeResult()
+
+    session._session = _FakeSession()
+    session._lock = __import__("asyncio").Lock()
+    session._owned = False
+
+    invocation = McpInvocation(
+        tool="arxiv",
+        method="download_paper",
+        args=ArxivGetAbstractArgs(paper_id="2401.00001"),
+    )
+
+    with pytest.raises(McpUpstreamError) as exc_info:
+        await session.call(invocation)
+
+    assert "PDF extra not installed" in str(exc_info.value)

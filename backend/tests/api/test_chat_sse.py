@@ -27,6 +27,26 @@ from paperhub.data.vectors import ChromaVectorStore, ChunkVector
 from paperhub.llm.adapter import FakeAdapter
 from paperhub.rag.embedder import FakeEmbedder
 
+# ---------------------------------------------------------------------------
+# No-op LaunchedMcpSessions for test fixtures (prevents subprocess spawn)
+# ---------------------------------------------------------------------------
+
+
+class _NoOpMcpSessions:
+    """Prevents the app lifespan from launching ``uvx arxiv-mcp-server`` in tests."""
+
+    def __init__(self, settings: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> _NoOpMcpSessions:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        pass
+
+    def make_dispatcher(self) -> None:
+        return None
+
 
 def _fake_embed(text: str) -> list[float]:
     h = hash(text) % FakeEmbedder.DIM
@@ -86,13 +106,20 @@ def _make_app_with_overrides(
     workspace: Path,
     fake_adapter: FakeAdapter,
     seeded_store: ChromaVectorStore,
+    monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> Any:
     """Create a FastAPI app with dependency overrides for the LLM adapter and retriever.
 
     Also applies migrations so tables exist before tests hit the endpoint.
     Env vars (PAPERHUB_WORKSPACE_ROOT, PAPERHUB_DB_PATH) must be set by the
     caller (e.g. via monkeypatch.setenv) BEFORE calling this helper.
+
+    ``monkeypatch`` (required): patches ``LaunchedMcpSessions`` to a no-op so
+    the app lifespan does NOT attempt to spawn ``uvx arxiv-mcp-server``
+    (which takes ~90s and is not needed for chat-endpoint unit tests).
+    The patch persists for the test's duration and is reset automatically.
     """
+    import paperhub.api.app as _app_module
     from paperhub.api.app import create_app
     from paperhub.api.routes.chat import get_adapter, get_retriever
     from paperhub.data.db import apply_migrations
@@ -102,6 +129,11 @@ def _make_app_with_overrides(
 
     # Apply migrations so tables exist (normally done by app lifespan)
     apply_migrations(db_path)
+
+    # Patch at module level so the lifespan (which executes during AsyncClient
+    # startup, outside any with-block) sees the no-op class.
+    if monkeypatch is not None:
+        monkeypatch.setattr(_app_module, "LaunchedMcpSessions", _NoOpMcpSessions)
 
     app = create_app()
 
@@ -138,7 +170,7 @@ async def test_chat_sse_paper_qa_event_sequence(
     monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
     monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
 
-    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store)
+    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store, monkeypatch)
 
     lines: list[str] = []
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -181,7 +213,7 @@ async def test_chat_sse_routing_decision_has_paper_qa(
     monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
     monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
 
-    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store)
+    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store, monkeypatch)
 
     lines: list[str] = []
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -210,7 +242,7 @@ async def test_chat_sse_final_event_contains_answer(
     monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
     monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
 
-    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store)
+    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store, monkeypatch)
 
     lines: list[str] = []
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -248,7 +280,7 @@ async def test_chat_sse_chitchat_returns_final_only(
             ),
         }
     )
-    app = _make_app_with_overrides(workspace, chitchat_adapter, seeded_store)
+    app = _make_app_with_overrides(workspace, chitchat_adapter, seeded_store, monkeypatch)
 
     lines: list[str] = []
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -270,3 +302,130 @@ async def test_chat_sse_chitchat_returns_final_only(
 
     final_events = [e for e in events if e["type"] == "final"]
     assert "PaperHub" in final_events[0]["answer"]
+
+
+# ---------------------------------------------------------------------------
+# D5: User message persistence
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_sse_persists_user_and_assistant_messages(
+    workspace: Path,
+    seeded_store: ChromaVectorStore,
+    fake_adapter: FakeAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D5: After a paper_qa chat, the messages table must contain both a
+    role='user' AND a role='assistant' row, both with the same run_id.
+    """
+    import sqlite3 as _sqlite3
+
+    monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
+
+    app = _make_app_with_overrides(workspace, fake_adapter, seeded_store, monkeypatch)
+    db_path = workspace / "paperhub.db"
+
+    session_id = str(uuid4())
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with ac.stream(
+            "POST",
+            "/chat",
+            json={"message": "What is X?", "session_id": session_id},
+        ) as r:
+            assert r.status_code == 200
+            async for _ in r.aiter_lines():
+                pass  # consume the stream
+
+    # Check messages table
+    conn = _sqlite3.connect(db_path)
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute(
+        "SELECT role, content, run_id FROM messages WHERE session_id=? ORDER BY created_at",
+        (session_id,),
+    ).fetchall()
+    conn.close()
+
+    roles = [r["role"] for r in rows]
+    assert "user" in roles, f"Expected 'user' message in DB, got roles: {roles}"
+    assert "assistant" in roles, f"Expected 'assistant' message in DB, got roles: {roles}"
+
+    # Both messages must share the same run_id
+    run_ids = {r["run_id"] for r in rows}
+    assert len(run_ids) == 1, f"Expected all messages to share a run_id, got: {run_ids}"
+
+    # User message content must match the original request
+    user_rows = [r for r in rows if r["role"] == "user"]
+    assert user_rows[0]["content"] == "What is X?"
+
+
+# ---------------------------------------------------------------------------
+# D4: Client disconnect / CancelledError → run finalized as 'failed'
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_sse_cancelled_error_finalizes_run(
+    workspace: Path,
+    seeded_store: ChromaVectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D4: If the SSE generator is cancelled (simulated client disconnect), the
+    runs table must NOT be left in status='running'.
+    """
+    import asyncio as _asyncio
+    import sqlite3 as _sqlite3
+
+    from paperhub.agents.router import BinaryRoutingDecision
+    from paperhub.llm.adapter import FakeAdapter as _FakeAdapter
+
+    monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
+
+    db_path = workspace / "paperhub.db"
+
+    # An adapter that raises CancelledError during the LLM call
+    class _CancellingAdapter(_FakeAdapter):
+        async def complete(self, *args: object, **kwargs: object) -> object:
+            raise _asyncio.CancelledError("simulated client disconnect")
+
+    cancelling_adapter = _CancellingAdapter(
+        {
+            "router": BinaryRoutingDecision(
+                intent="paper_qa",
+                confidence=0.95,
+                model_tier="small",
+                reasoning="qa",
+            ),
+        }
+    )
+
+    app = _make_app_with_overrides(workspace, cancelling_adapter, seeded_store, monkeypatch)
+
+    # The CancelledError will propagate out — we catch it here at the test level
+    try:
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            async with ac.stream(
+                "POST",
+                "/chat",
+                json={"message": "What is X?", "session_id": None},
+            ) as r:
+                assert r.status_code == 200
+                async for _ in r.aiter_lines():
+                    pass
+    except Exception:
+        pass  # CancelledError or SSE error — expected
+
+    # After the stream ends (for any reason), no run should be stuck in 'running'
+    conn = _sqlite3.connect(db_path)
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute("SELECT id, status FROM runs").fetchall()
+    conn.close()
+
+    running_runs = [r for r in rows if r["status"] == "running"]
+    assert not running_runs, (
+        f"Expected no runs stuck in 'running', but found: {[dict(r) for r in running_runs]}"
+    )

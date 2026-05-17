@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from paperhub.mcp.scopes import (
-    ArxivFetchMetadataArgs,
+    ArxivDownloadPaperArgs,
+    ArxivGetAbstractArgs,
     FilesystemReadArgs,
     FilesystemWriteArgs,
     GrobidProcessFulltextArgs,
@@ -85,11 +86,21 @@ def test_tool_mismatch_is_rejected(tmp_workspace: Path) -> None:
     assert "tool mismatch" in result.reason.lower()
 
 
-def test_arxiv_invocation_parses_cleanly() -> None:
+def test_arxiv_get_abstract_invocation_parses_cleanly() -> None:
     inv = McpInvocation(
         tool="arxiv",
-        method="fetch_metadata",
-        args=ArxivFetchMetadataArgs(arxiv_id="2401.00001"),
+        method="get_abstract",
+        args=ArxivGetAbstractArgs(paper_id="2401.00001"),
+    )
+    scope = McpToolScope(tool_name="arxiv")
+    assert check_scope(inv, scope) is None
+
+
+def test_arxiv_download_paper_invocation_parses_cleanly() -> None:
+    inv = McpInvocation(
+        tool="arxiv",
+        method="download_paper",
+        args=ArxivDownloadPaperArgs(paper_id="2401.00001"),
     )
     scope = McpToolScope(tool_name="arxiv")
     assert check_scope(inv, scope) is None

@@ -1,21 +1,22 @@
 """POST /papers/import — import a paper from arXiv into PaperHub.
 
-Pipeline:
-1. Call arxiv MCP ``fetch_metadata`` → extract title, authors, year, abstract.
-2. Call arxiv MCP ``download_pdf`` → get local PDF path.
-3. Validate PDF path is inside workspace_root.
-4. Call grobid MCP ``process_fulltext`` (falls back to stub on error).
-5. Extract text from TEI XML (or fallback plain text).
-6. Chunk via ``chunker.chunk_text``.
-7. Embed via ``Embedder(settings.embedding_model)`` (lazy).
-8. Insert ``papers`` + ``chunks`` rows into SQLite.
-9. Insert vectors into ChromaVectorStore.
-10. Return the created ``Paper`` Pydantic model.
+Phase A pipeline (aligned to real arxiv-mcp-server tool surface):
+1. Call arxiv MCP ``get_abstract`` → extract title, authors, year, abstract.
+2. Call arxiv MCP ``download_paper`` → get markdown content (NOT a PDF path).
+3. Save markdown to ``workspace_root/papers/<arxiv_id>.md``.
+4. Validate the saved path is inside workspace_root.
+5. Chunk via ``chunker.chunk_text`` (operates on markdown text directly —
+   GROBID is skipped in Phase A; the markdown is already clean text).
+6. Embed via ``Embedder`` (instantiated once in app lifespan; D6 fix).
+7. Insert ``papers`` + ``chunks`` rows into SQLite.
+8. Insert vectors into ChromaVectorStore.
+9. Return the created ``Paper`` Pydantic model.
 
-Phase A limitations:
-- Metadata parsing is best-effort (arXiv JSON response varies).
-- PDF SHA-256 is computed from the file bytes.
-- PDF text fallback uses the TEI ``<p>`` tag text content.
+Phase A notes:
+- ``papers.pdf_path`` stores the ``.md`` file path; column name is kept as-is
+  for now and will be renamed or documented in Phase B (migration deferred).
+- SHA-256 is computed from the markdown file bytes.
+- GROBID code remains in the codebase for Phase B (FR-02 PDF references).
 """
 
 from __future__ import annotations
@@ -24,13 +25,12 @@ import hashlib
 import json
 import logging
 import re
-import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from paperhub.config import Settings, get_settings
@@ -40,14 +40,14 @@ from paperhub.data.vectors import ChromaVectorStore, ChunkVector
 from paperhub.mcp.client import McpClient
 from paperhub.mcp.launchers import make_dispatcher
 from paperhub.mcp.scopes import (
-    ArxivDownloadPdfArgs,
-    ArxivFetchMetadataArgs,
-    GrobidProcessFulltextArgs,
+    ArxivDownloadPaperArgs,
+    ArxivGetAbstractArgs,
     McpInvocation,
     McpToolScope,
 )
 from paperhub.rag.chunker import chunk_text
 from paperhub.rag.embedder import Embedder
+from paperhub.rag.retriever import Retriever
 
 log = logging.getLogger(__name__)
 
@@ -76,26 +76,12 @@ def _compute_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _extract_text_from_tei(tei_xml: str) -> str:
-    """Extract plain text from TEI XML, falling back to stripping tags."""
-    try:
-        # Strip namespace for simpler XPath
-        xml_no_ns = re.sub(r' xmlns="[^"]+"', "", tei_xml)
-        root = ET.fromstring(xml_no_ns)
-        parts: list[str] = []
-        for elem in root.iter():
-            if elem.tag in {"p", "head", "title"} and elem.text:
-                parts.append(elem.text.strip())
-        if parts:
-            return "\n\n".join(parts)
-    except ET.ParseError:
-        pass
-    # Fallback: strip all XML tags
-    return re.sub(r"<[^>]+>", " ", tei_xml)
+def _parse_arxiv_abstract_response(raw: str, arxiv_id: str) -> dict[str, Any]:
+    """Parse arXiv ``get_abstract`` JSON response into known fields (best-effort).
 
-
-def _parse_arxiv_metadata(raw: str, arxiv_id: str) -> dict[str, Any]:
-    """Parse arXiv metadata JSON (best-effort) into a dict of known fields."""
+    The upstream returns:
+        {status, paper_id, title, authors[], abstract, categories[], published, pdf_url}
+    """
     try:
         data: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError:
@@ -124,6 +110,23 @@ def _parse_arxiv_metadata(raw: str, arxiv_id: str) -> dict[str, Any]:
     return {"title": title, "authors": authors, "year": year, "abstract": abstract}
 
 
+def _get_embedder(request: Request, settings: Settings) -> Embedder:
+    """Return the app-state cached Embedder, or construct one per-request as fallback.
+
+    Pulls the embedder out of the cached Retriever (if ``get_retriever`` has
+    already run for this app instance).  Falls back to per-request construction
+    in tests / CI that inject a fake Embedder via monkeypatching.
+    """
+    retriever: Retriever | None = getattr(request.app.state, "retriever", None)
+    if retriever is not None:
+        # Pull the embedder out of the cached Retriever
+        cached_embedder: Embedder | None = getattr(retriever, "_embedder", None)
+        if cached_embedder is not None:
+            return cached_embedder
+    # Fallback: construct per-request (tests that monkeypatch Embedder use this path)
+    return Embedder(settings.embedding_model)
+
+
 # ---------------------------------------------------------------------------
 # Route
 # ---------------------------------------------------------------------------
@@ -131,75 +134,78 @@ def _parse_arxiv_metadata(raw: str, arxiv_id: str) -> dict[str, Any]:
 
 @router.post("/papers/import", response_model=Paper)
 async def import_paper(
-    request: PaperImportRequest,
+    request: Request,
+    body: PaperImportRequest,
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> Paper:
     """Import a paper from arXiv into PaperHub.
 
     Parameters
     ----------
-    request.arxiv_id:
+    body.arxiv_id:
         The arXiv identifier (e.g. ``"2301.07041"``).
     """
-    arxiv_id = request.arxiv_id.strip()
+    arxiv_id = body.arxiv_id.strip()
     workspace_root = settings.workspace_root
 
-    # Build a minimal dispatcher + scoped MCP client
-    dispatcher = make_dispatcher()
+    # Build dispatcher — prefer the pre-launched lifespan-managed dispatcher
+    # (stored on app.state by the lifespan hook in api/app.py) which avoids
+    # spawning a new subprocess per-request and fixes the D3 anyio cancel-scope
+    # mismatch.  Falls back to make_dispatcher() for tests / lazy connect.
+    dispatcher = getattr(request.app.state, "mcp_dispatcher", None)
+    if dispatcher is None:
+        dispatcher = make_dispatcher(settings=settings)
+
     arxiv_scope = McpToolScope(tool_name="arxiv")
-    grobid_scope = McpToolScope(tool_name="grobid", filesystem_root=workspace_root)
-    scopes: dict[str, McpToolScope] = {"arxiv": arxiv_scope, "grobid": grobid_scope}
+    scopes: dict[str, McpToolScope] = {"arxiv": arxiv_scope}
     mcp = McpClient(scopes=scopes, dispatcher=dispatcher)
 
-    # --- Step 1: fetch metadata ---
+    # --- Step 1: get_abstract → metadata ---
     meta_result = await mcp.call(
         McpInvocation(
             tool="arxiv",
-            method="fetch_metadata",
-            args=ArxivFetchMetadataArgs(arxiv_id=arxiv_id),
+            method="get_abstract",
+            args=ArxivGetAbstractArgs(paper_id=arxiv_id),
         )
     )
+    # The dispatcher merges parsed JSON into the result dict; try "result" key first
     raw_meta = str(meta_result.get("result", "{}"))
-    meta = _parse_arxiv_metadata(raw_meta, arxiv_id)
+    meta = _parse_arxiv_abstract_response(raw_meta, arxiv_id)
 
-    # --- Step 2: download PDF ---
-    pdf_result = await mcp.call(
+    # --- Step 2: download_paper → markdown content ---
+    dl_result = await mcp.call(
         McpInvocation(
             tool="arxiv",
-            method="download_pdf",
-            args=ArxivDownloadPdfArgs(arxiv_id=arxiv_id),
+            method="download_paper",
+            args=ArxivDownloadPaperArgs(paper_id=arxiv_id),
         )
     )
-    pdf_path_raw = str(pdf_result.get("result", ""))
-    pdf_path = Path(pdf_path_raw)
+    # Upstream returns {status, message, paper_id, source, content}
+    # content is the paper's full text in markdown
+    markdown_content: str = str(dl_result.get("content", dl_result.get("result", "")))
 
-    # Validate the PDF path is under workspace_root
+    # --- Step 3: save markdown to workspace_root/papers/<arxiv_id>.md ---
+    papers_dir = workspace_root / "papers"
+    papers_dir.mkdir(parents=True, exist_ok=True)
+    md_path = papers_dir / f"{arxiv_id}.md"
+    md_path.write_text(markdown_content, encoding="utf-8")
+
+    # Validate the saved path is inside workspace_root (path-traversal guard)
     try:
-        pdf_path.resolve().relative_to(workspace_root.resolve())
+        md_path.resolve().relative_to(workspace_root.resolve())
     except ValueError as exc:
         raise ValueError(
-            f"Downloaded PDF path {pdf_path} is outside workspace root {workspace_root}"
+            f"Markdown file path {md_path} is outside workspace root {workspace_root}"
         ) from exc
 
-    sha256 = _compute_sha256(pdf_path)
+    sha256 = _compute_sha256(md_path)
 
-    # --- Step 3: process with GROBID ---
-    tei_result = await mcp.call(
-        McpInvocation(
-            tool="grobid",
-            method="process_fulltext",
-            args=GrobidProcessFulltextArgs(pdf_path=pdf_path),
-        )
-    )
-    tei_xml = str(tei_result.get("tei", ""))
-    full_text = _extract_text_from_tei(tei_xml)
-
-    # --- Step 4: chunk ---
+    # --- Step 4: chunk (directly on markdown — GROBID skipped in Phase A) ---
     paper_id = uuid4()
-    chunks = list(chunk_text(paper_id, full_text))
+    chunks = list(chunk_text(paper_id, markdown_content))
 
     # --- Step 5: embed ---
-    embedder = Embedder(settings.embedding_model)
+    embedder = _get_embedder(request, settings)
     chunk_texts = [c.text for c in chunks]
     embeddings: list[list[float]] = embedder.embed(chunk_texts) if chunk_texts else []
 
@@ -220,7 +226,7 @@ async def import_paper(
                     json.dumps(meta["authors"]),
                     meta["year"],
                     meta["abstract"],
-                    str(pdf_path),
+                    str(md_path),
                     sha256,
                     added_at,
                 ),
@@ -277,7 +283,7 @@ async def import_paper(
         authors=meta["authors"],
         year=meta["year"],
         abstract=meta["abstract"],
-        pdf_path=str(pdf_path),
+        pdf_path=str(md_path),
         sha256=sha256,
         primary_topic=None,
         added_at=datetime.fromisoformat(added_at),

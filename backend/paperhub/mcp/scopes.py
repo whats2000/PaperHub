@@ -7,6 +7,13 @@ the documented exception to NFR-11's "no untyped dict at I/O boundary".
 
 Phase A ships the arg schemas Task 6 needs (arxiv + filesystem); later
 phases add the remaining tools (`sqlite`, `grobid` methods, `latex`).
+
+arXiv MCP tool surface (blazickjp/arxiv-mcp-server):
+- search_papers(query, ...) → list of matches
+- get_abstract(paper_id: str) → metadata dict (title, authors, abstract, etc.)
+- download_paper(paper_id: str) → {status, content} where content is markdown text
+- list_papers({}) → list of downloaded paper IDs
+- read_paper(paper_id) → {status, paper_id, content}
 """
 
 from __future__ import annotations
@@ -32,12 +39,16 @@ class ArxivSearchArgs(BaseModel):
     max_results: int = 10
 
 
-class ArxivFetchMetadataArgs(BaseModel):
-    arxiv_id: str
+class ArxivGetAbstractArgs(BaseModel):
+    """Args for the upstream ``get_abstract`` tool (returns metadata only)."""
+
+    paper_id: str
 
 
-class ArxivDownloadPdfArgs(BaseModel):
-    arxiv_id: str
+class ArxivDownloadPaperArgs(BaseModel):
+    """Args for the upstream ``download_paper`` tool (returns markdown content)."""
+
+    paper_id: str
 
 
 class FilesystemReadArgs(BaseModel):
@@ -59,8 +70,8 @@ class GrobidProcessFulltextArgs(BaseModel):
 
 McpArgs = (
     ArxivSearchArgs
-    | ArxivFetchMetadataArgs
-    | ArxivDownloadPdfArgs
+    | ArxivGetAbstractArgs
+    | ArxivDownloadPaperArgs
     | FilesystemReadArgs
     | FilesystemWriteArgs
     | GrobidProcessHeaderArgs
