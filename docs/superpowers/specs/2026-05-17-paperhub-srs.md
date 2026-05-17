@@ -13,7 +13,7 @@ scope: full-system
 
 | Field | Value |
 | --- | --- |
-| Version | v1.5 |
+| Version | v1.6 |
 | Date | May 2026 |
 | Predecessor | [paper2slides-plus](https://github.com/whats2000/paper2slides-plus) |
 
@@ -29,6 +29,7 @@ scope: full-system
 | v1.3 | 2026-05-17 | **Merged §⑤ External APIs and §⑧ MCP Tool Layer.** Every external integration except the LLM provider adapter is now exposed as an MCP tool: bibliographic APIs (`arxiv`, `semantic_scholar`, `crossref`, `web_search`), local deterministic tools (`grobid`, `latex`), and existing `filesystem` / `sqlite` — eight client-side MCP tools total, plus a richer `paperhub.*` server-side tool surface (`search_library`, `get_paper`, `find_related`, `summarize_paper`, `compose_slides`, `list_runs`, `get_trace`). This gives every external call uniform tracing, uniform scope-checking, and uniform exposure to external MCP clients (Claude Desktop, Cursor). LLM providers stay separate because their hot-path streaming / structured-output interface doesn't map cleanly onto MCP. |
 | v1.4 | 2026-05-17 | **Design-review fixes.** Tightened measurable acceptance criteria (#2 rewritten against a seeded intra-library citation graph; #3 refusal target relaxed from 100% → ≥95% on a defined 20-question OOD set), split **NFR-01** performance targets into warm-cache vs cold-start budgets, added an **FR-12 answer-quality rubric** (LLM-as-judge with κ-validated rubric prompt) so the model-comparison bullet is concretely measurable, added a **NFR-11 narrow exception** for upstream LangGraph / MCP SDK type-stub gaps (per-error-code `# type: ignore` only), dropped multi-user language from §④ (single-user product per Out-of-Scope §7), changed the two-stage RAG funnel to `top-min(50, ⌈corpus_size / 3⌉)` so it behaves sensibly on small libraries, added FR-05 hard cap (≤ 20 generated pages per slide run), and clarified the DuckDB-over-SQLite mechanism (read-only `ATTACH ... TYPE SQLITE` rather than a unified view). No FR additions, no scope cuts. |
 | v1.5 | 2026-05-17 | **MCP bill-of-materials: reuse-first.** §⑧ MCP Tool Layer table gains a **Provenance** column declaring per-tool whether PaperHub reuses an existing community MCP server, wraps an existing client in a thin custom MCP server, or builds one from scratch — survey across `modelcontextprotocol/servers`, npm, PyPI, and community lists (May 2026). Result: **3 reuse** (`filesystem` via `@modelcontextprotocol/server-filesystem` pinned post-CVE-2025-53109/53110, `arxiv` via `blazickjp/arxiv-mcp-server`, `semantic_scholar` via `zongmin-yu/semantic-scholar-fastmcp`), **4 thin wraps** (`sqlite` for the table allow-list + aggregated `schema()` method, `web_search` for the domain allow-list, `crossref` because no maintained server exists, `grobid` for PDF-path sandboxing), **1 build-from-scratch** (`latex` — none expose `chktex` + workspace sandbox), plus the always-custom `paperhub.*` server. Tool capabilities and scope boundaries are unchanged; the FR-10 implementation strategy is now "configure and constrain existing servers" rather than "write 8 servers from scratch." No FR, NFR, UC, or acceptance changes. |
+| v1.6 | 2026-05-17 | **Scope simplification + LLM-client consolidation.** **(1) MCP surface shrinks 8 → 5 client-side tools**: keep `arxiv` (PDF + metadata — essential for RAG), `grobid` (structured references), `latex` (slides), `filesystem`, `sqlite`. Drop `semantic_scholar`, `crossref`, `web_search` for v1 — citation graph (FR-02) now sourced exclusively from GROBID-extracted references; DOI import path (FR-01) drops to v2; research-direction (FR-04) works from local-library topic clustering only. **(2) LLM client = LiteLLM**: replace the would-be hand-rolled `AnthropicAdapter` / `OpenAIAdapter` with a thin wrapper over `litellm.acompletion()`. Same `LlmAdapter` Protocol on top, but the provider plumbing (Anthropic / OpenAI / Ollama / structured output via `response_format={"type":"json_schema",...}`) is delegated to LiteLLM — drops ~200 LoC of provider-specific code and inherits LiteLLM's retry/fallback/cost-tracking for free. NFR-03's "providers must be pluggable" is satisfied by LiteLLM's 100+ provider matrix rather than our own adapter pattern. **(3) Implementation phasing compressed 9 → 3** in the companion design doc (no SRS bearing — the phase split was always a build-order detail, not a requirements detail). Acceptance #10 updated for the new 5-tool MCP surface. No FR, NFR, or use-case removals; the dropped MCP tools were never user-visible features. |
 
 ---
 
@@ -145,7 +146,7 @@ The following criteria correspond to FR-01 through FR-12; all must pass for deli
 7. Per-slide recompilation finishes within 30 seconds and does not affect other slides.
 8. On the held-out routing test set (≥ 30 labeled prompts spanning all intents), Router Agent top-1 accuracy ≥ 75%; out-of-scope MCP calls (e.g. filesystem write outside the configured root) are rejected by the orchestrator in 100% of attempted cases.
 9. On a 10-question NL2SQL test set, ≥ 70% of generated queries are executable on first attempt and ≥ 85% after the self-repair loop; for the executable subset, numeric answers match the gold result row-for-row.
-10. All eight client-side MCP tools (`arxiv`, `semantic_scholar`, `crossref`, `web_search`, `grobid`, `latex`, `filesystem`, `sqlite`) are callable end-to-end; at least one explicitly out-of-scope call per tool is rejected by the orchestrator in tests. The `paperhub.*` server-side MCP surface (≥ 5 methods) is reachable from an external MCP client and round-trips through the same scope-checker + tracer.
+10. All five v1 client-side MCP tools (`arxiv`, `grobid`, `latex`, `filesystem`, `sqlite`) are callable end-to-end; at least one explicitly out-of-scope call per tool is rejected by the orchestrator in tests. The `paperhub.*` server-side MCP surface (≥ 5 methods) is reachable from an external MCP client and round-trips through the same scope-checker + tracer.
 11. For every chat run, the Tool Trace UI renders the full step DAG and exports it as JSON; replaying any single read-only step (e.g. retrieval, SQL query) in isolation reproduces the same `result_summary`.
 12. The evaluation harness produces a side-by-side comparison table across at least two model tiers × two routing strategies, reporting routing accuracy, answer correctness, SQL executability, latency, and cost per task.
 
@@ -247,16 +248,13 @@ flowchart TB
         O5["Tool-Call Tracer<br/>(audit log)"]
     end
 
-    subgraph MCP["⑧ MCP Tool Layer (client-side + paperhub.* server)"]
+    subgraph MCP["⑧ MCP Tool Layer (v1: 5 client-side + paperhub.* server)"]
         M1["filesystem (scoped)"]
         M2["sqlite (read-only)"]
-        M3["web_search"]
-        M4["arxiv"]
-        M5["semantic_scholar"]
-        M6["crossref"]
-        M7["grobid"]
-        M8["latex (pdflatex+chktex)"]
-        M9["custom: paperhub.*<br/>server"]
+        M3["arxiv"]
+        M4["grobid"]
+        M5["latex (pdflatex+chktex)"]
+        M6["custom: paperhub.*<br/>server"]
     end
 
     subgraph LLM["③ LLM Module"]
@@ -303,7 +301,7 @@ flowchart TB
     class LLM,L1,L2,L3 llm
     class RAG,R1,R2,R3 rag
     class DB,D1,D2,D3,D4 db
-    class MCP,M1,M2,M3,M4,M5,M6,M7,M8,M9 mcp
+    class MCP,M1,M2,M3,M4,M5,M6 mcp
 ```
 
 *Figure 1. PaperHub system overview (v1.3). Six top-level blocks: ① UI, ② Orchestrator (Router + sub-agents + tracer), ③ LLM Module (only kept-separate external integration), ④ RAG / Knowledge Base, ⑥ Data Layer, ⑧ MCP Tool Layer (every other external or deterministic integration). The previous §⑤ External APIs and §⑦ Rules/Tools blocks are folded into §⑧.*
@@ -375,15 +373,14 @@ As of v1.3, the deterministic tools previously listed here — `grobid` (structu
 
 The unified tool surface for every non-LLM external integration. Every tool ships with a structured description — purpose, JSON argument schema, and an **explicit scope/permission boundary** — and the orchestrator rejects any call whose arguments fall outside the declared scope *before* the request reaches the MCP server. The same Tool-Call Tracer that records internal steps also records every MCP invocation.
 
-**Client-side MCP tools** (called by PaperHub agents; replace the v1.2 §⑤ External APIs and §⑦ Rules / Tools). The **Provenance** column is the v1.5 bill of materials: *Reuse* = run an existing community server unchanged, *Wrap* = ship a thin custom MCP server (~30–60 LoC) around an existing client library to add PaperHub-specific scope enforcement, *Build* = no acceptable server or client wrapper exists. Versions / package names are pinned at the design level.
+**Client-side MCP tools** (called by PaperHub agents). The **Provenance** column is the v1.5 bill of materials: *Reuse* = run an existing community server unchanged, *Wrap* = ship a thin custom MCP server (~30–60 LoC) around an existing client library to add PaperHub-specific scope enforcement, *Build* = no acceptable server or client wrapper exists. Versions / package names are pinned at the design level.
+
+**v1.6 scope reduction.** The v1 surface is **5 client-side tools**. `semantic_scholar`, `crossref`, and `web_search` were dropped — their roles fold elsewhere: citation edges for FR-02 come from `grobid`'s reference extraction; DOI import (FR-01) is v2 (only arXiv import in v1); research-direction (FR-04) operates on local-library topic clustering. The dropped tools can be added back in a later release without schema or contract changes — they just plug into the existing scope-checker.
 
 | MCP Tool | Scope / Allow-list | Typical Use | Provenance |
 | --- | --- | --- | --- |
 | `arxiv` | Domain pinned to `arxiv.org`; per-arXiv-ToS rate limit | Resolve arXiv IDs to metadata; download PDF and LaTeX source. | **Reuse** — `blazickjp/arxiv-mcp-server` (PyPI, `uv tool install arxiv-mcp-server`). Already enforces the 3 s rate limit; superset of methods we need. |
-| `semantic_scholar` | Domain pinned to `api.semanticscholar.org`; per-API-key rate limit | Citation graph, related works, author lookup; primary source for the relation-graph and research-direction features. | **Reuse** — `zongmin-yu/semantic-scholar-fastmcp` (PyPI: `semantic-scholar-fastmcp`). 16 tools covering paper / citations / references / recommendations / author. |
-| `crossref` | Domain pinned to `api.crossref.org` | Reverse-lookup metadata by DOI when arXiv has no record. | **Wrap** — no maintained MCP server exists; wrap `crossref-commons` (Python) in a thin FastMCP server (~30 LoC). |
-| `web_search` | Domain allow-list (`arxiv.org`, `semanticscholar.org`, `doi.org`, `openreview.net`); rate-limited | Fallback general lookup when none of the structured APIs resolve. | **Wrap** — wrap Brave Search SDK (or Tavily) in a thin FastMCP server (~30 LoC) that enforces the 4-domain allow-list and rate limit. Reference: `brave/brave-search-mcp-server`. |
-| `grobid` | Localhost only (`http://localhost:8070`); request-size capped | Structured header + reference extraction from PDF. | **Wrap** — wrap `kermitt2/grobid-client-python` in a thin FastMCP server (~40 LoC) that validates PDF paths against the workspace root. Reference: `JackKuo666/grobid-MCP-Server`. |
+| `grobid` | Localhost only (`http://localhost:8070`); request-size capped | Structured header + reference extraction from PDF (also the v1 source for citation edges in FR-02). | **Wrap** — wrap `kermitt2/grobid-client-python` in a thin FastMCP server (~40 LoC) that validates PDF paths against the workspace root. Reference: `JackKuo666/grobid-MCP-Server`. |
 | `latex` | Sandboxed to workspace root; per-call timeout | `pdflatex` compile + `chktex` lint; backs the Beamer feedback loop. | **Build** — no existing server exposes both `chktex` and a workspace sandbox. ~150 LoC FastMCP server invoking `pdflatex` + `chktex` as subprocesses. |
 | `filesystem` | A single user-configured root (default: `~/PaperHub/workspace`); read + write inside the root only | Save downloaded PDFs, export decks / trace JSON. | **Reuse** — `@modelcontextprotocol/server-filesystem` (Anthropic official, npm). Pinned to a release **post-CVE-2025-53109/53110** (path-traversal fixes); regression test for `..` traversal added to PaperHub's test suite. |
 | `sqlite` | Read-only connection; allow-list of safe tables (`papers`, `tags`, `notes`, `citations`, `tool_calls`, `runs`, `chat_sessions`, `messages`) | Power the SQL Agent's NL2SQL queries against the metadata DB. | **Wrap** — official `mcp/server-sqlite` is archived and not read-only-with-allow-list. Build a thin FastMCP server (~50 LoC) on `sqlite3` exposing `query` + `schema` with the table allow-list enforced. Reference: `hannesrudolph/sqlite-explorer-fastmcp-mcp-server`. |
