@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff-format
+        files: ^backend/
+      - id: ruff
+        args: [--fix]
+        files: ^backend/
+  - repo: local
+    hooks:
+      - id: mypy-strict
+        name: mypy --strict (backend)
+        entry: bash -c "cd backend && uv run mypy"
+        language: system
+        pass_filenames: false
+        files: ^backend/.*\.py$
