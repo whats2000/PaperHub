@@ -9,9 +9,13 @@ point.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from paperhub.mcp.scopes import McpInvocation, McpToolScope, ScopeRejection, check_scope
+
+if TYPE_CHECKING:
+    from paperhub.tracing.tracer import ToolCallTracer
 
 
 class McpScopeViolation(RuntimeError):
@@ -48,7 +52,7 @@ class McpClient:
         *,
         scopes: dict[str, McpToolScope],
         dispatcher: McpDispatcher,
-        tracer: object | None = None,
+        tracer: ToolCallTracer | None = None,
         run_id: UUID | None = None,
         step_index: int = 0,
     ) -> None:
@@ -62,14 +66,16 @@ class McpClient:
         """Write a rejected tool_calls row if a tracer is configured."""
         if self._tracer is None or self._run_id is None:
             return
-        # Import here to avoid a circular dependency at module load time.
-        from paperhub.tracing.tracer import ToolCallTracer
-
-        if not isinstance(self._tracer, ToolCallTracer):
-            return
-        # Use mode='json' so Path/bytes fields are serialized to str/<bytes:N>
-        # before they reach tracer.record() → json.dumps().
-        args_dict: dict[str, object] = invocation.model_dump(mode="json")
+        # Keep bytes/Path objects as their native types so redact() can see them
+        # and convert them to placeholders. The tracer's json.dumps in
+        # tracer.record will then receive a clean str-keyed dict with no binary
+        # content.
+        args_dict = invocation.args.model_dump()
+        args_payload: dict[str, object] = {
+            "tool": invocation.tool,
+            "method": invocation.method,
+            "args": args_dict,
+        }
         self._tracer.record(
             run_id=self._run_id,
             step_index=self._step_index,
@@ -77,7 +83,7 @@ class McpClient:
             agent="mcp_client",
             tool=invocation.tool,
             model=None,
-            args=args_dict,
+            args=args_payload,
             result_summary=None,
             latency_ms=0,
             token_in=None,

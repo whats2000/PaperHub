@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 class McpToolScope(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     tool_name: str
+    # Also used by 'grobid' tool to validate pdf_path is under the workspace root
     filesystem_root: Path | None = None
     sqlite_table_allowlist: list[str] | None = None
     url_domain_allowlist: list[str] | None = None
@@ -48,12 +49,22 @@ class FilesystemWriteArgs(BaseModel):
     content: bytes
 
 
+class GrobidProcessHeaderArgs(BaseModel):
+    pdf_path: Path
+
+
+class GrobidProcessFulltextArgs(BaseModel):
+    pdf_path: Path
+
+
 McpArgs = (
     ArxivSearchArgs
     | ArxivFetchMetadataArgs
     | ArxivDownloadPdfArgs
     | FilesystemReadArgs
     | FilesystemWriteArgs
+    | GrobidProcessHeaderArgs
+    | GrobidProcessFulltextArgs
 )
 
 
@@ -104,6 +115,19 @@ def check_scope(inv: McpInvocation, scope: McpToolScope) -> ScopeRejection | Non
         if not _is_inside(inv.args.path, scope.filesystem_root):
             return ScopeRejection(
                 reason=f"path {inv.args.path} is outside filesystem root {scope.filesystem_root}"
+            )
+        return None
+    if isinstance(inv.args, GrobidProcessHeaderArgs | GrobidProcessFulltextArgs):
+        if scope.filesystem_root is None:
+            return ScopeRejection(
+                reason="grobid scope missing filesystem_root for pdf_path validation"
+            )
+        if not _is_inside(inv.args.pdf_path, scope.filesystem_root):
+            return ScopeRejection(
+                reason=(
+                    f"pdf_path {inv.args.pdf_path} is outside filesystem root"
+                    f" {scope.filesystem_root}"
+                )
             )
         return None
     return None  # arxiv args: no path/domain check needed at this layer

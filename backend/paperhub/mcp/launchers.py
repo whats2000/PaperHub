@@ -36,7 +36,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from paperhub.mcp.client import McpDispatcher
-from paperhub.mcp.scopes import McpInvocation
+from paperhub.mcp.scopes import GrobidProcessFulltextArgs, GrobidProcessHeaderArgs, McpInvocation
 
 log = logging.getLogger(__name__)
 
@@ -113,15 +113,20 @@ class _GrobidSession:
             process_header,
         )
 
-        args_dict = invocation.args.model_dump()
-        pdf_path: str = str(args_dict.get("path", args_dict.get("pdf_path", "")))
-
-        if invocation.method == "process_header":
-            result = process_header(pdf_path)
-        elif invocation.method == "process_fulltext":
-            result = process_fulltext(pdf_path)
+        args = invocation.args
+        if isinstance(args, GrobidProcessHeaderArgs):
+            method = "process_header"
+            pdf_path = str(args.pdf_path)
+        elif isinstance(args, GrobidProcessFulltextArgs):
+            method = "process_fulltext"
+            pdf_path = str(args.pdf_path)
         else:
-            raise ValueError(f"Unknown grobid method: {invocation.method!r}")
+            raise TypeError(f"Unexpected args type for grobid: {type(args).__name__}")
+
+        if method == "process_header":
+            result = process_header(pdf_path)
+        else:
+            result = process_fulltext(pdf_path)
 
         return {"tei": result}
 

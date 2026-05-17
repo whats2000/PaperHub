@@ -8,6 +8,8 @@ from paperhub.mcp.scopes import (
     ArxivFetchMetadataArgs,
     FilesystemReadArgs,
     FilesystemWriteArgs,
+    GrobidProcessFulltextArgs,
+    GrobidProcessHeaderArgs,
     McpInvocation,
     McpToolScope,
     ScopeRejection,
@@ -91,3 +93,46 @@ def test_arxiv_invocation_parses_cleanly() -> None:
     )
     scope = McpToolScope(tool_name="arxiv")
     assert check_scope(inv, scope) is None
+
+
+def test_grobid_pdf_path_inside_workspace_is_ok(tmp_workspace: Path) -> None:
+    scope = McpToolScope(tool_name="grobid", filesystem_root=tmp_workspace)
+    inv = McpInvocation(
+        tool="grobid",
+        method="process_header",
+        args=GrobidProcessHeaderArgs(pdf_path=tmp_workspace / "paper.pdf"),
+    )
+    assert check_scope(inv, scope) is None
+
+
+def test_grobid_pdf_path_outside_workspace_is_rejected(tmp_workspace: Path) -> None:
+    scope = McpToolScope(tool_name="grobid", filesystem_root=tmp_workspace)
+    inv = McpInvocation(
+        tool="grobid",
+        method="process_header",
+        args=GrobidProcessHeaderArgs(pdf_path=tmp_workspace.parent / "evil.pdf"),
+    )
+    result = check_scope(inv, scope)
+    assert isinstance(result, ScopeRejection)
+
+
+def test_grobid_fulltext_pdf_path_inside_workspace_is_ok(tmp_workspace: Path) -> None:
+    scope = McpToolScope(tool_name="grobid", filesystem_root=tmp_workspace)
+    inv = McpInvocation(
+        tool="grobid",
+        method="process_fulltext",
+        args=GrobidProcessFulltextArgs(pdf_path=tmp_workspace / "paper.pdf"),
+    )
+    assert check_scope(inv, scope) is None
+
+
+def test_grobid_missing_filesystem_root_is_rejected(tmp_workspace: Path) -> None:
+    scope = McpToolScope(tool_name="grobid")  # no filesystem_root
+    inv = McpInvocation(
+        tool="grobid",
+        method="process_header",
+        args=GrobidProcessHeaderArgs(pdf_path=tmp_workspace / "paper.pdf"),
+    )
+    result = check_scope(inv, scope)
+    assert isinstance(result, ScopeRejection)
+    assert "filesystem_root" in result.reason

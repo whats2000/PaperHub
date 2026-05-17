@@ -29,6 +29,8 @@ def _scrub(value: object) -> object:
     if isinstance(value, bytes):
         # bytes are not JSON-serializable; render as a safe placeholder (M-2 fix)
         return f"<bytes: {len(value)}>"
+    if isinstance(value, Path):
+        return _scrub_string(str(value))
     if isinstance(value, str):
         return _scrub_string(value)
     if isinstance(value, dict):
