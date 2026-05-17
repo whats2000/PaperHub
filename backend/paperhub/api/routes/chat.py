@@ -21,8 +21,11 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends
@@ -66,41 +69,29 @@ class ChatRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Dependency helpers — lazy-init heavy objects once per process
+# Dependency providers — instantiated per-request; override in tests via
+# app.dependency_overrides[get_adapter] = lambda: fake_adapter
 # ---------------------------------------------------------------------------
 
-_prompts: PromptRegistry | None = None
-_adapter: LlmAdapter | None = None
-_retriever: Retriever | None = None
+
+def get_prompts() -> PromptRegistry:
+    return PromptRegistry.load_default()
 
 
-def _get_prompts() -> PromptRegistry:
-    global _prompts
-    if _prompts is None:
-        _prompts = PromptRegistry.load_default()
-    return _prompts
+def get_adapter(settings: Settings = Depends(get_settings)) -> LlmAdapter:  # noqa: B008
+    """Return a production LlmAdapter configured from settings."""
+    return LiteLlmAdapter(
+        small_model=settings.router_model,
+        flagship_model=settings.generation_model,
+    )
 
 
-def _get_adapter(settings: Settings) -> LlmAdapter:
-    """Return the production LlmAdapter (lazy singleton)."""
-    global _adapter
-    if _adapter is None:
-        _adapter = LiteLlmAdapter(
-            small_model=settings.router_model,
-            flagship_model=settings.generation_model,
-        )
-    return _adapter
-
-
-def _get_retriever(settings: Settings) -> Retriever:
-    """Return the production Retriever (lazy singleton)."""
-    global _retriever
-    if _retriever is None:
-        chroma_path = settings.chroma_path or (settings.workspace_root / "chroma")
-        store = ChromaVectorStore(chroma_path)
-        embedder = Embedder(settings.embedding_model)
-        _retriever = Retriever(store, embedder)
-    return _retriever
+def get_retriever(settings: Settings = Depends(get_settings)) -> Retriever:  # noqa: B008
+    """Return a production Retriever configured from settings."""
+    chroma_path = settings.chroma_path or (settings.workspace_root / "chroma")
+    store = ChromaVectorStore(chroma_path)
+    embedder = Embedder(settings.embedding_model)
+    return Retriever(store, embedder)
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +100,6 @@ def _get_retriever(settings: Settings) -> Retriever:
 
 
 def _insert_run(conn: object, run_id: UUID, session_id: UUID | None, started_at: str) -> None:
-    import sqlite3
-
     assert isinstance(conn, sqlite3.Connection)
     conn.execute(
         "INSERT INTO runs (id, session_id, routing_decision_json, started_at, status) "
@@ -125,8 +114,6 @@ def _update_run_status(
     status: str,
     routing_decision: RoutingDecision | None,
 ) -> None:
-    from pathlib import Path
-
     assert isinstance(db_path, Path)
     rd_json = routing_decision.model_dump_json() if routing_decision is not None else None
     finished_at = datetime.now(UTC).isoformat()
@@ -144,8 +131,6 @@ def _insert_message(
     content: str,
     run_id: UUID,
 ) -> None:
-    from pathlib import Path
-
     assert isinstance(db_path, Path)
     msg_id = uuid4()
     ts = datetime.now(UTC).isoformat()
@@ -159,8 +144,6 @@ def _insert_message(
 
 def _load_tool_calls(db_path: object, run_id: UUID) -> list[ToolCall]:
     """Load all tool_calls rows for *run_id* and return as Pydantic models."""
-    from pathlib import Path
-
     assert isinstance(db_path, Path)
     with connect(db_path) as conn:
         rows = conn.execute(
@@ -205,6 +188,9 @@ _CHITCHAT_REPLY = (
 async def _chat_stream(
     request: ChatRequest,
     settings: Settings,
+    adapter: LlmAdapter,
+    retriever: Retriever,
+    prompts: PromptRegistry,
 ) -> AsyncIterator[str]:
     """Async generator yielding JSON-encoded SSE data strings."""
     run_id = uuid4()
@@ -227,8 +213,6 @@ async def _chat_stream(
             _insert_run(conn, run_id, session_id, started_at)
 
         # --- 2. Route the message ---
-        prompts = _get_prompts()
-        adapter = _get_adapter(settings)
         router_obj = Router(adapter, prompts)
         decision: BinaryRoutingDecision = await router_obj.classify(request.message)
         routing_decision = decision
@@ -241,7 +225,6 @@ async def _chat_stream(
             # Record a "retrieval" tool step manually
             tracer = ToolCallTracer(settings.db_path)
 
-            retriever = _get_retriever(settings)
             research_agent = ResearchAgent(adapter, prompts, retriever)
 
             initial_state: AgentState = {
@@ -250,8 +233,6 @@ async def _chat_stream(
             }
 
             # Record a synthetic "retrieval" step before calling the agent
-            import time
-
             t0 = time.monotonic()
             final_state = await research_agent.answer(initial_state)
             latency_ms = int((time.monotonic() - t0) * 1000)
@@ -332,6 +313,9 @@ async def _chat_stream(
 async def chat(
     request: ChatRequest,
     settings: Settings = Depends(get_settings),  # noqa: B008
+    adapter: LlmAdapter = Depends(get_adapter),  # noqa: B008
+    retriever: Retriever = Depends(get_retriever),  # noqa: B008
+    prompts: PromptRegistry = Depends(get_prompts),  # noqa: B008
 ) -> EventSourceResponse:
     """Stream a chat response as Server-Sent Events.
 
@@ -340,7 +324,7 @@ async def chat(
     """
 
     async def _generator() -> AsyncIterator[dict[str, str]]:
-        async for data in _chat_stream(request, settings):
+        async for data in _chat_stream(request, settings, adapter, retriever, prompts):
             yield {"data": data}
 
     return EventSourceResponse(_generator())

@@ -90,32 +90,25 @@ def _make_app_with_overrides(
     """Create a FastAPI app with dependency overrides for the LLM adapter and retriever.
 
     Also applies migrations so tables exist before tests hit the endpoint.
+    Env vars (PAPERHUB_WORKSPACE_ROOT, PAPERHUB_DB_PATH) must be set by the
+    caller (e.g. via monkeypatch.setenv) BEFORE calling this helper.
     """
-    import os
-
-    db_path = workspace / "paperhub.db"
-    os.environ["PAPERHUB_WORKSPACE_ROOT"] = str(workspace)
-    os.environ["PAPERHUB_DB_PATH"] = str(db_path)
-
     from paperhub.api.app import create_app
-    from paperhub.api.routes import chat as chat_module
+    from paperhub.api.routes.chat import get_adapter, get_retriever
     from paperhub.data.db import apply_migrations
     from paperhub.rag.retriever import Retriever
+
+    db_path = workspace / "paperhub.db"
 
     # Apply migrations so tables exist (normally done by app lifespan)
     apply_migrations(db_path)
 
-    # Reset module-level singletons so each test gets a fresh state
-    chat_module._adapter = None
-    chat_module._prompts = None
-    chat_module._retriever = None
-
     app = create_app()
 
     # Inject the retriever backed by seeded_store + FakeEmbedder
-    retriever = Retriever(seeded_store, FakeEmbedder())
-    chat_module._retriever = retriever
-    chat_module._adapter = fake_adapter
+    seeded_retriever = Retriever(seeded_store, FakeEmbedder())
+    app.dependency_overrides[get_adapter] = lambda: fake_adapter
+    app.dependency_overrides[get_retriever] = lambda: seeded_retriever
 
     return app
 
