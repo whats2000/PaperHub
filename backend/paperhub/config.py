@@ -51,8 +51,13 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
 
     mcp_arxiv_command: str = "uvx arxiv-mcp-server"
+    mcp_arxiv_latex_command: str = "uvx arxiv-latex-mcp"
     mcp_filesystem_command: str = "npx -y @modelcontextprotocol/server-filesystem"
     grobid_url: str = "http://localhost:8070"
+
+    # Tier 2 (Marker) is deferred to Phase B — heavyweight ML models (~2-4 GB).
+    # Phase B flips this to True and implements the Marker call in the import ladder.
+    marker_enabled: bool = False
 
 
 def get_settings() -> Settings:

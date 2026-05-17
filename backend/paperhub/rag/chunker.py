@@ -12,12 +12,21 @@ Strategy
 * Hard cap: no chunk ever exceeds ``hard_max`` tokens (rare; only fires when a
   single "sentence" exceeds target_tokens).
 
+LaTeX support (Phase A — basic preamble strip)
+----------------------------------------------
+When the input is LaTeX source (detected by :func:`is_latex`), the preamble
+(everything up to and including ``\\begin{document}``) and the closing
+``\\end{document}`` are stripped before chunking.  This drops boilerplate that
+wastes tokens.  Full LaTeX-aware chunking (e.g. section-level splits) is
+deferred to Phase B.
+
 Each :class:`~paperhub.data.models.Chunk` carries ``char_start`` and
 ``char_end`` so callers can map back to the source text.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from uuid import UUID, uuid4
 
@@ -26,6 +35,42 @@ import tiktoken
 from paperhub.data.models import Chunk
 
 _ENCODING = tiktoken.get_encoding("cl100k_base")
+
+# ---------------------------------------------------------------------------
+# LaTeX detection + preamble stripping
+# ---------------------------------------------------------------------------
+
+_LATEX_MARKERS = re.compile(r"\\documentclass|\\begin\{document\}")
+_BEGIN_DOCUMENT = re.compile(r"\\begin\{document\}", re.IGNORECASE)
+_END_DOCUMENT = re.compile(r"\\end\{document\}", re.IGNORECASE)
+
+
+def is_latex(text: str) -> bool:
+    """Return True if *text* looks like a LaTeX source file.
+
+    Checks for the presence of ``\\documentclass`` or ``\\begin{document}``
+    markers which are unambiguous indicators of a LaTeX source file.
+    """
+    return bool(_LATEX_MARKERS.search(text))
+
+
+def strip_latex_preamble(text: str) -> str:
+    """Strip the LaTeX preamble and closing ``\\end{document}`` from *text*.
+
+    Everything up to and including ``\\begin{document}`` is removed (the
+    preamble contains ``\\usepackage``, ``\\newcommand`` etc. — mostly noise
+    for retrieval).  The ``\\end{document}`` at the end is also removed.
+
+    If ``\\begin{document}`` is not found, *text* is returned unchanged.
+    """
+    m = _BEGIN_DOCUMENT.search(text)
+    if m:
+        text = text[m.end():]
+    # Strip trailing \\end{document}
+    m_end = _END_DOCUMENT.search(text)
+    if m_end:
+        text = text[: m_end.start()]
+    return text
 
 
 def chunk_text(
@@ -43,7 +88,9 @@ def chunk_text(
     paper_id:
         UUID of the owning paper (propagated to every chunk).
     text:
-        Plain-text content to split.
+        Plain-text or LaTeX content to split.  If *text* starts with a LaTeX
+        preamble (detected by :func:`is_latex`), the preamble and closing
+        ``\\end{document}`` are stripped before chunking.
     target_tokens:
         Soft window size in tokens.  Each chunk will be at most this many
         tokens (unless a single token run exceeds *hard_max*).
@@ -56,6 +103,13 @@ def chunk_text(
     """
     if not text.strip():
         return
+
+    # Strip LaTeX preamble / postamble before tokenising.
+    # Full LaTeX-aware section chunking is Phase B work.
+    if is_latex(text):
+        text = strip_latex_preamble(text)
+        if not text.strip():
+            return
 
     tokens: list[int] = _ENCODING.encode(text)
     if not tokens:

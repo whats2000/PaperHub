@@ -44,6 +44,95 @@ def test_paper_round_trip() -> None:
     assert Paper.model_validate(p.model_dump(mode="json")) == p
 
 
+def test_paper_extraction_tier_latex() -> None:
+    """Paper with extraction_tier='latex' (Tier 1 path) has no low-fidelity annotation."""
+    pid = uuid4()
+    p = Paper(
+        id=pid,
+        arxiv_id="1706.03762",
+        doi=None,
+        title="Attention Is All You Need",
+        authors=["Vaswani et al."],
+        year=2017,
+        abstract="Transformer architecture.",
+        pdf_path="papers/1706.03762/source.tex",
+        sha256="a" * 64,
+        primary_topic=None,
+        added_at=datetime(2026, 5, 17, 12, 0, 0),
+        extraction_tier="latex",
+        notes_md=None,
+    )
+    assert p.extraction_tier == "latex"
+    assert p.notes_md is None
+    # Round-trip
+    assert Paper.model_validate(p.model_dump()) == p
+
+
+def test_paper_extraction_tier_raw() -> None:
+    """Paper with extraction_tier='raw' (Tier 3 fallback) is annotated as low-fidelity."""
+    pid = uuid4()
+    p = Paper(
+        id=pid,
+        arxiv_id="2301.07041",
+        doi=None,
+        title="Test Paper",
+        authors=["Alice"],
+        year=2023,
+        abstract="Abstract.",
+        pdf_path="papers/2301.07041/fallback.md",
+        sha256="b" * 64,
+        primary_topic=None,
+        added_at=datetime(2026, 5, 17, 12, 0, 0),
+        extraction_tier="raw",
+        notes_md="low_fidelity_extraction",
+    )
+    assert p.extraction_tier == "raw"
+    assert p.notes_md == "low_fidelity_extraction"
+    # Round-trip
+    assert Paper.model_validate(p.model_dump()) == p
+
+
+def test_paper_extraction_tier_none_backward_compat() -> None:
+    """Pre-migration Paper rows with no extraction_tier are valid (None = unknown tier)."""
+    pid = uuid4()
+    p = Paper(
+        id=pid,
+        arxiv_id="old-paper",
+        doi=None,
+        title="Old Paper",
+        authors=[],
+        year=None,
+        abstract=None,
+        pdf_path="papers/old-paper.md",
+        sha256="c" * 64,
+        primary_topic=None,
+        added_at=datetime(2026, 5, 17, 12, 0, 0),
+        # extraction_tier and notes_md intentionally omitted → default None
+    )
+    assert p.extraction_tier is None
+    assert p.notes_md is None
+
+
+def test_paper_extraction_tier_invalid_value() -> None:
+    """extraction_tier must be one of 'latex', 'marker', 'raw', or None."""
+    pid = uuid4()
+    with pytest.raises(ValueError):
+        Paper(
+            id=pid,
+            arxiv_id="x",
+            doi=None,
+            title="X",
+            authors=[],
+            year=None,
+            abstract=None,
+            pdf_path="x.pdf",
+            sha256="d" * 64,
+            primary_topic=None,
+            added_at=datetime(2026, 5, 17, 12, 0, 0),
+            extraction_tier="unknown_tier",  # type: ignore[arg-type]
+        )
+
+
 def test_routing_decision_intent_literal_is_enforced() -> None:
     with pytest.raises(ValueError):
         RoutingDecision(

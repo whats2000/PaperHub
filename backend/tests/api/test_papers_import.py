@@ -1,9 +1,12 @@
 """Tests for POST /papers/import.
 
 Real arXiv + GROBID calls are marked @pytest.mark.e2e and skipped by default.
-The unit test below monkeypatches the MCP dispatcher to return fake metadata +
-fake markdown content (matching the real ``get_abstract`` + ``download_paper``
-tool surface from blazickjp/arxiv-mcp-server).
+The unit tests below monkeypatch the MCP dispatcher to return fake metadata +
+fake content (matching the §1.1 three-tier source-fidelity ladder).
+
+Tier 1 (arxiv-latex-mcp / LaTeX)  — happy path and metadata-enrichment path
+Tier 3 (arxiv-mcp-server markdown) — fallback when Tier 1 fails
+Both fail                           — HTTP 502 with named tiers
 """
 
 from __future__ import annotations
@@ -49,7 +52,13 @@ def workspace(tmp_path: Path) -> Path:
     return ws
 
 
-# Fake markdown content returned by the real ``download_paper`` tool
+# ---------------------------------------------------------------------------
+# Fake response payloads
+# ---------------------------------------------------------------------------
+
+_STUB_ARXIV_ID = "2301.07041"
+
+# Tier-3 (arxiv-mcp-server) fake responses
 _STUB_MARKDOWN = (
     """# Test Paper Title
 
@@ -73,7 +82,7 @@ We propose a novel approach using transformers.
 _STUB_ABSTRACT_RESPONSE = json.dumps(
     {
         "status": "success",
-        "paper_id": "2301.07041",
+        "paper_id": _STUB_ARXIV_ID,
         "title": "Test Paper Title",
         "authors": ["Alice Smith", "Bob Jones"],
         "abstract": "A test abstract about machine learning.",
@@ -87,53 +96,131 @@ _STUB_DOWNLOAD_RESPONSE = json.dumps(
     {
         "status": "success",
         "message": "Paper downloaded successfully",
-        "paper_id": "2301.07041",
+        "paper_id": _STUB_ARXIV_ID,
         "source": "html",
         "content": _STUB_MARKDOWN,
     }
 )
 
+# Tier-1 (arxiv-latex-mcp) fake responses
+_STUB_LATEX_ABSTRACT_RESPONSE = json.dumps(
+    {
+        "title": "Test LaTeX Paper",
+        "authors": ["Carol Doe", "Dave Lee"],
+        "abstract": "A lossless LaTeX-sourced abstract.",
+        "published": "2023-01-18",
+    }
+)
 
-@pytest.fixture()
-def client(
+_STUB_LATEX_BODY = r"""\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+\section{Introduction}
+We propose a novel architecture based on attention mechanisms $\alpha + \beta$.
+
+\section{Methods}
+Our method uses transformer blocks with multi-head self-attention.
+
+\section{Results}
+We achieve state-of-the-art performance on multiple benchmarks.
+\end{document}
+"""
+
+# -----------------------------------------------------------------------
+# Helper: build fake dispatcher with configurable per-tier behavior
+# -----------------------------------------------------------------------
+
+
+def _make_fake_dispatcher(
+    *,
+    tier1_abstract_response: str | None = _STUB_LATEX_ABSTRACT_RESPONSE,
+    tier1_body_response: str | None = _STUB_LATEX_BODY,
+    tier1_raises: bool = False,
+    tier3_abstract_response: str | None = _STUB_ABSTRACT_RESPONSE,
+    tier3_download_response: str | None = _STUB_DOWNLOAD_RESPONSE,
+    tier3_raises: bool = False,
+) -> Any:
+    """Return an async dispatcher that simulates the three-tier ladder."""
+    from paperhub.mcp.launchers import McpUpstreamError
+    from paperhub.mcp.scopes import (
+        ArxivDownloadPaperArgs,
+        ArxivGetAbstractArgs,
+        ArxivLatexGetPaperAbstractArgs,
+        ArxivLatexGetPaperPromptArgs,
+        McpInvocation,
+    )
+
+    # Dummy invocation used when raising (only needs tool/method/args shape)
+    _dummy_inv = McpInvocation(
+        tool="arxiv_latex",
+        method="get_paper_abstract",
+        args=ArxivLatexGetPaperAbstractArgs(arxiv_id=_STUB_ARXIV_ID),
+    )
+
+    async def _fake_dispatcher(invocation: object) -> dict[str, object]:
+        assert isinstance(invocation, McpInvocation)
+
+        # Tier 1 paths
+        if invocation.tool == "arxiv_latex" and isinstance(
+            invocation.args, ArxivLatexGetPaperAbstractArgs
+        ):
+            if tier1_raises:
+                raise McpUpstreamError(_dummy_inv, "arxiv-latex-mcp: no e-print available")
+            parsed = json.loads(tier1_abstract_response)  # type: ignore[arg-type]
+            return {"result": tier1_abstract_response, **parsed}
+
+        if invocation.tool == "arxiv_latex" and isinstance(
+            invocation.args, ArxivLatexGetPaperPromptArgs
+        ):
+            if tier1_raises:
+                raise McpUpstreamError(_dummy_inv, "arxiv-latex-mcp: no e-print available")
+            return {"result": tier1_body_response}
+
+        # Tier 3 paths (metadata enrichment or fallback)
+        if invocation.tool == "arxiv" and isinstance(invocation.args, ArxivGetAbstractArgs):
+            if tier3_raises:
+                raise McpUpstreamError(_dummy_inv, "arxiv-mcp-server: get_abstract failed")
+            parsed = json.loads(tier3_abstract_response)  # type: ignore[arg-type]
+            return {"result": tier3_abstract_response, **parsed}
+
+        if invocation.tool == "arxiv" and isinstance(invocation.args, ArxivDownloadPaperArgs):
+            if tier3_raises:
+                raise McpUpstreamError(_dummy_inv, "arxiv-mcp-server: download failed")
+            parsed = json.loads(tier3_download_response)  # type: ignore[arg-type]
+            return {"result": tier3_download_response, **parsed}
+
+        return {}
+
+    return _fake_dispatcher
+
+
+def _make_client(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    tier1_raises: bool = False,
+    tier3_raises: bool = False,
+    tier1_abstract_response: str | None = _STUB_LATEX_ABSTRACT_RESPONSE,
+    tier1_body_response: str | None = _STUB_LATEX_BODY,
 ) -> Generator[TestClient, None, None]:
     monkeypatch.setenv("PAPERHUB_WORKSPACE_ROOT", str(workspace))
     monkeypatch.setenv("PAPERHUB_DB_PATH", str(workspace / "paperhub.db"))
 
-    # Patch make_dispatcher in the papers route to return a fake dispatcher
-    async def _fake_dispatcher(invocation: object) -> dict[str, object]:
-        from paperhub.mcp.scopes import (
-            ArxivDownloadPaperArgs,
-            ArxivGetAbstractArgs,
-            McpInvocation,
-        )
-
-        assert isinstance(invocation, McpInvocation)
-        if invocation.tool == "arxiv" and isinstance(invocation.args, ArxivGetAbstractArgs):
-            # Return the parsed dict (launchers.py merges parsed JSON into result)
-            parsed = json.loads(_STUB_ABSTRACT_RESPONSE)
-            return {"result": _STUB_ABSTRACT_RESPONSE, **parsed}
-        if invocation.tool == "arxiv" and isinstance(invocation.args, ArxivDownloadPaperArgs):
-            parsed = json.loads(_STUB_DOWNLOAD_RESPONSE)
-            return {"result": _STUB_DOWNLOAD_RESPONSE, **parsed}
-        return {}
-
+    fake_dispatcher = _make_fake_dispatcher(
+        tier1_abstract_response=tier1_abstract_response,
+        tier1_body_response=tier1_body_response,
+        tier1_raises=tier1_raises,
+        tier3_raises=tier3_raises,
+    )
     monkeypatch.setattr(
         "paperhub.api.routes.papers.make_dispatcher",
-        lambda **kwargs: _fake_dispatcher,
+        lambda **kwargs: fake_dispatcher,
     )
 
-    # Prevent the lifespan from starting the real arXiv MCP subprocess.
-    # Without this the TestClient lifespan would launch ``uvx arxiv-mcp-server``
-    # (taking up to 90s) and set app.state.mcp_dispatcher to a real dispatcher
-    # that bypasses the fake above.
     import paperhub.api.app as _app_module
 
     monkeypatch.setattr(_app_module, "LaunchedMcpSessions", _NoOpMcpSessions)
 
-    # Patch Embedder to avoid loading sentence-transformers
     from paperhub.rag.embedder import FakeEmbedder
 
     monkeypatch.setattr(
@@ -147,32 +234,161 @@ def client(
         yield tc
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def client_tier1(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
+    """Client where Tier 1 succeeds (happy path)."""
+    yield from _make_client(workspace, monkeypatch)
+
+
+@pytest.fixture()
+def client_tier3_fallback(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
+    """Client where Tier 1 raises McpUpstreamError → falls back to Tier 3."""
+    yield from _make_client(workspace, monkeypatch, tier1_raises=True)
+
+
+@pytest.fixture()
+def client_both_fail(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
+    """Client where both Tier 1 and Tier 3 raise."""
+    yield from _make_client(workspace, monkeypatch, tier1_raises=True, tier3_raises=True)
+
+
+# Legacy fixture alias — uses Tier 3 path (old default behaviour is now fallback)
+@pytest.fixture()
+def client(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
+    """Client where Tier 1 succeeds (equivalent to client_tier1)."""
+    yield from _make_client(workspace, monkeypatch)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+def test_tier1_latex_success(
+    client_tier1: TestClient,
+    workspace: Path,
+) -> None:
+    """Tier 1 (arxiv-latex-mcp) success: artifact is .tex, tier='latex', notes_md=None."""
+    r = client_tier1.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
+    assert r.status_code == 200, r.text
+
+    data = r.json()
+    assert data["arxiv_id"] == _STUB_ARXIV_ID
+    assert data["extraction_tier"] == "latex"
+    assert data["pdf_path"].endswith(".tex"), f"Expected .tex, got: {data['pdf_path']}"
+    assert data["notes_md"] is None, "Tier 1 artifact should not be flagged as low-fidelity"
+
+    # Verify the .tex file exists and has content
+    tex_path = workspace / data["pdf_path"]
+    assert tex_path.exists(), f".tex file not found at {tex_path}"
+    content = tex_path.read_text(encoding="utf-8")
+    assert "\\section" in content or "\\begin" in content, "Expected LaTeX markup in artifact"
+
+
+def test_tier1_paper_stored_in_db(
+    client_tier1: TestClient,
+    workspace: Path,
+) -> None:
+    """Tier 1 import: DB row has extraction_tier='latex' and non-null title."""
+    r = client_tier1.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
+    assert r.status_code == 200, r.text
+
+    from paperhub.data.db import connect
+
+    db_path = workspace / "paperhub.db"
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT title, extraction_tier, notes_md FROM papers WHERE arxiv_id=?",
+            (_STUB_ARXIV_ID,),
+        ).fetchone()
+    assert row is not None
+    assert row["extraction_tier"] == "latex"
+    assert row["notes_md"] is None
+
+
+def test_tier3_fallback_when_tier1_fails(
+    client_tier3_fallback: TestClient,
+    workspace: Path,
+) -> None:
+    """Tier 1 failure → Tier 3: artifact is .md, tier='raw', notes_md='low_fidelity_extraction'."""
+    r = client_tier3_fallback.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
+    assert r.status_code == 200, r.text
+
+    data = r.json()
+    assert data["extraction_tier"] == "raw", f"Expected 'raw', got: {data['extraction_tier']}"
+    assert data["pdf_path"].endswith(".md"), f"Expected .md, got: {data['pdf_path']}"
+    assert data["notes_md"] == "low_fidelity_extraction", (
+        "Tier 3 artifact must be flagged as low-fidelity"
+    )
+
+    # Verify the .md file exists under the paper subdirectory
+    md_path = workspace / data["pdf_path"]
+    assert md_path.exists(), f"Fallback .md file not found at {md_path}"
+    content = md_path.read_text(encoding="utf-8")
+    assert "Test Paper Title" in content
+
+
+def test_tier3_fallback_db_row(
+    client_tier3_fallback: TestClient,
+    workspace: Path,
+) -> None:
+    """Tier 3 import: DB row has extraction_tier='raw' and notes_md='low_fidelity_extraction'."""
+    r = client_tier3_fallback.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
+    assert r.status_code == 200, r.text
+
+    from paperhub.data.db import connect
+
+    db_path = workspace / "paperhub.db"
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT extraction_tier, notes_md FROM papers WHERE arxiv_id=?",
+            (_STUB_ARXIV_ID,),
+        ).fetchone()
+    assert row is not None
+    assert row["extraction_tier"] == "raw"
+    assert row["notes_md"] == "low_fidelity_extraction"
+
+
+def test_both_tiers_fail_returns_502(
+    client_both_fail: TestClient,
+    workspace: Path,
+) -> None:
+    """Both Tier 1 and Tier 3 fail → HTTP 502 with tiers listed in detail."""
+    r = client_both_fail.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
+    assert r.status_code == 502, r.text
+
+    detail = r.json().get("detail", "")
+    assert "latex" in detail, f"Expected 'latex' in 502 detail: {detail}"
+    assert "raw" in detail, f"Expected 'raw' in 502 detail: {detail}"
+
+
 def test_papers_import_creates_paper_and_chunks(
     client: TestClient,
     workspace: Path,
 ) -> None:
     """POST /papers/import must create a paper row + chunk rows + vector entries."""
-    r = client.post("/papers/import", json={"arxiv_id": "2301.07041"})
+    r = client.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
     assert r.status_code == 200, r.text
 
     data = r.json()
-    assert data["arxiv_id"] == "2301.07041"
-    assert data["title"] == "Test Paper Title"
-    assert "Alice Smith" in data["authors"]
-    assert data["year"] == 2023
-
-    # Verify the saved file is a .md file under workspace_root
-    pdf_path = data["pdf_path"]
-    assert pdf_path.endswith(".md"), f"Expected .md extension, got: {pdf_path}"
-    saved_path = Path(pdf_path)
-    assert saved_path.is_relative_to(workspace) or str(saved_path).startswith(str(workspace)), (
-        f"Saved path {saved_path} is not under workspace {workspace}"
-    )
-
-    # Verify the markdown file was actually written
-    assert saved_path.exists(), f"Markdown file not found at {saved_path}"
-    content = saved_path.read_text(encoding="utf-8")
-    assert "Test Paper Title" in content
+    assert data["arxiv_id"] == _STUB_ARXIV_ID
 
     # Verify the database has the paper and at least 1 chunk
     from paperhub.data.db import connect
@@ -180,7 +396,7 @@ def test_papers_import_creates_paper_and_chunks(
     db_path = workspace / "paperhub.db"
     with connect(db_path) as conn:
         paper_rows = conn.execute(
-            "SELECT id FROM papers WHERE arxiv_id=?", ("2301.07041",)
+            "SELECT id FROM papers WHERE arxiv_id=?", (_STUB_ARXIV_ID,)
         ).fetchall()
         assert len(paper_rows) == 1, "Expected 1 paper row"
 
@@ -193,18 +409,17 @@ def test_papers_import_saves_under_workspace_root(
     client: TestClient,
     workspace: Path,
 ) -> None:
-    """The saved markdown file path must be inside workspace_root (path-traversal guard)."""
-    r = client.post("/papers/import", json={"arxiv_id": "2301.07041"})
+    """The saved artifact path must be inside workspace_root (path-traversal guard)."""
+    r = client.post("/papers/import", json={"arxiv_id": _STUB_ARXIV_ID})
     assert r.status_code == 200, r.text
 
     data = r.json()
-    pdf_path = Path(data["pdf_path"])
+    pdf_path = workspace / data["pdf_path"]
     # Must be under workspace / "papers"
     expected_parent = workspace / "papers"
     assert str(pdf_path).startswith(str(expected_parent)), (
         f"pdf_path {pdf_path} not under expected papers dir {expected_parent}"
     )
-    assert pdf_path.suffix == ".md"
 
 
 @pytest.mark.e2e

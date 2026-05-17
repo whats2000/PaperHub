@@ -51,6 +51,41 @@ class ArxivDownloadPaperArgs(BaseModel):
     paper_id: str
 
 
+# ---------------------------------------------------------------------------
+# arxiv-latex-mcp args (Tier 1 — takashiishida/arxiv-latex-mcp)
+# Tool surface:
+#   get_paper_prompt(arxiv_id)   → complete flattened LaTeX source as raw text
+#   get_paper_abstract(arxiv_id) → abstract (may include title/authors)
+#   list_paper_sections(arxiv_id) → section headings
+#   get_paper_section(arxiv_id, section_path) → specific section
+# ---------------------------------------------------------------------------
+
+
+class ArxivLatexGetPaperPromptArgs(BaseModel):
+    """Args for ``get_paper_prompt`` — returns the full flattened LaTeX source."""
+
+    arxiv_id: str
+
+
+class ArxivLatexGetPaperAbstractArgs(BaseModel):
+    """Args for ``get_paper_abstract`` — returns abstract (+ possible metadata)."""
+
+    arxiv_id: str
+
+
+class ArxivLatexListSectionsArgs(BaseModel):
+    """Args for ``list_paper_sections`` — returns section headings."""
+
+    arxiv_id: str
+
+
+class ArxivLatexGetSectionArgs(BaseModel):
+    """Args for ``get_paper_section`` — returns a specific section."""
+
+    arxiv_id: str
+    section_path: str
+
+
 class FilesystemReadArgs(BaseModel):
     path: Path
 
@@ -72,6 +107,10 @@ McpArgs = (
     ArxivSearchArgs
     | ArxivGetAbstractArgs
     | ArxivDownloadPaperArgs
+    | ArxivLatexGetPaperPromptArgs
+    | ArxivLatexGetPaperAbstractArgs
+    | ArxivLatexListSectionsArgs
+    | ArxivLatexGetSectionArgs
     | FilesystemReadArgs
     | FilesystemWriteArgs
     | GrobidProcessHeaderArgs
@@ -141,4 +180,4 @@ def check_scope(inv: McpInvocation, scope: McpToolScope) -> ScopeRejection | Non
                 )
             )
         return None
-    return None  # arxiv args: no path/domain check needed at this layer
+    return None  # arxiv / arxiv-latex args: no path/domain check needed at this layer

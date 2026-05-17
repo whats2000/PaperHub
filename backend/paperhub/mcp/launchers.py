@@ -204,6 +204,131 @@ class _ArxivSession:
             return {"result": text}
 
 
+class _ArxivLatexSession:
+    """Stdio session for ``arxiv-latex-mcp`` (uvx subprocess).
+
+    Provides lossless LaTeX source access for arXiv papers (Tier 1 of the
+    §1.1 source-fidelity ladder).  The tool surface (takashiishida/arxiv-latex-mcp):
+      - get_paper_prompt(arxiv_id)    → full flattened LaTeX source as plain text
+      - get_paper_abstract(arxiv_id)  → abstract (possibly including title/authors)
+      - list_paper_sections(arxiv_id) → section headings
+      - get_paper_section(arxiv_id, section_path) → specific section text
+
+    Lifecycle mirrors :class:`_ArxivSession`: use via :class:`LaunchedMcpSessions`
+    for the lifespan-owned path, or lazy-connect for per-request use.
+    """
+
+    def __init__(self, command: str = "uvx arxiv-latex-mcp") -> None:
+        self._lock = asyncio.Lock()
+        self._session: Any = None
+        self._stdio_ctx: Any = None
+        self._session_ctx: Any = None
+        self._command = command
+        self._owned: bool = False
+
+    async def __aenter__(self) -> _ArxivLatexSession:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        command_parts = shlex.split(self._command)
+        command = command_parts[0]
+        args = command_parts[1:] if len(command_parts) > 1 else []
+
+        params = StdioServerParameters(command=command, args=args, env=None)
+        self._stdio_ctx = stdio_client(params)
+        read_stream, write_stream = await self._stdio_ctx.__aenter__()
+
+        session: Any = ClientSession(read_stream, write_stream)
+        self._session_ctx = session
+        await session.__aenter__()
+        await session.initialize()
+
+        self._session = session
+        self._owned = True
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        if self._session_ctx is not None:
+            try:
+                await self._session_ctx.__aexit__(*exc_info)
+            except Exception:
+                log.exception("Error exiting arxiv-latex ClientSession context")
+        if self._stdio_ctx is not None:
+            try:
+                await self._stdio_ctx.__aexit__(*exc_info)
+            except Exception:
+                log.exception("Error exiting arxiv-latex stdio_client context")
+        self._session = None
+        self._owned = False
+
+    async def _ensure_connected(self) -> Any:
+        async with self._lock:
+            if self._session is not None:
+                return self._session
+            await self.__aenter__()
+            return self._session
+
+    async def call(self, invocation: McpInvocation) -> dict[str, object]:
+        """Dispatch a single arxiv-latex-mcp tool call.
+
+        Maps our internal method names to upstream tool names.  The upstream
+        tool names are snake_case matching the README surface exactly.
+
+        Raises McpUpstreamError on any upstream error (isError envelope or
+        status=error JSON content).
+        """
+        session = await self._ensure_connected()
+
+        method = invocation.method
+        args_dict = invocation.args.model_dump()
+
+        # Map method → upstream tool name + args
+        if method == "get_paper_prompt":
+            upstream_tool = "get_paper_prompt"
+            upstream_args = {"arxiv_id": args_dict.get("arxiv_id", "")}
+        elif method == "get_paper_abstract":
+            upstream_tool = "get_paper_abstract"
+            upstream_args = {"arxiv_id": args_dict.get("arxiv_id", "")}
+        elif method == "list_paper_sections":
+            upstream_tool = "list_paper_sections"
+            upstream_args = {"arxiv_id": args_dict.get("arxiv_id", "")}
+        elif method == "get_paper_section":
+            upstream_tool = "get_paper_section"
+            upstream_args = {
+                "arxiv_id": args_dict.get("arxiv_id", ""),
+                "section_path": args_dict.get("section_path", ""),
+            }
+        else:
+            # Forward-compat passthrough
+            upstream_tool = method
+            upstream_args = args_dict
+
+        result = await session.call_tool(upstream_tool, upstream_args)
+
+        if getattr(result, "isError", False):
+            contents = getattr(result, "content", [])
+            error_text = contents[0].text if contents else "unknown upstream error"
+            raise McpUpstreamError(invocation, error_text)
+
+        contents = getattr(result, "content", [])
+        if not contents:
+            return {"result": result}
+
+        text = getattr(contents[0], "text", None)
+        if text is None:
+            return {"result": result}
+
+        try:
+            parsed: dict[str, object] = json.loads(text)
+            if isinstance(parsed, dict) and parsed.get("status") == "error":
+                error_msg = str(parsed.get("message", text))
+                raise McpUpstreamError(invocation, error_msg)
+            return {"result": text, **parsed}
+        except (json.JSONDecodeError, TypeError):
+            # Plain text response (the LaTeX source is NOT JSON)
+            return {"result": text}
+
+
 class _GrobidSession:
     """In-process FastMCP session for the GROBID wrapper."""
 
@@ -261,14 +386,24 @@ class LaunchedMcpSessions:
     def __init__(self, settings: Any) -> None:
         self._settings = settings
         self._arxiv = _ArxivSession(arxiv_command=settings.mcp_arxiv_command)
+        self._arxiv_latex = _ArxivLatexSession(
+            command=settings.mcp_arxiv_latex_command
+        )
         self._grobid = _GrobidSession()
-        self._started: bool = False
+        self._arxiv_started: bool = False
+        self._arxiv_latex_started: bool = False
+
+    @property
+    def _started(self) -> bool:
+        """True when at least the Tier-3 arxiv session is running."""
+        return self._arxiv_started
 
     async def __aenter__(self) -> LaunchedMcpSessions:
+        # Start Tier-3 arxiv-mcp-server (existing fallback)
         log.info("Starting arXiv MCP subprocess: %s", self._settings.mcp_arxiv_command)
         try:
             await self._arxiv.__aenter__()
-            self._started = True
+            self._arxiv_started = True
             log.info("arXiv MCP session started successfully")
         except Exception:
             log.warning(
@@ -276,10 +411,28 @@ class LaunchedMcpSessions:
                 "routes will fall back to per-request lazy connect",
                 exc_info=True,
             )
+
+        # Start Tier-1 arxiv-latex-mcp (LaTeX source, preferred path)
+        log.info(
+            "Starting arxiv-latex-mcp subprocess: %s",
+            self._settings.mcp_arxiv_latex_command,
+        )
+        try:
+            await self._arxiv_latex.__aenter__()
+            self._arxiv_latex_started = True
+            log.info("arxiv-latex-mcp session started successfully")
+        except Exception:
+            log.warning(
+                "arxiv-latex-mcp subprocess failed to start — Tier 1 will fall back "
+                "to per-request lazy connect (or skip to Tier 3 if unavailable)",
+                exc_info=True,
+            )
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
-        if self._started:
+        if self._arxiv_latex_started:
+            await self._arxiv_latex.__aexit__(*exc_info)
+        if self._arxiv_started:
             await self._arxiv.__aexit__(*exc_info)
 
     def make_dispatcher(self) -> McpDispatcher | None:
@@ -287,14 +440,21 @@ class LaunchedMcpSessions:
 
         Returns None when the subprocess failed to start so callers can fall
         back to the per-request ``make_dispatcher()`` factory (lazy connect).
+
+        Routing:
+          ``arxiv``       → _ArxivSession       (Tier 3: arxiv-mcp-server markdown)
+          ``arxiv_latex`` → _ArxivLatexSession  (Tier 1: arxiv-latex-mcp LaTeX source)
+          ``grobid``      → _GrobidSession      (in-process)
         """
-        if not self._started:
+        if not self._arxiv_started:
             return None
         arxiv_call = self._arxiv.call
+        arxiv_latex_call = self._arxiv_latex.call
         grobid_call = self._grobid.call
 
         _ROUTES: dict[str, _ToolHandler] = {
             "arxiv": arxiv_call,
+            "arxiv_latex": arxiv_latex_call,
             "grobid": grobid_call,
         }
 
@@ -350,10 +510,12 @@ def make_dispatcher(
         settings = get_settings()
 
     _arxiv = _ArxivSession(arxiv_command=settings.mcp_arxiv_command)
+    _arxiv_latex = _ArxivLatexSession(command=settings.mcp_arxiv_latex_command)
     _grobid = _GrobidSession()
 
     _ROUTES: dict[str, _ToolHandler] = {
         "arxiv": _arxiv.call,
+        "arxiv_latex": _arxiv_latex.call,
         "grobid": _grobid.call,
     }
 

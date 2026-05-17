@@ -1,4 +1,4 @@
-"""Tests for the greedy text chunker."""
+"""Tests for the greedy text chunker, including LaTeX preamble stripping."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import tiktoken
 
-from paperhub.rag.chunker import chunk_text
+from paperhub.rag.chunker import chunk_text, is_latex, strip_latex_preamble
 
 _ENC = tiktoken.get_encoding("cl100k_base")
 
@@ -68,3 +68,94 @@ def test_empty_text_yields_no_chunks() -> None:
     paper_id = uuid4()
     assert list(chunk_text(paper_id, "")) == []
     assert list(chunk_text(paper_id, "   ")) == []
+
+
+# ---------------------------------------------------------------------------
+# LaTeX detection and preamble stripping
+# ---------------------------------------------------------------------------
+
+_LATEX_SAMPLE = r"""\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\newcommand{\norm}[1]{\left\|#1\right\|}
+
+\begin{document}
+
+\section{Introduction}
+We propose a novel architecture based on self-attention.
+
+\section{Methods}
+Our model uses multi-head attention: $\alpha + \beta$.
+
+\end{document}
+"""
+
+_PLAIN_TEXT_SAMPLE = "This is just a plain text document without any LaTeX markup."
+
+
+def test_is_latex_detects_documentclass() -> None:
+    """is_latex returns True for text containing \\documentclass."""
+    assert is_latex(r"\documentclass{article}\n\begin{document}\nHello\n\end{document}")
+
+
+def test_is_latex_detects_begin_document() -> None:
+    """is_latex returns True for text containing \\begin{document}."""
+    assert is_latex(r"Some preamble\n\begin{document}\nBody\n\end{document}")
+
+
+def test_is_latex_returns_false_for_plain_text() -> None:
+    """is_latex returns False for plain text without LaTeX markers."""
+    assert not is_latex(_PLAIN_TEXT_SAMPLE)
+    assert not is_latex("# Markdown heading\n\nSome content.")
+
+
+def test_strip_latex_preamble_removes_preamble() -> None:
+    """strip_latex_preamble removes everything up to and including \\begin{document}."""
+    stripped = strip_latex_preamble(_LATEX_SAMPLE)
+    assert "\\documentclass" not in stripped
+    assert "\\usepackage" not in stripped
+    assert "\\begin{document}" not in stripped
+    # Body content must be preserved
+    assert "Introduction" in stripped
+    assert "self-attention" in stripped
+
+
+def test_strip_latex_preamble_removes_end_document() -> None:
+    """strip_latex_preamble also strips \\end{document}."""
+    stripped = strip_latex_preamble(_LATEX_SAMPLE)
+    assert "\\end{document}" not in stripped
+
+
+def test_strip_latex_preamble_preserves_body_content() -> None:
+    """Body text between \\begin{document} and \\end{document} is preserved."""
+    stripped = strip_latex_preamble(_LATEX_SAMPLE)
+    assert "multi-head attention" in stripped
+    assert r"$\alpha + \beta$" in stripped
+
+
+def test_strip_latex_preamble_no_begin_document() -> None:
+    """When \\begin{document} is absent, text is returned unchanged."""
+    text = r"\usepackage{amsmath}\nSome content."
+    assert strip_latex_preamble(text) == text
+
+
+def test_chunk_text_on_latex_strips_preamble() -> None:
+    """chunk_text on LaTeX input does not include preamble content in chunks."""
+    paper_id = uuid4()
+    chunks = list(chunk_text(paper_id, _LATEX_SAMPLE))
+    assert len(chunks) >= 1, "Expected at least one chunk from LaTeX body"
+
+    combined = " ".join(c.text for c in chunks)
+    # Preamble commands should not appear in chunks
+    assert "\\documentclass" not in combined
+    assert "\\usepackage" not in combined
+    # Body content should appear
+    assert "Introduction" in combined or "attention" in combined
+
+
+def test_chunk_text_on_latex_preamble_only_yields_no_chunks() -> None:
+    """LaTeX that has an empty body (only preamble) yields no chunks."""
+    paper_id = uuid4()
+    latex_preamble_only = "\\documentclass{article}\n\\begin{document}\n\\end{document}"
+    chunks = list(chunk_text(paper_id, latex_preamble_only))
+    assert chunks == [], f"Expected no chunks from empty LaTeX body, got: {chunks}"

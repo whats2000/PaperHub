@@ -34,6 +34,23 @@ class Project(_Frozen):
 
 
 class Paper(_Frozen):
+    """A paper imported into PaperHub.
+
+    ``pdf_path`` is the path to the **primary artifact** relative to the
+    workspace root.  The artifact format depends on the extraction tier:
+      - Tier 1 (``extraction_tier='latex'``) → ``.tex`` file
+        (``papers/<arxiv_id>/source.tex``)
+      - Tier 2 (``extraction_tier='marker'``) → ``.md`` file (Phase B)
+      - Tier 3 (``extraction_tier='raw'``) → ``.md`` file
+        (``papers/<arxiv_id>/fallback.md``)
+    The column name ``pdf_path`` is kept as-is to avoid breaking existing
+    tests and migrations; its semantics have been broadened.
+
+    ``notes_md`` carries import-time annotations.  When ``'low_fidelity_extraction'``
+    the artifact is a lossy Tier-3 raw-markdown extract; downstream consumers
+    (e.g. the Phase B slide pipeline) should decline to use it.
+    """
+
     id: UUID
     arxiv_id: str | None
     doi: str | None
@@ -45,6 +62,8 @@ class Paper(_Frozen):
     sha256: str
     primary_topic: str | None
     added_at: datetime
+    extraction_tier: Literal["latex", "marker", "raw"] | None = None
+    notes_md: str | None = None
 
 
 class ProjectPaper(_Frozen):
