@@ -33,3 +33,11 @@ def test_redact_nested_dict_and_list() -> None:
     assert isinstance(inner, list)
     assert "<REDACTED:api-key>" in inner[0]
     assert inner[1] == "ok"
+
+
+def test_redact_bytes_renders_as_placeholder() -> None:
+    """M-2 fix: bytes values must not break JSON serialisation."""
+    payload = b"hello world"
+    # redact() is typed as dict[str, object] → object; bytes is a valid object value.
+    out = redact({"content": payload})
+    assert out["content"] == f"<bytes: {len(payload)}>"

@@ -81,9 +81,11 @@ class ChromaVectorStore:
         where: dict[str, object] | None = None
         if paper_ids:
             where = {"paper_id": {"$in": [str(pid) for pid in paper_ids]}}
+        # M-3 fix: chromadb raises if n_results > collection size; guard against it
+        n_results = min(top_k, max(self._coll.count(), 1))
         res = self._coll.query(
             query_embeddings=[query_embedding],  # type: ignore[arg-type]
-            n_results=top_k,
+            n_results=n_results,
             where=where,  # type: ignore[arg-type]
         )
         hits: list[VectorSearchHit] = []

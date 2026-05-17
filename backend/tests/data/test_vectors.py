@@ -72,3 +72,16 @@ def test_search_filters_by_paper_id(store: ChromaVectorStore) -> None:
     )
     hits = store.search(query_embedding=_vec(0.0), top_k=5, paper_ids=[p1])
     assert [h.chunk_id for h in hits] == [c1]
+
+
+def test_search_top_k_larger_than_collection_does_not_raise(store: ChromaVectorStore) -> None:
+    """M-3 fix: top_k > collection size must not raise."""
+    p = uuid4()
+    store.add(
+        [
+            ChunkVector(chunk_id=uuid4(), paper_id=p, embedding=_vec(0.0), metadata={}),
+            ChunkVector(chunk_id=uuid4(), paper_id=p, embedding=_vec(1.0), metadata={}),
+        ]
+    )
+    hits = store.search(query_embedding=_vec(0.0), top_k=5)
+    assert len(hits) == 2
