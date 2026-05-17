@@ -19,6 +19,10 @@ Design notes
 * After each successful executescript() we record the version with
   INSERT OR IGNORE — "OR IGNORE" handles the edge case where the
   migration SQL itself already inserted the row.
+
+NOTE: future migration .sql files SHOULD wrap their DDL in explicit
+`BEGIN;` ... `COMMIT;` blocks so that a partial failure rolls back —
+`executescript()` runs in autocommit mode and won't roll back on its own.
 """
 
 from __future__ import annotations

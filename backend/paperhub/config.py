@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     db_path: Path
 
     vector_backend: Literal["chroma", "sqlite-vec"] = "chroma"
-    chroma_path: Path | None = None
+    chroma_path: Path | None = None  # if None, defaults to workspace_root / "chroma" (Task 5)
 
     router_model: str = "claude-haiku-4-5"
     generation_model: str = "claude-sonnet-4-6"

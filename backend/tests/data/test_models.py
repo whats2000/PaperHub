@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -40,12 +40,14 @@ def test_paper_round_trip() -> None:
     assert dumped["authors"] == ["Alice", "Bob"]
     revived = Paper.model_validate(dumped)
     assert revived == p
+    # JSON-mode round-trip (used by DAOs persisting to JSON columns in Task 6)
+    assert Paper.model_validate(p.model_dump(mode="json")) == p
 
 
 def test_routing_decision_intent_literal_is_enforced() -> None:
     with pytest.raises(ValueError):
         RoutingDecision(
-            intent="nonsense",  # pyright: ignore[reportArgumentType]  # intentional bad value
+            intent="nonsense",  # intentional bad value
             confidence=0.5,
             model_tier="small",
             reasoning="x",
@@ -87,14 +89,14 @@ def test_tool_call_status_is_constrained() -> None:
             latency_ms=1,
             token_in=None,
             token_out=None,
-            status="weird",  # pyright: ignore[reportArgumentType]  # intentional bad value
+            status="weird",  # intentional bad value
             error=None,
         )
 
 
 def test_chunk_project_note_validate() -> None:
-    Project(id=uuid4(), name="Thesis", created_at=datetime.utcnow())
-    Note(id=uuid4(), paper_id=uuid4(), body_md="note", created_at=datetime.utcnow())
+    Project(id=uuid4(), name="Thesis", created_at=datetime.now(UTC))
+    Note(id=uuid4(), paper_id=uuid4(), body_md="note", created_at=datetime.now(UTC))
     Chunk(
         id=uuid4(),
         paper_id=uuid4(),
