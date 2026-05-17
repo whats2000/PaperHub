@@ -72,7 +72,7 @@ paperhub/
 │   │   │   ├── db.py                 # SQLite (+ DuckDB optional) connection
 │   │   │   ├── models.py             # Pydantic data models
 │   │   │   ├── migrations/           # raw SQL files, applied at startup
-│   │   │   └── vectors.py            # sqlite-vss integration
+│   │   │   └── vectors.py            # Chroma (default) / sqlite-vec (opt-in) driver
 │   │   ├── tracing/
 │   │   │   ├── tracer.py             # Tool-Call Tracer (decorator + ctx mgr)
 │   │   │   └── redactor.py           # secret/path redaction
