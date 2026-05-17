@@ -1,7 +1,0 @@
-pyproject.toml
-paperhub/__init__.py
-paperhub.egg-info/PKG-INFO
-paperhub.egg-info/SOURCES.txt
-paperhub.egg-info/dependency_links.txt
-paperhub.egg-info/requires.txt
-paperhub.egg-info/top_level.txt
