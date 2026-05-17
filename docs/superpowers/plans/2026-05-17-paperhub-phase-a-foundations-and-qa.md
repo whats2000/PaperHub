@@ -1113,6 +1113,28 @@ Each task corresponds to a coherent unit of value, follows TDD (write test → m
 - ✅ MCP scope-checker rejects out-of-root filesystem paths and `..` traversal attempts
 - ✅ `mypy --strict` clean, ruff clean, all unit + integration tests pass; CI gates on the same
 
+## Phase A complete (2026-05-17)
+
+Tagged at `phase-a-complete`. Branch: `feat/phase-a-foundations`. Commit summary:
+
+- Backend: 60+ source files, 64 unit/integration tests + 2 e2e (skipped without credentials)
+- Frontend: React+Vite+Tailwind+Vitest scaffold + chat UI (Sidebar, ChatPane, Composer, RoutingBadge, TraceInline, Message) + SSE client + zustand store
+- Foundations: Settings, SQLite migrations + 12-table schema, Pydantic models, LiteLLM adapter, YAML prompt registry, ChromaVectorStore, Tool-Call Tracer + redactor, MCP scope-checker + client, RAG (chunker/embedder/retriever), Router (binary), Research Agent, FastAPI app + /health + /chat SSE + /papers/import
+- CI: GitHub Actions runs ruff/mypy/pytest (backend) + typecheck/lint/test/build (frontend) on every PR
+- All gates green: pytest 64 passed (+2 e2e skipped), mypy --strict clean (62 source files), ruff format + check clean, frontend typecheck/lint/test/build clean
+
+### Handoff to Phase B
+
+Phase B widens the vertical slice from binary `{paper_qa, chitchat}` routing to the full 6-intent set (adds `library_stats`, `research_suggest`, `slides`, `mcp_tool`). New work:
+- Full Router (6 intents + disambiguation fallback when confidence < threshold)
+- SQL Agent (NL2SQL + self-repair loop + Show-SQL toggle)
+- MCP layer hardening: `filesystem` (CVE-pinned reuse), `sqlite` (wrap), `latex` (build), `paperhub.*` server
+- Report Agent (multi-paper slides via `latex` MCP + Slide Editor UI)
+- Relation analysis + research-direction (citations from `grobid` references + vector-similarity edges + Cytoscape graph)
+- Multi-project management (CRUD, tags, notes, reading-status, per-project chat history)
+- Real-time token streaming (Phase A emits the full answer in one `token` event; Phase B should use `litellm.acompletion(stream=True)`)
+- FastAPI dependency_overrides for tests (already started in Phase A Task 7 follow-up)
+
 ## Self-review checklist (already performed by plan author)
 
 - **Spec coverage** — Phase A from SRS v1.6 design §4 lights up NFR-11 from day 1; FR-01 (single import), FR-03 (RAG QA), FR-08 (binary routing), FR-10 (`arxiv`, `grobid`), FR-11 (tracer + Trace UI). All ten tasks cover concrete bullets in the design.
