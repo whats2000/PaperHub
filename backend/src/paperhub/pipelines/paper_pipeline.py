@@ -1,0 +1,325 @@
+"""Cache-aware Paper Pipeline orchestrator (SRS §III-5.1).
+
+Stages:
+1. Compute content_key (arxiv:<id> or sha256:<hex>)
+2. Cache lookup on paper_content.content_key
+3. On hit: insert papers row, return.
+4. On miss: download → extract → chunk → embed → render HTML → persist
+   paper_content row + chunks rows + Chroma vectors → insert papers row.
+
+NOTE (sync-in-async): ``download_arxiv_source`` and ``search_arxiv`` are
+synchronous network calls invoked inside ``async`` methods.  This blocks the
+event loop for the duration of the download/search.  For Plan C scope this
+is accepted; wrapping in ``asyncio.to_thread`` is deferred.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+import aiosqlite
+
+from paperhub.pipelines.arxiv_client import download_arxiv_source, search_arxiv
+from paperhub.pipelines.chunker import Chunk, chunk_text
+from paperhub.pipelines.embedder import Embedder, get_embedder
+from paperhub.pipelines.extract import extract_latex, extract_pdf
+from paperhub.pipelines.renderer import render_html
+from paperhub.rag.chroma import ChromaStore
+
+
+@dataclass(frozen=True)
+class IngestRequest:
+    session_id: int
+    arxiv_id: str | None = None
+    upload_path: Path | None = None
+    upload_kind: Literal["pdf", "latex"] | None = None  # if upload_path is set
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    paper_content_id: int
+    papers_id: int
+    cache_hit: bool
+
+
+def compute_content_key(
+    *,
+    arxiv_id: str | None = None,
+    upload_path: Path | None = None,
+) -> str:
+    """Return a stable, human-readable cache key for a paper.
+
+    - arXiv papers:  ``arxiv:<arxiv_id>``
+    - Uploaded files: ``sha256:<hex-digest>``
+    """
+    if arxiv_id is not None:
+        return f"arxiv:{arxiv_id}"
+    if upload_path is not None:
+        h = hashlib.sha256()
+        with upload_path.open("rb") as fobj:
+            for block in iter(lambda: fobj.read(1 << 20), b""):
+                h.update(block)
+        return f"sha256:{h.hexdigest()}"
+    raise ValueError("must provide arxiv_id or upload_path")
+
+
+class PaperPipeline:
+    """Orchestrates the full paper ingestion pipeline with cache-aware short-circuiting."""
+
+    def __init__(
+        self,
+        conn: aiosqlite.Connection,
+        *,
+        papers_cache_dir: Path,
+        chroma: ChromaStore,
+        embedder: Embedder | None = None,
+    ) -> None:
+        self._conn = conn
+        self._cache_root = papers_cache_dir
+        self._chroma = chroma
+        self._embedder = embedder or get_embedder()
+
+    async def ingest(self, req: IngestRequest) -> IngestResult:
+        """Ingest a paper, returning immediately on cache hit."""
+        content_key = compute_content_key(
+            arxiv_id=req.arxiv_id,
+            upload_path=req.upload_path,
+        )
+
+        # Cache lookup.
+        async with self._conn.execute(
+            "SELECT id FROM paper_content WHERE content_key = ?",
+            (content_key,),
+        ) as cur:
+            row = await cur.fetchone()
+
+        if row is not None:
+            paper_content_id = int(row[0])
+            papers_id = await self._link_to_session(req.session_id, paper_content_id)
+            return IngestResult(paper_content_id, papers_id, cache_hit=True)
+
+        # Cache miss — full ingest.
+        paper_content_id, papers_id = await self._fresh_ingest(req, content_key)
+        return IngestResult(paper_content_id, papers_id, cache_hit=False)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    async def _link_to_session(self, session_id: int, paper_content_id: int) -> int:
+        """Upsert a ``papers`` row for (session_id, paper_content_id), return its id."""
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO papers (session_id, paper_content_id) VALUES (?, ?)",
+            (session_id, paper_content_id),
+        )
+        await self._conn.commit()
+        async with self._conn.execute(
+            "SELECT id FROM papers WHERE session_id = ? AND paper_content_id = ?",
+            (session_id, paper_content_id),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    async def _fresh_ingest(
+        self,
+        req: IngestRequest,
+        content_key: str,
+    ) -> tuple[int, int]:
+        """Run the full ingest pipeline and persist results."""
+        if req.arxiv_id is not None:
+            return await self._ingest_arxiv(req, content_key)
+        return await self._ingest_upload(req, content_key)
+
+    async def _ingest_arxiv(
+        self,
+        req: IngestRequest,
+        content_key: str,
+    ) -> tuple[int, int]:
+        assert req.arxiv_id is not None
+        arxiv_id = req.arxiv_id
+
+        # Download source tarball (sync — see module docstring).
+        source_dir = download_arxiv_source(
+            arxiv_id,
+            cache_root=self._cache_root / "arxiv",
+        )
+        cache_dir = self._cache_root / "arxiv" / arxiv_id
+
+        # Extract LaTeX text.
+        ext = extract_latex(source_dir)
+        full_text = ext.flattened_text
+        source_path = ext.main_path
+
+        # Persist flattened source alongside original.
+        flat_path = cache_dir / "source.flattened.tex"
+        flat_path.write_text(full_text, encoding="utf-8")
+
+        # Render to HTML.
+        html_path = cache_dir / "source.html"
+        render_html(source=source_path, kind="latex", out_path=html_path)
+
+        # Metadata (sync — see module docstring).
+        metadata = self._lookup_arxiv_metadata(arxiv_id)
+
+        # Chunk + embed.
+        chunks = chunk_text(full_text)
+        texts = [c.text for c in chunks]
+        embeddings = self._embedder.embed(texts)
+
+        # Persist.
+        paper_content_id = await self._persist_paper_content(
+            content_key=content_key,
+            kind="arxiv",
+            arxiv_id=arxiv_id,
+            sha256=None,
+            metadata=metadata,
+            source_path=source_path,
+            source_dir_path=cache_dir,
+            html_path=html_path,
+        )
+        chunk_ids = await self._persist_chunks(paper_content_id, chunks)
+
+        self._chroma.add_chunks(
+            paper_content_id=paper_content_id,
+            chunk_ids=chunk_ids,
+            texts=texts,
+            embeddings=embeddings,
+        )
+
+        papers_id = await self._link_to_session(req.session_id, paper_content_id)
+        return paper_content_id, papers_id
+
+    async def _ingest_upload(
+        self,
+        req: IngestRequest,
+        content_key: str,
+    ) -> tuple[int, int]:
+        assert req.upload_path is not None and req.upload_kind is not None
+        sha = content_key.split(":", 1)[1]
+        cache_dir = self._cache_root / "upload" / sha
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        kind = req.upload_kind
+        target = cache_dir / req.upload_path.name
+        target.write_bytes(req.upload_path.read_bytes())
+
+        if kind == "latex":
+            source_dir = target.parent
+            ext = extract_latex(source_dir)
+            full_text = ext.flattened_text
+            source_path = ext.main_path
+            flat_path = cache_dir / "source.flattened.tex"
+            flat_path.write_text(full_text, encoding="utf-8")
+            render_source = source_path
+        else:
+            full_text = extract_pdf(target)
+            source_path = target
+            render_source = source_path
+
+        html_path = cache_dir / "source.html"
+        render_html(source=render_source, kind=kind, out_path=html_path)
+
+        metadata: dict[str, object] = {
+            "title": req.upload_path.stem,
+            "authors": [],
+            "year": None,
+        }
+
+        chunks = chunk_text(full_text)
+        texts = [c.text for c in chunks]
+        embeddings = self._embedder.embed(texts)
+
+        db_kind: Literal["pdf_upload", "latex_upload"] = (
+            "pdf_upload" if kind == "pdf" else "latex_upload"
+        )
+
+        paper_content_id = await self._persist_paper_content(
+            content_key=content_key,
+            kind=db_kind,
+            arxiv_id=None,
+            sha256=sha,
+            metadata=metadata,
+            source_path=source_path,
+            source_dir_path=cache_dir,
+            html_path=html_path,
+        )
+        chunk_ids = await self._persist_chunks(paper_content_id, chunks)
+
+        self._chroma.add_chunks(
+            paper_content_id=paper_content_id,
+            chunk_ids=chunk_ids,
+            texts=texts,
+            embeddings=embeddings,
+        )
+
+        papers_id = await self._link_to_session(req.session_id, paper_content_id)
+        return paper_content_id, papers_id
+
+    async def _persist_paper_content(
+        self,
+        *,
+        content_key: str,
+        kind: Literal["arxiv", "pdf_upload", "latex_upload"],
+        arxiv_id: str | None,
+        sha256: str | None,
+        metadata: dict[str, object],
+        source_path: Path,
+        source_dir_path: Path,
+        html_path: Path,
+    ) -> int:
+        await self._conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                content_key,
+                kind,
+                arxiv_id,
+                sha256,
+                str(metadata.get("title", "")),
+                json.dumps(metadata.get("authors", [])),
+                metadata.get("year"),
+                str(source_path),
+                str(source_dir_path),
+                str(html_path),
+            ),
+        )
+        async with self._conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        await self._conn.commit()
+        return int(row[0])  # type: ignore[index]
+
+    async def _persist_chunks(
+        self,
+        paper_content_id: int,
+        chunks: list[Chunk],
+    ) -> list[int]:
+        chunk_ids: list[int] = []
+        for c in chunks:
+            await self._conn.execute(
+                "INSERT INTO chunks (paper_content_id, section, char_start, char_end, text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (paper_content_id, c.section, c.char_start, c.char_end, c.text),
+            )
+            async with self._conn.execute("SELECT last_insert_rowid()") as cur:
+                row = await cur.fetchone()
+            chunk_ids.append(int(row[0]))  # type: ignore[index]
+        await self._conn.commit()
+        return chunk_ids
+
+    def _lookup_arxiv_metadata(self, arxiv_id: str) -> dict[str, object]:
+        """Fetch title/authors/year from arXiv API (sync call — see module docstring)."""
+        results = search_arxiv(arxiv_id, max_results=1)
+        if not results:
+            return {"title": arxiv_id, "authors": [], "year": None}
+        r = results[0]
+        return {
+            "title": r.title,
+            "authors": r.authors,
+            "year": r.year,
+        }
