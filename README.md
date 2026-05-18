@@ -34,36 +34,70 @@ See the [implementation plan](#implementation-plan) section below for the full d
 
 ## Quick start
 
-The backend ships in [`backend/`](backend/). After cloning:
+After cloning, install both halves:
+
+```powershell
+cd backend; uv sync                  # Python deps from uv.lock
+cd ..\frontend; npm install          # JS deps from package-lock.json
+```
+
+### Run the dev stack
+
+Open two terminals (or use a tmux/Windows Terminal split).
+
+**Terminal 1 — backend** (FastAPI + LangGraph, hot-reload on save, port 8000):
 
 ```powershell
 cd backend
-uv sync                            # install all deps from uv.lock
-uv run pytest -v                   # 34+ tests, fully hermetic via LiteLLM mock_response
+uv run uvicorn paperhub.app:app --reload --port 8000
 ```
 
-Run the server (mocked end-to-end, no API key needed):
+**Terminal 2 — frontend** (Vite + React, hot-reload on save, port 5173):
 
 ```powershell
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173`. The frontend posts to the backend via CORS.
+
+To exercise the chat path without configuring an LLM key, set the mock env vars before starting the backend:
+
+```powershell
+$env:PAPERHUB_ROUTER_MOCK   = '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"dev"}'
+$env:PAPERHUB_CHITCHAT_MOCK = "Hello from PaperHub!"
+uv run uvicorn paperhub.app:app --reload --port 8000
+```
+
+To run against a real LLM (Gemini by default), copy `backend/.env.example` to `backend/.env`, fill in `GEMINI_API_KEY`, and start the backend without the mock vars.
+
+### One-shot smoke scripts
+
+Backend-only mocked round-trip + SQLite replay:
+
+```powershell
+cd backend
 .\scripts\smoke_chat.ps1
 ```
 
-Run against a real LLM (Gemini by default — copy `.env.example` to `.env` and fill in `GEMINI_API_KEY`):
+Backend-only against a real LLM (requires `backend/.env`):
 
 ```powershell
+cd backend
 .\scripts\smoke_chat_real.ps1
 ```
 
-Replay any past chat turn from SQLite:
-
-```powershell
-uv run paperhub-replay --run-id 1
-```
-
-End-to-end smoke (backend + frontend together, mocked LLM):
+Full end-to-end smoke (boots backend + frontend, asserts SSE round-trip, exits non-zero on failure — suitable for CI):
 
 ```powershell
 .\scripts\smoke_e2e.ps1
+```
+
+### Replay a past chat turn from SQLite
+
+```powershell
+cd backend
+uv run paperhub-replay --run-id 1
 ```
 
 Full quality gates (must pass before any PR):
