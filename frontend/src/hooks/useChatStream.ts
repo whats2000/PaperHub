@@ -13,13 +13,15 @@ export function useChatStream() {
   const abortRef = useRef<AbortController | null>(null);
   const store = useChatStore;
 
-  const send = useCallback(async (sessionId: number, userMessage: string) => {
+  const send = useCallback(async (sessionId: number, userMessage: string, opts?: { skipUserAppend?: boolean }) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
-    store.getState().appendMessage(sessionId, {
-      role: "user", content: userMessage, run_id: null,
-    });
+    if (!opts?.skipUserAppend) {
+      store.getState().appendMessage(sessionId, {
+        role: "user", content: userMessage, run_id: null,
+      });
+    }
     store.getState().appendMessage(sessionId, {
       role: "assistant", content: "", run_id: null, status: "streaming",
     });

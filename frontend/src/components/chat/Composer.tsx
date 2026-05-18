@@ -1,4 +1,4 @@
-import { KeyboardEvent, useRef, useState } from "react";
+import { KeyboardEvent, useRef } from "react";
 import {
   Paperclip,
   BookOpen,
@@ -15,6 +15,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useChatStore } from "@/store/chat";
 
 interface Props {
   onSubmit: (text: string) => void;
@@ -52,14 +53,18 @@ const CAPABILITIES: Capability[] = [
 ];
 
 export function Composer({ onSubmit, disabled }: Props) {
-  const [value, setValue] = useState("");
+  const draft = useChatStore((s) => s.composerDraft);
+  const setDraft = useChatStore((s) => s.setComposerDraft);
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  const value = draft;
+  const setValue = setDraft;
 
   const submit = () => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
     onSubmit(trimmed);
-    setValue("");
+    setDraft("");
     ref.current?.focus();
   };
 

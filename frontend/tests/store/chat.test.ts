@@ -112,4 +112,32 @@ describe("chat store", () => {
     const parsed = JSON.parse(raw!) as { state: { sessions: unknown[] } };
     expect(parsed.state.sessions).toHaveLength(1);
   });
+
+  it("setComposerDraft updates composerDraft", () => {
+    expect(useChatStore.getState().composerDraft).toBe("");
+    useChatStore.getState().setComposerDraft("Find papers on transformers");
+    expect(useChatStore.getState().composerDraft).toBe(
+      "Find papers on transformers",
+    );
+  });
+
+  it("removeMessage removes the message at the specified index", () => {
+    const id = useChatStore.getState().newSession();
+    useChatStore.getState().appendMessage(id, {
+      role: "user", content: "msg 0", run_id: null,
+    });
+    useChatStore.getState().appendMessage(id, {
+      role: "assistant", content: "msg 1", run_id: 1, status: "ok",
+    });
+    useChatStore.getState().appendMessage(id, {
+      role: "user", content: "msg 2", run_id: null,
+    });
+
+    useChatStore.getState().removeMessage(id, 1);
+
+    const session = useChatStore.getState().sessions.find((s) => s.id === id)!;
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages[0]!.content).toBe("msg 0");
+    expect(session.messages[1]!.content).toBe("msg 2");
+  });
 });

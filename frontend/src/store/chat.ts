@@ -12,6 +12,7 @@ interface ChatState {
   activeSessionId: number | null;
   _nextId: number;
   sidebarCollapsed: boolean;
+  composerDraft: string;
   newSession: () => number;
   selectSession: (id: number) => void;
   appendMessage: (sessionId: number, message: ChatMessage) => void;
@@ -38,6 +39,7 @@ interface ChatState {
   restoreSession: (session: ChatSession, atIndex: number) => void;
   removeMessage: (sessionId: number, messageIndex: number) => void;
   toggleSidebar: () => void;
+  setComposerDraft: (text: string) => void;
   reset: () => void;
 }
 
@@ -56,6 +58,7 @@ export const useChatStore = create<ChatState>()(
       activeSessionId: null,
       _nextId: 1,
       sidebarCollapsed: false,
+      composerDraft: "",
 
       newSession: () => {
         const id = get()._nextId;
@@ -243,8 +246,10 @@ export const useChatStore = create<ChatState>()(
       toggleSidebar: () =>
         set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
+      setComposerDraft: (text) => set({ composerDraft: text }),
+
       reset: () =>
-        set({ sessions: [], activeSessionId: null, _nextId: 1 }),
+        set({ sessions: [], activeSessionId: null, _nextId: 1, composerDraft: "" }),
     }),
     {
       name: "paperhub-chat-v1",
@@ -254,6 +259,7 @@ export const useChatStore = create<ChatState>()(
         activeSessionId: state.activeSessionId,
         _nextId: state._nextId,
         sidebarCollapsed: state.sidebarCollapsed,
+        composerDraft: state.composerDraft,
       }),
     },
   ),

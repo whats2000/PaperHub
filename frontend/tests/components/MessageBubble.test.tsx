@@ -1,7 +1,19 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/chat/MessageBubble";
+
+// Mock clipboard API — keep a reference to the spy outside navigator so lint
+// doesn't flag navigator.clipboard.writeText as an unbound method access.
+const writeTextMock = vi.fn().mockResolvedValue(undefined);
+beforeEach(() => {
+  writeTextMock.mockClear();
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: writeTextMock },
+    configurable: true,
+  });
+});
 
 describe("MessageBubble", () => {
   it("renders a user message right-aligned", () => {
@@ -34,6 +46,82 @@ describe("MessageBubble", () => {
       />,
     );
     expect(screen.getByText(/provider 500/i)).toBeInTheDocument();
+  });
+
+  it("shows Retry button on error message when onRetry is provided", async () => {
+    const onRetry = vi.fn();
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "", run_id: 1,
+          status: "error", error: "Something failed",
+        }}
+        onRetry={onRetry}
+      />,
+    );
+    const retryBtn = screen.getByRole("button", { name: /retry/i });
+    expect(retryBtn).toBeInTheDocument();
+    await userEvent.click(retryBtn);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show Retry button on error message when onRetry is absent", () => {
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "", run_id: 1,
+          status: "error", error: "Something failed",
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+  });
+
+  it("renders Copy button on completed assistant messages", () => {
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "Here is the answer", run_id: 1, status: "ok",
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /copy message/i })).toBeInTheDocument();
+  });
+
+  it("copy button calls clipboard.writeText with message content", async () => {
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "Clipboard text", run_id: 1, status: "ok",
+        }}
+      />,
+    );
+    const copyBtn = screen.getByRole("button", { name: /copy message/i });
+    await userEvent.click(copyBtn);
+    expect(writeTextMock).toHaveBeenCalledWith("Clipboard text");
+  });
+
+  it("does not show Copy button on streaming messages", () => {
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "partial", run_id: 1, status: "streaming",
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /copy message/i })).toBeNull();
+  });
+
+  it("does not show Copy button on error messages", () => {
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant", content: "", run_id: 1,
+          status: "error", error: "oops",
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /copy message/i })).toBeNull();
   });
 
   it("renders user content as plain text (no HTML execution)", () => {
