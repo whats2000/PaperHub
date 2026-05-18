@@ -389,6 +389,21 @@ def test_extract_candidates_tolerant_when_block_missing() -> None:
     assert cands == []
 
 
+def test_extract_candidates_tolerant_when_block_malformed_json() -> None:
+    """Agent emitted the fence but the JSON inside is syntactically broken —
+    strip the block so it doesn't leak to the user, return empty candidates."""
+    text = (
+        "Here's a shortlist:\n"
+        "```json:candidates\n"
+        "[{paper_id: library:1, reason: broken — no quotes]\n"
+        "```\n"
+    )
+    cleaned, cands = _extract_candidates(text, {"library:1": {"title": "X"}})
+    assert "```json:candidates" not in cleaned, "malformed block must still be stripped"
+    assert "Here's a shortlist:" in cleaned
+    assert cands == []
+
+
 def test_extract_candidates_drops_unknown_paper_ids() -> None:
     """The agent occasionally hallucinates paper_ids it didn't search for —
     drop them defensively."""
