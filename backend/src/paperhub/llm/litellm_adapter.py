@@ -13,12 +13,26 @@ class LiteLlmAdapter:
     def __init__(self, registry: PromptRegistry | None = None) -> None:
         self._registry = registry or PromptRegistry()
 
-    def _messages(self, slot: str, variables: dict[str, Any]) -> list[dict[str, str]]:
+    def _messages(
+        self,
+        slot: str,
+        variables: dict[str, Any],
+        history: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         prompt = self._registry.get(slot)
-        return [
+        messages: list[dict[str, str]] = [
             {"role": "system", "content": prompt.system},
-            {"role": "user", "content": prompt.user_template.format(**variables)},
         ]
+        if history:
+            for h in history:
+                role = h.get("role")
+                content = h.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+        messages.append(
+            {"role": "user", "content": prompt.user_template.format(**variables)},
+        )
+        return messages
 
     async def structured(
         self,
@@ -27,6 +41,7 @@ class LiteLlmAdapter:
         variables: dict[str, Any],
         response_model: type[T],
         model: str,
+        history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> T:
         # Pass the Pydantic class directly so LiteLLM translates it into each
@@ -35,7 +50,7 @@ class LiteLlmAdapter:
         # at the API boundary, not just by prompt phrasing.
         response = await litellm.acompletion(
             model=model,
-            messages=self._messages(slot, variables),
+            messages=self._messages(slot, variables, history),
             response_format=response_model,
             **kwargs,
         )
@@ -48,11 +63,12 @@ class LiteLlmAdapter:
         slot: str,
         variables: dict[str, Any],
         model: str,
+        history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         response = await litellm.acompletion(
             model=model,
-            messages=self._messages(slot, variables),
+            messages=self._messages(slot, variables, history),
             stream=True,
             **kwargs,
         )

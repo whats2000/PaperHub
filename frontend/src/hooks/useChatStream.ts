@@ -17,6 +17,13 @@ export function useChatStream() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
+    // Snapshot prior turns BEFORE we append the new user + assistant placeholder.
+    const priorMessages = store.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
+    const history = priorMessages
+      .filter((m) => m.status !== "error" && m.status !== "streaming")
+      .filter((m) => m.content.length > 0)
+      .map((m) => ({ role: m.role, content: m.content }));
+
     if (!opts?.skipUserAppend) {
       store.getState().appendMessage(sessionId, {
         role: "user", content: userMessage, run_id: null,
@@ -32,7 +39,7 @@ export function useChatStream() {
 
     try {
       await streamChat(
-        { session_id: null, user_message: userMessage },
+        { session_id: null, user_message: userMessage, history },
         {
           onEvent: (event, data) => {
             if (event === "tool_step") {

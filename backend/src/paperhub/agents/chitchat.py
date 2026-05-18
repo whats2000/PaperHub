@@ -15,6 +15,7 @@ async def chitchat_stream(
     **adapter_kwargs: Any,
 ) -> AsyncIterator[str]:
     user_message = state["user_message"]
+    history = state.get("history") or []
     async with tracer.step(agent="chitchat", tool="generate", model=model) as step:
         step.record_args({"user_message": user_message})
         collected: list[str] = []
@@ -22,6 +23,7 @@ async def chitchat_stream(
             slot="chitchat/v1",
             variables={"user_message": user_message},
             model=model,
+            history=history,
             **adapter_kwargs,
         ):
             collected.append(token)

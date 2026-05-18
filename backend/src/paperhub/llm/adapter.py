@@ -14,6 +14,7 @@ class LlmAdapter(Protocol):
         variables: dict[str, Any],
         response_model: type[T],
         model: str,
+        history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> T: ...
 
@@ -23,5 +24,6 @@ class LlmAdapter(Protocol):
         slot: str,
         variables: dict[str, Any],
         model: str,
+        history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]: ...

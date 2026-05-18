@@ -18,6 +18,7 @@ async def router_node(
     **adapter_kwargs: Any,
 ) -> AgentState:
     user_message = state["user_message"]
+    history = state.get("history") or []
     async with tracer.step(agent="router", tool="classify", model=model) as step:
         step.record_args({"user_message": user_message})
         decision = await adapter.structured(
@@ -25,6 +26,7 @@ async def router_node(
             variables={"user_message": user_message},
             response_model=RoutingDecision,
             model=model,
+            history=history,
             **adapter_kwargs,
         )
         step.record_result(decision.model_dump())

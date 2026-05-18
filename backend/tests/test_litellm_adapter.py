@@ -36,3 +36,46 @@ async def test_stream_yields_tokens() -> None:
     ):
         chunks.append(token)
     assert "".join(chunks) == "Hello there!"
+
+
+async def test_structured_with_history_builds_correct_messages() -> None:
+    """structured() with history produces a messages array of len 2 + len(history)."""
+    history = [
+        {"role": "user", "content": "1+1=?"},
+        {"role": "assistant", "content": "1+1 is 2!"},
+    ]
+    adapter = LiteLlmAdapter()
+    # Capture the messages that would be sent by patching _messages
+    captured: list[list[dict[str, str]]] = []
+    original_messages = adapter._messages  # noqa: SLF001
+
+    def patched_messages(
+        slot: str,
+        variables: dict,
+        hist: list | None = None,
+    ) -> list[dict[str, str]]:
+        result = original_messages(slot, variables, hist)
+        captured.append(result)
+        return result
+
+    adapter._messages = patched_messages  # type: ignore[method-assign]  # noqa: SLF001
+
+    await adapter.structured(
+        slot="router/v1",
+        variables={"user_message": "So what did I ask?"},
+        response_model=RoutingDecision,
+        model="gpt-4o-mini",
+        history=history,
+        mock_response='{"intent":"chitchat","model_tier":"small",'
+                      '"confidence":0.9,"reasoning":"follow-up"}',
+    )
+
+    assert len(captured) == 1
+    messages = captured[0]
+    # system + 2 history turns + user = 4
+    assert len(messages) == 2 + len(history)
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"] == "1+1=?"
+    assert messages[2]["role"] == "assistant"
+    assert messages[3]["role"] == "user"

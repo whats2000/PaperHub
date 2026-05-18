@@ -41,3 +41,4 @@ class AgentState(TypedDict, total=False):
     user_message: str
     routing_decision: RoutingDecision
     final_response: str
+    history: list[dict[str, str]]

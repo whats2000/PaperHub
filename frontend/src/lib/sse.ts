@@ -7,8 +7,14 @@ export interface SseHandlers {
   onClose?: () => void;
 }
 
+export interface ChatRequestBody {
+  session_id: number | null;
+  user_message: string;
+  history: { role: "user" | "assistant"; content: string }[];
+}
+
 export async function streamChat(
-  body: { session_id: number | null; user_message: string },
+  body: ChatRequestBody,
   handlers: SseHandlers,
   signal?: AbortSignal,
 ): Promise<void> {

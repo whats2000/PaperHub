@@ -1,11 +1,11 @@
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 import aiosqlite
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
@@ -27,9 +27,15 @@ from paperhub.tracing.tracer import Tracer
 router = APIRouter()
 
 
+class HistoryEntry(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class ChatRequest(BaseModel):
     session_id: int | None = None
     user_message: str
+    history: list[HistoryEntry] = Field(default_factory=list)
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
@@ -129,6 +135,7 @@ async def chat_endpoint(req: ChatRequest, _request: Request) -> EventSourceRespo
             state: AgentState = {
                 "run_id": run_id, "branch": "", "session_id": session_id,
                 "user_message": req.user_message,
+                "history": [h.model_dump() for h in req.history],
             }
             last_emitted_step = -1
             try:
