@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
-from paperhub.agents.research import paper_qa_stream, paper_search
+from paperhub.agents.research import FinalOnlyMessage, paper_qa_stream, paper_search
 from paperhub.agents.router import router_node
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
@@ -197,7 +197,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     )
                     retriever = Retriever(chroma=chroma)
                     qa_chunks: list[str] = []
-                    async for token in paper_qa_stream(
+                    final_content = ""
+                    async for item in paper_qa_stream(
                         state,
                         adapter=adapter,
                         tracer=tracer,
@@ -205,11 +206,15 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         retriever=retriever,
                         conn=conn,
                     ):
-                        qa_chunks.append(token)
-                        token_evt = TokenEvent(run_id=run_id, branch="", text=token)
-                        yield {"event": "token",
-                               "data": token_evt.model_dump_json(exclude={"type"})}
-                    final_content = "".join(qa_chunks)
+                        if isinstance(item, FinalOnlyMessage):
+                            final_content = item.content
+                        else:
+                            qa_chunks.append(item)
+                            token_evt = TokenEvent(run_id=run_id, branch="", text=item)
+                            yield {"event": "token",
+                                   "data": token_evt.model_dump_json(exclude={"type"})}
+                    if not final_content:
+                        final_content = "".join(qa_chunks)
                 else:
                     final_content = await stub_response(state, intent=intent)
 

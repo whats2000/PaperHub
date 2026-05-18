@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import aiosqlite
 import pytest
 
-from paperhub.agents.research import paper_qa_stream
+from paperhub.agents.research import FinalOnlyMessage, paper_qa_stream
 from paperhub.rag.retriever import RetrievedChunk, Retriever
 from paperhub.tracing.tracer import Tracer
 
@@ -165,7 +165,7 @@ async def test_paper_qa_no_enabled_papers_short_circuits(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
 ) -> None:
-    """If the session has no enabled papers, yield a single message and stop —
+    """If the session has no enabled papers, yield a FinalOnlyMessage and stop —
     do NOT call the retriever or adapter."""
     session_id = await _make_session(migrated_db)
     retriever = MagicMock(spec=Retriever)
@@ -176,14 +176,15 @@ async def test_paper_qa_no_enabled_papers_short_circuits(
         "branch": "", "session_id": session_id,
         "user_message": "anything",
     }
-    out: list[str] = []
-    async for t in paper_qa_stream(
+    out: list[str | FinalOnlyMessage] = []
+    async for item in paper_qa_stream(
         state, adapter=adapter, tracer=fake_tracer,
         model="m", retriever=retriever, conn=migrated_db,
     ):
-        out.append(t)
+        out.append(item)
     assert len(out) == 1
-    assert "No references are enabled" in out[0]
+    assert isinstance(out[0], FinalOnlyMessage)
+    assert "No references are enabled" in out[0].content
     retriever.retrieve.assert_not_called()
     assert adapter.last_variables is None
 
@@ -192,7 +193,7 @@ async def test_paper_qa_no_chunks_short_circuits(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
 ) -> None:
-    """Enabled paper but retriever returns no chunks → fallback message."""
+    """Enabled paper but retriever returns no chunks → FinalOnlyMessage."""
     session_id = await _make_session(migrated_db)
     await _insert_paper_with_chunks(
         migrated_db, session_id=session_id, arxiv_id="2401.0099",
@@ -208,13 +209,14 @@ async def test_paper_qa_no_chunks_short_circuits(
         "branch": "", "session_id": session_id,
         "user_message": "anything",
     }
-    out: list[str] = []
-    async for t in paper_qa_stream(
+    out: list[str | FinalOnlyMessage] = []
+    async for item in paper_qa_stream(
         state, adapter=adapter, tracer=fake_tracer,
         model="m", retriever=retriever, conn=migrated_db,
     ):
-        out.append(t)
+        out.append(item)
     assert len(out) == 1
-    assert "No relevant chunks" in out[0]
+    assert isinstance(out[0], FinalOnlyMessage)
+    assert "No relevant chunks" in out[0].content
     retriever.retrieve.assert_called_once()
     assert adapter.last_variables is None

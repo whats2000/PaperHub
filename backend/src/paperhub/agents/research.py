@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import aiosqlite
@@ -22,6 +22,16 @@ from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.rag.retriever import Retriever
 from paperhub.tracing.tracer import Tracer
+
+
+@dataclass(frozen=True)
+class FinalOnlyMessage:
+    """Yielded by paper_qa_stream when the early-exit message should be sent
+    as a single 'final' SSE event without any 'token' events. Used for the
+    empty-references and empty-retrieved cases."""
+
+    content: str
+
 
 MAX_ARXIV_CALLS_PER_TURN = 3
 # hard ceiling: ~ search_library + 3 × search_arxiv + 2 × add + slack
@@ -203,7 +213,7 @@ async def paper_qa_stream(
     retriever: Retriever,
     conn: aiosqlite.Connection,
     **adapter_kwargs: Any,
-) -> AsyncIterator[str]:
+) -> AsyncIterator[str | FinalOnlyMessage]:
     """Stream paper_qa tokens.
 
     Workflow: resolve enabled_paper_content_ids → retrieve → rerank → format
@@ -226,7 +236,7 @@ async def paper_qa_stream(
         step.record_result({"enabled_paper_content_ids": enabled_ids})
 
     if not enabled_ids:
-        yield (
+        yield FinalOnlyMessage(
             "No references are enabled for this session. Add a paper to the "
             "Reference Sources panel first, then ask again."
         )
@@ -253,7 +263,7 @@ async def paper_qa_stream(
         step.record_result({"chunk_ids": [r.chunk_id for r in retrieved]})
 
     if not retrieved:
-        yield "No relevant chunks were found in the enabled references."
+        yield FinalOnlyMessage("No relevant chunks were found in the enabled references.")
         return
 
     chunks_context = "\n\n".join(
