@@ -44,6 +44,30 @@ Plan C is verifiable end-to-end via CLI (`scripts/ingest_paper.ps1` + `scripts/q
 
 ---
 
+## Reconciliation log (Task 14)
+
+The implementation diverged from the plan as written in these specific places. Each was a spec defect or a misalignment with what existing code actually exposed:
+
+1. **`IngestResult.title`** — added by Task 10 (commit 44d899c). The plan's Task 8 dataclass omitted it but Task 10's `add_paper_to_session_dispatch` read it. `IngestResult` now has 4 fields, not 3.
+2. **`paper_content.abstract` column** — added by Task 10 (commit 2cab8a1) because `search_library_dispatch` SQL selects `pc.abstract`. The plan listed neither the column nor the migration. (See follow-up #4.)
+3. **`PaperPipeline` is NOT an `app.state` singleton.** It takes a positional `conn` arg, which is per-request. The plan's Task 11 sketch tried to construct one at lifespan time; the shipped implementation constructs `PaperPipeline` per-request inside `chat.py` and `papers.py`, using the shared `app.state.chroma` ChromaStore.
+4. **`ChromaStore.aclose()` does not exist** — the plan's lifespan called it. The shipped lifespan does not.
+5. **`get_renderer()` / `renderer=` kwarg does not exist** — renderer is module-level `render_html()` functions. Plan Task 11's PaperPipeline construction sketch incorrectly included `renderer=get_renderer()`; shipped code drops it.
+6. **`settings.research_model` does not exist** — shipped code uses `settings.paper_qa_model` for both `paper_search` and `paper_qa` flows.
+7. **`chunker.target` parameter is declared but unused** in the shipped impl — faithful to the plan's literal code, but the parameter is dead. (See follow-up #1.)
+8. **`Chunk` char offsets aligned with stripped text** — the plan's chunker code stored `piece.strip()` as `text` while using raw cursor positions for `char_start`/`char_end`. Fixed in Task 4 commit `4e62b83`.
+9. **Pandoc subprocess `cwd=tex_path.parent`** — the plan's renderer didn't set cwd; multi-file LaTeX `\input{...}` resolution would have broken in production. Fixed in commit `67a47cf`.
+10. **Tarball unlink in finally** — Task 2's plan code would have leaked a tarball on extraction error. Fixed in commit `f4b0073`.
+11. **Test fixtures: `fake_tracer`, `fake_pipeline`, `seed_library`** — the plan listed test cases but not fixture definitions. Added in `tests/conftest.py` by Task 10.
+12. **`paper_qa_stream` was defined twice** in the plan's Task 10 code block (partial stub + full version). Shipped code has one definition (the full version).
+13. **`%`-strip in `search_library_dispatch` LIKE escape** — the plan's escape `\%` was incorrect SQLite syntax. Shipped code strips `%` from the query as a Plan F follow-up.
+14. **`respx` dev-dep added** in Task 10 for `test_semantic_scholar.py` HTTP mocking.
+15. **`_FakeEmbedder` duplicate `embed()` method** — the plan's test fixture for `test_retriever.py` silently shadowed the first `embed()` with the second (Python method resolution). Fixed in commit `813da21` by merging into one definition with call tracking.
+16. **PATCH/DELETE commit-before-rowcheck bug** — the plan's `papers.py` sketch committed the transaction before checking `rowcount`, meaning a 404 response would still commit a no-op write. Fixed in commit `ba9b2fe`. A 410 Gone path for missing `html_path` files was also added in the same fix.
+17. **`ignore_errors = true` redundancy in mypy chromadb override** — the plan's `pyproject.toml` sketch included both `ignore_errors` and `ignore_missing_imports` for chromadb. `ignore_errors` was dropped in commit `00f1107` as redundant.
+
+---
+
 ## File Structure
 
 ```

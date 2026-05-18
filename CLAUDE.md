@@ -16,7 +16,7 @@ The SRS is decomposed into 7 sequential plans, each producing working/testable s
 | --- | --- | --- |
 | A — Backend foundation + Router-only chat | **complete** | [2026-05-17-paperhub-A-backend-foundation.md](docs/superpowers/plans/2026-05-17-paperhub-A-backend-foundation.md) |
 | B — Frontend foundation | **complete** | [2026-05-18-paperhub-B-frontend-foundation.md](docs/superpowers/plans/2026-05-18-paperhub-B-frontend-foundation.md) |
-| C — Paper Pipeline + Research Agent | pending | not yet written |
+| C — Paper Pipeline + Research Agent | **complete** | [2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) |
 | D — Search results + Reference Sources + Citation Canvas | pending | not yet written |
 | E — SQL Agent + sqlite MCP | pending | not yet written |
 | F — Slide Pipeline + Report Agent | pending | not yet written |
@@ -111,6 +111,21 @@ Tracked here. Highlights:
 4. Replace hardcoded `session_id: null` in `useChatStream.ts` once backend session persistence ships.
 5. Wire `RejectionPill` when Plan E/G surfaces `status==="rejected"` tool_calls.
 6. Replace MessageBubble's inline streaming-dots markup with `<LoadingDots />`.
+
+## Plan C known follow-ups
+
+Non-blocking polish flagged during Plan C reviews. Pick these up in a cleanup PR or fold into Plan D as opportunity allows:
+
+1. **Drop unused `chunker.target` parameter** in `pipelines/chunker.py`. The signature declares `target: int = 800` but the body only uses `hard`. Either implement target-aware early-close at natural boundaries, or drop the parameter. Spec defect carried through Task 4.
+2. **Task 8 SQLite transaction polish:** wrap `_persist_paper_content` + `_persist_chunks` in a single transaction (commit once after chunks) to eliminate the partial-write window. Replace `# type: ignore[index]` on `last_insert_rowid()` fetches with `assert row is not None` guards for consistency. Replace bare `assert` in `_link_to_session` with explicit `RuntimeError` for prod safety.
+3. **Define a `Reranker` Protocol** in `rag/reranker.py` so `retriever.py` doesn't import the private `_CrossEncoderReranker` name. Mirrors the `Embedder` Protocol pattern.
+4. **Schema migration gap:** `paper_content.abstract` was added in Plan C Task 10 but `migrate.py` uses `CREATE TABLE IF NOT EXISTS`, which silently skips column additions on pre-existing DBs. Add a proper migration step (ALTER TABLE) or a versioned migrations table before any team-shared dev DB exists.
+5. **Graph / API divergence:** `agents/graph.py` still registers `_stub_paper_search` and `_stub_paper_qa` as graph nodes; the API path bypasses the graph entirely and dispatches directly. If a future task wires `graph.ainvoke()` back into the request path (e.g., for Compare-mode in Plan G), the stubs will silently shadow the real handlers. Update graph wiring before then.
+6. **Extract `chat.py`/`papers.py` chroma-fallback helper.** The `getattr(request.app.state, "chroma", None) or ChromaStore(settings.chroma_dir)` pattern is duplicated in both files. Move to a shared `api/deps.py` helper.
+7. **`papers.py` assert in production path:** `attach_from_library` uses `assert papers_row is not None` after `INSERT OR IGNORE`+`SELECT`. Replace with `if papers_row is None: raise HTTPException(500, ...)` so `-O` mode doesn't degrade to AttributeError.
+8. **`papers.paper_content_id` FK missing `ON DELETE` policy** — generalised Plan A follow-up. Decide CASCADE vs RESTRICT and document.
+9. **SQL `LIKE` `%`-stripping for `search_library` and `/papers/library` `q` filter** is a Plan F follow-up — FTS5 will replace `LIKE` and obviate the escape concern.
+10. **`paper_qa_v1.yaml`** embeds `{chunks_context}` in the system prompt, defeating prompt caching when chunks change between turns. Move to user turn or per-call cache key when Plan E perf work lands.
 
 ## Restricted operations
 
