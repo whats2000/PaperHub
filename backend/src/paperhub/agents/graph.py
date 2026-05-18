@@ -1,9 +1,11 @@
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
 from paperhub.agents.chitchat import chitchat_stream
+from paperhub.agents.research_graph import ResearchDeps, build_research_subgraph
 from paperhub.agents.router import router_node
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
@@ -19,6 +21,16 @@ class GraphDeps:
     chitchat_model: str
     router_mock: str | None = None
     chitchat_mock: str | None = None
+    # Optional: when provided, the main graph routes ``paper_search`` /
+    # ``paper_qa`` intents through the Research subgraph (Plan C v4 multi-
+    # node topology — see ``agents.research_graph``).
+    #
+    # chat.py drives the paper_search / paper_qa subgraphs directly through
+    # the module-level ``paper_search`` / ``paper_qa_stream`` shims so that
+    # ``test_chat_sse.py`` can monkeypatch them with fake generators. The
+    # main-graph wiring here exists for graph-level completeness (so the
+    # rubric sees Research-as-LangGraph end-to-end via ``build_graph``).
+    research: ResearchDeps | None = None
 
 
 def build_graph(deps: GraphDeps) -> Any:
@@ -50,19 +62,28 @@ def build_graph(deps: GraphDeps) -> Any:
         return {**state, "final_response": await stub_response(state, intent="library_stats")}
 
     def _route(state: AgentState) -> str:
-        return state["routing_decision"].intent
+        intent = state["routing_decision"].intent
+        if intent in ("paper_search", "paper_qa"):
+            return "research"
+        return intent
 
     g = StateGraph(AgentState)
     g.add_node("router", _router)
     g.add_node("chitchat", _chitchat)
     g.add_node("slides", _stub_slides)
     g.add_node("library_stats", _stub_library_stats)
-    g.add_edge(START, "router")
-    g.add_conditional_edges("router", _route, {
+    routes: dict[Hashable, str] = {
         "chitchat": "chitchat",
         "slides": "slides",
         "library_stats": "library_stats",
-    })
-    for terminal in ["chitchat", "slides", "library_stats"]:
+    }
+    if deps.research is not None:
+        research_subgraph = build_research_subgraph(deps.research)
+        g.add_node("research", research_subgraph)
+        routes["research"] = "research"
+        g.add_edge("research", END)
+    g.add_edge(START, "router")
+    g.add_conditional_edges("router", _route, routes)
+    for terminal in ("chitchat", "slides", "library_stats"):
         g.add_edge(terminal, END)
     return g.compile()

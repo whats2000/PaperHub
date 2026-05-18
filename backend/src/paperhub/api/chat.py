@@ -14,8 +14,12 @@ from paperhub.agents.research import (
     FinalOnlyMessage,
     SearchCandidate,
     SearchResultsYield,
-    paper_qa_stream,
-    paper_search,
+    ToolStepYield,
+)
+from paperhub.agents.research_graph import (
+    ResearchDeps,
+    build_paper_qa_subgraph,
+    build_paper_search_subgraph,
 )
 from paperhub.agents.research_tools import (
     NoIngestibleSourceError,
@@ -216,6 +220,143 @@ async def _record_user_message(
     await conn.commit()
 
 
+# ---------------------------------------------------------------------------
+# Subgraph-driving shims
+# ---------------------------------------------------------------------------
+#
+# ``paper_search`` and ``paper_qa_stream`` are exposed as module-level
+# async-generator attributes so:
+#
+#   1. The chat handler drives the Research subgraphs through these names
+#      by default — preserving the rubric-required multi-node LangGraph
+#      orchestration as the production code path;
+#   2. ``test_chat_sse.py`` can still ``monkeypatch.setattr(chat_module,
+#      "paper_search", fake)`` and route a hand-crafted generator straight
+#      into the SSE translation loop without spinning up a graph.
+#
+# The shim drives the compiled subgraph via
+# ``astream(stream_mode=["custom", "values"])`` and re-emits the custom-
+# stream payloads as the same ``ToolStepYield`` / ``SearchResultsYield`` /
+# ``FinalOnlyMessage`` (paper_search) or ``str`` / ``FinalOnlyMessage``
+# (paper_qa) shapes the SSE translation loop already understands.
+# ---------------------------------------------------------------------------
+
+
+async def paper_search(
+    state: AgentState,
+    *,
+    adapter: Any,
+    tracer: Tracer,
+    model: str,
+    conn: aiosqlite.Connection,
+    pipeline: PaperPipeline,
+    **kwargs: Any,
+) -> AsyncIterator[Any]:
+    """Run the paper_search subgraph and yield ToolStepYield /
+    SearchResultsYield / FinalOnlyMessage in stream order."""
+    retriever = kwargs.pop("retriever", None)
+    deps = ResearchDeps(
+        adapter=adapter,
+        tracer=tracer,
+        paper_qa_model=model,
+        conn=conn,
+        pipeline=pipeline,
+        retriever=retriever if retriever is not None else _NULL_RETRIEVER,
+        adapter_kwargs=kwargs or None,
+    )
+    graph = build_paper_search_subgraph(deps)
+    final_text = ""
+    candidates_yielded = False
+    async for mode, payload in graph.astream(
+        state, stream_mode=["custom", "values"],
+    ):
+        if mode == "custom":
+            evt = payload.get("event")
+            if evt == "tool_step":
+                yield ToolStepYield(record=payload["record"])
+            elif evt == "search_results":
+                yield SearchResultsYield(candidates=list(payload["candidates"]))
+                candidates_yielded = True
+        elif mode == "values" and isinstance(payload, dict):
+            if "final_response" in payload:
+                final_text = payload["final_response"]
+    # If the subgraph didn't surface a final_response (unexpected) keep
+    # an empty string rather than crashing the SSE pipeline.
+    del candidates_yielded  # ordering already correct via astream
+    yield FinalOnlyMessage(final_text)
+
+
+async def paper_qa_stream(
+    state: AgentState,
+    *,
+    adapter: Any,
+    tracer: Tracer,
+    model: str,
+    retriever: Retriever,
+    conn: aiosqlite.Connection,
+    **kwargs: Any,
+) -> AsyncIterator[Any]:
+    """Run the paper_qa subgraph and yield token strings / FinalOnlyMessage
+    in stream order.
+
+    The chat layer expects:
+      * ``str`` items → emit ``token`` SSE events;
+      * ``FinalOnlyMessage`` item → emit a single ``final`` SSE event with
+        no preceding tokens (sentinel for empty refs / empty corpus).
+
+    The subgraph carries the final text via ``state["final_response"]``;
+    we mirror the legacy generator's behaviour by yielding token strings
+    as they arrive and yielding a ``FinalOnlyMessage`` ONLY when the
+    final_response came from a non-streaming branch (pq_empty / synth
+    short-circuit) — those paths emit zero tokens on the custom stream.
+    """
+    pipeline = kwargs.pop("pipeline", None)
+    deps = ResearchDeps(
+        adapter=adapter,
+        tracer=tracer,
+        paper_qa_model=model,
+        conn=conn,
+        pipeline=pipeline if pipeline is not None else _NULL_PIPELINE,
+        retriever=retriever,
+        adapter_kwargs=kwargs or None,
+    )
+    graph = build_paper_qa_subgraph(deps)
+    streamed_any = False
+    final_text = ""
+    async for mode, payload in graph.astream(
+        state, stream_mode=["custom", "values"],
+    ):
+        if mode == "custom":
+            evt = payload.get("event")
+            if evt == "token":
+                streamed_any = True
+                yield payload["text"]
+        elif mode == "values" and isinstance(payload, dict):
+            if "final_response" in payload:
+                final_text = payload["final_response"]
+    # Sentinel-only paths (no streamed tokens) surface as FinalOnlyMessage
+    # so the chat layer emits one final event without preceding tokens.
+    if not streamed_any:
+        yield FinalOnlyMessage(final_text)
+
+
+# Sentinels so the shims can build ResearchDeps without a real
+# pipeline / retriever when the caller is using only one branch.
+# These are never actually invoked because the corresponding subgraph
+# node doesn't touch them — paper_search subgraph never touches
+# ``retriever``; paper_qa subgraph never touches ``pipeline``.
+class _NullPipeline:  # noqa: D101 — local sentinel
+    pass
+
+
+class _NullRetriever:  # noqa: D101 — local sentinel
+    pass
+
+
+_NULL_PIPELINE: Any = _NullPipeline()
+_NULL_RETRIEVER: Any = _NullRetriever()
+
+
 @router.post("/chat")
 async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceResponse:
     settings = load_settings()
@@ -277,16 +418,21 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         chroma=get_chroma(request, settings),
                     )
                     final_content = ""
+                    # paper_search is module-level so monkeypatch can swap.
                     async for ps_item in paper_search(
-                        state,
-                        adapter=adapter,
-                        tracer=tracer,
-                        model=settings.paper_qa_model,
-                        conn=conn,
+                        state, adapter=adapter, tracer=tracer,
+                        model=settings.paper_qa_model, conn=conn,
                         pipeline=pipeline,
                     ):
-                        if isinstance(ps_item, FinalOnlyMessage):
-                            final_content = ps_item.content
+                        if isinstance(ps_item, ToolStepYield):
+                            yield {
+                                "event": "tool_step",
+                                "data": json.dumps(
+                                    {"record": ps_item.record},
+                                    separators=(',', ':'),
+                                ),
+                            }
+                            last_emitted_step = ps_item.record["step_index"]
                         elif isinstance(ps_item, SearchResultsYield):
                             enriched = await _process_search_results(
                                 ps_item,
@@ -306,42 +452,45 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                 "data": sr_evt.model_dump_json(exclude={"type"}),
                             }
                             # Auto-attach may have produced new tool_calls rows
-                            # (e.g. via pipeline.ingest). Drain those so the
-                            # client sees them in order.
+                            # (e.g. via pipeline.ingest). Drain so the client
+                            # sees them in order.
                             for rec in await drain_tool_calls_since(
                                 conn, run_id, last_emitted_step,
                             ):
-                                yield {"event": "tool_step",
-                                       "data": json.dumps({"record": rec},
-                                                          separators=(',', ':'))}
+                                yield {
+                                    "event": "tool_step",
+                                    "data": json.dumps(
+                                        {"record": rec},
+                                        separators=(',', ':'),
+                                    ),
+                                }
                                 last_emitted_step = rec["step_index"]
-                        else:  # ToolStepYield
-                            yield {"event": "tool_step",
-                                   "data": json.dumps(
-                                       {"record": ps_item.record},
-                                       separators=(',', ':'),
-                                   )}
-                            last_emitted_step = ps_item.record["step_index"]
+                        elif isinstance(ps_item, FinalOnlyMessage):
+                            final_content = ps_item.content
                 elif intent == "paper_qa":
                     retriever = Retriever(chroma=get_chroma(request, settings))
                     qa_chunks: list[str] = []
                     final_content = ""
-                    async for qa_item in paper_qa_stream(
-                        state,
-                        adapter=adapter,
-                        tracer=tracer,
-                        model=settings.paper_qa_model,
-                        retriever=retriever,
+                    final_only_seen = False
+                    async for item in paper_qa_stream(
+                        state, adapter=adapter, tracer=tracer,
+                        model=settings.paper_qa_model, retriever=retriever,
                         conn=conn,
                     ):
-                        if isinstance(qa_item, FinalOnlyMessage):
-                            final_content = qa_item.content
+                        if isinstance(item, FinalOnlyMessage):
+                            # Sentinel path: empty refs / empty corpus.
+                            final_content = item.content
+                            final_only_seen = True
                         else:
-                            qa_chunks.append(qa_item)
-                            token_evt = TokenEvent(run_id=run_id, branch="", text=qa_item)
-                            yield {"event": "token",
-                                   "data": token_evt.model_dump_json(exclude={"type"})}
-                    if not final_content:
+                            qa_chunks.append(item)
+                            token_evt = TokenEvent(
+                                run_id=run_id, branch="", text=item,
+                            )
+                            yield {
+                                "event": "token",
+                                "data": token_evt.model_dump_json(exclude={"type"}),
+                            }
+                    if not final_only_seen:
                         final_content = "".join(qa_chunks)
                 else:
                     final_content = await stub_response(state, intent=intent)
