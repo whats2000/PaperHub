@@ -17,6 +17,8 @@ export function MessageBubble({ message, onRetry }: Props) {
   const isOk = message.status === "ok" || (isAssistant && message.status === undefined);
   const isStreaming = message.status === "streaming";
   const isError = message.status === "error";
+  const isStreamingEmpty = isStreaming && !message.content;
+  const isStreamingWithContent = isStreaming && !!message.content;
   const showCopy = isAssistant && isOk && !isStreaming;
 
   return (
@@ -26,9 +28,9 @@ export function MessageBubble({ message, onRetry }: Props) {
     >
       <div className="group/bubble relative">
         <div
-          className={`max-w-[80%] rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert ${
+          className={`rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert ${
             isUser ? "bg-primary text-primary-foreground" : "bg-card border border-border"
-          }`}
+          } ${isStreamingEmpty ? "min-w-[220px] max-w-[80%]" : "max-w-[80%]"}`}
         >
           {isError ? (
             <div className="space-y-2">
@@ -47,6 +49,18 @@ export function MessageBubble({ message, onRetry }: Props) {
             </div>
           ) : isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : isStreamingEmpty ? (
+            // Pre-token waiting state — three dots spread across a min-width
+            // bubble so it visually reads as "active / thinking", not "collapsed".
+            <div
+              role="status"
+              aria-label="streaming"
+              className="flex w-full items-center justify-between px-2 py-2"
+            >
+              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse" />
+              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:200ms]" />
+              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:400ms]" />
+            </div>
           ) : (
             // react-markdown renders to React elements (no dangerouslySetInnerHTML).
             // Raw HTML in source is not rendered as HTML by default — exactly what
@@ -55,12 +69,13 @@ export function MessageBubble({ message, onRetry }: Props) {
               {message.content || " "}
             </ReactMarkdown>
           )}
-          {isStreaming && (
-            <span aria-label="streaming" className="inline-flex ml-2 gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse" />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:120ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:240ms]" />
-            </span>
+          {isStreamingWithContent && (
+            // Cursor blink trailing the streamed content — subtler than dots
+            // once real text is visible.
+            <span
+              aria-label="streaming"
+              className="inline-block w-[2px] h-4 ml-0.5 align-[-2px] bg-muted-foreground motion-safe:animate-pulse"
+            />
           )}
         </div>
 

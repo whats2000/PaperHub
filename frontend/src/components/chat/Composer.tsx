@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -84,55 +83,57 @@ export function Composer({ onSubmit, disabled }: Props) {
         submit();
       }}
     >
-      <div className="relative max-w-3xl mx-auto">
-        <Textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask about a paper, search, or just chat… (Enter to send, Shift+Enter for new line)"
-          rows={2}
-          className="resize-none pr-12"
-          disabled={disabled}
-          aria-label="Message"
-        />
-        <Button
-          type="submit"
-          size="icon"
-          variant="ghost"
-          disabled={disabled || value.trim().length === 0}
-          aria-label="Send"
-          className="absolute right-2 bottom-2 h-8 w-8"
-        >
-          <Send className="h-4 w-4" />
-        </Button>
-
-        {/* Capability action bar */}
-        <div className="mt-2 flex items-center gap-1 px-1">
-          <TooltipProvider>
-            {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
-              <Tooltip key={label}>
-                <TooltipTrigger
-                  render={<span tabIndex={0} className="inline-flex" />}
-                >
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled
-                    className="gap-1.5 pointer-events-none"
-                    aria-label={label}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>{tooltip}</p>
-                </TooltipContent>
-              </Tooltip>
-            ))}
-          </TooltipProvider>
+      <div className="max-w-3xl mx-auto">
+        {/* Single rounded container — textarea on top, tool row + send on bottom.
+            focus-within ring unifies the visual treatment across child focus. */}
+        <div className="rounded-2xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">
+          <textarea
+            ref={ref}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about a paper, search, or just chat… (Enter to send, Shift+Enter for new line)"
+            rows={2}
+            className="block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled}
+            aria-label="Message"
+          />
+          <div className="flex items-center justify-between gap-1 px-2 pb-2">
+            <TooltipProvider>
+              <div className="flex items-center gap-0.5">
+                {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
+                  <Tooltip key={label}>
+                    <TooltipTrigger
+                      render={<span tabIndex={0} className="inline-flex" />}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled
+                        className="h-8 w-8 pointer-events-none text-muted-foreground"
+                        aria-label={label}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>{tooltip}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </TooltipProvider>
+            <Button
+              type="submit"
+              size="icon"
+              disabled={disabled || value.trim().length === 0}
+              aria-label="Send"
+              className="h-8 w-8 rounded-full"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </form>
