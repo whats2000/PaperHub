@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,23 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await apply_schema(conn)
     # ChromaStore holds a PersistentClient; chromadb manages its own cleanup.
     app.state.chroma = ChromaStore(settings.chroma_dir)
+
+    # Pre-warm embedder and reranker singletons so the first real paper_qa
+    # request doesn't pay the ~5s model-load cost (Plan C field-test #3).
+    # These are lazy singletons; touching them here loads the underlying
+    # SentenceTransformer / CrossEncoder weights from the HF cache.
+    # Guarded by PAPERHUB_PREWARM_MODELS=0 so offline / CI envs can skip.
+    if os.environ.get("PAPERHUB_PREWARM_MODELS", "1") != "0":
+        try:
+            from paperhub.pipelines.embedder import get_embedder
+            from paperhub.rag.reranker import get_reranker
+
+            get_embedder().embed([""])
+            get_reranker().rerank("warm", ["up"], top_k=1)
+        except Exception:  # noqa: BLE001
+            # Pre-warm is best-effort — never block boot.
+            pass
+
     yield
     # Lifespan: chroma cleanup handled internally by chromadb.
 
