@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -95,6 +95,101 @@ describe("ReferenceSourcesDrawer", () => {
       expect(
         useChatStore.getState().referencesBySession[42],
       ).toHaveLength(0);
+    });
+  });
+
+  it("toggle_switch_fires_patch_and_updates_optimistically", async () => {
+    // Pre-populate the store with one enabled ref
+    useChatStore.getState().setReferences(42, sampleRefs);
+
+    // Use a deferred promise so we can check the UI before the network resolves
+    let resolvePatch!: () => void;
+    const patchPromise = new Promise<void>((res) => { resolvePatch = res; });
+
+    server.use(
+      http.patch(`${API_BASE_URL}/papers/1`, async () => {
+        await patchPromise;
+        return HttpResponse.json({ enabled: false });
+      }),
+    );
+
+    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+
+    const triggerBtn = screen.getByRole("button", { name: /references/i });
+    await userEvent.click(triggerBtn);
+
+    // Find the toggle switch (should be checked = enabled)
+    const toggle = await screen.findByRole("switch", {
+      name: /toggle attention is all you need/i,
+    });
+    expect(toggle).toBeChecked();
+
+    // Click the toggle — optimistic update should flip it immediately
+    await userEvent.click(toggle);
+
+    // The UI should reflect the new state before the PATCH resolves
+    expect(toggle).not.toBeChecked();
+    expect(useChatStore.getState().referencesBySession[42]?.[0]?.enabled).toBe(false);
+
+    // Resolve the network call
+    resolvePatch();
+    await waitFor(() => {
+      // Toggle remains off after successful PATCH
+      expect(toggle).not.toBeChecked();
+    });
+  });
+
+  it("toggle_switch_reverts_on_error", async () => {
+    // Pre-populate the store with one enabled ref
+    useChatStore.getState().setReferences(42, sampleRefs);
+
+    server.use(
+      http.patch(`${API_BASE_URL}/papers/1`, () =>
+        HttpResponse.json({ detail: "server error" }, { status: 500 }),
+      ),
+    );
+
+    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+
+    const triggerBtn = screen.getByRole("button", { name: /references/i });
+    await userEvent.click(triggerBtn);
+
+    const toggle = await screen.findByRole("switch", {
+      name: /toggle attention is all you need/i,
+    });
+    expect(toggle).toBeChecked();
+
+    // Click the toggle — MSW 500 resolves quickly, so by the time userEvent.click
+    // settles the optimistic flip and revert have both completed.
+    await userEvent.click(toggle);
+
+    // After the PATCH rejects, the store reverts to enabled=true
+    await waitFor(() => {
+      expect(useChatStore.getState().referencesBySession[42]?.[0]?.enabled).toBe(true);
+    });
+
+    // The UI also reverts back to checked
+    expect(toggle).toBeChecked();
+  });
+
+  it("closes on Escape key", async () => {
+    useChatStore.getState().setReferences(42, sampleRefs);
+
+    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+
+    // Open the drawer
+    const triggerBtn = screen.getByRole("button", { name: /references/i });
+    await userEvent.click(triggerBtn);
+
+    // Drawer panel should be visible
+    expect(screen.getByRole("dialog", { name: /reference sources/i })).toBeInTheDocument();
+
+    // Press Escape
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // Drawer should close
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /reference sources/i })).toBeNull();
     });
   });
 });
