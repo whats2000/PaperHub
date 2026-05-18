@@ -5,7 +5,6 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { RoutingBadge } from "@/components/chat/RoutingBadge";
 import { TraceInline } from "@/components/chat/TraceInline";
 import { EmptyState } from "@/components/states/EmptyState";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatStore } from "@/store/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 
@@ -40,9 +39,9 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <div className="flex-1 min-h-0 overflow-y-auto">
       <div
-        className="max-w-3xl mx-auto p-4 space-y-4"
+        className="max-w-3xl mx-auto p-4 space-y-4 pb-12"
         aria-live="polite"
         aria-atomic="false"
       >
@@ -82,6 +81,6 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
         })}
         <div ref={endRef} />
       </div>
-    </ScrollArea>
+    </div>
   );
 }

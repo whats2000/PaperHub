@@ -77,7 +77,7 @@ export function Composer({ onSubmit, disabled }: Props) {
 
   return (
     <form
-      className="border-t border-border bg-card p-3"
+      className="shrink-0 border-t border-border bg-card p-3"
       onSubmit={(e) => {
         e.preventDefault();
         submit();

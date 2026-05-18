@@ -26,11 +26,11 @@ export function MessageBubble({ message, onRetry }: Props) {
       data-role={message.role}
       className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
     >
-      <div className="group/bubble relative">
+      <div className={`group/bubble relative max-w-[80%] ${isStreamingEmpty ? "min-w-[64px]" : ""}`}>
         <div
           className={`rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert ${
             isUser ? "bg-primary text-primary-foreground" : "bg-card border border-border"
-          } ${isStreamingEmpty ? "min-w-[220px] max-w-[80%]" : "max-w-[80%]"}`}
+          }`}
         >
           {isError ? (
             <div className="space-y-2">
@@ -50,16 +50,16 @@ export function MessageBubble({ message, onRetry }: Props) {
           ) : isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : isStreamingEmpty ? (
-            // Pre-token waiting state — three dots spread across a min-width
-            // bubble so it visually reads as "active / thinking", not "collapsed".
+            // Pre-token waiting state — tight three-dot cluster so it reads
+            // as a real "…" typing indicator, not stretched apart.
             <div
               role="status"
               aria-label="streaming"
-              className="flex w-full items-center justify-between px-2 py-2"
+              className="flex items-center gap-1 py-1"
             >
-              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse" />
-              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:200ms]" />
-              <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:400ms]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:200ms]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:400ms]" />
             </div>
           ) : (
             // react-markdown renders to React elements (no dangerouslySetInnerHTML).
