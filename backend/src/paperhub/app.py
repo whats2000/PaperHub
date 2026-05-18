@@ -57,9 +57,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Pre-warm is best-effort — never block boot.
             pass
 
-    yield
-    # Lifespan: chroma cleanup handled internally by chromadb.
-    await app.state.mcp_registry.shutdown()
+    try:
+        yield
+    finally:
+        # Lifespan: chroma cleanup handled internally by chromadb.
+        await app.state.mcp_registry.shutdown()
 
 
 def create_app() -> FastAPI:

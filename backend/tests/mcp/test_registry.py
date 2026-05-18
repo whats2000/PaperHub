@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from paperhub.mcp.client import MCPClient
 from paperhub.mcp.errors import MCPToolError, MCPUnavailableError
 from paperhub.mcp.registry import MCPRegistry
 
@@ -274,8 +273,16 @@ async def test_call_propagates_tool_error(
     reg = MCPRegistry()
     await reg.startup(_write_two_server_toml(tmp_path))
 
+    # Prime the cache first so the post-condition assertion is meaningful.
+    await reg.aggregate_tool_schemas()
+    assert reg._aggregated_schemas is not None  # type: ignore[attr-defined]
+
     with pytest.raises(MCPToolError, match=r"upstream said no"):
         await reg.call("web.search", {})
+
+    # MCPToolError is an upstream/tool-level failure — cache stays primed.
+    # (Contrast with MCPUnavailableError, which invalidates the cache.)
+    assert reg._aggregated_schemas is not None  # type: ignore[attr-defined]
 
 
 async def test_has_tool_after_startup(
@@ -337,14 +344,3 @@ async def test_startup_missing_toml_yields_empty_registry(tmp_path: Path) -> Non
     await reg.shutdown()
 
 
-async def test_registry_is_a_real_mcp_client_consumer() -> None:
-    """Smoke: MCPRegistry types compose with the real MCPClient.
-
-    No connect attempted — we just want to confirm the imports + types line
-    up so we don't ship a broken type contract.
-    """
-    reg = MCPRegistry()
-    # Construct an MCPClient instance just to confirm the symbol exists where
-    # the registry will use it.
-    assert MCPClient is not None
-    assert reg._clients == {}  # type: ignore[attr-defined]
