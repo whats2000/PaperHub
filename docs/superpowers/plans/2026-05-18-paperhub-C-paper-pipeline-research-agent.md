@@ -3218,13 +3218,15 @@ Browser verification (manual):
 
 ---
 
-## Plan C v2.5 Follow-up Tasks (MCP client layer + open-webSearch integration)
+## Plan C v2.5 Follow-up Tasks (MCP client layer + open-webSearch + paperhub-papers FastMCP)
 
-> **Status:** v2.4 shipped. Manual paper-search testing on short / vague queries (e.g. "that diffusion paper everyone cites", "Mamba 的後續工作") surfaced **a UX failure inside the v2.4 read-only loop** — Semantic Scholar's lexical match consistently misses on indirect references; the agent burns its 3-call external-search budget on slight rephrasings and surrenders a thin shortlist. v2.5 fixes this by **shipping the MCP client layer** Plan C's original SRS intent expected (and which Plan C's actual implementation skipped — accepted technical debt — see SRS §III-7 v2.5 course-correction note) and integrating `Aas-ee/open-webSearch` as a no-key multi-engine discovery step. The same client layer is reused unchanged by Plan E (sqlite MCP) and Plan G (filesystem + custom `paperhub.*` MCP).
+> **Status:** v2.4 shipped. Manual paper-search testing on short / vague queries (e.g. "that diffusion paper everyone cites", "Mamba 的後續工作") surfaced **a UX failure inside the v2.4 read-only loop** — Semantic Scholar's lexical match consistently misses on indirect references; the agent burns its 3-call external-search budget on slight rephrasings and surrenders a thin shortlist. v2.5 fixes this by **shipping the MCP client layer** Plan C's original SRS intent expected and integrating `Aas-ee/open-webSearch` as a no-key multi-engine discovery step. **SRS v2.6 update**: the `paperhub-papers` FastMCP server originally deferred to Plan E is **pulled into v2.5 scope** — keeping a dual dispatch path (in-process `papers.*`, MCP `web.*`) re-introduces the exact "manual tool" violation the course-correction set out to eliminate. The same client layer is reused unchanged by Plan E (sqlite MCP) and Plan G (filesystem MCP).
 >
-> **SRS reference**: [v2.5 entry](../specs/2026-05-17-paperhub-srs.md) + §III-6 (open-webSearch row + §III-6.1 MCP client layer subsection) + FR-07 v2.5 paragraph + §III-3 Research Agent v2.5 paragraph.
+> **SRS reference**: [v2.6 entry](../specs/2026-05-17-paperhub-srs.md) + [v2.5 entry](../specs/2026-05-17-paperhub-srs.md) + §III-6 (open-webSearch + paperhub-papers rows + §III-6.1 MCP client layer subsection) + FR-07 v2.5 paragraph + §III-3 Research Agent v2.5 paragraph.
 >
-> **Design summary**: two new **discovery-only** tools (`web.search`, `web.fetch`) join the Research Agent palette under the `web.*` namespace **when the MCP registry has a reachable `web` server**; their results carry no `paper_id` and cannot enter `json:candidates`. The agent uses them as a *discover-then-refine* step before `search_semantic_scholar`. The 3-call external-search cap broadens to cover `search_semantic_scholar` + `web.search` + `web.fetch` combined. Daemon-down case: registry has no `web` server, tools don't enter the palette, `paper_search/v1` loads instead of `paper_search/v2`, behaviour reverts to v2.4 exactly. open-webSearch is an **optional external dependency** (operator runs `npm install -g open-websearch && open-websearch serve`), same posture as `pandoc`.
+> **Design summary**: every tool the Research Agent has — `papers.*` (the three local dispatchers, now exposed via FastMCP at `/mcp` on the same FastAPI app) + `web.*` (open-webSearch over HTTP at `http://localhost:3000/mcp`) — flows through **one** MCPClient dispatch path. **Discovery-only** tools (`web.search`, `web.fetch`) enter the palette only when the registry has a reachable `web` server; their results carry no `paper_id` and cannot enter `json:candidates`. The 3-call external-search cap broadens to cover `papers.search_semantic_scholar` + `web.search` + `web.fetch` combined. open-webSearch-down case: registry has no `web` server, web tools don't enter the palette, `paper_search/v1` loads instead of `paper_search/v2`, behaviour reverts to v2.4 exactly. open-webSearch is an **optional external dependency** (operator runs `npm install -g open-websearch && open-websearch serve`); `paperhub-papers` is **always available** (mounted in-process by the backend itself).
+>
+> **Task sequencing**: 1 → 2 → **3 (NEW — paperhub-papers FastMCP server)** → 4 → 5 → 6. Tasks 4–6 below were numbered v2.5-3 through v2.5-5 before the v2.6 update; they have been renumbered.
 
 ### Task v2.5-1 — MCP client core (`paperhub.mcp.{config,errors,client}`)
 
@@ -3243,82 +3245,149 @@ Browser verification (manual):
 
 **Acceptance:** `uv run pytest tests/mcp/` passes; `uv run mypy src/paperhub/mcp` strict-clean.
 
-### Task v2.5-2 — Registry + FastAPI lifespan wiring (`paperhub.mcp.registry`)
+### Task v2.5-2 — Registry + FastAPI lifespan wiring (`paperhub.mcp.registry`) **[v2.6 UPDATE: lazy connect]**
 
-**Goal:** stand up a process-wide MCP registry that loads `mcp_servers.toml` at FastAPI startup, calls `MCPClient.connect()` for each server (logging WARN on failure, continuing on success), and exposes `aggregate_tool_schemas()` + `call(namespaced_name, args)` to consumers.
-
-**Files:**
-- New: `backend/src/paperhub/mcp/registry.py` — `MCPRegistry` class: `startup(config_path: Path)`, `shutdown()`, `aggregate_tool_schemas() -> list[dict]` (concat per-server namespaced schemas), `call(namespaced_name, args)` (splits `<server>.<tool>`, routes to the right `MCPClient`), `has_tool(namespaced_name) -> bool`.
-- Modify: `backend/src/paperhub/api/main.py` (or wherever FastAPI's lifespan is defined — verify location) — attach the registry: `app.state.mcp_registry = MCPRegistry(); await app.state.mcp_registry.startup(...)` in the lifespan startup, `await app.state.mcp_registry.shutdown()` in shutdown.
-
-**Tests:** `tests/mcp/test_registry.py` — load a TOML fixture with two servers (one reachable, one unreachable, both stubbed); assert `startup()` returns success with one reachable client; `aggregate_tool_schemas` excludes the unreachable server's tools; `call("web.search", {...})` routes correctly; `call("unknown.tool", {...})` raises a clear error.
-
-**Acceptance:** existing `uv run pytest -v` runs unchanged (registry initialised but no MCP servers exposed by default in test env); add `tests/api/test_lifespan_mcp.py` asserting `app.state.mcp_registry` exists after startup.
-
-### Task v2.5-3 — Research Agent integration (schema aggregation + namespaced dispatch)
-
-**Goal:** wire the MCP registry into the existing Research Agent dispatch path without changing the in-process tool behaviour or the tracer-step shape.
+**Goal:** stand up a process-wide MCP registry that loads `mcp_servers.toml` at FastAPI startup and exposes `aggregate_tool_schemas()` + `call(namespaced_name, args)` to consumers. Connection to each server is **lazy on first tool use** (not eager at startup) — required because the `papers` server (added in v2.5-3) points at the backend's own port over loopback, and uvicorn isn't accepting connections during lifespan startup. Lazy connect is simpler than special-casing loopback servers and applies the same rule uniformly to every configured server.
 
 **Files:**
-- Modify: [`backend/src/paperhub/agents/research_tools.py`](../../../backend/src/paperhub/agents/research_tools.py) — replace the module-level `TOOL_SCHEMAS` constant with a builder `build_tool_schemas(mcp_registry: MCPRegistry | None) -> list[dict]` that returns the base 3 schemas + `mcp_registry.aggregate_tool_schemas()`. Keep `TOOL_SCHEMAS = build_tool_schemas(None)` as a transitional export so legacy callers still type-check (delete in v2.5-5 cleanup).
-- Modify: [`backend/src/paperhub/agents/research.py`](../../../backend/src/paperhub/agents/research.py) — `_dispatch_paper_search_tool_call` gains a branch: `if "." in call["function"]["name"]: result = await mcp_registry.call(name, args)`. The tracer step name format becomes `paper_search:<namespaced_name>` (e.g. `paper_search:web.search`) — preserves existing ToolStrip rendering. MCP-routed results are **not** indexed into `recent_results` (they're discovery-only). Errors caught and translated to `{"error": str(exc), "tool": name}` so the LLM gets a clean fallback signal.
-- Modify: `MAX_EXTERNAL_SEARCH_CALLS_PER_TURN = 3` — rename to `MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN` (semantically broader) and have the cap counter increment on **both** `search_semantic_scholar` calls and `web.*` calls.
-- Modify: [`backend/src/paperhub/api/chat.py`](../../../backend/src/paperhub/api/chat.py) and [`backend/src/paperhub/agents/research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) — wherever the paper_search subgraph is built, pass `app.state.mcp_registry` through so the dispatch path can reach it.
+- New: `backend/src/paperhub/mcp/registry.py` — `MCPRegistry` class:
+  - `startup(config_path: Path) -> None` — loads `mcp_servers.toml` via `load_mcp_servers(...)`, **constructs** `MCPClient` instances for each block (but does NOT call `connect()` yet), stashes them in `self._clients: dict[str, MCPClient]` keyed by server name. Missing `mcp_servers.toml` → log INFO and continue with an empty registry (fresh-clone-friendly).
+  - `shutdown() -> None` — calls `await client.disconnect()` on every client that ever connected; idempotent disconnects.
+  - `aggregate_tool_schemas() -> list[dict]` — **on first call**, this triggers connection to all configured servers (lazy connect; failures log WARN and skip), then returns the union of per-server `list_tools()` results. Subsequent calls return a cached list (invalidate-on-failure).
+  - `call(namespaced_name: str, args: dict) -> Any` — splits `<server>.<tool>`, ensures the server's client is connected (lazy-connecting if not), dispatches. If the server is unreachable, raises `MCPUnavailableError`.
+  - `has_tool(namespaced_name: str) -> bool` — peeks into the cached aggregated schema list (triggering lazy connect if not yet done).
+- Modify: `backend/src/paperhub/api/main.py` (or wherever FastAPI's lifespan is defined — verify location) — attach the registry: `app.state.mcp_registry = MCPRegistry()` + `await app.state.mcp_registry.startup(mcp_servers_toml_path)` in lifespan startup, `await app.state.mcp_registry.shutdown()` in shutdown.
 
-**Tests:** new `tests/test_research_tools_mcp.py`:
-- Stub the registry with a fake `web.search` that returns a canned hit list; assert dispatch routes through the registry, tracer step is named `paper_search:web.search`, result is **not** added to `recent_results`.
-- Same for `web.fetch`.
-- Assert the combined cap blocks a 4th external call regardless of mix (1 SS + 3 web → 4th rejected; 3 SS + 1 web → 4th rejected).
-- Existing `tests/test_research_paper_search.py` — verify all cases still pass with `mcp_registry=None` (daemon-down path, current behaviour).
+**Tests:** `tests/mcp/test_registry.py` — load a TOML fixture with two servers (one reachable, one unreachable, both stubbed); assert `startup()` does NOT connect either client; assert `aggregate_tool_schemas()` triggers connection to both, returns the reachable one's tools, and logs WARN for the unreachable one; `call("web.search", {...})` routes correctly; `call("unknown.tool", {...})` raises a clear error. Also: `startup(path_to_nonexistent_toml)` succeeds and yields an empty registry.
 
-**Acceptance:** `uv run pytest -v` clean; no regressions in existing 5 paper_search test cases.
+**Acceptance:** existing `uv run pytest -v` runs unchanged (registry initialised but no MCP servers exposed by default in test env); add `tests/api/test_lifespan_mcp.py` asserting `app.state.mcp_registry` exists after startup and does not block on unreachable loopback servers (test the boot path with `mcp_servers.toml` pointing at the backend itself — must not deadlock).
 
-### Task v2.5-4 — `paper_search/v2` prompt + conditional dispatch
+### Task v2.5-3 — `paperhub-papers` FastMCP server (mount on FastAPI at `/mcp`) **[v2.6 ADDITION]**
 
-**Goal:** add a v2 prompt that teaches the agent the discover-then-refine pattern, load it only when the MCP registry exposes `web.search`.
+**Goal:** stand up an in-process FastMCP server that re-exposes the three existing Research Agent tool dispatchers (`search_library`, `search_semantic_scholar`, `find_related_papers`) over the MCP wire protocol. Mounted on the existing FastAPI app at `/mcp` (no extra process, no second port). External MCP clients (Claude Desktop, Cursor) and the backend's own Research Agent reach the same URL — uniform interface.
+
+**Architectural notes:**
+- **No subprocess.** FastMCP supports being mounted as an ASGI sub-app on FastAPI. The MCP HTTP transport listens on the backend's own port at `/mcp`.
+- **Same code path.** The FastMCP tool handlers call the *exact same* dispatcher functions in `agents/research_tools.py` (`search_library_dispatch`, `search_semantic_scholar_dispatch`, `find_related_papers_dispatch`). Zero behaviour change at the SQL / HTTP / Chroma layer — only the surface in front of them changes.
+- **Same tracer-step contract.** Tracer step name remains `paper_search:papers.<tool>` (the namespace prefix comes from the MCP server name `papers`). The dispatcher functions write `tool_calls` rows themselves via the existing `Tracer` instance the agent passes in — the FastMCP layer must thread the live `Tracer` + `aiosqlite.Connection` + `session_id` through tool-call invocations. Pattern: per-request FastMCP context populated from the parent FastAPI request scope so the tool handler can reach `request.app.state` + the active run's tracer.
+- **`add_paper_to_session_dispatch` stays in-process.** It is not in the LLM palette (v2.4) and is called by FastAPI endpoints (`POST /papers`, `POST /papers/from-library`). Do NOT expose it via MCP in this task.
 
 **Files:**
-- New: `backend/src/paperhub/llm/prompts/paper_search_v2.yaml` — copy v1, add `web.search` + `web.fetch` to the tool catalogue with descriptions emphasising **discovery-only** and the "must round-trip through `search_semantic_scholar` for a citable hit" rule. Insert a worked-example trajectory in the canonical-flow section: vague user query → `web.search` → `search_semantic_scholar` (refined) → `json:candidates`. Update the call-budget note to reflect the combined cap.
-- Modify: [`backend/src/paperhub/llm/prompts/registry.py`](../../../backend/src/paperhub/llm/prompts/registry.py) — add a helper `get_paper_search_slot(mcp_registry: MCPRegistry | None) -> str` that returns `"paper_search/v2"` if the registry has `web.search`, else `"paper_search/v1"`.
+- New: `backend/src/paperhub/mcp/server.py` — `build_paperhub_papers_server() -> FastMCP` factory. Defines three tools matching the LiteLLM JSON-schemas already in `research_tools.TOOL_SCHEMAS`. Each tool handler resolves its per-call context (live `Tracer`, `aiosqlite.Connection`, `session_id`) from the FastMCP request scope (set via `paperhub_papers_request_context()` middleware below) and delegates to the existing `*_dispatch` function. Tool return shape matches today's structured-return dataclasses, JSON-serialised by FastMCP.
+- New: `backend/src/paperhub/mcp/server_context.py` — `PaperhubPapersRequestContext` dataclass + `set_request_context(ctx) -> token` / `current_request_context() -> PaperhubPapersRequestContext` using `contextvars.ContextVar`. The HTTP request handling middleware sets the context per-MCP-request from the parent FastAPI request, tool handlers read it.
+- Modify: [`backend/src/paperhub/api/main.py`](../../../backend/src/paperhub/api/main.py) (or wherever the FastAPI app is constructed — verify location) — instantiate the FastMCP server during app startup; mount it: `app.mount("/mcp", paperhub_papers.streamable_http_app())` (verify the exact mount API against the installed FastMCP version). Add a small middleware on the mounted sub-app that captures the parent request scope (session_id from header / cookie / query string — pick the same path used by `/chat` for consistency) and populates `PaperhubPapersRequestContext`.
+- Modify: [`backend/mcp_servers.toml.example`](../../../backend/mcp_servers.toml.example) — add a *commented-in* `papers` server block at the top of the file showing the loopback URL pattern:
+  ```toml
+  [[server]]
+  name = "papers"
+  transport = "streamable_http"
+  url = "http://localhost:${PAPERHUB_BACKEND_PORT:-8000}/mcp"
+  expose = ["search_library", "search_semantic_scholar", "find_related_papers"]
+  timeout_seconds = 8.0
+  ```
+  Keep the `web` block below it as a separate `[[server]]` entry. (Env-var-interpolation syntax depends on what `load_mcp_servers` supports — Task v2.5-1 may have implemented it; if not, hardcode a port + add an `env` flag in v2.5-6 cleanup.)
+- New: `backend/pyproject.toml` — verify `mcp>=1.0.0` from v2.5-1 already bundles `FastMCP`; if it's a separate package (e.g. `fastmcp`), add it.
+
+**Tests:** new `tests/mcp/test_server.py`:
+- Build the FastMCP server via the factory; spin up a test FastAPI app with it mounted at `/mcp`; use `httpx.AsyncClient` against the in-process app to:
+  - Call MCP `tools/list` → assert all three tools are advertised with correct names + JSON-schemas (matching the existing `TOOL_SCHEMAS`).
+  - Call `tools/call` for `search_library` against a seeded in-memory SQLite → assert the same rows that `search_library_dispatch` would return.
+  - Call `tools/call` for `search_semantic_scholar` with `respx` stubbing the Semantic Scholar HTTP API → assert the dispatcher's structured-return shape round-trips through FastMCP serialization unchanged.
+  - Call `tools/call` for `find_related_papers` similarly.
+- Assert that every tool call writes a `tool_calls` row through the threaded `Tracer` (use a real `Tracer` against a temp DB; query the table after each call).
+- Assert that an MCP call with an out-of-context (no `session_id`) returns a clean error rather than crashing.
+
+Additional regression coverage in `tests/test_research_tools.py` — the existing tests must still pass (the dispatcher functions are unchanged; we're only adding a new surface in front of them).
+
+**Acceptance:**
+- `uv run pytest tests/mcp/ -v` passes (Task v2.5-1's 24 tests + new v2.5-3 tests).
+- `uv run pytest tests/test_research_tools.py -v` passes unchanged.
+- `uv run ruff check src tests` clean.
+- `uv run mypy src/paperhub/mcp src/paperhub/api` strict-clean.
+
+**Out of scope for this task** (handled in v2.5-4 + v2.5-5):
+- Switching the agent to call via `MCPClient` instead of in-process dispatch. This task only stands up the MCP surface; v2.5-4 migrates the agent.
+- Adding `papers.*` to the `paper_search/v2` prompt's tool description (v2.5-5).
+- Removing the now-redundant `TOOL_SCHEMAS` module-level constant. The agent still uses it directly in v2.5-3 — v2.5-4 is the cutover.
+
+### Task v2.5-4 — Research Agent migration to uniform MCP dispatch **[v2.6 RESHAPE]**
+
+**Goal:** make every Research Agent tool call flow through `MCPRegistry.call(...)` — eliminate the in-process `papers.*` dispatch branch entirely. After this task there is exactly one dispatch path, and the SRS-original "every tool via MCP, no manual tools" architecture holds end-to-end.
+
+**Files:**
+- Modify: [`backend/src/paperhub/agents/research_tools.py`](../../../backend/src/paperhub/agents/research_tools.py) — replace the module-level `TOOL_SCHEMAS` constant with a builder `build_tool_schemas(mcp_registry: MCPRegistry) -> list[dict]` that returns `mcp_registry.aggregate_tool_schemas()`. **The base three schemas are no longer hardcoded here** — they come from the `papers.*` MCP server registered in `mcp_servers.toml`. The `*_dispatch` Python functions stay in this module (the FastMCP server from v2.5-3 imports them); they are no longer called by the agent directly.
+- Modify: [`backend/src/paperhub/agents/research.py`](../../../backend/src/paperhub/agents/research.py) — `_dispatch_paper_search_tool_call` reduces to a single branch: `result = await mcp_registry.call(tool_name, args)`. All tool names are now namespaced (`papers.search_library`, `web.search`, etc.). Tracer step name format: `paper_search:<namespaced_name>` (e.g. `paper_search:papers.search_library`, `paper_search:web.search`). Web hits remain not-indexed into `recent_results`; papers hits ARE indexed (they were before — that part keeps working). Errors caught and translated to `{"error": str(exc), "tool": name}`.
+- Modify: `MAX_EXTERNAL_SEARCH_CALLS_PER_TURN = 3` — rename to `MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN`; cap counter increments on `papers.search_semantic_scholar` + `web.*` calls (NOT on `papers.search_library` or `papers.find_related_papers` — those remain cheap / uncapped, matching v2.4 semantics).
+- Modify: [`backend/src/paperhub/api/chat.py`](../../../backend/src/paperhub/api/chat.py) and [`backend/src/paperhub/agents/research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) — thread `app.state.mcp_registry` through to the paper_search subgraph; the agent now requires the registry (no fallback to in-process dispatch).
+- Modify: [`backend/mcp_servers.toml.example`](../../../backend/mcp_servers.toml.example) — uncomment the `papers` block from v2.5-3 (it must be active by default for the agent to work). Document at the top of the file: "the `papers` server is required; do not disable it."
+
+**Tests:**
+- Update `tests/test_research_tools.py` — existing tests assert the dispatcher functions' behaviour against SQLite + respx mocks. These remain valid (the dispatcher functions are unchanged). Add: assert `build_tool_schemas(registry)` returns the registry's schemas verbatim (no in-process fallback).
+- New `tests/test_research_tools_mcp.py`:
+  - Stub the registry with a fake `papers.search_library` + `web.search`; assert dispatch routes through the registry, tracer step is named `paper_search:papers.search_library` / `paper_search:web.search`.
+  - Assert the renamed cap blocks a 4th external call regardless of mix (1 papers.search_semantic_scholar + 3 web → 4th rejected; 3 papers.search_semantic_scholar + 1 web → 4th rejected).
+  - Assert `papers.search_library` / `papers.find_related_papers` are NOT capped (uncapped, matching v2.4 semantics).
+- Update `tests/test_research_paper_search.py` — the 5 existing cases need the registry threaded in. Stub it to route `papers.*` calls back into the in-process dispatchers under the hood (cheapest path that keeps the test surface in shape).
+- Update `tests/test_chat_sse.py` — same: stub `app.state.mcp_registry` in the test app builder.
+
+**Acceptance:**
+- `uv run pytest -v` clean across the board (no regression in any existing test).
+- `uv run mypy src` strict-clean (the `TOOL_SCHEMAS = build_tool_schemas(None)` transitional shim from the original v2.5-3 plan is **not** present — there is no longer an in-process fallback).
+- Manual smoke (operator): start backend, ensure `papers` MCP server is reachable at `/mcp`, run `scripts/research_turn.ps1` — every tool_step row in the trace now carries a namespaced tool name.
+
+**Migration safety:** since the dispatcher functions themselves are unchanged, the only failure modes introduced by this cutover are (a) FastMCP serialization round-trip bugs (caught by v2.5-3's tests) and (b) the agent failing to find the `papers` server in the registry (manifests as a clean error at startup). Both are detectable before merge.
+
+### Task v2.5-5 — `paper_search/v2` prompt + conditional dispatch
+
+**Goal:** rewrite the paper_search prompt to (a) use the new namespaced tool names (`papers.search_library`, `papers.search_semantic_scholar`, `papers.find_related_papers`) — required by v2.5-4's MCP-only dispatch — and (b) teach the agent the discover-then-refine pattern when `web.*` is available. Load v2 only when the MCP registry exposes `web.search`; otherwise load v1 — but **v1 must also be updated** to use namespaced names since v2.5-4 cut the in-process path entirely.
+
+**Files:**
+- Modify: `backend/src/paperhub/llm/prompts/paper_search_v1.yaml` — rename tool references from `search_library` / `search_semantic_scholar` / `find_related_papers` to `papers.search_library` / `papers.search_semantic_scholar` / `papers.find_related_papers`. This is a mechanical rename matching v2.5-4's namespacing. No discovery / `web.*` tools mentioned (this is the daemon-down prompt).
+- New: `backend/src/paperhub/llm/prompts/paper_search_v2.yaml` — copy the (updated) v1, add `web.search` + `web.fetch` to the tool catalogue with descriptions emphasising **discovery-only** and the "must round-trip through `papers.search_semantic_scholar` (or `papers.search_library`) for a citable hit" rule. Insert a worked-example trajectory in the canonical-flow section: vague user query → `web.search` → `papers.search_semantic_scholar` (refined) → `json:candidates`. Update the call-budget note: the combined cap covers `papers.search_semantic_scholar` + `web.search` + `web.fetch` (not `papers.search_library` or `papers.find_related_papers` — those stay uncapped).
+- Modify: [`backend/src/paperhub/llm/prompts/registry.py`](../../../backend/src/paperhub/llm/prompts/registry.py) — add a helper `get_paper_search_slot(mcp_registry: MCPRegistry) -> str` that returns `"paper_search/v2"` if the registry has `web.search`, else `"paper_search/v1"`. (Registry is now always non-None per v2.5-4.)
 - Modify: `backend/src/paperhub/agents/research.py` — `_build_paper_search_messages` calls the helper instead of hardcoding `"paper_search/v1"`.
 
-**Tests:** new `tests/test_paper_search_prompt_selection.py` — assert v2 loads when the fake registry advertises `web.search`; assert v1 loads otherwise. New `tests/llm/test_prompts_paper_search_v2.py` — assert the v2 YAML parses, mentions both `web.search` and `web.fetch`, and includes the discovery-only rule.
+**Tests:** new `tests/test_paper_search_prompt_selection.py` — assert v2 loads when the fake registry advertises `web.search`; assert v1 loads otherwise. New `tests/llm/test_prompts_paper_search_v2.py` — assert the v2 YAML parses, uses namespaced tool names, mentions both `web.search` and `web.fetch`, and includes the discovery-only rule. New `tests/llm/test_prompts_paper_search_v1.py` — assert v1 YAML parses and uses namespaced tool names (regression coverage for the v2.6 rename).
 
-**Acceptance:** the v1 prompt remains unchanged (no regression risk for daemon-down case); v2 only loads when warranted.
+**Acceptance:** both v1 and v2 use namespaced tool names matching what `MCPRegistry.aggregate_tool_schemas()` actually advertises; v2 only loads when warranted. No regression in existing `test_research_paper_search.py` (the 5 cases now exercise the namespaced names end-to-end).
 
-### Task v2.5-5 — Operator surface (smoke script, docs, cleanup)
+### Task v2.5-6 — Operator surface (smoke scripts, docs)
 
-**Goal:** make this usable by an operator from a clean clone, and clean up transitional shims from v2.5-3.
+**Goal:** make this usable by an operator from a clean clone. Add smoke scripts for both MCP surfaces (`papers.*` always-on, `web.*` daemon-up), and document the optional external dependency.
 
 **Files:**
-- New: `backend/scripts/smoke_mcp_web.ps1` — operator-facing smoke: curl the daemon `/health` endpoint, run a single `web.search` via the Python client, print the first 3 hits. Skipped in CI (no daemon). Documented in `CLAUDE.md` alongside the other smoke scripts.
-- Modify: `CLAUDE.md` (project) — add `open-websearch` to the optional-external-dependency block next to `pandoc`. Document `open-websearch serve` as the prerequisite for v2 paper_search behaviour. Update the `backend/scripts/` smoke-script list.
-- Modify: `backend/scripts/smoke_chat_real.ps1` — when the operator has the daemon running (`scripts/smoke_mcp_web.ps1` succeeded), add an assertion that a vague-query turn routes through `paper_search:web.search` → `paper_search:search_semantic_scholar` → `search_results` SSE event with ≥ 1 candidate.
-- Modify: `README.md` (if any) — add a "Web search (optional)" subsection pointing at the open-websearch install + serve commands.
-- Cleanup: remove the transitional `TOOL_SCHEMAS = build_tool_schemas(None)` export from `research_tools.py` introduced in v2.5-3; verify no remaining callers.
+- New: `backend/scripts/smoke_mcp_papers.ps1` — operator-facing smoke: hits `http://localhost:8000/mcp` directly via the Python `MCPClient`, calls `papers.search_library` against the live workspace DB. Verifies the in-process FastMCP server is mounted correctly. Always runnable (no external dep).
+- New: `backend/scripts/smoke_mcp_web.ps1` — operator-facing smoke: curl `http://localhost:3000/health`, then run a single `web.search` via `MCPClient`, print the first 3 hits. Skipped in CI (no daemon). Documented in `CLAUDE.md` alongside the other smoke scripts.
+- Modify: `CLAUDE.md` (project) — add `open-websearch` to the optional-external-dependency block next to `pandoc`. Document `open-websearch serve` as the prerequisite for v2 paper_search behaviour. Note that `paperhub-papers` MCP is mounted in-process and requires no external install. Update the `backend/scripts/` smoke-script list.
+- Modify: `backend/scripts/smoke_chat_real.ps1` — when the operator has the daemon running (`scripts/smoke_mcp_web.ps1` succeeded), add an assertion that a vague-query turn routes through `paper_search:web.search` → `paper_search:papers.search_semantic_scholar` → `search_results` SSE event with ≥ 1 candidate. When the daemon is down, assert the turn still completes (papers.* only) with a clean trace.
+- Modify: `README.md` (if any) — add a "Web search (optional)" subsection pointing at the open-websearch install + serve commands; mention `paperhub-papers` is bundled.
 
-**Tests:** none new — this is documentation + an operator-facing script.
+**Tests:** none new — this is documentation + operator-facing scripts.
 
-**Acceptance:** an operator following only CLAUDE.md + README.md can install open-webSearch, run `open-websearch serve`, restart the backend, and observe v2 paper_search behaviour without reading any other docs.
+**Acceptance:** an operator following only CLAUDE.md + README.md can clone the repo, start the backend, run `scripts/smoke_mcp_papers.ps1` and see it pass; install open-webSearch + run `open-websearch serve`, then run `scripts/smoke_mcp_web.ps1` and see it pass; restart the backend and observe v2 paper_search behaviour without reading any other docs.
 
 ### Quality gates after the v2.5 round
 
 From `backend/`:
 
 ```powershell
-uv run pytest -v          # +6-10 new tests across tests/mcp/, tests/test_research_tools_mcp.py, tests/test_paper_search_prompt_selection.py
+uv run pytest -v          # +30-40 new tests across tests/mcp/{test_config,test_client,test_server,test_registry}.py, tests/test_research_tools_mcp.py, tests/test_paper_search_prompt_selection.py
 uv run ruff check src tests
 uv run mypy src           # strict-clean over the new paperhub.mcp package
-.\scripts\smoke_chat_real.ps1     # regression; daemon-down path unchanged
-.\scripts\smoke_mcp_web.ps1       # NEW — daemon-up path verification (skipped if no daemon)
+.\scripts\smoke_mcp_papers.ps1    # NEW (v2.5-6) — papers.* in-process MCP path
+.\scripts\smoke_mcp_web.ps1       # NEW (v2.5-6) — daemon-up path verification (skipped if no daemon)
+.\scripts\smoke_chat_real.ps1     # regression; daemon-down path uses papers.* only
 .\scripts\research_turn.ps1       # regression
 ```
 
-Browser verification (manual, daemon up):
-- Turn 1 with a vague query ("that diffusion paper everyone cites") → trace shows `paper_search:web.search` → optional `paper_search:web.fetch` → `paper_search:search_semantic_scholar` → `search_results` SSE event surfaces the actual paper.
+Browser verification (manual, both daemons up):
+- Turn 1 with a vague query ("that diffusion paper everyone cites") → trace shows `paper_search:web.search` → optional `paper_search:web.fetch` → `paper_search:papers.search_semantic_scholar` → `search_results` SSE event surfaces the actual paper. **Every tool_step row carries a namespaced tool name** (no bare `search_semantic_scholar` — confirms the v2.6 cutover).
 - Turn 2 in same session: regular paper_qa works unchanged.
 
-Browser verification (manual, daemon down):
-- Same vague-query turn: trace shows only `paper_search:search_semantic_scholar` calls (no `web.*`), agent surfaces a thinner shortlist or asks a clarifying question. **No errors, no broken UX** — v2.4 behaviour exactly.
+Browser verification (manual, open-webSearch daemon down):
+- Same vague-query turn: trace shows only `paper_search:papers.search_library` + `paper_search:papers.search_semantic_scholar` calls (no `web.*`), agent surfaces a thinner shortlist or asks a clarifying question. **No errors, no broken UX** — v2.4 behaviour exactly, but every tool call still flows through MCP (papers.* is in-process and always available).
+
+Browser verification (negative — `papers.*` server unreachable for any reason):
+- The Research Agent fails cleanly at the first tool call with an `MCPUnavailableError` surfaced as a red trace row; FR-09's "no silent failure" property holds. (Should never happen in practice — the FastMCP sub-app is mounted on the same process, so failure here implies the backend itself is broken.)
 
 ---
