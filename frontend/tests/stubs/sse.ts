@@ -12,6 +12,9 @@ export const chitchatHappyPath = http.post(`${API_BASE_URL}/chat`, () => {
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
+        sseChunk("session", { run_id: 1, session_id: 10 }),
+      );
+      controller.enqueue(
         sseChunk("tool_step", {
           record: {
             run_id: 1, branch: "", step_index: 0, agent: "router", tool: "classify",

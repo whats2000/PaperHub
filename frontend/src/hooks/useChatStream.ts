@@ -3,6 +3,7 @@ import type { RoutingDecision, ToolCallRecord } from "@/types/domain";
 import { streamChat } from "@/lib/sse";
 import { useChatStore } from "@/store/chat";
 
+interface SessionData { run_id: number; session_id: number; }
 interface ToolStepData { record: ToolCallRecord; }
 interface RoutingData { run_id: number; branch: string; decision: RoutingDecision; }
 interface TokenData { run_id: number; branch: string; text: string; }
@@ -18,7 +19,9 @@ export function useChatStream() {
     abortRef.current = new AbortController();
 
     // Snapshot prior turns BEFORE we append the new user + assistant placeholder.
-    const priorMessages = store.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
+    const currentSession = store.getState().sessions.find((s) => s.id === sessionId);
+    const priorMessages = currentSession?.messages ?? [];
+    const backendSessionId = currentSession?.backend_session_id ?? null;
     const history = priorMessages
       .filter((m) => m.status !== "error" && m.status !== "streaming")
       .filter((m) => m.content.length > 0)
@@ -39,10 +42,17 @@ export function useChatStream() {
 
     try {
       await streamChat(
-        { session_id: null, user_message: userMessage, history },
+        { session_id: backendSessionId, user_message: userMessage, history },
         {
           onEvent: (event, data) => {
-            if (event === "tool_step") {
+            if (event === "session") {
+              const s = data as SessionData;
+              store.getState().patchSessionBackendId(sessionId, s.session_id);
+              if (runId === null) {
+                runId = s.run_id;
+                store.getState().patchAssistantRunId(sessionId, runId);
+              }
+            } else if (event === "tool_step") {
               const rec = (data as ToolStepData).record;
               if (runId === null) {
                 runId = rec.run_id;

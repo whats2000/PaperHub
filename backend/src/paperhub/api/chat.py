@@ -21,6 +21,7 @@ from paperhub.models.events import (
     ErrorEvent,
     FinalEvent,
     RoutingDecisionEvent,
+    SessionEvent,
     TokenEvent,
 )
 from paperhub.pipelines.paper_pipeline import PaperPipeline
@@ -133,6 +134,9 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
         async with open_db(settings.db_path) as conn:
             session_id = await _ensure_session(conn, req.session_id)
             run_id = await _new_run(conn, session_id)
+            sess_evt = SessionEvent(run_id=run_id, session_id=session_id)
+            yield {"event": sess_evt.type,
+                   "data": sess_evt.model_dump_json(exclude={"type"})}
             await _record_user_message(conn, session_id, req.user_message, run_id)
             tracer = Tracer(conn, run_id=run_id, branch="")
             state: AgentState = {

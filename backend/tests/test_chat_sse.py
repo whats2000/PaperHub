@@ -251,6 +251,88 @@ async def test_chat_sse_paper_qa_empty_refs_no_double_emit(
 
 
 # ---------------------------------------------------------------------------
+# v2.4-1: session event emitted as first SSE event + session reuse
+# ---------------------------------------------------------------------------
+async def test_chat_emits_session_event_first(tmp_path: Any, monkeypatch: Any) -> None:
+    """The very first SSE event must be 'session' with valid run_id and session_id."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"chitchat","model_tier":"small","confidence":1.0,"reasoning":"x"}',
+    )
+    monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hi")
+    await _bootstrap_schema(tmp_path)
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "hi"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    assert events, "Expected at least one SSE event"
+    first_type, first_payload = events[0]
+    assert first_type == "session", (
+        f"Expected first event to be 'session', got '{first_type}'"
+    )
+    assert isinstance(first_payload.get("session_id"), int)
+    assert first_payload["session_id"] > 0
+    assert isinstance(first_payload.get("run_id"), int)
+    assert first_payload["run_id"] > 0
+
+
+async def test_chat_reuses_session_when_session_id_provided(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """Two POST turns with the same session_id must land in the same chat_sessions row."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"chitchat","model_tier":"small","confidence":1.0,"reasoning":"x"}',
+    )
+    monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hello")
+    await _bootstrap_schema(tmp_path)
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # First turn: no session_id → backend creates one
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "first"},
+        ) as response:
+            assert response.status_code == 200
+            events1 = await _consume_sse(response.aiter_bytes())
+
+        sess_payload = dict(events1[0][1])
+        backend_session_id = sess_payload["session_id"]
+        assert isinstance(backend_session_id, int)
+
+        # Second turn: pass the learned session_id
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": backend_session_id, "user_message": "second"},
+        ) as response:
+            assert response.status_code == 200
+            events2 = await _consume_sse(response.aiter_bytes())
+
+    sess_payload2 = dict(events2[0][1])
+    assert sess_payload2["session_id"] == backend_session_id
+
+    # Verify both turns landed in the same chat_sessions row
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn, conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+        (backend_session_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    # Each chat turn writes 1 user + 1 assistant row = 4 rows total for 2 turns
+    assert row[0] >= 4
+
+
+# ---------------------------------------------------------------------------
 # A7: exception strings must be redacted before persistence / SSE emission
 # ---------------------------------------------------------------------------
 async def test_chat_sse_exception_text_is_redacted(tmp_path: Any, monkeypatch: Any) -> None:

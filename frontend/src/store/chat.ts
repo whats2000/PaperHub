@@ -35,6 +35,7 @@ interface ChatState {
   errorMessage: (sessionId: number, run_id: number, error: string) => void;
   failPendingAssistant: (sessionId: number, error: string) => void;
   patchAssistantRunId: (sessionId: number, runId: number) => void;
+  patchSessionBackendId: (sessionId: number, backendId: number) => void;
   deleteSession: (sessionId: number) => ChatSession | null;
   restoreSession: (session: ChatSession, atIndex: number) => void;
   removeMessage: (sessionId: number, messageIndex: number) => void;
@@ -87,7 +88,7 @@ export const useChatStore = create<ChatState>()(
         set((s) => ({
           sessions: [
             ...s.sessions,
-            { id, title: "New chat", messages: [] },
+            { id, title: "New chat", messages: [], backend_session_id: null },
           ],
           activeSessionId: id,
           _nextId: s._nextId + 1,
@@ -201,6 +202,19 @@ export const useChatStore = create<ChatState>()(
               : sess,
           ),
         })),
+
+      patchSessionBackendId: (sessionId, backendId) =>
+        set((state) => {
+          const session = state.sessions.find((s) => s.id === sessionId);
+          if (!session || session.backend_session_id !== null) return state;
+          return {
+            sessions: state.sessions.map((s) =>
+              s.id === sessionId
+                ? { ...s, backend_session_id: backendId }
+                : s,
+            ),
+          };
+        }),
 
       deleteSession: (sessionId) => {
         const state = get();

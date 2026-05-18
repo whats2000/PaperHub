@@ -199,4 +199,73 @@ describe("useChatStream", () => {
       { role: "assistant", content: "A reply" },
     ]);
   });
+
+  it("stores backend_session_id from session event and sends it on subsequent turns", async () => {
+    // Capture the session_id the client sends on each request
+    const capturedSessionIds: (number | null)[] = [];
+
+    let requestCount = 0;
+    server.resetHandlers(
+      http.post(`${API_BASE_URL}/chat`, async ({ request }) => {
+        requestCount += 1;
+        const body = await request.json() as { session_id: number | null };
+        capturedSessionIds.push(body.session_id);
+
+        const enc2 = new TextEncoder();
+        function sseChunk2(event: string, data: unknown): Uint8Array {
+          return enc2.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+        const runId = requestCount;
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              sseChunk2("session", { run_id: runId, session_id: 42 }),
+            );
+            controller.enqueue(
+              sseChunk2("routing_decision", {
+                run_id: runId, branch: "",
+                decision: { intent: "chitchat", model_tier: "small", confidence: 0.9, reasoning: "x" },
+              }),
+            );
+            controller.enqueue(sseChunk2("token", { run_id: runId, branch: "", text: "Reply" }));
+            controller.enqueue(
+              sseChunk2("final", { run_id: runId, branch: "", message_id: runId, content: "Reply" }),
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+    );
+
+    const sessionId = useChatStore.getState().newSession();
+    const { result } = renderHook(() => useChatStream());
+
+    // First turn: session_id should be null (no backend session yet)
+    await act(async () => {
+      await result.current.send(sessionId, "first");
+    });
+
+    await waitFor(() => {
+      const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+      expect(session?.backend_session_id).toBe(42);
+    });
+
+    // Second turn: session_id should be 42 (learned from first session event)
+    await act(async () => {
+      await result.current.send(sessionId, "second");
+    });
+
+    await waitFor(() => {
+      const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+      const messages = session!.messages.filter((m) => m.role === "assistant");
+      expect(messages.every((m) => m.status === "ok")).toBe(true);
+    });
+
+    expect(capturedSessionIds[0]).toBeNull();
+    expect(capturedSessionIds[1]).toBe(42);
+    // backend_session_id must stay 42 (idempotent — not overwritten on second turn)
+    const finalSession = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+    expect(finalSession?.backend_session_id).toBe(42);
+  });
 });

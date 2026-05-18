@@ -47,4 +47,5 @@ export interface ChatSession {
   id: number;
   title: string;
   messages: ChatMessage[];
+  backend_session_id: number | null;
 }

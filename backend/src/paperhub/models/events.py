@@ -6,6 +6,12 @@ from pydantic import BaseModel
 from paperhub.models.domain import Branch, RoutingDecision, ToolCallRecord
 
 
+class SessionEvent(BaseModel):
+    type: Literal["session"] = "session"
+    run_id: int
+    session_id: int
+
+
 class RoutingDecisionEvent(BaseModel):
     type: Literal["routing_decision"] = "routing_decision"
     run_id: int
@@ -40,7 +46,14 @@ class ErrorEvent(BaseModel):
     message: str
 
 
-SseEvent = RoutingDecisionEvent | ToolStepEvent | TokenEvent | FinalEvent | ErrorEvent
+SseEvent = (
+    SessionEvent
+    | RoutingDecisionEvent
+    | ToolStepEvent
+    | TokenEvent
+    | FinalEvent
+    | ErrorEvent
+)
 
 
 def sse_format(event: SseEvent) -> str:
