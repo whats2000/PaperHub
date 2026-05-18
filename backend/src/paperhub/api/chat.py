@@ -25,6 +25,7 @@ from paperhub.models.events import (
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.rag.chroma import ChromaStore
 from paperhub.rag.retriever import Retriever
+from paperhub.tracing.redactor import redact
 from paperhub.tracing.tracer import Tracer
 
 router = APIRouter()
@@ -231,8 +232,9 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                 yield {"event": final_evt.type,
                        "data": final_evt.model_dump_json(exclude={"type"})}
             except Exception as exc:
-                await _finalise(conn, run_id, session_id, str(exc), status="error")
-                err_evt = ErrorEvent(run_id=run_id, branch="", message=str(exc))
+                safe_msg = redact(str(exc))
+                await _finalise(conn, run_id, session_id, safe_msg, status="error")
+                err_evt = ErrorEvent(run_id=run_id, branch="", message=safe_msg)
                 yield {"event": err_evt.type,
                        "data": err_evt.model_dump_json(exclude={"type"})}
 

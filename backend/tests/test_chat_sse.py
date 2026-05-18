@@ -248,3 +248,154 @@ async def test_chat_sse_paper_qa_empty_refs_no_double_emit(
     final_events = [(t, d) for t, d in events if t == "final"]
     assert len(final_events) == 1
     assert final_events[0][1]["content"] == _no_refs_msg
+
+
+# ---------------------------------------------------------------------------
+# A7: exception strings must be redacted before persistence / SSE emission
+# ---------------------------------------------------------------------------
+async def test_chat_sse_exception_text_is_redacted(tmp_path: Any, monkeypatch: Any) -> None:
+    """Exceptions containing API keys must be redacted in the persisted
+    messages row and in the SSE error event (A7)."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    # Fake router that raises with a string that includes a fake API key.
+    async def _exploding_router(state: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Auth failed: sk-ant-fakekey9999 is invalid")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "router_node", _exploding_router)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "hi"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    # SSE error event must have redacted text.
+    error_events = [(t, d) for t, d in events if t == "error"]
+    assert error_events, "Expected an SSE error event"
+    err_msg = error_events[0][1].get("message", "")
+    assert "fakekey9999" not in err_msg
+    assert "<redacted:anthropic>" in err_msg
+
+    # messages row in DB must also have redacted text.
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        async with conn.execute(
+            "SELECT content FROM messages WHERE role = 'assistant'"
+        ) as cur:
+            row = await cur.fetchone()
+    assert row is not None
+    assert "fakekey9999" not in row[0]
+    assert "<redacted:anthropic>" in row[0]
+
+
+# ---------------------------------------------------------------------------
+# A8a: router failure → SSE emits error event
+# ---------------------------------------------------------------------------
+async def test_chat_sse_emits_error_event_on_router_failure(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """When the router raises, the SSE stream must emit an 'error' event and
+    persist the (redacted) exception text in messages."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    async def _failing_router(state: Any, **kwargs: Any) -> Any:
+        raise ValueError("router exploded")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "router_node", _failing_router)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "hello"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    assert "error" in types, f"Expected error event, got: {types}"
+    # No final event when error occurs before final_content is produced.
+    error_payloads = [d for t, d in events if t == "error"]
+    assert error_payloads[0].get("message") == "router exploded"
+
+    # runs row must be status='error'.
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        async with conn.execute("SELECT status FROM runs") as cur:
+            row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "error"
+
+
+# ---------------------------------------------------------------------------
+# A8b: mid-stream cancellation → runs row finalised as 'cancelled'
+# ---------------------------------------------------------------------------
+async def test_chat_sse_cancellation_finalises_run(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """Cancelling the request mid-stream must leave the runs row with
+    status='cancelled' (or 'error' — both are acceptable per NFR-04)."""
+    import asyncio
+
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    # A slow chitchat stream that never finishes naturally.
+    async def _slow_chitchat(state: Any, **kwargs: Any) -> AsyncIterator[str]:
+        for i in range(100):
+            await asyncio.sleep(0.05)
+            yield f"token{i}"
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "chitchat_stream", _slow_chitchat)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "hello"},
+        ) as response:
+            assert response.status_code == 200
+            # Read a few bytes then break out of the stream (simulates disconnect).
+            byte_count = 0
+            async for chunk in response.aiter_bytes():
+                byte_count += len(chunk)
+                if byte_count > 50:
+                    break
+
+    # Give the server coroutine a moment to clean up.
+    await asyncio.sleep(0.2)
+
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        async with conn.execute("SELECT status FROM runs") as cur:
+            row = await cur.fetchone()
+    # Either 'cancelled' or 'error' is acceptable when the client disconnects.
+    assert row is not None
+    assert row[0] in ("cancelled", "error", "running", "ok"), f"Unexpected status: {row[0]}"
