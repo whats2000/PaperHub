@@ -8,6 +8,7 @@ import type {
   ReferenceItem,
   SearchResultCandidate,
 } from "@/types/domain";
+import { createBackendSession } from "@/lib/api";
 
 interface ChatState {
   sessions: ChatSession[];
@@ -60,6 +61,7 @@ interface ChatState {
     candidates: SearchResultCandidate[],
   ) => void;
   markPaperAdded: (paperId: string) => void;
+  ensureBackendSession: (sessionId: number) => Promise<number>;
 }
 
 function deriveTitle(content: string): string {
@@ -330,6 +332,15 @@ export const useChatStore = create<ChatState>()(
         set((s) => ({
           addedPaperIds: new Set([...s.addedPaperIds, paperId]),
         })),
+
+      ensureBackendSession: async (sessionId) => {
+        const session = get().sessions.find((s) => s.id === sessionId);
+        if (!session) throw new Error(`session ${sessionId} not found`);
+        if (session.backend_session_id !== null) return session.backend_session_id;
+        const backendId = await createBackendSession();
+        get().patchSessionBackendId(sessionId, backendId);
+        return backendId;
+      },
     }),
     {
       name: "paperhub-chat-v1",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookMarked, ExternalLink, Trash2, X } from "lucide-react";
+import { BookMarked, ExternalLink, Loader2, Trash2, X } from "lucide-react";
 
 import type { ReferenceItem } from "@/types/domain";
 import { listSessionReferences, toggleReference, removeReference } from "@/lib/api";
@@ -10,17 +10,27 @@ import { Switch } from "@/components/ui/switch";
 import { LibraryBrowserModal } from "./LibraryBrowserModal";
 
 interface Props {
-  backendSessionId: number | null;
+  /** The frontend session id. Trigger is shown whenever this is non-null. */
+  frontendSessionId: number | null;
 }
 
-export function ReferenceSourcesDrawer({ backendSessionId }: Props) {
+export function ReferenceSourcesDrawer({ frontendSessionId }: Props) {
   const [open, setOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(false);
 
+  const ensureBackendSession = useChatStore((s) => s.ensureBackendSession);
   const setReferences = useChatStore((s) => s.setReferences);
   const patchReferenceEnabled = useChatStore((s) => s.patchReferenceEnabled);
   const removeReferenceLocal = useChatStore((s) => s.removeReferenceLocal);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
+  const sessions = useChatStore((s) => s.sessions);
+
+  const activeSession =
+    frontendSessionId !== null
+      ? (sessions.find((s) => s.id === frontendSessionId) ?? null)
+      : null;
+  const backendSessionId = activeSession?.backend_session_id ?? null;
 
   const refs: ReferenceItem[] =
     backendSessionId !== null
@@ -47,7 +57,7 @@ export function ReferenceSourcesDrawer({ backendSessionId }: Props) {
     }
   }
 
-  // Refresh when session changes or drawer opens
+  // Refresh when backend session becomes available
   useEffect(() => {
     if (backendSessionId !== null) {
       void refreshRefs();
@@ -55,12 +65,25 @@ export function ReferenceSourcesDrawer({ backendSessionId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendSessionId]);
 
+  // Refresh when drawer opens and session is already known
   useEffect(() => {
     if (open && backendSessionId !== null) {
       void refreshRefs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  async function handleOpen() {
+    if (frontendSessionId === null) return;
+    setSessionLoading(true);
+    try {
+      // Lazy-creates the backend session if it doesn't exist yet.
+      await ensureBackendSession(frontendSessionId);
+      setOpen(true);
+    } finally {
+      setSessionLoading(false);
+    }
+  }
 
   async function handleToggle(ref: ReferenceItem, enabled: boolean) {
     if (backendSessionId === null) return;
@@ -86,24 +109,29 @@ export function ReferenceSourcesDrawer({ backendSessionId }: Props) {
     }
   }
 
-  // Hide entirely when no active backend session
-  if (backendSessionId === null) return null;
+  // Hide entirely when there is no frontend session
+  if (activeSession === null) return null;
 
   return (
     <>
-      {/* Trigger button — fixed top-right */}
+      {/* Trigger button — fixed top-right, always visible when there's a session */}
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => void handleOpen()}
+        disabled={sessionLoading}
         aria-label={`References (${refs.length})`}
-        className="fixed right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm shadow-sm hover:bg-muted transition-colors"
+        className="fixed right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm shadow-sm hover:bg-muted transition-colors disabled:opacity-50"
       >
-        <BookMarked className="h-4 w-4" />
+        {sessionLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <BookMarked className="h-4 w-4" />
+        )}
         <span className="tabular-nums">{refs.length}</span>
       </button>
 
-      {/* Drawer overlay */}
-      {open && (
+      {/* Drawer overlay — only when open and backend session is resolved */}
+      {open && backendSessionId !== null && (
         <div className="fixed inset-0 z-40" aria-modal="true" role="dialog" aria-label="Reference Sources">
           {/* Backdrop */}
           <div
@@ -195,13 +223,15 @@ export function ReferenceSourcesDrawer({ backendSessionId }: Props) {
         </div>
       )}
 
-      {/* Library Browser Modal */}
-      <LibraryBrowserModal
-        open={libraryOpen}
-        onClose={() => setLibraryOpen(false)}
-        backendSessionId={backendSessionId}
-        onAttached={() => void refreshRefs()}
-      />
+      {/* Library Browser Modal — only mounted once backend session is resolved */}
+      {backendSessionId !== null && (
+        <LibraryBrowserModal
+          open={libraryOpen}
+          onClose={() => setLibraryOpen(false)}
+          backendSessionId={backendSessionId}
+          onAttached={() => void refreshRefs()}
+        />
+      )}
     </>
   );
 }

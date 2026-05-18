@@ -31,14 +31,11 @@ export function ChatPage() {
     });
   };
 
-  const backendSessionId: number | null =
-    activeSession != null ? activeSession.backend_session_id : null;
-
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <ChatThread session={activeSession} />
       <Composer onSubmit={handleSubmit} disabled={isStreaming} />
-      <ReferenceSourcesDrawer backendSessionId={backendSessionId} />
+      <ReferenceSourcesDrawer frontendSessionId={activeSessionId} />
     </div>
   );
 }

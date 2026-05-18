@@ -80,3 +80,10 @@ export async function ingestPaper(
     body: JSON.stringify({ session_id: sessionId, paper_id: paperId }),
   });
 }
+
+export async function createBackendSession(): Promise<number> {
+  const data = await apiFetch<{ session_id: number }>("/sessions", {
+    method: "POST",
+  });
+  return data.session_id;
+}

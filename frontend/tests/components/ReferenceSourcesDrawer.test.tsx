@@ -2,12 +2,16 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReferenceSourcesDrawer } from "@/components/references/ReferenceSourcesDrawer";
 import { useChatStore } from "@/store/chat";
 import { API_BASE_URL } from "@/lib/api";
 import type { ReferenceItem } from "@/types/domain";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeRef(overrides: Partial<ReferenceItem> = {}): ReferenceItem {
   return {
@@ -25,9 +29,29 @@ function makeRef(overrides: Partial<ReferenceItem> = {}): ReferenceItem {
 
 const sampleRefs = [makeRef()];
 
+/**
+ * Seed a frontend session into the store and return its id.
+ * Optionally supply a backendId to pre-assign backend_session_id.
+ */
+function seedSession(backendId: number | null = null): number {
+  const store = useChatStore.getState();
+  const frontendId = store.newSession();
+  if (backendId !== null) {
+    store.patchSessionBackendId(frontendId, backendId);
+  }
+  return frontendId;
+}
+
+// ---------------------------------------------------------------------------
+// MSW server
+// ---------------------------------------------------------------------------
+
 const server = setupServer(
   http.get(`${API_BASE_URL}/papers`, () =>
     HttpResponse.json(sampleRefs),
+  ),
+  http.post(`${API_BASE_URL}/sessions`, () =>
+    HttpResponse.json({ session_id: 42 }, { status: 201 }),
   ),
   http.patch(`${API_BASE_URL}/papers/1`, () =>
     HttpResponse.json({ enabled: false }),
@@ -42,6 +66,9 @@ afterAll(() => server.close());
 beforeEach(() => {
   server.resetHandlers(
     http.get(`${API_BASE_URL}/papers`, () => HttpResponse.json(sampleRefs)),
+    http.post(`${API_BASE_URL}/sessions`, () =>
+      HttpResponse.json({ session_id: 42 }, { status: 201 }),
+    ),
     http.patch(`${API_BASE_URL}/papers/1`, () =>
       HttpResponse.json({ enabled: false }),
     ),
@@ -52,18 +79,58 @@ beforeEach(() => {
   useChatStore.getState().reset();
 });
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe("ReferenceSourcesDrawer", () => {
-  it("renders nothing when backendSessionId is null", () => {
+  it("renders nothing when frontendSessionId is null", () => {
     const { container } = render(
-      <ReferenceSourcesDrawer backendSessionId={null} />,
+      <ReferenceSourcesDrawer frontendSessionId={null} />,
     );
     expect(container.firstChild).toBeNull();
   });
 
-  it("loads and displays references on open", async () => {
-    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+  it("trigger_renders_without_backend_session_id", () => {
+    // Frontend session exists but backend_session_id is null.
+    const frontendId = seedSession(null);
 
-    // Trigger button should be visible
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
+
+    // Trigger button must be visible even though backend session doesn't exist yet.
+    const triggerBtn = screen.getByRole("button", { name: /references/i });
+    expect(triggerBtn).toBeInTheDocument();
+  });
+
+  it("clicking_trigger_creates_backend_session_when_missing", async () => {
+    // Frontend session without backend_session_id.
+    const frontendId = seedSession(null);
+    const patchSpy = vi.spyOn(useChatStore.getState(), "patchSessionBackendId");
+
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
+
+    const triggerBtn = screen.getByRole("button", { name: /references/i });
+    await userEvent.click(triggerBtn);
+
+    // POST /sessions must have been called, and patchSessionBackendId(frontendId, 42).
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith(frontendId, 42);
+    });
+
+    // Drawer body should now render (backend session resolved to 42).
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /reference sources/i })).toBeInTheDocument();
+    });
+
+    patchSpy.mockRestore();
+  });
+
+  it("loads and displays references on open", async () => {
+    // Pre-assign backend_session_id so no POST /sessions is needed.
+    const frontendId = seedSession(42);
+
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
+
     const triggerBtn = await screen.findByRole("button", {
       name: /references/i,
     });
@@ -78,10 +145,11 @@ describe("ReferenceSourcesDrawer", () => {
   });
 
   it("removes reference from local store when trash is clicked", async () => {
+    const frontendId = seedSession(42);
     // Pre-populate the store so the drawer renders refs immediately
     useChatStore.getState().setReferences(42, sampleRefs);
 
-    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
 
     const triggerBtn = screen.getByRole("button", { name: /references/i });
     await userEvent.click(triggerBtn);
@@ -99,6 +167,7 @@ describe("ReferenceSourcesDrawer", () => {
   });
 
   it("toggle_switch_fires_patch_and_updates_optimistically", async () => {
+    const frontendId = seedSession(42);
     // Pre-populate the store with one enabled ref
     useChatStore.getState().setReferences(42, sampleRefs);
 
@@ -113,7 +182,7 @@ describe("ReferenceSourcesDrawer", () => {
       }),
     );
 
-    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
 
     const triggerBtn = screen.getByRole("button", { name: /references/i });
     await userEvent.click(triggerBtn);
@@ -140,6 +209,7 @@ describe("ReferenceSourcesDrawer", () => {
   });
 
   it("toggle_switch_reverts_on_error", async () => {
+    const frontendId = seedSession(42);
     // Pre-populate the store with one enabled ref
     useChatStore.getState().setReferences(42, sampleRefs);
 
@@ -149,7 +219,7 @@ describe("ReferenceSourcesDrawer", () => {
       ),
     );
 
-    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
 
     const triggerBtn = screen.getByRole("button", { name: /references/i });
     await userEvent.click(triggerBtn);
@@ -173,9 +243,10 @@ describe("ReferenceSourcesDrawer", () => {
   });
 
   it("closes on Escape key", async () => {
+    const frontendId = seedSession(42);
     useChatStore.getState().setReferences(42, sampleRefs);
 
-    render(<ReferenceSourcesDrawer backendSessionId={42} />);
+    render(<ReferenceSourcesDrawer frontendSessionId={frontendId} />);
 
     // Open the drawer
     const triggerBtn = screen.getByRole("button", { name: /references/i });
