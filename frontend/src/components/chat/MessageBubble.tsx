@@ -6,13 +6,15 @@ import { toast } from "sonner";
 import type { ChatMessage } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
+import { SearchResultList } from "@/components/chat/SearchResultList";
 
 interface Props {
   message: ChatMessage;
   onRetry?: () => void;
+  backendSessionId?: number | null;
 }
 
-export function MessageBubble({ message, onRetry }: Props) {
+export function MessageBubble({ message, onRetry, backendSessionId }: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isOk = message.status === "ok" || (isAssistant && message.status === undefined);
@@ -21,6 +23,10 @@ export function MessageBubble({ message, onRetry }: Props) {
   const isStreamingEmpty = isStreaming && !message.content;
   const isStreamingWithContent = isStreaming && !!message.content;
   const showCopy = isAssistant && isOk && !isStreaming;
+  const hasSearchResults =
+    isAssistant &&
+    message.search_results !== undefined &&
+    message.search_results.length > 0;
 
   return (
     <article
@@ -71,6 +77,14 @@ export function MessageBubble({ message, onRetry }: Props) {
             />
           )}
         </div>
+
+        {/* Search results — rendered below the bubble body */}
+        {hasSearchResults && backendSessionId != null && (
+          <SearchResultList
+            candidates={message.search_results!}
+            sessionId={backendSessionId}
+          />
+        )}
 
         {/* Copy button — hover-revealed on completed assistant messages */}
         {showCopy && (

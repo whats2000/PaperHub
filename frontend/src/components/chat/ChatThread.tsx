@@ -65,7 +65,11 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
 
           return (
             <div key={`${msg.run_id ?? "user"}-${i}`} className="space-y-1">
-              <MessageBubble message={msg} onRetry={retryHandler} />
+              <MessageBubble
+                message={msg}
+                onRetry={retryHandler}
+                backendSessionId={session.backend_session_id}
+              />
               {msg.role === "assistant" && msg.routing_decision && (
                 <div className="flex justify-start pl-1">
                   <RoutingBadge decision={msg.routing_decision} />
