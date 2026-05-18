@@ -124,8 +124,10 @@ Non-blocking polish flagged during Plan C reviews. Pick these up in a cleanup PR
 6. **Extract `chat.py`/`papers.py` chroma-fallback helper.** The `getattr(request.app.state, "chroma", None) or ChromaStore(settings.chroma_dir)` pattern is duplicated in both files. Move to a shared `api/deps.py` helper.
 7. **`papers.py` assert in production path:** `attach_from_library` uses `assert papers_row is not None` after `INSERT OR IGNORE`+`SELECT`. Replace with `if papers_row is None: raise HTTPException(500, ...)` so `-O` mode doesn't degrade to AttributeError.
 8. **`papers.paper_content_id` FK missing `ON DELETE` policy** — generalised Plan A follow-up. Decide CASCADE vs RESTRICT and document.
-9. **SQL `LIKE` `%`-stripping for `search_library` and `/papers/library` `q` filter** is a Plan F follow-up — FTS5 will replace `LIKE` and obviate the escape concern.
+9. **SQL `LIKE` `%`-stripping for `search_library` and `/papers/library` `q` filter** is a Plan F follow-up — FTS5 will replace `LIKE` and obviate the escape concern. **Note (field test):** the LIKE pattern is also broken for multi-word queries — `%transformers attention%` won't match "transformers and attention". Until FTS5 lands, the agent should be prompted to call `search_library` with single keywords, or pull the FTS5 migration forward into Plan D.
 10. **`paper_qa_v1.yaml`** embeds `{chunks_context}` in the system prompt, defeating prompt caching when chunks change between turns. Move to user turn or per-call cache key when Plan E perf work lands.
+11. **Empty-references `paper_qa` double-emits** the "No references are enabled…" string as both a `token` event and a `final` event with identical content. Frontend renders correctly but it's a minor wart in the SSE stream.
+12. **`paper_qa:retrieve` cold start ~5s** even for `corpus_size=0` — likely embedder/reranker first-load. Fine for prod; pre-warm the singletons in lifespan if test runtimes become a concern.
 
 ## Restricted operations
 
