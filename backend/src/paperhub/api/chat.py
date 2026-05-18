@@ -1,6 +1,7 @@
 import json
 import os
 from collections.abc import AsyncIterator
+from dataclasses import asdict, replace
 from typing import Any, Literal
 
 import aiosqlite
@@ -11,8 +12,14 @@ from sse_starlette.sse import EventSourceResponse
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.research import (
     FinalOnlyMessage,
+    SearchCandidate,
+    SearchResultsYield,
     paper_qa_stream,
     paper_search,
+)
+from paperhub.agents.research_tools import (
+    NoIngestibleSourceError,
+    add_paper_to_session_dispatch,
 )
 from paperhub.agents.router import router_node
 from paperhub.agents.state import AgentState
@@ -26,6 +33,8 @@ from paperhub.models.events import (
     ErrorEvent,
     FinalEvent,
     RoutingDecisionEvent,
+    SearchCandidateModel,
+    SearchResultsEvent,
     SessionEvent,
     TokenEvent,
 )
@@ -92,6 +101,94 @@ async def _finalise(
         row = await cur.fetchone()
     assert row is not None
     return int(row[0])
+
+
+FINALIZE_CAP = 2
+
+
+def _enforce_finalize_cap(
+    candidates: list[SearchCandidate],
+) -> list[SearchCandidate]:
+    """Truncate to at most ``FINALIZE_CAP`` finalize-flagged picks (preserve
+    agent's order). Returns a new list of candidates; never mutates input."""
+    kept = 0
+    out: list[SearchCandidate] = []
+    for c in candidates:
+        if c.finalize:
+            if kept < FINALIZE_CAP:
+                out.append(c)
+                kept += 1
+            else:
+                out.append(replace(c, finalize=False))
+        else:
+            out.append(c)
+    return out
+
+
+async def _mark_already_in_session(
+    conn: aiosqlite.Connection,
+    session_id: int,
+    candidates: list[SearchCandidate],
+) -> list[SearchCandidate]:
+    """For ``library:<id>`` candidates, set ``already_in_session=True`` when
+    a papers row already exists. (search_library filters these out for the
+    LLM, but the agent could resurface a library: id from history.)"""
+    out: list[SearchCandidate] = []
+    for c in candidates:
+        if c.paper_id.startswith("library:"):
+            try:
+                pcid = int(c.paper_id.removeprefix("library:"))
+            except ValueError:
+                out.append(c)
+                continue
+            async with conn.execute(
+                "SELECT 1 FROM papers WHERE session_id = ? AND paper_content_id = ?",
+                (session_id, pcid),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                out.append(replace(c, already_in_session=True))
+                continue
+        out.append(c)
+    return out
+
+
+async def _process_search_results(
+    ps_item: SearchResultsYield,
+    *,
+    pipeline: PaperPipeline,
+    conn: aiosqlite.Connection,
+    session_id: int,
+) -> list[SearchCandidate]:
+    """Enforce finalize cap, mark already_in_session, then auto-attach
+    ``finalize=True`` picks. Returns the enriched candidate list ready
+    for SSE emission."""
+    capped = _enforce_finalize_cap(list(ps_item.candidates))
+    marked = await _mark_already_in_session(conn, session_id, capped)
+    enriched: list[SearchCandidate] = []
+    for c in marked:
+        if c.finalize and not c.already_in_session:
+            try:
+                result = await add_paper_to_session_dispatch(
+                    c.paper_id,
+                    pipeline=pipeline,
+                    conn=conn,
+                    session_id=session_id,
+                )
+                enriched.append(
+                    replace(c, auto_added=True, papers_id=result.papers_id),
+                )
+            except NoIngestibleSourceError:
+                enriched.append(
+                    replace(c, auto_added=False, error="no_ingestible_source"),
+                )
+            except Exception as exc:  # noqa: BLE001 — defensive, redacted before emit
+                enriched.append(
+                    replace(c, auto_added=False, error=redact(str(exc))),
+                )
+        else:
+            enriched.append(c)
+    return enriched
 
 
 async def _record_user_message(
@@ -176,6 +273,34 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     ):
                         if isinstance(ps_item, FinalOnlyMessage):
                             final_content = ps_item.content
+                        elif isinstance(ps_item, SearchResultsYield):
+                            enriched = await _process_search_results(
+                                ps_item,
+                                pipeline=pipeline,
+                                conn=conn,
+                                session_id=session_id,
+                            )
+                            sr_evt = SearchResultsEvent(
+                                run_id=run_id,
+                                candidates=[
+                                    SearchCandidateModel(**asdict(c))
+                                    for c in enriched
+                                ],
+                            )
+                            yield {
+                                "event": sr_evt.type,
+                                "data": sr_evt.model_dump_json(exclude={"type"}),
+                            }
+                            # Auto-attach may have produced new tool_calls rows
+                            # (e.g. via pipeline.ingest). Drain those so the
+                            # client sees them in order.
+                            for rec in await drain_tool_calls_since(
+                                conn, run_id, last_emitted_step,
+                            ):
+                                yield {"event": "tool_step",
+                                       "data": json.dumps({"record": rec},
+                                                          separators=(',', ':'))}
+                                last_emitted_step = rec["step_index"]
                         else:  # ToolStepYield
                             yield {"event": "tool_step",
                                    "data": json.dumps(

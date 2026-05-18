@@ -8,7 +8,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, model_validator
 
-from paperhub.agents.research_tools import _to_fts5_query
+from paperhub.agents.research_tools import (
+    NoIngestibleSourceError,
+    _to_fts5_query,
+    add_paper_to_session_dispatch,
+)
 from paperhub.api.deps import get_chroma
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
@@ -113,15 +117,21 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
                 papers_cache_dir=settings.papers_cache_dir,
                 chroma=get_chroma(request, settings),
             )
-            from paperhub.agents.research_tools import add_paper_to_session_dispatch
-
             result = await add_paper_to_session_dispatch(
-                paper_id=paper_id,
-                reason="",
+                paper_id,
                 pipeline=pipeline,
                 conn=conn,
                 session_id=body.session_id,
             )
+    except NoIngestibleSourceError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "detail": "no_ingestible_source",
+                "title": exc.title,
+                "paper_id": exc.paper_id,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return IngestResponse(

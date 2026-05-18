@@ -618,6 +618,86 @@ async def test_post_papers_legacy_arxiv_id_field_still_works(
     assert r.json()["title"] == "GPT-3"
 
 
+async def test_post_papers_accepts_paper_id_ss_prefix_resolves_to_arxiv_when_externalIds_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /papers with paper_id='ss:<id>' + SS metadata having externalIds.ArXiv
+    falls through to the arxiv ingest path."""
+    await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await apply_schema(conn)
+        await _seed_session(conn)
+
+    async def _fake_meta(paper_id: str) -> Any:
+        from paperhub.pipelines.semantic_scholar import SemanticScholarMetadata
+
+        return SemanticScholarMetadata(
+            paperId=paper_id, title="T", abstract="abs", year=2024, authors=[],
+            arxiv_id="2401.99999", open_access_pdf_url=None,
+        )
+
+    async def _fake_ingest(self: Any, req: Any) -> IngestResult:
+        return IngestResult(
+            paper_content_id=1, papers_id=1, cache_hit=False, title="T",
+        )
+
+    import paperhub.agents.research_tools as rt
+    import paperhub.pipelines.paper_pipeline as pipeline_module
+
+    monkeypatch.setattr(rt, "fetch_paper_metadata", _fake_meta)
+    with patch.object(pipeline_module.PaperPipeline, "ingest", _fake_ingest):
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post(
+                "/papers",
+                json={"session_id": 1, "paper_id": "ss:abcd"},
+            )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["title"] == "T"
+
+
+async def test_post_papers_returns_422_no_ingestible_source_when_ss_has_no_arxiv_and_no_pdf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /papers with ss:<id> + no arXiv + no openAccessPdf → 422
+    no_ingestible_source."""
+    await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await apply_schema(conn)
+        await _seed_session(conn)
+
+    async def _fake_meta(paper_id: str) -> Any:
+        from paperhub.pipelines.semantic_scholar import SemanticScholarMetadata
+
+        return SemanticScholarMetadata(
+            paperId=paper_id, title="Closed access", abstract="abs",
+            year=2024, authors=[], arxiv_id=None, open_access_pdf_url=None,
+        )
+
+    import paperhub.agents.research_tools as rt
+
+    monkeypatch.setattr(rt, "fetch_paper_metadata", _fake_meta)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.post(
+            "/papers",
+            json={"session_id": 1, "paper_id": "ss:closed"},
+        )
+
+    assert r.status_code == 422, r.text
+    body = r.json()
+    detail = body["detail"]
+    assert detail["detail"] == "no_ingestible_source"
+    assert detail["title"] == "Closed access"
+    assert detail["paper_id"] == "ss:closed"
+
+
 async def test_post_papers_rejects_both_paper_id_and_arxiv_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

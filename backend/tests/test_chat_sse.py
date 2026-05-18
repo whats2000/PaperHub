@@ -5,7 +5,13 @@ from typing import Any
 import aiosqlite
 from httpx import ASGITransport, AsyncClient
 
-from paperhub.agents.research import FinalOnlyMessage, ToolStepYield
+from paperhub.agents.research import (
+    FinalOnlyMessage,
+    SearchCandidate,
+    SearchResultsYield,
+    ToolStepYield,
+)
+from paperhub.agents.research_tools import AddResult, NoIngestibleSourceError
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
@@ -574,3 +580,308 @@ async def test_paper_search_streams_tool_step_events_incrementally(
     # Final content matches.
     final_payload = next(d for t, d in events if t == "final")
     assert final_payload["content"] == _final_text
+
+
+# ---------------------------------------------------------------------------
+# v2.4-5: search_results SSE event, finalize cap, auto-attach
+# ---------------------------------------------------------------------------
+
+
+def _candidate(
+    paper_id: str,
+    *,
+    title: str = "T",
+    finalize: bool = False,
+) -> SearchCandidate:
+    return SearchCandidate(
+        paper_id=paper_id,
+        title=title,
+        authors=[],
+        year=2024,
+        abstract="abs",
+        arxiv_id=None,
+        has_open_pdf=False,
+        reason="r",
+        finalize=finalize,
+    )
+
+
+async def _setup_paper_search_test(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"paper_search","model_tier":"flagship",'
+        '"confidence":0.95,"reasoning":"find papers"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+
+async def test_paper_search_emits_search_results_event_before_final(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """search_results SSE event arrives before final."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(candidates=[_candidate("ss:abcd", title="X")])
+        yield FinalOnlyMessage("Here are picks.")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    assert "search_results" in types, f"missing search_results event in {types}"
+    sr_idx = types.index("search_results")
+    final_idx = types.index("final")
+    assert sr_idx < final_idx
+    sr_payload = events[sr_idx][1]
+    assert sr_payload["run_id"] > 0
+    assert len(sr_payload["candidates"]) == 1
+    assert sr_payload["candidates"][0]["paper_id"] == "ss:abcd"
+    # No finalize → no auto_added.
+    assert sr_payload["candidates"][0]["auto_added"] is False
+
+
+async def test_paper_search_caps_finalize_at_2_when_agent_marks_three(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """3 finalize:true candidates → exactly 2 keep finalize=True in the
+    emitted payload (and only 2 are auto_added)."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(
+            candidates=[
+                _candidate("ss:one", finalize=True),
+                _candidate("ss:two", finalize=True),
+                _candidate("ss:three", finalize=True),
+                _candidate("ss:four", finalize=False),
+            ],
+        )
+        yield FinalOnlyMessage("picks")
+
+    attached: list[str] = []
+
+    async def _fake_dispatch(paper_id: str, **kwargs: Any) -> AddResult:
+        attached.append(paper_id)
+        return AddResult(
+            paper_content_id=99, papers_id=len(attached), cache_hit=False,
+            title="T",
+        )
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+    monkeypatch.setattr(
+        chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
+    )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    sr_payload = next(d for t, d in events if t == "search_results")
+    finalize_count = sum(1 for c in sr_payload["candidates"] if c["finalize"])
+    assert finalize_count == 2, (
+        f"Expected 2 finalize=True after cap, got {finalize_count}"
+    )
+    auto_added_count = sum(1 for c in sr_payload["candidates"] if c["auto_added"])
+    assert auto_added_count == 2
+    # The first two (by agent order) should be the kept finalize ones.
+    assert sr_payload["candidates"][0]["finalize"] is True
+    assert sr_payload["candidates"][1]["finalize"] is True
+    assert sr_payload["candidates"][2]["finalize"] is False
+    assert sr_payload["candidates"][3]["finalize"] is False
+    # Only 2 dispatcher calls.
+    assert attached == ["ss:one", "ss:two"]
+
+
+async def test_paper_search_auto_attaches_finalize_marked_candidates_and_populates_papers_id(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """A finalize=True library:<id> candidate ends up with auto_added=True
+    + papers_id populated; a corresponding papers row exists."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    # Seed a paper_content row so library: can be attached.
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "arxiv:1706.03762", "arxiv", "1706.03762",
+                "Attention Is All You Need", "[]", 2017,
+                "abs", "/tmp/s.tex", "/tmp", "/tmp/s.html",
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(
+            candidates=[
+                _candidate(f"library:{pcid}", finalize=True),
+            ],
+        )
+        yield FinalOnlyMessage("picks")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    sr_payload = next(d for t, d in events if t == "search_results")
+    cand = sr_payload["candidates"][0]
+    assert cand["auto_added"] is True
+    assert cand["papers_id"] is not None
+    assert cand["error"] is None
+
+    # Verify papers row exists in DB.
+    async with aiosqlite.connect(settings.db_path) as conn, conn.execute(
+        "SELECT id FROM papers WHERE paper_content_id = ?", (pcid,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+
+
+async def test_paper_search_no_papers_row_for_suggested_only_candidates(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """finalize:false ss:<id> → no INSERT into papers, dispatcher not called."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(
+            candidates=[_candidate("ss:suggested", finalize=False)],
+        )
+        yield FinalOnlyMessage("picks")
+
+    dispatch_calls: list[str] = []
+
+    async def _fake_dispatch(paper_id: str, **kwargs: Any) -> AddResult:
+        dispatch_calls.append(paper_id)
+        return AddResult(
+            paper_content_id=1, papers_id=1, cache_hit=False, title="x",
+        )
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+    monkeypatch.setattr(
+        chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
+    )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            await _consume_sse(response.aiter_bytes())
+
+    assert dispatch_calls == []
+    # And no papers row.
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn, conn.execute(
+        "SELECT COUNT(*) FROM papers",
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert int(row[0]) == 0
+
+
+async def test_paper_search_finalize_no_ingestible_source_marks_error_and_continues(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """finalize:true with NoIngestibleSourceError → auto_added=false, error
+    field set; other suggested-only candidates still emitted."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(
+            candidates=[
+                _candidate("ss:nosrc", title="No Source", finalize=True),
+                _candidate("ss:also", title="Also", finalize=False),
+            ],
+        )
+        yield FinalOnlyMessage("picks")
+
+    async def _fake_dispatch(paper_id: str, **kwargs: Any) -> AddResult:
+        raise NoIngestibleSourceError(paper_id=paper_id, title="No Source")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+    monkeypatch.setattr(
+        chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
+    )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    sr_payload = next(d for t, d in events if t == "search_results")
+    assert len(sr_payload["candidates"]) == 2
+    nosrc = sr_payload["candidates"][0]
+    assert nosrc["auto_added"] is False
+    assert nosrc["error"] == "no_ingestible_source"
+    also = sr_payload["candidates"][1]
+    assert also["auto_added"] is False
+    assert also["error"] is None
