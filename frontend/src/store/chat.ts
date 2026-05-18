@@ -5,6 +5,8 @@ import type {
   ChatSession,
   RoutingDecision,
   ToolCallRecord,
+  ReferenceItem,
+  SearchResultCandidate,
 } from "@/types/domain";
 
 interface ChatState {
@@ -13,6 +15,8 @@ interface ChatState {
   _nextId: number;
   sidebarCollapsed: boolean;
   composerDraft: string;
+  referencesBySession: Record<number, ReferenceItem[]>;
+  addedPaperIds: Set<string>;
   newSession: () => number;
   selectSession: (id: number) => void;
   appendMessage: (sessionId: number, message: ChatMessage) => void;
@@ -42,6 +46,20 @@ interface ChatState {
   toggleSidebar: () => void;
   setComposerDraft: (text: string) => void;
   reset: () => void;
+  // References
+  setReferences: (backendSessionId: number, refs: ReferenceItem[]) => void;
+  patchReferenceEnabled: (
+    backendSessionId: number,
+    papersId: number,
+    enabled: boolean,
+  ) => void;
+  removeReferenceLocal: (backendSessionId: number, papersId: number) => void;
+  setSearchResults: (
+    sessionId: number,
+    runId: number,
+    candidates: SearchResultCandidate[],
+  ) => void;
+  markPaperAdded: (paperId: string) => void;
 }
 
 function deriveTitle(content: string): string {
@@ -82,6 +100,8 @@ export const useChatStore = create<ChatState>()(
       _nextId: 1,
       sidebarCollapsed: false,
       composerDraft: "",
+      referencesBySession: {},
+      addedPaperIds: new Set<string>(),
 
       newSession: () => {
         const id = get()._nextId;
@@ -256,7 +276,60 @@ export const useChatStore = create<ChatState>()(
       setComposerDraft: (text) => set({ composerDraft: text }),
 
       reset: () =>
-        set({ sessions: [], activeSessionId: null, _nextId: 1, composerDraft: "" }),
+        set({
+          sessions: [],
+          activeSessionId: null,
+          _nextId: 1,
+          composerDraft: "",
+          referencesBySession: {},
+          addedPaperIds: new Set<string>(),
+        }),
+
+      setReferences: (backendSessionId, refs) =>
+        set((s) => ({
+          referencesBySession: {
+            ...s.referencesBySession,
+            [backendSessionId]: refs,
+          },
+        })),
+
+      patchReferenceEnabled: (backendSessionId, papersId, enabled) =>
+        set((s) => {
+          const existing = s.referencesBySession[backendSessionId] ?? [];
+          return {
+            referencesBySession: {
+              ...s.referencesBySession,
+              [backendSessionId]: existing.map((r) =>
+                r.papers_id === papersId ? { ...r, enabled } : r,
+              ),
+            },
+          };
+        }),
+
+      removeReferenceLocal: (backendSessionId, papersId) =>
+        set((s) => {
+          const existing = s.referencesBySession[backendSessionId] ?? [];
+          return {
+            referencesBySession: {
+              ...s.referencesBySession,
+              [backendSessionId]: existing.filter(
+                (r) => r.papers_id !== papersId,
+              ),
+            },
+          };
+        }),
+
+      setSearchResults: (sessionId, runId, candidates) =>
+        set((s) => ({
+          sessions: patchMessageByRunId(s.sessions, sessionId, runId, {
+            search_results: candidates,
+          }),
+        })),
+
+      markPaperAdded: (paperId) =>
+        set((s) => ({
+          addedPaperIds: new Set([...s.addedPaperIds, paperId]),
+        })),
     }),
     {
       name: "paperhub-chat-v1",
