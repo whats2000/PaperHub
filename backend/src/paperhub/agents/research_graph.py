@@ -329,10 +329,18 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
     """
 
     async def _pq_resolve(state: AgentState) -> AgentState:
+        writer = get_stream_writer()
+        last_step = int(state.get("ps_last_step_index", -1))
         papers = await _resolve_enabled_papers(
             deps.conn, session_id=state["session_id"], tracer=deps.tracer,
         )
-        return {**state, "pq_papers": papers}
+        # Drain and emit the paper_qa:resolve tool_step that just closed.
+        run_id: int = state["run_id"]
+        recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
+        for rec in recs:
+            writer({"event": "tool_step", "record": rec})
+            last_step = rec["step_index"]
+        return {**state, "pq_papers": papers, "ps_last_step_index": last_step}
 
     def _pq_branch(state: AgentState) -> str:
         n = len(state.get("pq_papers") or [])
@@ -377,26 +385,43 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
         return {**state, "final_response": "".join(collected)}
 
     async def _pq_map(state: AgentState) -> AgentState:
+        writer = get_stream_writer()
         papers = list(state["pq_papers"])
+        run_id: int = state["run_id"]
+        last_step = int(state.get("ps_last_step_index", -1))
+        lock = asyncio.Lock()
+
+        async def _one_with_emit(
+            pid: int, title: str,
+        ) -> tuple[int, str, list[Any], str]:
+            result = await _paper_qa_map_one(
+                pid=pid,
+                title=title,
+                user_message=state["user_message"],
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.paper_qa_model,
+                retriever=deps.retriever,
+                conn=deps.conn,
+                **_kwargs(deps),
+            )
+            # Drain any rows written since the last emission and emit them
+            # immediately. The lock prevents two concurrent tasks from
+            # claiming the same row twice.
+            async with lock:
+                nonlocal last_step
+                recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
+                for rec in recs:
+                    writer({"event": "tool_step", "record": rec})
+                    last_step = rec["step_index"]
+            return result
+
         results = list(
             await asyncio.gather(
-                *[
-                    _paper_qa_map_one(
-                        pid=pid,
-                        title=title,
-                        user_message=state["user_message"],
-                        adapter=deps.adapter,
-                        tracer=deps.tracer,
-                        model=deps.paper_qa_model,
-                        retriever=deps.retriever,
-                        conn=deps.conn,
-                        **_kwargs(deps),
-                    )
-                    for pid, title in papers
-                ],
+                *[_one_with_emit(pid, title) for pid, title in papers],
             ),
         )
-        return {**state, "pq_per_paper": results}
+        return {**state, "pq_per_paper": results, "ps_last_step_index": last_step}
 
     async def _pq_synthesize(state: AgentState) -> AgentState:
         writer = get_stream_writer()

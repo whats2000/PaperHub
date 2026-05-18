@@ -590,5 +590,169 @@ async def test_research_dispatcher_routes_to_paper_qa(
     assert "No references are enabled" in final_state["final_response"]
 
 
+async def test_pq_resolve_emits_tool_step_immediately(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Tracer,
+) -> None:
+    """_pq_resolve must emit the paper_qa:resolve tool_step as the FIRST
+    custom-stream event (before any map or synthesize events)."""
+    session_id = await _seed_session(migrated_db)
+    # Add two papers so the map path is taken (resolve → map → synthesize).
+    pcid_a, chunks_a = await _seed_paper_with_chunks(
+        migrated_db, session_id=session_id, arxiv_id="2501.0010",
+        title="ResolveA", chunk_texts=["text a"],
+    )
+    pcid_b, chunks_b = await _seed_paper_with_chunks(
+        migrated_db, session_id=session_id, arxiv_id="2501.0011",
+        title="ResolveB", chunk_texts=["text b"],
+    )
+    retriever = MagicMock(spec=Retriever)
+    retriever.retrieve.side_effect = [
+        [RetrievedChunk(chunk_id=chunks_a[0], paper_content_id=pcid_a,
+                        text="text a", score=0.9)],
+        [RetrievedChunk(chunk_id=chunks_b[0], paper_content_id=pcid_b,
+                        text="text b", score=0.8)],
+    ]
+    synth_tokens = ["synth result"]
+    adapter = _StubAdapter(
+        tokens=synth_tokens,
+        token_map={
+            "ResolveA": ["a analysis"],
+            "ResolveB": ["b analysis"],
+            "paper_qa_synthesize/v1": synth_tokens,
+        },
+    )
+    graph = build_paper_qa_subgraph(
+        _deps(conn=migrated_db, tracer=fake_tracer,
+              retriever=retriever, adapter=adapter),
+    )
+    state = {
+        "run_id": fake_tracer._run_id, "branch": "",  # noqa: SLF001
+        "session_id": session_id, "user_message": "compare",
+    }
+    customs, _ = await _collect(graph, state)
+    tool_steps = [c for c in customs if c.get("event") == "tool_step"]
+    assert len(tool_steps) >= 1, "Expected at least one tool_step event"
+    # The very first tool_step must be the resolve step.
+    first_step = tool_steps[0]
+    assert first_step["record"]["tool"] == "paper_qa:resolve", (
+        f"Expected first tool_step tool='paper_qa:resolve', "
+        f"got {first_step['record']['tool']!r}"
+    )
+    # resolve must appear BEFORE any token events (it's synchronous, ~0 ms).
+    first_token_idx = next(
+        (i for i, c in enumerate(customs) if c.get("event") == "token"), None,
+    )
+    resolve_idx = customs.index(first_step)
+    if first_token_idx is not None:
+        assert resolve_idx < first_token_idx, (
+            f"resolve tool_step (idx={resolve_idx}) must precede first token "
+            f"(idx={first_token_idx})"
+        )
+
+
+async def test_paper_qa_subgraph_emits_tool_step_for_each_map_call_at_completion_time(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Tracer,
+) -> None:
+    """When the map node runs N parallel _paper_qa_map_one tasks, each
+    task's tool_step event must be emitted at ITS completion time — not all
+    bundled at gather completion. Verified by injecting different per-task
+    latencies and asserting the fast paper's event precedes the slow paper's."""
+    import time
+
+    session_id = await _seed_session(migrated_db)
+    pcid_fast, chunks_fast = await _seed_paper_with_chunks(
+        migrated_db, session_id=session_id, arxiv_id="2501.0020",
+        title="FastPaper", chunk_texts=["fast text"],
+    )
+    pcid_slow, chunks_slow = await _seed_paper_with_chunks(
+        migrated_db, session_id=session_id, arxiv_id="2501.0021",
+        title="SlowPaper", chunk_texts=["slow text"],
+    )
+    retriever = MagicMock(spec=Retriever)
+    retriever.retrieve.side_effect = [
+        [RetrievedChunk(chunk_id=chunks_fast[0], paper_content_id=pcid_fast,
+                        text="fast text", score=0.9)],
+        [RetrievedChunk(chunk_id=chunks_slow[0], paper_content_id=pcid_slow,
+                        text="slow text", score=0.8)],
+    ]
+    synth_tokens = ["synth ok"]
+
+    # Inject per-paper latency via a custom _StubAdapter that uses title routing.
+    class _LatencyAdapter(_StubAdapter):
+        _latency_map: dict[str, float] = {"FastPaper": 0.0, "SlowPaper": 0.25}
+
+        def stream(
+            self,
+            *,
+            slot: str,
+            variables: dict[str, Any],
+            model: str,  # noqa: ARG002
+            history: list[dict[str, str]] | None = None,  # noqa: ARG002
+            **_: Any,
+        ) -> Any:
+            title = variables.get("title", "")
+            lat = self._latency_map.get(title, 0.0)
+            toks: list[str]
+            if title in self._token_map:
+                toks = list(self._token_map[title])
+            elif slot in self._token_map:
+                toks = list(self._token_map[slot])
+            else:
+                toks = list(self._tokens)
+
+            async def _gen() -> AsyncIterator[str]:
+                if lat:
+                    await asyncio.sleep(lat)
+                for t in toks:
+                    yield t
+
+            return _gen()
+
+    latency_adapter = _LatencyAdapter(
+        tokens=synth_tokens,
+        token_map={
+            "FastPaper": ["fast analysis"],
+            "SlowPaper": ["slow analysis"],
+            "paper_qa_synthesize/v1": synth_tokens,
+        },
+    )
+
+    graph = build_paper_qa_subgraph(
+        _deps(conn=migrated_db, tracer=fake_tracer,
+              retriever=retriever, adapter=latency_adapter),
+    )
+    state = {
+        "run_id": fake_tracer._run_id, "branch": "",  # noqa: SLF001
+        "session_id": session_id, "user_message": "compare",
+    }
+
+    # Collect with timestamps.
+    tool_step_events: list[tuple[float, dict[str, Any]]] = []
+    t0 = time.monotonic()
+    async for mode, payload in graph.astream(state, stream_mode=["custom", "values"]):
+        if mode == "custom" and isinstance(payload, dict) and payload.get("event") == "tool_step":
+            tool_step_events.append((time.monotonic() - t0, payload))
+
+    # Filter to map steps (paper_qa:map).
+    map_steps = [
+        (ts, ev) for ts, ev in tool_step_events
+        if ev["record"]["tool"] == "paper_qa:map"
+    ]
+    assert len(map_steps) == 2, (
+        f"Expected 2 paper_qa:map tool_step events, got {len(map_steps)}: "
+        f"{[ev['record'] for _, ev in map_steps]}"
+    )
+    ts_first, ts_second = map_steps[0][0], map_steps[1][0]
+    # The fast paper's step should arrive significantly earlier than the slow one.
+    # With 0.25 s gap, require at least 0.1 s separation.
+    assert ts_second - ts_first >= 0.1, (
+        f"Expected map tool_steps to arrive at completion time (progressive), "
+        f"but timestamps were {ts_first:.3f}s and {ts_second:.3f}s — "
+        f"gap={ts_second - ts_first:.3f}s (expected >= 0.1 s)"
+    )
+
+
 # Compatibility surface used by other tests / chat layer; silence ruff.
 _ = SemanticScholarToolHit
