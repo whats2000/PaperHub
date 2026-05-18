@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 import aiosqlite
+import httpx
 
 from paperhub.pipelines.arxiv_client import download_arxiv_source, search_arxiv
 from paperhub.pipelines.chunker import Chunk, chunk_text
@@ -28,6 +29,9 @@ from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import extract_latex, extract_pdf
 from paperhub.pipelines.renderer import render_html
 from paperhub.rag.chroma import ChromaStore
+
+_PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+_PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
 
 
 @dataclass(frozen=True)
@@ -275,6 +279,99 @@ class PaperPipeline:
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
         return paper_content_id, papers_id, str(metadata.get("title", ""))
+
+    async def ingest_pdf_from_url(
+        self,
+        *,
+        session_id: int,
+        pdf_url: str,
+        title_hint: str,
+        abstract_hint: str,
+        authors_hint: list[str],
+        year_hint: int | None,
+    ) -> IngestResult:
+        """Download a PDF from an open-access URL and ingest as kind='pdf_upload'.
+
+        Used by the ``ss:<paperId>`` dispatcher branch when Semantic Scholar
+        returns a paper without an arXiv ID but with ``openAccessPdf.url``.
+        sha256-keyed cache (same as user PDF uploads), so the same URL
+        downloaded twice deduplicates at ``paper_content``.
+        """
+        # 1. Fetch PDF bytes.
+        async with httpx.AsyncClient(
+            timeout=_PDF_DOWNLOAD_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": _PDF_USER_AGENT},
+        ) as client:
+            resp = await client.get(pdf_url)
+        resp.raise_for_status()
+        pdf_bytes = resp.content
+
+        # 2. Compute content_key.
+        sha = hashlib.sha256(pdf_bytes).hexdigest()
+        content_key = f"sha256:{sha}"
+
+        # 3. Cache lookup.
+        async with self._conn.execute(
+            "SELECT id, title FROM paper_content WHERE content_key = ?",
+            (content_key,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is not None:
+            paper_content_id = int(row[0])
+            title = str(row[1] or title_hint)
+            papers_id = await self._link_to_session(session_id, paper_content_id)
+            return IngestResult(
+                paper_content_id, papers_id, cache_hit=True, title=title,
+            )
+
+        # 4. Write PDF to cache.
+        cache_dir = self._cache_root / "upload" / sha
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = cache_dir / "source.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+
+        # 5. Render HTML.
+        html_path = cache_dir / "source.html"
+        render_html(source=pdf_path, kind="pdf", out_path=html_path)
+
+        # 6. Extract text + chunk.
+        full_text = extract_pdf(pdf_path)
+        chunks = chunk_text(full_text)
+        texts = [c.text for c in chunks]
+        embeddings = self._embedder.embed(texts)
+
+        metadata: dict[str, object] = {
+            "title": title_hint,
+            "authors": list(authors_hint),
+            "year": year_hint,
+            "abstract": abstract_hint,
+        }
+
+        # 7. Persist paper_content + chunks transactionally.
+        paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
+            content_key=content_key,
+            kind="pdf_upload",
+            arxiv_id=None,
+            sha256=sha,
+            metadata=metadata,
+            source_path=pdf_path,
+            source_dir_path=cache_dir,
+            html_path=html_path,
+            chunks=chunks,
+        )
+
+        self._chroma.add_chunks(
+            paper_content_id=paper_content_id,
+            chunk_ids=chunk_ids,
+            texts=texts,
+            embeddings=embeddings,
+        )
+
+        papers_id = await self._link_to_session(session_id, paper_content_id)
+        return IngestResult(
+            paper_content_id, papers_id, cache_hit=False, title=title_hint,
+        )
 
     async def _persist_paper_content_and_chunks(
         self,

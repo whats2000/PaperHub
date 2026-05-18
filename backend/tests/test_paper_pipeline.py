@@ -6,6 +6,7 @@ import os
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import aiosqlite
@@ -241,3 +242,88 @@ async def test_ingest_arxiv_cache_hit_skips_pipeline(
 
     # download_arxiv_source must have been called exactly once (not twice).
     download_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# v2.4-5: ingest_pdf_from_url — PDF fallback for ss:<paperId> with no arxiv
+# ---------------------------------------------------------------------------
+
+
+_SAMPLE_PDF = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
+
+
+@pytest.mark.asyncio
+async def test_ingest_pdf_from_url_persists_pdf_upload_kind(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Downloading a PDF via the open-access URL persists kind='pdf_upload'
+    + sha256 content_key + chunks + papers row."""
+    import httpx  # local to keep top-level imports minimal
+
+    pipeline, conn, _cache = pipeline_env
+
+    # Create a session so the FK is satisfied.
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('pdf test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    pdf_bytes = _SAMPLE_PDF.read_bytes()
+
+    # Patch httpx.AsyncClient.get to return our fixture PDF without hitting
+    # the network. Use a transport-based mock.
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=pdf_bytes)
+
+    transport = httpx.MockTransport(_handler)
+
+    class _PatchedClient(httpx.AsyncClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    with patch("paperhub.pipelines.paper_pipeline.httpx.AsyncClient",
+               new=_PatchedClient):
+        result = await pipeline.ingest_pdf_from_url(
+            session_id=session_id,
+            pdf_url="https://example.org/sample.pdf",
+            title_hint="Sample PDF",
+            abstract_hint="abs",
+            authors_hint=["A"],
+            year_hint=2024,
+        )
+
+    assert result.cache_hit is False
+    assert result.title == "Sample PDF"
+
+    async with conn.execute(
+        "SELECT kind, content_key, sha256 FROM paper_content WHERE id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    kind, content_key, sha256 = row
+    assert kind == "pdf_upload"
+    assert content_key.startswith("sha256:")
+    assert sha256 is not None
+    assert content_key == f"sha256:{sha256}"
+
+    # At least one chunk persisted.
+    async with conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        chunks_row = await cur.fetchone()
+    assert chunks_row is not None
+    assert int(chunks_row[0]) >= 1
+
+    # papers row links session to paper_content.
+    async with conn.execute(
+        "SELECT id FROM papers WHERE session_id = ? AND paper_content_id = ?",
+        (session_id, result.paper_content_id),
+    ) as cur:
+        papers_row = await cur.fetchone()
+    assert papers_row is not None
