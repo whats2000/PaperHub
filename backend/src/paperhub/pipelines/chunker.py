@@ -51,15 +51,19 @@ def chunk_text(text: str, *, target: int = 800, hard: int = 1000) -> list[Chunk]
                 tentative_end = max(tentative_end, cursor + 1)
                 piece = text[cursor:tentative_end]
                 tok_len = len(enc.encode(piece))
-            if not piece.strip():
+            raw_piece = text[cursor:tentative_end]
+            stripped = raw_piece.strip()
+            if not stripped:
                 cursor = tentative_end
                 continue
+            lead = len(raw_piece) - len(raw_piece.lstrip())
+            trail = len(raw_piece) - len(raw_piece.rstrip())
             out.append(
                 Chunk(
                     section=section,
-                    char_start=cursor,
-                    char_end=tentative_end,
-                    text=piece.strip(),
+                    char_start=cursor + lead,
+                    char_end=tentative_end - trail,
+                    text=stripped,
                 )
             )
             cursor = tentative_end

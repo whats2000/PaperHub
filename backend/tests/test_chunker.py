@@ -33,6 +33,14 @@ def test_char_offsets_are_correct() -> None:
     assert text[c.char_start:c.char_end] == c.text
 
 
+def test_char_offsets_hold_when_whitespace_stripped() -> None:
+    # \section{Intro} prefix + trailing newlines so each span has leading/trailing whitespace.
+    text = "\n\\section{Intro}\n   hello world   \n\\section{Body}\n   second   \n"
+    chunks = chunk_text(text, target=100, hard=100)
+    for c in chunks:
+        assert text[c.char_start:c.char_end] == c.text
+
+
 def _token_count(s: str) -> int:
     import tiktoken
     enc = tiktoken.get_encoding("cl100k_base")
