@@ -60,4 +60,9 @@ ignore_missing_imports = true
 module = ["pylatexenc.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["chromadb.*"]
+ignore_missing_imports = true
+ignore_errors = true
+
 
