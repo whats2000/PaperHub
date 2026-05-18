@@ -26,13 +26,13 @@ Claude Desktop client gets working tracer rows from day one). Tests
 bypass the middleware by calling
 :func:`~paperhub.mcp.server_context.set_request_context` directly.
 
-**Schema parity with TOOL_SCHEMAS.** FastMCP normally derives input
-schemas from Python type hints; we post-register override each tool's
-``parameters`` field with the exact JSON-schema dict already in
-:data:`paperhub.agents.research_tools.TOOL_SCHEMAS` so the MCP-visible
-contract matches the in-process LiteLLM palette one for one. Task v2.5-4
-will remove the in-process palette entirely; until then this guarantees
-the two surfaces stay in lockstep.
+**Canonical schemas.** FastMCP normally derives input schemas from
+Python type hints; we post-register override each tool's ``parameters``
+field with the exact JSON-schema dict in
+:data:`paperhub.agents.research_tools._BASE_PAPER_TOOL_SCHEMAS` so this
+module is the single source of truth for the ``papers.*`` JSON contract.
+The agent reads its palette from the MCP registry (Task v2.5-4) — there
+is no other in-process palette to keep in sync.
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from paperhub.agents.research_tools import (
-    TOOL_SCHEMAS,
+    _BASE_PAPER_TOOL_SCHEMAS,
     find_related_papers_dispatch,
     search_library_dispatch,
     search_semantic_scholar_dispatch,
@@ -186,11 +186,9 @@ def build_paperhub_papers_server() -> FastMCP:
     """Construct a FastMCP server exposing the three Research Agent tools.
 
     Tool input-schemas are taken verbatim from
-    :data:`~paperhub.agents.research_tools.TOOL_SCHEMAS` so the MCP-visible
-    contract matches the existing LiteLLM palette exactly. The descriptions
-    likewise mirror the in-process palette — they were authored as the
-    LLM-visible prompt for these tools and there is no separate MCP-visible
-    description.
+    :data:`~paperhub.agents.research_tools._BASE_PAPER_TOOL_SCHEMAS` —
+    this module owns the canonical ``papers.*`` JSON contract advertised
+    to MCP clients (the agent itself, Claude Desktop, Cursor).
 
     The server's ``streamable_http_path`` is set to ``/`` so mounting at
     ``/mcp`` (via :func:`mount_paperhub_papers_on`) makes ``POST /mcp``
@@ -199,7 +197,7 @@ def build_paperhub_papers_server() -> FastMCP:
     """
     server = FastMCP(SERVER_NAME, streamable_http_path="/")
     schemas_by_name: dict[str, dict[str, Any]] = {
-        s["function"]["name"]: s["function"] for s in TOOL_SCHEMAS
+        s["function"]["name"]: s["function"] for s in _BASE_PAPER_TOOL_SCHEMAS
     }
 
     _register_tool(server, "search_library", _search_library_handler, schemas_by_name)

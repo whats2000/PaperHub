@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import aiosqlite
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from paperhub.agents.research import (
@@ -16,6 +17,35 @@ from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
 from paperhub.rag.retriever import RetrievedChunk
+
+
+class _FakeMcpRegistry:
+    """Minimal stand-in for :class:`MCPRegistry` for tests that don't actually
+    exercise the agent's MCP dispatch path (every paper_search/paper_qa case
+    in this file monkeypatches the agent with a canned generator).
+    """
+
+    async def aggregate_tool_schemas(self) -> list[Any]:
+        return []
+
+    async def call(self, name: str, args: dict[str, Any]) -> Any:  # pragma: no cover
+        raise RuntimeError(
+            f"_FakeMcpRegistry.call invoked unexpectedly for {name!r} — test "
+            "should monkeypatch paper_search before reaching dispatch",
+        )
+
+
+def _wire_test_app() -> FastAPI:
+    """Build a test app with ``app.state.mcp_registry`` pre-populated.
+
+    ASGITransport does NOT trigger the FastAPI lifespan, so the real
+    registry the lifespan installs is never created. Tests monkeypatch
+    the agent itself so the registry is never dispatched through; the
+    stub exists only so ``request.app.state.mcp_registry`` resolves.
+    """
+    app = create_app()
+    app.state.mcp_registry = _FakeMcpRegistry()
+    return app
 
 
 async def _bootstrap_schema(tmp_path: Any) -> None:
@@ -57,7 +87,7 @@ async def test_chat_sse_chitchat_round_trip(tmp_path, monkeypatch) -> None:
                        '"confidence":0.9,"reasoning":"greeting"}')
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "Hello there!")
     await _bootstrap_schema(tmp_path)
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         # Lifespan runs schema migration. Issue request.
@@ -104,7 +134,7 @@ async def test_chat_sse_paper_search_one_shot(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -156,7 +186,7 @@ async def test_chat_sse_paper_qa_streams(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(chat_module, "paper_qa_stream", _fake_paper_qa_stream)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
 
     # Seed the DB with a session, paper_content, chunk, and papers link
@@ -237,7 +267,7 @@ async def test_chat_sse_paper_qa_empty_refs_no_double_emit(
 
     monkeypatch.setattr(chat_module, "paper_qa_stream", _fake_paper_qa_stream)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -268,7 +298,7 @@ async def test_chat_emits_session_event_first(tmp_path: Any, monkeypatch: Any) -
     )
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hi")
     await _bootstrap_schema(tmp_path)
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -300,7 +330,7 @@ async def test_chat_reuses_session_when_session_id_provided(
     )
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hello")
     await _bootstrap_schema(tmp_path)
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # First turn: no session_id → backend creates one
@@ -359,7 +389,7 @@ async def test_chat_sse_exception_text_is_redacted(tmp_path: Any, monkeypatch: A
 
     monkeypatch.setattr(chat_module, "router_node", _exploding_router)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -409,7 +439,7 @@ async def test_chat_sse_emits_error_event_on_router_failure(
 
     monkeypatch.setattr(chat_module, "router_node", _failing_router)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -461,7 +491,7 @@ async def test_chat_sse_cancellation_finalises_run(
 
     monkeypatch.setattr(chat_module, "chitchat_stream", _slow_chitchat)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -550,7 +580,7 @@ async def test_paper_search_streams_tool_step_events_incrementally(
 
     monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -635,7 +665,7 @@ async def test_paper_search_emits_search_results_event_before_final(
 
     monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -695,7 +725,7 @@ async def test_paper_search_caps_finalize_at_2_when_agent_marks_three(
         chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
     )
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -763,7 +793,7 @@ async def test_paper_search_auto_attaches_finalize_marked_candidates_and_populat
 
     monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -817,7 +847,7 @@ async def test_paper_search_no_papers_row_for_suggested_only_candidates(
         chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
     )
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
@@ -867,7 +897,7 @@ async def test_paper_search_finalize_no_ingestible_source_marks_error_and_contin
         chat_module, "add_paper_to_session_dispatch", _fake_dispatch,
     )
 
-    app = create_app()
+    app = _wire_test_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(

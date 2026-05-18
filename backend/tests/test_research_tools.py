@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import aiosqlite
 import pytest
 
 from paperhub.agents.research_tools import (
-    TOOL_SCHEMAS,
+    _BASE_PAPER_TOOL_SCHEMAS,
     NoIngestibleSourceError,
     _to_fts5_query,
     add_paper_to_session_dispatch,
+    build_tool_schemas,
     search_library_dispatch,
 )
 from paperhub.pipelines.paper_pipeline import (
@@ -196,7 +198,7 @@ async def test_add_paper_unrecognised_prefix_raises(
 
 
 def _schema_names() -> set[str]:
-    return {s["function"]["name"] for s in TOOL_SCHEMAS}
+    return {s["function"]["name"] for s in _BASE_PAPER_TOOL_SCHEMAS}
 
 
 def test_search_arxiv_not_in_tool_schemas() -> None:
@@ -214,12 +216,40 @@ def test_search_semantic_scholar_in_tool_schemas() -> None:
 
 
 def test_tool_schemas_v2_4_palette_exact() -> None:
-    """The LLM-visible palette contains exactly three entries (defensive)."""
+    """The base FastMCP ``papers.*`` palette contains exactly three entries."""
     assert _schema_names() == {
         "search_library",
         "search_semantic_scholar",
         "find_related_papers",
     }
+
+
+async def test_build_tool_schemas_delegates_to_registry() -> None:
+    """``build_tool_schemas`` returns the registry's aggregated schemas
+    verbatim — no in-process fallback (Task v2.5-4 invariant)."""
+    canned = [
+        {
+            "type": "function",
+            "function": {
+                "name": "papers.search_library",
+                "description": "stub", "parameters": {},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web.search",
+                "description": "stub", "parameters": {},
+            },
+        },
+    ]
+
+    class _FakeRegistry:
+        async def aggregate_tool_schemas(self) -> list[Any]:
+            return list(canned)
+
+    out = await build_tool_schemas(_FakeRegistry())  # type: ignore[arg-type]
+    assert out == canned
 
 
 def test_add_paper_to_session_dispatch_signature_no_reason_param() -> None:

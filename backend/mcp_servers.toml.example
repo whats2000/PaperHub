@@ -5,6 +5,11 @@
 # skipped, so leaving a daemon down is non-fatal — its tools simply don't
 # enter the agent palette.
 #
+# IMPORTANT: the `papers` server below is REQUIRED. The Research Agent
+# (Task v2.5-4) has no in-process fallback — without `papers.*` in the
+# registry, paper_search turns will fail with an empty tool palette.
+# Do not delete or comment out the `[[server]] name = "papers"` block.
+#
 # Each [[server]] block produces one `MCPServerConfig` (see
 # `paperhub.mcp.config`). Fields:
 #

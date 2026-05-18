@@ -1,22 +1,27 @@
-"""Research Agent tool dispatchers (SRS v2.4, FR-07).
+"""Research Agent tool dispatchers (SRS v2.6, FR-07).
 
 v2.4 design: the LLM-visible palette is **read-only**. The agent shortlists
 candidates, and the user is the sole ingestion trigger (via SearchResultList
 "Add" buttons → POST /papers) — with one exception: the agent may flag up
 to 2 picks with ``finalize: true``, which the chat endpoint auto-attaches
 on its behalf. ``add_paper_to_session_dispatch`` survives as a Python
-callable for the chat endpoint + POST /papers, but is no longer in
-``TOOL_SCHEMAS``.
+callable for the chat endpoint + POST /papers, but is no longer in the
+LLM-visible palette.
 
-Contracts (JSON-schema args, structured returns) are MCP-compatible —
-Plan E wraps this module as the `paperhub-papers` MCP server with
-zero call-shape changes.
+v2.6 (Task v2.5-4): the agent's tool palette is sourced **exclusively**
+from the MCP registry — see :func:`build_tool_schemas`. The dispatcher
+functions in this module are no longer invoked from the agent's hot path;
+they live on as the in-process backing for the FastMCP ``papers`` server
+mounted at ``/mcp`` (see :mod:`paperhub.mcp.server`). The base
+:data:`_BASE_PAPER_TOOL_SCHEMAS` list is private — only the FastMCP
+server consumes it to pin its advertised JSON-schemas; the agent never
+imports it.
 """
 from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
@@ -30,15 +35,19 @@ from paperhub.pipelines.semantic_scholar import (
     search_papers,
 )
 
+if TYPE_CHECKING:
+    from paperhub.mcp.registry import MCPRegistry
+
 __all__ = [
     "AddResult",
     "ArxivHit",
     "LibraryHit",
     "NoIngestibleSourceError",
     "SemanticScholarToolHit",
-    "TOOL_SCHEMAS",
+    "_BASE_PAPER_TOOL_SCHEMAS",
     "_to_fts5_query",
     "add_paper_to_session_dispatch",
+    "build_tool_schemas",
     "find_related_papers_dispatch",
     "search_arxiv_dispatch",
     "search_library_dispatch",
@@ -101,15 +110,17 @@ class NoIngestibleSourceError(Exception):
         self.title = title
 
 
-# The JSON-schemas LiteLLM (and later the MCP wrapper) hands to the LLM.
-# Keep field names + descriptions stable across Plan C/E — they become
-# part of the public MCP contract.
+# Canonical JSON-schemas the FastMCP ``papers`` server advertises.
+# Private to this module: only :mod:`paperhub.mcp.server` consumes it to
+# pin its ``tools/list`` output. The agent reads its palette from the MCP
+# registry via :func:`build_tool_schemas` — which returns namespaced
+# (``papers.search_library``, ``web.search``, …) schemas.
 #
 # v2.4: search_arxiv + add_paper_to_session are REMOVED from this list.
 # The agent is read-only (no write tool); ingestion is user-driven via
 # POST /papers, with the chat endpoint auto-attaching agent ``finalize:true``
 # picks on its behalf.
-TOOL_SCHEMAS: list[dict[str, Any]] = [
+_BASE_PAPER_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -200,6 +211,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+async def build_tool_schemas(
+    mcp_registry: MCPRegistry,
+) -> list[dict[str, Any]]:
+    """Return the LLM-visible tool palette by aggregating every reachable
+    MCP server's schemas (namespaced ``<server>.<tool>``).
+
+    The registry has at minimum the in-process ``papers`` server (see
+    ``mcp_servers.toml.example``); operators may add ``web``, ``sql``, etc.
+    Lazy connection is triggered on first call; transient failures are
+    logged + skipped by the registry — see :class:`MCPRegistry`.
+    """
+    return await mcp_registry.aggregate_tool_schemas()
 
 
 def _to_fts5_query(query: str) -> str:

@@ -33,6 +33,7 @@ from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
+from paperhub.mcp.registry import MCPRegistry
 from paperhub.models.events import (
     ErrorEvent,
     FinalEvent,
@@ -250,6 +251,7 @@ async def paper_search(
     model: str,
     conn: aiosqlite.Connection,
     pipeline: PaperPipeline,
+    mcp_registry: MCPRegistry,
     **kwargs: Any,
 ) -> AsyncIterator[Any]:
     """Run the paper_search subgraph and yield ToolStepYield /
@@ -262,6 +264,7 @@ async def paper_search(
         conn=conn,
         pipeline=pipeline,
         retriever=retriever if retriever is not None else _NULL_RETRIEVER,
+        mcp_registry=mcp_registry,
         adapter_kwargs=kwargs or None,
     )
     graph = build_paper_search_subgraph(deps)
@@ -311,6 +314,7 @@ async def paper_qa_stream(
     short-circuit) — those paths emit zero tokens on the custom stream.
     """
     pipeline = kwargs.pop("pipeline", None)
+    mcp_registry = kwargs.pop("mcp_registry", None)
     deps = ResearchDeps(
         adapter=adapter,
         tracer=tracer,
@@ -318,6 +322,7 @@ async def paper_qa_stream(
         conn=conn,
         pipeline=pipeline if pipeline is not None else _NULL_PIPELINE,
         retriever=retriever,
+        mcp_registry=mcp_registry if mcp_registry is not None else _NULL_REGISTRY,
         adapter_kwargs=kwargs or None,
     )
     graph = build_paper_qa_subgraph(deps)
@@ -360,8 +365,13 @@ class _NullRetriever:  # noqa: D101 — local sentinel
     pass
 
 
+class _NullRegistry:  # noqa: D101 — local sentinel
+    pass
+
+
 _NULL_PIPELINE: Any = _NullPipeline()
 _NULL_RETRIEVER: Any = _NullRetriever()
+_NULL_REGISTRY: Any = _NullRegistry()
 
 
 @router.post("/chat")
@@ -424,12 +434,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         papers_cache_dir=settings.papers_cache_dir,
                         chroma=get_chroma(request, settings),
                     )
+                    mcp_registry: MCPRegistry = request.app.state.mcp_registry
                     final_content = ""
                     # paper_search is module-level so monkeypatch can swap.
                     async for ps_item in paper_search(
                         state, adapter=adapter, tracer=tracer,
                         model=settings.paper_qa_model, conn=conn,
-                        pipeline=pipeline,
+                        pipeline=pipeline, mcp_registry=mcp_registry,
                     ):
                         if isinstance(ps_item, ToolStepYield):
                             yield {

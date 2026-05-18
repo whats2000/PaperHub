@@ -30,6 +30,62 @@ from paperhub.tracing.tracer import Tracer
 pytestmark = pytest.mark.asyncio
 
 
+class _FakeRegistry:
+    """Test stub that routes namespaced ``papers.*`` calls straight back
+    to the in-process dispatchers via the imports the tests already
+    monkeypatch in :mod:`paperhub.agents.research_tools`. Cheapest path
+    that keeps the same end-to-end semantics.
+    """
+
+    def __init__(
+        self,
+        *,
+        conn: Any,
+        session_id: int,
+        schema_names: tuple[str, ...] = (
+            "papers.search_library",
+            "papers.search_semantic_scholar",
+            "papers.find_related_papers",
+        ),
+    ) -> None:
+        self._conn = conn
+        self._session_id = session_id
+        self._schemas = [
+            {
+                "type": "function",
+                "function": {
+                    "name": n,
+                    "description": "stub",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for n in schema_names
+        ]
+
+    async def aggregate_tool_schemas(self) -> list[Any]:
+        return list(self._schemas)
+
+    async def call(self, name: str, args: dict[str, Any]) -> Any:
+        # Late-import so per-test patches on the module-level dispatcher
+        # names (e.g. ``patch("paperhub.agents.research_tools.search_library_dispatch")``)
+        # are honoured.
+        from dataclasses import asdict, is_dataclass
+
+        from paperhub.agents import research_tools as rt
+
+        if name == "papers.search_library":
+            hits = await rt.search_library_dispatch(
+                conn=self._conn, session_id=self._session_id, **args,
+            )
+            return [asdict(h) if is_dataclass(h) else h for h in hits]
+        if name == "papers.search_semantic_scholar":
+            hits = await rt.search_semantic_scholar_dispatch(**args)
+            return [asdict(h) if is_dataclass(h) else h for h in hits]
+        if name == "papers.find_related_papers":
+            return await rt.find_related_papers_dispatch(**args)
+        raise RuntimeError(f"_FakeRegistry: unknown tool {name!r}")
+
+
 async def _collect(gen: Any) -> tuple[str, list[Any]]:
     """Consume the paper_search async generator; return (final_content, all_items)."""
     items: list[Any] = []
@@ -85,11 +141,12 @@ async def test_vague_prompt_emits_clarifying_question(
         ),
     ]
     comp = _async_completion_mock(seq)
+    reg = _FakeRegistry(conn=migrated_db, session_id=1)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp):
         out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="gemini/gemini-2.5-flash",
-            conn=migrated_db, pipeline=fake_pipeline,
+            conn=migrated_db, pipeline=fake_pipeline, mcp_registry=reg,
         ))
     assert "?" in out
     assert comp.await_count == 1
@@ -132,7 +189,7 @@ async def test_library_hit_shortlists_without_external_search(
     )
     seq = [
         _msg(tool_calls=[
-            _tool_call("c1", "search_library",
+            _tool_call("c1", "papers.search_library",
                        {"query": "transformer", "max_results": 8}),
         ]),
         _msg(
@@ -143,14 +200,16 @@ async def test_library_hit_shortlists_without_external_search(
     ]
     comp = _async_completion_mock(seq)
     ss_mock = AsyncMock(return_value=[])
+    reg = _FakeRegistry(conn=migrated_db, session_id=1)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=lib_hits)), \
-         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+         patch("paperhub.agents.research_tools.search_semantic_scholar_dispatch",
                new=ss_mock):
         out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
+            mcp_registry=reg,
         ))
     # Final content has the prose but NOT the fenced block.
     assert "Attention Is All You Need" in out
@@ -198,24 +257,26 @@ async def test_library_miss_falls_through_to_semantic_scholar(
     )
     seq = [
         _msg(tool_calls=[
-            _tool_call("c1", "search_library",
+            _tool_call("c1", "papers.search_library",
                        {"query": "mixture of experts routing"}),
         ]),
         _msg(tool_calls=[
-            _tool_call("c2", "search_semantic_scholar",
+            _tool_call("c2", "papers.search_semantic_scholar",
                        {"query": "mixture of experts routing"}),
         ]),
         _msg(content="Found 'MoE Routing X'.\n\n" + block),
     ]
     comp = _async_completion_mock(seq)
+    reg = _FakeRegistry(conn=migrated_db, session_id=1)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=[])), \
-         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+         patch("paperhub.agents.research_tools.search_semantic_scholar_dispatch",
                new=AsyncMock(return_value=ss_hits)):
         out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
+            mcp_registry=reg,
         ))
     assert "MoE Routing X" in out
     yields = [i for i in items if isinstance(i, SearchResultsYield)]
@@ -243,14 +304,14 @@ async def test_external_search_refinement_within_cap(
     )
     seq = [
         _msg(tool_calls=[
-            _tool_call("c1", "search_library", {"query": "paper qa"}),
+            _tool_call("c1", "papers.search_library", {"query": "paper qa"}),
         ]),
         _msg(tool_calls=[
-            _tool_call("c2", "search_semantic_scholar", {"query": "paper QA"}),
+            _tool_call("c2", "papers.search_semantic_scholar", {"query": "paper QA"}),
         ]),
         # First external call weak — refine
         _msg(tool_calls=[
-            _tool_call("c3", "search_semantic_scholar",
+            _tool_call("c3", "papers.search_semantic_scholar",
                        {"query": "scientific paper question answering 2024"}),
         ]),
         _msg(content="Refined hit:\n\n" + block),
@@ -260,14 +321,16 @@ async def test_external_search_refinement_within_cap(
         [],
         [ss_hit],
     ]
+    reg = _FakeRegistry(conn=migrated_db, session_id=1)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=[])), \
-         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+         patch("paperhub.agents.research_tools.search_semantic_scholar_dispatch",
                new=AsyncMock(side_effect=ss_results)):
         out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
+            mcp_registry=reg,
         ))
     assert "Paper QA" in out or "Refined" in out
     yields = [i for i in items if isinstance(i, SearchResultsYield)]
@@ -287,11 +350,11 @@ async def test_external_search_cap_enforced_at_three(
         "run_id": 5, "branch": "", "session_id": 1,
         "user_message": "keep refining",
     }
-    call4 = _tool_call("c4", "search_semantic_scholar", {"query": "v4"})
+    call4 = _tool_call("c4", "papers.search_semantic_scholar", {"query": "v4"})
     seq = [
-        _msg(tool_calls=[_tool_call("c1", "search_semantic_scholar", {"query": "v1"})]),
-        _msg(tool_calls=[_tool_call("c2", "search_semantic_scholar", {"query": "v2"})]),
-        _msg(tool_calls=[_tool_call("c3", "search_semantic_scholar", {"query": "v3"})]),
+        _msg(tool_calls=[_tool_call("c1", "papers.search_semantic_scholar", {"query": "v1"})]),
+        _msg(tool_calls=[_tool_call("c2", "papers.search_semantic_scholar", {"query": "v2"})]),
+        _msg(tool_calls=[_tool_call("c3", "papers.search_semantic_scholar", {"query": "v3"})]),
         _msg(tool_calls=[call4]),  # 4th — must be capped
         _msg(content="I've reached the search cap."),
     ]
@@ -303,12 +366,14 @@ async def test_external_search_cap_enforced_at_three(
         return []
 
     comp = _async_completion_mock(seq)
+    reg = _FakeRegistry(conn=migrated_db, session_id=1)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+         patch("paperhub.agents.research_tools.search_semantic_scholar_dispatch",
                side_effect=fake_ss):
         await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
+            mcp_registry=reg,
         ))
     # Dispatcher invoked only 3 times — 4th was capped before dispatch.
     assert ss_calls == 3

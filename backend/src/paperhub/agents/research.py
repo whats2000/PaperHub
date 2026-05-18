@@ -35,22 +35,18 @@ import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiosqlite
 import litellm
 
-from paperhub.agents.research_tools import (
-    TOOL_SCHEMAS,
-    find_related_papers_dispatch,
-    search_library_dispatch,
-    search_semantic_scholar_dispatch,
-)
+from paperhub.agents.research_tools import build_tool_schemas
 from paperhub.agents.state import AgentState
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.llm.prompts.registry import PromptRegistry
+from paperhub.mcp.registry import MCPRegistry
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.rag.retriever import RetrievedChunk, Retriever
 from paperhub.tracing.tracer import Tracer
@@ -107,12 +103,19 @@ class SearchResultsYield:
     candidates: list[SearchCandidate]
 
 
-# v2.4: applies to search_semantic_scholar (not find_related_papers, which
-# is precise navigation, not free-text search and stays uncapped).
-MAX_EXTERNAL_SEARCH_CALLS_PER_TURN = 3
-# Hard ceiling: search_library + 3 × search_semantic_scholar + a couple of
+# v2.6: applies to `papers.search_semantic_scholar` + every `web.*` tool
+# (search, fetch) — discovery is rate-limited, navigation isn't.
+# `papers.search_library` and `papers.find_related_papers` remain uncapped:
+# library lookup is local + cheap, citation-graph navigation is precise.
+MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN = 3
+# Hard ceiling: search_library + 3 × external discovery + a couple of
 # find_related_papers + slack for clarification turns.
 MAX_TOOL_ITERATIONS = 8
+
+# Tool names (un-namespaced) that count toward the external-discovery cap.
+# Inspected against the suffix after the first ``.`` in the namespaced
+# tool name: ``papers.search_semantic_scholar`` → ``search_semantic_scholar``.
+_CAPPED_PAPERS_TOOLS = frozenset({"search_semantic_scholar"})
 
 
 CANDIDATES_BLOCK_RE = re.compile(r"```json:candidates\s*\n(.*?)\n```", re.DOTALL)
@@ -280,6 +283,7 @@ async def _paper_search_plan_step(
     tracer: Tracer,
     model: str,
     iteration: int,
+    mcp_registry: MCPRegistry,
     **litellm_kwargs: Any,
 ) -> dict[str, Any]:
     """Run one paper_search:plan tracer step + litellm.acompletion call.
@@ -287,7 +291,11 @@ async def _paper_search_plan_step(
     Returns the assistant message (``dict`` with ``content`` and possibly
     ``tool_calls``). The tracer step row is persisted as a side effect; the
     caller drains it via ``drain_tool_calls_since``.
+
+    The LLM tool palette is sourced from the MCP registry — every name
+    arrives namespaced (``papers.search_library``, ``web.search``, …).
     """
+    tools = await build_tool_schemas(mcp_registry)
     async with tracer.step(
         agent="research", tool="paper_search:plan", model=model,
     ) as step:
@@ -297,7 +305,7 @@ async def _paper_search_plan_step(
         response = await litellm.acompletion(
             model=model,
             messages=messages,
-            tools=TOOL_SCHEMAS,
+            tools=tools,
             tool_choice="auto",
             **litellm_kwargs,
         )
@@ -311,82 +319,121 @@ async def _paper_search_plan_step(
     return msg
 
 
+def _counts_against_discovery_cap(name: str) -> bool:
+    """Return True iff ``name`` (namespaced ``<server>.<tool>``) counts
+    toward :data:`MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN`.
+
+    Every ``web.*`` tool counts (search, fetch — both incur external HTTP
+    plus latency); ``papers.search_semantic_scholar`` counts (external SS
+    API), but ``papers.search_library`` / ``papers.find_related_papers``
+    do not (local FTS / precise citation navigation).
+    """
+    if "." not in name:
+        return False
+    server, tool = name.split(".", 1)
+    if server == "web":
+        return True
+    if server == "papers":
+        return tool in _CAPPED_PAPERS_TOOLS
+    return False
+
+
+def _index_results_into_recent(
+    name: str,
+    result: Any,
+    recent_results: dict[str, dict[str, Any]],
+) -> None:
+    """Update ``recent_results`` for the namespaced tool's result shape.
+
+    The agent's ``json:candidates`` block resolves picks against this map.
+    ``papers.*`` results carry the schemas the dispatchers return; ``web.*``
+    hits are NOT indexed (no stable paper_id surface) — they exist purely
+    to broaden the agent's context.
+    """
+    if not isinstance(result, list):
+        return
+    if "." not in name:
+        return
+    server, tool = name.split(".", 1)
+    if server != "papers":
+        return  # web.* and other servers are context-only.
+    if tool == "search_library":
+        for hit in result:
+            if not isinstance(hit, dict):
+                continue
+            pid, meta = _index_library_hit(hit)
+            recent_results[pid] = meta
+    elif tool == "search_semantic_scholar":
+        for hit in result:
+            if not isinstance(hit, dict):
+                continue
+            pid, meta = _index_ss_hit(hit)
+            recent_results[pid] = meta
+    elif tool == "find_related_papers":
+        for hit in result:
+            if not isinstance(hit, dict):
+                continue
+            indexed = _index_related_hit(hit)
+            if indexed is not None:
+                pid, meta = indexed
+                recent_results[pid] = meta
+
+
 async def _dispatch_paper_search_tool_call(
     *,
     call: dict[str, Any],
     tracer: Tracer,
-    conn: aiosqlite.Connection,
-    session_id: int,
-    external_search_calls: int,
+    conn: aiosqlite.Connection,  # noqa: ARG001 — kept for facade-parity / future
+    session_id: int,  # noqa: ARG001 — registry threads session via headers
+    external_discovery_calls: int,
     recent_results: dict[str, dict[str, Any]],
+    registry: MCPRegistry,
 ) -> tuple[Any, int]:
-    """Dispatch a single tool call inside its own tracer step.
+    """Dispatch a single tool call through the MCP registry.
 
-    Updates ``recent_results`` in place. Returns ``(result, new_external_count)``.
-    The result is JSON-serialisable; the caller stitches it into the
-    LLM message list as a ``tool`` role message.
+    Updates ``recent_results`` in place. Returns
+    ``(result, new_discovery_count)``. The result is JSON-serialisable;
+    the caller stitches it into the LLM message list as a ``tool`` role
+    message. Tracer step is named ``paper_search:<namespaced_name>``
+    (e.g. ``paper_search:papers.search_library``).
+
+    Cap semantics: ``web.*`` + ``papers.search_semantic_scholar`` count
+    toward :data:`MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN`. A capped call
+    is rejected before reaching the registry (its slot remains free for
+    the next allowed call).
     """
     name = call["function"]["name"]
     args = json.loads(call["function"]["arguments"] or "{}")
     result: Any
-    new_external_count = external_search_calls
+    new_count = external_discovery_calls
     async with tracer.step(
         agent="research", tool=f"paper_search:{name}", model=None,
     ) as step:
         step.record_args(args)
         try:
-            if name == "search_library":
-                lib_hits = [
-                    asdict(h)
-                    for h in await search_library_dispatch(
-                        conn=conn, session_id=session_id, **args,
-                    )
-                ]
-                for hit in lib_hits:
-                    pid, meta = _index_library_hit(hit)
-                    recent_results[pid] = meta
-                result = [
-                    {**h, "paper_id": f"library:{h['paper_content_id']}"}
-                    for h in lib_hits
-                ]
-            elif name == "search_semantic_scholar":
-                if external_search_calls >= MAX_EXTERNAL_SEARCH_CALLS_PER_TURN:
-                    result = {
-                        "error": "external_search_call_cap_reached",
-                        "cap": MAX_EXTERNAL_SEARCH_CALLS_PER_TURN,
-                    }
-                else:
-                    new_external_count = external_search_calls + 1
-                    ss_hits = [
-                        asdict(h)
-                        for h in await search_semantic_scholar_dispatch(**args)
-                    ]
-                    for hit in ss_hits:
-                        pid, meta = _index_ss_hit(hit)
-                        recent_results[pid] = meta
-                    result = ss_hits
-            elif name == "find_related_papers":
-                related = await find_related_papers_dispatch(**args)
-                for hit in related:
-                    indexed = _index_related_hit(hit)
-                    if indexed is not None:
-                        pid, meta = indexed
-                        recent_results[pid] = meta
-                result = related
+            counts = _counts_against_discovery_cap(name)
+            if counts and external_discovery_calls >= MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN:
+                result = {
+                    "error": "external_discovery_call_cap_reached",
+                    "cap": MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN,
+                }
             else:
-                result = {"error": f"unknown_tool:{name}"}
+                if counts:
+                    new_count = external_discovery_calls + 1
+                result = await registry.call(name, args)
+                _index_results_into_recent(name, result, recent_results)
             step.record_result(
                 {
                     "summary": result
                     if isinstance(result, dict)
-                    else {"count": len(result)},
+                    else {"count": len(result) if hasattr(result, "__len__") else 1},
                 },
             )
         except Exception as exc:  # noqa: BLE001
             result = {"error": str(exc), "tool": name}
             step.record_result({"error": str(exc)})
             step.mark_error(str(exc))
-    return result, new_external_count
+    return result, new_count
 
 
 async def paper_search(
@@ -397,6 +444,7 @@ async def paper_search(
     model: str,
     conn: aiosqlite.Connection,
     pipeline: PaperPipeline,  # noqa: ARG001 — kept for interface parity (chat layer attaches)
+    mcp_registry: MCPRegistry,
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
 ) -> AsyncIterator[ToolStepYield | SearchResultsYield | FinalOnlyMessage]:
@@ -421,7 +469,7 @@ async def paper_search(
     session_id = state["session_id"]
     run_id: int = state["run_id"]
     last_yielded_step = -1
-    external_search_calls = 0
+    external_discovery_calls = 0
     # Accumulator: paper_id → metadata, keyed by the prefixed id the agent will
     # quote back in its ``json:candidates`` block.
     recent_results: dict[str, dict[str, Any]] = {}
@@ -429,7 +477,8 @@ async def paper_search(
     for iteration in range(MAX_TOOL_ITERATIONS):
         msg = await _paper_search_plan_step(
             messages=messages, tracer=tracer, model=model,
-            iteration=iteration, **litellm_kwargs,
+            iteration=iteration, mcp_registry=mcp_registry,
+            **litellm_kwargs,
         )
 
         # Yield the plan step that just closed.
@@ -457,10 +506,11 @@ async def paper_search(
         )
 
         for call in tool_calls:
-            result, external_search_calls = await _dispatch_paper_search_tool_call(
+            result, external_discovery_calls = await _dispatch_paper_search_tool_call(
                 call=call, tracer=tracer, conn=conn, session_id=session_id,
-                external_search_calls=external_search_calls,
+                external_discovery_calls=external_discovery_calls,
                 recent_results=recent_results,
+                registry=mcp_registry,
             )
 
             # Yield the tool-dispatch step that just closed.

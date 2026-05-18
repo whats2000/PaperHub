@@ -74,6 +74,7 @@ from paperhub.agents.research import (
 from paperhub.agents.state import AgentState
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
+from paperhub.mcp.registry import MCPRegistry
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.rag.retriever import Retriever
 from paperhub.tracing.tracer import Tracer
@@ -104,6 +105,7 @@ class ResearchDeps:
     conn: aiosqlite.Connection
     pipeline: PaperPipeline
     retriever: Retriever
+    mcp_registry: MCPRegistry
     # Optional adapter kwargs (e.g. ``mock_response`` injected by smoke tests).
     adapter_kwargs: ResearchExtraKwargs | None = None
     # Legacy generator hooks (see class docstring); not consumed by the
@@ -177,6 +179,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
             tracer=deps.tracer,
             model=deps.paper_qa_model,
             iteration=ps_iter,
+            mcp_registry=deps.mcp_registry,
             **_kwargs(deps),
         )
 
@@ -240,8 +243,9 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                 tracer=deps.tracer,
                 conn=deps.conn,
                 session_id=session_id,
-                external_search_calls=external_calls,
+                external_discovery_calls=external_calls,
                 recent_results=recent_results,
+                registry=deps.mcp_registry,
             )
             # Drain & emit the tool-dispatch step that just closed.
             recs = await drain_tool_calls_since(deps.conn, run_id, last_step)

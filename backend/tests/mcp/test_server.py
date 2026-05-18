@@ -29,7 +29,7 @@ import respx
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from paperhub.agents.research_tools import TOOL_SCHEMAS
+from paperhub.agents.research_tools import _BASE_PAPER_TOOL_SCHEMAS
 from paperhub.mcp.server import (
     PaperhubPapersRequestContextMiddleware,
     build_paperhub_papers_server,
@@ -137,7 +137,7 @@ async def test_tools_list_advertises_three_tools_matching_schemas() -> None:
     }
     by_name = {t.name: t for t in tools}
     schemas_by_name = {
-        s["function"]["name"]: s["function"] for s in TOOL_SCHEMAS
+        s["function"]["name"]: s["function"] for s in _BASE_PAPER_TOOL_SCHEMAS
     }
     for name, tool in by_name.items():
         expected = schemas_by_name[name]

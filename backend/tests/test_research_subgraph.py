@@ -85,6 +85,38 @@ async def _collect(
     return customs, final_state
 
 
+class _FakeRegistry:
+    """Routes ``papers.*`` calls back to the in-process dispatchers so
+    these subgraph tests stay close to the v2.4 behaviour while exercising
+    the v2.6 dispatch path (registry.call → dispatcher)."""
+
+    def __init__(self, *, conn: aiosqlite.Connection, session_id: int) -> None:
+        self._conn = conn
+        self._session_id = session_id
+
+    async def aggregate_tool_schemas(self) -> list[dict[str, Any]]:
+        # Subgraph tests don't assert on the palette shape; an empty list
+        # is fine — the LLM is mocked and asks for tools by name regardless.
+        return []
+
+    async def call(self, name: str, args: dict[str, Any]) -> Any:
+        from dataclasses import asdict, is_dataclass
+
+        from paperhub.agents import research_tools as rt
+
+        if name == "papers.search_library":
+            hits = await rt.search_library_dispatch(
+                conn=self._conn, session_id=self._session_id, **args,
+            )
+            return [asdict(h) if is_dataclass(h) else h for h in hits]
+        if name == "papers.search_semantic_scholar":
+            hits = await rt.search_semantic_scholar_dispatch(**args)
+            return [asdict(h) if is_dataclass(h) else h for h in hits]
+        if name == "papers.find_related_papers":
+            return await rt.find_related_papers_dispatch(**args)
+        raise RuntimeError(f"_FakeRegistry: unknown tool {name!r}")
+
+
 def _deps(
     *,
     conn: aiosqlite.Connection,
@@ -92,6 +124,8 @@ def _deps(
     pipeline: Any | None = None,
     retriever: Any | None = None,
     adapter: Any | None = None,
+    session_id: int = 1,
+    mcp_registry: Any | None = None,
 ) -> ResearchDeps:
     return ResearchDeps(
         adapter=adapter if adapter is not None else MagicMock(),
@@ -100,6 +134,11 @@ def _deps(
         conn=conn,
         pipeline=pipeline if pipeline is not None else MagicMock(),
         retriever=retriever if retriever is not None else MagicMock(spec=Retriever),
+        mcp_registry=(
+            mcp_registry
+            if mcp_registry is not None
+            else _FakeRegistry(conn=conn, session_id=session_id)
+        ),
     )
 
 
@@ -117,13 +156,13 @@ async def test_paper_search_subgraph_loops_until_no_tool_calls(
     returns final content. Iteration count proves the loop fires twice."""
     seq = [
         _msg(tool_calls=[
-            _tool_call("c1", "search_library", {"query": "transformers"}),
+            _tool_call("c1", "papers.search_library", {"query": "transformers"}),
         ]),
         _msg(content="No picks."),
     ]
     comp = AsyncMock(side_effect=seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=[])):
         graph = build_paper_search_subgraph(
             _deps(conn=migrated_db, tracer=fake_tracer, pipeline=fake_pipeline),
@@ -155,12 +194,12 @@ async def test_paper_search_subgraph_caps_at_max_iterations(
     ps_finalize at iter == MAX_TOOL_ITERATIONS rather than looping forever."""
     # Always return a tool call — the cap must kick in.
     seq = [
-        _msg(tool_calls=[_tool_call(f"c{i}", "search_library", {"query": "q"})])
+        _msg(tool_calls=[_tool_call(f"c{i}", "papers.search_library", {"query": "q"})])
         for i in range(MAX_TOOL_ITERATIONS + 5)
     ]
     comp = AsyncMock(side_effect=seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=[])):
         graph = build_paper_search_subgraph(
             _deps(conn=migrated_db, tracer=fake_tracer, pipeline=fake_pipeline),
@@ -201,12 +240,12 @@ async def test_paper_search_subgraph_emits_search_results_event(
         },
     ])
     seq = [
-        _msg(tool_calls=[_tool_call("c1", "search_library", {"query": "t"})]),
+        _msg(tool_calls=[_tool_call("c1", "papers.search_library", {"query": "t"})]),
         _msg(content="Found it.\n\n" + block),
     ]
     comp = AsyncMock(side_effect=seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_library_dispatch",
+         patch("paperhub.agents.research_tools.search_library_dispatch",
                new=AsyncMock(return_value=lib_hits)):
         graph = build_paper_search_subgraph(
             _deps(conn=migrated_db, tracer=fake_tracer, pipeline=fake_pipeline),
@@ -236,14 +275,14 @@ async def test_paper_search_subgraph_external_search_cap_inside_dispatch_node(
     """The ps_dispatch_tools node enforces the external-search cap (3)
     by short-circuiting the 4th call without touching the dispatcher."""
     seq = [
-        _msg(tool_calls=[_tool_call(f"c{i}", "search_semantic_scholar",
+        _msg(tool_calls=[_tool_call(f"c{i}", "papers.search_semantic_scholar",
                                     {"query": f"v{i}"})])
         for i in range(4)
     ] + [_msg(content="capped")]
     ss_dispatcher = AsyncMock(return_value=[])
     comp = AsyncMock(side_effect=seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+         patch("paperhub.agents.research_tools.search_semantic_scholar_dispatch",
                new=ss_dispatcher):
         graph = build_paper_search_subgraph(
             _deps(conn=migrated_db, tracer=fake_tracer, pipeline=fake_pipeline),
