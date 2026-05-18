@@ -74,7 +74,11 @@ def download_arxiv_source(arxiv_id: str, *, cache_root: Path) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # Build the source URL directly from the arxiv_id.  The URL is
-    # deterministic: https://arxiv.org/src/<arxiv_id>.
+    # deterministic: https://export.arxiv.org/src/<arxiv_id>.
+    # Use export.arxiv.org per arXiv's programmatic-access policy
+    # (https://info.arxiv.org/help/robots.html): the export mirror is set
+    # aside for programmatic harvesting so the main site stays responsive
+    # for interactive readers.
     # Previously this called _client.results() to invoke Result.source_url(),
     # but that method just builds the same URL by substituting "/pdf/" →
     # "/src/" in the PDF URL.  Calling the arXiv metadata API here is a
@@ -82,7 +86,7 @@ def download_arxiv_source(arxiv_id: str, *, cache_root: Path) -> Path:
     # by _lookup_arxiv_metadata), which triggers arXiv's per-IP rate limit
     # (HTTP 429) when ingesting an SS-sourced paper that already resolved
     # metadata from Semantic Scholar.
-    src_url = f"https://arxiv.org/src/{arxiv_id}"
+    src_url = f"https://export.arxiv.org/src/{arxiv_id}"
 
     # Fetch the tarball. arxiv 4.0 removed Result.download_source() — see
     # arxiv/__init__.py: source_url derives from pdf_url by swapping

@@ -76,7 +76,7 @@ def test_download_arxiv_source_writes_to_cache(tmp_path: Path) -> None:
     tarball_bytes = buf.getvalue()
 
     # Mock only the HTTP GET for the source URL — no arxiv API mock needed.
-    respx.get("https://arxiv.org/src/2403.01234").mock(
+    respx.get("https://export.arxiv.org/src/2403.01234").mock(
         return_value=httpx.Response(200, content=tarball_bytes),
     )
 
@@ -106,7 +106,7 @@ def test_download_arxiv_source_builds_src_url_without_arxiv_metadata_query(
         tar.addfile(info, io.BytesIO(src_text.encode("utf-8")))
     tarball_bytes = buf.getvalue()
 
-    respx.get("https://arxiv.org/src/1234.56789").mock(
+    respx.get("https://export.arxiv.org/src/1234.56789").mock(
         return_value=httpx.Response(200, content=tarball_bytes),
     )
 
@@ -143,7 +143,7 @@ def test_download_arxiv_source_preserves_subdirs(tmp_path: Path) -> None:
             tar.addfile(info, io.BytesIO(body.encode("utf-8")))
     tarball = buf.getvalue()
 
-    respx.get("https://arxiv.org/src/2510.03293").mock(
+    respx.get("https://export.arxiv.org/src/2510.03293").mock(
         return_value=httpx.Response(200, content=tarball),
     )
 
@@ -176,7 +176,7 @@ def test_download_arxiv_source_rejects_path_traversal(tmp_path: Path) -> None:
             tar.addfile(info, io.BytesIO(body.encode("utf-8")))
     tarball = buf.getvalue()
 
-    respx.get("https://arxiv.org/src/0001.00001").mock(
+    respx.get("https://export.arxiv.org/src/0001.00001").mock(
         return_value=httpx.Response(200, content=tarball),
     )
 
