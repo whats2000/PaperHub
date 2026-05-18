@@ -5,20 +5,42 @@ patterns copied + edited to fit the Plan-C Paper Pipeline contract.
 """
 from __future__ import annotations
 
+import logging
+import random
 import re
 import tarfile
+import time
 from pathlib import Path
 
 import arxiv
 import httpx
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 _client = arxiv.Client()
 
-_DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+# Tarballs can be 30+ MB and export.arxiv.org sometimes throttles to a few
+# hundred KB/s. 120 s total read budget covers ~50 MB at 400 KB/s with margin;
+# connect stays tight so a hung DNS / firewall fails fast.
+_DOWNLOAD_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 # arXiv asks for a contactable User-Agent per their Terms of Use.
 # https://info.arxiv.org/help/api/tou.html
 _USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
+
+# arxiv's export mirror occasionally drops large transfers mid-stream
+# (httpx.RemoteProtocolError "peer closed connection without sending
+# complete message body"). Retry with backoff before failing the ingest.
+_DOWNLOAD_MAX_ATTEMPTS = 3
+_DOWNLOAD_BACKOFF_BASE_S = 2.0
+_TRANSIENT_DOWNLOAD_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+)
 
 
 class ArxivResult(BaseModel):
@@ -91,17 +113,49 @@ def download_arxiv_source(arxiv_id: str, *, cache_root: Path) -> Path:
     # Fetch the tarball. arxiv 4.0 removed Result.download_source() — see
     # arxiv/__init__.py: source_url derives from pdf_url by swapping
     # "/pdf/" → "/src/". We download with httpx.
+    #
+    # Retry transient transport failures (RemoteProtocolError mid-stream,
+    # ReadTimeout, etc.). export.arxiv.org occasionally drops large
+    # transfers — observed empirically with a 22 MB tarball.
     tar_path = target_dir / f"{arxiv_id}.tar.gz"
-    with httpx.stream(
-        "GET", src_url,
-        timeout=_DOWNLOAD_TIMEOUT,
-        follow_redirects=True,
-        headers={"User-Agent": _USER_AGENT},
-    ) as resp:
-        resp.raise_for_status()
-        with tar_path.open("wb") as f:
-            for chunk in resp.iter_bytes():
-                f.write(chunk)
+    last_exc: BaseException | None = None
+    for attempt in range(1, _DOWNLOAD_MAX_ATTEMPTS + 1):
+        # Wipe any partial bytes from a prior failed attempt.
+        tar_path.unlink(missing_ok=True)
+        try:
+            with httpx.stream(
+                "GET", src_url,
+                timeout=_DOWNLOAD_TIMEOUT,
+                follow_redirects=True,
+                headers={"User-Agent": _USER_AGENT},
+            ) as resp:
+                resp.raise_for_status()
+                with tar_path.open("wb") as f:
+                    for chunk in resp.iter_bytes():
+                        f.write(chunk)
+            break  # success
+        except _TRANSIENT_DOWNLOAD_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt >= _DOWNLOAD_MAX_ATTEMPTS:
+                logger.warning(
+                    "arxiv download failed after %d attempts for %s: %s: %s",
+                    attempt, arxiv_id, type(exc).__name__, exc,
+                )
+                tar_path.unlink(missing_ok=True)
+                raise
+            # Exponential backoff with jitter: 2s, 4s, 8s, ...
+            backoff = _DOWNLOAD_BACKOFF_BASE_S * (2 ** (attempt - 1))
+            backoff += random.uniform(0, 0.5)
+            logger.warning(
+                "arxiv download attempt %d/%d for %s failed (%s: %s); "
+                "retrying in %.1fs",
+                attempt, _DOWNLOAD_MAX_ATTEMPTS, arxiv_id,
+                type(exc).__name__, exc, backoff,
+            )
+            time.sleep(backoff)
+    else:  # pragma: no cover — loop exits via break or raise
+        if last_exc is not None:
+            raise last_exc
 
     source_dir.mkdir(parents=True, exist_ok=True)
     # Resolve once so we can sanity-check that every extracted member stays

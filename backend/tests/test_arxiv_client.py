@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import arxiv
 import httpx
+import pytest
 import respx
 
 from paperhub.pipelines.arxiv_client import (
@@ -187,3 +188,100 @@ def test_download_arxiv_source_rejects_path_traversal(tmp_path: Path) -> None:
     # The `..`/escape path must not have escaped source_dir.
     assert not (source_dir.parent / "escape.tex").exists()
     assert not (source_dir / "escape.tex").exists()
+
+
+def test_download_arxiv_source_retries_on_transient_transport_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """export.arxiv.org occasionally drops large transfers mid-stream
+    (httpx.RemoteProtocolError "peer closed connection without sending
+    complete message body"). The download must retry transient transport
+    errors before failing the ingest."""
+    # Build a real tarball that the retry path will eventually receive.
+    src_text = r"\documentclass{article}\begin{document}Retried\end{document}"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(name="main.tex")
+        info.size = len(src_text)
+        tar.addfile(info, io.BytesIO(src_text.encode("utf-8")))
+    tarball_bytes = buf.getvalue()
+
+    # First call: raise RemoteProtocolError (simulating arxiv's drop).
+    # Second call: return the real tarball.
+    call_count = {"n": 0}
+
+    class _FakeStream:
+        def __init__(self, fail_first: bool) -> None:
+            self._fail_first = fail_first
+
+        def __enter__(self) -> "_FakeStream":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_bytes(self) -> object:
+            if self._fail_first:
+                raise httpx.RemoteProtocolError(
+                    "peer closed connection without sending complete message body",
+                )
+            return iter([tarball_bytes])
+
+    def _fake_httpx_stream(*_args: object, **_kwargs: object) -> _FakeStream:
+        call_count["n"] += 1
+        return _FakeStream(fail_first=call_count["n"] == 1)
+
+    monkeypatch.setattr(
+        "paperhub.pipelines.arxiv_client.httpx.stream", _fake_httpx_stream,
+    )
+    # Avoid the real exponential backoff sleep so the test stays fast.
+    monkeypatch.setattr(
+        "paperhub.pipelines.arxiv_client.time.sleep", lambda _s: None,
+    )
+
+    source_dir = download_arxiv_source("2503.00001", cache_root=tmp_path / "cache")
+    assert (source_dir / "main.tex").exists()
+    assert call_count["n"] == 2  # one failure, one success
+
+
+def test_download_arxiv_source_gives_up_after_max_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After exhausting the retry budget the transport error propagates so
+    the API layer can return a meaningful 5xx + the user can see a Retry
+    button instead of an opaque 500."""
+    call_count = {"n": 0}
+
+    class _AlwaysFailStream:
+        def __enter__(self) -> "_AlwaysFailStream":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_bytes(self) -> object:
+            raise httpx.RemoteProtocolError("transient failure")
+
+    def _fake_httpx_stream(*_args: object, **_kwargs: object) -> _AlwaysFailStream:
+        call_count["n"] += 1
+        return _AlwaysFailStream()
+
+    monkeypatch.setattr(
+        "paperhub.pipelines.arxiv_client.httpx.stream", _fake_httpx_stream,
+    )
+    monkeypatch.setattr(
+        "paperhub.pipelines.arxiv_client.time.sleep", lambda _s: None,
+    )
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        download_arxiv_source("2503.00002", cache_root=tmp_path / "cache")
+    # 3 attempts total per _DOWNLOAD_MAX_ATTEMPTS
+    assert call_count["n"] == 3
