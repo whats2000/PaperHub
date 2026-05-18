@@ -21,6 +21,25 @@
 #                     (a timeout raises MCPUnavailableError, so the agent
 #                     treats it like any transport failure)
 #
+# ─── paperhub-papers (Plan C v2.6 — in-process FastMCP) ──────────────────
+# The Research Agent's own three tools, re-exposed over MCP via the FastMCP
+# sub-app mounted on the backend at /mcp. No extra process, no second port:
+# this server lives inside the FastAPI app and reaches the same SQLite +
+# Chroma + Semantic Scholar HTTP client the in-process dispatchers use.
+# External MCP clients (Claude Desktop, Cursor) reach the same URL.
+#
+# The MCP registry connects LAZILY on first tool use (see SRS v2.6) so the
+# loopback URL pointing at the backend's own port does NOT deadlock uvicorn
+# startup. Hardcoded port `8000` matches the FastAPI default; override via
+# editing this file or running uvicorn on the same port.
+
+[[server]]
+name = "papers"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp"
+expose = ["search_library", "search_semantic_scholar", "find_related_papers"]
+timeout_seconds = 8.0
+
 # ─── open-webSearch (Plan C v2.5) ────────────────────────────────────────
 # Optional external dependency. To enable:
 #   npm install -g open-websearch

@@ -12,7 +12,11 @@ from paperhub.api import sessions as sessions_api
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.migrate import apply_schema
-from paperhub.mcp import MCPRegistry
+from paperhub.mcp import (
+    MCPRegistry,
+    build_paperhub_papers_server,
+    mount_paperhub_papers_on,
+)
 from paperhub.rag.chroma import ChromaStore
 
 
@@ -76,6 +80,11 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(sessions_api.router)
     app.include_router(papers_api.router)
+    # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
+    # External MCP clients (Claude Desktop, Cursor) and the agent (post
+    # Task v2.5-4) reach the three Research Agent tools over the MCP wire
+    # protocol via this URL — uniform dispatch path with `web.*`.
+    mount_paperhub_papers_on(app, build_paperhub_papers_server(), path="/mcp")
     return app
 
 
