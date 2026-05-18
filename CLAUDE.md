@@ -31,6 +31,7 @@ When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The n
 - **Shell:** PowerShell on Windows. Use PowerShell syntax (`;` to chain, `$LASTEXITCODE`, backtick line continuation). Bash also available but PowerShell is the default.
 - **Workflow:** spec → plan → subagent-driven implementation per task → spec compliance review → code quality review → next task. See [superpowers:subagent-driven-development] for the loop.
 - **System binaries:** `pandoc` is an optional dependency used by the Paper Pipeline to render LaTeX → HTML for the Citation Canvas. If absent, the pipeline falls back to `pylatexenc` (pure Python, lower quality). Install via `winget install pandoc` on Windows or your package manager elsewhere.
+- **`open-websearch` (optional, npm)** — no-key multi-engine web-search MCP server. Required for the v2 `paper_search` prompt (discover-then-refine flow). Install: `npm install -g open-websearch`. Run: `open-websearch serve` in a separate shell — the daemon listens on `:3000`. If absent, the backend's MCP registry simply doesn't expose `web.*` tools and the Research Agent falls back to the v1 (papers-only) prompt. Same posture as `pandoc`. The `paperhub-papers` MCP server is mounted IN-PROCESS at `/mcp` and requires no external install — it ships with the backend.
 - **Test discipline:** every implementation task is TDD. Failing test first, minimal impl, commit.
 - **Fix-now policy (no deferred logical issues):** If a review surfaces an issue, fix it before the next task. **Blockers must be fixed. Non-blocker LOGICAL issues must ALSO be fixed.** Only pure stylistic preferences (naming, comment wording with no semantic difference) may be deferred. Deferred logical items have a track record of becoming critical at the next stage — silent shadowing, partial-write windows, schema drift, masked errors — so we close them at source. The "known follow-ups" sections below are for items genuinely out-of-scope (e.g., waiting on a future plan's surface), not for "we'll get to it later." When in doubt, fix it now.
 
@@ -54,6 +55,15 @@ End-to-end smoke (real LLM, requires `backend/.env` with provider key — see `.
 
 ```powershell
 .\scripts\smoke_chat_real.ps1
+```
+
+`smoke_chat_real.ps1` runs two sub-tests: a chitchat turn (legacy) AND a paper_search turn that asserts the MCP dispatch path. The paper_search sub-test auto-detects whether `open-websearch serve` is reachable on `:3000` — daemon UP asserts the v2 `web.search` → `papers.search_semantic_scholar` chain; daemon DOWN asserts the v1 papers-only fallback (zero `web.*` tool_calls rows).
+
+MCP-surface smokes (added in Plan C v2.5/v2.6):
+
+```powershell
+.\scripts\smoke_mcp_papers.ps1    # always runnable — boots its own backend on :8770 and exercises the in-process FastMCP `papers` server via the MCP wire protocol
+.\scripts\smoke_mcp_web.ps1       # requires `open-websearch serve` running on :3000; exits 1 with a "start the daemon" hint when down
 ```
 
 Replay any past run from SQLite:

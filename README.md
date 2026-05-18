@@ -71,6 +71,21 @@ uv run uvicorn paperhub.app:app --reload --port 8000
 
 To run against a real LLM (Gemini by default), copy `backend/.env.example` to `backend/.env`, fill in `GEMINI_API_KEY`, and start the backend without the mock vars.
 
+### Web search (optional)
+
+The Research Agent's `paper_search` flow has two prompt variants: v1 (papers-only) and v2 (discover via web search, then refine via Semantic Scholar). v2 is gated on a separately-running [`open-websearch`](https://www.npmjs.com/package/open-websearch) MCP daemon — a no-key multi-engine web-search server that lives outside this repo.
+
+Install + run (separate shell):
+
+```powershell
+npm install -g open-websearch
+open-websearch serve            # long-lived daemon on http://localhost:3000
+```
+
+When the daemon is reachable, the backend's MCP registry auto-exposes `web.search` / `web.fetch` to the agent and the v2 prompt loads. When it's down, the agent silently falls back to v1 — no manual config needed. Same posture as `pandoc` (optional system binary documented in [CLAUDE.md](CLAUDE.md)).
+
+The `paperhub-papers` MCP surface (three Research Agent tools — `search_library`, `search_semantic_scholar`, `find_related_papers`) is mounted IN-PROCESS at `http://localhost:8000/mcp` and ships with the backend — no extra install. External MCP clients (Claude Desktop, Cursor) can reach the same URL.
+
 ### One-shot smoke scripts
 
 Backend-only mocked round-trip + SQLite replay:
@@ -91,6 +106,14 @@ Full end-to-end smoke (boots backend + frontend, asserts SSE round-trip, exits n
 
 ```powershell
 .\scripts\smoke_e2e.ps1
+```
+
+MCP surface smokes — verify the v2.5/v2.6 MCP dispatch infrastructure end-to-end:
+
+```powershell
+cd backend
+.\scripts\smoke_mcp_papers.ps1   # always runnable; boots its own backend on :8770 and hits the in-process `papers` FastMCP server via the MCP wire protocol
+.\scripts\smoke_mcp_web.ps1      # requires `open-websearch serve` on :3000; verifies the daemon advertises `web.search` and returns hits
 ```
 
 ### Replay a past chat turn from SQLite
