@@ -13,14 +13,28 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenCalledWith("hello world");
   });
 
-  it("submits via Ctrl+Enter", async () => {
+  it("submits via plain Enter (no modifier)", async () => {
     const onSubmit = vi.fn();
     render(<Composer onSubmit={onSubmit} disabled={false} />);
-    await userEvent.type(
-      screen.getByRole("textbox"),
-      "hi{Control>}{Enter}{/Control}",
-    );
+    await userEvent.type(screen.getByRole("textbox"), "hi");
+    await userEvent.keyboard("{Enter}");
     expect(onSubmit).toHaveBeenCalledWith("hi");
+  });
+
+  it("Shift+Enter inserts newline, does NOT submit", async () => {
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} disabled={false} />);
+    const textbox = screen.getByRole<HTMLTextAreaElement>("textbox");
+    await userEvent.type(textbox, "line one");
+    await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+    await userEvent.type(textbox, "line two");
+    // Should NOT have submitted yet
+    expect(onSubmit).not.toHaveBeenCalled();
+    // Submit via button
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0]).toContain("line one");
+    expect(onSubmit.mock.calls[0]![0]).toContain("line two");
   });
 
   it("disables the send button when disabled prop is true", () => {
@@ -44,5 +58,14 @@ describe("Composer", () => {
     await userEvent.type(textbox, "hello");
     await userEvent.click(screen.getByRole("button", { name: /send/i }));
     expect(textbox.value).toBe("");
+  });
+
+  it("renders 4 disabled capability action bar buttons with correct labels", () => {
+    render(<Composer onSubmit={() => {}} disabled={false} />);
+    const labels = ["Attach paper", "References", "Slides", "Compare"];
+    for (const label of labels) {
+      const btn = screen.getByRole("button", { name: label });
+      expect(btn).toBeDisabled();
+    }
   });
 });
