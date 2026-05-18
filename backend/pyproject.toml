@@ -49,5 +49,5 @@ plugins = ["pydantic.mypy"]
 exclude = ["tests/fixtures/"]
 
 [[tool.mypy.overrides]]
-module = ["litellm.*", "sse_starlette.*"]
+module = ["litellm.*", "sse_starlette.*", "arxiv.*"]
 ignore_missing_imports = true
