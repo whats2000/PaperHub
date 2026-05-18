@@ -1,4 +1,9 @@
-"""Research Agent paper_search loop tests (SRS v2.3, FR-07)."""
+"""Research Agent paper_search loop tests (SRS v2.4, FR-07).
+
+v2.4 contract: the agent is read-only. Each final assistant message ends
+with a ``json:candidates`` fenced block. Up to 2 picks may carry
+``finalize: true``; the chat layer auto-attaches those — NOT the agent.
+"""
 from __future__ import annotations
 
 import json
@@ -8,8 +13,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiosqlite
 import pytest
 
-from paperhub.agents.research import FinalOnlyMessage, ToolStepYield, paper_search
-from paperhub.agents.research_tools import AddResult, ArxivHit, LibraryHit
+from paperhub.agents.research import (
+    FinalOnlyMessage,
+    SearchResultsYield,
+    ToolStepYield,
+    _extract_candidates,
+    paper_search,
+)
+from paperhub.agents.research_tools import (
+    ArxivHit,
+    LibraryHit,
+    SemanticScholarToolHit,
+)
 from paperhub.tracing.tracer import Tracer
 
 pytestmark = pytest.mark.asyncio
@@ -49,6 +64,10 @@ def _async_completion_mock(responses: list[dict[str, Any]]) -> AsyncMock:
     return AsyncMock(side_effect=responses)
 
 
+def _candidates_block(picks: list[dict[str, Any]]) -> str:
+    return "```json:candidates\n" + json.dumps(picks) + "\n```"
+
+
 # ---------- Case 1: vague prompt → clarifying question, zero tool calls ----------
 async def test_vague_prompt_emits_clarifying_question(
     migrated_db: aiosqlite.Connection,
@@ -77,10 +96,12 @@ async def test_vague_prompt_emits_clarifying_question(
     # Streaming contract: at least the plan step is yielded as ToolStepYield.
     tool_steps = [i for i in items if isinstance(i, ToolStepYield)]
     assert len(tool_steps) >= 1
+    # No SearchResultsYield for clarification turns.
+    assert not any(isinstance(i, SearchResultsYield) for i in items)
 
 
-# ---------- Case 2: clear prompt → library hit → add → respond (no arxiv) ----------
-async def test_library_hit_skips_arxiv(
+# ---------- Case 2: library hit → shortlist (no external search) ----------
+async def test_library_hit_shortlists_without_external_search(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
     fake_pipeline: MagicMock,
@@ -100,41 +121,53 @@ async def test_library_hit_skips_arxiv(
             year=2017,
         ),
     ]
+    block = _candidates_block(
+        [
+            {
+                "paper_id": f"library:{seed_library}",
+                "reason": "the original transformer paper",
+                "finalize": True,
+            },
+        ],
+    )
     seq = [
         _msg(tool_calls=[
             _tool_call("c1", "search_library",
                        {"query": "transformer", "max_results": 8}),
         ]),
-        _msg(tool_calls=[
-            _tool_call("c2", "add_paper_to_session",
-                       {"paper_id": f"library:{seed_library}",
-                        "reason": "the original transformer paper"}),
-        ]),
-        _msg(content="Added 'Attention Is All You Need' from your library."),
+        _msg(
+            content=(
+                "I found 'Attention Is All You Need' in your library.\n\n" + block
+            ),
+        ),
     ]
     comp = _async_completion_mock(seq)
-    add_mock = AsyncMock(return_value=AddResult(
-        seed_library, 99, cache_hit=True, title="Attention Is All You Need",
-    ))
-    arxiv_mock = AsyncMock(return_value=[])
+    ss_mock = AsyncMock(return_value=[])
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
          patch("paperhub.agents.research.search_library_dispatch",
                new=AsyncMock(return_value=lib_hits)), \
-         patch("paperhub.agents.research.search_arxiv_dispatch", new=arxiv_mock), \
-         patch("paperhub.agents.research.add_paper_to_session_dispatch",
-               new=add_mock):
-        out, _items = await _collect(paper_search(
+         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+               new=ss_mock):
+        out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
         ))
+    # Final content has the prose but NOT the fenced block.
     assert "Attention Is All You Need" in out
-    add_mock.assert_awaited_once()
-    # I-8 #9: library-first preference — no search_arxiv ever called
-    arxiv_mock.assert_not_called()
+    assert "json:candidates" not in out
+    # The shortlist must be surfaced as a SearchResultsYield.
+    yields = [i for i in items if isinstance(i, SearchResultsYield)]
+    assert len(yields) == 1
+    cands = yields[0].candidates
+    assert len(cands) == 1
+    assert cands[0].paper_id == f"library:{seed_library}"
+    assert cands[0].finalize is True
+    # I-8 #9: library-first preference — no external search called
+    ss_mock.assert_not_called()
 
 
-# ---------- Case 3: library miss → arxiv → add → respond ----------
-async def test_library_miss_falls_through_to_arxiv(
+# ---------- Case 3: library miss → search_semantic_scholar → shortlist ----------
+async def test_library_miss_falls_through_to_semantic_scholar(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
     fake_pipeline: MagicMock,
@@ -143,44 +176,55 @@ async def test_library_miss_falls_through_to_arxiv(
         "run_id": 3, "branch": "", "session_id": 1,
         "user_message": "find me mixture-of-experts routing papers",
     }
-    arx_hits = [
-        ArxivHit(arxiv_id="2403.00001", title="MoE Routing X",
-                 abstract="...", year=2024, authors=["A"]),
+    ss_hits = [
+        SemanticScholarToolHit(
+            paper_id="arxiv:2403.00001",
+            title="MoE Routing X",
+            abstract="...",
+            year=2024,
+            authors=["A"],
+            arxiv_id="2403.00001",
+            has_open_pdf=True,
+        ),
     ]
+    block = _candidates_block(
+        [
+            {
+                "paper_id": "arxiv:2403.00001",
+                "reason": "top MoE routing hit",
+                "finalize": True,
+            },
+        ],
+    )
     seq = [
         _msg(tool_calls=[
             _tool_call("c1", "search_library",
                        {"query": "mixture of experts routing"}),
         ]),
         _msg(tool_calls=[
-            _tool_call("c2", "search_arxiv",
+            _tool_call("c2", "search_semantic_scholar",
                        {"query": "mixture of experts routing"}),
         ]),
-        _msg(tool_calls=[
-            _tool_call("c3", "add_paper_to_session",
-                       {"paper_id": "arxiv:2403.00001",
-                        "reason": "top MoE routing hit"}),
-        ]),
-        _msg(content="Added MoE Routing X from arXiv."),
+        _msg(content="Found 'MoE Routing X'.\n\n" + block),
     ]
     comp = _async_completion_mock(seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
          patch("paperhub.agents.research.search_library_dispatch",
                new=AsyncMock(return_value=[])), \
-         patch("paperhub.agents.research.search_arxiv_dispatch",
-               new=AsyncMock(return_value=arx_hits)), \
-         patch("paperhub.agents.research.add_paper_to_session_dispatch",
-               new=AsyncMock(return_value=AddResult(
-                   7, 12, cache_hit=False, title="MoE Routing X"))):
-        out, _items = await _collect(paper_search(
+         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+               new=AsyncMock(return_value=ss_hits)):
+        out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
         ))
     assert "MoE Routing X" in out
+    yields = [i for i in items if isinstance(i, SearchResultsYield)]
+    assert len(yields) == 1
+    assert yields[0].candidates[0].paper_id == "arxiv:2403.00001"
 
 
-# ---------- Case 4: arxiv refinement loop (N=2 calls, both succeed) ----------
-async def test_arxiv_refinement_within_cap(
+# ---------- Case 4: external search refinement loop (N=2 calls, both succeed) ----------
+async def test_external_search_refinement_within_cap(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
     fake_pipeline: MagicMock,
@@ -189,79 +233,188 @@ async def test_arxiv_refinement_within_cap(
         "run_id": 4, "branch": "", "session_id": 1,
         "user_message": "find recent paper_qa work",
     }
+    ss_hit = SemanticScholarToolHit(
+        paper_id="arxiv:2404.00002",
+        title="Paper QA", abstract="...", year=2024, authors=[],
+        arxiv_id="2404.00002", has_open_pdf=False,
+    )
+    block = _candidates_block(
+        [{"paper_id": "arxiv:2404.00002", "reason": "best refined hit"}],
+    )
     seq = [
         _msg(tool_calls=[
             _tool_call("c1", "search_library", {"query": "paper qa"}),
         ]),
         _msg(tool_calls=[
-            _tool_call("c2", "search_arxiv", {"query": "paper QA"}),
+            _tool_call("c2", "search_semantic_scholar", {"query": "paper QA"}),
         ]),
-        # First arxiv call weak — refine
+        # First external call weak — refine
         _msg(tool_calls=[
-            _tool_call("c3", "search_arxiv",
+            _tool_call("c3", "search_semantic_scholar",
                        {"query": "scientific paper question answering 2024"}),
         ]),
-        _msg(tool_calls=[
-            _tool_call("c4", "add_paper_to_session",
-                       {"paper_id": "arxiv:2404.00002",
-                        "reason": "best refined hit"}),
-        ]),
-        _msg(content="Added one paper after refining the query."),
+        _msg(content="Refined hit:\n\n" + block),
     ]
     comp = _async_completion_mock(seq)
-    arxiv_results: list[list[ArxivHit]] = [
+    ss_results: list[list[SemanticScholarToolHit]] = [
         [],
-        [ArxivHit("2404.00002", "Paper QA", "...", 2024, [])],
+        [ss_hit],
     ]
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
          patch("paperhub.agents.research.search_library_dispatch",
                new=AsyncMock(return_value=[])), \
-         patch("paperhub.agents.research.search_arxiv_dispatch",
-               new=AsyncMock(side_effect=arxiv_results)), \
-         patch("paperhub.agents.research.add_paper_to_session_dispatch",
-               new=AsyncMock(return_value=AddResult(
-                   8, 13, False, "Paper QA"))):
-        out, _items = await _collect(paper_search(
+         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+               new=AsyncMock(side_effect=ss_results)):
+        out, items = await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
         ))
-    assert "refining" in out.lower() or "Paper QA" in out
+    assert "Paper QA" in out or "Refined" in out
+    yields = [i for i in items if isinstance(i, SearchResultsYield)]
+    assert len(yields) == 1
+    assert yields[0].candidates[0].paper_id == "arxiv:2404.00002"
 
 
-# ---------- Case 5: arxiv cap (N=3) enforced — 4th call returns cap error ----------
-async def test_arxiv_cap_enforced_at_three(
+# ---------- Case 5: external search cap (N=3) enforced — 4th call returns cap error ----------
+async def test_external_search_cap_enforced_at_three(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Tracer,
     fake_pipeline: MagicMock,
 ) -> None:
-    """4th search_arxiv must NOT actually invoke the dispatcher;
-    tool result returns {error: arxiv_call_cap_reached}."""
+    """4th search_semantic_scholar must NOT actually invoke the dispatcher;
+    tool result returns {error: external_search_call_cap_reached}."""
     state = {
         "run_id": 5, "branch": "", "session_id": 1,
         "user_message": "keep refining",
     }
-    call4 = _tool_call("c4", "search_arxiv", {"query": "v4"})
+    call4 = _tool_call("c4", "search_semantic_scholar", {"query": "v4"})
     seq = [
-        _msg(tool_calls=[_tool_call("c1", "search_arxiv", {"query": "v1"})]),
-        _msg(tool_calls=[_tool_call("c2", "search_arxiv", {"query": "v2"})]),
-        _msg(tool_calls=[_tool_call("c3", "search_arxiv", {"query": "v3"})]),
+        _msg(tool_calls=[_tool_call("c1", "search_semantic_scholar", {"query": "v1"})]),
+        _msg(tool_calls=[_tool_call("c2", "search_semantic_scholar", {"query": "v2"})]),
+        _msg(tool_calls=[_tool_call("c3", "search_semantic_scholar", {"query": "v3"})]),
         _msg(tool_calls=[call4]),  # 4th — must be capped
         _msg(content="I've reached the search cap."),
     ]
-    arx_dispatcher_calls = 0
+    ss_calls = 0
 
-    async def fake_arxiv(**_: Any) -> list[ArxivHit]:
-        nonlocal arx_dispatcher_calls
-        arx_dispatcher_calls += 1
+    async def fake_ss(**_: Any) -> list[SemanticScholarToolHit]:
+        nonlocal ss_calls
+        ss_calls += 1
         return []
 
     comp = _async_completion_mock(seq)
     with patch("paperhub.agents.research.litellm.acompletion", new=comp), \
-         patch("paperhub.agents.research.search_arxiv_dispatch",
-               side_effect=fake_arxiv):
+         patch("paperhub.agents.research.search_semantic_scholar_dispatch",
+               side_effect=fake_ss):
         await _collect(paper_search(
             state, adapter=None, tracer=fake_tracer,
             model="m", conn=migrated_db, pipeline=fake_pipeline,
         ))
     # Dispatcher invoked only 3 times — 4th was capped before dispatch.
-    assert arx_dispatcher_calls == 3
+    assert ss_calls == 3
+
+
+# ---------------------------------------------------------------------------
+# _extract_candidates unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_candidates_parses_finalize_flag() -> None:
+    recent = {
+        "library:42": {
+            "title": "Foundational MoE",
+            "authors": [],
+            "year": 2017,
+            "abstract": "abs",
+            "arxiv_id": None,
+            "has_open_pdf": False,
+        },
+        "ss:abcd": {
+            "title": "Mamba follow-up",
+            "authors": ["X"],
+            "year": 2024,
+            "abstract": "abs",
+            "arxiv_id": None,
+            "has_open_pdf": True,
+        },
+    }
+    text = (
+        "Here are picks.\n\n"
+        "```json:candidates\n"
+        + json.dumps(
+            [
+                {"paper_id": "library:42", "reason": "r1", "finalize": True},
+                {"paper_id": "ss:abcd", "reason": "r2", "finalize": True},
+            ],
+        )
+        + "\n```\n"
+    )
+    cleaned, cands = _extract_candidates(text, recent)
+    assert "json:candidates" not in cleaned
+    assert len(cands) == 2
+    assert all(c.finalize for c in cands)
+    assert cands[0].paper_id == "library:42"
+    assert cands[1].paper_id == "ss:abcd"
+
+
+def test_extract_candidates_strips_json_block_from_final_text() -> None:
+    recent = {
+        "arxiv:1234.5678": {
+            "title": "T",
+            "authors": [],
+            "year": 2024,
+            "abstract": "",
+            "arxiv_id": "1234.5678",
+            "has_open_pdf": False,
+        },
+    }
+    text = (
+        "prose summary.\n\n"
+        "```json:candidates\n"
+        + json.dumps([{"paper_id": "arxiv:1234.5678", "reason": "r"}])
+        + "\n```\n"
+    )
+    cleaned, cands = _extract_candidates(text, recent)
+    assert "```" not in cleaned
+    assert "json:candidates" not in cleaned
+    assert "prose summary." in cleaned
+    assert len(cands) == 1
+
+
+def test_extract_candidates_tolerant_when_block_missing() -> None:
+    """Agent forgot the block → empty list, original text preserved."""
+    text = "Just a prose answer with no fenced block."
+    cleaned, cands = _extract_candidates(text, {})
+    assert cleaned == text
+    assert cands == []
+
+
+def test_extract_candidates_drops_unknown_paper_ids() -> None:
+    """The agent occasionally hallucinates paper_ids it didn't search for —
+    drop them defensively."""
+    recent = {
+        "library:1": {
+            "title": "Real",
+            "authors": [],
+            "year": 2024,
+            "abstract": "",
+            "arxiv_id": None,
+            "has_open_pdf": False,
+        },
+    }
+    text = (
+        "p\n```json:candidates\n"
+        + json.dumps(
+            [
+                {"paper_id": "library:1", "reason": "real"},
+                {"paper_id": "library:999", "reason": "halluc"},
+            ],
+        )
+        + "\n```\n"
+    )
+    _, cands = _extract_candidates(text, recent)
+    assert {c.paper_id for c in cands} == {"library:1"}
+
+
+# Compatibility: keep importable ArxivHit (used elsewhere); silence ruff
+_ = ArxivHit  # noqa: F841 — kept for backward-compat surface

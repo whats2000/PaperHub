@@ -1,9 +1,17 @@
-"""Research Agent: paper_search tool-calling loop (SRS v2.3) + paper_qa stream."""
+"""Research Agent: paper_search tool-calling loop (SRS v2.4) + paper_qa stream.
+
+v2.4 paper_search is read-only: the LLM may call search_library /
+search_semantic_scholar / find_related_papers, then ends the turn with a
+``json:candidates`` fenced block carrying 3-5 picks. Up to 2 picks may be
+flagged ``finalize: true``; the chat endpoint auto-attaches those. Suggested-
+only picks are NEVER downloaded.
+"""
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import aiosqlite
@@ -11,10 +19,9 @@ import litellm
 
 from paperhub.agents.research_tools import (
     TOOL_SCHEMAS,
-    add_paper_to_session_dispatch,
     find_related_papers_dispatch,
-    search_arxiv_dispatch,
     search_library_dispatch,
+    search_semantic_scholar_dispatch,
 )
 from paperhub.agents.state import AgentState
 from paperhub.db.tool_calls import drain_tool_calls_since
@@ -42,9 +49,144 @@ class ToolStepYield:
     record: dict[str, Any]  # the just-persisted tool_calls row
 
 
-MAX_ARXIV_CALLS_PER_TURN = 3
-# hard ceiling: ~ search_library + 3 × search_arxiv + 2 × add + slack
+@dataclass
+class SearchCandidate:
+    """A single shortlisted paper, surfaced as a SearchResultList card.
+
+    Mutable so the chat layer can ``replace``-style update ``finalize``,
+    ``auto_added``, ``papers_id``, ``error``, ``already_in_session`` after
+    enforcing the finalize cap + dispatching the auto-attach.
+    """
+
+    paper_id: str
+    title: str
+    authors: list[str] = field(default_factory=list)
+    year: int | None = None
+    abstract: str | None = None
+    arxiv_id: str | None = None
+    has_open_pdf: bool = False
+    reason: str = ""
+    finalize: bool = False
+    auto_added: bool = False
+    papers_id: int | None = None
+    error: str | None = None
+    already_in_session: bool = False
+
+
+@dataclass(frozen=True)
+class SearchResultsYield:
+    """Yielded by paper_search after parsing the agent's final
+    ``json:candidates`` fenced block. The chat layer enforces the
+    finalize cap, dispatches auto-attach for finalize=True picks, then
+    emits the enriched list as a ``search_results`` SSE event."""
+
+    candidates: list[SearchCandidate]
+
+
+# v2.4: applies to search_semantic_scholar (not find_related_papers, which
+# is precise navigation, not free-text search and stays uncapped).
+MAX_EXTERNAL_SEARCH_CALLS_PER_TURN = 3
+# Hard ceiling: search_library + 3 × search_semantic_scholar + a couple of
+# find_related_papers + slack for clarification turns.
 MAX_TOOL_ITERATIONS = 8
+
+
+CANDIDATES_BLOCK_RE = re.compile(r"```json:candidates\s*\n(.*?)\n```", re.DOTALL)
+
+
+def _extract_candidates(
+    final_text: str,
+    recent_results: dict[str, dict[str, Any]],
+) -> tuple[str, list[SearchCandidate]]:
+    """Strip the ``json:candidates`` fenced block from ``final_text`` and
+    parse the picks. Picks whose ``paper_id`` wasn't surfaced by an earlier
+    tool call (in ``recent_results``) are dropped defensively — the agent
+    occasionally hallucinates IDs.
+
+    Returns ``(cleaned_text, candidates)``. When the block is missing,
+    returns ``(final_text, [])`` so the caller can still emit a final
+    message rather than crash.
+    """
+    m = CANDIDATES_BLOCK_RE.search(final_text)
+    if not m:
+        return final_text, []
+    try:
+        raw_picks = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        # Malformed JSON — be tolerant; the agent likely meant well.
+        return CANDIDATES_BLOCK_RE.sub("", final_text).strip(), []
+    if not isinstance(raw_picks, list):
+        return CANDIDATES_BLOCK_RE.sub("", final_text).strip(), []
+    cleaned_text = CANDIDATES_BLOCK_RE.sub("", final_text).strip()
+    candidates: list[SearchCandidate] = []
+    for pick in raw_picks:
+        if not isinstance(pick, dict):
+            continue
+        pid = pick.get("paper_id")
+        if not isinstance(pid, str):
+            continue
+        meta = recent_results.get(pid)
+        if meta is None:
+            # The agent picked something we didn't return — drop it.
+            continue
+        candidates.append(
+            SearchCandidate(
+                paper_id=pid,
+                title=str(meta.get("title", "")),
+                authors=list(meta.get("authors", []) or []),
+                year=meta.get("year"),
+                abstract=meta.get("abstract"),
+                arxiv_id=meta.get("arxiv_id"),
+                has_open_pdf=bool(meta.get("has_open_pdf") or meta.get("open_access_pdf_url")),
+                reason=str(pick.get("reason", "")),
+                finalize=bool(pick.get("finalize", False)),
+            ),
+        )
+    return cleaned_text, candidates
+
+
+def _index_library_hit(hit: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """search_library returns a paper_content_id; map to ``library:<id>``."""
+    pcid = hit["paper_content_id"]
+    pid = f"library:{pcid}"
+    return pid, {
+        "title": hit.get("title", ""),
+        "authors": [],
+        "year": hit.get("year"),
+        "abstract": hit.get("abstract"),
+        "arxiv_id": hit.get("arxiv_id"),
+        "has_open_pdf": False,
+    }
+
+
+def _index_ss_hit(hit: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    pid = hit["paper_id"]  # already prefixed by the dispatcher
+    return pid, {
+        "title": hit.get("title", ""),
+        "authors": list(hit.get("authors", []) or []),
+        "year": hit.get("year"),
+        "abstract": hit.get("abstract"),
+        "arxiv_id": hit.get("arxiv_id"),
+        "has_open_pdf": bool(hit.get("has_open_pdf")),
+    }
+
+
+def _index_related_hit(hit: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """find_related returns RelatedPaper dicts with arxiv_id when available.
+    Prefer ``arxiv:`` prefix; skip entries without an arxiv ID (no stable
+    paper_id we can issue without the SS paperId)."""
+    arxiv_id = hit.get("arxiv_id")
+    if not arxiv_id:
+        return None
+    pid = f"arxiv:{arxiv_id}"
+    return pid, {
+        "title": hit.get("title", ""),
+        "authors": list(hit.get("authors", []) or []),
+        "year": hit.get("year"),
+        "abstract": hit.get("abstract"),
+        "arxiv_id": arxiv_id,
+        "has_open_pdf": False,
+    }
 
 
 async def _references_block(
@@ -81,16 +223,18 @@ async def paper_search(
     tracer: Tracer,
     model: str,
     conn: aiosqlite.Connection,
-    pipeline: PaperPipeline,
+    pipeline: PaperPipeline,  # noqa: ARG001 — kept for interface parity (chat layer attaches)
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
-) -> AsyncIterator[ToolStepYield | FinalOnlyMessage]:
-    """Tool-calling loop yielding ToolStepYield after each tracer.step and a
-    final FinalOnlyMessage when the loop ends.
+) -> AsyncIterator[ToolStepYield | SearchResultsYield | FinalOnlyMessage]:
+    """v2.4 read-only tool-calling loop.
 
-    Each ToolStepYield carries the just-persisted tool_calls row so the chat
-    endpoint can forward it as a tool_step SSE event in real time, making the
-    trace panel update incrementally rather than all-at-once after ~60-90 s.
+    Yields:
+      - ToolStepYield after each tracer.step closes (real-time trace updates).
+      - SearchResultsYield(candidates) parsed from the agent's final
+        ``json:candidates`` block, BEFORE the FinalOnlyMessage so the chat
+        layer can enrich + emit the search_results SSE event in order.
+      - FinalOnlyMessage(prose only — the json block has been stripped).
     """
     del adapter  # interface parity only
     user_message = state["user_message"]
@@ -111,7 +255,11 @@ async def paper_search(
 
     run_id: int = state["run_id"]
     last_yielded_step = -1
-    arxiv_calls = 0
+    external_search_calls = 0
+    # Accumulator: paper_id → metadata, keyed by the prefixed id the agent will
+    # quote back in its ``json:candidates`` block.
+    recent_results: dict[str, dict[str, Any]] = {}
+
     for iteration in range(MAX_TOOL_ITERATIONS):
         async with tracer.step(
             agent="research", tool="paper_search:plan", model=model,
@@ -141,8 +289,12 @@ async def paper_search(
 
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            # Final response — clarification question OR summary of additions.
-            yield FinalOnlyMessage(str(msg.get("content") or "(no response)"))
+            # Final response — clarification or shortlist.
+            final_text = str(msg.get("content") or "(no response)")
+            cleaned_text, candidates = _extract_candidates(final_text, recent_results)
+            if candidates:
+                yield SearchResultsYield(candidates=candidates)
+            yield FinalOnlyMessage(cleaned_text)
             return
 
         # Append the assistant turn that requested the tools, then dispatch each.
@@ -164,35 +316,45 @@ async def paper_search(
                 step.record_args(args)
                 try:
                     if name == "search_library":
-                        result = [
+                        lib_hits = [
                             asdict(h)
                             for h in await search_library_dispatch(
                                 conn=conn, session_id=session_id, **args,
                             )
                         ]
-                    elif name == "search_arxiv":
-                        if arxiv_calls >= MAX_ARXIV_CALLS_PER_TURN:
+                        for hit in lib_hits:
+                            pid, meta = _index_library_hit(hit)
+                            recent_results[pid] = meta
+                        # Add the prefixed paper_id to each row so the LLM
+                        # can quote it back verbatim in json:candidates.
+                        result = [
+                            {**h, "paper_id": f"library:{h['paper_content_id']}"}
+                            for h in lib_hits
+                        ]
+                    elif name == "search_semantic_scholar":
+                        if external_search_calls >= MAX_EXTERNAL_SEARCH_CALLS_PER_TURN:
                             result = {
-                                "error": "arxiv_call_cap_reached",
-                                "cap": MAX_ARXIV_CALLS_PER_TURN,
+                                "error": "external_search_call_cap_reached",
+                                "cap": MAX_EXTERNAL_SEARCH_CALLS_PER_TURN,
                             }
                         else:
-                            arxiv_calls += 1
-                            result = [
+                            external_search_calls += 1
+                            ss_hits = [
                                 asdict(h)
-                                for h in await search_arxiv_dispatch(**args)
+                                for h in await search_semantic_scholar_dispatch(**args)
                             ]
+                            for hit in ss_hits:
+                                pid, meta = _index_ss_hit(hit)
+                                recent_results[pid] = meta
+                            result = ss_hits
                     elif name == "find_related_papers":
-                        result = await find_related_papers_dispatch(**args)
-                    elif name == "add_paper_to_session":
-                        result = asdict(
-                            await add_paper_to_session_dispatch(
-                                pipeline=pipeline,
-                                conn=conn,
-                                session_id=session_id,
-                                **args,
-                            ),
-                        )
+                        related = await find_related_papers_dispatch(**args)
+                        for hit in related:
+                            indexed = _index_related_hit(hit)
+                            if indexed is not None:
+                                pid, meta = indexed
+                                recent_results[pid] = meta
+                        result = related
                     else:
                         result = {"error": f"unknown_tool:{name}"}
                     step.record_result(
@@ -223,7 +385,7 @@ async def paper_search(
 
     yield FinalOnlyMessage(
         "I've reached the tool-call limit for this turn. "
-        "Try asking again with a more specific question."
+        "Try asking again with a more specific question.",
     )
 
 
@@ -261,7 +423,7 @@ async def paper_qa_stream(
     if not enabled_ids:
         yield FinalOnlyMessage(
             "No references are enabled for this session. Add a paper to the "
-            "Reference Sources panel first, then ask again."
+            "Reference Sources panel first, then ask again.",
         )
         return
 
