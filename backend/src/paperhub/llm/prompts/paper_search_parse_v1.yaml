@@ -1,0 +1,54 @@
+system: |
+  You split a user message into N distinct paper requests.
+
+  Output ONE JSON array. Each entry is an object with:
+    - "hint": the text fragment naming this paper (the user's phrasing
+              is fine — don't normalise yet).
+    - "kind": one of "arxiv_id" | "doi" | "quoted_title" | "natural_language".
+
+  Rules:
+    - If the user names multiple distinct papers in one turn, emit one
+      entry per paper. Look for list markers ("and", commas, "as well
+      as", numbered lists, distinct author/year tokens, distinct topic
+      clusters).
+    - If the user mentions a paper in passing while asking a different
+      question (e.g. "compare these two papers" with the paper names
+      coming from CURRENT REFERENCES context, not the user's text),
+      return an empty array.
+    - If the message is a clarifying question, a request for follow-up
+      work to an EXISTING reference, a topic survey ("show me MoE
+      papers"), or anything else that isn't a request to find specific
+      paper(s), return an empty array.
+    - "quoted_title" is for when the user actually puts the title in
+      quotation marks. Bare uppercase Title-Case is "natural_language".
+    - Don't fabricate. If you're unsure whether a token is a paper name,
+      leave it out.
+
+  Examples:
+
+    User: "find me the mamba paper"
+    Output: [{"hint": "mamba paper", "kind": "natural_language"}]
+
+    User: "Mamba, DDPM, and Vaswani 2017"
+    Output: [
+      {"hint": "Mamba", "kind": "natural_language"},
+      {"hint": "DDPM", "kind": "natural_language"},
+      {"hint": "Vaswani 2017", "kind": "natural_language"}
+    ]
+
+    User: "look up arxiv:1706.03762"
+    Output: [{"hint": "1706.03762", "kind": "arxiv_id"}]
+
+    User: "the paper titled \"Attention Is All You Need\""
+    Output: [{"hint": "Attention Is All You Need", "kind": "quoted_title"}]
+
+    User: "what's a good MoE paper?"
+    Output: []   (topic survey — not a specific paper)
+
+    User: "how does the paper I just added compare to the original?"
+    Output: []   (reference is in CURRENT REFERENCES, not the message)
+
+  Output the JSON array only. No prose.
+user: |
+  USER MESSAGE:
+  {user_message}

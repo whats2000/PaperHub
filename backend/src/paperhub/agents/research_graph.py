@@ -1,17 +1,20 @@
-"""Research Agent subgraph (Plan C v4): paper_search + paper_qa as
-multi-node LangGraph topologies.
+"""Research Agent subgraphs (Plan C v2.7 — decomposed paper_search).
 
-This module retires the v3 2-node passthrough wrapper around the umbrella
-async generators in ``research.py``. The Research Agent's internal
-control flow is now expressed as graph edges:
+paper_search subgraph (linear with per-request inner kick-back loop):
 
-paper_search subgraph (cyclic tool-calling loop):
+    START → ps_parse → ps_process → ps_finalize → END
 
-    START → ps_plan
-    ps_plan → conditional_edges → {
-        "tool_calls":  ps_dispatch_tools  → ps_plan   (loop)
-        "done":        ps_finalize        → END
-    }
+  * ps_parse splits user_message into N ParsedRequests via the Parser
+    LLM (small model, no tools).
+  * ps_process fans out per-request (asyncio.gather) — each branch runs
+    a bounded Discover→Resolve loop with kick-back-on-not-found
+    (MAX_REFINEMENT_LOOPS = 2). web.search is the Discoverer's only
+    tool; papers.search_semantic_scholar is called exactly once per
+    request by the Resolver (architecturally, not by prompt rule).
+  * ps_finalize emits the search_results event deterministically from
+    the resolved set (Python builds SearchCandidates; the LLM never
+    writes a json:candidates block) and runs the Synthesizer for the
+    user-visible prose.
 
 paper_qa subgraph (count-branching):
 
@@ -21,30 +24,16 @@ paper_qa subgraph (count-branching):
         "map":     pq_map         → pq_synthesize → END
     }
 
-Outer dispatcher subgraph (the Research Agent proper):
-
-    START → research_dispatch → conditional_edges → {
-        "paper_search": paper_search_subgraph (compiled, embedded as node)
-        "paper_qa":     paper_qa_subgraph     (compiled, embedded as node)
-    }
-    each → END
-
 Streaming contract (consumed by ``api/chat.py``):
 
-  * ``stream_mode="custom"`` carries the per-node ``tool_step`` /
-    ``search_results`` / ``token`` events written via
-    ``langgraph.config.get_stream_writer()``;
-  * ``stream_mode="values"`` carries the final state snapshot so the chat
-    layer can lift ``state["final_response"]``.
-
-The compiled subgraph is a Runnable so LangGraph happily embeds it as a
-node via ``add_node("paper_search", compiled_ps_subgraph)`` — confirmed on
-LangGraph 1.2.0.
+  * ``stream_mode="custom"`` carries ``tool_step`` / ``search_results``
+    / ``token`` events written via ``langgraph.config.get_stream_writer()``.
+  * ``stream_mode="values"`` carries the final state snapshot so the
+    chat layer lifts ``state["final_response"]``.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -54,25 +43,24 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from paperhub.agents.research import (
-    MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN,
-    MAX_TOOL_ITERATIONS,
     FinalOnlyMessage,
-    _build_paper_search_messages,
-    _corrective_message,
-    _corrective_message_no_results,
-    _dispatch_paper_search_tool_call,
-    _extract_candidates,
+    SearchCandidate,
     _paper_qa_map_one,
     _paper_qa_single_stream,
     _paper_qa_synthesize_stream,
-    _paper_search_plan_step,
     _resolve_enabled_papers,
 )
 from paperhub.agents.research import (
     paper_qa_stream as _default_paper_qa_stream,
 )
-from paperhub.agents.research import (
-    paper_search as _default_paper_search,
+from paperhub.agents.research_pipeline import (
+    MAX_REFINEMENT_LOOPS,
+    ParsedRequest,
+    ResolvedPaper,
+    discover_canonical,
+    parse_user_message,
+    resolve_via_ss,
+    synthesize_prose,
 )
 from paperhub.agents.state import AgentState
 from paperhub.db.tool_calls import drain_tool_calls_since
@@ -111,10 +99,14 @@ class ResearchDeps:
     mcp_registry: MCPRegistry
     # Optional adapter kwargs (e.g. ``mock_response`` injected by smoke tests).
     adapter_kwargs: ResearchExtraKwargs | None = None
-    # Legacy generator hooks (see class docstring); not consumed by the
-    # subgraph nodes themselves, but exposed so the chat layer can fall
-    # back to a fake generator under monkeypatching.
-    paper_search_fn: PaperSearchFn = field(default=_default_paper_search)
+    # Paper-search Parser/Synthesizer model. Defaults to ``paper_qa_model``
+    # but the pipeline can use a cheaper small model for the Parser without
+    # affecting the Synthesizer's prose quality.
+    paper_search_parser_model: str | None = None
+    paper_search_synth_model: str | None = None
+    # Legacy generator hooks (paper_qa only — paper_search no longer has
+    # a legacy generator). Kept so test_chat_sse.py can monkeypatch
+    # paper_qa_stream with a fake.
     paper_qa_stream_fn: PaperQaStreamFn = field(default=_default_paper_qa_stream)
 
 
@@ -128,253 +120,185 @@ def _kwargs(deps: ResearchDeps) -> ResearchExtraKwargs:
 
 
 def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
-    """Compile the paper_search cyclic tool-calling subgraph.
+    """Compile the v2.7 decomposed paper_search subgraph.
 
     Topology::
 
-        START → ps_plan
-        ps_plan → conditional_edges → {
-            "tool_calls":  ps_dispatch_tools  → ps_plan   (loop)
-            "done":        ps_finalize        → END
-        }
+        START → ps_parse → ps_process → ps_finalize → END
 
-    State fields used (see ``models/domain.AgentState``):
+    Per-request fan-out (parallel via ``asyncio.gather``) happens inside
+    ``ps_process``; each branch runs a Discover→Resolve loop with kick-
+    back-on-not-found, capped by ``MAX_REFINEMENT_LOOPS``.
 
-      * ps_messages: running LLM message list (system + user + assistant + tool)
-      * ps_iter: iteration counter (cap: MAX_TOOL_ITERATIONS)
-      * ps_pending_tool_calls: tool_calls from the last ps_plan response
-      * ps_external_discovery_calls: external discovery call counter
-        (papers.search_semantic_scholar + every web.* tool)
-      * ps_recent_results: paper_id → metadata accumulator
-      * ps_final_text: assistant content when the loop terminates
-      * ps_last_step_index: latest tool_calls.step_index already streamed
+    Streaming: every node drains ``drain_tool_calls_since`` between
+    stages and pushes each new row via ``get_stream_writer()`` as a
+    ``tool_step`` custom event, so the frontend trace panel sees each
+    stage close in real time (NOT a single batch at the end).
     """
 
-    async def _drain_tool_steps(
-        state: AgentState,
-    ) -> tuple[list[dict[str, Any]], int]:
-        run_id: int = state["run_id"]
-        last = state.get("ps_last_step_index", -1)
-        recs = await drain_tool_calls_since(deps.conn, run_id, last)
-        if recs:
-            last = recs[-1]["step_index"]
-        return recs, last
+    parser_model = deps.paper_search_parser_model or deps.paper_qa_model
+    synth_model = deps.paper_search_synth_model or deps.paper_qa_model
 
-    async def _ps_plan(state: AgentState) -> AgentState:
+    async def _drain_and_stream_tool_steps(
+        last_step: int, run_id: int,
+    ) -> int:
+        """Drain tracer rows newer than ``last_step`` and emit them as
+        ``tool_step`` custom events. Returns the new last step_index.
+        Called between every pipeline stage so SSE clients see progress
+        as each stage closes."""
         writer = get_stream_writer()
-        # Seed messages on first iteration (no ps_messages yet).
-        if "ps_messages" not in state:
-            messages = await _build_paper_search_messages(
-                state=state, conn=deps.conn, mcp_registry=deps.mcp_registry,
-            )
-            recent_results: dict[str, dict[str, Any]] = {}
-            ps_iter = 0
-            external_calls = 0
-            last_step = state.get("ps_last_step_index", -1)
-        else:
-            messages = list(state["ps_messages"])
-            recent_results = dict(state.get("ps_recent_results", {}))
-            ps_iter = int(state.get("ps_iter", 0))
-            external_calls = int(state.get("ps_external_discovery_calls", 0))
-            last_step = int(state.get("ps_last_step_index", -1))
-
-        msg = await _paper_search_plan_step(
-            messages=messages,
-            tracer=deps.tracer,
-            model=deps.paper_qa_model,
-            iteration=ps_iter,
-            mcp_registry=deps.mcp_registry,
-            **_kwargs(deps),
-        )
-
-        # Drain & emit the plan step that just closed.
-        run_id: int = state["run_id"]
         recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
         for rec in recs:
             writer({"event": "tool_step", "record": rec})
             last_step = rec["step_index"]
+        return last_step
 
-        tool_calls = msg.get("tool_calls") or []
-        next_state: AgentState = {
-            **state,
-            "ps_messages": messages,
-            "ps_iter": ps_iter + 1,
-            "ps_recent_results": recent_results,
-            "ps_external_discovery_calls": external_calls,
-            "ps_last_step_index": last_step,
-        }
-        if tool_calls:
-            # Append the assistant turn that requested the tools so the
-            # next litellm call sees the conversation correctly.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": msg.get("content"),
-                    "tool_calls": tool_calls,
-                },
-            )
-            next_state["ps_messages"] = messages
-            next_state["ps_pending_tool_calls"] = list(tool_calls)
-            next_state["ps_final_text"] = ""
-            return next_state
-
-        # No tool calls → final response (clarification, shortlist, or
-        # hallucination). Apply the corrective-retry guard before
-        # finalizing: if the agent forgot the json:candidates block but
-        # recent_results has hits, OR if no results were surfaced but
-        # discovery budget remains, run ONE corrective re-plan.
-        final_text = str(msg.get("content") or "(no response)")
-        _, candidates = _extract_candidates(final_text, recent_results)
-        retry_used = bool(state.get("ps_corrective_retry_used", False))
-        tried_external = external_calls > 0
-        budget_left = external_calls < MAX_EXTERNAL_DISCOVERY_CALLS_PER_TURN
-
-        # Corrective-retry decision:
-        #   - Have parsed candidates → finalize.
-        #   - Retry already burned → finalize (agent got its one shot).
-        #   - Case A: recent_results non-empty but no block → retry
-        #     (agent has the paper_ids but forgot the block).
-        #   - Case B: empty recent_results AND external discovery WAS
-        #     tried AND budget remains → retry for different angles.
-        #   - Otherwise (library-only-empty, clarifying-question,
-        #     external-tried-budget-exhausted) → finalize as-is.
-        should_retry_for_block = (
-            not candidates and bool(recent_results) and not retry_used
-        )
-        should_retry_for_search = (
-            not candidates
-            and not recent_results
-            and tried_external
-            and budget_left
-            and not retry_used
-        )
-        if not (should_retry_for_block or should_retry_for_search):
-            next_state["ps_pending_tool_calls"] = []
-            next_state["ps_final_text"] = final_text
-            return next_state
-
-        if should_retry_for_block:
-            corrective_text = _corrective_message(recent_results)
-        else:  # should_retry_for_search
-            corrective_text = _corrective_message_no_results()
-
-        messages.append({"role": "assistant", "content": final_text})
-        messages.append({"role": "user", "content": corrective_text})
-        next_state["ps_messages"] = messages
-        next_state["ps_pending_tool_calls"] = []
-        next_state["ps_final_text"] = ""
-        next_state["ps_corrective_retry_used"] = True
-        next_state["ps_corrective_retry_pending"] = True
-        return next_state
-
-    def _ps_plan_branch(state: AgentState) -> str:
-        if state.get("ps_corrective_retry_pending"):
-            return "corrective"
-        pending = state.get("ps_pending_tool_calls") or []
-        if not pending:
-            return "done"
-        if int(state.get("ps_iter", 0)) >= MAX_TOOL_ITERATIONS:
-            # Edge case: model returned tool_calls on the cap iteration.
-            # Skip dispatch and finalize so we don't blow past the cap.
-            return "done"
-        return "tool_calls"
-
-    async def _ps_corrective(state: AgentState) -> AgentState:
-        """Passthrough that clears the retry-pending flag before looping
-        back to ps_plan. The actual corrective message was already
-        appended to ps_messages by _ps_plan; this node exists purely to
-        give the topology an explicit branch destination."""
-        return {**state, "ps_corrective_retry_pending": False}
-
-    async def _ps_dispatch_tools(state: AgentState) -> AgentState:
-        writer = get_stream_writer()
-        messages = list(state["ps_messages"])
-        recent_results = dict(state.get("ps_recent_results", {}))
-        external_calls = int(state.get("ps_external_discovery_calls", 0))
-        last_step = int(state.get("ps_last_step_index", -1))
+    async def _ps_parse(state: AgentState) -> AgentState:
         run_id: int = state["run_id"]
-        session_id: int = state["session_id"]
-        pending: list[dict[str, Any]] = list(state.get("ps_pending_tool_calls") or [])
-
-        for call in pending:
-            result, external_calls = await _dispatch_paper_search_tool_call(
-                call=call,
-                tracer=deps.tracer,
-                conn=deps.conn,
-                session_id=session_id,
-                external_discovery_calls=external_calls,
-                recent_results=recent_results,
-                registry=deps.mcp_registry,
-            )
-            # Drain & emit the tool-dispatch step that just closed.
-            recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
-            for rec in recs:
-                writer({"event": "tool_step", "record": rec})
-                last_step = rec["step_index"]
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call["id"],
-                    "name": call["function"]["name"],
-                    "content": json.dumps(result, default=str),
-                },
-            )
-
+        last_step = int(state.get("ps_last_step_index", -1))
+        requests = await parse_user_message(
+            state["user_message"],
+            tracer=deps.tracer,
+            model=parser_model,
+            **_kwargs(deps),
+        )
+        last_step = await _drain_and_stream_tool_steps(last_step, run_id)
         return {
             **state,
-            "ps_messages": messages,
-            "ps_pending_tool_calls": [],
-            "ps_recent_results": recent_results,
-            "ps_external_discovery_calls": external_calls,
+            "ps_parsed_requests": list(requests),
+            "ps_last_step_index": last_step,
+        }
+
+    async def _ps_process(state: AgentState) -> AgentState:
+        run_id: int = state["run_id"]
+        last_step = int(state.get("ps_last_step_index", -1))
+        requests: list[ParsedRequest] = list(state.get("ps_parsed_requests") or [])
+
+        async def _process_one(req: ParsedRequest) -> ResolvedPaper | ParsedRequest:
+            """Run a bounded Discover→Resolve loop for ONE request.
+            Returns ResolvedPaper on success, the original ParsedRequest
+            on exhaustion (signal to the Synthesizer that this one failed).
+            """
+            feedback = ""
+            for _iter in range(MAX_REFINEMENT_LOOPS):
+                identity = await discover_canonical(
+                    req,
+                    tracer=deps.tracer,
+                    model=parser_model,
+                    mcp_registry=deps.mcp_registry,
+                    prior_attempt_feedback=feedback,
+                    **_kwargs(deps),
+                )
+                if identity is None:
+                    feedback = (
+                        f"Discoverer couldn't pin down a canonical "
+                        f"identity for '{req.hint}'. Try entirely "
+                        f"different query angles next attempt."
+                    )
+                    continue
+                resolved = await resolve_via_ss(
+                    req, identity,
+                    tracer=deps.tracer,
+                    mcp_registry=deps.mcp_registry,
+                )
+                if resolved is not None:
+                    return resolved
+                feedback = (
+                    f"Resolver tried Semantic Scholar with a query built "
+                    f"from title='{identity.title}' "
+                    f"(author={identity.author_surname}, year={identity.year}) "
+                    f"but got no hits. Try different phrasings of the "
+                    f"canonical title or alternative author/year."
+                )
+            return req  # NotFound
+
+        if requests:
+            results = await asyncio.gather(
+                *[_process_one(r) for r in requests],
+                return_exceptions=False,
+            )
+        else:
+            results = []
+
+        resolved: list[ResolvedPaper] = [
+            r for r in results if isinstance(r, ResolvedPaper)
+        ]
+        not_found: list[ParsedRequest] = [
+            r for r in results if isinstance(r, ParsedRequest)
+        ]
+        last_step = await _drain_and_stream_tool_steps(last_step, run_id)
+        return {
+            **state,
+            "ps_resolved": resolved,
+            "ps_not_found": not_found,
             "ps_last_step_index": last_step,
         }
 
     async def _ps_finalize(state: AgentState) -> AgentState:
         writer = get_stream_writer()
-        ps_iter = int(state.get("ps_iter", 0))
-        final_text = state.get("ps_final_text", "") or ""
-        recent_results = state.get("ps_recent_results", {}) or {}
+        run_id: int = state["run_id"]
+        last_step = int(state.get("ps_last_step_index", -1))
+        resolved: list[ResolvedPaper] = list(state.get("ps_resolved") or [])
+        not_found: list[ParsedRequest] = list(state.get("ps_not_found") or [])
 
-        # If the loop terminated because we hit MAX_TOOL_ITERATIONS with the
-        # model still asking for tool calls, surface the cap message instead
-        # of parsing a non-existent json:candidates block.
-        if not final_text and ps_iter >= MAX_TOOL_ITERATIONS:
-            return {
-                **state,
-                "final_response": (
-                    "I've reached the tool-call limit for this turn. "
-                    "Try asking again with a more specific question."
-                ),
-            }
+        # Emit search_results event DETERMINISTICALLY from the resolved
+        # set. Block emission is architectural, not LLM-driven — the
+        # Synthesizer cannot accidentally drop it.
+        if resolved:
+            candidates: list[SearchCandidate] = []
+            for r in resolved:
+                meta = r.meta if isinstance(r.meta, dict) else {}
+                year_val = meta.get("year")
+                if not isinstance(year_val, int):
+                    year_val = r.identity.year
+                abstract_val = meta.get("abstract")
+                arxiv_val = meta.get("arxiv_id")
+                authors_val = meta.get("authors")
+                authors_list: list[str] = (
+                    [str(a) for a in authors_val]
+                    if isinstance(authors_val, list)
+                    else []
+                )
+                candidates.append(
+                    SearchCandidate(
+                        paper_id=r.paper_id,
+                        title=str(meta.get("title") or r.identity.title or ""),
+                        authors=authors_list,
+                        year=year_val,
+                        abstract=str(abstract_val) if isinstance(abstract_val, str) else None,
+                        arxiv_id=str(arxiv_val) if isinstance(arxiv_val, str) else None,
+                        has_open_pdf=bool(meta.get("has_open_pdf")),
+                        reason=(
+                            r.identity.rationale
+                            or "Discovered via web.search + Semantic Scholar."
+                        ),
+                        finalize=False,
+                    ),
+                )
+            writer({"event": "search_results", "candidates": candidates})
 
-        cleaned_text, candidates = _extract_candidates(final_text, recent_results)
-        if candidates:
-            writer(
-                {
-                    "event": "search_results",
-                    "candidates": list(candidates),
-                },
-            )
-        return {**state, "final_response": cleaned_text}
+        prose = await synthesize_prose(
+            resolved,
+            not_found,
+            user_message=state["user_message"],
+            tracer=deps.tracer,
+            model=synth_model,
+            **_kwargs(deps),
+        )
+        last_step = await _drain_and_stream_tool_steps(last_step, run_id)
+        return {
+            **state,
+            "final_response": prose,
+            "ps_last_step_index": last_step,
+        }
 
     g: StateGraph[AgentState, Any] = StateGraph(AgentState)
-    g.add_node("ps_plan", _ps_plan)
-    g.add_node("ps_dispatch_tools", _ps_dispatch_tools)
-    g.add_node("ps_corrective", _ps_corrective)
+    g.add_node("ps_parse", _ps_parse)
+    g.add_node("ps_process", _ps_process)
     g.add_node("ps_finalize", _ps_finalize)
-    g.add_edge(START, "ps_plan")
-    g.add_conditional_edges(
-        "ps_plan",
-        _ps_plan_branch,
-        {
-            "tool_calls": "ps_dispatch_tools",
-            "corrective": "ps_corrective",
-            "done": "ps_finalize",
-        },
-    )
-    g.add_edge("ps_dispatch_tools", "ps_plan")
-    g.add_edge("ps_corrective", "ps_plan")
+    g.add_edge(START, "ps_parse")
+    g.add_edge("ps_parse", "ps_process")
+    g.add_edge("ps_process", "ps_finalize")
     g.add_edge("ps_finalize", END)
     return g.compile()
 

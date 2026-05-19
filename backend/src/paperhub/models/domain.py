@@ -60,37 +60,24 @@ class AgentState(TypedDict, total=False):
     # ``NotRequired`` (the TypedDict is ``total=False``) — the dispatcher
     # node initialises the fields its branch needs, leaving the rest unset.
     # ------------------------------------------------------------------
-    # paper_search loop:
-    #   - ps_messages: the running LLM message list (system + history +
-    #     user + assistant/tool turns) that ps_plan and ps_dispatch_tools
-    #     mutate across iterations.
-    #   - ps_iter: iteration counter, capped by MAX_TOOL_ITERATIONS.
-    #   - ps_pending_tool_calls: tool_calls returned by the last ps_plan
-    #     call; consumed (drained) by ps_dispatch_tools.
-    #   - ps_external_discovery_calls: external discovery call counter
-    #     (cap spans papers.search_semantic_scholar + every web.* tool).
-    #   - ps_recent_results: paper_id → metadata, populated by
-    #     ps_dispatch_tools so ps_finalize can resolve candidates.
-    #   - ps_final_text: assistant content from the terminating ps_plan
-    #     call (no tool_calls); consumed by ps_finalize.
-    #   - ps_last_step_index: latest tool_calls step_index the subgraph
-    #     has already emitted via stream_writer; drained at every step.
-    ps_messages: list[dict[str, Any]]
-    ps_iter: int
-    ps_pending_tool_calls: list[dict[str, Any]]
-    ps_external_discovery_calls: int
-    ps_recent_results: dict[str, dict[str, Any]]
-    ps_final_text: str
+    # paper_search subgraph (v2.7 — decomposed pipeline):
+    #   - ps_parsed_requests: output of the Parser stage; list of
+    #     ParsedRequest dataclasses (one per distinct paper request the
+    #     user named). Empty list means "not a paper-search query" → the
+    #     synthesizer emits a clarifying question.
+    #   - ps_resolved: list of ResolvedPaper from successful
+    #     Discover→Resolve cycles (one per ParsedRequest that landed).
+    #   - ps_not_found: list of ParsedRequest entries whose
+    #     Discover→Resolve cycle exhausted MAX_REFINEMENT_LOOPS without
+    #     a SS hit. The Synthesizer mentions these explicitly so the
+    #     user knows what failed.
+    #   - ps_last_step_index: latest tool_calls.step_index the subgraph
+    #     has already emitted via stream_writer; drained between stages
+    #     so the chat layer sees rows in tracer-write order.
+    ps_parsed_requests: list[Any]   # list[ParsedRequest]
+    ps_resolved: list[Any]          # list[ResolvedPaper]
+    ps_not_found: list[Any]         # list[ParsedRequest]
     ps_last_step_index: int
-    # Hallucination guard (v2.6 follow-up): the subgraph runs ONE
-    # corrective re-plan when the agent ends with prose-only output but
-    # either (A) recent_results has hits the prose mentioned without a
-    # json:candidates block, or (B) no tools surfaced anything but the
-    # external-discovery budget hasn't been spent. Both cases ship the
-    # agent back to ps_plan with a corrective user message.
-    ps_corrective_retry_used: bool
-    ps_corrective_retry_pending: bool
-    ps_any_tools_called: bool
     # paper_qa branch:
     #   - pq_papers: enabled (paper_content_id, title) pairs resolved by
     #     pq_resolve and consumed by the count branch.
