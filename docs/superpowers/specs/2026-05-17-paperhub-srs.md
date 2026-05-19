@@ -11,7 +11,7 @@ scope: full-system
 
 | Field | Value |
 | --- | --- |
-| Version | v2.7 |
+| Version | v2.9 |
 | Date | May 2026 |
 | Posture | **UX-first + decomposed reuse.** PaperHub owns its data layer, RAG pipeline, and slide pipeline so every step is traceable. Utility functions are *copied and adapted* from two reference projects rather than consumed as services. |
 | Reference projects (utility source) | [`paper2slides-plus`](https://github.com/whats2000/paper2slides-plus) — extraction utils for arXiv / PDF / LaTeX projects + LaTeX helpers, **decomposed; not run as a service** · [`Intro2GenAI-hw1`](https://github.com/whats2000/Intro2GenAI-hw1) — chat-shell + MCP UX idioms ported to React |
