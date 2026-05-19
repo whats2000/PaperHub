@@ -159,6 +159,92 @@ async def test_upload_filename_sanitises_to_empty_falls_back_to_upload_stem(
 
 
 @pytest.mark.asyncio
+async def test_upload_pdf_with_title_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the caller supplies a non-empty ``title`` Form field, the
+    pipeline must honour it instead of falling back to ``upload_path.stem``.
+    Verifies the override flows all the way through to ``paper_content.title``
+    in the DB, not just the response body."""
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    sample_pdf = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with sample_pdf.open("rb") as f:
+            r = await ac.post(
+                "/papers/upload",
+                data={
+                    "session_id": str(session_id),
+                    "title": "Custom Title For The Paper",
+                },
+                files={"file": ("sample.pdf", f, "application/pdf")},
+            )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["title"] == "Custom Title For The Paper"
+
+    # DB-level assertion — make sure the override actually persisted.
+    async with (
+        aiosqlite.connect(tmp_path / "paperhub.db") as conn,
+        conn.execute(
+            "SELECT title FROM paper_content WHERE id = ?",
+            (body["paper_content_id"],),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "Custom Title For The Paper"
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_blank_title_falls_back_to_filename_stem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whitespace-only ``title`` must NOT shadow the filename-stem fallback.
+    Empty/blank user input is treated as "no override supplied"."""
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    sample_pdf = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with sample_pdf.open("rb") as f:
+            r = await ac.post(
+                "/papers/upload",
+                data={"session_id": str(session_id), "title": "   "},
+                files={"file": ("sample.pdf", f, "application/pdf")},
+            )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["title"] == "sample"
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_no_title_field_falls_back_to_filename_stem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: omitting the new ``title`` Form field entirely must
+    keep the existing happy-path behaviour (filename-stem fallback)."""
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    sample_pdf = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with sample_pdf.open("rb") as f:
+            r = await ac.post(
+                "/papers/upload",
+                data={"session_id": str(session_id)},
+                files={"file": ("sample.pdf", f, "application/pdf")},
+            )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["title"] == "sample"
+
+
+@pytest.mark.asyncio
 async def test_upload_same_bytes_returns_cache_hit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

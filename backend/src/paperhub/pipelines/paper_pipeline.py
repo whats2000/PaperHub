@@ -358,11 +358,17 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=render_source, kind=kind, out_path=html_path)
 
-        metadata: dict[str, object] = {
-            "title": req.upload_path.stem,
-            "authors": [],
-            "year": None,
-        }
+        # Honor caller-supplied metadata override (e.g. a title typed in the
+        # upload modal) the same way the arxiv branch does. Without one, fall
+        # back to the filename stem so legacy callers keep working.
+        if req.metadata_override is not None:
+            metadata: dict[str, object] = asdict(req.metadata_override)
+        else:
+            metadata = {
+                "title": req.upload_path.stem,
+                "authors": [],
+                "year": None,
+            }
 
         chunks = chunk_text(full_text)
         texts = [c.text for c in chunks]

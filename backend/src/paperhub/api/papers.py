@@ -185,6 +185,7 @@ async def upload_paper(
     request: Request,
     session_id: int = Form(..., ge=1),
     file: UploadFile = File(...),  # noqa: B008 — FastAPI parameter declaration idiom
+    title: str | None = Form(None),
 ) -> IngestResponse:
     """Accept a multipart PDF upload, sha256-key it, run the pipeline.
 
@@ -229,6 +230,20 @@ async def upload_paper(
                     )
                 out.write(chunk)
 
+        # Honor an optional caller-supplied title so the library row doesn't
+        # inherit the (often opaque) filename stem. Whitespace-only / missing
+        # title falls through to the pipeline's existing `upload_path.stem`
+        # fallback. Authors/year/abstract are intentionally NOT exposed here
+        # — that's a later PATCH surface.
+        metadata_override: ArxivMetadata | None = None
+        if title is not None and title.strip():
+            metadata_override = ArxivMetadata(
+                title=title.strip(),
+                abstract="",
+                authors=[],
+                year=None,
+            )
+
         async with open_db(settings.db_path) as conn:
             pipeline = PaperPipeline(
                 conn,
@@ -240,6 +255,7 @@ async def upload_paper(
                     session_id=session_id,
                     upload_path=upload_path,
                     upload_kind="pdf",
+                    metadata_override=metadata_override,
                 ),
             )
     finally:
