@@ -92,21 +92,36 @@ End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
 
 ## Dev-environment caveats
 
+- **Model server is a sibling process** (v2.8, see SRS §III-6). The embedder
+  (~110 MB SentenceTransformer) and reranker (~80 MB CrossEncoder) live in
+  `paperhub.modelserver` running on `127.0.0.1:8001`, NOT inside the uvicorn
+  worker. Plain `uv run uvicorn paperhub.app:app --reload --reload-dir src`
+  auto-spawns it on first boot via `paperhub.modelserver.spawn.ensure_running`
+  — every subsequent `--reload` of the worker reuses the same modelserver
+  (TCP probe of `/health` returns 200, spawn is skipped). The subprocess is
+  detached (Windows `CREATE_NEW_PROCESS_GROUP` / Unix `start_new_session`)
+  with `stdout=DEVNULL`, so it outlives reload cycles. Cleanup is
+  intentionally manual: `taskkill /f /im python.exe` filtered, OS reboot, or
+  use `scripts/start.ps1` which terminates it in a `finally` block. Opt out
+  with `PAPERHUB_INPROCESS_MODELS=1` (loads models in the worker — tests use
+  this; expect the embedder to reload on every backend edit).
 - **uvicorn `--reload` + concurrent `uv sync`**: if you run pytest in one shell
   while `uvicorn --reload` is active in another, the reload watcher will see
   uv's atomic-install temp dirs in `.venv/Lib/site-packages/` and trigger a
   mid-install reload → `ImportError: cannot import name 'Tokenizer' from
-  'tokenizers'`. Mitigation: launch uvicorn with `--reload-exclude '.venv/**'`,
-  or stop the dev server before running tests.
+  'tokenizers'`. Mitigation: launch uvicorn with `--reload-dir src` so it
+  only watches the source tree (NOT the venv), or stop the dev server
+  before running tests.
 
 ## Where things live
 
 - `backend/src/paperhub/` — application code (db, models, tracing, llm, agents, api, cli)
+- `backend/src/paperhub/modelserver/` — separate FastAPI app hosting embedder + reranker (v2.8)
 - `backend/tests/` — pytest suite; fixtures under `tests/fixtures/`
-- `backend/scripts/` — operator-facing smoke scripts
+- `backend/scripts/` — operator-facing smoke scripts + `start.ps1` (orchestrates modelserver + backend)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, future `papers_cache/`, future `chroma/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
-- `docs/superpowers/specs/` — SRS (**v2.7 current**)
+- `docs/superpowers/specs/` — SRS (**v2.8 current**)
 - `docs/superpowers/plans/` — implementation plans
 
 ## Plan A known follow-ups
@@ -123,11 +138,11 @@ Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-n
 
 ## Plan C known follow-ups
 
-Plan C as-shipped includes the v2.4 (suggest-only + SS-primary), v2.5 (MCP client + open-webSearch + paperhub-papers FastMCP), v2.6 stabilisation, and v2.7 (four-stage paper_search decomposition + opt-in CUDA + device auto-detect) rounds. See [docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) Plan C v2.4 / v2.5 / v2.6 / v2.7 sections.
+Plan C as-shipped includes the v2.4 (suggest-only + SS-primary), v2.5 (MCP client + open-webSearch + paperhub-papers FastMCP), v2.6 stabilisation, v2.7 (four-stage paper_search decomposition + opt-in CUDA + device auto-detect), and v2.8 (model server isolation) rounds. See [docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) Plan C v2.4 / v2.5 / v2.6 / v2.7 / v2.8 sections.
 
 Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-now policy):
 
-1. **Inference server extraction (in flight, NOT yet a numbered plan)** — pulling `Embedder` + `Reranker` out of the backend process into a separate server with its own GPU pool. Working name: **Plan I — Inference Server Extraction**. The v2.7 lazy-singleton-with-`device=` shape is the seam; `resolve_device()` becomes "what device does the remote server use" once it lands. Will surface in a future SRS revision once the tool-surface decision (HTTP vs gRPC vs an MCP server of its own) is settled.
+1. ~~**Inference server extraction (in flight, NOT yet a numbered plan)**~~ — closed in v2.8 as a Plan C cleanup pass rather than a separate Plan I. Embedder + reranker now run in `paperhub.modelserver` (FastAPI on `:8001`); the backend's `_HttpEmbedder` / `_HttpReranker` talk to it over httpx. Auto-spawned by lifespan, survives `uvicorn --reload` because the subprocess is detached (Windows `CREATE_NEW_PROCESS_GROUP` / Unix `start_new_session`). See SRS v2.8 + Plan C v2.8 section.
 
 ## Restricted operations
 
@@ -150,3 +165,6 @@ Local-only operations (commit, branch, stash, local edits) are fine to proceed o
 - "Why is `paper_search` four LLM stages?" → SRS v2.7 entry + §III-3 Research Agent row (single-prompt mega-agent failure mode + the decomposition's disjoint-tool-palette guarantee)
 - "How does the Discoverer avoid the quoting-kills-DuckDuckGo footgun?" → `paperhub.search_web(paper_hint, extra_terms)` structured-output wrapper hides the free-text query field (SRS v2.7 + Plan C Task v2.7-2)
 - "Why is torch CPU-only by default?" → opt-in CUDA wheels via `uv sync --extra cu126` (Plan C Task v2.7-3 + CLAUDE.md GPU operators bullet)
+- "Why does the embedder live in a separate process?" → SRS v2.8 + Plan C v2.8 section. Surviving `uvicorn --reload` requires the model weights to live OUTSIDE the worker; auto-spawn with detached subprocess + reuse-via-`/health`-probe means the modelserver outlives any number of backend edits.
+- "How do I see the modelserver's logs?" → either run `uv run paperhub-modelserver` directly in a second shell (overrides auto-spawn by being already-reachable when the backend boots), or use `scripts/start.ps1` which orchestrates both processes with visible stdout. Default auto-spawn pipes stdout to DEVNULL (detachment requirement).
+- "Tests are failing with `httpx.ConnectError` on embedder calls?" → conftest sets `PAPERHUB_INPROCESS_MODELS=1` at module-import time. If you bypassed conftest (running pytest with `--no-header --confcutdir=/elsewhere`), set the env var manually before pytest starts.

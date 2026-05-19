@@ -3546,3 +3546,90 @@ Browser verification (negative — Discoverer NotFound):
 - Made-up paper title → Parser parses → Discoverer 2 attempts → both NotFound → Resolver returns NotFound → Finalizer emits 0 candidates → Synthesizer prose explains "I couldn't find this. Try an arxiv ID or DOI." No silent failure, no crash.
 
 ---
+
+## Plan C v2.8 — Model server isolation (cleanup pass)
+
+The v2.7 "Forward-looking: remote inference server" note has been folded back into Plan C rather than spun out as a separate Plan I, because the actual delivered surface area turned out to be much smaller than the original speculation (one new package, two changed files, no schema change, no new endpoints). SRS §III-5.1 + §III-5.2 + §III-6 updated to match; SRS Revision History v2.8 entry covers the architecture-level changes. This section documents the implementation specifics.
+
+### Symptom that forced the fix
+
+Live MolmoACT2 testing showed a 10-minute hang on the first ingest after any backend edit, followed by `RemoteProtocolError: peer closed connection without sending complete message body`. Root cause: the embedder (`SentenceTransformer ~110 MB`) and reranker (`CrossEncoder ~80 MB`) were module-level singletons inside the uvicorn worker. Every `uvicorn --reload` (triggered by any save under `src/paperhub/`) re-imported the module graph and reset both singletons. The next ingest paid the full reload tax, and if another reload fired mid-load the worker died with the arxiv download still streaming. The user observed this as "the embed reranker got hot reload" — exactly the v2.7 forward-looking diagnosis, just not yet fixed.
+
+### Architecture
+
+Three pieces, all under `backend/src/paperhub/modelserver/`:
+
+| File | Role |
+| --- | --- |
+| `server.py` | FastAPI app exposing `GET /health`, `POST /embed {texts}` → `{vectors}`, `POST /rerank {query, texts, top_k}` → `{indices, scores}`. Models lazy-load on first non-empty request (empty inputs short-circuit without touching the model — cheap pre-warm probes). Lazy load uses `paperhub.config.load_settings()` and `paperhub.pipelines._device.resolve_device()`, so device-detect + CUDA wheel support inherited from v2.7 apply unchanged. |
+| `__main__.py` | `python -m paperhub.modelserver` (and `paperhub-modelserver` script entry in `pyproject.toml`). Reads `PAPERHUB_MODEL_SERVER_HOST` / `PAPERHUB_MODEL_SERVER_PORT`, launches uvicorn against the FastAPI app with `reload=False`, `workers=1`. NOT subject to `--reload` — its whole reason to exist is to survive backend reloads. |
+| `spawn.py` | `ensure_running(host, port)` TCP-probes `/health` first; reachable → returns `None` (reuse path); not reachable → spawns ONE detached `subprocess.Popen` with `stdout=DEVNULL` and a platform-specific detach flag (Windows `CREATE_NEW_PROCESS_GROUP`, Unix `start_new_session=True`). Polls `/health` until ready or timeout (30s default), then returns the process handle. Caller (lifespan) deliberately discards the handle so shutdown can't cascade-kill the modelserver. `terminate_subprocess()` is also exported but only used by tests and `scripts/start.ps1`. |
+
+Backend pipelines become thin HTTP clients:
+
+| File | v2.7 shape | v2.8 shape |
+| --- | --- | --- |
+| `pipelines/embedder.py` | One impl: `_SentenceTransformersEmbedder(model_name)` loading via `device=resolve_device()`. | Two impls behind the `Embedder` Protocol: `_HttpEmbedder(base_url)` over httpx.Client (default), `_SentenceTransformersEmbedder` retained for `PAPERHUB_INPROCESS_MODELS=1` (tests, low-resource hosts). Factory `get_embedder()` dispatches on `Settings.inprocess_models`. New `reset_singleton()` test helper. |
+| `rag/reranker.py` | One impl: `_CrossEncoderReranker(model_name)`. | Mirror of the embedder shape: `_HttpReranker`, `_CrossEncoderReranker`, factory + reset helper. |
+| `config.py` | `Settings` has `embedding_model`, `reranker_model`. | Adds `model_server_host`, `model_server_port`, `inprocess_models`. `PAPERHUB_INPROCESS_MODELS` accepts `1` / `true` / `yes` as truthy. |
+
+### Lifespan integration (`app.py`)
+
+```python
+# Detect-or-spawn. If a modelserver is already reachable, reuse it.
+# Otherwise spawn ONE detached subprocess that outlives this worker.
+# We DON'T track the proc on app.state and DON'T terminate at shutdown —
+# that's exactly what was killing the modelserver on every reload before.
+if not settings.inprocess_models:
+    await _modelserver_ensure_running(
+        host=settings.model_server_host,
+        port=settings.model_server_port,
+    )
+```
+
+Pre-warm became fire-and-forget. The previous synchronous `get_embedder().embed([""])` call inside lifespan blocked startup for the entire HF Hub cold-cache download (observed: 10+ minutes). Now:
+
+```python
+app.state.prewarm_task = asyncio.create_task(_prewarm_models(), name="paperhub-prewarm")
+```
+
+`_prewarm_models()` runs the blocking HTTP calls via `asyncio.to_thread` so the event loop stays responsive. Cancelled cleanly at shutdown.
+
+### Operator workflow
+
+Three paths, in order of operator friction:
+
+1. **Auto-spawn** (default): `uv run uvicorn paperhub.app:app --reload --reload-dir src`. First boot spawns the modelserver; every subsequent `--reload` of the worker reuses it via the `/health` probe. The leaked modelserver process is cleaned up at OS reboot or via manual `taskkill /f /im python.exe` / `pkill -f paperhub-modelserver`. Trade-off: modelserver stdout is `DEVNULL` (detachment requirement), so its logs aren't visible.
+2. **Explicit orchestration** (`scripts/start.ps1`): runs `paperhub-modelserver` as a tracked background process with visible stdout, polls `/health`, starts uvicorn with `--reload-dir src` in the foreground, terminates the modelserver in the script's finally block. Use when you need to see modelserver logs or want clean Ctrl+C cleanup.
+3. **In-process fallback** (`PAPERHUB_INPROCESS_MODELS=1`): loads models in the worker as before v2.8. Used by tests (conftest sets it at module import) and by hosts that can't run a second process.
+
+### Tests
+
+- `tests/conftest.py` sets `PAPERHUB_INPROCESS_MODELS=1` via `os.environ.setdefault` at module import time so no test ever dials a non-running modelserver. Autouse fixture `_reset_model_singletons` brackets every test, clearing the embedder + reranker singleton caches before and after.
+- New `tests/test_modelserver.py` covers the server's wire contract (FastAPI TestClient with stub `_embed_model` / `_rerank_model` fixtures), HTTP-client serialisation (`httpx.MockTransport` — no port binding needed), empty-input short-circuit on both client and server side, and factory dispatch on `Settings.inprocess_models`.
+- All 287 existing tests still green under in-process mode.
+
+### Quality gates
+
+```powershell
+uv run pytest -q                  # 287 passed
+uv run ruff check src tests       # clean
+uv run mypy src                   # 61 files, clean
+.\scripts\smoke_mcp_papers.ps1    # unchanged behaviour
+```
+
+Manual smoke verifying detach: spawn modelserver via `ensure_running`, exit the parent Python script without calling terminate, run `tasklist /FI "PID eq <pid>"` — process still listed, `/health` still 200. After manual `Stop-Process -Force` it's gone. Confirms `CREATE_NEW_PROCESS_GROUP` correctly insulates the child from parent-group kills.
+
+### Files touched
+
+- New: [`backend/src/paperhub/modelserver/__init__.py`](../../../backend/src/paperhub/modelserver/__init__.py), [`server.py`](../../../backend/src/paperhub/modelserver/server.py), [`__main__.py`](../../../backend/src/paperhub/modelserver/__main__.py), [`spawn.py`](../../../backend/src/paperhub/modelserver/spawn.py).
+- New: [`backend/tests/test_modelserver.py`](../../../backend/tests/test_modelserver.py).
+- New: [`backend/scripts/start.ps1`](../../../backend/scripts/start.ps1) — optional orchestrator.
+- Modify: [`backend/src/paperhub/config.py`](../../../backend/src/paperhub/config.py) — `model_server_host` / `model_server_port` / `inprocess_models`.
+- Modify: [`backend/src/paperhub/pipelines/embedder.py`](../../../backend/src/paperhub/pipelines/embedder.py) — add `_HttpEmbedder`, factory dispatch, `reset_singleton`.
+- Modify: [`backend/src/paperhub/rag/reranker.py`](../../../backend/src/paperhub/rag/reranker.py) — mirror.
+- Modify: [`backend/src/paperhub/app.py`](../../../backend/src/paperhub/app.py) — `ensure_running` call (no termination), fire-and-forget pre-warm task.
+- Modify: [`backend/pyproject.toml`](../../../backend/pyproject.toml) — `paperhub-modelserver` script entry.
+- Modify: [`backend/tests/conftest.py`](../../../backend/tests/conftest.py) — `PAPERHUB_INPROCESS_MODELS=1` + autouse singleton-reset fixture.
+
+---
