@@ -5,9 +5,11 @@ import { Composer } from "@/components/chat/Composer";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useReferencesSync } from "@/hooks/useReferencesSync";
 
 export function ChatPage() {
   useGlobalShortcuts();
+  useReferencesSync();
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
