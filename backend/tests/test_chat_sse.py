@@ -820,6 +820,82 @@ async def test_paper_search_auto_attaches_finalize_marked_candidates_and_populat
     assert row is not None
 
 
+async def test_paper_search_library_already_in_session_populates_papers_id(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """When the agent resurfaces a library:<id> candidate (finalize=False) for
+    a paper that's already attached to this session, the SSE payload must
+    carry both ``already_in_session=True`` AND ``papers_id`` populated so the
+    frontend SearchResultList can derive its "Added" badge from the live
+    references slice (and so it can flip back to the Add button when the user
+    removes the paper from the panel)."""
+    await _setup_paper_search_test(tmp_path, monkeypatch)
+
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
+            "abstract, source_path, source_dir_path, html_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "sha256:abc123", "pdf_upload", None, "abc123",
+                "Some PDF Paper", "[]", 2020,
+                "abs", "/tmp/s.pdf", "/tmp", "/tmp/s.html",
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    captured_session_id: list[int] = []
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        # Pre-seed the papers row inside the test app's connection so
+        # _mark_already_in_session sees it.
+        sid = state["session_id"]
+        captured_session_id.append(sid)
+        await conn.execute(
+            "INSERT INTO papers (session_id, paper_content_id, enabled) "
+            "VALUES (?, ?, 1)",
+            (sid, pcid),
+        )
+        await conn.commit()
+        yield SearchResultsYield(
+            candidates=[_candidate(f"library:{pcid}", finalize=False)],
+        )
+        yield FinalOnlyMessage("picks")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "find papers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    sr_payload = next(d for t, d in events if t == "search_results")
+    cand = sr_payload["candidates"][0]
+    assert cand["already_in_session"] is True
+    assert cand["papers_id"] is not None, (
+        "library: candidates already in session must carry papers_id so the "
+        "frontend can match them against referencesBySession (papers_id is "
+        "the only join key for PDF-only papers where arxiv_id is NULL)"
+    )
+    assert cand["auto_added"] is False  # finalize=False → not auto-attached
+
+
 async def test_paper_search_no_papers_row_for_suggested_only_candidates(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:

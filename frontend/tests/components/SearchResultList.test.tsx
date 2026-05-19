@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
 
 import { SearchResultList } from "@/components/chat/SearchResultList";
 import { useChatStore } from "@/store/chat";
@@ -30,15 +31,8 @@ function makeCandidate(
   };
 }
 
-const ingestResponse = {
-  paper_content_id: 1,
-  papers_id: 1,
-  cache_hit: false,
-  title: "Attention Is All You Need",
-};
-
-const sampleRefList: ReferenceItem[] = [
-  {
+function makeRef(overrides: Partial<ReferenceItem> = {}): ReferenceItem {
+  return {
     papers_id: 1,
     paper_content_id: 1,
     enabled: true,
@@ -47,8 +41,18 @@ const sampleRefList: ReferenceItem[] = [
     title: "Attention Is All You Need",
     year: 2017,
     kind: "arxiv",
-  },
-];
+    ...overrides,
+  };
+}
+
+const ingestResponse = {
+  paper_content_id: 1,
+  papers_id: 1,
+  cache_hit: false,
+  title: "Attention Is All You Need",
+};
+
+const sampleRefList: ReferenceItem[] = [makeRef()];
 
 const server = setupServer(
   http.post(`${API_BASE_URL}/papers`, () =>
@@ -86,15 +90,90 @@ describe("SearchResultList", () => {
     expect(screen.getByText("2020")).toBeInTheDocument();
   });
 
-  it("shows 'Added by agent' badge when auto_added=true", () => {
+  it("shows 'Added by agent' badge when auto_added=true AND ref exists", () => {
+    useChatStore.getState().setReferences(1, [makeRef({ papers_id: 42 })]);
     render(
       <SearchResultList
-        candidates={[makeCandidate({ auto_added: true })]}
+        candidates={[makeCandidate({ auto_added: true, papers_id: 42 })]}
         sessionId={1}
       />,
     );
     expect(screen.getByText(/added by agent/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add as reference/i })).toBeNull();
+  });
+
+  it("auto_added candidate falls back to 'Add as reference' when ref was removed", () => {
+    // Backend originally set auto_added=true + papers_id=42, but the user
+    // has since removed the paper from the panel — refs no longer contains
+    // papers_id=42, so the card must reflect the live state.
+    useChatStore.getState().setReferences(1, []);
+    render(
+      <SearchResultList
+        candidates={[makeCandidate({ auto_added: true, papers_id: 42 })]}
+        sessionId={1}
+      />,
+    );
+    expect(screen.queryByText(/added by agent/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /add as reference/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("derives 'Added' badge via arxiv_id when papers_id is not on the candidate", () => {
+    // User clicked Add on a previous render and we've refreshed refs since;
+    // the candidate didn't carry papers_id, but the arxiv_id bridges identity.
+    useChatStore.getState().setReferences(1, [
+      makeRef({ papers_id: 7, arxiv_id: "1706.03762" }),
+    ]);
+    render(
+      <SearchResultList
+        candidates={[makeCandidate({ papers_id: null, arxiv_id: "1706.03762" })]}
+        sessionId={1}
+      />,
+    );
+    expect(screen.getByText(/^added$/i)).toBeInTheDocument();
+  });
+
+  it("library candidate already in session derives 'Added' from ref membership", () => {
+    useChatStore.getState().setReferences(1, [
+      makeRef({ papers_id: 99, arxiv_id: null, kind: "pdf_upload" }),
+    ]);
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            paper_id: "library:5",
+            already_in_session: true,
+            papers_id: 99,
+            arxiv_id: null,
+            has_open_pdf: false,
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+    expect(screen.getByText(/^added$/i)).toBeInTheDocument();
+  });
+
+  it("flips back to 'Add as reference' after the matching ref is removed mid-render", () => {
+    useChatStore.getState().setReferences(1, [makeRef({ papers_id: 3 })]);
+    render(
+      <SearchResultList
+        candidates={[makeCandidate({ papers_id: 3 })]}
+        sessionId={1}
+      />,
+    );
+    expect(screen.getByText(/^added$/i)).toBeInTheDocument();
+
+    // Simulate the user removing the paper from ReferenceSourcesPanel.
+    act(() => {
+      useChatStore.getState().removeReferenceLocal(1, 3);
+    });
+
+    expect(screen.queryByText(/^added$/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /add as reference/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows 'Source unavailable' disabled button when error=no_ingestible_source", () => {
@@ -108,7 +187,7 @@ describe("SearchResultList", () => {
     expect(btn).toBeDisabled();
   });
 
-  it("calls POST /papers and marks paper added on Add button click", async () => {
+  it("calls POST /papers and shows 'Added' badge derived from optimistic ref insert", async () => {
     render(
       <SearchResultList
         candidates={[makeCandidate()]}
@@ -119,14 +198,15 @@ describe("SearchResultList", () => {
     await userEvent.click(addBtn);
 
     await waitFor(() => {
-      // After successful add, "Added" badge appears
-      expect(screen.getByText(/added/i)).toBeInTheDocument();
+      expect(screen.getByText(/^added$/i)).toBeInTheDocument();
     });
 
-    // Store marks the paper id as added
-    expect(
-      useChatStore.getState().addedPaperIds.has("arxiv:1706.03762"),
-    ).toBe(true);
+    // The optimistic insert (or the refresh roundtrip) populates refs so the
+    // derivation flips to "Added" — no separate addedPaperIds slice needed.
+    const refs = useChatStore.getState().referencesBySession[1] ?? [];
+    expect(refs.some((r) => r.papers_id === ingestResponse.papers_id)).toBe(
+      true,
+    );
   });
 
   it("refreshes session references after successful add", async () => {

@@ -18,7 +18,6 @@ interface ChatState {
   sidebarTab: "chats" | "references";
   composerDraft: string;
   referencesBySession: Record<number, ReferenceItem[]>;
-  addedPaperIds: Set<string>;
   newSession: () => number;
   selectSession: (id: number) => void;
   appendMessage: (sessionId: number, message: ChatMessage) => void;
@@ -57,12 +56,15 @@ interface ChatState {
     enabled: boolean,
   ) => void;
   removeReferenceLocal: (backendSessionId: number, papersId: number) => void;
+  appendReferenceLocal: (
+    backendSessionId: number,
+    ref: ReferenceItem,
+  ) => void;
   setSearchResults: (
     sessionId: number,
     runId: number,
     candidates: SearchResultCandidate[],
   ) => void;
-  markPaperAdded: (paperId: string) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
 }
 
@@ -106,7 +108,6 @@ export const useChatStore = create<ChatState>()(
       sidebarTab: "chats",
       composerDraft: "",
       referencesBySession: {},
-      addedPaperIds: new Set<string>(),
 
       newSession: () => {
         const id = get()._nextId;
@@ -289,7 +290,6 @@ export const useChatStore = create<ChatState>()(
           _nextId: 1,
           composerDraft: "",
           referencesBySession: {},
-          addedPaperIds: new Set<string>(),
         }),
 
       setReferences: (backendSessionId, refs) =>
@@ -326,16 +326,25 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
+      appendReferenceLocal: (backendSessionId, ref) =>
+        set((s) => {
+          const existing = s.referencesBySession[backendSessionId] ?? [];
+          if (existing.some((r) => r.papers_id === ref.papers_id)) {
+            return s;
+          }
+          return {
+            referencesBySession: {
+              ...s.referencesBySession,
+              [backendSessionId]: [...existing, ref],
+            },
+          };
+        }),
+
       setSearchResults: (sessionId, runId, candidates) =>
         set((s) => ({
           sessions: patchMessageByRunId(s.sessions, sessionId, runId, {
             search_results: candidates,
           }),
-        })),
-
-      markPaperAdded: (paperId) =>
-        set((s) => ({
-          addedPaperIds: new Set([...s.addedPaperIds, paperId]),
         })),
 
       ensureBackendSession: async (sessionId) => {

@@ -140,9 +140,16 @@ async def _mark_already_in_session(
     session_id: int,
     candidates: list[SearchCandidate],
 ) -> list[SearchCandidate]:
-    """For ``library:<id>`` candidates, set ``already_in_session=True`` when
-    a papers row already exists. (search_library filters these out for the
-    LLM, but the agent could resurface a library: id from history.)"""
+    """For ``library:<id>`` candidates, set ``already_in_session=True`` AND
+    populate ``papers_id`` when a papers row already exists. (search_library
+    filters these out for the LLM, but the agent could resurface a library:
+    id from history.)
+
+    ``papers_id`` is what lets the frontend SearchResultList derive its
+    "Added" badge from the live references slice — arxiv_id matching alone
+    is insufficient for PDF-only papers whose paper_content row has
+    ``arxiv_id=NULL`` on both sides.
+    """
     out: list[SearchCandidate] = []
     for c in candidates:
         if c.paper_id.startswith("library:"):
@@ -152,12 +159,14 @@ async def _mark_already_in_session(
                 out.append(c)
                 continue
             async with conn.execute(
-                "SELECT 1 FROM papers WHERE session_id = ? AND paper_content_id = ?",
+                "SELECT id FROM papers WHERE session_id = ? AND paper_content_id = ?",
                 (session_id, pcid),
             ) as cur:
                 row = await cur.fetchone()
             if row is not None:
-                out.append(replace(c, already_in_session=True))
+                out.append(
+                    replace(c, already_in_session=True, papers_id=int(row[0])),
+                )
                 continue
         out.append(c)
     return out
