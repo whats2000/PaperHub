@@ -69,3 +69,58 @@ def _token_count(s: str) -> int:
     import tiktoken
     enc = tiktoken.get_encoding("cl100k_base")
     return len(enc.encode(s))
+
+
+def test_chunker_never_emits_chunks_below_min_meaningful_length():
+    """Regression: dense LaTeX previously walked the cursor 1 char at a time
+    through ~1800 iterations, emitting single-period chunks. The shrink loop
+    must always make forward progress at section/paragraph scale."""
+    section = "\\section{Experiments}\n"
+    dense = ("$\\sum_{i=0}^{n} \\alpha_i \\beta_i + \\gamma$. " * 200)
+    chunks = chunk_text(section + dense)
+    tiny = [c for c in chunks if len(c.text) < 50]
+    assert len(tiny) <= 1, (
+        f"Expected at most 1 trailing sliver, got {len(tiny)} tiny chunks: "
+        f"{[c.text[:20] for c in tiny[:5]]}"
+    )
+    one_char = [c for c in chunks if len(c.text) == 1]
+    assert one_char == [], f"1-char chunks regressed: {one_char[:5]}"
+
+
+def test_chunker_strips_latex_line_comments():
+    """LaTeX % line-comments (single-% to end of line, unless escaped \\%) must
+    be removed before chunking so they don't end up as 'content' in chunks
+    served to the analyst LLM."""
+    text = (
+        "\\section{Method}\n"
+        "We use attention. % FIXME: cite original paper here\n"
+        "The key insight is X. 50\\% of the data is held out.\n"
+        "% TODO: rewrite this paragraph\n"
+        "Therefore Y holds.\n"
+    )
+    chunks = chunk_text(text)
+    joined = "\n".join(c.text for c in chunks)
+    assert "FIXME" not in joined
+    assert "TODO" not in joined
+    assert "rewrite this paragraph" not in joined
+    # Escaped % survives (it's literal "50%").
+    assert "50\\%" in joined or "50%" in joined
+    # Real content is preserved.
+    assert "attention" in joined
+    assert "Therefore Y holds" in joined
+
+
+def test_chunker_closes_at_paragraph_boundary_not_mid_sentence():
+    """When target token count is hit, prefer closing at a paragraph break
+    over a mid-sentence break."""
+    para1 = ("This is paragraph one. " * 50).strip()
+    para2 = ("This is paragraph two. " * 50).strip()
+    para3 = ("This is paragraph three. " * 50).strip()
+    text = f"\\section{{Body}}\n{para1}\n\n{para2}\n\n{para3}\n"
+    chunks = chunk_text(text, target=400, hard=600)
+    for c in chunks:
+        stripped = c.text.strip()
+        if c is not chunks[-1]:
+            assert stripped.endswith(".") or stripped.endswith("\n"), (
+                f"Chunk closes mid-sentence: ...{stripped[-30:]!r}"
+            )
