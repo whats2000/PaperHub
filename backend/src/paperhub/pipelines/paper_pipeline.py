@@ -32,7 +32,11 @@ from paperhub.pipelines.arxiv_client import (
 )
 from paperhub.pipelines.chunker import Chunk, chunk_text
 from paperhub.pipelines.embedder import Embedder, get_embedder
-from paperhub.pipelines.extract import extract_latex, extract_pdf
+from paperhub.pipelines.extract import (
+    _extract_pdf_metadata,
+    extract_latex,
+    extract_pdf,
+)
 from paperhub.pipelines.renderer import render_html
 from paperhub.rag.chroma import ChromaStore
 
@@ -359,10 +363,22 @@ class PaperPipeline:
         render_html(source=render_source, kind=kind, out_path=html_path)
 
         # Honor caller-supplied metadata override (e.g. a title typed in the
-        # upload modal) the same way the arxiv branch does. Without one, fall
-        # back to the filename stem so legacy callers keep working.
+        # upload modal) the same way the arxiv branch does. Without one, try
+        # the PDF's embedded metadata next (PyMuPDF ``doc.metadata``), and
+        # only fall back to the filename stem when nothing usable is found —
+        # so a publisher-prepared PDF with a real title ends up with the
+        # real title, not the DOI-named stem.
         if req.metadata_override is not None:
             metadata: dict[str, object] = asdict(req.metadata_override)
+        elif req.upload_kind == "pdf":
+            auto = _extract_pdf_metadata(req.upload_path)
+            title = str(auto["title"]) or req.upload_path.stem
+            metadata = {
+                "title": title,
+                "authors": auto["authors"],
+                "year": auto["year"],
+                "abstract": "",
+            }
         else:
             metadata = {
                 "title": req.upload_path.stem,

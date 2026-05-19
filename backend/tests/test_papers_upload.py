@@ -12,11 +12,40 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import pymupdf
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
+
+
+def _build_pdf_with_metadata(
+    tmp_path: Path,
+    *,
+    title: str,
+    filename: str = "paper.pdf",
+) -> Path:
+    """Build a 1-page PDF carrying the given embedded ``title`` metadata."""
+    doc = pymupdf.open()  # type: ignore[no-untyped-call]
+    doc.new_page()
+    doc.set_metadata({  # type: ignore[arg-type]
+        "format": "PDF 1.7",
+        "title": title,
+        "author": "",
+        "subject": "",
+        "keywords": "",
+        "creator": "",
+        "producer": "",
+        "creationDate": "",
+        "modDate": "",
+        "trapped": "",
+        "encryption": None,
+    })
+    out = tmp_path / filename
+    doc.save(str(out))
+    doc.close()
+    return out
 
 
 async def _seed_session(conn: aiosqlite.Connection) -> int:
@@ -242,6 +271,60 @@ async def test_upload_pdf_no_title_field_falls_back_to_filename_stem(
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["title"] == "sample"
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_auto_detects_embedded_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When no ``title`` override is supplied and the PDF carries a non-junk
+    title in ``doc.metadata['title']`` (publisher-prepared PDFs from Nature,
+    Springer, arXiv preprints, etc.), the pipeline must use the embedded
+    title instead of the filename stem. Covers the case where a DOI-named
+    file like ``s41598-021-94163-y.pdf`` should land with its real title."""
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    # The filename stem (``s41598-021-94163-y``) is intentionally
+    # different from the embedded title — auto-detect must prefer the
+    # embedded title.
+    pdf_path = _build_pdf_with_metadata(
+        tmp_path,
+        title="Single-cell RNA sequencing of human breast cancer",
+        filename="s41598-021-94163-y.pdf",
+    )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with pdf_path.open("rb") as f:
+            r = await ac.post(
+                "/papers/upload",
+                data={"session_id": str(session_id)},
+                files={
+                    "file": (
+                        "s41598-021-94163-y.pdf",
+                        f,
+                        "application/pdf",
+                    ),
+                },
+            )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["title"] == (
+        "Single-cell RNA sequencing of human breast cancer"
+    )
+    assert body["title"] != "s41598-021-94163-y"
+
+    # DB-level assertion — the auto-detected title must actually persist.
+    async with (
+        aiosqlite.connect(tmp_path / "paperhub.db") as conn,
+        conn.execute(
+            "SELECT title FROM paper_content WHERE id = ?",
+            (body["paper_content_id"],),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "Single-cell RNA sequencing of human breast cancer"
 
 
 @pytest.mark.asyncio
