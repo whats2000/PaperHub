@@ -121,7 +121,7 @@ End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
 - `backend/scripts/` — operator-facing smoke scripts + `start.ps1` (orchestrates modelserver + backend)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, future `papers_cache/`, future `chroma/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
-- `docs/superpowers/specs/` — SRS (**v2.8 current**)
+- `docs/superpowers/specs/` — SRS (**v2.9 current**)
 - `docs/superpowers/plans/` — implementation plans
 
 ## Plan A known follow-ups
@@ -138,7 +138,7 @@ Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-n
 
 ## Plan C known follow-ups
 
-Plan C as-shipped includes the v2.4 (suggest-only + SS-primary), v2.5 (MCP client + open-webSearch + paperhub-papers FastMCP), v2.6 stabilisation, v2.7 (four-stage paper_search decomposition + opt-in CUDA + device auto-detect), and v2.8 (model server isolation) rounds. See [docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) Plan C v2.4 / v2.5 / v2.6 / v2.7 / v2.8 sections.
+Plan C as-shipped includes the v2.4 (suggest-only + SS-primary), v2.5 (MCP client + open-webSearch + paperhub-papers FastMCP), v2.6 stabilisation, v2.7 (four-stage paper_search decomposition + opt-in CUDA + device auto-detect), v2.8 (model server isolation), and v2.9 (PDF upload + arXiv-ID manual import) rounds. v2.9 closes the Plan B Composer paperclip-placeholder follow-up by wiring it to a new `POST /papers/upload` multipart endpoint and the existing `POST /papers {paper_id: arxiv:<id>}` JSON path. See [docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) Plan C v2.4 / v2.5 / v2.6 / v2.7 / v2.8 / v2.9 sections.
 
 Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-now policy):
 
