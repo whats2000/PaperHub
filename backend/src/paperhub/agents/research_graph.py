@@ -55,6 +55,7 @@ from paperhub.agents.research import (
 )
 from paperhub.agents.research_pipeline import (
     MAX_REFINEMENT_LOOPS,
+    CanonicalIdentity,
     ParsedRequest,
     ResolvedPaper,
     discover_canonical,
@@ -170,46 +171,65 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         }
 
     async def _ps_process(state: AgentState) -> AgentState:
+        writer = get_stream_writer()
         run_id: int = state["run_id"]
         last_step = int(state.get("ps_last_step_index", -1))
         requests: list[ParsedRequest] = list(state.get("ps_parsed_requests") or [])
+        # Lock-guarded incremental drain: each gather task calls this
+        # after every Discoverer iteration / Resolver call so the
+        # frontend trace panel sees rows as they close, not all-at-once
+        # 40+ seconds later when gather() resolves. Same pattern as
+        # _pq_map below.
+        drain_lock = asyncio.Lock()
+
+        async def _emit_progress() -> None:
+            nonlocal last_step
+            async with drain_lock:
+                recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
+                for rec in recs:
+                    writer({"event": "tool_step", "record": rec})
+                    last_step = rec["step_index"]
 
         async def _process_one(req: ParsedRequest) -> ResolvedPaper | ParsedRequest:
-            """Run a bounded Discover→Resolve loop for ONE request.
-            Returns ResolvedPaper on success, the original ParsedRequest
-            on exhaustion (signal to the Synthesizer that this one failed).
+            """Discover → Resolve, exactly one pass.
+
+            web.search is keyword-matching to surface a likely canonical
+            title; it is not iterative refinement. So we do one Discover
+            attempt and one Resolver call, then trust the result. If the
+            Discoverer can't pin down a canonical identity, we fall back
+            to the raw hint as a low-confidence identity and still hand
+            off to the Resolver — Semantic Scholar's own fuzzy match may
+            land the paper even when the LLM couldn't.
             """
-            feedback = ""
             for _iter in range(MAX_REFINEMENT_LOOPS):
                 identity = await discover_canonical(
                     req,
                     tracer=deps.tracer,
                     model=parser_model,
                     mcp_registry=deps.mcp_registry,
-                    prior_attempt_feedback=feedback,
                     **_kwargs(deps),
                 )
+                await _emit_progress()
                 if identity is None:
-                    feedback = (
-                        f"Discoverer couldn't pin down a canonical "
-                        f"identity for '{req.hint}'. Try entirely "
-                        f"different query angles next attempt."
+                    # Don't abandon the request — let SS try the raw hint.
+                    identity = CanonicalIdentity(
+                        title=req.hint,
+                        author_surname=None,
+                        year=None,
+                        confidence="low",
+                        rationale=(
+                            "Discoverer couldn't extract a canonical "
+                            "title; passing raw hint to Semantic Scholar."
+                        ),
                     )
-                    continue
                 resolved = await resolve_via_ss(
                     req, identity,
                     tracer=deps.tracer,
                     mcp_registry=deps.mcp_registry,
                 )
+                await _emit_progress()
                 if resolved is not None:
                     return resolved
-                feedback = (
-                    f"Resolver tried Semantic Scholar with a query built "
-                    f"from title='{identity.title}' "
-                    f"(author={identity.author_surname}, year={identity.year}) "
-                    f"but got no hits. Try different phrasings of the "
-                    f"canonical title or alternative author/year."
-                )
             return req  # NotFound
 
         if requests:

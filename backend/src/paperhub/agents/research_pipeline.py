@@ -47,13 +47,19 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
-# Per-request inner loop: how many times we kick back from Resolver to
-# Discoverer when SS returns nothing. 2 means: initial attempt + one
-# refinement.
-MAX_REFINEMENT_LOOPS = 2
+# Per-request outer loop: how many Discover→Resolve attempts we make
+# per request. Set to 1 — web.search is keyword lookup, not iterative
+# research; kick-back loops just churn out near-duplicate titles with
+# tweaked years (observed in prod traces) without adding signal. When
+# the first attempt misses, surface NotFound to the user and let them
+# disambiguate with an arxiv ID or DOI instead.
+MAX_REFINEMENT_LOOPS = 1
 # Cap on web.search calls within ONE discover stage invocation. The
-# prompt asks for 2-3 distinct query angles; this is a hard ceiling.
-MAX_WEB_SEARCHES_PER_DISCOVER = 4
+# Discoverer's job is to keyword-match likely paper titles, not to
+# do open-ended research — 2 is enough for one canonical-title query
+# plus one alternate phrasing. After this cap, the inner loop forces
+# the LLM to commit to a canonical identity.
+MAX_WEB_SEARCHES_PER_DISCOVER = 2
 
 RequestKind = Literal["arxiv_id", "doi", "quoted_title", "natural_language"]
 
