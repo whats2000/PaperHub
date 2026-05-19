@@ -15,9 +15,23 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ingestPaper, parseArxivId, uploadPdf } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import type { IngestResult, ReferenceItem } from "@/types/domain";
+
+/** Snapshot the currently-active backend_session_id from the store. Reading
+ * via getState() (not the render closure) so handlers see the freshest value
+ * before AND after the network call — used to detect a session-switch race. */
+function currentBackendSessionId(): number | null {
+  const state = useChatStore.getState();
+  const active = state.sessions.find((s) => s.id === state.activeSessionId);
+  return active?.backend_session_id ?? null;
+}
 
 /** Build a ReferenceItem from an ingest/upload response. */
 function buildReference(
@@ -64,12 +78,20 @@ export function AttachPaperMenu() {
 
   async function handlePdfChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file || backendSessionId === null) return;
+    if (!file) return;
+    // Snapshot the active session at the start. If it changes before the
+    // upload resolves, discard the result so we don't poison the wrong bucket.
+    const startedAt = currentBackendSessionId();
+    if (startedAt === null) return;
     setBusy(true);
     try {
-      const result = await uploadPdf(backendSessionId, file);
+      const result = await uploadPdf(startedAt, file);
+      if (currentBackendSessionId() !== startedAt) {
+        toast.info("Session changed; the attached paper was discarded.");
+        return;
+      }
       const ref = buildReference(result, "pdf_upload", null);
-      appendReferenceLocal(backendSessionId, ref);
+      appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? "Re-attached" : "Added", {
         description: result.title,
       });
@@ -85,51 +107,65 @@ export function AttachPaperMenu() {
   }
 
   async function handleArxivSubmit() {
-    if (backendSessionId === null) return;
     setArxivError(null);
     const canonical = parseArxivId(arxivInput);
     if (canonical === null) {
       setArxivError("Not a valid arXiv identifier or URL.");
       return;
     }
+    // Snapshot the active session at the start. If it changes before the
+    // request resolves, discard the result.
+    const startedAt = currentBackendSessionId();
+    if (startedAt === null) return;
     setBusy(true);
     try {
-      const result = await ingestPaper(backendSessionId, canonical);
+      const result = await ingestPaper(startedAt, canonical);
+      if (currentBackendSessionId() !== startedAt) {
+        toast.info("Session changed; the attached paper was discarded.");
+        return;
+      }
       // canonical is "arxiv:<id>" — strip the prefix for ReferenceItem.arxiv_id.
       const arxivId = canonical.replace(/^arxiv:/i, "");
       const ref = buildReference(result, "arxiv", arxivId);
-      appendReferenceLocal(backendSessionId, ref);
+      appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? "Re-attached" : "Added", {
         description: result.title,
       });
       handleOpenChange(false);
     } catch (err) {
-      toast.error("Import failed", {
-        description: err instanceof Error ? err.message : String(err),
-      });
+      const raw = err instanceof Error ? err.message : String(err);
+      // Strip an `API <code>: ` prefix so the inline error stays terse —
+      // the toast keeps the unedited message for parity with PDF uploads.
+      const inlineMessage = raw.replace(/^API \d+:\s*/, "");
+      setArxivError(inlineMessage);
+      toast.error("Import failed", { description: raw });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            aria-label="Attach paper"
-            title="Attach paper — upload PDF or paste arXiv ID"
-          />
-        }
-      >
-        <Paperclip className="h-4 w-4" />
-      </PopoverTrigger>
+    <Tooltip>
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  aria-label="Attach paper"
+                />
+              }
+            >
+              <Paperclip className="h-4 w-4" />
+            </PopoverTrigger>
+          }
+        />
 
-      <PopoverContent
+        <PopoverContent
         side="top"
         align="start"
         className="w-80"
@@ -206,6 +242,10 @@ export function AttachPaperMenu() {
           </TabsContent>
         </Tabs>
       </PopoverContent>
-    </Popover>
+      </Popover>
+      <TooltipContent side="top">
+        Attach paper — upload PDF or paste arXiv ID
+      </TooltipContent>
+    </Tooltip>
   );
 }

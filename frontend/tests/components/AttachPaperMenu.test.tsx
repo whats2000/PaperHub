@@ -8,14 +8,15 @@ import { AttachPaperMenu } from "@/components/chat/AttachPaperMenu";
 import { API_BASE_URL } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 
-// Hoisted mock for sonner — toast.success/error are no-ops we can spy on.
-const { toastSuccess, toastError } = vi.hoisted(() => ({
+// Hoisted mock for sonner — toast.success/error/info are no-ops we can spy on.
+const { toastSuccess, toastError, toastInfo } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError },
+  toast: { success: toastSuccess, error: toastError, info: toastInfo },
 }));
 
 const server = setupServer();
@@ -27,6 +28,7 @@ beforeEach(() => {
   server.resetHandlers();
   toastSuccess.mockReset();
   toastError.mockReset();
+  toastInfo.mockReset();
   // Seed the store with an active session (id=1, backend_session_id=7).
   useChatStore.setState({
     sessions: [
@@ -229,6 +231,98 @@ describe("AttachPaperMenu", () => {
     ).toBeInTheDocument();
     expect(handlerSpy).not.toHaveBeenCalled();
     expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("discards the result and shows an info toast when the session changes mid-upload", async () => {
+    // Seed a second session up front so we can swap to it before the response.
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 1,
+          title: "Session A",
+          messages: [],
+          backend_session_id: 7,
+        },
+        {
+          id: 2,
+          title: "Session B",
+          messages: [],
+          backend_session_id: 9,
+        },
+      ],
+      activeSessionId: 1,
+      _nextId: 3,
+      referencesBySession: {},
+      composerDraft: "",
+    });
+
+    // Hold the response open until we say so.
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, async () => {
+        await responseGate;
+        return HttpResponse.json({
+          papers_id: 42,
+          paper_content_id: 100,
+          cache_hit: false,
+          title: "Late Paper",
+        });
+      }),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    const fileInput = screen.getByLabelText(/pdf file/i);
+    await userEvent.upload(fileInput, makePdfFile());
+
+    // While the upload is in flight, swap the active session.
+    useChatStore.setState({ activeSessionId: 2 });
+
+    // Now release the response and wait for the info toast.
+    releaseResponse();
+
+    await waitFor(() => {
+      expect(toastInfo).toHaveBeenCalledWith(
+        "Session changed; the attached paper was discarded.",
+      );
+    });
+
+    // Success toast must NOT have fired, and neither session's bucket must
+    // have been mutated.
+    expect(toastSuccess).not.toHaveBeenCalled();
+    const refsBySession = useChatStore.getState().referencesBySession;
+    expect(refsBySession[7] ?? []).toHaveLength(0);
+    expect(refsBySession[9] ?? []).toHaveLength(0);
+  });
+
+  it("renders an inline error and toasts when the arXiv backend call fails", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/papers`, () =>
+        HttpResponse.text("paper not found upstream", { status: 502 }),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.click(screen.getByRole("tab", { name: /paste arxiv id/i }));
+    const arxivInput = screen.getByLabelText(/arxiv identifier/i);
+    await userEvent.type(arxivInput, "2310.06825");
+    await userEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith(
+        "Import failed",
+        expect.anything(),
+      );
+    });
+    // The inline alert should also show the backend's message, stripped of
+    // any "API <code>: " prefix.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/paper not found upstream/i);
+    expect(alert.textContent).not.toMatch(/^API \d+:/);
   });
 
   it("disables both inputs and shows a hint when backend_session_id is null", async () => {
