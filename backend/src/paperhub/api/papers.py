@@ -193,11 +193,11 @@ async def upload_paper(
     file bytes don't belong in the LLM-visible tool surface. Calls
     ``PaperPipeline.ingest()`` directly with an upload_path IngestRequest.
 
-    Streams the request body to a tempfile in 1 MiB blocks so we never
-    materialise the full PDF in process memory, and enforces the
-    PAPERHUB_MAX_UPLOAD_MB ceiling on the byte count as we go (so a
-    pathological client that lies about Content-Length can't fill the
-    disk).
+    Streams the body in 1 MiB blocks (Starlette has already spooled the
+    multipart body to a temp file under the hood, so the in-memory
+    guarantee is bounded by Starlette's SpooledTemporaryFile threshold,
+    not us) and enforces the PAPERHUB_MAX_UPLOAD_MB ceiling mid-stream,
+    so we never write past the byte cap on disk.
     """
     settings = load_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
