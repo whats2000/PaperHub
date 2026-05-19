@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 
 interface AddButtonProps {
   candidate: SearchResultCandidate;
-  sessionId: number;
+  sessionId: number | null;
 }
 
 function AddButton({ candidate, sessionId }: AddButtonProps) {
@@ -18,6 +18,22 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
   const addedPaperIds = useChatStore((s) => s.addedPaperIds);
   const markPaperAdded = useChatStore((s) => s.markPaperAdded);
   const setReferences = useChatStore((s) => s.setReferences);
+
+  if (sessionId === null) {
+    // Race window: backend `session` SSE event hasn't landed yet, so
+    // we don't have a session id to POST against. Disable the button
+    // with a tooltip so the user understands it's transient.
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled
+        title="Establishing session — try again in a second"
+      >
+        Add as reference
+      </Button>
+    );
+  }
 
   if (candidate.auto_added) {
     return (
@@ -75,9 +91,14 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
   }
 
   async function doIngest() {
+    // sessionId is narrowed non-null by the early-return guard at the
+    // top of AddButton; TS can't see that across the closure boundary,
+    // so we capture a local non-null alias.
+    if (sessionId === null) return;
+    const sid = sessionId;
     setState("loading");
     try {
-      await ingestPaper(sessionId, candidate.paper_id, {
+      await ingestPaper(sid, candidate.paper_id, {
         title: candidate.title,
         abstract: candidate.abstract,
         authors: candidate.authors,
@@ -86,8 +107,8 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
       markPaperAdded(candidate.paper_id);
       setState("added");
       // Refresh the reference drawer so it reflects the newly added paper
-      const refs = await listSessionReferences(sessionId);
-      setReferences(sessionId, refs);
+      const refs = await listSessionReferences(sid);
+      setReferences(sid, refs);
     } catch {
       setState("error");
     }
@@ -117,7 +138,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
 
 interface Props {
   candidates: SearchResultCandidate[];
-  sessionId: number;
+  sessionId: number | null;
 }
 
 export function SearchResultList({ candidates, sessionId }: Props) {

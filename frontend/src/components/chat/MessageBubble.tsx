@@ -78,11 +78,15 @@ export function MessageBubble({ message, onRetry, backendSessionId }: Props) {
           )}
         </div>
 
-        {/* Search results — rendered below the bubble body */}
-        {hasSearchResults && backendSessionId != null && (
+        {/* Search results — rendered below the bubble body.
+            sessionId may be transiently null in the race window between
+            the assistant placeholder render and the `session` SSE event
+            populating backend_session_id; SearchResultList handles that
+            by disabling the Add button until the id arrives. */}
+        {hasSearchResults && (
           <SearchResultList
             candidates={message.search_results!}
-            sessionId={backendSessionId}
+            sessionId={backendSessionId ?? null}
           />
         )}
 
