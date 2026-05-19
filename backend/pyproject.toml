@@ -98,6 +98,7 @@ dev = [
 [project.scripts]
 paperhub-replay = "paperhub.cli.replay:main"
 paperhub-modelserver = "paperhub.modelserver.__main__:main"
+paperhub-reingest = "paperhub.cli.reingest:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
