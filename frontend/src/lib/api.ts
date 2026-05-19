@@ -144,3 +144,46 @@ export async function deleteLibraryPaper(
   const text = await res.text().catch(() => "");
   throw new Error(`API ${res.status}: ${text}`);
 }
+
+const ARXIV_NEW = /^(\d{4}\.\d{4,5})(v\d+)?$/;
+const ARXIV_OLD = /^([a-z-]+(\.[A-Z]{2})?\/\d{7})(v\d+)?$/;
+
+/** Normalise user-supplied arXiv input to canonical `arxiv:<id>` form, or
+ * null if it doesn't look like an arXiv identifier. Accepts bare IDs,
+ * `arxiv:` prefix, and `arxiv.org/abs/` or `arxiv.org/pdf/` URLs, with or
+ * without a trailing `vN` version suffix. */
+export function parseArxivId(input: string): string | null {
+  let s = input.trim();
+  if (!s) return null;
+  // Strip URL forms first.
+  const urlMatch = s.match(/arxiv\.org\/(?:abs|pdf)\/([^?#]+?)(?:\.pdf)?$/i);
+  if (urlMatch && urlMatch[1]) s = urlMatch[1];
+  // Strip arxiv: prefix.
+  s = s.replace(/^arxiv:/i, "");
+  // Match new-style or old-style, capturing without version.
+  const mNew = s.match(ARXIV_NEW);
+  if (mNew && mNew[1]) return `arxiv:${mNew[1]}`;
+  const mOld = s.match(ARXIV_OLD);
+  if (mOld && mOld[1]) return `arxiv:${mOld[1]}`;
+  return null;
+}
+
+/** Multipart PDF upload. Backend hashes the bytes → sha256-keyed cache,
+ * so re-uploading the same file produces `cache_hit: true`. */
+export async function uploadPdf(
+  sessionId: number,
+  file: File,
+): Promise<IngestResult> {
+  const form = new FormData();
+  form.append("session_id", String(sessionId));
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/papers/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return (await res.json()) as IngestResult;
+}
