@@ -258,3 +258,52 @@ async def test_subagent_read_section_unknown_returns_error_to_llm_not_crash(
         f"unknown-section error was not relayed to LLM in tool result; "
         f"got: {tool_results[-1]['content']!r}"
     )
+
+
+async def test_subagent_handles_malformed_tool_call_arguments(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Regression: LiteLLM/model can return malformed JSON in tool_call
+    arguments. Subagent must not crash — it should treat the call as
+    if no args were provided and continue."""
+    pcid, _ = await _seed_paper_with_sections(
+        migrated_db,
+        title="Methods Paper",
+        sections=[{"name": "Method", "chunks": ["Method content."]}],
+    )
+
+    # Turn 1: read_section tool_call with broken JSON args ("{bad").
+    # Turn 2: final summary — no tool_calls.
+    broken_call: dict[str, Any] = {
+        "id": "1",
+        "type": "function",
+        "function": {"name": "read_section", "arguments": "{bad"},
+    }
+    responses = [
+        _msg(tool_calls=[broken_call]),
+        _msg(content="Done. No chunks found."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Methods Paper",
+            user_message="What is the method?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    # No crash; subagent reached the final summary path.
+    assert picks.paper_content_id == pcid
+
+    # The second LLM call must include a tool result message
+    # (the error for the malformed/empty-args read_section call).
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    assert tool_results, "no tool result returned to the LLM after malformed args"

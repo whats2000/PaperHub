@@ -122,7 +122,10 @@ async def _list_sections(
         row = await cur.fetchone()
     if row is None or row[0] is None:
         return json.dumps({"error": "no section TOC available for this paper"})
-    sections = json.loads(row[0])
+    try:
+        sections = json.loads(row[0])
+    except json.JSONDecodeError:
+        return json.dumps({"error": "section TOC is corrupted; re-ingest this paper"})
     return json.dumps([
         {"name": s["name"], "tokens": s["token_count"], "chunks": s["chunk_count"]}
         for s in sections
@@ -221,9 +224,9 @@ async def run_paper_qa_subagent(
             "title": title,
         })
 
-        # We allow up to (max_section_reads + 1) LLM iterations: one extra
-        # gives the LLM a chance to receive the "budget exhausted" tool result
-        # and produce its final summary. After that we force-stop.
+        # +2: one for a free list_sections turn (before any reads), one safety
+        # margin. Force-stop fires after dispatch in the iteration where read_count
+        # hits max — the LLM doesn't get an extra response turn after exhaustion.
         for _iteration in range(max_section_reads + 2):
             response = await litellm.acompletion(
                 model=model,
@@ -250,7 +253,10 @@ async def run_paper_qa_subagent(
             # Execute each tool call.
             for call in tool_calls:
                 name = call["function"]["name"]
-                raw_args = json.loads(call["function"]["arguments"] or "{}")
+                try:
+                    raw_args = json.loads(call["function"]["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    raw_args = {}
 
                 if name == "list_sections":
                     result_str = await _list_sections(
@@ -292,17 +298,9 @@ async def run_paper_qa_subagent(
             # tool_calls (meaning it didn't self-terminate after receiving
             # the exhaustion error). Break out and use the fallback.
             if read_count >= max_section_reads and all(
-                (c["function"]["name"] == "read_section") for c in tool_calls
+                c["function"]["name"] == "read_section" for c in tool_calls
             ):
-                # Check whether we just sent the exhaustion error to the LLM.
-                # If read_count is already at or past the budget when the LLM
-                # sent tool_calls, every read_section call would have received
-                # the exhaustion error — force-stop now.
-                exhausted_results = [
-                    c for c in tool_calls if c["function"]["name"] == "read_section"
-                ]
-                if exhausted_results:
-                    break
+                break  # every read_section call received the exhaustion error; force-stop
 
         # Compute picks from whatever the loop produced.
         cited_ids = _extract_cited_chunk_ids(final_summary)
