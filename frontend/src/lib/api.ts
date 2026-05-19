@@ -171,19 +171,14 @@ export function parseArxivId(input: string): string | null {
 }
 
 /** Multipart PDF upload. Backend hashes the bytes → sha256-keyed cache,
- * so re-uploading the same file produces `cache_hit: true`. When `title`
- * is provided non-empty (after trim), it overrides the backend's default
- * filename-stem title; otherwise the field is omitted and the backend
- * falls back to the uploaded file's stem. */
+ * so re-uploading the same file produces `cache_hit: true`. */
 export async function uploadPdf(
   sessionId: number,
   file: File,
-  title?: string,
 ): Promise<IngestResult> {
   const form = new FormData();
   form.append("session_id", String(sessionId));
   form.append("file", file);
-  if (title && title.trim()) form.append("title", title.trim());
   const res = await fetch(`${API_BASE_URL}/papers/upload`, {
     method: "POST",
     body: form,
