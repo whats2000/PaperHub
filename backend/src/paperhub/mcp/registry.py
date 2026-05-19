@@ -67,6 +67,15 @@ class MCPRegistry:
         # Server name → live subprocess we spawned at startup. Terminated
         # on `shutdown()`; populated only for configs with `has_launch`.
         self._launched: dict[str, asyncio.subprocess.Process] = {}
+        # v2.7 follow-up: serialise aggregate_tool_schemas + _ensure_
+        # connected so concurrent callers (the fan-out per ParsedRequest
+        # via asyncio.gather) don't race on the connect path. Without
+        # this, Task B sees ``_connect_attempted.add(name)`` from Task A
+        # and returns immediately while Task A's ``await client.connect()``
+        # is still in flight — list_tools then raises "not connected"
+        # and the server gets sticky-failed forever. Lazy-init so the
+        # lock binds to the running loop on first use.
+        self._connect_lock: asyncio.Lock | None = None
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -225,31 +234,48 @@ class MCPRegistry:
         fail to connect are logged at WARN and skipped — and **not retried**
         within this registry lifecycle. Cached after the first successful
         build; the cache is invalidated by :meth:`call` on transport failure.
+
+        **Concurrency**: serialised by ``self._connect_lock``. The v2.7
+        fan-out runs N ParsedRequests through ``asyncio.gather``; each
+        branch's first ``has_tool``/``aggregate_tool_schemas`` call
+        would otherwise race on ``_ensure_connected`` — Task B observed
+        Task A's ``_connect_attempted.add(name)`` and skipped the
+        ``await client.connect()`` while it was still in flight, then
+        called ``list_tools`` on an unconnected client. The lock makes
+        the connect happen exactly once and lets concurrent callers
+        share the result.
         """
         if self._aggregated_schemas is not None:
             return self._aggregated_schemas
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:
+            # Re-check inside the lock: another concurrent caller may have
+            # built the cache while we waited.
+            if self._aggregated_schemas is not None:
+                return self._aggregated_schemas
 
-        aggregated: list[dict[str, Any]] = []
-        for name, client in self._clients.items():
-            if name in self._connect_failed:
-                continue
-            await self._ensure_connected(name, client)
-            if name in self._connect_failed:
-                continue
-            try:
-                schemas = await client.list_tools()
-            except MCPUnavailableError as exc:
-                _LOG.warning(
-                    "mcp.registry list_tools failed server=%s err=%s; skipping",
-                    name,
-                    exc,
-                )
-                self._connect_failed.add(name)
-                continue
-            aggregated.extend(schemas)
+            aggregated: list[dict[str, Any]] = []
+            for name, client in self._clients.items():
+                if name in self._connect_failed:
+                    continue
+                await self._ensure_connected(name, client)
+                if name in self._connect_failed:
+                    continue
+                try:
+                    schemas = await client.list_tools()
+                except MCPUnavailableError as exc:
+                    _LOG.warning(
+                        "mcp.registry list_tools failed server=%s err=%s; skipping",
+                        name,
+                        exc,
+                    )
+                    self._connect_failed.add(name)
+                    continue
+                aggregated.extend(schemas)
 
-        self._aggregated_schemas = aggregated
-        return aggregated
+            self._aggregated_schemas = aggregated
+            return aggregated
 
     async def has_tool(self, namespaced_name: str) -> bool:
         """Convenience: is ``namespaced_name`` in the aggregated palette?"""
@@ -274,7 +300,18 @@ class MCPRegistry:
         if client is None:
             raise MCPUnavailableError(f"no server named {server_name!r}")
 
-        await self._ensure_connected(server_name, client)
+        # Serialise the connect via the same lock aggregate_tool_schemas
+        # uses — two concurrent ``call`` invocations for the same
+        # server (e.g. fan-out per ParsedRequest) would otherwise race
+        # ``_ensure_connected`` (Task B observes Task A's
+        # ``_connect_attempted.add`` and returns while connect is in
+        # flight). Note ``MCPClient.connect`` is itself idempotent, so
+        # acquiring the lock when the connect already finished is a
+        # quick no-op on the second call.
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:
+            await self._ensure_connected(server_name, client)
         if server_name in self._connect_failed:
             self._aggregated_schemas = None
             raise MCPUnavailableError(
