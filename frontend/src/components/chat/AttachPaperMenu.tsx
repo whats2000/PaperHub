@@ -33,6 +33,12 @@ function currentBackendSessionId(): number | null {
   return active?.backend_session_id ?? null;
 }
 
+/** Strip the LAST extension only, matching Python's Path(...).stem semantics. */
+function filenameStem(name: string): string {
+  const lastDot = name.lastIndexOf(".");
+  return lastDot > 0 ? name.slice(0, lastDot) : name;
+}
+
 /** Build a ReferenceItem from an ingest/upload response. */
 function buildReference(
   result: IngestResult,
@@ -64,6 +70,8 @@ export function AttachPaperMenu() {
   const [busy, setBusy] = useState(false);
   const [arxivInput, setArxivInput] = useState("");
   const [arxivError, setArxivError] = useState<string | null>(null);
+  const [pickedFile, setPickedFile] = useState<File | null>(null);
+  const [titleInput, setTitleInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset transient state when the menu is closed.
@@ -72,20 +80,27 @@ export function AttachPaperMenu() {
     if (!next) {
       setArxivInput("");
       setArxivError(null);
+      setPickedFile(null);
+      setTitleInput("");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
-  async function handlePdfChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  function handlePdfPicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setPickedFile(file);
+    setTitleInput(file ? filenameStem(file.name) : "");
+  }
+
+  async function handlePdfUpload() {
+    if (!pickedFile) return;
     // Snapshot the active session at the start. If it changes before the
     // upload resolves, discard the result so we don't poison the wrong bucket.
     const startedAt = currentBackendSessionId();
     if (startedAt === null) return;
     setBusy(true);
     try {
-      const result = await uploadPdf(startedAt, file);
+      const result = await uploadPdf(startedAt, pickedFile, titleInput);
       if (currentBackendSessionId() !== startedAt) {
         toast.info("Session changed; the attached paper was discarded.");
         return;
@@ -101,6 +116,8 @@ export function AttachPaperMenu() {
         description: err instanceof Error ? err.message : String(err),
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
+      setPickedFile(null);
+      setTitleInput("");
     } finally {
       setBusy(false);
     }
@@ -193,11 +210,37 @@ export function AttachPaperMenu() {
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf"
-                onChange={(e) => void handlePdfChange(e)}
+                onChange={handlePdfPicked}
                 disabled={busy || !hasBackendSession}
                 aria-label="PDF file"
                 className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium hover:file:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               />
+
+              {pickedFile && (
+                <>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-muted-foreground">Title</span>
+                    <Input
+                      type="text"
+                      value={titleInput}
+                      onChange={(e) => setTitleInput(e.target.value)}
+                      placeholder={filenameStem(pickedFile.name)}
+                      disabled={busy || !hasBackendSession}
+                      aria-label="Paper title"
+                    />
+                  </label>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={busy || !hasBackendSession}
+                      onClick={() => void handlePdfUpload()}
+                    >
+                      Upload
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </TabsContent>
 

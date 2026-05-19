@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -79,6 +79,9 @@ describe("AttachPaperMenu", () => {
     // Default tab should be Upload PDF. Find the file input by its aria-label.
     const fileInput = screen.getByLabelText(/pdf file/i);
     await userEvent.upload(fileInput, makePdfFile());
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
 
     await waitFor(() => {
       expect(toastSuccess).toHaveBeenCalledWith(
@@ -114,6 +117,9 @@ describe("AttachPaperMenu", () => {
     await openMenu();
     const fileInput = screen.getByLabelText(/pdf file/i);
     await userEvent.upload(fileInput, makePdfFile());
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
 
     await waitFor(() => {
       expect(toastSuccess).toHaveBeenCalledWith(
@@ -134,6 +140,9 @@ describe("AttachPaperMenu", () => {
     await openMenu();
     const fileInput = screen.getByLabelText(/pdf file/i);
     await userEvent.upload(fileInput, makePdfFile());
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalled();
@@ -155,6 +164,9 @@ describe("AttachPaperMenu", () => {
     await openMenu();
     const fileInput = screen.getByLabelText(/pdf file/i);
     await userEvent.upload(fileInput, makePdfFile("not-a-pdf.txt"));
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalledWith(
@@ -162,6 +174,99 @@ describe("AttachPaperMenu", () => {
         expect.anything(),
       );
     });
+  });
+
+  it("sends the user-edited title in FormData when the user customises it before Upload", async () => {
+    // Spy on fetch so we can capture the FormData synchronously, before MSW
+    // gets ahold of the request (msw + jsdom multipart body parsing is flaky).
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(
+          {
+            papers_id: 1,
+            paper_content_id: 1,
+            cache_hit: false,
+            title: "Custom Title",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+
+    const fileInput = screen.getByLabelText(/pdf file/i);
+    await userEvent.upload(fileInput, makePdfFile("paper.pdf"));
+
+    const titleField = await screen.findByLabelText(/paper title/i);
+    fireEvent.change(titleField, { target: { value: "Custom Title" } });
+
+    const uploadBtn = await screen.findByRole("button", { name: /^upload$/i });
+    await userEvent.click(uploadBtn);
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalled();
+    });
+
+    // Inspect the FormData passed to fetch on the upload call.
+    const uploadCall = fetchSpy.mock.calls.find(([url]) =>
+      typeof url === "string" && url.includes("/papers/upload"),
+    );
+    expect(uploadCall).toBeDefined();
+    const init = uploadCall?.[1];
+    const body = init?.body;
+    expect(body).toBeInstanceOf(FormData);
+    expect((body as FormData).get("title")).toBe("Custom Title");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("omits the title field from FormData when the user clears the title before Upload", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(
+          {
+            papers_id: 2,
+            paper_content_id: 2,
+            cache_hit: false,
+            title: "paper",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+
+    const fileInput = screen.getByLabelText(/pdf file/i);
+    await userEvent.upload(fileInput, makePdfFile("paper.pdf"));
+
+    const titleField = await screen.findByLabelText(/paper title/i);
+    fireEvent.change(titleField, { target: { value: "" } });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalled();
+    });
+
+    const uploadCall = fetchSpy.mock.calls.find(([url]) =>
+      typeof url === "string" && url.includes("/papers/upload"),
+    );
+    expect(uploadCall).toBeDefined();
+    const init = uploadCall?.[1];
+    const body = init?.body;
+    expect(body).toBeInstanceOf(FormData);
+    // Blank title → field is omitted from FormData (so backend falls back).
+    expect((body as FormData).get("title")).toBeNull();
+
+    fetchSpy.mockRestore();
   });
 
   it("imports a valid arXiv ID — calls /papers with the canonical paper_id", async () => {
@@ -277,6 +382,9 @@ describe("AttachPaperMenu", () => {
     await openMenu();
     const fileInput = screen.getByLabelText(/pdf file/i);
     await userEvent.upload(fileInput, makePdfFile());
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^upload$/i }),
+    );
 
     // While the upload is in flight, swap the active session.
     useChatStore.setState({ activeSessionId: 2 });
