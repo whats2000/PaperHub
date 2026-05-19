@@ -22,7 +22,6 @@ Called from ``app._lifespan``. The flow is:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import socket
@@ -91,18 +90,38 @@ async def ensure_running(
         "PAPERHUB_MODEL_SERVER_PORT": str(port),
     }
     _LOG.info("modelserver spawning: %s (port=%d)", " ".join(cmd), port)
-    # NOTE: subprocess.Popen (sync) is intentional here. The async
-    # alternative is asyncio.create_subprocess_exec, but that returns
-    # an asyncio.subprocess.Process whose API differs from the sync
-    # Popen (no .poll(), async .stdout.read(), etc.) — and the spawn
-    # call itself returns immediately after fork/spawn so it doesn't
-    # actually block the event loop. The /health-polling wait below
-    # IS async via asyncio.sleep.
+    # Detach the child from the parent so uvicorn --reload (which
+    # kills the worker's process group on restart) doesn't take the
+    # modelserver down with it. The whole point of isolation is for
+    # the modelserver to OUTLIVE the worker across reloads.
+    #   - Windows: CREATE_NEW_PROCESS_GROUP detaches the child from
+    #     the parent's group so its Ctrl-C / kill doesn't cascade.
+    #   - Unix: start_new_session=True calls setsid().
+    # subprocess.Popen (sync) is intentional — the spawn call returns
+    # immediately after fork/spawn; only the /health poll below is
+    # async (via asyncio.sleep).
+    # Platform-specific detach flag. Split into two Popen call sites
+    # (rather than **kwargs unpacking) because Popen's overload set is
+    # very narrow on those kwargs and mypy can't unify them through a
+    # generic dict.
     try:
-        proc = subprocess.Popen(  # noqa: ASYNC220, S603 — see note above
-            cmd, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        )
+        # stdout/stderr go to DEVNULL — without that, the spawned
+        # uvicorn would dump its logs into our pipe and we'd never
+        # drain them, eventually blocking on a full pipe buffer.
+        # Operators who want logs use `scripts/start.ps1` which runs
+        # the modelserver in the foreground with its stdout visible.
+        if sys.platform == "win32":
+            proc = subprocess.Popen(  # noqa: ASYNC220, S603 — see note above
+                cmd, env=env,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        else:
+            proc = subprocess.Popen(  # noqa: ASYNC220, S603 — see note above
+                cmd, env=env,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     except (OSError, FileNotFoundError) as exc:
         _LOG.warning(
             "modelserver spawn failed (%s: %s); set "
@@ -122,17 +141,17 @@ async def ensure_running(
             )
             return proc
         if proc.poll() is not None:
-            # Subprocess exited before becoming reachable — log its
-            # captured stdout/stderr for diagnostics.
-            output = b""
-            if proc.stdout is not None:
-                with contextlib.suppress(OSError):
-                    output = proc.stdout.read() or b""
+            # Subprocess exited before becoming reachable. stdout is
+            # DEVNULL (detachment requirement) so we can't echo the
+            # child's logs here — operators should re-run with
+            # `uv run paperhub-modelserver` directly to see the
+            # failure, or use `scripts/start.ps1` which captures the
+            # subprocess output.
             _LOG.warning(
                 "modelserver subprocess exited prematurely (code=%s); "
-                "output:\n%s",
+                "run `uv run paperhub-modelserver` directly to see why, "
+                "or set PAPERHUB_INPROCESS_MODELS=1 to bypass",
                 proc.returncode,
-                output.decode("utf-8", errors="replace")[:4000],
             )
             return None
         await asyncio.sleep(_PROBE_INTERVAL_S)

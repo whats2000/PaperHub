@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -30,7 +31,6 @@ from paperhub.mcp import (
     mount_paperhub_papers_on,
 )
 from paperhub.modelserver.spawn import ensure_running as _modelserver_ensure_running
-from paperhub.modelserver.spawn import terminate_subprocess as _modelserver_terminate
 from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.app")
@@ -84,18 +84,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ChromaStore holds a PersistentClient; chromadb manages its own cleanup.
     app.state.chroma = ChromaStore(settings.chroma_dir)
 
-    # Spawn the model server (sentence-transformers + cross-encoder) as
-    # a sibling process so uvicorn --reload on backend code can't reset
-    # the ~110 MB embedder + ~80 MB reranker weights. Skipped when the
-    # operator forced in-process models (PAPERHUB_INPROCESS_MODELS=1) or
-    # when the server is already reachable (e.g. operator started it
-    # manually, or a previous backend run's subprocess outlived its
-    # parent). Best-effort: a failed spawn doesn't block boot — the
-    # HTTP-client embedder will surface a connection error to the
-    # caller, and the operator can switch to inprocess_models.
-    app.state.modelserver_proc = None
+    # Model server: detach-and-leak. If an instance is already
+    # reachable on host:port, reuse it — this is what makes uvicorn
+    # --reload zero-cost: the previous worker's spawn outlives the
+    # reload, the new worker probes /health, sees green, skips spawn.
+    # If nothing is listening, spawn ONE detached subprocess (Windows
+    # CREATE_NEW_PROCESS_GROUP / Unix start_new_session) so a future
+    # worker restart won't take it down with us. We intentionally do
+    # NOT track this proc on app.state and do NOT terminate it at
+    # shutdown — that's what was killing the modelserver on every
+    # reload before. Operators who want explicit lifecycle use
+    # `scripts/start.ps1`; otherwise the modelserver leaks across
+    # backend restarts (cleaned up at OS reboot, or by manual
+    # taskkill / pkill paperhub-modelserver). Skipped entirely when
+    # PAPERHUB_INPROCESS_MODELS=1.
     if not settings.inprocess_models:
-        app.state.modelserver_proc = await _modelserver_ensure_running(
+        await _modelserver_ensure_running(
             host=settings.model_server_host,
             port=settings.model_server_port,
         )
@@ -109,28 +113,63 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_registry = MCPRegistry()
     await app.state.mcp_registry.startup(mcp_toml)
 
-    # Pre-warm embedder and reranker singletons so the first real paper_qa
-    # request doesn't pay the cold-cache tax. With the model server
-    # running out-of-process, this warms its model cache (not the
-    # worker's) — so the warm state survives backend reloads.
+    # Pre-warm embedder + reranker as a FIRE-AND-FORGET background task
+    # so lifespan finishes immediately. The modelserver's first /embed
+    # call triggers SentenceTransformer load (HF Hub download on cold
+    # cache — minutes on a slow network); blocking lifespan on that
+    # would hang the backend for the full download. Real ingest
+    # requests arriving before warm-up completes will simply queue
+    # behind the in-flight model load on the modelserver side.
     # Guarded by PAPERHUB_PREWARM_MODELS=0 so offline / CI envs can skip.
+    app.state.prewarm_task = None
     if os.environ.get("PAPERHUB_PREWARM_MODELS", "1") != "0":
-        try:
-            from paperhub.pipelines.embedder import get_embedder
-            from paperhub.rag.reranker import get_reranker
-
-            get_embedder().embed([""])
-            get_reranker().rerank("warm", ["up"], top_k=1)
-        except Exception:  # noqa: BLE001
-            # Pre-warm is best-effort — never block boot.
-            pass
+        app.state.prewarm_task = asyncio.create_task(
+            _prewarm_models(), name="paperhub-prewarm",
+        )
 
     try:
         yield
     finally:
+        # Cancel pre-warm if still in flight at shutdown.
+        prewarm = app.state.prewarm_task
+        if prewarm is not None and not prewarm.done():
+            prewarm.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await prewarm
         # Lifespan: chroma cleanup handled internally by chromadb.
         await app.state.mcp_registry.shutdown()
-        _modelserver_terminate(app.state.modelserver_proc)
+
+
+async def _prewarm_models() -> None:
+    """Background warm-up of the modelserver's embedder + reranker.
+
+    Runs the blocking HTTP calls in a worker thread (via
+    ``asyncio.to_thread``) so the event loop stays responsive to
+    incoming requests during warm-up. Best-effort: any failure
+    (modelserver not running, slow HF download, network blip, etc.)
+    is logged at WARN and swallowed — the first real request will
+    just pay the load cost itself.
+    """
+    try:
+        from paperhub.pipelines.embedder import get_embedder
+        from paperhub.rag.reranker import get_reranker
+
+        _LOG.info("paperhub.app prewarm starting (background)")
+        await asyncio.to_thread(get_embedder().embed, [""])
+        await asyncio.to_thread(
+            get_reranker().rerank, "warm", ["up"], 1,
+        )
+        _LOG.info("paperhub.app prewarm complete")
+    except asyncio.CancelledError:
+        _LOG.info("paperhub.app prewarm cancelled at shutdown")
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _LOG.warning(
+            "paperhub.app prewarm failed (%s: %s) — first ingest "
+            "will pay the model-load cost. Is `scripts/start.ps1` "
+            "running, or PAPERHUB_INPROCESS_MODELS=1 set?",
+            type(exc).__name__, exc,
+        )
 
 
 def create_app() -> FastAPI:
@@ -151,6 +190,5 @@ def create_app() -> FastAPI:
     # protocol via this URL — uniform dispatch path with `web.*`.
     mount_paperhub_papers_on(app, build_paperhub_papers_server(), path="/mcp")
     return app
-
 
 app = create_app()
