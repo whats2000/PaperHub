@@ -9,6 +9,18 @@ Branch = Literal["", "A", "B"]
 PaperQaStrategy = Literal["compare", "find"]
 
 
+class SectionEntry(BaseModel):
+    """One entry in paper_content.sections_json — a section's name and
+    physical extents within source.flattened.tex. Used by the per-paper
+    paper_qa subagent's list_sections() tool (Plan C v2.10-3)."""
+
+    name: str
+    char_start: int
+    char_end: int
+    token_count: int
+    chunk_count: int
+
+
 class RoutingDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     intent: Intent

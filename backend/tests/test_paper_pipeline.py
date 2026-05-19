@@ -413,3 +413,75 @@ async def test_ingest_arxiv_skips_lookup_when_metadata_override_provided(
         pc_row = await cur.fetchone()
     assert pc_row is not None
     assert pc_row[0] == "Override Title from SS"
+
+
+# ---------------------------------------------------------------------------
+# v2.10-2: sections_json persisted at ingest time
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_paper_pipeline_persists_sections_json_at_ingest(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    migrated_db: aiosqlite.Connection,
+    tmp_path: Path,
+) -> None:
+    """After ingest, paper_content.sections_json must contain a list of
+    {name, char_start, char_end, token_count, chunk_count} entries, ordered
+    by appearance, covering every \\section{...} in the source."""
+    import json
+
+    pipeline, conn, cache_root = pipeline_env
+
+    sample_tex = (
+        "\\section{Introduction}\nIntro body here. " * 30 + "\n\n"
+        "\\section{Method}\nMethod body here. " * 30 + "\n\n"
+        "\\section{Experiments}\nExperiment body here. " * 50 + "\n"
+    )
+
+    # Build a fake latex source dir in tmp_path (like _make_fake_download does).
+    src_dir = tmp_path / "sections_src"
+    src_dir.mkdir()
+    (src_dir / "main.tex").write_text(sample_tex, encoding="utf-8")
+
+    # Create a chat_sessions row so the FK to papers.session_id is satisfied.
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('sections test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    fake_download = _make_fake_download(src_dir)
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=fake_download,
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.search_arxiv",
+            side_effect=_fake_search_arxiv,
+        ),
+    ):
+        result = await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id="sections-test-fixture")
+        )
+
+    assert result.cache_hit is False
+
+    async with conn.execute(
+        "SELECT sections_json FROM paper_content WHERE id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] is not None, "sections_json must be populated at ingest"
+    sections = json.loads(row[0])
+    assert [s["name"] for s in sections] == ["Introduction", "Method", "Experiments"]
+    for s in sections:
+        assert s["chunk_count"] > 0
+        assert s["token_count"] > 0
+        assert s["char_end"] > s["char_start"]
+        for required_key in ("name", "char_start", "char_end", "token_count", "chunk_count"):
+            assert required_key in s

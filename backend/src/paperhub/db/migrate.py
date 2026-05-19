@@ -84,6 +84,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # v2.10-2: Idempotent column-add for paper_content.sections_json
+    # (pre-existing DBs created before this migration won't have the column).
+    # Populated at re-ingest time by Plan C v2.10-5's paperhub-reingest CLI;
+    # rows that haven't been re-ingested keep NULL.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "sections_json" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN sections_json TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # A5: Ensure papers.paper_content_id FK has ON DELETE RESTRICT.
     # PRAGMA foreign_key_list returns rows where column 6 is `on_delete`.
     # -----------------------------------------------------------------------

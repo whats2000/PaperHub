@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS paper_content (
     authors_json TEXT NOT NULL DEFAULT '[]',
     year INTEGER,
     abstract TEXT NOT NULL DEFAULT '',
+    sections_json TEXT,
     source_path TEXT NOT NULL,
     source_dir_path TEXT NOT NULL,
     html_path TEXT NOT NULL,

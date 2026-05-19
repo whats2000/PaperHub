@@ -16,14 +16,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
 import aiosqlite
 import httpx
+import tiktoken
 
 from paperhub.llm.adapter import LlmAdapter
+from paperhub.models.domain import SectionEntry
 from paperhub.pipelines.arxiv_client import (
     _TRANSIENT_DOWNLOAD_EXCEPTIONS,
     TarballCorrupt,
@@ -253,6 +256,9 @@ class PaperPipeline:
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
+        # Compute section TOC for paper_qa subagent (v2.10-2).
+        sections_json = self._build_sections_json(chunks, full_text)
+
         # Persist paper_content + chunks in a single transaction.
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
@@ -264,6 +270,7 @@ class PaperPipeline:
             source_dir_path=cache_dir,
             html_path=html_path,
             chunks=chunks,
+            sections_json=sections_json,
         )
 
         self._chroma.add_chunks(
@@ -321,6 +328,9 @@ class PaperPipeline:
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
+        # Compute section TOC for paper_qa subagent (v2.10-2).
+        sections_json = self._build_sections_json(chunks, full_text)
+
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
@@ -331,6 +341,7 @@ class PaperPipeline:
             source_dir_path=cache_dir,
             html_path=html_path,
             chunks=chunks,
+            sections_json=sections_json,
         )
 
         self._chroma.add_chunks(
@@ -421,6 +432,9 @@ class PaperPipeline:
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
+        # Compute section TOC for paper_qa subagent (v2.10-2).
+        sections_json = self._build_sections_json(chunks, full_text)
+
         db_kind: Literal["pdf_upload", "latex_upload"] = (
             "pdf_upload" if kind == "pdf" else "latex_upload"
         )
@@ -435,6 +449,7 @@ class PaperPipeline:
             source_dir_path=cache_dir,
             html_path=html_path,
             chunks=chunks,
+            sections_json=sections_json,
         )
 
         self._chroma.add_chunks(
@@ -508,6 +523,9 @@ class PaperPipeline:
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
+        # Compute section TOC for paper_qa subagent (v2.10-2).
+        sections_json = self._build_sections_json(chunks, full_text)
+
         metadata: dict[str, object] = {
             "title": title_hint,
             "authors": list(authors_hint),
@@ -526,6 +544,7 @@ class PaperPipeline:
             source_dir_path=cache_dir,
             html_path=html_path,
             chunks=chunks,
+            sections_json=sections_json,
         )
 
         self._chroma.add_chunks(
@@ -540,6 +559,40 @@ class PaperPipeline:
             paper_content_id, papers_id, cache_hit=False, title=title_hint,
         )
 
+    @staticmethod
+    def _build_sections_json(chunks: list[Chunk], full_text: str) -> str:
+        """Compute the sections_json value from a list of chunks and source text.
+
+        Groups chunks by section name, computes char extents and token counts,
+        and returns a JSON-encoded list of SectionEntry dicts ordered by
+        appearance. Chunks with section=None (preamble / pre-first-section
+        text) are excluded — they are not addressable by name.
+        """
+        enc = tiktoken.get_encoding("cl100k_base")
+        per_section: dict[str, list[Chunk]] = defaultdict(list)
+        section_order: list[str] = []
+        for c in chunks:
+            if c.section is None:
+                continue
+            if c.section not in per_section:
+                section_order.append(c.section)
+            per_section[c.section].append(c)
+
+        entries: list[SectionEntry] = []
+        for name in section_order:
+            group = per_section[name]
+            section_text = full_text[group[0].char_start : group[-1].char_end]
+            entries.append(
+                SectionEntry(
+                    name=name,
+                    char_start=group[0].char_start,
+                    char_end=group[-1].char_end,
+                    token_count=len(enc.encode(section_text)),
+                    chunk_count=len(group),
+                )
+            )
+        return json.dumps([e.model_dump() for e in entries])
+
     async def _persist_paper_content_and_chunks(
         self,
         *,
@@ -552,6 +605,7 @@ class PaperPipeline:
         source_dir_path: Path,
         html_path: Path,
         chunks: list[Chunk],
+        sections_json: str | None = None,
     ) -> tuple[int, list[int]]:
         """Persist paper_content + chunks in a single atomic transaction.
 
@@ -563,8 +617,8 @@ class PaperPipeline:
             await self._conn.execute(
                 "INSERT INTO paper_content "
                 "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
-                "abstract, source_path, source_dir_path, html_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "abstract, sections_json, source_path, source_dir_path, html_path) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     content_key,
                     kind,
@@ -574,6 +628,7 @@ class PaperPipeline:
                     json.dumps(metadata.get("authors", [])),
                     metadata.get("year"),
                     str(metadata.get("abstract", "")),
+                    sections_json,
                     str(source_path),
                     str(source_dir_path),
                     str(html_path),
