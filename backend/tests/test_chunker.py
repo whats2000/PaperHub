@@ -127,11 +127,15 @@ def test_chunker_closes_at_paragraph_boundary_not_mid_sentence():
 
 
 def test_chunker_closes_at_paragraph_boundary_not_sentence_when_both_present():
-    """Verify the new behavior: when a chunk could close at EITHER a
-    sentence end mid-paragraph OR at a paragraph break, it must pick the
-    paragraph break. The old chunker preferred sentence-end (the latest
-    ``(?<=[.!?]) `` match), so the chunk would include the start of the
-    next paragraph. The new chunker must close at ``\\n\\n``.
+    """Regression guard for paragraph-first boundary alignment: when a chunk
+    could close at EITHER a sentence end mid-paragraph OR at a paragraph
+    break, it must pick the paragraph break. The chunker uses an ordered
+    decision — paragraph preferred over sentence — and this test pins that
+    ordering with byte-exact equality against the first paragraph.
+
+    (This test pins the priority as a regression guard; the paragraph-first
+    preference was already correct in the first v2.10-1 commit. Future
+    changes that re-order or merge boundary logic must keep this passing.)
 
     Parameters are chosen so that the two paragraphs combined exceed ``hard``
     (forcing the chunker to split), but each paragraph alone fits within
