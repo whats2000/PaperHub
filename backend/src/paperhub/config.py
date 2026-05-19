@@ -15,6 +15,17 @@ class Settings:
     embedding_model: str
     reranker_model: str
     log_level: str
+    # Model-server (sentence-transformers + cross-encoder hosted in a
+    # SEPARATE process so uvicorn --reload on backend code doesn't
+    # reset the ~110 MB embedder + ~80 MB reranker weights). The backend
+    # lifespan auto-spawns this process and terminates it on shutdown.
+    model_server_host: str
+    model_server_port: int
+    # When True, skip the HTTP client + auto-spawn and load models in
+    # the worker process directly. Useful for tests (no network round-
+    # trip, no port conflicts) and for environments where the operator
+    # can't spawn an extra process.
+    inprocess_models: bool
 
 
 def load_settings() -> Settings:
@@ -33,4 +44,13 @@ def load_settings() -> Settings:
             "PAPERHUB_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
         ),
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),
+        model_server_host=os.environ.get(
+            "PAPERHUB_MODEL_SERVER_HOST", "127.0.0.1",
+        ),
+        model_server_port=int(
+            os.environ.get("PAPERHUB_MODEL_SERVER_PORT", "8001"),
+        ),
+        inprocess_models=os.environ.get(
+            "PAPERHUB_INPROCESS_MODELS", "0",
+        ) not in ("0", "", "false", "False"),
     )

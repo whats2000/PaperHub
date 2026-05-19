@@ -29,6 +29,8 @@ from paperhub.mcp import (
     build_paperhub_papers_server,
     mount_paperhub_papers_on,
 )
+from paperhub.modelserver.spawn import ensure_running as _modelserver_ensure_running
+from paperhub.modelserver.spawn import terminate_subprocess as _modelserver_terminate
 from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.app")
@@ -82,6 +84,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ChromaStore holds a PersistentClient; chromadb manages its own cleanup.
     app.state.chroma = ChromaStore(settings.chroma_dir)
 
+    # Spawn the model server (sentence-transformers + cross-encoder) as
+    # a sibling process so uvicorn --reload on backend code can't reset
+    # the ~110 MB embedder + ~80 MB reranker weights. Skipped when the
+    # operator forced in-process models (PAPERHUB_INPROCESS_MODELS=1) or
+    # when the server is already reachable (e.g. operator started it
+    # manually, or a previous backend run's subprocess outlived its
+    # parent). Best-effort: a failed spawn doesn't block boot — the
+    # HTTP-client embedder will surface a connection error to the
+    # caller, and the operator can switch to inprocess_models.
+    app.state.modelserver_proc = None
+    if not settings.inprocess_models:
+        app.state.modelserver_proc = await _modelserver_ensure_running(
+            host=settings.model_server_host,
+            port=settings.model_server_port,
+        )
+
     # MCP registry: load mcp_servers.toml + construct (NOT connect) clients.
     # Connection is lazy on first tool use so this never blocks startup —
     # critical for loopback servers (e.g. the future `papers` MCP) that
@@ -92,9 +110,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.mcp_registry.startup(mcp_toml)
 
     # Pre-warm embedder and reranker singletons so the first real paper_qa
-    # request doesn't pay the ~5s model-load cost (Plan C field-test #3).
-    # These are lazy singletons; touching them here loads the underlying
-    # SentenceTransformer / CrossEncoder weights from the HF cache.
+    # request doesn't pay the cold-cache tax. With the model server
+    # running out-of-process, this warms its model cache (not the
+    # worker's) — so the warm state survives backend reloads.
     # Guarded by PAPERHUB_PREWARM_MODELS=0 so offline / CI envs can skip.
     if os.environ.get("PAPERHUB_PREWARM_MODELS", "1") != "0":
         try:
@@ -112,6 +130,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         # Lifespan: chroma cleanup handled internally by chromadb.
         await app.state.mcp_registry.shutdown()
+        _modelserver_terminate(app.state.modelserver_proc)
 
 
 def create_app() -> FastAPI:
