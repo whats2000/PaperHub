@@ -82,8 +82,6 @@ async def test_paper_suggest_routes_to_research_path(migrated_db: aiosqlite.Conn
     # routes without raising a KeyError / InvalidUpdateError.
     from paperhub.agents.graph import GraphDeps, build_graph
     from paperhub.agents.research_graph import ResearchDeps
-    from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     class _FakePipeline:
         pass
