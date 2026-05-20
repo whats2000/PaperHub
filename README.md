@@ -14,6 +14,7 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
 ![Tests](https://img.shields.io/badge/tests-340%20backend%20%2B%20105%20frontend-brightgreen)
 ![Status](https://img.shields.io/badge/Plan%20C-merged%20(SRS%20v2.10)-success)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 </div>
 
@@ -229,4 +230,4 @@ uv run paperhub-replay --run-id 1
 
 ## 📄 License
 
-Not yet specified.
+[Apache License 2.0](LICENSE) — © PaperHub contributors. You may use, modify, and distribute this software under the terms of the license, which includes an express grant of patent rights from contributors.
