@@ -68,7 +68,7 @@ from paperhub.agents.research_pipeline import (
     resolve_via_ss,
     synthesize_prose,
 )
-from paperhub.agents.state import AgentState
+from paperhub.agents.state import AgentState, effective_query
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.mcp.registry import MCPRegistry
@@ -158,7 +158,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         run_id: int = state["run_id"]
         last_step = int(state.get("ps_last_step_index", -1))
         requests = await parse_user_message(
-            state["user_message"],
+            effective_query(state),
             tracer=deps.tracer,
             model=parser_model,
             **_kwargs(deps),
@@ -328,7 +328,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         prose = await synthesize_prose(
             resolved,
             not_found,
-            user_message=state["user_message"],
+            user_message=effective_query(state),
             tracer=deps.tracer,
             model=synth_model,
             **_kwargs(deps),

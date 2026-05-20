@@ -785,6 +785,25 @@ async def test_paper_search_finalize_records_emitted_candidates(
 # ──────────────────────── Public-API dataclass smoke ────────────────────
 
 
+async def test_parse_resolves_topic_from_brief(
+    fake_tracer: Tracer,
+) -> None:
+    """Contract test: a self-contained brief (resolved by the router) yields
+    a non-empty request list from the Parser.  The behavioural change is at
+    the call site in research_graph.py (effective_query → parse_user_message);
+    this test pins the contract that the Parser handles a topical brief."""
+    comp = _async_completion_mock([
+        _msg(content='[{"hint":"discrete diffusion distillation","kind":"natural_language"}]'),
+    ])
+    brief = "recommend representative papers on discrete diffusion distillation"
+    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+        reqs = await parse_user_message(
+            brief, tracer=fake_tracer, model="gpt-4o-mini",
+        )
+    assert len(reqs) == 1
+    assert reqs[0].kind == "natural_language"
+
+
 def test_dataclasses_serialise_via_asdict() -> None:
     """The chat layer / SSE wire shape depends on asdict() round-tripping
     cleanly for diagnostics — keep them dataclasses-compatible."""
