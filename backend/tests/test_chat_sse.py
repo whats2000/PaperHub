@@ -994,3 +994,50 @@ async def test_paper_search_finalize_no_ingestible_source_marks_error_and_contin
     also = sr_payload["candidates"][1]
     assert also["auto_added"] is False
     assert also["error"] is None
+
+
+# ---------------------------------------------------------------------------
+# v2.11-6: clarify intent — router surfaces a clarifying question
+# ---------------------------------------------------------------------------
+
+async def test_chat_sse_clarify_surfaces_question_no_pipeline(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """When the router emits intent='clarify', the SSE stream must:
+    - emit a routing_decision event with intent='clarify'
+    - emit a final event whose content is exactly the resolved_query
+    - NOT emit any token events (the question is surfaced as one final block)
+    - NOT emit any tool_step events from the paper_search pipeline."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"clarify","model_tier":"small","confidence":0.4,'
+        '"reasoning":"ambiguous","resolved_query":"Which topic do you mean?"}',
+    )
+    await _bootstrap_schema(tmp_path)
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "推薦幾篇"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    assert "routing_decision" in types
+    assert "final" in types
+    # The clarifying question must appear in final.content.
+    final_payload = next(d for t, d in events if t == "final")
+    assert "Which topic do you mean?" in final_payload["content"]
+    # No paper_search-related tool_step events — the pipeline must not run.
+    paper_search_tool_steps = [
+        d for t, d in events
+        if t == "tool_step"
+        and isinstance(d.get("record"), dict)
+        and "paper_search" in (d["record"].get("tool") or "")
+    ]
+    assert paper_search_tool_steps == [], (
+        f"Expected no paper_search tool_step events for clarify, got: {paper_search_tool_steps}"
+    )

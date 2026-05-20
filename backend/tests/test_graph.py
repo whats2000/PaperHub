@@ -56,3 +56,21 @@ async def test_router_effective_query_falls_back_to_raw(migrated_db: aiosqlite.C
     )
     assert out["effective_query"] == "hello"
 
+
+async def test_clarify_path(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    deps = GraphDeps(
+        adapter=LiteLlmAdapter(), tracer=tracer,
+        router_model="gpt-4o-mini", chitchat_model="gpt-4o-mini",
+        router_mock='{"intent":"clarify","model_tier":"small","confidence":0.4,'
+                    '"reasoning":"no topic yet","resolved_query":"Which research topic would you like papers on?"}',
+    )
+    graph = build_graph(deps)
+    state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "推薦幾篇"}
+    result = await graph.ainvoke(state)
+    assert result["routing_decision"].intent == "clarify"
+    assert result["final_response"] == "Which research topic would you like papers on?"
+

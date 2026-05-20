@@ -455,6 +455,19 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         yield {"event": "token",
                                "data": token_evt.model_dump_json(exclude={"type"})}
                     final_content = "".join(chunks)
+                elif intent == "clarify":
+                    # The router (which sees history) judged the turn
+                    # un-resolvable and supplied a clarifying question in
+                    # resolved_query. Surface it deliberately — no pipeline,
+                    # no degenerate empty-results re-ask. resolved_query is
+                    # already captured in the router tracer row + runs table.
+                    final_content = decision.resolved_query or (
+                        "Could you clarify what you'd like help with? "
+                        "A topic, author, or paper title works well."
+                    )
+                    token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
+                    yield {"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})}
                 elif intent == "paper_search":
                     pipeline = PaperPipeline(
                         conn,

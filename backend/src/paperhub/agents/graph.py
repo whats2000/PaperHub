@@ -61,6 +61,9 @@ def build_graph(deps: GraphDeps) -> Any:
     async def _stub_library_stats(state: AgentState) -> AgentState:
         return {**state, "final_response": await stub_response(state, intent="library_stats")}
 
+    async def _clarify(state: AgentState) -> AgentState:
+        return {**state, "final_response": state["routing_decision"].resolved_query}
+
     def _route(state: AgentState) -> str:
         intent = state["routing_decision"].intent
         if intent in ("paper_search", "paper_qa"):
@@ -72,10 +75,12 @@ def build_graph(deps: GraphDeps) -> Any:
     g.add_node("chitchat", _chitchat)
     g.add_node("slides", _stub_slides)
     g.add_node("library_stats", _stub_library_stats)
+    g.add_node("clarify", _clarify)
     routes: dict[Hashable, str] = {
         "chitchat": "chitchat",
         "slides": "slides",
         "library_stats": "library_stats",
+        "clarify": "clarify",
     }
     if deps.research is not None:
         research_subgraph = build_research_subgraph(deps.research)
@@ -84,6 +89,6 @@ def build_graph(deps: GraphDeps) -> Any:
         g.add_edge("research", END)
     g.add_edge(START, "router")
     g.add_conditional_edges("router", _route, routes)
-    for terminal in ("chitchat", "slides", "library_stats"):
+    for terminal in ("chitchat", "slides", "library_stats", "clarify"):
         g.add_edge(terminal, END)
     return g.compile()
