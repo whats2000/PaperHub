@@ -804,6 +804,50 @@ async def test_parse_resolves_topic_from_brief(
     assert reqs[0].kind == "natural_language"
 
 
+async def test_parse_uses_provided_slot(
+    fake_tracer: Tracer,
+) -> None:
+    """Passing slot='paper_search_parse_suggest/v1' routes to the suggest
+    prompt. The suggest prompt contains 'angle' (search angles) but the
+    default parse prompt does not — assert the system message seen by the
+    LLM comes from the suggest slot."""
+    seen: dict[str, Any] = {}
+
+    async def fake_acompletion(*, model: Any, messages: Any, **kw: Any) -> Any:
+        seen["messages"] = messages
+        return {
+            "choices": [{
+                "message": {
+                    "content": (
+                        '[{"hint":"flow matching for discrete diffusion",'
+                        '"kind":"natural_language"},'
+                        '{"hint":"distillation for discrete diffusion",'
+                        '"kind":"natural_language"}]'
+                    ),
+                },
+            }],
+        }
+
+    with patch(
+        "paperhub.agents.research_pipeline.litellm.acompletion",
+        new=fake_acompletion,
+    ):
+        reqs = await parse_user_message(
+            "recommend papers on flow matching and distillation for discrete diffusion",
+            tracer=fake_tracer,
+            model="gpt-4o-mini",
+            slot="paper_search_parse_suggest/v1",
+        )
+
+    sys_msg = next(m["content"] for m in seen["messages"] if m["role"] == "system")
+    # "angle" appears in paper_search_parse_suggest/v1 (search angles) but
+    # NOT in the default paper_search_parse/v1.
+    assert "angle" in sys_msg.lower(), (
+        f"suggest parse slot must be used; system prompt was:\n{sys_msg[:300]}"
+    )
+    assert len(reqs) == 2
+
+
 def test_dataclasses_serialise_via_asdict() -> None:
     """The chat layer / SSE wire shape depends on asdict() round-tripping
     cleanly for diagnostics — keep them dataclasses-compatible."""

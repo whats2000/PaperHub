@@ -181,6 +181,7 @@ async def parse_user_message(
     *,
     tracer: Tracer,
     model: str,
+    slot: str = "paper_search_parse/v1",
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
 ) -> list[ParsedRequest]:
@@ -206,7 +207,7 @@ async def parse_user_message(
             return direct
 
     reg = registry or PromptRegistry()
-    prompt = reg.get("paper_search_parse/v1")
+    prompt = reg.get(slot)
     system = prompt.system
     user = prompt.user_template.format(user_message=user_message)
     messages = [
@@ -742,6 +743,7 @@ async def synthesize_prose(
     user_message: str,
     tracer: Tracer,
     model: str,
+    slot: str = "paper_search_synthesize/v1",
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
 ) -> str:
@@ -752,7 +754,7 @@ async def synthesize_prose(
     emission is architectural, not LLM-driven).
     """
     reg = registry or PromptRegistry()
-    prompt = reg.get("paper_search_synthesize/v1")
+    prompt = reg.get(slot)
     system = prompt.system
     resolved_block = "\n".join(
         f"  - {r.identity.title} "
