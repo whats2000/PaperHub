@@ -70,12 +70,14 @@ cp .env.example .env           # then fill in GEMINI_API_KEY (or your provider's
 
 ### Run the dev stack
 
-Two terminals (the model-server auto-spawns on first backend boot):
+**Recommended (Windows, one command):** `scripts/start.ps1` orchestrates all
+the sibling processes — it brings up the external MCP daemons (open-websearch)
+via `paperhub-mcp-up`, the model-server, then the backend with hot-reload:
 
-```bash
-# Terminal 1 — backend (FastAPI + LangGraph, hot-reload, :8000)
+```powershell
+# Terminal 1 — backend stack (MCP daemons + model-server + FastAPI on :8000)
 cd backend
-uv run uvicorn paperhub.app:app --reload --reload-dir src --port 8000
+.\scripts\start.ps1
 ```
 
 ```bash
@@ -85,6 +87,24 @@ npm run dev
 ```
 
 Open **http://localhost:5173** and start chatting.
+
+<details>
+<summary>Lower-level: run uvicorn directly</summary>
+
+The model-server auto-spawns on first backend boot, so the minimum is:
+
+```bash
+cd backend
+uv run uvicorn paperhub.app:app --reload --reload-dir src --port 8000
+```
+
+Note: this path does **not** start the web-search daemon for you. On Windows,
+`uvicorn --reload` runs on a `SelectorEventLoop`, so the in-worker autostart
+falls back gracefully (papers-only) — bring web search up yourself with
+`uv run paperhub-mcp-up` (or use `scripts/start.ps1`, which does it). See the
+web-search note under [Configuration](#️-configuration).
+
+</details>
 
 > **No API key handy?** Exercise the chat plumbing with mocked LLMs (PowerShell):
 > ```powershell
@@ -109,14 +129,14 @@ All settings live in `backend/.env` (grouped by function in [`.env.example`](bac
 
 **GPU (optional).** torch installs CPU-only by default. For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130`.
 
-**Web-search discovery (optional).** `paper_search` gets a no-key multi-engine discovery step when an [`open-websearch`](https://www.npmjs.com/package/open-websearch) daemon is reachable. Install + run it in a separate shell:
+**Web-search discovery (optional).** `paper_search` / `paper_suggest` gain a no-key multi-engine discovery step when an [`open-websearch`](https://www.npmjs.com/package/open-websearch) daemon is reachable on `:3000`. You don't install it by hand — `scripts/start.ps1` (or `uv run paperhub-mcp-up`) reads `mcp_servers.toml` and launches every `launch`-declaring MCP server for you via `npx -y`, which fetches the package on first run (~25s, one-time):
 
 ```bash
-npm install -g open-websearch
-MODE=http open-websearch        # listens on http://localhost:3000
+cd backend
+uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if already up)
 ```
 
-When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`. When it's down, the agent falls back to a papers-only flow — no config needed. (The `paperhub-papers` MCP surface ships in-process at `/mcp`; no install required.)
+When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`. When it's down, the agent falls back to a papers-only flow — no config needed. Spawned daemons are detached so they survive backend `--reload`; explicit teardown is `start.ps1`'s job (otherwise they clear at reboot). Requires Node 18+ on `PATH`. (The `paperhub-papers` MCP surface ships in-process at `/mcp`; no install required.)
 
 ---
 

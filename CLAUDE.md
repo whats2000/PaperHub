@@ -143,6 +143,21 @@ End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
   use `scripts/start.ps1` which terminates it in a `finally` block. Opt out
   with `PAPERHUB_INPROCESS_MODELS=1` (loads models in the worker — tests use
   this; expect the embedder to reload on every backend edit).
+- **External MCP daemons are spawned with `subprocess.Popen`, not asyncio**
+  (and via the boot script, not the worker, on the supported path). uvicorn's
+  `use_subprocess` (`reload or workers > 1`) makes its loop factory directly
+  instantiate a `SelectorEventLoop` on Windows — bypassing the
+  `WindowsProactorEventLoopPolicy` set in `app.py` — and `SelectorEventLoop`
+  raises `NotImplementedError` on `asyncio.create_subprocess_exec`. So under
+  the documented `--reload` dev flow, an in-worker asyncio spawn of
+  `open-websearch` always failed silently on Windows. The fix: every
+  `launch`-declaring MCP server is launched via `paperhub.mcp.launcher.launch_detached`
+  (a detached `subprocess.Popen`, loop-independent — same primitive the model
+  server uses). `scripts/start.ps1` runs `paperhub-mcp-up` (reads
+  `mcp_servers.toml`, launches all `has_launch` servers) before the backend;
+  the in-worker registry autostart is a bare-`uvicorn` fallback. Spawned
+  daemons are **detach-and-leak** (NOT terminated on worker shutdown) so
+  reloads don't re-pay the ~25s npx cold start. Skip with `start.ps1 -NoWebSearch`.
 - **uvicorn `--reload` + concurrent `uv sync`**: if you run pytest in one shell
   while `uvicorn --reload` is active in another, the reload watcher will see
   uv's atomic-install temp dirs in `.venv/Lib/site-packages/` and trigger a
@@ -156,7 +171,7 @@ End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
 - `backend/src/paperhub/` — application code (db, models, tracing, llm, agents, api, cli)
 - `backend/src/paperhub/modelserver/` — separate FastAPI app hosting embedder + reranker (v2.8)
 - `backend/tests/` — pytest suite; fixtures under `tests/fixtures/`
-- `backend/scripts/` — operator-facing smoke scripts + `start.ps1` (orchestrates modelserver + backend)
+- `backend/scripts/` — operator-facing smoke scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + modelserver + backend)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, future `papers_cache/`, future `chroma/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
 - `docs/superpowers/specs/` — SRS (**v2.11 current**)

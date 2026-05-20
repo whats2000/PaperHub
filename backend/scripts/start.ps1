@@ -17,9 +17,10 @@
 #      so we don't orphan it.
 #
 # Usage:
-#     .\scripts\start.ps1                    # backend on :8000, modelserver on :8001
+#     .\scripts\start.ps1                    # backend :8000, modelserver :8001, MCP daemons up
 #     .\scripts\start.ps1 -BackendPort 8765  # custom backend port
 #     .\scripts\start.ps1 -NoReload          # production-style: no uvicorn --reload
+#     .\scripts\start.ps1 -NoWebSearch       # skip launching external MCP daemons (open-websearch)
 #
 # The model server is **deliberately not** subject to --reload — its
 # whole reason to exist is to survive backend reloads. If you change
@@ -29,7 +30,8 @@ param(
     [int]$BackendPort = 8000,
     [int]$ModelServerPort = 8001,
     [string]$BindHost = "127.0.0.1",     # $Host is a PowerShell reserved automatic
-    [switch]$NoReload                    # default: uvicorn --reload on
+    [switch]$NoReload,                   # default: uvicorn --reload on
+    [switch]$NoWebSearch                 # default: ensure external MCP daemons (open-websearch)
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +43,11 @@ $env:PAPERHUB_MODEL_SERVER_HOST = $BindHost
 $env:PAPERHUB_MODEL_SERVER_PORT = $ModelServerPort
 
 $modelProc = $null
+# Sidecar file written by paperhub-mcp-up: ports of MCP daemons it started this
+# run. We tree-kill their listeners on exit (the daemons are spawned detached,
+# so the CLI can't hand us a process handle — port → PID → taskkill /T is the
+# reliable cleanup).
+$mcpPortsFile = Join-Path $PSScriptRoot "..\.mcp_daemon_ports"
 $cleanup = {
     if ($script:modelProc -and -not $script:modelProc.HasExited) {
         Write-Host "Stopping modelserver (pid=$($script:modelProc.Id))" -ForegroundColor Yellow
@@ -52,6 +59,21 @@ $cleanup = {
         } catch {
             Stop-Process -Id $script:modelProc.Id -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    # Stop the MCP daemons paperhub-mcp-up started (open-websearch, etc.).
+    if (Test-Path $script:mcpPortsFile) {
+        foreach ($line in (Get-Content $script:mcpPortsFile -ErrorAction SilentlyContinue)) {
+            $port = 0
+            if (-not [int]::TryParse($line.Trim(), [ref]$port) -or $port -eq 0) { continue }
+            $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+            foreach ($conn in $conns) {
+                Write-Host "Stopping MCP daemon on :$port (pid=$($conn.OwningProcess))" -ForegroundColor Yellow
+                # /T kills the npx → node child tree, not just the wrapper.
+                & taskkill /F /T /PID $conn.OwningProcess 2>$null | Out-Null
+            }
+        }
+        Remove-Item $script:mcpPortsFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -89,6 +111,29 @@ try {
         throw "modelserver did not become ready at $healthUrl within ${readyTimeoutSec}s"
     }
     Write-Host "modelserver ready at $healthUrl (pid=$($modelProc.Id))" -ForegroundColor Green
+
+    # Step 2b: ensure external MCP daemons are up (open-websearch today; sql/fs
+    # later). `paperhub-mcp-up` reads mcp_servers.toml and launches every
+    # `launch`-declaring server via a detached subprocess.Popen — loop-
+    # independent, so it works even though uvicorn --reload forces a
+    # SelectorEventLoop on Windows (where the in-worker asyncio spawn raises
+    # NotImplementedError). The daemons are detach-and-leak: they survive
+    # backend reloads and are reused on the next boot. NON-FATAL: web search
+    # is optional, so a failure here just means the agent falls back to
+    # papers-only — we warn and keep booting. Skip with -NoWebSearch.
+    if (-not $NoWebSearch) {
+        Write-Host "Ensuring external MCP daemons (paperhub-mcp-up)..." -ForegroundColor Cyan
+        try {
+            & uv run paperhub-mcp-up
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "paperhub-mcp-up exited $LASTEXITCODE; continuing without it" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "paperhub-mcp-up failed ($_); continuing without external MCP daemons" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Skipping external MCP daemons (-NoWebSearch)" -ForegroundColor DarkGray
+    }
 
     # Step 3: start the backend in the foreground. --reload watches
     # src/ only so workspace/ writes and .venv/ activity don't trigger

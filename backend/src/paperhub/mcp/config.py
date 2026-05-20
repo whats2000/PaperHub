@@ -27,13 +27,23 @@ Schema (see `mcp_servers.toml.example`):
 """
 from __future__ import annotations
 
+import logging
+import os
+import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-__all__ = ["MCPServerConfig", "Transport", "load_mcp_servers"]
+__all__ = [
+    "MCPServerConfig",
+    "Transport",
+    "ensure_config_seeded",
+    "load_mcp_servers",
+    "resolve_config_path",
+]
 
+_LOG = logging.getLogger(__name__)
 
 Transport = Literal["streamable_http", "stdio"]
 _VALID_TRANSPORTS: tuple[Transport, ...] = ("streamable_http", "stdio")
@@ -97,6 +107,43 @@ def load_mcp_servers(path: Path) -> list[MCPServerConfig]:
     for idx, block in enumerate(blocks):
         out.append(_parse_block(idx, block))
     return out
+
+
+def resolve_config_path() -> Path:
+    """Resolve ``mcp_servers.toml``. Env override → backend repo sibling.
+
+    Shared by the FastAPI app (``app._lifespan``) and the ``paperhub-mcp-up``
+    CLI so both read the same file. ``PAPERHUB_MCP_CONFIG`` wins; otherwise
+    the file sits next to ``backend/`` (config.py is
+    ``backend/src/paperhub/mcp/config.py`` → ``parents[3]`` is ``backend``).
+    """
+    env = os.environ.get("PAPERHUB_MCP_CONFIG")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[3] / "mcp_servers.toml"
+
+
+def ensure_config_seeded(path: Path) -> None:
+    """Seed ``mcp_servers.toml`` from the checked-in ``.example`` on first boot.
+
+    The ``papers`` server is REQUIRED by the Research Agent (no in-process
+    fallback), so a fresh clone with no config would silently boot with an
+    empty tool palette. Auto-seeding from the example closes that gap; the
+    operator can still edit afterwards. Skips when the file already exists
+    (operator-customised) or the example is missing (env-overridden path).
+    """
+    if path.exists():
+        return
+    example = path.with_name(path.name + ".example")
+    if not example.exists():
+        _LOG.info(
+            "mcp.config %s absent + no example at %s; "
+            "registry/launcher will start empty",
+            path.name, example,
+        )
+        return
+    shutil.copyfile(example, path)
+    _LOG.info("mcp.config seeded %s from %s (first-boot default)", path.name, example.name)
 
 
 def _parse_block(idx: int, block: dict[str, Any]) -> MCPServerConfig:

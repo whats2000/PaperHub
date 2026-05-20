@@ -17,43 +17,48 @@ sometimes takes 30-60s on a cold first run (package download + Playwright
 init), and an early lazy-connect would otherwise sticky-fail the server
 for the whole backend lifecycle.
 
-**Autostart (config-driven).** A ``[[server]]`` block may declare a
-``launch`` list (e.g. ``["npx", "-y", "open-websearch@latest", "serve"]``).
-At ``startup()`` the registry TCP-probes the configured URL; if no daemon
-is listening, it spawns the launch command (with merged ``launch_env``)
-and polls until the daemon is reachable or ``launch_ready_timeout``
-elapses. Spawned subprocesses are tracked and terminated on ``shutdown()``
-so the daemon dies with the backend. Fresh-clone developers don't need to
-install or pre-run anything — ``npx -y`` auto-fetches the package on
-first boot.
+**Autostart (config-driven, fallback path).** A ``[[server]]`` block may
+declare a ``launch`` list (e.g. ``["npx", "-y", "open-websearch@latest"]``).
+At ``startup()`` the registry TCP-probes the configured URL; if no daemon is
+listening, it spawns the launch command (with merged ``launch_env``) via a
+**detached** ``subprocess.Popen`` (see ``launcher.launch_detached`` — NOT the
+asyncio subprocess API, which raises ``NotImplementedError`` on the
+``SelectorEventLoop`` uvicorn forces under ``--reload`` on Windows) and polls
+until the daemon is reachable. Spawned daemons are **detach-and-leak**: they
+are NOT terminated on ``shutdown()``, so a worker reload doesn't kill + respawn
+them (an ``npx`` cold start is ~25s) — identical posture to the model server.
+The supported path is ``scripts/start.ps1``, which pre-starts every
+``launch``-declaring server via ``paperhub-mcp-up``; this in-worker autostart
+is the fallback for a bare ``uvicorn`` run. ``npx -y`` auto-fetches the package
+on first boot, so fresh-clone developers need nothing pre-installed.
 """
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-import os
-import shutil
-import sys
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from .client import MCPClient
 from .config import MCPServerConfig, load_mcp_servers
 from .errors import MCPUnavailableError
+from .launcher import (
+    host_port_from_url,
+    launch_detached,
+    tcp_reachable,
+    terminate,
+    wait_until_reachable,
+)
+
+# Re-export under the historical private name so existing imports/tests
+# (tests/mcp/test_registry_probe.py) keep resolving through the registry.
+_tcp_reachable = tcp_reachable
 
 __all__ = ["MCPRegistry"]
 
 _LOG = logging.getLogger(__name__)
-
-# Time budget for a SIGTERM'd subprocess to exit cleanly before SIGKILL.
-_SUBPROCESS_TERMINATE_TIMEOUT = 5.0
-# Polling cadence while waiting for a freshly-spawned daemon to bind.
-_LAUNCH_POLL_INTERVAL = 0.5
-# Per-probe TCP-connect timeout.
-_PROBE_CONNECT_TIMEOUT = 0.5
 
 
 class MCPRegistry:
@@ -81,9 +86,10 @@ class MCPRegistry:
         # the retry-after-cooldown path.
         self._failed_at: dict[str, float] = {}
         self._aggregated_schemas: list[dict[str, Any]] | None = None
-        # Server name → live subprocess we spawned at startup. Terminated
-        # on `shutdown()`; populated only for configs with `has_launch`.
-        self._launched: dict[str, asyncio.subprocess.Process] = {}
+        # Server name → live subprocess we spawned at startup. Detach-and-leak:
+        # NOT terminated on `shutdown()` (so reloads don't thrash the daemon);
+        # populated only for configs with `has_launch`. See module docstring.
+        self._launched: dict[str, subprocess.Popen[bytes]] = {}
         # v2.7 follow-up: serialise aggregate_tool_schemas + _ensure_
         # connected so concurrent callers (the fan-out per ParsedRequest
         # via asyncio.gather) don't race on the connect path. Without
@@ -140,14 +146,23 @@ class MCPRegistry:
             )
 
     async def shutdown(self) -> None:
-        """Disconnect every client + terminate spawned subprocesses."""
+        """Disconnect every client. Spawned daemons are **detach-and-leak**.
+
+        We intentionally do NOT terminate ``self._launched`` here: under
+        ``uvicorn --reload`` the worker is torn down on every code edit, and
+        killing the daemon each time would re-pay the ~25s ``npx`` cold start
+        on the next boot. The daemon outlives the worker (it's detached) and
+        is reused via the reachability probe — same posture as the model
+        server. Explicit teardown is the boot script's job (``start.ps1``
+        terminates ``paperhub-mcp-up``); leaked daemons otherwise clear at OS
+        reboot or manual kill.
+        """
         for name, client in self._clients.items():
             try:
                 await client.disconnect()
             except Exception as exc:  # noqa: BLE001
                 _LOG.warning("mcp.registry disconnect failed server=%s err=%s", name, exc)
         self._aggregated_schemas = None
-        await self._terminate_launched()
 
     # ------------------------------------------------------------------ autostart
 
@@ -161,7 +176,7 @@ class MCPRegistry:
         ``call_tool``, which the dispatcher already handles cleanly.
         """
         assert cfg.url is not None  # enforced by config loader
-        host, port = _host_port_from_url(cfg.url)
+        host, port = host_port_from_url(cfg.url)
         if host is None or port is None:
             _LOG.warning(
                 "mcp.registry %s: cannot parse host:port from url=%r; skipping launch",
@@ -169,57 +184,29 @@ class MCPRegistry:
             )
             return
 
-        if await _tcp_reachable(host, port):
+        if await tcp_reachable(host, port):
             _LOG.info(
                 "mcp.registry %s daemon already reachable on %s:%d; skipping launch",
                 cfg.name, host, port,
             )
             return
 
-        cmd = list(cfg.launch)
-        if not cmd:
-            return
-        exe = shutil.which(cmd[0])
-        if exe is None:
-            _LOG.info(
-                "mcp.registry %s: launch binary %r not on PATH; cannot autostart "
-                "(install it or run `%s` manually)",
-                cfg.name, cmd[0], " ".join(cmd),
-            )
-            return
-
-        env = {**os.environ, **cfg.launch_env}
-        argv = _wrap_for_windows_shim(exe, cmd[1:])
-        _LOG.info(
-            "mcp.registry %s spawning launch=%s env-overrides=%s",
-            cfg.name, argv, sorted(cfg.launch_env),
-        )
-        try:
-            proc = await asyncio.create_subprocess_exec(*argv, env=env)
-        except (OSError, NotImplementedError) as exc:
-            # NotImplementedError surfaces on Windows when uvicorn is
-            # running on SelectorEventLoop (no subprocess support).
-            # Don't abort startup — the registry already handles
-            # "daemon not reachable" gracefully (tools just don't
-            # enter the palette). Operator can launch the daemon
-            # manually with the documented `npx -y open-websearch`
-            # incantation.
-            _LOG.warning(
-                "mcp.registry %s: subprocess spawn failed (%s: %s); "
-                "skipping launch. If you need the daemon, run it "
-                "manually: %s",
-                cfg.name, type(exc).__name__, exc, " ".join(cmd),
-            )
+        # Detached subprocess.Popen (loop-independent — works on the
+        # SelectorEventLoop uvicorn forces under --reload on Windows). PATH /
+        # spawn failures are logged inside launch_detached and surface as
+        # None; the unreachable server then fails cleanly at first call_tool.
+        proc = launch_detached(cfg.launch, cfg.launch_env, label=cfg.name)
+        if proc is None:
             return
         self._launched[cfg.name] = proc
 
-        if not await _wait_until_reachable(host, port, deadline_after=cfg.launch_ready_timeout):
+        if not await wait_until_reachable(host, port, cfg.launch_ready_timeout):
             _LOG.warning(
                 "mcp.registry %s: daemon never became reachable on %s:%d "
                 "within %.1fs; terminating subprocess (pid=%s)",
                 cfg.name, host, port, cfg.launch_ready_timeout, proc.pid,
             )
-            await _terminate(proc)
+            terminate(proc)
             self._launched.pop(cfg.name, None)
             return
 
@@ -227,29 +214,6 @@ class MCPRegistry:
             "mcp.registry %s daemon ready on %s:%d (pid=%s)",
             cfg.name, host, port, proc.pid,
         )
-
-    async def _terminate_launched(self) -> None:
-        """Terminate every subprocess we spawned. Parallel for fast shutdown."""
-        if not self._launched:
-            return
-        items = list(self._launched.items())
-        self._launched.clear()
-        await asyncio.gather(
-            *[self._terminate_one(name, proc) for name, proc in items],
-            return_exceptions=False,
-        )
-
-    async def _terminate_one(
-        self, name: str, proc: asyncio.subprocess.Process,
-    ) -> None:
-        try:
-            await _terminate(proc)
-            _LOG.info("mcp.registry %s subprocess terminated (pid=%s)", name, proc.pid)
-        except Exception as exc:  # noqa: BLE001
-            _LOG.warning(
-                "mcp.registry %s subprocess termination error pid=%s err=%s",
-                name, proc.pid, exc,
-            )
 
     # ------------------------------------------------------------------ public ops
 
@@ -402,105 +366,3 @@ class MCPRegistry:
                 exc,
             )
             self._connect_failed.add(name)
-
-
-# ===================================================================== helpers
-
-
-def _host_port_from_url(url: str) -> tuple[str | None, int | None]:
-    parsed = urlparse(url)
-    host = parsed.hostname
-    port = parsed.port
-    if port is None and parsed.scheme in {"http", "https"}:
-        port = 80 if parsed.scheme == "http" else 443
-    return host, port
-
-
-async def _tcp_reachable(host: str, port: int) -> bool:
-    """Cheap probe: TCP-connect to any address ``host`` resolves to.
-
-    Resolves ``host`` via :func:`socket.getaddrinfo` and tries each
-    address (IPv4 + IPv6) in turn. Returns True on the first successful
-    connect. Closes the probe socket immediately — streamable-HTTP MCP
-    servers tolerate a closed probe.
-
-    **Windows / dual-stack gotcha.** On Windows the loopback resolver
-    returns ``::1`` (IPv6) FIRST for ``localhost``, but `npx open-
-    websearch` binds IPv4 only. ``asyncio.open_connection("localhost",
-    port)`` then tries ``::1`` first; if it hangs instead of refusing
-    fast (common on Windows where IPv6 connectivity *appears* present),
-    every probe times out at ``_PROBE_CONNECT_TIMEOUT`` and the autostart
-    declares the daemon unreachable — even though IPv4 ``127.0.0.1:PORT``
-    is happily serving. Explicit per-family iteration avoids that.
-
-    This bug was caught by **live-backend testing**, not pytest — the
-    unit tests stubbed `_tcp_reachable` and so couldn't see it. A real
-    socket-roundtrip test lives in `tests/mcp/test_registry_probe.py`.
-    """
-    import socket as _socket
-
-    loop = asyncio.get_event_loop()
-    try:
-        addrinfo = await loop.getaddrinfo(
-            host, port, type=_socket.SOCK_STREAM,
-        )
-    except _socket.gaierror:
-        return False
-
-    # Prefer IPv4 (loopback servers on Windows / Node bind IPv4 only by
-    # default). Stable-sort so the order is otherwise preserved.
-    addrinfo.sort(key=lambda ai: 0 if ai[0] == _socket.AF_INET else 1)
-
-    for family, _socktype, _proto, _canon, sockaddr in addrinfo:
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(
-                    host=sockaddr[0], port=sockaddr[1], family=family,
-                ),
-                timeout=_PROBE_CONNECT_TIMEOUT,
-            )
-        except (OSError, TimeoutError):
-            continue
-        writer.close()
-        with contextlib.suppress(Exception):
-            # Closing a probe socket; benign races on the response side.
-            await writer.wait_closed()
-        return True
-    return False
-
-
-async def _wait_until_reachable(host: str, port: int, deadline_after: float) -> bool:  # noqa: ASYNC109 — operator-facing knob from MCPServerConfig.launch_ready_timeout
-    """Poll ``host:port`` until it accepts a TCP connect, up to ``deadline_after`` seconds."""
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + deadline_after
-    while loop.time() < deadline:
-        if await _tcp_reachable(host, port):
-            return True
-        await asyncio.sleep(_LAUNCH_POLL_INTERVAL)
-    return False
-
-
-def _wrap_for_windows_shim(exe: str, args: list[str]) -> list[str]:
-    """On Windows, ``npx`` / ``yarn`` / ``pnpm`` resolve to ``.cmd`` shims
-    that ``asyncio.create_subprocess_exec`` cannot run directly. Route them
-    through ``cmd /c`` so the shim launches its target."""
-    if sys.platform.startswith("win") and exe.lower().endswith(".cmd"):
-        return ["cmd", "/c", exe, *args]
-    return [exe, *args]
-
-
-async def _terminate(proc: asyncio.subprocess.Process) -> None:
-    """Graceful SIGTERM, then SIGKILL after ``_SUBPROCESS_TERMINATE_TIMEOUT``."""
-    if proc.returncode is not None:
-        return
-    try:
-        proc.terminate()
-    except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(
-            proc.wait(), timeout=_SUBPROCESS_TERMINATE_TIMEOUT,
-        )
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
