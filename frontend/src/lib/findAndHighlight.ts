@@ -8,8 +8,14 @@ export const HIGHLIGHT_CLASS = "ph-cite-hl";
  */
 const PREFIX_LEN = 150;
 
-/** Minimum characters required to call a prefix match valid. */
-const MIN_PREFIX = 20;
+/**
+ * Minimum characters for any accepted prefix match.
+ * Every candidate target must be at least this long (or be the whole needle
+ * when the needle itself is shorter). A 30-char threshold makes an accidental
+ * match against a generic sentence opener unlikely — though not impossible —
+ * which is a demo-acceptable trade-off. Short needles match in full only.
+ */
+const MIN_MATCH = 30;
 
 const HIGHLIGHT_MS = 2500;
 
@@ -27,42 +33,52 @@ interface NodeSpan {
  * The challenge: a stored chunk may end with LaTeX math or a figure caption
  * that the HTML renderer drops or transforms. The head of the passage is
  * reliable; the tail is not. So we try progressively shorter leading
- * substrings until we find one in the DOM, stopping at MIN_PREFIX chars.
+ * substrings until we find one in the DOM.
  *
- * Priority order (longest-first so we don't accidentally match a 20-char
- * prefix that appears in an unrelated sentence):
+ * Every candidate must be at least MIN_MATCH characters long, making
+ * accidental matches against generic short openers unlikely (though not
+ * impossible) — a demo-acceptable trade-off. The one exception: when the
+ * whole normalized needle is shorter than MIN_MATCH, the only candidate is
+ * the entire needle (a short chunk must match in full; no sub-floor).
+ *
+ * Priority order (longest-first):
  *   1. needle normalized and capped at PREFIX_LEN
- *   2. needle up to the last sentence boundary (". ") before PREFIX_LEN
- *   3. needle up to the last word boundary (" ") before PREFIX_LEN / 2
- *   4. needle up to MIN_PREFIX chars (hard floor)
+ *   2. needle up to the last sentence boundary (". ") before PREFIX_LEN,
+ *      only if that boundary is at or beyond MIN_MATCH
+ *   3. needle up to the last word boundary (" ") near the midpoint,
+ *      only if that boundary is at or beyond MIN_MATCH
+ *   4. needle up to MIN_MATCH chars (floor), only if needle >= MIN_MATCH
  */
 function buildTargets(needle: string): string[] {
-  const full = normalize(needle);
-  const capped = full.slice(0, PREFIX_LEN);
+  const norm = normalize(needle);
+  if (!norm) return [];
 
-  const targets: string[] = [capped];
-
-  // Sentence boundary before PREFIX_LEN
-  const sentenceEnd = capped.lastIndexOf(". ");
-  if (sentenceEnd >= MIN_PREFIX) {
-    const sentenceTarget = capped.slice(0, sentenceEnd + 1); // keep the "."
-    if (sentenceTarget !== capped) targets.push(sentenceTarget);
+  // Short needle: must match in full — no sub-floor candidates.
+  if (norm.length < MIN_MATCH) {
+    return [norm];
   }
 
-  // Word boundary before PREFIX_LEN / 2
-  const halfLen = Math.floor(PREFIX_LEN / 2);
-  const halfCapped = full.slice(0, halfLen);
-  const wordEnd = halfCapped.lastIndexOf(" ");
-  if (wordEnd >= MIN_PREFIX) {
-    const wordTarget = halfCapped.slice(0, wordEnd);
+  const cap = Math.min(norm.length, PREFIX_LEN);
+  const targets: string[] = [norm.slice(0, cap)];
+
+  // Sentence boundary before PREFIX_LEN (keep the ".")
+  const dot = norm.lastIndexOf(". ", cap);
+  if (dot + 1 >= MIN_MATCH) {
+    const sentenceTarget = norm.slice(0, dot + 1);
+    if (!targets.includes(sentenceTarget)) targets.push(sentenceTarget);
+  }
+
+  // Word boundary near the midpoint
+  const mid = Math.max(MIN_MATCH, Math.floor(cap / 2));
+  const sp = norm.lastIndexOf(" ", mid);
+  if (sp >= MIN_MATCH) {
+    const wordTarget = norm.slice(0, sp);
     if (!targets.includes(wordTarget)) targets.push(wordTarget);
   }
 
-  // Hard floor
-  const floorTarget = full.slice(0, MIN_PREFIX);
-  if (floorTarget.length >= MIN_PREFIX && !targets.includes(floorTarget)) {
-    targets.push(floorTarget);
-  }
+  // Floor: MIN_MATCH chars
+  const floorTarget = norm.slice(0, MIN_MATCH);
+  if (!targets.includes(floorTarget)) targets.push(floorTarget);
 
   // De-dup while preserving order (longest-first)
   return [...new Set(targets)];
@@ -79,7 +95,7 @@ function buildTargets(needle: string): string[] {
  */
 export function findAndHighlight(doc: Document, needle: string): boolean {
   const targets = buildTargets(needle);
-  if (!targets[0]) return false;
+  if (targets.length === 0) return false;
 
   clearHighlight(doc);
 
