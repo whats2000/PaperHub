@@ -127,3 +127,61 @@ async def test_amain_is_nonfatal_when_daemon_wont_start(
 
     # Even though the daemon never starts, the CLI must exit 0.
     assert await mcp_up._amain() == 0
+    # Nothing started → no ports file (cleanup has nothing to do).
+    assert not mcp_up._ports_file().exists()
+
+
+async def test_amain_writes_started_ports_for_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Daemons we START are recorded so the boot script can tree-kill them."""
+    path = _write_toml(tmp_path, launch=True)
+    monkeypatch.setattr(mcp_up, "resolve_config_path", lambda: path)
+    monkeypatch.setattr(mcp_up, "ensure_config_seeded", lambda _p: None)
+    state = {"up": False}
+
+    async def _reachable(host: str, port: int) -> bool:
+        return state["up"]
+
+    class _Proc:
+        pid = 4242
+
+    def _launch(launch: Any, env: Any, *, label: str = "") -> Any:
+        state["up"] = True
+        return _Proc()
+
+    async def _wait(host: str, port: int, deadline_after: float) -> bool:
+        return state["up"]
+
+    monkeypatch.setattr(mcp_up, "tcp_reachable", _reachable)
+    monkeypatch.setattr(mcp_up, "launch_detached", _launch)
+    monkeypatch.setattr(mcp_up, "wait_until_reachable", _wait)
+
+    assert await mcp_up._amain() == 0
+    # The web block's url is :3000 — that port must be recorded.
+    assert mcp_up._ports_file().read_text(encoding="utf-8").split() == ["3000"]
+
+
+async def test_amain_clears_stale_ports_file_when_already_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A daemon already running (we didn't start it) must not be recorded;
+    a stale ports file is cleared so the boot script won't kill a daemon we
+    don't own."""
+    path = _write_toml(tmp_path, launch=True)
+    monkeypatch.setattr(mcp_up, "resolve_config_path", lambda: path)
+    monkeypatch.setattr(mcp_up, "ensure_config_seeded", lambda _p: None)
+    # Pre-existing stale file from a prior run.
+    mcp_up._ports_file().write_text("9999\n", encoding="utf-8")
+
+    async def _reachable(host: str, port: int) -> bool:
+        return True
+
+    monkeypatch.setattr(mcp_up, "tcp_reachable", _reachable)
+    monkeypatch.setattr(
+        mcp_up, "launch_detached",
+        lambda *a, **k: pytest.fail("must not launch when already running"),
+    )
+
+    assert await mcp_up._amain() == 0
+    assert not mcp_up._ports_file().exists()

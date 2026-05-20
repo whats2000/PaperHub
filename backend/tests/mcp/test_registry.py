@@ -510,8 +510,15 @@ async def test_startup_spawns_subprocess_and_leaks_on_shutdown(
         state["daemon_up"] = True  # spawn "succeeded"
         return fake_proc
 
+    # Stub the post-launch readiness wait too — the real wait_until_reachable
+    # calls the launcher's own tcp_reachable (not the registry-level name we
+    # patch), which would otherwise hit a real socket on :3000.
+    async def _stub_wait(host: str, port: int, deadline_after: float) -> bool:
+        return state["daemon_up"]
+
     monkeypatch.setattr(registry_mod, "tcp_reachable", _stub_reachable)
     monkeypatch.setattr(registry_mod, "launch_detached", _stub_launch)
+    monkeypatch.setattr(registry_mod, "wait_until_reachable", _stub_wait)
 
     reg = MCPRegistry()
     await reg.startup(

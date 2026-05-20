@@ -43,6 +43,11 @@ $env:PAPERHUB_MODEL_SERVER_HOST = $BindHost
 $env:PAPERHUB_MODEL_SERVER_PORT = $ModelServerPort
 
 $modelProc = $null
+# Sidecar file written by paperhub-mcp-up: ports of MCP daemons it started this
+# run. We tree-kill their listeners on exit (the daemons are spawned detached,
+# so the CLI can't hand us a process handle — port → PID → taskkill /T is the
+# reliable cleanup).
+$mcpPortsFile = Join-Path $PSScriptRoot "..\.mcp_daemon_ports"
 $cleanup = {
     if ($script:modelProc -and -not $script:modelProc.HasExited) {
         Write-Host "Stopping modelserver (pid=$($script:modelProc.Id))" -ForegroundColor Yellow
@@ -54,6 +59,21 @@ $cleanup = {
         } catch {
             Stop-Process -Id $script:modelProc.Id -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    # Stop the MCP daemons paperhub-mcp-up started (open-websearch, etc.).
+    if (Test-Path $script:mcpPortsFile) {
+        foreach ($line in (Get-Content $script:mcpPortsFile -ErrorAction SilentlyContinue)) {
+            $port = 0
+            if (-not [int]::TryParse($line.Trim(), [ref]$port) -or $port -eq 0) { continue }
+            $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+            foreach ($conn in $conns) {
+                Write-Host "Stopping MCP daemon on :$port (pid=$($conn.OwningProcess))" -ForegroundColor Yellow
+                # /T kills the npx → node child tree, not just the wrapper.
+                & taskkill /F /T /PID $conn.OwningProcess 2>$null | Out-Null
+            }
+        }
+        Remove-Item $script:mcpPortsFile -Force -ErrorAction SilentlyContinue
     }
 }
 

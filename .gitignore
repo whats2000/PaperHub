@@ -86,6 +86,9 @@ workspace*/
 # Checked-in template lives at backend/mcp_servers.toml.example (SRS v2.5,
 # §III-6.1).
 /backend/mcp_servers.toml
+# Sidecar written by paperhub-mcp-up: ports of MCP daemons it started, read by
+# scripts/start.ps1 for cleanup on exit.
+/backend/.mcp_daemon_ports
 
 # temporary files
 tmp*/

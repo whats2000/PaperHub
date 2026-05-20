@@ -14,9 +14,12 @@ For every ``[[server]]`` block with a ``launch`` command:
 
 Detach-and-leak by design: spawned daemons OUTLIVE this short-lived CLI so they
 survive ``uvicorn --reload`` and are reused on the next boot via the probe.
-Cleanup is the boot script's job (it terminates this process group) or OS
-reboot / manual kill — identical posture to the model server. Always exits 0:
-a daemon that won't start is non-fatal (the agent falls back), so it must not
+**Lifecycle handoff**: the ports of daemons we actually STARTED (not the ones
+already running, which we don't own) are written to a sidecar file next to
+``mcp_servers.toml`` so the boot script (``scripts/start.ps1``) can tree-kill
+them in its ``finally`` — otherwise Ctrl+C on the boot script stops the
+backend + modelserver but leaves the MCP daemon running. Always exits 0: a
+daemon that won't start is non-fatal (the agent falls back), so it must not
 fail the boot script.
 """
 from __future__ import annotations
@@ -24,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from paperhub.mcp.config import (
     MCPServerConfig,
@@ -40,6 +44,15 @@ from paperhub.mcp.launcher import (
 )
 
 _LOG = logging.getLogger("paperhub.mcp_up")
+
+# Sidecar file (next to mcp_servers.toml) listing the ports of daemons THIS run
+# started. scripts/start.ps1 reads it to tree-kill them on Ctrl+C. Gitignored
+# alongside the toml; rewritten every run.
+_PORTS_FILENAME = ".mcp_daemon_ports"
+
+
+def _ports_file() -> Path:
+    return resolve_config_path().with_name(_PORTS_FILENAME)
 
 
 async def _ensure_one(cfg: MCPServerConfig) -> str:
@@ -89,9 +102,31 @@ async def _amain() -> int:
         len(launchable), ", ".join(c.name for c in launchable),
     )
     statuses = await asyncio.gather(*[_ensure_one(c) for c in launchable])
+
+    # Record the ports of daemons we STARTED (not already-running ones — those
+    # belong to whoever launched them). The boot script tree-kills these on
+    # exit. Rewritten every run; cleared when we started nothing this run.
+    started_ports: list[int] = []
     for cfg, status in zip(launchable, statuses, strict=True):
         _LOG.info("  %-12s %s", cfg.name, status)
+        if status.startswith("started") and cfg.url is not None:
+            _host, port = host_port_from_url(cfg.url)
+            if port is not None:
+                started_ports.append(port)
+    _write_ports_file(started_ports)
     return 0
+
+
+def _write_ports_file(ports: list[int]) -> None:
+    """Persist the ports we started for the boot script's cleanup pass."""
+    path = _ports_file()
+    try:
+        if ports:
+            path.write_text("\n".join(str(p) for p in ports) + "\n", encoding="utf-8")
+        elif path.exists():
+            path.unlink()  # nothing started this run → no stale ports to clean
+    except OSError as exc:
+        _LOG.warning("could not write %s: %s", path.name, exc)
 
 
 def main() -> None:
