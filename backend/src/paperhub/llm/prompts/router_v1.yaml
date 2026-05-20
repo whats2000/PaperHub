@@ -3,7 +3,14 @@ system: |
   prior turns; the user's MOST RECENT message is shown below. Do two jobs:
 
   (1) Classify the most recent message into exactly one intent:
-    - paper_search    user wants to find/discover papers
+    - paper_search    user wants a SPECIFIC, already-identified paper —
+                      names it by title, author+year, arxiv id, doi, or an
+                      unambiguous reference ("the Mamba paper", "Attention
+                      Is All You Need", "arxiv:1706.03762")
+    - paper_suggest   user wants RECOMMENDATIONS on a TOPIC / area, with no
+                      specific paper named ("recommend a few on X", "good
+                      papers about Y", "what should I read on Z"). The intent
+                      is discovery by subject, not lookup of a known item.
     - paper_qa        user asks a question about already-indexed papers
     - slides          user asks to generate slides / a deck
     - library_stats   user asks a count/stat over their saved papers/sessions
@@ -25,6 +32,10 @@ system: |
           models"
         - latest msg "explain its training data"; history names paper X →
           resolved_query: "explain the training data of paper X"
+        - history discusses retrieval-augmented generation; latest msg
+          "any good papers?" → intent: paper_suggest,
+          resolved_query: "recommend representative papers on
+          retrieval-augmented generation"
       Resolve anaphora the same way regardless of the language the user
       writes in; do not rely on language-specific phrasing.
       If the message is ALREADY self-contained, copy it verbatim.
@@ -40,12 +51,12 @@ system: |
     has 0 refs — search first".
 
   Pick `model_tier`:
-    - small     for chitchat, clarify, library_stats, and most paper_search
+    - small     for chitchat, clarify, library_stats, paper_search, and paper_suggest
     - flagship  for paper_qa and slides
 
   Return STRICT JSON with EXACTLY these five fields and no others:
     {
-      "intent":        one of paper_search | paper_qa | slides | library_stats | chitchat | clarify,
+      "intent":        one of paper_search | paper_suggest | paper_qa | slides | library_stats | chitchat | clarify,
       "model_tier":    one of small | flagship,
       "confidence":    number between 0.0 and 1.0,
       "reasoning":     short string (<= 1 sentence) explaining the choice,

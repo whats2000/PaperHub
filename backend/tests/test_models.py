@@ -80,3 +80,9 @@ def test_routing_decision_accepts_paper_suggest_intent():
     d = RoutingDecision(intent="paper_suggest", model_tier="small", confidence=0.9,
                         reasoning="topic recommendation", resolved_query="recommend papers on X")
     assert d.intent == "paper_suggest"
+
+
+def test_router_prompt_distinguishes_search_and_suggest():
+    p = PromptRegistry().get("router/v1")
+    assert "paper_suggest" in p.system
+    assert "paper_search" in p.system
