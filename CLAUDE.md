@@ -51,7 +51,28 @@ async with tracer.step(agent="research", tool="paper_qa:subagent", model=model) 
     # step.mark_error("reason")    # optional: force status='error' without raising
 ```
 
-The tracer auto-captures `step_index`, `latency_ms`, `status`/`error`, redaction of args+result (keys + `$HOME`), and survives `CancelledError` — don't duplicate those. Name tools `<agent>:<stage>` (the Trace panel + smoke scripts assert on the names). What to put in `record_result`: the IDs of every resource the step touched (chunks read/cited, sections listed, papers dispatched, tool args + results) and the step's final output — enough that `SELECT result_summary_json FROM tool_calls WHERE run_id=? AND tool=?` answers "what did this stage see and decide?" without re-running.
+The tracer auto-captures `step_index`, `latency_ms`, `status`/`error`, redaction of args+result (keys + `$HOME`), and survives `CancelledError` — don't duplicate those. Name tools `<agent>:<stage>` (the Trace panel + smoke scripts assert on the names). What to put in `record_result`: the IDs of every resource the step touched (chunks read/cited, sections listed, papers dispatched, tool args + results) and the step's final output — enough that the trace answers "what did this stage see and decide?" without re-running.
+
+### Tracing back a chat session (any agent flow)
+
+When a turn misbehaves, reconstruct it from SQLite — no instrumentation script, no guessing. The workspace DB is `backend/workspace/paperhub.db`.
+
+1. **Find the run.** A session has one `runs` row per turn:
+   ```sql
+   SELECT id, status, routing_decision_json FROM runs WHERE session_id = ? ORDER BY id DESC;
+   ```
+2. **See the step DAG** (which agent/stage fired, status, latency):
+   ```powershell
+   uv run paperhub-replay --run-id <N>
+   ```
+3. **Read the full recorded state of any step** — this is where the reconstruct-able payload lives (per the record principle above):
+   ```sql
+   SELECT step_index, tool, args_redacted_json, result_summary_json, error
+   FROM tool_calls WHERE run_id = ? ORDER BY step_index;
+   ```
+   `result_summary_json` holds the IDs touched + the stage's output (chunk IDs read/cited, sections listed, resolved/emitted candidates, the LLM's final text). That payload — not a re-run, not the prompt — is what you diagnose from.
+
+This works identically for every flow (paper_search, paper_qa subagent, finalizer, any future topology) precisely because they all obey the record principle. **Iron rule (restated): read the recorded run before proposing any agent-flow fix.** If the trace can't answer the question, the first fix is to enrich that step's `record_result`, then re-run.
 
 ## Backend quality gates
 
