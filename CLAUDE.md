@@ -35,7 +35,40 @@ When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The n
 - **GPU operators (optional)** — torch defaults to CPU-only on a clean `uv sync` (small wheel, fast install). For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130` swaps to the matching CUDA torch wheel. Device is auto-detected at runtime via `paperhub.pipelines._device.resolve_device()` (CUDA → MPS → CPU walk); override with `PAPERHUB_DEVICE=cpu|cuda|cuda:1|mps`. The embedder + cross-encoder reranker singletons pass `device=` explicitly so GPU operators don't get silent CPU inference. **In-flight (post-Plan C):** an inference-server extraction is underway to move the embedder + reranker out of the backend process; the lazy-singleton-with-`device=` shape is what keeps that migration low-churn.
 - **Test discipline:** every implementation task is TDD. Failing test first, minimal impl, commit.
 - **Fix-now policy (no deferred logical issues):** If a review surfaces an issue, fix it before the next task. **Blockers must be fixed. Non-blocker LOGICAL issues must ALSO be fixed.** Only pure stylistic preferences (naming, comment wording with no semantic difference) may be deferred. Deferred logical items have a track record of becoming critical at the next stage — silent shadowing, partial-write windows, schema drift, masked errors — so we close them at source. The "known follow-ups" sections below are for items genuinely out-of-scope (e.g., waiting on a future plan's surface), not for "we'll get to it later." When in doubt, fix it now.
-- **Agent-flow observability policy (load-bearing):** for any agent flow (paper_search, paper_qa subagent, finalizer, any future multi-LLM-call topology), every step's `tool_calls` row MUST record enough state to **reconstruct the agent context entirely** from the DB alone. Concretely: record the IDs of every resource the step touched (chunk IDs read, chunk IDs cited, section names listed, paper IDs dispatched, tool-call argument values + tool-result payloads), and the step's final output text. **Do NOT record the rendered prompt** — prompts are templates filled from state, so the input state is sufficient. With this contract, debugging is a SQL query (`SELECT * FROM tool_calls WHERE run_id = X`), not a one-off instrumentation script. **Iron rule: do NOT propose, hypothesize, or commit any fix to an agent-flow bug without first reading the actual recorded pipeline run.** No "I think the LLM is doing X" without evidence from the trace; no "the prompt is too lenient" without a run that shows what the LLM actually saw + returned. If the trace is too thin to determine root cause, the FIRST fix is to enrich the tracer's `record_result` payload — then re-run, then diagnose.
+- **Agent-flow observability policy (load-bearing):** for any agent flow (paper_search, paper_qa subagent, finalizer, any future multi-LLM-call topology), every step's `tool_calls` row MUST record enough state to **reconstruct the agent context entirely** from the DB alone. Concretely: record the IDs of every resource the step touched (chunk IDs read, chunk IDs cited, section names listed, paper IDs dispatched, tool-call argument values + tool-result payloads), and the step's final output text. **Do NOT record the rendered prompt** — prompts are templates filled from state, so the input state is sufficient. With this contract, debugging is a SQL query (`SELECT * FROM tool_calls WHERE run_id = X`), not a one-off instrumentation script. **Iron rule: do NOT propose, hypothesize, or commit any fix to an agent-flow bug without first reading the actual recorded pipeline run.** No "I think the LLM is doing X" without evidence from the trace; no "the prompt is too lenient" without a run that shows what the LLM actually saw + returned. If the trace is too thin to determine root cause, the FIRST fix is to enrich the tracer's `record_result` payload — then re-run, then diagnose. The concrete how-to is the next section.
+
+## Agent-flow tracing — how to write a traced step
+
+Every model call, MCP call, and pipeline stage is wrapped in a `Tracer` step. The tracer (`paperhub.tracing.tracer.Tracer`) is constructed per-run (`Tracer(conn, run_id=…, branch=…)`) and threaded into every agent function. The shape is always:
+
+```python
+async with tracer.step(agent="research", tool="paper_qa:subagent", model=model) as step:
+    step.record_args({...})        # INPUT STATE at step open — IDs, query, params
+    ...                            # do the work (LLM call, DB read, tool dispatch)
+    step.record_result({...})      # OUTPUT STATE at step close — see field guide below
+    # step.mark_error("reason")    # optional: force status='error' without raising
+```
+
+What the tracer does for you automatically — **do not duplicate these**:
+- `step_index` (monotonic per run), `latency_ms` (wall clock around the `with`), `status` (`ok`, or `error` on exception / `mark_error`), `error` text.
+- **Redaction** of `args` + `result` (API keys `sk-…`/`AIza…`, `$HOME` paths) before they hit the DB — via `paperhub.tracing.redactor.redact`. You record plain dicts; redaction is transparent.
+- Survives `CancelledError` (client disconnect) — the row is still written.
+
+`tool` naming convention: `<agent>:<stage>` (e.g. `paper_search:parse`, `paper_search:resolve`, `paper_qa:subagent`, `paper_qa:finalize`). Keep names stable — the frontend Trace panel + smoke scripts assert on them.
+
+**`record_result` field guide** (the reconstruct-from-DB contract, per shipped flow):
+
+| Step | Must record |
+| --- | --- |
+| `paper_search:parse` | `requests` (parsed `{hint, kind}` list) + `llm_content` (raw model output before dedup) |
+| `paper_search:discover_plan` | per-iteration `content` + `tool_calls`; the `web.search` sub-step records the actual top-N hits, not just a count |
+| `paper_search:resolve` | the SS `query`, `hits` count, the `picked` paper_id, `top` hits, `source` |
+| `paper_search:synthesize` | `resolved` (`[{paper_id, title}]`), `not_found` (hints), `content` (prose) |
+| `paper_search:finalize` | `emitted_candidates` (`[{paper_id, title, finalize}]`), `resolved_count`, `not_found` |
+| `paper_qa:subagent` | `chunks_read_ids`, `chunks_cited_ids`, `listed_sections`, `llm_turns` (per-turn content + tool calls), `tool_call_log` (per-tool args + chunk IDs returned), `final_summary`, `reads_used` |
+| `paper_qa:finalize` | `n_papers`, `n_chunks` (args) + streamed `length` (result) |
+
+When you add a new agent step, record the analogous IDs + the final text — enough that `SELECT result_summary_json FROM tool_calls WHERE run_id=? AND tool=?` answers "what did this stage see and decide?" without re-running. New multi-LLM topologies follow the same rule from their first commit, not as a later retrofit.
 
 ## Backend quality gates
 
