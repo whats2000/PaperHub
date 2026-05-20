@@ -1,15 +1,24 @@
+import { lazy, Suspense } from "react";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
+
+const CitationCanvas = lazy(() =>
+  import("@/components/canvas/CitationCanvas").then((m) => ({
+    default: m.CitationCanvas,
+  })),
+);
 
 export function ChatPage() {
   useGlobalShortcuts();
   useReferencesSync();
+  const canvasOpen = useCanvasStore((s) => s.open);
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
@@ -36,6 +45,11 @@ export function ChatPage() {
     <div className="flex flex-1 flex-col min-h-0">
       <ChatThread session={activeSession} />
       <Composer onSubmit={handleSubmit} disabled={isStreaming} />
+      {canvasOpen && (
+        <Suspense fallback={null}>
+          <CitationCanvas />
+        </Suspense>
+      )}
     </div>
   );
 }
