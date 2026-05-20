@@ -41,4 +41,25 @@ describe("findAndHighlight", () => {
     findAndHighlight(doc, "charlie delta");
     expect(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`).length).toBe(1);
   });
+
+  it("does NOT match an unrelated paragraph via a short generic prefix", () => {
+    const doc = docFrom(
+      "<p>Introduction to the topic and motivation.</p>" +
+        "<p>The model architecture uses attention layers extensively.</p>",
+    );
+    // A stored chunk that shares only a short generic opener with paragraph 2,
+    // then diverges. Must NOT highlight the wrong paragraph.
+    const needle =
+      "The model architecture is a totally different sentence that does not " +
+      "exist in the rendered document anywhere here at all nope none whatsoever.";
+    const ok = findAndHighlight(doc, needle);
+    expect(ok).toBe(false);
+    expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)).toBeNull();
+  });
+
+  it("a short needle must match in full (no sub-floor)", () => {
+    const doc = docFrom("<p>load balancing helps.</p>");
+    expect(findAndHighlight(doc, "load balancing helps.")).toBe(true);
+    expect(findAndHighlight(doc, "load balancing rocks.")).toBe(false);
+  });
 });
