@@ -6,7 +6,9 @@ This file is loaded into every Claude Code session that opens this repo. Read it
 
 PaperHub is a paper-aware chat client with multi-agent tool-routing, an in-repo RAG knowledge base, an in-repo slide pipeline, and a Citation Canvas so every cited chunk traces back to source. It is decomposed from two reference projects (`paper2slides-plus`, `Intro2GenAI-hw1`) — useful utilities are copied + adapted, not run as services.
 
-**Authoritative spec:** [docs/superpowers/specs/2026-05-17-paperhub-srs.md](docs/superpowers/specs/2026-05-17-paperhub-srs.md) (**v2.10**). Any architecture / schema / scope question is answered there before code. The two-layer schema (`paper_content` for unique papers, `papers` for per-session membership) and the deferred slide-rendering framework choice are the two most load-bearing decisions to keep in mind. v2.7 captured the four-stage `paper_search` decomposition (Parser → Processor [Discover→Resolve] → Finalizer → Synthesizer) and the operational hardening round (opt-in CUDA wheels, device auto-detect, arxiv-ingest resilience, MCP registry cooldown + retry, Windows Proactor loop fix); v2.8 isolated the embedder + reranker into a sibling `paperhub-modelserver` process so weights survive `uvicorn --reload`; v2.9 wired the Composer's paperclip to a new multipart `POST /papers/upload` (PDF) + the existing JSON `POST /papers` (arXiv-ID); v2.10 rebuilt `paper_qa` from dense-RAG map-reduce into an **agentic hierarchical pipeline** (per-paper subagent navigates each paper's section TOC via `list_sections`/`read_section`, flagship finalizer reads the raw cited chunks) + added the **agent-flow observability policy** (every agent step records full reconstruct-able state to `tool_calls`).
+**Authoritative spec:** [docs/superpowers/specs/2026-05-17-paperhub-srs.md](docs/superpowers/specs/2026-05-17-paperhub-srs.md) (**v2.10**). 
+Any architecture / schema / scope question is answered there before code. 
+The two-layer schema (`paper_content` for unique papers, `papers` for per-session membership) and the deferred slide-rendering framework choice are the two most load-bearing decisions to keep in mind. v2.7 captured the four-stage `paper_search` decomposition (Parser → Processor [Discover→Resolve] → Finalizer → Synthesizer) and the operational hardening round (opt-in CUDA wheels, device auto-detect, arxiv-ingest resilience, MCP registry cooldown + retry, Windows Proactor loop fix); v2.8 isolated the embedder + reranker into a sibling `paperhub-modelserver` process so weights survive `uvicorn --reload`; v2.9 wired the Composer's paperclip to a new multipart `POST /papers/upload` (PDF) + the existing JSON `POST /papers` (arXiv-ID); v2.10 rebuilt `paper_qa` from dense-RAG map-reduce into an **agentic hierarchical pipeline** (per-paper subagent navigates each paper's section TOC via `list_sections`/`read_section`, flagship finalizer reads the raw cited chunks) + added the **agent-flow observability policy** (every agent step records full reconstruct-able state to `tool_calls`).
 
 ## Implementation plan
 
@@ -32,43 +34,24 @@ When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The n
 - **Workflow:** spec → plan → subagent-driven implementation per task → spec compliance review → code quality review → next task. See [superpowers:subagent-driven-development] for the loop.
 - **System binaries:** `pandoc` is an optional dependency used by the Paper Pipeline to render LaTeX → HTML for the Citation Canvas. If absent, the pipeline falls back to `pylatexenc` (pure Python, lower quality). Install via `winget install pandoc` on Windows or your package manager elsewhere.
 - **`open-websearch` (optional, npm)** — no-key multi-engine web-search MCP server. Used by the **Discoverer** stage of the v2.7 four-stage `paper_search` subgraph (Parser → Processor [Discover→Resolve] → Finalizer → Synthesizer). Install: `npm install -g open-websearch`. The backend's MCP registry can **auto-spawn** the daemon as a managed subprocess (config in `mcp_servers.toml`); operators can also run it standalone via `open-websearch` (with `MODE=http`, listens on `:3000`). If absent, the registry has no reachable `web` server, the Discoverer falls back gracefully (Parser short-circuit + direct Resolver), and behaviour reverts to v2.4 papers-only. Same optional-external posture as `pandoc`. The `paperhub-papers` MCP server is mounted IN-PROCESS at `/mcp` and requires no external install — it ships with the backend.
-- **GPU operators (optional)** — torch defaults to CPU-only on a clean `uv sync` (small wheel, fast install). For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130` swaps to the matching CUDA torch wheel. Device is auto-detected at runtime via `paperhub.pipelines._device.resolve_device()` (CUDA → MPS → CPU walk); override with `PAPERHUB_DEVICE=cpu|cuda|cuda:1|mps`. The embedder + cross-encoder reranker singletons pass `device=` explicitly so GPU operators don't get silent CPU inference. **In-flight (post-Plan C):** an inference-server extraction is underway to move the embedder + reranker out of the backend process; the lazy-singleton-with-`device=` shape is what keeps that migration low-churn.
+- **GPU operators (optional)** — torch defaults to CPU-only on a clean `uv sync` (small wheel, fast install). For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130` swaps to the matching CUDA torch wheel. Device is auto-detected at runtime via `paperhub.pipelines._device.resolve_device()` (CUDA → MPS → CPU walk); override with `PAPERHUB_DEVICE=cpu|cuda|cuda:1|mps`. The embedder + cross-encoder reranker run in the sibling `paperhub-modelserver` process (v2.8) and pass `device=` explicitly so GPU operators don't get silent CPU inference.
 - **Test discipline:** every implementation task is TDD. Failing test first, minimal impl, commit.
 - **Fix-now policy (no deferred logical issues):** If a review surfaces an issue, fix it before the next task. **Blockers must be fixed. Non-blocker LOGICAL issues must ALSO be fixed.** Only pure stylistic preferences (naming, comment wording with no semantic difference) may be deferred. Deferred logical items have a track record of becoming critical at the next stage — silent shadowing, partial-write windows, schema drift, masked errors — so we close them at source. The "known follow-ups" sections below are for items genuinely out-of-scope (e.g., waiting on a future plan's surface), not for "we'll get to it later." When in doubt, fix it now.
 - **Agent-flow observability policy (load-bearing):** for any agent flow (paper_search, paper_qa subagent, finalizer, any future multi-LLM-call topology), every step's `tool_calls` row MUST record enough state to **reconstruct the agent context entirely** from the DB alone. Concretely: record the IDs of every resource the step touched (chunk IDs read, chunk IDs cited, section names listed, paper IDs dispatched, tool-call argument values + tool-result payloads), and the step's final output text. **Do NOT record the rendered prompt** — prompts are templates filled from state, so the input state is sufficient. With this contract, debugging is a SQL query (`SELECT * FROM tool_calls WHERE run_id = X`), not a one-off instrumentation script. **Iron rule: do NOT propose, hypothesize, or commit any fix to an agent-flow bug without first reading the actual recorded pipeline run.** No "I think the LLM is doing X" without evidence from the trace; no "the prompt is too lenient" without a run that shows what the LLM actually saw + returned. If the trace is too thin to determine root cause, the FIRST fix is to enrich the tracer's `record_result` payload — then re-run, then diagnose. The concrete how-to is the next section.
 
 ## Agent-flow tracing — how to write a traced step
 
-Every model call, MCP call, and pipeline stage is wrapped in a `Tracer` step. The tracer (`paperhub.tracing.tracer.Tracer`) is constructed per-run (`Tracer(conn, run_id=…, branch=…)`) and threaded into every agent function. The shape is always:
+**Any new agent flow MUST follow the record principle from its first commit** — wrap every model/MCP/pipeline step in a `Tracer` step and record enough state to reconstruct it from the DB. The shape:
 
 ```python
 async with tracer.step(agent="research", tool="paper_qa:subagent", model=model) as step:
-    step.record_args({...})        # INPUT STATE at step open — IDs, query, params
-    ...                            # do the work (LLM call, DB read, tool dispatch)
-    step.record_result({...})      # OUTPUT STATE at step close — see field guide below
+    step.record_args({...})        # input state: IDs, query, params
+    ...                            # do the work
+    step.record_result({...})      # output state: IDs touched + final text (NOT the prompt)
     # step.mark_error("reason")    # optional: force status='error' without raising
 ```
 
-What the tracer does for you automatically — **do not duplicate these**:
-- `step_index` (monotonic per run), `latency_ms` (wall clock around the `with`), `status` (`ok`, or `error` on exception / `mark_error`), `error` text.
-- **Redaction** of `args` + `result` (API keys `sk-…`/`AIza…`, `$HOME` paths) before they hit the DB — via `paperhub.tracing.redactor.redact`. You record plain dicts; redaction is transparent.
-- Survives `CancelledError` (client disconnect) — the row is still written.
-
-`tool` naming convention: `<agent>:<stage>` (e.g. `paper_search:parse`, `paper_search:resolve`, `paper_qa:subagent`, `paper_qa:finalize`). Keep names stable — the frontend Trace panel + smoke scripts assert on them.
-
-**`record_result` field guide** (the reconstruct-from-DB contract, per shipped flow):
-
-| Step | Must record |
-| --- | --- |
-| `paper_search:parse` | `requests` (parsed `{hint, kind}` list) + `llm_content` (raw model output before dedup) |
-| `paper_search:discover_plan` | per-iteration `content` + `tool_calls`; the `web.search` sub-step records the actual top-N hits, not just a count |
-| `paper_search:resolve` | the SS `query`, `hits` count, the `picked` paper_id, `top` hits, `source` |
-| `paper_search:synthesize` | `resolved` (`[{paper_id, title}]`), `not_found` (hints), `content` (prose) |
-| `paper_search:finalize` | `emitted_candidates` (`[{paper_id, title, finalize}]`), `resolved_count`, `not_found` |
-| `paper_qa:subagent` | `chunks_read_ids`, `chunks_cited_ids`, `listed_sections`, `llm_turns` (per-turn content + tool calls), `tool_call_log` (per-tool args + chunk IDs returned), `final_summary`, `reads_used` |
-| `paper_qa:finalize` | `n_papers`, `n_chunks` (args) + streamed `length` (result) |
-
-When you add a new agent step, record the analogous IDs + the final text — enough that `SELECT result_summary_json FROM tool_calls WHERE run_id=? AND tool=?` answers "what did this stage see and decide?" without re-running. New multi-LLM topologies follow the same rule from their first commit, not as a later retrofit.
+The tracer auto-captures `step_index`, `latency_ms`, `status`/`error`, redaction of args+result (keys + `$HOME`), and survives `CancelledError` — don't duplicate those. Name tools `<agent>:<stage>` (the Trace panel + smoke scripts assert on the names). What to put in `record_result`: the IDs of every resource the step touched (chunks read/cited, sections listed, papers dispatched, tool args + results) and the step's final output — enough that `SELECT result_summary_json FROM tool_calls WHERE run_id=? AND tool=?` answers "what did this stage see and decide?" without re-running.
 
 ## Backend quality gates
 
@@ -167,8 +150,7 @@ All Plan A follow-ups closed during Plan C cleanup pass.
 Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-now policy):
 
 1. Bundle code-split (currently ~418 KB raw JS) — natural split point lands with Plan D's Citation Canvas component (lazy-load via React.lazy + Suspense). Cannot split usefully before that surface exists.
-2. ~~Replace hardcoded `session_id: null` in `useChatStream.ts`~~ — closed in the Plan C v2.4 round; frontend now learns `backend_session_id` from the first SSE event and threads it through subsequent POSTs. (Original concern was that backend session-creation didn't exist; `POST /sessions` shipped in Plan C v2.4 follow-up.)
-3. `RejectionPill` is wired but unreachable until Plan E SQL-allowlist or Plan G MCP-permission rejects a tool_call with `status="rejected"`. No frontend change needed; verify the pill renders when those plans land.
+2. `RejectionPill` is wired but unreachable until Plan E SQL-allowlist or Plan G MCP-permission rejects a tool_call with `status="rejected"`. No frontend change needed; verify the pill renders when those plans land.
 
 ## Plan C known follow-ups
 
@@ -176,8 +158,7 @@ Plan C as-shipped includes the v2.4 (suggest-only + SS-primary), v2.5 (MCP clien
 
 Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-now policy):
 
-1. ~~**Inference server extraction (in flight, NOT yet a numbered plan)**~~ — closed in v2.8 as a Plan C cleanup pass rather than a separate Plan I. Embedder + reranker now run in `paperhub.modelserver` (FastAPI on `:8001`); the backend's `_HttpEmbedder` / `_HttpReranker` talk to it over httpx. Auto-spawned by lifespan, survives `uvicorn --reload` because the subprocess is detached (Windows `CREATE_NEW_PROCESS_GROUP` / Unix `start_new_session`). See SRS v2.8 + Plan C v2.8 section.
-2. **PDF-upload section navigation (v2.10 known gap)** — papers ingested via `POST /papers/upload` (`kind='pdf_upload'`) have empty `sections_json` because the chunker only detects LaTeX `\section{...}`. The paper_qa per-paper subagent's `list_sections` returns `[]`, so the LLM can't navigate a PDF-only paper by section. Fix is either PyMuPDF heading detection (font-size heuristic, mirroring the title extractor) at chunk time, or a subagent "read-all-chunks" fallback when the TOC is empty. Not blocking arxiv/LaTeX papers (which dominate the demo); scoped as a follow-up round.
+1. **PDF-upload section navigation (v2.10 known gap)** — papers ingested via `POST /papers/upload` (`kind='pdf_upload'`) have empty `sections_json` because the chunker only detects LaTeX `\section{...}`. The paper_qa per-paper subagent's `list_sections` returns `[]`, so the LLM can't navigate a PDF-only paper by section. Fix is either PyMuPDF heading detection (font-size heuristic, mirroring the title extractor) at chunk time, or a subagent "read-all-chunks" fallback when the TOC is empty. Not blocking arxiv/LaTeX papers (which dominate the demo); scoped as a follow-up round.
 
 ## Restricted operations
 
