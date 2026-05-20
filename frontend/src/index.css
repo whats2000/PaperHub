@@ -47,6 +47,27 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    /* Research-progress card motion (see ResearchProgressCard). */
+    --animate-research-beam: research-beam 2s ease-in-out infinite;
+    --animate-research-line: research-line 1.8s ease-in-out infinite;
+    --animate-research-shimmer: research-shimmer 1.8s linear infinite;
+}
+
+@keyframes research-beam {
+    0%   { transform: translateY(-130%); opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { transform: translateY(330%); opacity: 0; }
+}
+
+@keyframes research-line {
+    0%, 100% { opacity: 0.25; }
+    50%      { opacity: 0.85; }
+}
+
+@keyframes research-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 :root {
