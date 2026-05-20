@@ -2,7 +2,9 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Intent = Literal["paper_search", "paper_qa", "slides", "library_stats", "chitchat"]
+Intent = Literal[
+    "paper_search", "paper_qa", "slides", "library_stats", "chitchat", "clarify",
+]
 ModelTier = Literal["small", "flagship"]
 ToolStatus = Literal["ok", "error", "rejected"]
 Branch = Literal["", "A", "B"]
@@ -29,6 +31,12 @@ class RoutingDecision(BaseModel):
     model_tier: ModelTier
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
+    # v2.11: self-contained, anaphora-free rewrite of the user's latest
+    # turn (resolved against history by the router). For actionable
+    # intents this is the task brief downstream agents act on; for
+    # intent="clarify" it carries the clarifying question to show the
+    # user. Empty string => downstream falls back to the raw user_message.
+    resolved_query: str = ""
 
 
 class PaperQaPlan(BaseModel):

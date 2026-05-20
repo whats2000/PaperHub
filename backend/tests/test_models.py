@@ -10,6 +10,22 @@ from paperhub.models.events import (
 )
 
 
+def test_routing_decision_resolved_query_defaults_empty() -> None:
+    # Legacy 4-field payload still validates; resolved_query defaults to "".
+    d = RoutingDecision(intent="paper_search", model_tier="small", confidence=0.9, reasoning="r")
+    assert d.resolved_query == ""
+
+
+def test_routing_decision_accepts_clarify_intent_and_brief() -> None:
+    d = RoutingDecision(
+        intent="clarify", model_tier="small", confidence=0.5,
+        reasoning="ambiguous follow-up",
+        resolved_query="Which topic would you like papers on?",
+    )
+    assert d.intent == "clarify"
+    assert d.resolved_query.startswith("Which topic")
+
+
 def test_routing_decision_rejects_unknown_intent() -> None:
     with pytest.raises(ValidationError):
         RoutingDecision(intent="bogus", model_tier="small", confidence=0.9, reasoning="x")
