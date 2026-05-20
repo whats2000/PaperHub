@@ -248,7 +248,13 @@ class PaperPipeline:
         # its char offsets align with chunk char_start/char_end + sections_json
         # (all computed against flattened_text) for the Citation Canvas.
         html_path = cache_dir / "source.html"
-        render_html(source=flat_path, kind="latex", out_path=html_path)
+        # Figures live in the extracted source tree (source_path.parent), not
+        # next to the flattened .tex — pass it as resource_dir so pandoc finds
+        # + embeds them into a self-contained artefact for the Citation Canvas.
+        render_html(
+            source=flat_path, kind="latex", out_path=html_path,
+            resource_dir=source_path.parent,
+        )
 
         # Metadata: use caller-supplied override when available (avoids an
         # arXiv API round-trip when the caller already has metadata from
@@ -386,13 +392,20 @@ class PaperPipeline:
             # Render from the flattened single-file source (see arxiv branch):
             # avoids pandoc hang/OOM on \input chains + aligns canvas offsets.
             render_source = flat_path
+            # Figures live in the extracted source tree, not next to the
+            # flattened .tex — let pandoc find + embed them.
+            render_resource_dir: Path | None = source_path.parent
         else:
             full_text = extract_pdf(target)
             source_path = target
             render_source = source_path
+            render_resource_dir = None
 
         html_path = cache_dir / "source.html"
-        render_html(source=render_source, kind=kind, out_path=html_path)
+        render_html(
+            source=render_source, kind=kind, out_path=html_path,
+            resource_dir=render_resource_dir,
+        )
 
         # Honor caller-supplied metadata override (e.g. a title typed in the
         # upload modal) the same way the arxiv branch does. Without one, try

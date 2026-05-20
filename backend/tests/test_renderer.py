@@ -1,3 +1,4 @@
+import base64
 import shutil
 import subprocess
 from pathlib import Path
@@ -145,6 +146,54 @@ def test_render_latex_pandoc_passes_subprocess_timeout(tmp_path: Path) -> None:
     with patch("paperhub.pipelines.renderer.subprocess.run") as run_mock:
         renderer._render_latex_pandoc(fixture, out)
     assert run_mock.call_args.kwargs.get("timeout"), "pandoc subprocess must set a timeout"
+
+
+def test_render_latex_pandoc_embeds_resources_and_uses_resource_path(tmp_path: Path) -> None:
+    """For the Citation Canvas (Plan D) the HTML must be self-contained with
+    figures inlined. _render_latex_pandoc must pass --embed-resources, and
+    --resource-path=<resource_dir> so figures that live in the source/ subtree
+    (separate from the flattened .tex in cache_dir) are found + embedded."""
+    from paperhub.pipelines import renderer
+
+    tex = tmp_path / "source.flattened.tex"
+    tex.write_text(r"\documentclass{article}\begin{document}x\end{document}", encoding="utf-8")
+    res_dir = tmp_path / "source"
+    res_dir.mkdir()
+    out = tmp_path / "out.html"
+    with patch("paperhub.pipelines.renderer.subprocess.run") as run_mock:
+        renderer._render_latex_pandoc(tex, out, resource_dir=res_dir)
+    argv = run_mock.call_args.args[0]
+    assert "--embed-resources" in argv
+    assert "--resource-path" in argv
+    assert str(res_dir) in argv
+
+
+def test_render_html_embeds_image_from_resource_dir(tmp_path: Path) -> None:
+    """End-to-end: a flattened .tex in one dir referencing an image that lives
+    in a separate resource dir must produce HTML with the image embedded as a
+    data: URI (so the Citation Canvas renders figures regardless of serving dir)."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    tex_dir = tmp_path / "cache"
+    tex_dir.mkdir()
+    res_dir = tmp_path / "source"
+    (res_dir / "figs").mkdir(parents=True)
+    # Minimal valid 1x1 transparent PNG.
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    (res_dir / "figs" / "pic.png").write_bytes(png)
+    tex = tex_dir / "source.flattened.tex"
+    tex.write_text(
+        r"\documentclass{article}\usepackage{graphicx}"
+        r"\begin{document}\includegraphics{figs/pic.png}\end{document}",
+        encoding="utf-8",
+    )
+    out = tex_dir / "source.html"
+    render_html(source=tex, kind="latex", out_path=out, resource_dir=res_dir)
+    html = out.read_text(encoding="utf-8")
+    assert "data:image" in html, "figure should be embedded as a data: URI"
 
 
 def test_render_latex_pandoc_resolves_input_relative_to_source_dir(tmp_path: Path) -> None:

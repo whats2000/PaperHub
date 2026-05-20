@@ -215,8 +215,12 @@ async def test_ingest_arxiv_renders_from_flattened_source(
 
     captured: dict[str, Path] = {}
 
-    def _capture_render(*, source: Path, kind: str, out_path: Path) -> Path:
+    def _capture_render(
+        *, source: Path, kind: str, out_path: Path, resource_dir: Path | None = None,
+    ) -> Path:
         captured["source"] = source
+        if resource_dir is not None:
+            captured["resource_dir"] = resource_dir
         out_path.write_text("<html></html>", encoding="utf-8")
         return out_path
 
@@ -239,6 +243,8 @@ async def test_ingest_arxiv_renders_from_flattened_source(
         )
 
     assert captured["source"].name == "source.flattened.tex"
+    # Figures live in the extracted source tree, passed so pandoc can embed them.
+    assert "resource_dir" in captured
 
 
 @pytest.mark.asyncio

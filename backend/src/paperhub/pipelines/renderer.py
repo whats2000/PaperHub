@@ -25,14 +25,29 @@ logger = logging.getLogger(__name__)
 _PANDOC_TIMEOUT_SECONDS = 60
 
 
-def render_html(*, source: Path, kind: Literal["latex", "pdf"], out_path: Path) -> Path:
+def render_html(
+    *,
+    source: Path,
+    kind: Literal["latex", "pdf"],
+    out_path: Path,
+    resource_dir: Path | None = None,
+) -> Path:
+    """Render ``source`` to a self-contained HTML artefact at ``out_path``.
+
+    ``resource_dir`` (latex only) is where figures referenced by the flattened
+    source actually live — typically the extracted ``source/`` subtree, which
+    is a different directory from the flattened ``.tex``. pandoc searches it via
+    ``--resource-path`` and inlines the figures (``--embed-resources``) so the
+    Citation Canvas (Plan D) renders images regardless of where the HTML is
+    served from.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if kind == "pdf":
         _render_pdf(source, out_path)
     elif kind == "latex":
         if shutil.which("pandoc"):
             try:
-                _render_latex_pandoc(source, out_path)
+                _render_latex_pandoc(source, out_path, resource_dir=resource_dir)
                 return out_path
             except subprocess.CalledProcessError as exc:
                 # Idiosyncratic LaTeX commonly trips pandoc with non-zero exit.
@@ -82,16 +97,25 @@ def _render_pdf(pdf_path: Path, out_path: Path) -> None:
     out_path.write_text("".join(pieces), encoding="utf-8")
 
 
-def _render_latex_pandoc(tex_path: Path, out_path: Path) -> None:
+def _render_latex_pandoc(
+    tex_path: Path, out_path: Path, *, resource_dir: Path | None = None,
+) -> None:
+    cmd = [
+        "pandoc",
+        "--from", "latex",
+        "--to", "html5",
+        "--standalone",
+        # Inline figures/CSS as data: URIs so the artefact is self-contained
+        # (the Citation Canvas serves it independent of the source tree).
+        "--embed-resources",
+    ]
+    if resource_dir is not None:
+        # Figures live in the extracted source/ subtree, not next to the
+        # flattened .tex — tell pandoc where to find them for embedding.
+        cmd += ["--resource-path", str(resource_dir)]
+    cmd += [str(tex_path), "-o", str(out_path)]
     subprocess.run(
-        [
-            "pandoc",
-            "--from", "latex",
-            "--to", "html5",
-            "--standalone",
-            str(tex_path),
-            "-o", str(out_path),
-        ],
+        cmd,
         check=True,
         capture_output=True,
         text=True,
