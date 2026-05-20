@@ -46,12 +46,22 @@ expose = ["search_library", "search_semantic_scholar", "find_related_papers"]
 timeout_seconds = 8.0
 
 # ─── open-webSearch (Plan C v2.5) ────────────────────────────────────────
-# v2.6 follow-up: the `launch` field auto-spawns the daemon if it isn't
-# already running on the configured port — fresh-clone developers don't
-# need to pre-install anything (npx -y fetches the package the first
-# time, ~10s of one-time download). Operators who manage their own
-# daemon can delete the `launch` / `launch_env` lines below to opt out;
-# the registry will still try to connect to the configured URL.
+# The `launch` field declares HOW to spawn the daemon when the configured
+# port isn't already serving. Two things consume it, both via the shared
+# detached-`subprocess.Popen` launcher (`paperhub.mcp.launcher`):
+#   1. `paperhub-mcp-up` (run by `scripts/start.ps1` before the backend) —
+#      the SUPPORTED path. Pre-starts every `launch`-declaring server so the
+#      worker just connects.
+#   2. The in-worker registry autostart — a FALLBACK for a bare `uvicorn`
+#      run with no boot script.
+# Both spawn via `subprocess.Popen` (NOT asyncio's create_subprocess_exec),
+# which is loop-independent: uvicorn --reload forces a SelectorEventLoop on
+# Windows where the asyncio subprocess API raises NotImplementedError. Spawned
+# daemons are detach-and-leak — they survive backend reloads and are reused.
+# Fresh-clone developers need nothing pre-installed (npx -y fetches the
+# package, ~25s one-time download). Operators who manage their own daemon can
+# delete the `launch` / `launch_env` lines; the registry still connects to the
+# configured URL.
 #
 # When the daemon is reachable, paper_search loads the v2 prompt and the
 # Research Agent gains a no-key multi-engine discovery step before
@@ -59,8 +69,9 @@ timeout_seconds = 8.0
 # PATH, npm registry blocked, …), paper_search/v1 loads and behaviour
 # reverts to v2.4 exactly — no errors surfaced to the user.
 #
-# The registry tracks the spawned subprocess and terminates it on
-# FastAPI shutdown, so killing the backend kills the daemon.
+# Spawned daemons are detach-and-leak (NOT terminated on FastAPI shutdown) so
+# `uvicorn --reload` doesn't kill + re-pay the ~25s npx cold start each edit.
+# `scripts/start.ps1` owns explicit teardown; otherwise they clear at reboot.
 
 [[server]]
 name = "web"

@@ -426,27 +426,28 @@ expose = ["search"]
     return p
 
 
-class _FakeProcess:
-    """asyncio.subprocess.Process stand-in: tracks terminate/kill/wait calls."""
+class _FakePopen:
+    """subprocess.Popen stand-in: tracks terminate/kill/wait calls."""
 
     def __init__(self) -> None:
         self.pid = 4242
-        self.returncode: int | None = None
+        self._returncode: int | None = None
         self.terminate_calls = 0
         self.kill_calls = 0
-        self.wait_calls = 0
+
+    def poll(self) -> int | None:
+        return self._returncode
 
     def terminate(self) -> None:
         self.terminate_calls += 1
-        self.returncode = 0  # graceful exit
+        self._returncode = 0  # graceful exit
 
     def kill(self) -> None:
         self.kill_calls += 1
-        self.returncode = -9
+        self._returncode = -9
 
-    async def wait(self) -> int:
-        self.wait_calls += 1
-        return self.returncode or 0
+    def wait(self, timeout: float | None = None) -> int:
+        return self._returncode or 0
 
 
 async def test_startup_skips_launch_when_url_already_reachable(
@@ -463,14 +464,12 @@ async def test_startup_skips_launch_when_url_already_reachable(
 
     spawn_calls: list[tuple[Any, ...]] = []
 
-    async def _explosive_spawn(*args: Any, **kwargs: Any) -> Any:
+    def _explosive_spawn(*args: Any, **kwargs: Any) -> Any:
         spawn_calls.append(args)
         raise AssertionError("should not spawn when daemon is already reachable")
 
-    monkeypatch.setattr(registry_mod, "_tcp_reachable", _stub_reachable)
-    monkeypatch.setattr(
-        registry_mod.asyncio, "create_subprocess_exec", _explosive_spawn,
-    )
+    monkeypatch.setattr(registry_mod, "tcp_reachable", _stub_reachable)
+    monkeypatch.setattr(registry_mod, "launch_detached", _explosive_spawn)
 
     reg = MCPRegistry()
     with caplog.at_level(logging.INFO):
@@ -484,10 +483,15 @@ async def test_startup_skips_launch_when_url_already_reachable(
     assert any("already reachable" in r.message for r in caplog.records)
 
 
-async def test_startup_spawns_subprocess_then_terminates_on_shutdown(
+async def test_startup_spawns_subprocess_and_leaks_on_shutdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When URL is unreachable + launch set, spawn the subprocess; shutdown terminates it."""
+    """Unreachable URL + launch set → spawn (detached Popen); shutdown LEAKS it.
+
+    Detach-and-leak: the daemon must OUTLIVE the worker so `uvicorn --reload`
+    doesn't kill + re-pay the ~25s npx cold start every edit. So shutdown must
+    NOT terminate the launched daemon (regression guard).
+    """
     web = _FakeClient("web")
     _patch_clients(monkeypatch, {"web": web})
 
@@ -500,18 +504,14 @@ async def test_startup_spawns_subprocess_then_terminates_on_shutdown(
     async def _stub_reachable(host: str, port: int) -> bool:
         return state["daemon_up"]
 
-    fake_proc = _FakeProcess()
+    fake_proc = _FakePopen()
 
-    async def _stub_spawn(*args: Any, **kwargs: Any) -> Any:
+    def _stub_launch(launch: Any, launch_env: Any, *, label: str = "") -> Any:
         state["daemon_up"] = True  # spawn "succeeded"
         return fake_proc
 
-    monkeypatch.setattr(registry_mod, "_tcp_reachable", _stub_reachable)
-    monkeypatch.setattr(
-        registry_mod.asyncio, "create_subprocess_exec", _stub_spawn,
-    )
-    # Ensure shutil.which doesn't try the real PATH on this host.
-    monkeypatch.setattr(registry_mod.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(registry_mod, "tcp_reachable", _stub_reachable)
+    monkeypatch.setattr(registry_mod, "launch_detached", _stub_launch)
 
     reg = MCPRegistry()
     await reg.startup(
@@ -521,18 +521,18 @@ async def test_startup_spawns_subprocess_then_terminates_on_shutdown(
         ),
     )
 
-    # The fake process is now tracked and shutdown terminates it.
+    # The fake process is tracked; shutdown does NOT terminate it (detach-and-leak).
     assert "web" in reg._launched  # noqa: SLF001 — inspecting private state
     assert reg._launched["web"] is fake_proc  # noqa: SLF001
     await reg.shutdown()
-    assert fake_proc.terminate_calls == 1
-    assert reg._launched == {}  # noqa: SLF001
+    assert fake_proc.terminate_calls == 0
+    assert "web" in reg._launched  # noqa: SLF001 — still tracked, still running
 
 
 async def test_startup_skips_launch_when_binary_not_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """`shutil.which` returning None → log INFO + skip spawn, no error."""
+    """`launch_detached` returning None (binary missing) → no tracked proc, no error."""
     web = _FakeClient("web")
     _patch_clients(monkeypatch, {"web": web})
 
@@ -541,15 +541,15 @@ async def test_startup_skips_launch_when_binary_not_on_path(
     async def _stub_unreachable(host: str, port: int) -> bool:
         return False
 
-    monkeypatch.setattr(registry_mod, "_tcp_reachable", _stub_unreachable)
-    monkeypatch.setattr(registry_mod.shutil, "which", lambda _name: None)
+    def _missing_binary(launch: Any, launch_env: Any, *, label: str = "") -> Any:
+        # Mirror launcher.launch_detached's PATH-miss path: log + return None.
+        logging.getLogger("paperhub.mcp.launcher").info(
+            "%s: launch binary %r not on PATH", label, launch[0],
+        )
+        return None
 
-    async def _explosive_spawn(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("should not spawn when binary is missing")
-
-    monkeypatch.setattr(
-        registry_mod.asyncio, "create_subprocess_exec", _explosive_spawn,
-    )
+    monkeypatch.setattr(registry_mod, "tcp_reachable", _stub_unreachable)
+    monkeypatch.setattr(registry_mod, "launch_detached", _missing_binary)
 
     reg = MCPRegistry()
     with caplog.at_level(logging.INFO):
