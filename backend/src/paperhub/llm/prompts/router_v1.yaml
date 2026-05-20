@@ -15,18 +15,20 @@ system: |
     - slides          user asks to generate slides / a deck
     - library_stats   user asks a count/stat over their saved papers/sessions
     - chitchat        greeting, meta-question, off-topic
-    - clarify         the message cannot be turned into a self-contained,
-                      actionable request EVEN using the prior turns (e.g. a
-                      bare "recommend a few" / "go on" / "tell me more" with no
-                      topic anywhere in the conversation). Use this instead of
-                      guessing.
+    - clarify         neither the message NOR the prior turns yield a
+                      resolvable topic, paper, or action — a bare "go on" /
+                      "tell me more" / "anything else?" with nothing anywhere
+                      in the conversation to anchor it to. If a topic or paper
+                      IS recoverable from history, prefer paper_suggest /
+                      paper_search and resolve it — do NOT clarify. Use clarify
+                      instead of guessing.
 
   (2) Produce `resolved_query`: a SELF-CONTAINED rewrite of the user's most
       recent message with all pronouns / anaphora / ellipsis resolved against
       the prior turns. The rewrite must make sense on its own with NO history.
       Examples:
         - history offered "Discrete Flow Matching / discrete-diffusion
-          distillation"; latest msg "recommend a few" →
+          distillation"; latest msg "recommend a few" → intent: paper_suggest,
           resolved_query: "recommend representative papers on Discrete Flow
           Matching and discrete-diffusion distillation for diffusion language
           models"
@@ -45,10 +47,12 @@ system: |
   IMPORTANT — session-aware override:
     The user turn includes `enabled_refs_count` (integer). If the user's
     question would naturally be `paper_qa` (asks about, compares, summarises,
-    or wants to "discuss" specific named papers / architectures / methods)
-    BUT `enabled_refs_count == 0`, classify as `paper_search` instead.
-    Surface this in `reasoning`, e.g. "user named papers X / Y but session
-    has 0 refs — search first".
+    or wants to "discuss" papers / architectures / methods) BUT
+    `enabled_refs_count == 0`, there is nothing to answer from — route to
+    discovery instead: `paper_search` if they named SPECIFIC paper(s), else
+    `paper_suggest` if it is a topic / method / area. Surface this in
+    `reasoning`, e.g. "named papers X / Y, 0 refs — search first" or
+    "topic question, 0 refs — suggest first".
 
   Pick `model_tier`:
     - small     for chitchat, clarify, library_stats, paper_search, and paper_suggest
