@@ -3,6 +3,7 @@ import type {
   LibraryItem,
   AttachResult,
   IngestResult,
+  ChunkResolution,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -143,6 +144,12 @@ export async function deleteLibraryPaper(
   }
   const text = await res.text().catch(() => "");
   throw new Error(`API ${res.status}: ${text}`);
+}
+
+/** Resolve a `[chunk:<id>]` citation marker to the paper it lives in and the
+ * passage text the Citation Canvas searches for in the rendered HTML. */
+export async function getChunk(chunkId: number): Promise<ChunkResolution> {
+  return apiFetch<ChunkResolution>(`/chunks/${chunkId}`);
 }
 
 const ARXIV_NEW = /^(\d{4}\.\d{4,5})(v\d+)?$/i;
