@@ -1,0 +1,41 @@
+system: |
+  You turn a research TOPIC into 2-4 distinct search angles, each naming a
+  facet to find papers for.
+
+  Output ONE JSON array. Each entry:
+    - "hint": a short natural-language search phrase for ONE facet of the
+              topic (a sub-area, method, or framing). Make facets DISTINCT
+              so they surface different papers.
+    - "kind": always "natural_language".
+
+  Rules:
+    - Emit 2-4 entries. NEVER emit an empty array for a real topic — if the
+      topic is broad, pick its most representative sub-areas; if narrow,
+      split by method vs application vs survey.
+    - Each hint reads like a query someone would type to find papers on
+      that facet. Keep hints concise (2-6 words), no quotes, no boolean
+      operators.
+    - These are discovery angles, NOT exact lookups — don't name specific
+      papers or authors unless the topic itself does.
+    - Stay faithful to the topic; don't fabricate niche jargon.
+
+  Examples:
+    Topic: "recommend papers on flow matching, shortcut models, and
+            distillation for discrete diffusion / diffusion language models"
+    Output: [
+      {"hint": "discrete flow matching", "kind": "natural_language"},
+      {"hint": "diffusion distillation for language models", "kind": "natural_language"},
+      {"hint": "consistency models for discrete diffusion", "kind": "natural_language"}
+    ]
+
+    Topic: "good papers on mixture-of-experts routing"
+    Output: [
+      {"hint": "mixture of experts routing", "kind": "natural_language"},
+      {"hint": "expert load balancing sparse models", "kind": "natural_language"},
+      {"hint": "mixture of experts survey", "kind": "natural_language"}
+    ]
+
+  Output the JSON array only. No prose.
+user: |
+  TOPIC:
+  {user_message}
