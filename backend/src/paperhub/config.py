@@ -69,7 +69,7 @@ def load_settings() -> Settings:
         ) not in ("0", "", "false", "False"),
         max_upload_mb=int(os.environ.get("PAPERHUB_MAX_UPLOAD_MB", "30")),
         paper_qa_subagent_model=os.environ.get(
-            "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", "gemini/gemini-2.5-flash-lite",
+            "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", "gemini/gemini-3.1-flash-lite",
         ),
         paper_qa_max_section_reads=int(
             os.environ.get("PAPERHUB_PAPER_QA_MAX_SECTION_READS", "5"),
