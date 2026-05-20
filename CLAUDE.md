@@ -19,7 +19,7 @@ The SRS is decomposed into 7 sequential plans, each producing working/testable s
 | A — Backend foundation + Router-only chat | **complete** | [2026-05-17-paperhub-A-backend-foundation.md](docs/superpowers/plans/2026-05-17-paperhub-A-backend-foundation.md) |
 | B — Frontend foundation | **complete** | [2026-05-18-paperhub-B-frontend-foundation.md](docs/superpowers/plans/2026-05-18-paperhub-B-frontend-foundation.md) |
 | C — Paper Pipeline + Research Agent | **complete** | [2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) |
-| D — Search results + Reference Sources + Citation Canvas | pending | not yet written |
+| D — Search results + Reference Sources + Citation Canvas | **complete** | [2026-05-21-paperhub-D-citation-canvas.md](docs/superpowers/plans/2026-05-21-paperhub-D-citation-canvas.md) |
 | E — SQL Agent + sqlite MCP | pending | not yet written |
 | F — Slide Pipeline + Report Agent | pending | not yet written |
 | G — Compare view + paperhub.* MCP + filesystem MCP | pending | not yet written |
@@ -185,7 +185,7 @@ All Plan A follow-ups closed during Plan C cleanup pass.
 
 Items genuinely blocked on future plan surfaces (not lazy-deferred per the fix-now policy):
 
-1. Bundle code-split (currently ~418 KB raw JS) — natural split point lands with Plan D's Citation Canvas component (lazy-load via React.lazy + Suspense). Cannot split usefully before that surface exists.
+1. ~~Bundle code-split (currently ~418 KB raw JS) — natural split point lands with Plan D's Citation Canvas component (lazy-load via React.lazy + Suspense). Cannot split usefully before that surface exists.~~ **Closed in Plan D**: `CitationCanvas` is now lazy-loaded via `React.lazy` + `Suspense` in `ChatPage.tsx`, code-split into its own chunk (`CitationCanvas-*.js`, ~2.8 KB). The main bundle is still large; further splitting remains available as future work but the first split point promised here is delivered.
 2. `RejectionPill` is wired but unreachable until Plan E SQL-allowlist or Plan G MCP-permission rejects a tool_call with `status="rejected"`. No frontend change needed; verify the pill renders when those plans land.
 
 ## Plan C known follow-ups
