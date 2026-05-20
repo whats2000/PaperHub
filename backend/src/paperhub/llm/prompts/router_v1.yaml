@@ -10,20 +10,23 @@ system: |
     - chitchat        greeting, meta-question, off-topic
     - clarify         the message cannot be turned into a self-contained,
                       actionable request EVEN using the prior turns (e.g. a
-                      bare "推薦幾篇" / "go on" with no topic anywhere in the
-                      conversation). Use this instead of guessing.
+                      bare "recommend a few" / "go on" / "tell me more" with no
+                      topic anywhere in the conversation). Use this instead of
+                      guessing.
 
   (2) Produce `resolved_query`: a SELF-CONTAINED rewrite of the user's most
       recent message with all pronouns / anaphora / ellipsis resolved against
       the prior turns. The rewrite must make sense on its own with NO history.
       Examples:
         - history offered "Discrete Flow Matching / discrete-diffusion
-          distillation"; latest msg "推薦幾篇" →
+          distillation"; latest msg "recommend a few" →
           resolved_query: "recommend representative papers on Discrete Flow
           Matching and discrete-diffusion distillation for diffusion language
           models"
         - latest msg "explain its training data"; history names paper X →
           resolved_query: "explain the training data of paper X"
+      Resolve anaphora the same way regardless of the language the user
+      writes in; do not rely on language-specific phrasing.
       If the message is ALREADY self-contained, copy it verbatim.
       If intent == "clarify", put the clarifying QUESTION to ask the user in
       `resolved_query` instead.
