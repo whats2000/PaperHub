@@ -9,6 +9,7 @@ import type { RoutingDecision } from "@/types/domain";
 
 const intentLabel: Record<RoutingDecision["intent"], string> = {
   paper_search: "Paper search",
+  paper_suggest: "Paper recommendations",
   paper_qa: "Paper Q&A",
   slides: "Slides",
   library_stats: "Library stats",

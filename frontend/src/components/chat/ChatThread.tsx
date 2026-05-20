@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ChatSession } from "@/types/domain";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { RoutingBadge } from "@/components/chat/RoutingBadge";
+import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { TraceInline } from "@/components/chat/TraceInline";
 import { EmptyState } from "@/components/states/EmptyState";
 import { useChatStore } from "@/store/chat";
@@ -63,12 +64,28 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
             }
           }
 
+          // While a long-running research turn is still streaming, show the
+          // progress card ABOVE the bubble — status on top, then the papers it
+          // finds (rendered inside the bubble), then the write-up. Suppress the
+          // empty "…" bubble so we don't show two indicators at once.
+          const intent = msg.routing_decision?.intent;
+          const showResearchCard =
+            msg.role === "assistant" &&
+            msg.status === "streaming" &&
+            (intent === "paper_search" || intent === "paper_suggest");
+
           return (
             <div key={`${msg.run_id ?? "user"}-${i}`} className="space-y-1">
+              {showResearchCard && (
+                <div className="pl-1">
+                  <ResearchProgressCard intent={intent} trace={msg.trace} />
+                </div>
+              )}
               <MessageBubble
                 message={msg}
                 onRetry={retryHandler}
                 backendSessionId={session.backend_session_id}
+                researching={showResearchCard}
               />
               {msg.role === "assistant" && msg.routing_decision && (
                 <div className="flex justify-start pl-1">

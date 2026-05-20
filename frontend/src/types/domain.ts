@@ -1,5 +1,6 @@
 export type Intent =
   | "paper_search"
+  | "paper_suggest"
   | "paper_qa"
   | "slides"
   | "library_stats"

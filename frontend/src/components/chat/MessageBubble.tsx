@@ -17,9 +17,20 @@ interface Props {
   message: ChatMessage;
   onRetry?: () => void;
   backendSessionId?: number | null;
+  /**
+   * When the parent shows a dedicated in-flight indicator (the research
+   * progress card), suppress this bubble's empty "…" placeholder so the user
+   * doesn't see two loading affordances at once.
+   */
+  researching?: boolean;
 }
 
-export function MessageBubble({ message, onRetry, backendSessionId }: Props) {
+export function MessageBubble({
+  message,
+  onRetry,
+  backendSessionId,
+  researching = false,
+}: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isOk = message.status === "ok" || (isAssistant && message.status === undefined);
@@ -32,6 +43,12 @@ export function MessageBubble({ message, onRetry, backendSessionId }: Props) {
     isAssistant &&
     message.search_results !== undefined &&
     message.search_results.length > 0;
+
+  // The research card owns the waiting state; nothing to show in the bubble
+  // until content or search results arrive.
+  if (researching && isStreamingEmpty && !hasSearchResults) {
+    return null;
+  }
 
   return (
     <article
