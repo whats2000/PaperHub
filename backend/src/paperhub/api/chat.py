@@ -267,11 +267,23 @@ async def paper_search(
     conn: aiosqlite.Connection,
     pipeline: PaperPipeline,
     mcp_registry: MCPRegistry,
+    suggest: bool = False,
     **kwargs: Any,
 ) -> AsyncIterator[Any]:
     """Run the paper_search subgraph and yield ToolStepYield /
-    SearchResultsYield / FinalOnlyMessage in stream order."""
+    SearchResultsYield / FinalOnlyMessage in stream order.
+
+    When ``suggest=True``, the suggest-mode prompt slots are selected so
+    the Parser decomposes the request as a topic-recommendation query
+    instead of an explicit-paper lookup.
+    """
     retriever = kwargs.pop("retriever", None)
+    parse_slot = (
+        "paper_search_parse_suggest/v1" if suggest else "paper_search_parse/v1"
+    )
+    synth_slot = (
+        "paper_search_synthesize_suggest/v1" if suggest else "paper_search_synthesize/v1"
+    )
     deps = ResearchDeps(
         adapter=adapter,
         tracer=tracer,
@@ -281,6 +293,8 @@ async def paper_search(
         retriever=retriever if retriever is not None else _NULL_RETRIEVER,
         mcp_registry=mcp_registry,
         adapter_kwargs=kwargs or None,
+        parse_slot=parse_slot,
+        synth_slot=synth_slot,
     )
     graph = build_paper_search_subgraph(deps)
     final_text = ""
@@ -466,7 +480,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
                     yield {"event": "token",
                            "data": token_evt.model_dump_json(exclude={"type"})}
-                elif intent == "paper_search":
+                elif intent in ("paper_search", "paper_suggest"):
                     pipeline = PaperPipeline(
                         conn,
                         papers_cache_dir=settings.papers_cache_dir,
@@ -475,10 +489,12 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     mcp_registry: MCPRegistry = request.app.state.mcp_registry
                     final_content = ""
                     # paper_search is module-level so monkeypatch can swap.
+                    # suggest=True selects the topic-recommendation prompt slots.
                     async for ps_item in paper_search(
                         state, adapter=adapter, tracer=tracer,
                         model=settings.paper_qa_model, conn=conn,
                         pipeline=pipeline, mcp_registry=mcp_registry,
+                        suggest=(intent == "paper_suggest"),
                     ):
                         if isinstance(ps_item, ToolStepYield):
                             yield {

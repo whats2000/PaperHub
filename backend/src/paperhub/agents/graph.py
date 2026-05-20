@@ -72,7 +72,9 @@ def build_graph(deps: GraphDeps) -> Any:
 
     def _route(state: AgentState) -> str:
         intent = state["routing_decision"].intent
-        if intent in ("paper_search", "paper_qa"):
+        # paper_suggest reuses the research subgraph (same pipeline,
+        # different prompt slots selected by the chat.py shim).
+        if intent in ("paper_search", "paper_qa", "paper_suggest"):
             return "research"
         return intent
 

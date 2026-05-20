@@ -1000,6 +1000,56 @@ async def test_paper_search_finalize_no_ingestible_source_marks_error_and_contin
 # v2.11-6: clarify intent — router surfaces a clarifying question
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# v2.12-6: paper_suggest intent routes through the paper_search pipeline
+# ---------------------------------------------------------------------------
+
+async def test_chat_sse_paper_suggest_runs_pipeline(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """paper_suggest intent must route through the paper_search pipeline
+    (not the else-stub), emitting a search_results SSE event."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"paper_suggest","model_tier":"small","confidence":0.95,'
+        '"reasoning":"topic","resolved_query":"recommend papers on retrieval augmented generation"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    async def _fake_paper_search(
+        state: Any, *, adapter: Any, tracer: Any, model: Any, conn: Any,
+        pipeline: Any, **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        yield SearchResultsYield(candidates=[_candidate("ss:rag123", title="RAG Paper")])
+        yield FinalOnlyMessage("Here are some recommended papers on RAG.")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "paper_search", _fake_paper_search)
+
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "recommend papers on RAG"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    # The pipeline must have run — a search_results event is emitted.
+    assert "search_results" in types, (
+        f"Expected search_results event (pipeline ran), got: {types}"
+    )
+    # No stub final-only without search_results (else-branch would produce
+    # a final with stub text and no search_results event).
+    sr_idx = types.index("search_results")
+    final_idx = types.index("final")
+    assert sr_idx < final_idx
+
+
 async def test_chat_sse_clarify_surfaces_question_no_pipeline(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
