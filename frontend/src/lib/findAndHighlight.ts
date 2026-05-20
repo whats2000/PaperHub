@@ -1,5 +1,24 @@
 export const HIGHLIGHT_CLASS = "ph-cite-hl";
 
+const HIGHLIGHT_STYLE_ID = "ph-cite-hl-style";
+
+/**
+ * Inject a one-time <style> rule into `doc` so `.ph-cite-hl` is visible
+ * inside style-isolated contexts (e.g. an iframe whose parent Tailwind/CSS
+ * cannot reach inside). Safe to call repeatedly — creates the element only
+ * once per document.
+ */
+function ensureHighlightStyle(doc: Document): void {
+  if (doc.getElementById(HIGHLIGHT_STYLE_ID) !== null) return;
+  const style = doc.createElement("style");
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent =
+    `.${HIGHLIGHT_CLASS} { background-color: #fde68a; color: inherit; ` +
+    `border-radius: 2px; box-shadow: 0 0 0 2px #fde68a; ` +
+    `transition: background-color 0.3s ease; }`;
+  (doc.head ?? doc.documentElement).appendChild(style);
+}
+
 /**
  * Maximum characters of the (normalized) needle to attempt first.
  * Rendering (math, ligatures, figure captions) often mangles the tail of
@@ -130,6 +149,7 @@ export function findAndHighlight(doc: Document, needle: string): boolean {
 
   const el = span.node.parentElement;
   if (el) {
+    ensureHighlightStyle(doc);
     el.classList.add(HIGHLIGHT_CLASS);
     if (typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ behavior: "smooth", block: "center" });

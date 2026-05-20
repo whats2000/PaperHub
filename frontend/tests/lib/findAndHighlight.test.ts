@@ -62,4 +62,21 @@ describe("findAndHighlight", () => {
     expect(findAndHighlight(doc, "load balancing helps.")).toBe(true);
     expect(findAndHighlight(doc, "load balancing rocks.")).toBe(false);
   });
+
+  it("injects a stylesheet rule so the highlight is visible inside the iframe doc", () => {
+    const doc = docFrom("<p>Expert collapse is mitigated by load balancing.</p>");
+    const ok = findAndHighlight(doc, "Expert collapse is mitigated");
+    expect(ok).toBe(true);
+    const style = doc.getElementById("ph-cite-hl-style");
+    expect(style).not.toBeNull();
+    expect(style?.textContent).toContain(`.${HIGHLIGHT_CLASS}`);
+    expect(style?.textContent).toMatch(/background/i);
+  });
+
+  it("injects the stylesheet only once across repeated calls", () => {
+    const doc = docFrom("<p>alpha bravo charlie delta echo foxtrot.</p>");
+    findAndHighlight(doc, "alpha bravo");
+    findAndHighlight(doc, "charlie delta");
+    expect(doc.querySelectorAll("#ph-cite-hl-style").length).toBe(1);
+  });
 });
