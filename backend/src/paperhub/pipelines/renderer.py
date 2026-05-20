@@ -7,7 +7,9 @@ Strategy:
 """
 from __future__ import annotations
 
+import base64
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +19,16 @@ import pymupdf
 from pylatexenc.latex2text import LatexNodes2Text
 
 logger = logging.getLogger(__name__)
+
+_IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
+_IMG_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
 
 # pandoc can HANG (not just exit non-zero) on pathological LaTeX. Without a
 # bound the hanging subprocess parks the whole ingest until the worker OOMs
@@ -32,14 +44,17 @@ def render_html(
     out_path: Path,
     resource_dir: Path | None = None,
 ) -> Path:
-    """Render ``source`` to a self-contained HTML artefact at ``out_path``.
+    """Render ``source`` to an HTML artefact at ``out_path``.
 
     ``resource_dir`` (latex only) is where figures referenced by the flattened
-    source actually live — typically the extracted ``source/`` subtree, which
-    is a different directory from the flattened ``.tex``. pandoc searches it via
-    ``--resource-path`` and inlines the figures (``--embed-resources``) so the
-    Citation Canvas (Plan D) renders images regardless of where the HTML is
-    served from.
+    source actually live — typically the extracted ``source/`` subtree, a
+    different directory from the flattened ``.tex``. pandoc searches it via
+    ``--resource-path``; figures are then inlined as data: URIs by
+    ``_inline_local_images`` so the artefact is self-contained for the Citation
+    Canvas (Plan D). Math is rendered via an EXTERNAL MathJax CDN ``<script>``
+    (``--mathjax``, not ``--embed-resources``) so multi-line environments like
+    ``\\begin{aligned}`` render in the browser without fetching+inlining ~1.3MB
+    of MathJax into every paper at ingest time.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if kind == "pdf":
@@ -48,6 +63,8 @@ def render_html(
         if shutil.which("pandoc"):
             try:
                 _render_latex_pandoc(source, out_path, resource_dir=resource_dir)
+                if resource_dir is not None:
+                    _inline_local_images(out_path, resource_dir)
                 return out_path
             except subprocess.CalledProcessError as exc:
                 # Idiosyncratic LaTeX commonly trips pandoc with non-zero exit.
@@ -105,9 +122,13 @@ def _render_latex_pandoc(
         "--from", "latex",
         "--to", "html5",
         "--standalone",
-        # Inline figures/CSS as data: URIs so the artefact is self-contained
-        # (the Citation Canvas serves it independent of the source tree).
-        "--embed-resources",
+        # Render math via an external MathJax CDN <script>. pandoc's built-in
+        # conversion can't handle multi-line math (\begin{aligned}, $$..$$) and
+        # dumps raw TeX; MathJax renders it in the browser. We deliberately do
+        # NOT use --embed-resources: it would fetch + inline ~1.3MB of MathJax
+        # into every paper at ingest (~12s/paper + network dependency). Figures
+        # are inlined separately by _inline_local_images.
+        "--mathjax",
     ]
     if resource_dir is not None:
         # Figures live in the extracted source/ subtree, not next to the
@@ -122,6 +143,34 @@ def _render_latex_pandoc(
         cwd=tex_path.parent,
         timeout=_PANDOC_TIMEOUT_SECONDS,
     )
+
+
+def _inline_local_images(html_path: Path, resource_dir: Path) -> None:
+    """Rewrite ``<img src="rel/path">`` referencing local raster files under
+    ``resource_dir`` into base64 ``data:`` URIs, so the HTML is self-contained
+    without pandoc's --embed-resources (which would also fetch+inline MathJax).
+    Remote (http/https) and already-inlined (data:) srcs are left untouched;
+    missing or non-raster files are left as-is."""
+    html = html_path.read_text(encoding="utf-8")
+
+    def _sub(m: re.Match[str]) -> str:
+        pre, src, post = m.group(1), m.group(2), m.group(3)
+        if src.startswith(("data:", "http://", "https://", "//")):
+            return m.group(0)
+        figure = resource_dir / src
+        mime = _IMG_MIME.get(figure.suffix.lower())
+        if mime is None or not figure.is_file():
+            return m.group(0)
+        try:
+            b64 = base64.b64encode(figure.read_bytes()).decode("ascii")
+        except OSError as exc:
+            logger.warning("image inline failed for %s: %s", figure, exc)
+            return m.group(0)
+        return f"{pre}data:{mime};base64,{b64}{post}"
+
+    new_html = _IMG_SRC_RE.sub(_sub, html)
+    if new_html != html:
+        html_path.write_text(new_html, encoding="utf-8")
 
 
 def _render_latex_pylatexenc(tex_path: Path, out_path: Path) -> None:

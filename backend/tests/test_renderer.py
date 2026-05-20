@@ -148,11 +148,12 @@ def test_render_latex_pandoc_passes_subprocess_timeout(tmp_path: Path) -> None:
     assert run_mock.call_args.kwargs.get("timeout"), "pandoc subprocess must set a timeout"
 
 
-def test_render_latex_pandoc_embeds_resources_and_uses_resource_path(tmp_path: Path) -> None:
-    """For the Citation Canvas (Plan D) the HTML must be self-contained with
-    figures inlined. _render_latex_pandoc must pass --embed-resources, and
-    --resource-path=<resource_dir> so figures that live in the source/ subtree
-    (separate from the flattened .tex in cache_dir) are found + embedded."""
+def test_render_latex_pandoc_uses_mathjax_and_resource_path_not_embed(tmp_path: Path) -> None:
+    """Math must render via MathJax (pandoc's built-in conversion can't handle
+    multi-line envs like \\begin{aligned}). We keep the MathJax <script> EXTERNAL
+    (no --embed-resources, which would fetch+inline ~1.3MB from the CDN at ingest
+    and slow every paper); figures are inlined separately. --resource-path still
+    points pandoc at the source/ subtree."""
     from paperhub.pipelines import renderer
 
     tex = tmp_path / "source.flattened.tex"
@@ -163,9 +164,36 @@ def test_render_latex_pandoc_embeds_resources_and_uses_resource_path(tmp_path: P
     with patch("paperhub.pipelines.renderer.subprocess.run") as run_mock:
         renderer._render_latex_pandoc(tex, out, resource_dir=res_dir)
     argv = run_mock.call_args.args[0]
-    assert "--embed-resources" in argv
+    assert "--mathjax" in argv
     assert "--resource-path" in argv
     assert str(res_dir) in argv
+    assert "--embed-resources" not in argv  # external MathJax, fast ingest
+
+
+def test_inline_local_images_embeds_relative_img_as_data_uri(tmp_path: Path) -> None:
+    """Figures stay external in pandoc output (no --embed-resources); we inline
+    the local raster <img> refs ourselves so the artefact is self-contained
+    without fetching MathJax."""
+    from paperhub.pipelines import renderer
+
+    res_dir = tmp_path / "source"
+    (res_dir / "figs").mkdir(parents=True)
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    (res_dir / "figs" / "pic.png").write_bytes(png)
+    html = tmp_path / "out.html"
+    html.write_text(
+        '<html><body><img src="figs/pic.png" />'
+        '<img src="https://x/y.png" /><img src="data:image/png;base64,AAAA" /></body></html>',
+        encoding="utf-8",
+    )
+    renderer._inline_local_images(html, res_dir)
+    out = html.read_text(encoding="utf-8")
+    assert 'src="data:image/png;base64,' in out  # local figure inlined
+    assert 'src="https://x/y.png"' in out  # remote left alone
+    assert out.count("data:image/png;base64,AAAA") == 1  # pre-existing data: untouched
 
 
 def test_render_html_embeds_image_from_resource_dir(tmp_path: Path) -> None:
@@ -187,13 +215,19 @@ def test_render_html_embeds_image_from_resource_dir(tmp_path: Path) -> None:
     tex = tex_dir / "source.flattened.tex"
     tex.write_text(
         r"\documentclass{article}\usepackage{graphicx}"
-        r"\begin{document}\includegraphics{figs/pic.png}\end{document}",
+        r"\begin{document}\includegraphics{figs/pic.png}"
+        r"\[ x_t = (1-t)x_0 + t x_1 \]"
+        r"\end{document}",
         encoding="utf-8",
     )
     out = tex_dir / "source.html"
     render_html(source=tex, kind="latex", out_path=out, resource_dir=res_dir)
     html = out.read_text(encoding="utf-8")
     assert "data:image" in html, "figure should be embedded as a data: URI"
+    # MathJax stays an external CDN <script> (not fetched+inlined): keeps the
+    # HTML lean and ingest fast.
+    assert "mathjax" in html.lower(), "MathJax script should be referenced"
+    assert html.count("data:application/javascript") == 0, "MathJax must NOT be embedded"
 
 
 def test_render_latex_pandoc_resolves_input_relative_to_source_dir(tmp_path: Path) -> None:
