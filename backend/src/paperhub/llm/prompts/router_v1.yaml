@@ -15,13 +15,9 @@ system: |
     - slides          user asks to generate slides / a deck
     - library_stats   user asks a count/stat over their saved papers/sessions
     - chitchat        greeting, meta-question, off-topic
-    - clarify         neither the message NOR the prior turns yield a
-                      resolvable topic, paper, or action — a bare "go on" /
-                      "tell me more" / "anything else?" with nothing anywhere
-                      in the conversation to anchor it to. If a topic or paper
-                      IS recoverable from history, prefer paper_suggest /
-                      paper_search and resolve it — do NOT clarify. Use clarify
-                      instead of guessing.
+    - clarify         nothing in the message or prior turns gives a topic or
+                      paper to act on (bare "go on" / "anything else?"). If
+                      history supplies one, resolve it instead — don't clarify.
 
   (2) Produce `resolved_query`: a SELF-CONTAINED rewrite of the user's most
       recent message with all pronouns / anaphora / ellipsis resolved against
