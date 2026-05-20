@@ -31,11 +31,33 @@ param(
     [int]$ModelServerPort = 8001,
     [string]$BindHost = "127.0.0.1",     # $Host is a PowerShell reserved automatic
     [switch]$NoReload,                   # default: uvicorn --reload on
-    [switch]$NoWebSearch                 # default: ensure external MCP daemons (open-websearch)
+    [switch]$NoWebSearch,                # default: ensure external MCP daemons (open-websearch)
+    [switch]$NoReap                      # default: reap stale listeners from a prior run before starting
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -Path (Join-Path $PSScriptRoot "..")
+
+# --- process-tree teardown helpers -------------------------------------------
+# We spawn children through `uv` / `npx` wrappers, so the handle we hold is the
+# WRAPPER, not the server. Killing the wrapper orphans the real grandchild (the
+# modelserver leak: `Stop-Process` on the `uv` wrapper left `-m paperhub.modelserver`
+# running, holding :8001 and ~400 MB — repeated across runs => OOM). taskkill /T
+# walks + kills the whole tree; reaping by port is the wrapper-handle-independent
+# backstop (and the only handle we have for detached daemons / leaked workers).
+function Stop-ProcessTree([int]$procId, [string]$why) {
+    if ($procId -le 0) { return }
+    & taskkill /F /T /PID $procId 2>$null | Out-Null
+    if ($why) { Write-Host "  killed pid=$procId ($why)" -ForegroundColor DarkYellow }
+}
+
+function Stop-PortListeners([int]$port, [string]$why) {
+    $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
+        Write-Host "Stopping listener on :$port (pid=$($conn.OwningProcess)) — $why" -ForegroundColor Yellow
+        Stop-ProcessTree $conn.OwningProcess $why
+    }
+}
 
 # Propagate ports to the modelserver subprocess via env, so its
 # Settings.load picks the right bind address.
@@ -49,35 +71,49 @@ $modelProc = $null
 # reliable cleanup).
 $mcpPortsFile = Join-Path $PSScriptRoot "..\.mcp_daemon_ports"
 $cleanup = {
+    # Modelserver: we hold the `uv` wrapper handle, but the real server is its
+    # python grandchild (`-m paperhub.modelserver`). Tree-kill the wrapper so the
+    # child dies too, then reap the port as a backstop (covers the case where the
+    # wrapper already exited but the grandchild kept the socket).
     if ($script:modelProc -and -not $script:modelProc.HasExited) {
-        Write-Host "Stopping modelserver (pid=$($script:modelProc.Id))" -ForegroundColor Yellow
-        try {
-            $script:modelProc.CloseMainWindow() | Out-Null
-            if (-not $script:modelProc.WaitForExit(5000)) {
-                Stop-Process -Id $script:modelProc.Id -Force -ErrorAction SilentlyContinue
-            }
-        } catch {
-            Stop-Process -Id $script:modelProc.Id -Force -ErrorAction SilentlyContinue
-        }
+        Write-Host "Stopping modelserver tree (wrapper pid=$($script:modelProc.Id))" -ForegroundColor Yellow
+        Stop-ProcessTree $script:modelProc.Id "modelserver wrapper"
     }
+    Stop-PortListeners $script:ModelServerPort "modelserver"
 
-    # Stop the MCP daemons paperhub-mcp-up started (open-websearch, etc.).
+    # Backend: foreground `& uv` should exit with the script, but uvicorn
+    # --reload workers (multiprocessing spawn children) can outlive a Ctrl+C —
+    # reap the port to catch orphaned ~580 MB workers.
+    Stop-PortListeners $script:BackendPort "backend"
+
+    # MCP daemons paperhub-mcp-up started (open-websearch, etc.). NOTE: we do NOT
+    # reap the MCP port at startup — those are detach-and-leak BY DESIGN (reused
+    # across runs to skip the ~25s npx cold start); only this run's owned daemons
+    # (recorded in the sidecar) are torn down here.
     if (Test-Path $script:mcpPortsFile) {
         foreach ($line in (Get-Content $script:mcpPortsFile -ErrorAction SilentlyContinue)) {
             $port = 0
             if (-not [int]::TryParse($line.Trim(), [ref]$port) -or $port -eq 0) { continue }
-            $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-            foreach ($conn in $conns) {
-                Write-Host "Stopping MCP daemon on :$port (pid=$($conn.OwningProcess))" -ForegroundColor Yellow
-                # /T kills the npx → node child tree, not just the wrapper.
-                & taskkill /F /T /PID $conn.OwningProcess 2>$null | Out-Null
-            }
+            Stop-PortListeners $port "mcp daemon"
         }
         Remove-Item $script:mcpPortsFile -Force -ErrorAction SilentlyContinue
     }
 }
 
 try {
+    # Step 0: reap stragglers from a prior run. PowerShell's `finally` does NOT
+    # reliably run when a native foreground command (`& uv`) catches Ctrl+C, so
+    # leaked modelservers + ~580 MB --reload workers accumulate across runs and
+    # eventually OOM the box. Tree-kill anything still holding OUR ports before we
+    # spawn fresh — this is the backstop that makes "start all, close all" hold
+    # even when last run's teardown was skipped. (MCP :3000 is intentionally left
+    # alone — detach-and-leak by design.) Skip with -NoReap.
+    if (-not $NoReap) {
+        Write-Host "Reaping stale listeners on :$BackendPort / :$ModelServerPort ..." -ForegroundColor DarkCyan
+        Stop-PortListeners $ModelServerPort "stale modelserver"
+        Stop-PortListeners $BackendPort "stale backend"
+    }
+
     # Step 1: start the model server in the background. Inherits the
     # current uv-managed Python environment via `uv run`.
     Write-Host "Starting modelserver on ${BindHost}:$ModelServerPort..." -ForegroundColor Cyan
