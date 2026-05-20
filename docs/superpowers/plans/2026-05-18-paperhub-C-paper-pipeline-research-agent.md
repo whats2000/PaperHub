@@ -6332,3 +6332,262 @@ user: |
 - **DRY:** single `effective_query()` helper used at all five read sites.
 - **Type consistency:** `effective_query(state: AgentState) -> str`; field `resolved_query` / slot `effective_query` used identically across v2.11-1…7.
 - **Out of scope:** the `paper_qa_stream` legacy façade ([`research.py:161`](../../../backend/src/paperhub/agents/research.py#L161)) only consumes the question inside the subgraph (covered); its empty-refs sentinel doesn't touch the query, so no change needed there.
+
+---
+
+## Plan C v2.12 — `paper_suggest` intent (topic recommendation; conditional suggest prompts, reuse the search pipeline) — follow-up patch
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use [superpowers:subagent-driven-development](../../../C:/Users/eddie/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development) (recommended) or [superpowers:executing-plans](../../../C:/Users/eddie/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/executing-plans). Steps use `- [ ]` for tracking. **Depends on v2.11** (uses `resolved_query` / `effective_query`); built on the same branch.
+
+**Goal:** Add a first-class `paper_suggest` intent for **topic-level recommendation** ("recommend a few papers on X"), distinct from `paper_search` (find a *specific named* paper). It reuses the v2.7 Discover→Resolve→Finalize→Synthesize pipeline as much as possible, diverging only where the use case differs: a **conditional Parser prompt** that decomposes the topic into 2–4 search angles, a **conditional Synthesizer prompt** with recommendation tone, and a **suggestion-only Finalizer** (no auto-attach — every result is a card the user can add).
+
+**Why now (root-cause evidence — run 101, session 72).** After v2.11 the router correctly resolved "推薦幾篇" into a topical brief and handed it to the Parser (`paper_search:parse` args = the full topic brief). But the Parser returned `requests: []` and the synthesizer re-asked for "a particular paper, lead author, or arXiv ID". Reading the Parser prompt ([`paper_search_parse_v1.yaml:18-21,45-46`](../../../backend/src/paperhub/llm/prompts/paper_search_parse_v1.yaml#L18)) shows this is **by design**: the four-stage `paper_search` resolves *specific named papers* and explicitly returns `[]` for a "topic survey" (`"what's a good MoE paper?" → []`). So topic recommendation has no path through the pipeline. v2.11 (anaphora resolution) was necessary but not sufficient — it surfaced this second, independent gap. The fix is a sibling intent, not a change to `paper_search`'s exact-lookup semantics.
+
+**Architecture (data flow, suggest):** router (`intent=paper_suggest`, `resolved_query`=topic) → `effective_query` → `ps_parse` **[conditional suggest prompt → 2–4 angle hints]** → `ps_process` Discover→Resolve fan-out (**unchanged code**, ~1 paper per angle) → `ps_finalize` (**`finalize=False` in suggest mode → suggestion-only, no auto-attach**) → `synthesize` **[conditional suggest prompt → recommendation prose]**. Conditional prompt selection = two new optional `ResearchDeps` slots (`parse_slot` / `synth_slot`, defaulting to the v1 search prompts) + a `suggest_mode` flag; the `chat.py` shim sets them when the intent is `paper_suggest`. The prompt registry auto-discovers slots by filename, so the two new prompts need only their YAML files.
+
+**Reuse boundary (what does NOT change):** Discover (`discover_canonical`) + Resolve (`resolve_via_ss`) + the per-request `asyncio.gather` fan-out, the SSE `search_results` / `tool_step` shapes, `_process_search_results` cap/dedup/auto-attach machinery in `chat.py`, observability, and the DB schema. `paper_search` (exact lookup) behaviour is byte-for-byte unchanged (defaults preserved).
+
+### v2.12 File Structure
+
+| File | Change |
+| --- | --- |
+| [`domain.py`](../../../backend/src/paperhub/models/domain.py) | add `"paper_suggest"` to `Intent` |
+| [`router_v1.yaml`](../../../backend/src/paperhub/llm/prompts/router_v1.yaml) | add `paper_suggest` intent + search-vs-suggest distinction (language-neutral) |
+| **new** `paper_search_parse_suggest_v1.yaml` | topic → 2–4 distinct natural-language angle hints |
+| **new** `paper_search_synthesize_suggest_v1.yaml` | recommendation-tone prose; suggestion-only framing |
+| [`research_pipeline.py`](../../../backend/src/paperhub/agents/research_pipeline.py) | `parse_user_message(slot=...)` + `synthesize_prose(slot=...)` |
+| [`research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) | `ResearchDeps.{parse_slot,synth_slot,suggest_mode}`; pass slots; `finalize=not suggest_mode` |
+| [`chat.py`](../../../backend/src/paperhub/api/chat.py) | `paper_search` shim gains `suggest: bool`; route `paper_suggest` + `paper_search` through it |
+| [`graph.py`](../../../backend/src/paperhub/agents/graph.py) | route `paper_suggest` to research subgraph (test completeness) |
+| tests | `test_models.py`, `test_research_pipeline.py`, `test_research_subgraph.py` (or `test_graph.py`), `test_chat_sse.py` |
+
+### v2.12-1 — `paper_suggest` intent
+
+**Files:** Modify [`domain.py`](../../../backend/src/paperhub/models/domain.py) (`Intent` literal). Test: `tests/test_models.py`.
+
+- [ ] **Step 1: failing test** — add to `tests/test_models.py`:
+```python
+def test_routing_decision_accepts_paper_suggest_intent():
+    d = RoutingDecision(intent="paper_suggest", model_tier="small", confidence=0.9,
+                        reasoning="topic recommendation", resolved_query="recommend papers on X")
+    assert d.intent == "paper_suggest"
+```
+- [ ] **Step 2: run, verify FAIL** — `uv run pytest tests/test_models.py::test_routing_decision_accepts_paper_suggest_intent -v` → `"paper_suggest"` not a valid Intent.
+- [ ] **Step 3: implement** — extend the literal (already includes `clarify` from v2.11):
+```python
+Intent = Literal[
+    "paper_search", "paper_suggest", "paper_qa", "slides", "library_stats", "chitchat", "clarify",
+]
+```
+- [ ] **Step 4: run** `uv run pytest tests/test_models.py -v` → PASS.
+- [ ] **Step 5: commit** `git commit -m "feat(router): add paper_suggest intent to RoutingDecision"`
+
+### v2.12-2 — router prompt: classify search vs suggest
+
+**Files:** Modify [`router_v1.yaml`](../../../backend/src/paperhub/llm/prompts/router_v1.yaml). Test: `tests/test_models.py`.
+
+- [ ] **Step 1: failing test** — add to `tests/test_models.py`:
+```python
+def test_router_prompt_distinguishes_search_and_suggest():
+    p = PromptRegistry().get("router/v1")
+    assert "paper_suggest" in p.system
+    assert "paper_search" in p.system
+```
+- [ ] **Step 2: run, verify FAIL** — prompt doesn't mention `paper_suggest`.
+- [ ] **Step 3: implement** — in the intent list, REPLACE the single `paper_search` line with the pair, and keep everything else (resolved_query job, language-neutral examples, clarify, override, JSON contract) intact. The two lines:
+```yaml
+    - paper_search    user wants a SPECIFIC, already-identified paper —
+                      names it by title, author+year, arxiv id, doi, or an
+                      unambiguous reference ("the Mamba paper", "Attention
+                      Is All You Need", "arxiv:1706.03762")
+    - paper_suggest   user wants RECOMMENDATIONS on a TOPIC / area, with no
+                      specific paper named ("recommend a few on X", "good
+                      papers about Y", "what should I read on Z"). The intent
+                      is discovery by subject, not lookup of a known item.
+```
+Add `paper_suggest` to the small-tier line: `- small     for chitchat, clarify, library_stats, paper_search, and paper_suggest`. Update the JSON `"intent"` enum line to include `paper_suggest`. Add one resolved_query example under the existing Examples block:
+```yaml
+        - history discusses retrieval-augmented generation; latest msg
+          "any good papers?" → intent: paper_suggest,
+          resolved_query: "recommend representative papers on
+          retrieval-augmented generation"
+```
+Keep the `enabled_refs_count` override unchanged (a user naming specific papers with 0 refs still → `paper_search`; topic asks → `paper_suggest`).
+- [ ] **Step 4: run** `uv run pytest tests/test_models.py -v` → PASS. Also sanity-render: `uv run python -c "from paperhub.llm.prompts.registry import PromptRegistry; print(PromptRegistry().get('router/v1').user_template.format(enabled_refs_count=0, user_message='hi'))"`.
+- [ ] **Step 5: commit** `git commit -m "feat(router): prompt distinguishes paper_search (specific) vs paper_suggest (topic)"`
+
+### v2.12-3 — new suggest prompt files
+
+**Files:** create `backend/src/paperhub/llm/prompts/paper_search_parse_suggest_v1.yaml` and `paper_search_synthesize_suggest_v1.yaml`. Test: `tests/test_models.py` (registry discovery + template safety).
+
+- [ ] **Step 1: failing test** — add to `tests/test_models.py`:
+```python
+def test_suggest_prompts_load_and_format():
+    reg = PromptRegistry()
+    parse = reg.get("paper_search_parse_suggest/v1")
+    assert "{user_message}" not in parse.user_template.format(user_message="T")  # formats cleanly
+    synth = reg.get("paper_search_synthesize_suggest/v1")
+    synth.user_template.format(user_message="m", resolved_block="r", not_found_block="n")  # no KeyError
+```
+- [ ] **Step 2: run, verify FAIL** — files don't exist (`FileNotFoundError`).
+- [ ] **Step 3: implement** — create `paper_search_parse_suggest_v1.yaml`:
+```yaml
+system: |
+  You turn a research TOPIC into 2-4 distinct search angles, each naming a
+  facet to find papers for.
+
+  Output ONE JSON array. Each entry:
+    - "hint": a short natural-language search phrase for ONE facet of the
+              topic (a sub-area, method, or framing). Make facets DISTINCT
+              so they surface different papers.
+    - "kind": always "natural_language".
+
+  Rules:
+    - Emit 2-4 entries. NEVER emit an empty array for a real topic — if the
+      topic is broad, pick its most representative sub-areas; if narrow,
+      split by method vs application vs survey.
+    - Each hint reads like a query someone would type to find papers on
+      that facet. Keep hints concise (2-6 words), no quotes, no boolean
+      operators.
+    - These are discovery angles, NOT exact lookups — don't name specific
+      papers or authors unless the topic itself does.
+    - Stay faithful to the topic; don't fabricate niche jargon.
+
+  Examples:
+    Topic: "recommend papers on flow matching, shortcut models, and
+            distillation for discrete diffusion / diffusion language models"
+    Output: [
+      {"hint": "discrete flow matching", "kind": "natural_language"},
+      {"hint": "diffusion distillation for language models", "kind": "natural_language"},
+      {"hint": "consistency models for discrete diffusion", "kind": "natural_language"}
+    ]
+
+    Topic: "good papers on mixture-of-experts routing"
+    Output: [
+      {"hint": "mixture of experts routing", "kind": "natural_language"},
+      {"hint": "expert load balancing sparse models", "kind": "natural_language"},
+      {"hint": "mixture of experts survey", "kind": "natural_language"}
+    ]
+
+  Output the JSON array only. No prose.
+user: |
+  TOPIC:
+  {user_message}
+```
+And `paper_search_synthesize_suggest_v1.yaml`:
+```yaml
+system: |
+  You write a short prose recommendation of the papers the pipeline found
+  for the user's TOPIC.
+
+  Constraints:
+    - Open with one sentence framing the recommendation
+      ("Here are a few representative papers on <topic>:").
+    - 1-2 sentences per resolved paper. Name each by title + lead author +
+      year as given in RESOLVED. Don't invent details (no abstract
+      paraphrasing — you only have title/year/authors).
+    - These are SUGGESTIONS: invite the user to add any that look useful
+      (they appear as cards below your message). Do NOT claim you added them.
+    - For not-found angles: at most one sentence inviting the user to narrow
+      or rephrase the topic. Do NOT demand an arxiv ID, author, or title.
+    - If RESOLVED is empty: a brief, friendly note that you couldn't surface
+      clear matches, suggesting the user narrow the topic or name a sub-area.
+      Do NOT ask for a specific paper title/ID — the user gave a topic on
+      purpose.
+
+  Do NOT emit any ``json:candidates`` block — the orchestrator builds the
+  candidate cards deterministically from RESOLVED.
+
+  Do NOT invent paper titles. Only mention papers in RESOLVED below.
+user: |
+  USER MESSAGE:
+  {user_message}
+
+  RESOLVED (papers the pipeline successfully landed):
+  {resolved_block}
+
+  NOT_FOUND (angles the pipeline couldn't locate a paper for):
+  {not_found_block}
+```
+- [ ] **Step 4: run** `uv run pytest tests/test_models.py -v` → PASS.
+- [ ] **Step 5: commit** `git commit -m "feat(paper_suggest): add suggest parse + synthesize prompts"`
+
+### v2.12-4 — conditional slot params on Parser + Synthesizer
+
+**Files:** Modify [`research_pipeline.py`](../../../backend/src/paperhub/agents/research_pipeline.py) (`parse_user_message`, `synthesize_prose`). Test: `tests/test_research_pipeline.py`.
+
+- [ ] **Step 1: failing test** — add to `tests/test_research_pipeline.py` (match the file's litellm-mock convention):
+```python
+async def test_parse_uses_suggest_slot(migrated_db):
+    # With the suggest slot, the parser prompt is the angle-decomposition one.
+    # Assert the slot is honored by checking the recorded prompt path indirectly:
+    # a topic brief returns multiple natural_language angles from the mocked LLM.
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    reqs = await parse_user_message(
+        "recommend papers on mixture of experts", tracer=tracer, model="gpt-4o-mini",
+        slot="paper_search_parse_suggest/v1",
+        mock_response='[{"hint":"moe routing","kind":"natural_language"},{"hint":"moe survey","kind":"natural_language"}]',
+    )
+    assert len(reqs) == 2
+```
+(Use the file's actual mock mechanism — patch `litellm.acompletion` if `mock_response` isn't a kwarg, mirroring v2.11-4. The contract: `parse_user_message` accepts `slot=` and routes it to `PromptRegistry().get(slot)`.)
+- [ ] **Step 2: run, verify FAIL** — `parse_user_message` has no `slot` param (`TypeError`).
+- [ ] **Step 3: implement** — in `research_pipeline.py`:
+  - `parse_user_message(..., slot: str = "paper_search_parse/v1", registry=None, **litellm_kwargs)`; replace `reg.get("paper_search_parse/v1")` with `reg.get(slot)`.
+  - `synthesize_prose(..., slot: str = "paper_search_synthesize/v1", registry=None, **litellm_kwargs)`; replace `reg.get("paper_search_synthesize/v1")` with `reg.get(slot)`.
+  Defaults preserve `paper_search` behaviour exactly.
+- [ ] **Step 4: run** `uv run pytest tests/test_research_pipeline.py -v` → PASS.
+- [ ] **Step 5: commit** `git commit -m "feat(paper_search): conditional parse/synth prompt slot params"`
+
+### v2.12-5 — `ResearchDeps` suggest config + subgraph wiring (incl. suggestion-only finalize)
+
+**Files:** Modify [`research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py). Test: `tests/test_research_subgraph.py` (or wherever `build_paper_search_subgraph` is exercised).
+
+- [ ] **Step 1: failing test** — add a test that builds the subgraph in suggest mode and asserts (a) the suggest parse slot drives a multi-angle parse and (b) emitted candidates have `finalize=False`. Mirror the existing paper_search subgraph test's mocking (it injects `adapter_kwargs`/`mock_response` and a fake MCP registry). Key assertions:
+```python
+# deps built with parse_slot="paper_search_parse_suggest/v1",
+# synth_slot="paper_search_synthesize_suggest/v1", suggest_mode=True
+# After running the graph on a topic state, the search_results candidates
+# (captured from the custom stream / DB finalize row) all have finalize == False.
+```
+(Match the existing subgraph test harness exactly — capture the `search_results` custom event or read the `paper_search:finalize` tracer row's `emitted_candidates[*].finalize`.)
+- [ ] **Step 2: run, verify FAIL** — `ResearchDeps` has no `parse_slot`/`synth_slot`/`suggest_mode`; finalize is hardcoded `True`.
+- [ ] **Step 3: implement** — in `research_graph.py`:
+  - Add to `ResearchDeps`: `parse_slot: str = "paper_search_parse/v1"`, `synth_slot: str = "paper_search_synthesize/v1"`, `suggest_mode: bool = False`.
+  - In `build_paper_search_subgraph`, `_ps_parse`: `parse_user_message(effective_query(state), tracer=..., model=parser_model, slot=deps.parse_slot, **_kwargs(deps))`.
+  - In the `synthesize_prose(...)` call: add `slot=deps.synth_slot`.
+  - In `_ps_finalize`, change the hardcoded `finalize=True` (line ~303) to `finalize=not deps.suggest_mode`, and update the adjacent comment to note suggest-mode emits cards-only (no auto-attach).
+- [ ] **Step 4: run** `uv run pytest tests/test_research_subgraph.py tests/test_research_pipeline.py -v` → PASS.
+- [ ] **Step 5: commit** `git commit -m "feat(paper_suggest): subgraph suggest-mode (conditional slots + suggestion-only finalize)"`
+
+### v2.12-6 — route `paper_suggest` (chat SSE + build_graph)
+
+**Files:** Modify [`chat.py`](../../../backend/src/paperhub/api/chat.py), [`graph.py`](../../../backend/src/paperhub/agents/graph.py). Tests: `tests/test_chat_sse.py`, `tests/test_graph.py`.
+
+- [ ] **Step 1: failing tests** —
+  (a) `tests/test_chat_sse.py`: with `PAPERHUB_ROUTER_MOCK` set to `intent=paper_suggest` (+ a topical `resolved_query`), POST `/chat`; assert a `search_results` event is emitted AND every candidate has `finalize: false` (suggestion-only, no auto-attach). Match the file's SSE harness; you may also need to mock the suggest parse/synth LLM calls — reuse however `test_chat_sse.py` already mocks paper_search downstream calls.
+  (b) `tests/test_graph.py`: a `paper_suggest` router mock routes through the research path without error (graph-completeness).
+- [ ] **Step 2: run, verify FAIL** — `paper_suggest` falls into chat.py's `else: stub_response`; `_route` in `build_graph` returns an unrouted `"paper_suggest"`.
+- [ ] **Step 3: implement** —
+  - In `chat.py` `paper_search` shim: add a `suggest: bool = False` param; when `True`, set `deps.parse_slot="paper_search_parse_suggest/v1"`, `deps.synth_slot="paper_search_synthesize_suggest/v1"`, `deps.suggest_mode=True` (set these fields on the `ResearchDeps(...)` construction).
+  - In the `/chat` intent dispatch, change `elif intent == "paper_search":` to `elif intent in ("paper_search", "paper_suggest"):` and pass `suggest=(intent == "paper_suggest")` into the `paper_search(...)` call. The entire ToolStepYield / SearchResultsYield / FinalOnlyMessage handling block is shared unchanged (suggestion-only `finalize=False` flows through `_process_search_results`'s existing cap/already-in-session logic, which simply auto-attaches nothing).
+  - In `graph.py` `_route`: `if intent in ("paper_search", "paper_qa", "paper_suggest"): return "research"`. (The test-only research subgraph runs default search mode for `paper_suggest`; real suggest-mode behaviour is covered by the chat SSE + subgraph tests above. Note this scoping in a comment.)
+- [ ] **Step 4: run** `uv run pytest tests/test_chat_sse.py tests/test_graph.py -v` → PASS.
+- [ ] **Step 5: commit** `git commit -m "feat(paper_suggest): route via chat shim (suggest=True) + build_graph"`
+
+### v2.12-7 — full gate + real-LLM end-to-end
+
+- [ ] **Step 1: gate** (from `backend/`): `uv run pytest -q`; `uv run ruff check src tests`; `uv run mypy src` → all green.
+- [ ] **Step 2: real-LLM e2e** (requires `backend/.env`). Reproduce the session-72 two-turn flow (topic turn, then "推薦幾篇"); confirm from the SQLite trace per the CLAUDE.md recipe: `router:classify` → `intent=paper_suggest` with a topical `resolved_query`; `paper_search:parse` (suggest slot) → **2–4 angle requests** (non-empty); `paper_search:finalize` `emitted_candidates` non-empty with `finalize=false`; the final message recommends papers and invites the user to add cards (NOT a re-ask for a specific paper). Capture run id and paste the `tool_calls` rows.
+- [ ] **Step 3: docs** — `CLAUDE.md` (as-shipped list + a Pointers entry: *"Topic recommendation vs exact lookup? → `paper_suggest` (angle-decomposition, suggestion-only) vs `paper_search` (resolve named paper); v2.12"*); SRS §III-3 + changelog v2.12 entry; Plan C as-shipped list. Commit `docs: record Plan C v2.12 paper_suggest`.
+
+### v2.12 self-review (author)
+
+- **Decisions covered:** distinct `paper_suggest` intent (v2.12-1,2), conditional suggest prompts (v2.12-3,4 + chat shim v2.12-6), angle-decomposition Parser (v2.12-3), suggestion-only no-auto-attach (`finalize=not suggest_mode`, v2.12-5).
+- **Reuse maximised:** Discover/Resolve/fan-out and `_process_search_results` untouched; `paper_search` defaults byte-for-byte unchanged (new params all default to v1 slots / `suggest_mode=False`).
+- **Backward-compat:** additive intent + additive optional deps fields + additive prompt files; no schema change.
+- **Type consistency:** `parse_slot` / `synth_slot` / `suggest_mode` named identically in `ResearchDeps`, the subgraph, and the chat shim; new prompt slot strings match their YAML filenames (registry auto-discovery).
+- **Scoping note:** `build_graph` routes `paper_suggest` to the research subgraph in default mode (test-completeness only); real suggest-mode behaviour is covered by the chat SSE test + the direct subgraph suggest-mode test, since the production path drives the subgraph through the `chat.py` shim.
