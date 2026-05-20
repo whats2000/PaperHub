@@ -93,15 +93,50 @@ def test_launch_detached_returns_none_on_spawn_oserror(
     assert any("spawn failed" in r.message for r in caplog.records)
 
 
-def test_terminate_calls_terminate_then_returns() -> None:
+def test_terminate_kills_the_process_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """terminate() must take the whole tree, not just the cmd/shell wrapper.
+
+    The launch is ``cmd /c npx … open-websearch`` (or a POSIX shell fork), so a
+    plain ``proc.terminate()`` orphans the node daemon. We assert the
+    tree-killing primitive for the running platform is invoked with our PID.
+    """
     proc = _FakePopen()
-    launcher.terminate(proc)  # type: ignore[arg-type]
-    assert proc.terminated == 1
-    assert proc.killed == 0
+    proc.pid = 4242
+
+    if sys.platform == "win32":
+        calls: list[list[str]] = []
+
+        def _fake_run(args: Any, **kwargs: Any) -> Any:
+            calls.append(args)
+            proc._rc = 0
+            return subprocess.CompletedProcess(args, 0)
+
+        monkeypatch.setattr(launcher.subprocess, "run", _fake_run)
+        launcher.terminate(proc)  # type: ignore[arg-type]
+        assert calls == [["taskkill", "/F", "/T", "/PID", "4242"]]
+    else:
+        killed: list[int] = []
+        monkeypatch.setattr(launcher.os, "getpgid", lambda pid: pid)
+        monkeypatch.setattr(
+            launcher.os, "killpg",
+            lambda pgid, _sig: (killed.append(pgid), setattr(proc, "_rc", 0)),
+        )
+        launcher.terminate(proc)  # type: ignore[arg-type]
+        assert killed == [4242]
 
 
-def test_terminate_noop_on_already_exited() -> None:
+def test_terminate_noop_on_already_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     proc = _FakePopen()
     proc._rc = 0  # already exited
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("must not touch an already-exited process")
+
+    monkeypatch.setattr(launcher.subprocess, "run", _boom)
+    # os.killpg is POSIX-only; patch it only where it exists.
+    monkeypatch.setattr(launcher.os, "killpg", _boom, raising=False)
     launcher.terminate(proc)  # type: ignore[arg-type]
-    assert proc.terminated == 0

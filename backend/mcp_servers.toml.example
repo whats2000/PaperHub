@@ -99,7 +99,12 @@ timeout_seconds = 8.0
 # on a Chinese network who want bing back can override this block.
 launch = ["npx", "-y", "open-websearch@latest"]
 launch_env = { PORT = "3000", MODE = "http", ALLOWED_SEARCH_ENGINES = "duckduckgo,brave,startpage", DEFAULT_SEARCH_ENGINE = "duckduckgo" }
-launch_ready_timeout = 30.0   # first run downloads the package; ~25s observed
+# Cold `npx -y open-websearch@latest` = package fetch + an `@latest` registry
+# check + the daemon's search-engine init. 30s was observed to time out right
+# as the daemon was binding (false timeout + an orphaned node child). 60s
+# covers it comfortably. (Pin a version, e.g. `open-websearch@<ver>`, and drop
+# `@latest` to skip the registry round-trip and start faster.)
+launch_ready_timeout = 60.0
 
 # ─── future blocks ───────────────────────────────────────────────────────
 # Plan E will add a sqlite block:

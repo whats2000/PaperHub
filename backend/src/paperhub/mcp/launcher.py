@@ -24,6 +24,7 @@ import contextlib
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -177,23 +178,51 @@ def launch_detached(
 
 
 def terminate(proc: subprocess.Popen[bytes] | None) -> None:
-    """Best-effort terminate of a :func:`launch_detached` child: SIGTERM → SIGKILL."""
+    """Best-effort terminate of a :func:`launch_detached` child — and its whole
+    process **tree**.
+
+    Critical: the child is typically ``cmd /c npx … open-websearch`` (Windows)
+    or a shell wrapper that itself forks ``npx → node → the daemon``. A plain
+    ``proc.terminate()`` kills only the wrapper and ORPHANS the node daemon
+    that actually binds the port (observed: the "terminated" daemon kept
+    running and bound :3000 anyway). So we kill the entire tree:
+
+      * Windows: ``taskkill /T /F`` walks + kills descendants by PID.
+      * POSIX: we spawned with ``start_new_session`` so the child leads a new
+        process group — ``killpg`` takes the npx/node children with it.
+    """
     if proc is None or proc.poll() is not None:
         return
+
+    if sys.platform == "win32":
+        try:
+            subprocess.run(  # noqa: S603, S607 — fixed taskkill args, PID from our own child
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=_TERMINATE_GRACE_S,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            _LOG.warning("mcp.launcher taskkill failed for pid=%d: %s", proc.pid, exc)
+            with contextlib.suppress(OSError):
+                proc.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            proc.wait(timeout=_TERMINATE_GRACE_S)
+        return
+
+    # POSIX: kill the child's process group (it's a session/group leader).
     try:
-        proc.terminate()
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
         try:
             proc.wait(timeout=_TERMINATE_GRACE_S)
             return
         except subprocess.TimeoutExpired:
             pass
-        proc.kill()
-        try:
+        os.killpg(pgid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=_TERMINATE_GRACE_S)
-        except subprocess.TimeoutExpired:
-            _LOG.warning(
-                "mcp.launcher subprocess (pid=%d) did not exit after SIGKILL",
-                proc.pid,
-            )
-    except OSError as exc:
-        _LOG.warning("mcp.launcher subprocess teardown failed: %s", exc)
+    except (ProcessLookupError, PermissionError) as exc:
+        _LOG.warning("mcp.launcher killpg failed for pid=%d: %s", proc.pid, exc)
