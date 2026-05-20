@@ -71,6 +71,13 @@ export interface LibraryItem {
   year: number | null;
 }
 
+export interface ChunkResolution {
+  id: number;
+  paper_content_id: number;
+  section: string | null;
+  text: string;
+}
+
 export interface AttachResult {
   papers_id: number;
   paper_content_id: number;
