@@ -20,9 +20,11 @@ The orchestration lives in ``research_graph.build_paper_search_subgraph``
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -31,7 +33,17 @@ import litellm
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.mcp.errors import MCPToolError, MCPUnavailableError
 from paperhub.mcp.registry import MCPRegistry
+from paperhub.pipelines.arxiv_client import ArxivResult, fetch_arxiv_by_id
 from paperhub.tracing.tracer import Tracer
+
+# Verifies an LLM-claimed arxiv_id against the arXiv API. Injected into
+# ``resolve_via_ss`` for testability; the prod default wraps the sync
+# ``fetch_arxiv_by_id`` in a thread so it doesn't block the event loop.
+ArxivLookup = Callable[[str], Awaitable["ArxivResult | None"]]
+
+
+async def _default_arxiv_lookup(arxiv_id: str) -> ArxivResult | None:
+    return await asyncio.to_thread(fetch_arxiv_by_id, arxiv_id)
 
 __all__ = [
     "MAX_REFINEMENT_LOOPS",
@@ -617,6 +629,7 @@ async def resolve_via_ss(
     *,
     tracer: Tracer,
     mcp_registry: MCPRegistry,
+    arxiv_lookup: ArxivLookup | None = None,
 ) -> ResolvedPaper | None:
     """Resolve ``identity`` to a ResolvedPaper, ideally via Semantic
     Scholar but falling back to arxiv when SS misses.
@@ -625,17 +638,22 @@ async def resolve_via_ss(
 
     1. If ``identity.arxiv_id`` is set, query SS with ``arXiv:<id>``
        (much more reliable than title match). If SS hits → use SS meta.
-       If SS misses → SYNTHESISE a ResolvedPaper from the identity
-       itself with ``paper_id = "arxiv:<id>"``; the downstream Paper
-       Pipeline ingests via the arxiv path anyway, so SS isn't a
-       gatekeeper. This is the key fix for very-new papers that
-       aren't yet in SS's index.
+       If SS misses → VERIFY the id against the arXiv API and adopt
+       arXiv's AUTHORITATIVE metadata (title/authors/year/abstract).
+       The LLM's ``identity.title`` is a discovery hint only and is
+       NEVER stored as the paper title — the Discoverer routinely
+       paraphrases ("Distilled Diffusion Language Models" for what is
+       really "Turning the TIDE: Cross-Architecture Distillation …"),
+       so trusting it produced the title-mismatch bug. If arXiv can't
+       confirm the id, it's bogus → return None (NotFound).
 
     2. Else (title-only), query SS with the canonical title. On miss,
        return None (NotFound).
 
-    No outer loop, no LLM — at most two SS calls.
+    No outer loop, no LLM. ``arxiv_lookup`` is injected for tests; prod
+    uses the arXiv ``id_list`` API via :data:`_default_arxiv_lookup`.
     """
+    arxiv_lookup = arxiv_lookup or _default_arxiv_lookup
     # Trace args + identity snapshot.
     async with tracer.step(
         agent="research", tool="paper_search:resolve", model=None,
@@ -673,27 +691,42 @@ async def resolve_via_ss(
                     return ResolvedPaper(
                         request=request, identity=identity, paper_id=pid, meta=top,
                     )
-            # SS missed an arxiv-id we trust — synthesise.
-            synthetic_pid = f"arxiv:{identity.arxiv_id}"
-            synthetic_meta: dict[str, Any] = {
-                "title": identity.title,
-                "arxiv_id": identity.arxiv_id,
-                "year": identity.year,
-                "authors": [identity.author_surname] if identity.author_surname else [],
-                "abstract": None,
+            # SS missed — verify the id against arXiv and adopt arXiv's
+            # AUTHORITATIVE metadata. We never store the LLM's guessed
+            # title (it paraphrases), and we drop ids arXiv can't confirm.
+            verified = await arxiv_lookup(identity.arxiv_id)
+            if verified is None:
+                step.record_result(
+                    {
+                        "hits": 0,
+                        "top": [],
+                        "source": "arxiv_id_unverified",
+                        "unverified_arxiv_id": identity.arxiv_id,
+                    },
+                )
+                return None
+            verified_pid = f"arxiv:{verified.arxiv_id}"
+            verified_meta: dict[str, Any] = {
+                "title": verified.title,
+                "arxiv_id": verified.arxiv_id,
+                "year": verified.year,
+                "authors": verified.authors,
+                "abstract": verified.abstract,
                 "has_open_pdf": True,  # arxiv URLs always have an open PDF
             }
             step.record_result(
                 {
                     "hits": 0,
                     "top": [],
-                    "source": "synthesised_from_arxiv_url",
-                    "synthetic_paper_id": synthetic_pid,
+                    "source": "verified_via_arxiv_api",
+                    "verified_arxiv_id": verified.arxiv_id,
+                    "title": verified.title,
+                    "llm_hint_title": identity.title,
                 },
             )
             return ResolvedPaper(
                 request=request, identity=identity,
-                paper_id=synthetic_pid, meta=synthetic_meta,
+                paper_id=verified_pid, meta=verified_meta,
             )
 
         # Path 2: no arxiv_id → title-only SS search.

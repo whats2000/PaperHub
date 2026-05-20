@@ -130,6 +130,37 @@ def search_arxiv(query: str, max_results: int = 10) -> list[ArxivResult]:
     return results
 
 
+def fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
+    """Exact-ID metadata lookup — returns the paper for ``arxiv_id`` or None.
+
+    Unlike :func:`search_arxiv` (a relevance query that returns the
+    nearest-matching paper for ANY string), this uses arXiv's ``id_list``
+    so a non-existent / hallucinated id returns ``None`` instead of a
+    confidently-wrong neighbour. Used to VERIFY an LLM-claimed arxiv_id
+    before trusting it: if it resolves the paper exists and we adopt
+    arXiv's authoritative title; if not, the id is bogus and the caller
+    drops it. Best-effort: any arXiv API error is logged and treated as
+    "unverifiable" (``None``) rather than propagated.
+    """
+    try:
+        search = arxiv.Search(id_list=[arxiv_id])
+        for r in _client.results(search):
+            return ArxivResult(
+                arxiv_id=_id_from_entry_id(r.entry_id),
+                title=r.title.strip(),
+                authors=[a.name for a in r.authors],
+                year=getattr(r.published, "year", None),
+                abstract=r.summary.strip(),
+                pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,
+            )
+    except Exception as exc:  # noqa: BLE001 — best-effort verification
+        logger.warning(
+            "fetch_arxiv_by_id(%r) failed (%s: %s); treating as unverifiable",
+            arxiv_id, type(exc).__name__, exc,
+        )
+    return None
+
+
 def _download_with_resume(url: str, target_path: Path) -> None:
     """Download ``url`` to ``target_path`` with byte-range resume +
     fast retry for transient failures, but FAIL FAST on the file-size

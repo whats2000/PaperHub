@@ -23,6 +23,7 @@ from paperhub.agents.research_pipeline import (
     resolve_via_ss,
     synthesize_prose,
 )
+from paperhub.pipelines.arxiv_client import ArxivResult
 from paperhub.tracing.tracer import Tracer
 
 # ───────────────────────────── helpers ─────────────────────────────
@@ -601,29 +602,68 @@ async def test_resolver_uses_arxiv_id_when_present(
     assert reg.call_log[0][1]["query"] == "arXiv:2510.10274"
 
 
-async def test_resolver_synthesises_when_ss_misses_known_arxiv_id(
+async def test_resolver_verifies_arxiv_id_when_ss_misses(
     fake_tracer: Tracer,
 ) -> None:
-    """The headline new behaviour: when the Discoverer knows the arxiv
-    ID (from a web hit URL) but SS hasn't indexed the paper yet, the
-    Resolver synthesises a ResolvedPaper from the identity itself so
-    the downstream arxiv-ingest path can still land it. Critical for
-    very-new papers that aren't in SS's index."""
+    """When SS hasn't indexed an arxiv_id the Discoverer claims, the
+    Resolver VERIFIES the id against the arXiv API rather than trusting
+    the LLM's identity. On a hit it adopts arXiv's AUTHORITATIVE
+    title/meta — the LLM's guessed title is discarded. This is the fix
+    for the title-mismatch bug: SS/arXiv sources preserve the real
+    paper name; the LLM never determines it."""
     reg = _StubRegistry(ss_hits=[])  # SS misses
     identity = CanonicalIdentity(
-        title="X-VLA: Soft-Prompted Transformer …",
+        # The LLM's guess — deliberately wrong to prove it's discarded.
+        title="WRONG LLM-GUESSED TITLE",
         author_surname="Zheng", year=2025, confidence="high",
         arxiv_id="2510.10274",
     )
+
+    async def fake_lookup(arxiv_id: str) -> ArxivResult | None:
+        assert arxiv_id == "2510.10274"
+        return ArxivResult(
+            arxiv_id="2510.10274",
+            title="X-VLA: Soft-Prompted Transformer as Scalable …",
+            authors=["Jinliang Zheng"], year=2025, abstract="real abstract",
+        )
+
     out = await resolve_via_ss(
         ParsedRequest(hint="X-VLA", kind="natural_language"),
         identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        arxiv_lookup=fake_lookup,
     )
-    assert out is not None, "synthesised ResolvedPaper expected on SS miss"
+    assert out is not None, "verified ResolvedPaper expected on arXiv hit"
     assert out.paper_id == "arxiv:2510.10274"
     assert out.meta["arxiv_id"] == "2510.10274"
-    assert out.meta["title"] == identity.title
+    # Authoritative arXiv title wins; the LLM's guess is gone.
+    assert out.meta["title"] == "X-VLA: Soft-Prompted Transformer as Scalable …"
+    assert out.meta["title"] != identity.title
     assert out.meta["has_open_pdf"] is True
+
+
+async def test_resolver_drops_unverifiable_arxiv_id(
+    fake_tracer: Tracer,
+) -> None:
+    """If the LLM-claimed arxiv_id doesn't resolve against arXiv, it's
+    bogus/hallucinated (the 2604.26951 case). The Resolver drops it
+    (returns None → NotFound) instead of synthesising a paper labelled
+    with the LLM's invented title."""
+    reg = _StubRegistry(ss_hits=[])  # SS misses
+    identity = CanonicalIdentity(
+        title="Distilled Diffusion Language Models",  # LLM invention
+        author_surname=None, year=None, confidence="high",
+        arxiv_id="2604.26951",  # does not exist on arXiv
+    )
+
+    async def fake_lookup(arxiv_id: str) -> ArxivResult | None:
+        return None  # arXiv has no such paper
+
+    out = await resolve_via_ss(
+        ParsedRequest(hint="distilled diffusion", kind="natural_language"),
+        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        arxiv_lookup=fake_lookup,
+    )
+    assert out is None, "unverifiable arxiv_id must be dropped, not synthesised"
 
 
 async def test_resolver_extracts_arxiv_id_from_evidence_safety_net(
