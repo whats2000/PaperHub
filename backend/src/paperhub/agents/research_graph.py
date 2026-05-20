@@ -435,7 +435,7 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
             picks = await run_paper_qa_subagent(
                 paper_content_id=pid,
                 title=title,
-                user_message=state["user_message"],
+                user_message=effective_query(state),
                 tracer=deps.tracer,
                 model=subagent_model,
                 conn=deps.conn,
@@ -477,7 +477,7 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
         collected: list[str] = []
         async for tok in paper_qa_finalize(
             per_paper_picks=picks,
-            user_message=state["user_message"],
+            user_message=effective_query(state),
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.paper_qa_model,

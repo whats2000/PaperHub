@@ -58,6 +58,33 @@ async def test_chitchat_stream_uses_history(
     assert "1+1" in response
 
 
+async def test_chitchat_uses_effective_query(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """When effective_query is set (router resolved an anaphora brief), chitchat
+    must act on the resolved brief rather than the raw user_message."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1,
+        "user_message": "go on",
+        "effective_query": "explain flow matching more",
+    }
+    async for _ in chitchat_stream(
+        state, adapter=LiteLlmAdapter(), tracer=tracer,
+        model="gpt-4o-mini", mock_response="ok",
+    ):
+        pass
+    async with migrated_db.execute(
+        "SELECT args_redacted_json FROM tool_calls WHERE run_id=1 AND tool='generate'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert "explain flow matching more" in row[0]
+
+
 async def test_stub_returns_not_implemented_message() -> None:
     state: AgentState = {
         "run_id": 1, "branch": "", "session_id": 1, "user_message": "x",

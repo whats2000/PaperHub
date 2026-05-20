@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from paperhub.agents.state import AgentState
+from paperhub.agents.state import AgentState, effective_query
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
 
@@ -14,7 +14,7 @@ async def chitchat_stream(
     model: str,
     **adapter_kwargs: Any,
 ) -> AsyncIterator[str]:
-    user_message = state["user_message"]
+    user_message = effective_query(state)
     history = state.get("history") or []
     async with tracer.step(agent="chitchat", tool="generate", model=model) as step:
         step.record_args({"user_message": user_message})
