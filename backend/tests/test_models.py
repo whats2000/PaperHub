@@ -3,6 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from paperhub.agents.state import effective_query
 from paperhub.models.domain import RoutingDecision, ToolCallRecord
 from paperhub.models.events import (
     RoutingDecisionEvent,
@@ -57,3 +58,12 @@ def test_sse_format_routing_decision() -> None:
     assert payload.startswith("event: routing_decision\n")
     assert "chitchat" in payload
     assert payload.endswith("\n\n")
+
+
+def test_effective_query_prefers_resolved() -> None:
+    assert effective_query({"user_message": "raw", "effective_query": "brief"}) == "brief"
+
+
+def test_effective_query_falls_back_when_empty_or_missing() -> None:
+    assert effective_query({"user_message": "raw", "effective_query": ""}) == "raw"
+    assert effective_query({"user_message": "raw"}) == "raw"
