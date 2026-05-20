@@ -64,6 +64,26 @@ async def test_get_chunk_returns_resolution(
     }
 
 
+async def test_get_chunk_null_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """section is the only nullable field in ChunkResolution; verify it serialises
+    as JSON null (not the string "None") when the DB row has section=NULL."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        chunk_id = await _seed_chunk(conn, paper_content_id=2, section=None)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/chunks/{chunk_id}")
+
+    assert r.status_code == 200
+    assert r.json()["section"] is None
+
+
 async def test_get_chunk_404_when_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
