@@ -18,6 +18,12 @@ from pylatexenc.latex2text import LatexNodes2Text
 
 logger = logging.getLogger(__name__)
 
+# pandoc can HANG (not just exit non-zero) on pathological LaTeX. Without a
+# bound the hanging subprocess parks the whole ingest until the worker OOMs
+# (arxiv:2410.12557 reproduced this). Cap it and treat a timeout like any
+# other pandoc failure — fall back to pylatexenc, then the raw envelope.
+_PANDOC_TIMEOUT_SECONDS = 60
+
 
 def render_html(*, source: Path, kind: Literal["latex", "pdf"], out_path: Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +45,14 @@ def render_html(*, source: Path, kind: Literal["latex", "pdf"], out_path: Path) 
                     source,
                     exc.returncode,
                     (exc.stderr or "")[:500],
+                )
+            except subprocess.TimeoutExpired:
+                # pandoc hung past the cap — kill it and fall back rather than
+                # parking the ingest until the worker OOMs.
+                logger.warning(
+                    "pandoc timed out after %ss on %s; falling back to pylatexenc.",
+                    _PANDOC_TIMEOUT_SECONDS,
+                    source,
                 )
         # pandoc absent OR exited non-zero — try pylatexenc.
         try:
@@ -82,6 +96,7 @@ def _render_latex_pandoc(tex_path: Path, out_path: Path) -> None:
         capture_output=True,
         text=True,
         cwd=tex_path.parent,
+        timeout=_PANDOC_TIMEOUT_SECONDS,
     )
 
 

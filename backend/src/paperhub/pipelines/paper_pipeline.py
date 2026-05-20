@@ -241,9 +241,14 @@ class PaperPipeline:
         flat_path = cache_dir / "source.flattened.tex"
         flat_path.write_text(full_text, encoding="utf-8")
 
-        # Render to HTML.
+        # Render to HTML from the FLATTENED source, not the original main
+        # .tex. The flattened file is a single self-contained document
+        # (\input chains already inlined by extract_latex), so pandoc can't
+        # hang/OOM resolving includes (arxiv:2410.12557 reproduced that), and
+        # its char offsets align with chunk char_start/char_end + sections_json
+        # (all computed against flattened_text) for the Citation Canvas.
         html_path = cache_dir / "source.html"
-        render_html(source=source_path, kind="latex", out_path=html_path)
+        render_html(source=flat_path, kind="latex", out_path=html_path)
 
         # Metadata: use caller-supplied override when available (avoids an
         # arXiv API round-trip when the caller already has metadata from
@@ -378,7 +383,9 @@ class PaperPipeline:
             source_path = ext.main_path
             flat_path = cache_dir / "source.flattened.tex"
             flat_path.write_text(full_text, encoding="utf-8")
-            render_source = source_path
+            # Render from the flattened single-file source (see arxiv branch):
+            # avoids pandoc hang/OOM on \input chains + aligns canvas offsets.
+            render_source = flat_path
         else:
             full_text = extract_pdf(target)
             source_path = target

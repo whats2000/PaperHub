@@ -110,6 +110,43 @@ def test_render_latex_falls_back_to_raw_envelope_when_pylatexenc_fails(
     assert any("pylatexenc failed" in r.message for r in caplog.records)
 
 
+def test_render_latex_falls_back_when_pandoc_times_out(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """pandoc can HANG (not just exit non-zero) on pathological LaTeX. With no
+    subprocess timeout this parked an entire /chat ingest indefinitely until the
+    worker OOM-crashed (arxiv:2410.12557). render_html must catch
+    subprocess.TimeoutExpired and fall back, never propagate/hang."""
+    fixture = tmp_path / "slow.tex"
+    fixture.write_text(
+        r"\documentclass{article}\begin{document}Hello world\end{document}",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    timeout_err = subprocess.TimeoutExpired(cmd=["pandoc"], timeout=60)
+    with (
+        patch("paperhub.pipelines.renderer._render_latex_pandoc", side_effect=timeout_err),
+        caplog.at_level("WARNING", logger="paperhub.pipelines.renderer"),
+    ):
+        render_html(source=fixture, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    assert "Hello world" in html  # pylatexenc fallback produced content
+    assert any("pandoc" in r.message.lower() for r in caplog.records)
+
+
+def test_render_latex_pandoc_passes_subprocess_timeout(tmp_path: Path) -> None:
+    """_render_latex_pandoc must bound the pandoc subprocess with a timeout so a
+    hanging pandoc cannot park ingest forever."""
+    from paperhub.pipelines import renderer
+
+    fixture = tmp_path / "main.tex"
+    fixture.write_text(r"\documentclass{article}\begin{document}x\end{document}", encoding="utf-8")
+    out = tmp_path / "out.html"
+    with patch("paperhub.pipelines.renderer.subprocess.run") as run_mock:
+        renderer._render_latex_pandoc(fixture, out)
+    assert run_mock.call_args.kwargs.get("timeout"), "pandoc subprocess must set a timeout"
+
+
 def test_render_latex_pandoc_resolves_input_relative_to_source_dir(tmp_path: Path) -> None:
     """Pandoc must resolve \\input{...} relative to the .tex file's own directory,
     not the process cwd. Otherwise multi-file arxiv sources break silently."""

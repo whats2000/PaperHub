@@ -198,6 +198,50 @@ async def test_ingest_arxiv_cache_miss_creates_paper_content_and_chunks(
 
 
 @pytest.mark.asyncio
+async def test_ingest_arxiv_renders_from_flattened_source(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+) -> None:
+    """Regression (arxiv:2410.12557): HTML must be rendered from the FLATTENED
+    single-file source, not the original main .tex. Rendering the un-flattened
+    main file made pandoc expand \\input chains and hang/OOM, parking ingest.
+    The flattened path is also what chunk offsets + sections_json align to."""
+    pipeline, conn, _ = pipeline_env
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('s')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    captured: dict[str, Path] = {}
+
+    def _capture_render(*, source: Path, kind: str, out_path: Path) -> Path:
+        captured["source"] = source
+        out_path.write_text("<html></html>", encoding="utf-8")
+        return out_path
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=_make_fake_download(_ARXIV_SAMPLE),
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.search_arxiv",
+            side_effect=_fake_search_arxiv,
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.render_html",
+            side_effect=_capture_render,
+        ),
+    ):
+        await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id=_FIXTURE_ARXIV_ID)
+        )
+
+    assert captured["source"].name == "source.flattened.tex"
+
+
+@pytest.mark.asyncio
 async def test_ingest_arxiv_cache_hit_skips_pipeline(
     pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
     migrated_db: aiosqlite.Connection,
