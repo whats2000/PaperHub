@@ -253,6 +253,117 @@ async def test_paper_qa_subgraph_dispatches_one_subagent_per_enabled_paper(
     assert {p.paper_content_id for p in picks} == {pcid_a, pcid_b}
 
 
+async def test_paper_search_emits_every_step_under_out_of_order_completion(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Regression (trace-panel drop bug): _ps_process must emit a tool_step
+    custom event for EVERY tracer row, even when parallel Discover/Resolve
+    calls commit out-of-order.
+
+    The tracer assigns step_index at OPEN time but commits at CLOSE time. With
+    a monotonic ``last_step`` watermark, a request that opened first (low
+    index) but finished slowest commits AFTER the watermark already advanced
+    past it — so its row is never streamed and is missing from the trace
+    panel (the missing #10/#12 in real runs). The set-based dedup must stream
+    every row exactly once.
+    """
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from paperhub.agents.research_graph import (
+        ResearchDeps,
+        build_paper_search_subgraph,
+    )
+    from paperhub.agents.research_pipeline import (
+        CanonicalIdentity,
+        ParsedRequest,
+        ResolvedPaper,
+    )
+
+    # First-opened request finishes SLOWEST → forces out-of-order commit.
+    latency_by_hint = {"p0": 0.30, "p1": 0.05, "p2": 0.10, "p3": 0.15}
+    requests = [
+        ParsedRequest(hint=h, kind="natural_language") for h in latency_by_hint
+    ]
+
+    async def _fake_parse(*_: Any, **__: Any) -> list[ParsedRequest]:
+        return list(requests)
+
+    async def _fake_discover(
+        request: ParsedRequest, *, tracer: Any, model: str, **__: Any,
+    ) -> CanonicalIdentity:
+        async with tracer.step(
+            agent="research", tool="paper_search:discover_plan", model=model,
+        ):
+            await asyncio.sleep(latency_by_hint[request.hint])
+        return CanonicalIdentity(
+            title=request.hint, author_surname=None, year=2024, confidence="high",
+        )
+
+    async def _fake_resolve(
+        request: ParsedRequest, identity: CanonicalIdentity, *, tracer: Any, **__: Any,
+    ) -> ResolvedPaper:
+        async with tracer.step(
+            agent="research", tool="paper_search:paperhub.search_web", model=None,
+        ):
+            await asyncio.sleep(0.02)
+        return ResolvedPaper(
+            request=request, identity=identity,
+            paper_id=f"ss:{request.hint}", meta={"title": request.hint},
+        )
+
+    async def _fake_synth(*_: Any, **__: Any) -> str:
+        return "prose"
+
+    deps = ResearchDeps(
+        adapter=MagicMock(),
+        tracer=fake_tracer,
+        paper_qa_model="stub",
+        conn=migrated_db,
+        pipeline=MagicMock(),
+        retriever=MagicMock(),
+        mcp_registry=MagicMock(),
+    )
+
+    emitted: list[int] = []
+    with (
+        patch("paperhub.agents.research_graph.parse_user_message", new=_fake_parse),
+        patch("paperhub.agents.research_graph.discover_canonical", new=_fake_discover),
+        patch("paperhub.agents.research_graph.resolve_via_ss", new=_fake_resolve),
+        patch("paperhub.agents.research_graph.synthesize_prose", new=_fake_synth),
+    ):
+        graph = build_paper_search_subgraph(deps)
+        state: dict[str, Any] = {
+            "run_id": fake_tracer._run_id,  # noqa: SLF001
+            "branch": "",
+            "session_id": 1,
+            "user_message": "find p0 p1 p2 p3",
+            "history": [],
+            "ps_last_step_index": -1,
+        }
+        async for mode, payload in graph.astream(
+            state, stream_mode=["custom", "values"],
+        ):
+            if mode == "custom" and payload.get("event") == "tool_step":
+                emitted.append(int(payload["record"]["step_index"]))
+
+    # Every tracer row written for this run must have been streamed exactly once.
+    async with migrated_db.execute(
+        "SELECT step_index FROM tool_calls WHERE run_id = ? ORDER BY step_index",
+        (fake_tracer._run_id,),  # noqa: SLF001
+    ) as cur:
+        all_indices = sorted(int(r[0]) for r in await cur.fetchall())
+
+    assert sorted(emitted) == all_indices, (
+        f"Steps dropped from trace stream. DB rows={all_indices}, "
+        f"emitted={sorted(emitted)}, missing={sorted(set(all_indices) - set(emitted))}"
+    )
+    assert len(emitted) == len(set(emitted)), (
+        f"Duplicate tool_step events emitted: {emitted}"
+    )
+
+
 async def test_paper_qa_subgraph_all_empty_picks_yields_no_content_message(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Any,

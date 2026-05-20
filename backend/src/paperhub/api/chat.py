@@ -504,7 +504,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                     separators=(',', ':'),
                                 ),
                             }
-                            last_emitted_step = ps_item.record["step_index"]
+                            # max(), not assign: set-based emission in
+                            # _ps_process can surface indices out of order;
+                            # the watermark must be the high-water mark so the
+                            # end-of-turn drain never re-emits a streamed row.
+                            last_emitted_step = max(
+                                last_emitted_step, ps_item.record["step_index"],
+                            )
                         elif isinstance(ps_item, SearchResultsYield):
                             enriched = await _process_search_results(
                                 ps_item,
@@ -561,7 +567,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                     separators=(',', ':'),
                                 ),
                             }
-                            last_emitted_step = item.record["step_index"]
+                            # max(): paper_qa's set-based dispatch drain can
+                            # also surface indices out of order (see
+                            # _pq_dispatch). High-water mark prevents the
+                            # end-of-turn drain from re-emitting streamed rows.
+                            last_emitted_step = max(
+                                last_emitted_step, item.record["step_index"],
+                            )
                         elif isinstance(item, FinalOnlyMessage):
                             # Sentinel path: empty refs / empty corpus.
                             final_content = item.content
