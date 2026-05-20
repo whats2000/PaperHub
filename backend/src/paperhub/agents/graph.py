@@ -12,6 +12,11 @@ from paperhub.agents.stubs import stub_response
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
 
+CLARIFY_FALLBACK = (
+    "Could you clarify what you'd like help with? "
+    "A topic, author, or paper title works well."
+)
+
 
 @dataclass
 class GraphDeps:
@@ -62,7 +67,8 @@ def build_graph(deps: GraphDeps) -> Any:
         return {**state, "final_response": await stub_response(state, intent="library_stats")}
 
     async def _clarify(state: AgentState) -> AgentState:
-        return {**state, "final_response": state["routing_decision"].resolved_query}
+        decision = state["routing_decision"]
+        return {**state, "final_response": decision.resolved_query or CLARIFY_FALLBACK}
 
     def _route(state: AgentState) -> str:
         intent = state["routing_decision"].intent
