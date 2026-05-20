@@ -826,31 +826,13 @@ async def test_paper_search_subgraph_uses_suggest_slots(
         {"hint": "flow matching for discrete diffusion", "kind": "natural_language"},
         {"hint": "distillation for discrete diffusion", "kind": "natural_language"},
     ])
-    reg = _StubRegistry(
-        has_web_search=False,  # no web search → discover_fallback short-circuit
-        ss_hits=[
-            {
-                "paper_id": "arxiv:2501.00001",
-                "title": "Flow Matching for Discrete Diffusion",
-                "year": 2025,
-                "arxiv_id": "2501.00001",
-                "authors": ["Smith"],
-                "has_open_pdf": True,
-                "abstract": "Abstract A.",
-            },
-        ],
-    )
 
     # LLM call sequence:
     #  call 0 → parse (suggest slot) — returns 2-angle array
     #  call 1 → synthesize (suggest slot) — returns prose
     # Discover is bypassed (no web search) and Resolver calls the stub reg.
-    # Because both angle hints are "natural_language" and SS stub always
-    # returns the same hit, both will resolve (dedupe is by paper_id in the
-    # subgraph; here both resolve to the same arxiv:2501.00001 which is fine
-    # — the test just asserts ≥1 candidate emitted, i.e., the subgraph ran
-    # fully with the provided slots). We give the stub 2 different SS hits
-    # to get 2 distinct candidates.
+    # We give the stub 2 different SS hits (cycling) so both angles resolve
+    # to distinct candidates.
 
     # Override the stub to return 2 different hits by cycling.
     call_idx: dict[str, int] = {"n": 0}
@@ -908,9 +890,12 @@ async def test_paper_search_subgraph_uses_suggest_slots(
         async for mode, payload in graph.astream(
             state, stream_mode=["custom", "values"],
         ):
-            if mode == "custom" and isinstance(payload, dict):
-                if payload.get("event") == "search_results":
-                    captured_candidates.extend(payload.get("candidates", []))
+            if (
+                mode == "custom"
+                and isinstance(payload, dict)
+                and payload.get("event") == "search_results"
+            ):
+                captured_candidates.extend(payload.get("candidates", []))
 
     assert len(captured_candidates) >= 2, (
         f"suggest slots must yield ≥2 candidates; got {captured_candidates!r}"
