@@ -39,7 +39,20 @@ MAX_SECTION_READS: int = 5
 
 # ──────────────────────── chunk-marker regex ─────────────────────────
 
-_CHUNK_MARKER_RE = re.compile(r"\[chunk:(\d+(?:,\d+)*)\]")
+# Matches any ``chunk:<digits>`` occurrence regardless of bracket structure.
+# Real LLM responses mix three citation formats interchangeably and the old
+# bracket-bounded pattern silently dropped the multi-format ones:
+#
+#   [chunk:101]               ✓ matched by old + new
+#   [chunk:101,102]           ✓ matched by old + new
+#   [chunk:101, 102]          ✗ old missed (space after comma)
+#   [chunk:101, chunk:102]    ✗ old missed (repeated `chunk:` prefix)
+#   (chunk:101) or chunk:101  ✗ old missed (non-bracketed)
+#
+# Empirical: gemini-2.5-flash-lite uses the third + fourth form heavily.
+# Scanning for the token directly catches every variant and is robust to
+# future format drift.
+_CHUNK_MARKER_RE = re.compile(r"chunk:(\d+)")
 
 # ──────────────────────── tool schemas ──────────────────────────────
 
@@ -165,10 +178,18 @@ async def _read_section(
 
 
 def _extract_cited_chunk_ids(summary: str) -> list[int]:
-    """Parse ``[chunk:N]`` and ``[chunk:N,M,...]`` markers from summary."""
+    """Return every distinct ``chunk:<id>`` referenced in ``summary``, in
+    first-occurrence order. Tolerates every citation format real LLMs emit
+    (single, comma-list, repeated-prefix, with or without spaces, bracketed
+    or not — see ``_CHUNK_MARKER_RE`` for the matrix). Duplicates collapse
+    so the finalizer doesn't see the same chunk twice."""
+    seen: set[int] = set()
     out: list[int] = []
     for m in _CHUNK_MARKER_RE.finditer(summary):
-        out.extend(int(x) for x in m.group(1).split(","))
+        cid = int(m.group(1))
+        if cid not in seen:
+            seen.add(cid)
+            out.append(cid)
     return out
 
 
@@ -212,6 +233,18 @@ async def run_paper_qa_subagent(
     read_count: int = 0
     final_summary: str = ""
 
+    # Per-CLAUDE.md "agent-flow observability policy": record enough state
+    # at each step that a future debugger can reconstruct the full agent
+    # context from the tool_calls row alone — no one-off instrumentation
+    # script should be needed to diagnose subagent failures.
+    #
+    # Captured BUT NOT in tracer-args (those are bounded): a per-tool-call
+    # log of {turn, tool, args, result_len, chunk_ids_returned, sections_listed}
+    # accumulated below and flushed into record_result on step exit.
+    tool_call_log: list[dict[str, Any]] = []
+    listed_sections: list[str] | None = None  # captured first time list_sections is called
+    llm_turn_log: list[dict[str, Any]] = []  # one entry per LLM turn
+
     # ONE tracer step around the entire loop — one paper_qa:subagent row
     # per run_paper_qa_subagent call, summarising the whole loop at exit.
     async with tracer.step(
@@ -227,7 +260,7 @@ async def run_paper_qa_subagent(
         # +2: one for a free list_sections turn (before any reads), one safety
         # margin. Force-stop fires after dispatch in the iteration where read_count
         # hits max — the LLM doesn't get an extra response turn after exhaustion.
-        for _iteration in range(max_section_reads + 2):
+        for iteration in range(max_section_reads + 2):
             response = await litellm.acompletion(
                 model=model,
                 messages=messages,
@@ -237,10 +270,27 @@ async def run_paper_qa_subagent(
             )
             msg = response["choices"][0]["message"]
             tool_calls = msg.get("tool_calls") or []
+            assistant_content = str(msg.get("content") or "")
+            # Observability: log every LLM turn — what came back, did the LLM
+            # call tools, what did it choose, what content did it emit. This
+            # is the recorded evidence a debugger uses to determine whether
+            # the LLM gave up empty, looped on the wrong section, etc.
+            llm_turn_log.append({
+                "turn": iteration,
+                "content_len": len(assistant_content),
+                "content_preview": assistant_content[:200],
+                "tool_calls": [
+                    {
+                        "name": tc["function"]["name"],
+                        "args": tc["function"]["arguments"],
+                    }
+                    for tc in tool_calls
+                ],
+            })
 
             if not tool_calls:
                 # Final summary — parse cites and exit loop.
-                final_summary = str(msg.get("content") or "").strip()
+                final_summary = assistant_content.strip()
                 break
 
             # Append assistant turn.
@@ -258,10 +308,35 @@ async def run_paper_qa_subagent(
                 except json.JSONDecodeError:
                     raw_args = {}
 
+                tool_log_entry: dict[str, Any] = {
+                    "turn": iteration,
+                    "tool": name,
+                    "args": raw_args,
+                }
+
                 if name == "list_sections":
                     result_str = await _list_sections(
                         paper_content_id=paper_content_id, conn=conn,
                     )
+                    # Capture the section names the LLM saw so a post-mortem
+                    # can answer "did the LLM have a usable TOC to navigate?"
+                    try:
+                        parsed_sections = json.loads(result_str)
+                        if isinstance(parsed_sections, list):
+                            sec_names = [
+                                s.get("name") for s in parsed_sections
+                                if isinstance(s, dict)
+                            ]
+                            tool_log_entry["sections_listed"] = sec_names
+                            if listed_sections is None:
+                                listed_sections = sec_names
+                        elif (
+                            isinstance(parsed_sections, dict)
+                            and "error" in parsed_sections
+                        ):
+                            tool_log_entry["error"] = parsed_sections["error"]
+                    except json.JSONDecodeError:
+                        pass
                 elif name == "read_section":
                     section_name = raw_args.get("name", "")
                     if read_count >= max_section_reads:
@@ -271,6 +346,7 @@ async def run_paper_qa_subagent(
                                 "Stop calling tools and write your final summary now."
                             ),
                         })
+                        tool_log_entry["error"] = "budget_exhausted"
                     else:
                         result_str, new_picks = await _read_section(
                             paper_content_id=paper_content_id,
@@ -281,11 +357,18 @@ async def run_paper_qa_subagent(
                             seen_chunks[p.chunk_id] = p
                         if new_picks:  # only count a successful read
                             read_count += 1
+                        tool_log_entry["chunk_ids_returned"] = [
+                            p.chunk_id for p in new_picks
+                        ]
                 else:
                     # Off-palette tool call — return a clear error.
                     result_str = json.dumps({
                         "error": f"unknown tool {name!r}. Use list_sections or read_section.",
                     })
+                    tool_log_entry["error"] = "off_palette"
+
+                tool_log_entry["result_len"] = len(result_str)
+                tool_call_log.append(tool_log_entry)
 
                 messages.append({
                     "role": "tool",
@@ -311,11 +394,25 @@ async def run_paper_qa_subagent(
             # hand everything read to the finalizer as best-effort fallback.
             picked = list(seen_chunks.values())
 
+        # Observability payload — see CLAUDE.md "agent-flow observability
+        # policy". A future debugger reconstructs the full subagent flow
+        # from this single record_result without needing one-off
+        # instrumentation:
+        #   - llm_turns: per-turn LLM choices (tool calls + content preview)
+        #   - tool_call_log: per-tool-call args + outputs + chunk_ids returned
+        #   - chunks_read_ids / chunks_cited_ids: the actual IDs (not just counts)
+        #   - final_summary: the LLM's complete output text (cite source-of-truth)
         step.record_result({
             "reads_used": read_count,
             "chunks_read": len(seen_chunks),
+            "chunks_read_ids": sorted(seen_chunks.keys()),
             "chunks_cited": len(picked),
+            "chunks_cited_ids": [p.chunk_id for p in picked],
             "summary_len": len(final_summary),
+            "final_summary": final_summary,
+            "listed_sections": listed_sections,
+            "llm_turns": llm_turn_log,
+            "tool_call_log": tool_call_log,
         })
 
     rationale = (

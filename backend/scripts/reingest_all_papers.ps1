@@ -8,7 +8,8 @@
 #   .\scripts\reingest_all_papers.ps1 --dry-run   # preview only (no mutations)
 $ErrorActionPreference = "Stop"
 
-$workspace = Join-Path $PSScriptRoot "..\workspace"
+$workspace = (Resolve-Path (Join-Path $PSScriptRoot "..\workspace")).Path
+$backend   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $db        = Join-Path $workspace "paperhub.db"
 $chroma    = Join-Path $workspace "chroma"
 $dbBak     = Join-Path $workspace "paperhub.db.bak.v2.10"
@@ -24,8 +25,19 @@ Write-Host "Backing up workspace/chroma -> chroma.bak.v2.10..."
 if (Test-Path $chromaBak) { Remove-Item -Recurse -Force $chromaBak }
 Copy-Item $chroma $chromaBak -Recurse
 
-Write-Host "Running paperhub-reingest $args..."
-uv run paperhub-reingest @args
+# CRITICAL: pin PAPERHUB_WORKSPACE to the absolute backend/workspace path so
+# `paperhub-reingest` hits the SAME DB the backend writes to, regardless of
+# where the operator invoked this script from. Without this, `load_settings()`
+# defaults to ./workspace relative to cwd — if you ran from the repo root,
+# that resolves to <repo>/workspace/paperhub.db (a different, usually empty DB)
+# and the CLI silently reports "0 paper(s)" while the live DB is untouched.
+$env:PAPERHUB_WORKSPACE = $workspace
+
+Write-Host "Running paperhub-reingest $args (PAPERHUB_WORKSPACE=$workspace) ..."
+# Use --project to anchor uv on the backend's pyproject.toml regardless of
+# the invoker's cwd. Without this, uv may pick a different (or root) project
+# context and the `paperhub-reingest` entry-point fails to resolve.
+uv run --project $backend paperhub-reingest @args
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "paperhub-reingest exited $LASTEXITCODE; old data preserved at $dbBak and $chromaBak"

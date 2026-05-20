@@ -25,6 +25,7 @@ import tiktoken
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
 from paperhub.pipelines.embedder import get_embedder
+from paperhub.pipelines.extract import extract_latex, extract_pdf
 from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.reingest")
@@ -74,19 +75,57 @@ async def _reingest_one(
     chunks_before is 0 when the row is skipped (missing source_path).
     """
     async with conn.execute(
-        "SELECT source_path FROM paper_content WHERE id = ?", (pcid,)
+        "SELECT kind, source_path, source_dir_path "
+        "FROM paper_content WHERE id = ?",
+        (pcid,),
     ) as cur:
         row = await cur.fetchone()
-    if row is None or row[0] is None:
-        _LOG.warning("pcid=%d: no source_path on row — skipped", pcid)
+    if row is None:
+        _LOG.warning("pcid=%d: paper_content row missing — skipped", pcid)
         return (0, 0)
-    source_path = Path(row[0])
-    if not source_path.exists():  # noqa: ASYNC240 — sequential CLI; sync I/O is fine
-        _LOG.warning(
-            "pcid=%d: source file missing at %s — skipped", pcid, source_path
-        )
+    kind: str | None = row[0]
+    source_path_raw: str | None = row[1]
+    source_dir_path_raw: str | None = row[2]
+
+    # CRITICAL: chunking must run on EXTRACTED body text, NOT raw source bytes.
+    # For arxiv / latex_upload the chunker needs the flattened body (preamble
+    # stripped, \input expanded, \section{...} headers preserved). For
+    # pdf_upload it needs PyMuPDF-extracted plain text. Reading source_path
+    # directly produces preamble-only chunks for arxiv papers (a few KB of
+    # \usepackage declarations) and binary-decoded garbage for PDFs.
+    if kind in ("arxiv", "latex_upload"):
+        if source_dir_path_raw is None:
+            _LOG.warning("pcid=%d: kind=%s has no source_dir_path — skipped", pcid, kind)
+            return (0, 0)
+        source_dir = Path(source_dir_path_raw) / "source"
+        if not source_dir.is_dir():
+            _LOG.warning(
+                "pcid=%d: LaTeX source dir missing at %s — skipped", pcid, source_dir,
+            )
+            return (0, 0)
+        try:
+            extracted = extract_latex(source_dir).flattened_text
+        except FileNotFoundError as exc:
+            _LOG.warning("pcid=%d: extract_latex failed: %s — skipped", pcid, exc)
+            return (0, 0)
+    elif kind == "pdf_upload":
+        if source_path_raw is None:
+            _LOG.warning("pcid=%d: pdf_upload has no source_path — skipped", pcid)
+            return (0, 0)
+        pdf_path = Path(source_path_raw)
+        if not pdf_path.exists():
+            _LOG.warning(
+                "pcid=%d: PDF source missing at %s — skipped", pcid, pdf_path,
+            )
+            return (0, 0)
+        try:
+            extracted = extract_pdf(pdf_path)
+        except FileNotFoundError as exc:
+            _LOG.warning("pcid=%d: extract_pdf failed: %s — skipped", pcid, exc)
+            return (0, 0)
+    else:
+        _LOG.warning("pcid=%d: unknown kind %r — skipped", pcid, kind)
         return (0, 0)
-    flattened = source_path.read_text(encoding="utf-8", errors="replace")  # noqa: ASYNC240
 
     async with conn.execute(
         "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ?", (pcid,)
@@ -94,7 +133,8 @@ async def _reingest_one(
         before_row = await cur.fetchone()
     before = int(before_row[0]) if before_row else 0
 
-    chunks = chunk_text(flattened)
+    chunks = chunk_text(extracted)
+    flattened = extracted  # alias for downstream sections_json computation
     if not chunks:
         _LOG.warning("pcid=%d: chunker produced zero chunks", pcid)
         return (before, 0)

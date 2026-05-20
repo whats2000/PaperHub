@@ -372,11 +372,23 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
         }
 
     async def _pq_dispatch(state: AgentState) -> AgentState:
-        """Fan-out: one subagent task per enabled paper, asyncio.gather."""
+        """Fan-out: one subagent task per enabled paper, asyncio.gather.
+
+        Drain bookkeeping uses a ``set[int]`` of emitted step_indexes rather
+        than a monotonic ``last_step`` watermark. A monotonic watermark
+        permanently loses a row when two subagents commit their tracer
+        steps out-of-order — the tracer assigns step_index at OPEN time but
+        commits at CLOSE time, so a subagent that opened first but
+        finished slower commits a LOWER step_index AFTER its sibling, and
+        a watermark-based drain advances past the lower index before it
+        was ever read. The set-based dedup is robust against any
+        commit-order interleaving.
+        """
         writer = get_stream_writer()
         papers = list(state["pq_papers"])
         run_id: int = state["run_id"]
-        last_step = int(state.get("ps_last_step_index", -1))
+        baseline_step = int(state.get("ps_last_step_index", -1))
+        emitted_indices: set[int] = set()
         lock = asyncio.Lock()
 
         async def _one_with_emit(pid: int, title: str) -> PerPaperPicks:
@@ -391,17 +403,24 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
                 **_kwargs(deps),
             )
             async with lock:
-                nonlocal last_step
-                recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
+                recs = await drain_tool_calls_since(
+                    deps.conn, run_id, baseline_step,
+                )
                 for rec in recs:
-                    writer({"event": "tool_step", "record": rec})
-                    last_step = rec["step_index"]
+                    if rec["step_index"] not in emitted_indices:
+                        writer({"event": "tool_step", "record": rec})
+                        emitted_indices.add(rec["step_index"])
             return picks
 
         picks_list: list[PerPaperPicks] = list(
             await asyncio.gather(*[_one_with_emit(pid, title) for pid, title in papers])
         )
-        return {**state, "pq_per_paper_picks": picks_list, "ps_last_step_index": last_step}
+        next_last_step = max(emitted_indices) if emitted_indices else baseline_step
+        return {
+            **state,
+            "pq_per_paper_picks": picks_list,
+            "ps_last_step_index": next_last_step,
+        }
 
     async def _pq_finalize(state: AgentState) -> AgentState:
         writer = get_stream_writer()
