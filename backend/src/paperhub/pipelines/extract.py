@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -115,6 +116,142 @@ def extract_pdf(pdf_path: Path) -> str:
         for page in doc:
             pieces.append(page.get_text("text"))
     return "\n\f\n".join(pieces).strip()
+
+
+# Page separator used when concatenating per-page text. MUST match the join
+# in ``extract_pdf`` so heading char offsets from ``extract_pdf_with_headings``
+# align with the full_text it returns.
+_PDF_PAGE_SEP = "\n\f\n"
+# A line whose font size exceeds the modal body size by at least this many
+# points (while staying below the page-1 title size) is treated as a section
+# heading. 1.0pt clears rounding noise while catching the typical body(10-11)
+# vs heading(12-14) gap.
+_HEADING_MIN_DELTA = 1.0
+# Headings are short lines; longer lines are prose that merely happens to be
+# emphasised. Caps a runaway large-font paragraph from becoming a "section".
+_HEADING_MAX_CHARS = 120
+# A candidate must have at least this many chars and at least one letter, so
+# page numbers ("1"), stray glyphs, and rule lines don't become "sections".
+_HEADING_MIN_CHARS = 3
+_HAS_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def _looks_like_heading(name: str) -> bool:
+    """Reject non-heading-shaped lines that happen to share the heading font:
+    too-short / letter-less strings (page numbers, glyphs), URLs (journal
+    footers), and lines with control characters (extraction garbage)."""
+    if len(name) < _HEADING_MIN_CHARS:
+        return False
+    if not _HAS_LETTER.search(name):
+        return False
+    if "www." in name or "http" in name:
+        return False
+    return name.isprintable()
+
+
+def _modal_body_font_size(doc: pymupdf.Document) -> float:
+    """Most-common (weighted by character count) rounded span font size.
+
+    This is the body-text size: headings sit above it, captions/footnotes
+    below. Returns ``0.0`` for an empty / image-only document.
+    """
+    weight: dict[float, int] = defaultdict(int)
+    for pno in range(len(doc)):
+        blocks = doc[pno].get_text("dict").get("blocks", [])  # type: ignore[no-untyped-call]
+        for b in blocks:
+            if b.get("type", 0) != 0:
+                continue
+            for line in b.get("lines", []):
+                for span in line.get("spans", []):
+                    sz = round(span.get("size", 0.0), 1)
+                    txt = (span.get("text") or "").strip()
+                    if sz > 0 and txt:
+                        weight[sz] += len(txt)
+    if not weight:
+        return 0.0
+    return max(weight, key=lambda s: weight[s])
+
+
+def _page1_title_size(doc: pymupdf.Document) -> float:
+    """Largest span font size on page 1 — the title size, which we exclude
+    from the heading band so the paper title isn't treated as a section."""
+    if len(doc) == 0:
+        return 0.0
+    blocks = doc[0].get_text("dict").get("blocks", [])  # type: ignore[no-untyped-call]
+    mx = 0.0
+    for b in blocks:
+        if b.get("type", 0) != 0:
+            continue
+        for line in b.get("lines", []):
+            for span in line.get("spans", []):
+                if (span.get("text") or "").strip():
+                    mx = max(mx, round(span.get("size", 0.0), 1))
+    return mx
+
+
+def extract_pdf_with_headings(
+    pdf_path: Path,
+) -> tuple[str, list[tuple[str, int]]]:
+    """Return ``(full_text, headings)`` for a PDF.
+
+    ``full_text`` is the same per-page concatenation as :func:`extract_pdf`
+    (NOT stripped, so the heading char offsets stay exact). ``headings`` is a
+    list of ``(name, char_offset)`` where each name is a line whose font size
+    lands in the band ``[modal_body + 1pt, page1_title)`` and is short enough
+    to be a heading rather than emphasised prose. Offsets index into
+    ``full_text``. Returns ``[]`` headings for flat single-font / image-only
+    PDFs — the caller then falls back to a single synthetic section.
+
+    Used by the Paper Pipeline's PDF branches so ``kind='pdf_upload'`` papers
+    get a real ``sections_json`` and the paper_qa subagent can navigate them
+    by section (mirrors the LaTeX ``\\section{}`` path).
+    """
+    if not pdf_path.exists():
+        raise FileNotFoundError(pdf_path)
+    pieces: list[str] = []
+    # Collect raw candidates first, then drop running headers (banners that
+    # repeat across pages — "Article", journal name, footer) in a second pass.
+    candidates: list[tuple[str, int]] = []
+    with pymupdf.open(pdf_path) as doc:  # type: ignore[no-untyped-call]
+        body_size = _modal_body_font_size(doc)
+        title_size = _page1_title_size(doc)
+        offset = 0
+        last = len(doc) - 1
+        for pno, page in enumerate(doc):
+            page_text: str = page.get_text("text")
+            blocks = page.get_text("dict").get("blocks", [])
+            for b in blocks:
+                if b.get("type", 0) != 0:
+                    continue
+                for line in b.get("lines", []):
+                    spans = line.get("spans", [])
+                    name = "".join(s.get("text") or "" for s in spans).strip()
+                    if len(name) > _HEADING_MAX_CHARS or not _looks_like_heading(name):
+                        continue
+                    size = max(
+                        (round(s.get("size", 0.0), 1) for s in spans
+                         if (s.get("text") or "").strip()),
+                        default=0.0,
+                    )
+                    in_band = size >= body_size + _HEADING_MIN_DELTA and (
+                        title_size <= 0.0 or size < title_size
+                    )
+                    if not in_band:
+                        continue
+                    idx = page_text.find(name)
+                    if idx >= 0:
+                        candidates.append((name, offset + idx))
+            pieces.append(page_text)
+            offset += len(page_text)
+            if pno < last:
+                offset += len(_PDF_PAGE_SEP)
+    # Running headers repeat on multiple pages; a real section heading appears
+    # once. Drop every name that occurs more than once.
+    name_counts: dict[str, int] = defaultdict(int)
+    for name, _ in candidates:
+        name_counts[name] += 1
+    headings = [(n, o) for n, o in candidates if name_counts[n] == 1]
+    return _PDF_PAGE_SEP.join(pieces), headings
 
 
 def extract_pdf_page1_text(pdf_path: Path) -> str:

@@ -9,6 +9,7 @@ from paperhub.pipelines.extract import (
     _extract_pdf_title_from_page1,
     extract_latex,
     extract_pdf,
+    extract_pdf_with_headings,
 )
 
 
@@ -75,6 +76,52 @@ def test_extract_pdf_returns_text() -> None:
     text = extract_pdf(fixture)
     assert "Tiny Test Paper" in text
     assert "Mixture-of-Experts" in text
+
+
+def test_extract_pdf_with_headings_detects_font_size_band(tmp_path: Path) -> None:
+    """Headings are lines whose font size sits in the band between the modal
+    body size and the page-1 title size. The title (largest) is excluded;
+    body text (smallest, most common) is excluded; section headings in
+    between are returned with char offsets into the returned full_text."""
+    pdf = _build_pdf(
+        tmp_path,
+        page1_lines=[
+            ("Turning the TIDE: Cross-Architecture Distillation", 18.0),  # title
+            ("Abstract", 14.0),  # heading
+            ("This paper studies distillation across architectures in depth.", 11.0),
+            ("Introduction", 14.0),  # heading
+            ("Diffusion language models have grown rapidly over recent years.", 11.0),
+            ("Methods", 14.0),  # heading
+            ("We train a student model with a cross-architecture objective here.", 11.0),
+        ],
+    )
+    full_text, headings = extract_pdf_with_headings(pdf)
+    names = [h[0] for h in headings]
+    assert "Abstract" in names
+    assert "Introduction" in names
+    assert "Methods" in names
+    # Title (largest font) is NOT treated as a heading.
+    assert not any("Turning the TIDE" in n for n in names)
+    # Offsets point at the heading text inside full_text.
+    for name, off in headings:
+        assert full_text[off : off + len(name)] == name
+
+
+def test_extract_pdf_with_headings_flat_font_returns_empty(tmp_path: Path) -> None:
+    """A PDF with a single uniform font (no size contrast) yields no
+    detectable headings — the caller falls back to a single synthetic
+    section covering the whole document."""
+    pdf = _build_pdf(
+        tmp_path,
+        page1_lines=[
+            ("Some uniform text line one here.", 11.0),
+            ("Some uniform text line two here.", 11.0),
+            ("Some uniform text line three here.", 11.0),
+        ],
+    )
+    full_text, headings = extract_pdf_with_headings(pdf)
+    assert full_text.strip() != ""
+    assert headings == []
 
 
 def test_extract_latex_raises_on_empty_dir(tmp_path: Path) -> None:

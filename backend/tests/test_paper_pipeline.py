@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from collections.abc import AsyncIterator
@@ -371,6 +372,26 @@ async def test_ingest_pdf_from_url_persists_pdf_upload_kind(
         chunks_row = await cur.fetchone()
     assert chunks_row is not None
     assert int(chunks_row[0]) >= 1
+
+    # PDF section navigation: sample.pdf has "Abstract" + "Introduction" at
+    # 14pt (body 11pt, title 18pt), so heading detection must populate a
+    # non-empty sections_json the paper_qa subagent can navigate.
+    async with conn.execute(
+        "SELECT sections_json FROM paper_content WHERE id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        sj_row = await cur.fetchone()
+    assert sj_row is not None and sj_row[0] is not None
+    section_names = {e["name"] for e in json.loads(sj_row[0])}
+    assert "Abstract" in section_names
+    assert "Introduction" in section_names
+    # Those section names are queryable on chunks (what read_section uses).
+    async with conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ? AND section = ?",
+        (result.paper_content_id, "Introduction"),
+    ) as cur:
+        sec_chunks = await cur.fetchone()
+    assert sec_chunks is not None and int(sec_chunks[0]) >= 1
 
     # papers row links session to paper_content.
     async with conn.execute(

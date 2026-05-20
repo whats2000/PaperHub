@@ -63,25 +63,62 @@ def strip_latex_comments(text: str) -> str:
     return _COMMENT_FULL_RE.sub(_replace, text)
 
 
-def chunk_text(text: str, *, target: int = 800, hard: int = 1000) -> list[Chunk]:
+def chunk_text(
+    text: str,
+    *,
+    target: int = 800,
+    hard: int = 1000,
+    sections: list[tuple[str, int]] | None = None,
+    strip_comments: bool = True,
+) -> list[Chunk]:
+    """Token-windowed chunker with section-aware boundaries.
+
+    ``sections`` — explicit ``(name, char_offset)`` boundaries for sources
+    without LaTeX ``\\section{}`` markers (the PDF path). When provided, spans
+    are split on these offsets instead of the regex, and every chunk is tagged
+    with the owning section name. When ``None`` (LaTeX path), the ``\\section{}``
+    regex is used as before.
+
+    ``strip_comments`` — run :func:`strip_latex_comments` first (default).
+    PDF text is not LaTeX, so the PDF path passes ``False`` to avoid truncating
+    lines at any ``%`` (e.g. ``"95% accuracy"``).
+    """
     enc = tiktoken.get_encoding("cl100k_base")
 
     # Strip LaTeX line-comments BEFORE section detection. Chunk char_start /
     # char_end indices are relative to the stripped text. The pre-rendered
     # HTML used by the Citation Canvas never contained the comments anyway.
-    text = strip_latex_comments(text)
+    # PDF text isn't LaTeX (strip_comments=False) — see docstring.
+    if strip_comments:
+        text = strip_latex_comments(text)
 
     # Split into section-spans.
     spans: list[tuple[str | None, int, int]] = []
-    last_idx = 0
-    last_section: str | None = None
-    for m in _SECTION_RE.finditer(text):
-        if m.start() > last_idx:
-            spans.append((last_section, last_idx, m.start()))
-        last_section = m.group(1).strip()
-        last_idx = m.end()
-    if last_idx < len(text):
-        spans.append((last_section, last_idx, len(text)))
+    if sections is not None:
+        # Caller-supplied boundaries (PDF path). Sort by offset, clamp into
+        # range, and emit one span per [offset, next_offset). Any text before
+        # the first boundary is left section=None (callers prepend a (name, 0)
+        # boundary when they want full coverage).
+        ordered = sorted(
+            ((name, off) for name, off in sections if 0 <= off <= len(text)),
+            key=lambda x: x[1],
+        )
+        if ordered and ordered[0][1] > 0:
+            spans.append((None, 0, ordered[0][1]))
+        for i, (name, off) in enumerate(ordered):
+            end = ordered[i + 1][1] if i + 1 < len(ordered) else len(text)
+            if end > off:
+                spans.append((name, off, end))
+    else:
+        last_idx = 0
+        last_section: str | None = None
+        for m in _SECTION_RE.finditer(text):
+            if m.start() > last_idx:
+                spans.append((last_section, last_idx, m.start()))
+            last_section = m.group(1).strip()
+            last_idx = m.end()
+        if last_idx < len(text):
+            spans.append((last_section, last_idx, len(text)))
 
     # Greedy-fill each span up to hard cap, closing at paragraph (or
     # sentence as fallback) boundaries once target is hit.

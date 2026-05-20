@@ -39,8 +39,8 @@ from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import (
     _extract_pdf_metadata,
     extract_latex,
-    extract_pdf,
     extract_pdf_page1_text,
+    extract_pdf_with_headings,
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.renderer import render_html
@@ -337,7 +337,10 @@ class PaperPipeline:
             arxiv_id, cache_root=self._cache_root / "arxiv",
         )
 
-        full_text = extract_pdf(pdf_path)
+        # PDF path: detect headings via font-size band so the paper_qa subagent
+        # can navigate by section (mirrors the LaTeX \section{} path). No LaTeX
+        # comments in PDF text → strip_comments=False (preserves "95%" etc.).
+        full_text, headings = extract_pdf_with_headings(pdf_path)
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
@@ -347,12 +350,15 @@ class PaperPipeline:
             else self._lookup_arxiv_metadata(arxiv_id)
         )
 
-        chunks = chunk_text(full_text)
+        boundaries = self._pdf_boundaries(headings, str(metadata.get("title", "")))
+        chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
         # Compute section TOC for paper_qa subagent (v2.10-2).
-        sections_json = self._build_sections_json(chunks, full_text)
+        sections_json = self._build_sections_json(
+            chunks, full_text, strip_comments=False,
+        )
 
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
@@ -409,8 +415,11 @@ class PaperPipeline:
             # Figures live in the extracted source tree, not next to the
             # flattened .tex — let pandoc find + embed them.
             render_resource_dir: Path | None = source_path.parent
+            pdf_headings: list[tuple[str, int]] = []
         else:
-            full_text = extract_pdf(target)
+            # PDF: detect headings (font-size band) for section navigation;
+            # strip_comments=False at chunk time (PDF text isn't LaTeX).
+            full_text, pdf_headings = extract_pdf_with_headings(target)
             source_path = target
             render_source = source_path
             render_resource_dir = None
@@ -465,12 +474,19 @@ class PaperPipeline:
                 "year": None,
             }
 
-        chunks = chunk_text(full_text)
+        if kind == "pdf":
+            boundaries = self._pdf_boundaries(
+                pdf_headings, str(metadata.get("title", "")),
+            )
+            chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
+            sections_json = self._build_sections_json(
+                chunks, full_text, strip_comments=False,
+            )
+        else:
+            chunks = chunk_text(full_text)
+            sections_json = self._build_sections_json(chunks, full_text)
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
-
-        # Compute section TOC for paper_qa subagent (v2.10-2).
-        sections_json = self._build_sections_json(chunks, full_text)
 
         db_kind: Literal["pdf_upload", "latex_upload"] = (
             "pdf_upload" if kind == "pdf" else "latex_upload"
@@ -554,14 +570,18 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
-        # 6. Extract text + chunk.
-        full_text = extract_pdf(pdf_path)
-        chunks = chunk_text(full_text)
+        # 6. Extract text + chunk. PDF path: heading detection for section
+        # navigation; strip_comments=False (PDF text isn't LaTeX).
+        full_text, headings = extract_pdf_with_headings(pdf_path)
+        boundaries = self._pdf_boundaries(headings, title_hint)
+        chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
         # Compute section TOC for paper_qa subagent (v2.10-2).
-        sections_json = self._build_sections_json(chunks, full_text)
+        sections_json = self._build_sections_json(
+            chunks, full_text, strip_comments=False,
+        )
 
         metadata: dict[str, object] = {
             "title": title_hint,
@@ -597,20 +617,33 @@ class PaperPipeline:
         )
 
     @staticmethod
-    def _build_sections_json(chunks: list[Chunk], full_text: str) -> str:
+    def _pdf_boundaries(
+        headings: list[tuple[str, int]], fallback_name: str,
+    ) -> list[tuple[str, int]]:
+        """Section boundaries for a PDF: the detected headings, or a single
+        synthetic section covering the whole doc when none were detected (so
+        ``list_sections`` always returns a navigable entry)."""
+        return headings if headings else [(fallback_name or "Full text", 0)]
+
+    @staticmethod
+    def _build_sections_json(
+        chunks: list[Chunk], full_text: str, *, strip_comments: bool = True,
+    ) -> str:
         """Compute the sections_json value from a list of chunks and source text.
 
         Groups chunks by section name, computes char extents and token counts,
         and returns a JSON-encoded list of SectionEntry dicts ordered by
         appearance. Chunks with section=None (preamble / pre-first-section
         text) are excluded — they are not addressable by name.
+
+        ``strip_comments`` MUST match the value passed to ``chunk_text`` for the
+        same source: chunk char offsets are relative to the text the chunker
+        saw (comment-stripped for LaTeX, raw for PDF), so the slicing here has
+        to use the same representation or token_count would misalign.
         """
-        # Chunk char offsets are relative to the COMMENT-STRIPPED text, since
-        # chunk_text strips before computing offsets. Apply the same strip
-        # here so section_text slicing aligns with chunks[*].char_start /
-        # char_end and the resulting token_count reflects content the model
-        # will actually see.
-        stripped_text = strip_latex_comments(full_text)
+        # See chunk_text: LaTeX offsets are relative to the comment-stripped
+        # text; PDF offsets are relative to the raw text. Match it.
+        stripped_text = strip_latex_comments(full_text) if strip_comments else full_text
         per_section: dict[str, list[Chunk]] = defaultdict(list)
         section_order: list[str] = []
         for c in chunks:

@@ -175,6 +175,56 @@ def test_chunker_paragraph_aligned_even_when_under_target():
         )
 
 
+def test_chunker_explicit_sections_assign_names_by_offset():
+    """When the caller passes explicit (name, char_offset) boundaries (the
+    PDF path, where there are no LaTeX \\section{} markers), the chunker
+    splits spans on those offsets and tags each chunk with the owning
+    section name — instead of the \\section{} regex."""
+    body = "intro text. " * 40
+    methods = "methods text. " * 40
+    results = "results text. " * 40
+    text = body + methods + results
+    sections = [
+        ("Introduction", 0),
+        ("Methods", len(body)),
+        ("Results", len(body) + len(methods)),
+    ]
+    chunks = chunk_text(
+        text, target=100, hard=200, sections=sections, strip_comments=False,
+    )
+    names = {c.section for c in chunks}
+    assert names == {"Introduction", "Methods", "Results"}
+    # No chunk is left section=None — every char is owned by a section.
+    assert all(c.section is not None for c in chunks)
+
+
+def test_chunker_single_section_boundary_covers_whole_doc():
+    """The no-headings-detected fallback: a single (name, 0) boundary tags
+    the entire document under one section so list_sections always returns a
+    navigable entry."""
+    text = "paragraph one. " * 100
+    chunks = chunk_text(
+        text, target=100, hard=200,
+        sections=[("Full text", 0)], strip_comments=False,
+    )
+    assert chunks
+    assert {c.section for c in chunks} == {"Full text"}
+
+
+def test_chunker_strip_comments_false_preserves_percent_content():
+    """PDF text is not LaTeX — running strip_latex_comments on it truncates
+    lines at any '%' (e.g. '95% accuracy' -> '95'). The PDF path passes
+    strip_comments=False so '%' content survives intact."""
+    text = "The model achieved 95% accuracy on the held-out set."
+    chunks = chunk_text(
+        text, target=100, hard=200,
+        sections=[("Results", 0)], strip_comments=False,
+    )
+    joined = " ".join(c.text for c in chunks)
+    assert "95% accuracy" in joined
+    assert "held-out set" in joined
+
+
 def test_chunker_strips_comment_after_latex_line_break():
     """LaTeX tabular / align row-ends use \\\\ followed immediately by %
     for end-of-row comments. The two-backslash case must be stripped (the

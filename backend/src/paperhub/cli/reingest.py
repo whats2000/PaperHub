@@ -25,19 +25,21 @@ import tiktoken
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
 from paperhub.pipelines.embedder import get_embedder
-from paperhub.pipelines.extract import extract_latex, extract_pdf
+from paperhub.pipelines.extract import extract_latex, extract_pdf_with_headings
 from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.reingest")
 _CL100K = tiktoken.get_encoding("cl100k_base")
 
 
-def _build_sections_json(chunks: list[Chunk], full_text: str) -> str:
+def _build_sections_json(
+    chunks: list[Chunk], full_text: str, *, strip_comments: bool = True,
+) -> str:
     """Mirror of PaperPipeline._build_sections_json; kept local so the CLI
-    has minimal coupling to PaperPipeline internals. Stripped text is the
-    source-of-truth for char offsets — chunker already strips LaTeX
-    comments internally."""
-    stripped = strip_latex_comments(full_text)
+    has minimal coupling to PaperPipeline internals. ``strip_comments`` MUST
+    match the value passed to ``chunk_text`` (LaTeX strips comments, PDF does
+    not) so char offsets used for slicing align with the chunks."""
+    stripped = strip_latex_comments(full_text) if strip_comments else full_text
     per_section: dict[str | None, list[Chunk]] = defaultdict(list)
     order: list[str] = []
     for c in chunks:
@@ -75,7 +77,7 @@ async def _reingest_one(
     chunks_before is 0 when the row is skipped (missing source_path).
     """
     async with conn.execute(
-        "SELECT kind, source_path, source_dir_path "
+        "SELECT kind, source_path, source_dir_path, title "
         "FROM paper_content WHERE id = ?",
         (pcid,),
     ) as cur:
@@ -86,6 +88,9 @@ async def _reingest_one(
     kind: str | None = row[0]
     source_path_raw: str | None = row[1]
     source_dir_path_raw: str | None = row[2]
+    title: str = str(row[3] or "")
+    # PDF heading boundaries (populated only for pdf_upload below).
+    pdf_headings: list[tuple[str, int]] = []
 
     # CRITICAL: chunking must run on EXTRACTED body text, NOT raw source bytes.
     # For arxiv / latex_upload the chunker needs the flattened body (preamble
@@ -128,7 +133,7 @@ async def _reingest_one(
             )
             return (0, 0)
         try:
-            extracted = extract_pdf(pdf_path)
+            extracted, pdf_headings = extract_pdf_with_headings(pdf_path)
         except FileNotFoundError as exc:
             _LOG.warning("pcid=%d: extract_pdf failed: %s — skipped", pcid, exc)
             return (0, 0)
@@ -142,7 +147,15 @@ async def _reingest_one(
         before_row = await cur.fetchone()
     before = int(before_row[0]) if before_row else 0
 
-    chunks = chunk_text(extracted)
+    # PDF: section boundaries from detected headings (single synthetic section
+    # on no-headings) + strip_comments=False (PDF text isn't LaTeX). LaTeX:
+    # the \section{} regex path, unchanged.
+    pdf_path_kind = kind == "pdf_upload"
+    if pdf_path_kind:
+        boundaries = pdf_headings if pdf_headings else [(title or "Full text", 0)]
+        chunks = chunk_text(extracted, sections=boundaries, strip_comments=False)
+    else:
+        chunks = chunk_text(extracted)
     flattened = extracted  # alias for downstream sections_json computation
     if not chunks:
         _LOG.warning("pcid=%d: chunker produced zero chunks", pcid)
@@ -162,7 +175,9 @@ async def _reingest_one(
     embeddings = embedder.embed([c.text for c in chunks])
 
     # Compute sections_json before delete too (pure function; no I/O).
-    sections_json = _build_sections_json(chunks, flattened)
+    sections_json = _build_sections_json(
+        chunks, flattened, strip_comments=not pdf_path_kind,
+    )
 
     # Only now do destructive deletes.
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = ?", (pcid,))
