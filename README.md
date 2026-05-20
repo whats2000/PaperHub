@@ -1,230 +1,232 @@
-# PaperHub
+<div align="center">
 
-> A paper-aware chat client with multi-agent tool routing, an in-repo RAG knowledge base, a multi-paper slide pipeline, and a Citation Canvas that traces every cited chunk back to its source.
+# 📚 PaperHub
 
-PaperHub is built UX-first. Every retrieved chunk has a clickable provenance trail, every generation step writes an audit row, and every chat turn is reconstructible from SQLite alone. The backend assembles a small set of capabilities — paper ingest, RAG, NL→SQL, slide generation — behind a single chat interface with intent-routed agents.
+**A paper-aware chat client where every cited sentence traces back to its source.**
+
+Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retrieval · a Citation Canvas that links every `[chunk]` back to the exact passage in the paper.
+
+![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-React%2019-3178C6?logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-LangGraph-009688?logo=fastapi&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
+![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
+![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
+![Tests](https://img.shields.io/badge/tests-340%20backend%20%2B%20105%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/Plan%20C-merged%20(SRS%20v2.10)-success)
+
+</div>
 
 ---
 
-## Status
+PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance trail, every generation step writes an audit row, and every chat turn is reconstructible from SQLite alone. A single chat interface routes each turn to the right specialist agent — paper search, paper Q&A, NL→SQL stats, or slide generation.
 
-| Layer | Status |
+## ✨ What it does
+
+- **🔎 Agentic paper retrieval.** Ask a question across your enabled papers and a per-paper subagent *navigates each paper by its section table-of-contents* (`list_sections` → `read_section`) rather than blind cosine-similarity top-k, then a flagship model synthesises across papers over the raw cited chunks.
+- **🧷 Citation Canvas.** Inline `[chunk:N]` markers in every answer link back to the exact passage — click to scroll + highlight the source. No ungrounded claims.
+- **🧭 Visible routing + tracing.** A routing badge shows which agent + model handled each turn; an expandable trace panel lists every model/MCP/pipeline step with latency and status. The full DAG replays from SQLite.
+- **🌐 Discovery via web + Semantic Scholar.** `paper_search` decomposes into Parser → Discover (no-key multi-engine web search) → Resolve (Semantic Scholar) → Synthesize, so even vague references ("that diffusion paper everyone cites") resolve to a citable hit.
+- **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant.
+- **➗ Math renders.** LaTeX in answers (`$…$`, `$$…$$`) renders as real equations via KaTeX.
+- **🔌 MCP-native.** The agent's own tools are served over MCP (in-process FastMCP at `/mcp`); external clients (Claude Desktop, Cursor) can reach the same surface.
+
+---
+
+## 🧱 Tech stack
+
+| Area | Choice |
 | --- | --- |
-| Backend foundation (FastAPI + LangGraph + SQLite + Tracer + Router) | Plan A complete |
-| Frontend (React + Vite + Tailwind + Zustand) | Plan B complete |
-| Paper Pipeline + Research Agent | Plan C complete (v2.5/v2.6 follow-ups land MCP layer + open-webSearch integration) |
-| Search results + Reference Sources + Citation Canvas | Plan D — not started |
-| SQL Agent + library_stats | Plan E — not started |
-| Slide Pipeline + Report Agent | Plan F — not started |
-| Compare view + MCP surfaces | Plan G — not started |
+| **Backend** | Python 3.11 · FastAPI · LangGraph · LiteLLM · SQLite (`aiosqlite`) · Pydantic v2 |
+| **Frontend** | TypeScript · React 19 · Vite · Tailwind · Zustand · `react-markdown` + KaTeX |
+| **RAG** | Chroma · `BAAI/bge-small-en-v1.5` embedder · `ms-marco-MiniLM` cross-encoder (hosted in a sibling model-server process) |
+| **LLM** | Gemini by default (any LiteLLM provider — small-tier subagents, flagship finalizer) |
+| **Tooling** | `uv` · `pytest` · `ruff` · `mypy --strict` · Vitest · ESLint · Conventional Commits |
 
-See the [implementation plan](#implementation-plan) section below for the full decomposition.
+> Local-only, single-user. No auth surface — point it at your own LLM key and run it on your machine.
 
 ---
 
-## At a glance
+## 🚀 Quick start
 
-- **Language:** Python 3.11 (backend), TypeScript + React (frontend, Plan B)
-- **Backend:** FastAPI, LangGraph, LiteLLM, SQLite (`aiosqlite`), Pydantic v2
-- **RAG:** Chroma + `sentence-transformers/BAAI/bge-small-en-v1.5` + cross-encoder rerank (Plan C)
-- **Slides:** framework deliberately deferred — Marp / Slidev / Beamer-via-LangGraph (Plan F)
-- **Tooling:** `uv` for Python, `pytest` + `ruff` + `mypy --strict`, Conventional Commits
-- **Auth model:** local-only single-user; no auth surface in Plan A–G
+**Prerequisites:** Python 3.11 + [`uv`](https://docs.astral.sh/uv/), Node 18+, and an LLM API key (Gemini by default).
 
----
+```bash
+git clone https://github.com/whats2000/PaperHub.git
+cd PaperHub
 
-## Quick start
+# Install both halves
+cd backend && uv sync          # Python deps from uv.lock
+cd ../frontend && npm install  # JS deps from package-lock.json
+```
 
-After cloning, install both halves:
+Configure your LLM key:
 
-```powershell
-cd backend; uv sync                  # Python deps from uv.lock
-cd ..\frontend; npm install          # JS deps from package-lock.json
+```bash
+cd backend
+cp .env.example .env           # then fill in GEMINI_API_KEY (or your provider's key)
 ```
 
 ### Run the dev stack
 
-Open two terminals (or use a tmux/Windows Terminal split).
+Two terminals (the model-server auto-spawns on first backend boot):
 
-**Terminal 1 — backend** (FastAPI + LangGraph, hot-reload on save, port 8000):
-
-```powershell
+```bash
+# Terminal 1 — backend (FastAPI + LangGraph, hot-reload, :8000)
 cd backend
-uv run uvicorn paperhub.app:app --reload --port 8000
+uv run uvicorn paperhub.app:app --reload --reload-dir src --port 8000
 ```
 
-**Terminal 2 — frontend** (Vite + React, hot-reload on save, port 5173):
-
-```powershell
+```bash
+# Terminal 2 — frontend (Vite + React, hot-reload, :5173)
 cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend posts to the backend via CORS.
+Open **http://localhost:5173** and start chatting.
 
-To exercise the chat path without configuring an LLM key, set the mock env vars before starting the backend:
+> **No API key handy?** Exercise the chat plumbing with mocked LLMs (PowerShell):
+> ```powershell
+> $env:PAPERHUB_ROUTER_MOCK   = '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"dev"}'
+> $env:PAPERHUB_CHITCHAT_MOCK = "Hello from PaperHub!"
+> uv run uvicorn paperhub.app:app --reload --reload-dir src --port 8000
+> ```
 
-```powershell
-$env:PAPERHUB_ROUTER_MOCK   = '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"dev"}'
-$env:PAPERHUB_CHITCHAT_MOCK = "Hello from PaperHub!"
-uv run uvicorn paperhub.app:app --reload --port 8000
-```
+---
 
-To run against a real LLM (Gemini by default), copy `backend/.env.example` to `backend/.env`, fill in `GEMINI_API_KEY`, and start the backend without the mock vars.
+## ⚙️ Configuration
 
-### Web search (optional)
+All settings live in `backend/.env` (grouped by function in [`.env.example`](backend/.env.example)). The ones you'll likely touch:
 
-The Research Agent's `paper_search` flow has two prompt variants: v1 (papers-only) and v2 (discover via web search, then refine via Semantic Scholar). v2 is gated on a separately-running [`open-websearch`](https://www.npmjs.com/package/open-websearch) MCP daemon — a no-key multi-engine web-search server that lives outside this repo.
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | LLM provider credential (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
+| `PAPERHUB_PAPER_QA_MODEL` | Flagship finalizer (cross-paper synthesis) | `gemini/gemini-2.5-pro` |
+| `PAPERHUB_PAPER_QA_SUBAGENT_MODEL` | Per-paper section navigator (lightweight) | `gemini/gemini-3.1-flash-lite` |
+| `PAPERHUB_DEVICE` | Embedder/reranker device (`auto`/`cpu`/`cuda`/`mps`) | `auto` |
+| `PAPERHUB_SEMANTIC_SCHOLAR_API_KEY` | Higher Semantic Scholar rate limit (optional) | — |
 
-Install + run (separate shell):
+**GPU (optional).** torch installs CPU-only by default. For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130`.
 
-```powershell
+**Web-search discovery (optional).** `paper_search` gets a no-key multi-engine discovery step when an [`open-websearch`](https://www.npmjs.com/package/open-websearch) daemon is reachable. Install + run it in a separate shell:
+
+```bash
 npm install -g open-websearch
-open-websearch serve            # long-lived daemon on http://localhost:3000
+MODE=http open-websearch        # listens on http://localhost:3000
 ```
 
-When the daemon is reachable, the backend's MCP registry auto-exposes `web.search` / `web.fetch` to the agent and the v2 prompt loads. When it's down, the agent silently falls back to v1 — no manual config needed. Same posture as `pandoc` (optional system binary documented in [CLAUDE.md](CLAUDE.md)).
+When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`. When it's down, the agent falls back to a papers-only flow — no config needed. (The `paperhub-papers` MCP surface ships in-process at `/mcp`; no install required.)
 
-The `paperhub-papers` MCP surface (three Research Agent tools — `search_library`, `search_semantic_scholar`, `find_related_papers`) is mounted IN-PROCESS at `http://localhost:8000/mcp` and ships with the backend — no extra install. External MCP clients (Claude Desktop, Cursor) can reach the same URL.
+---
 
-### One-shot smoke scripts
+## 🗺️ Architecture (one screen)
 
-Backend-only mocked round-trip + SQLite replay:
-
-```powershell
-cd backend
-.\scripts\smoke_chat.ps1
+```
+┌─────────────────┐       SSE      ┌──────────────────────────────────────────┐
+│  React shell    │ ◄───────────── │ FastAPI · POST /chat                     │
+│  - Composer     │                │  ┌─────────────────────────────────────┐ │
+│  - Routing badge│                │  │ LangGraph turn                      │ │
+│  - Trace panel  │                │  │  Router ─► chitchat | paper_qa |    │ │
+│  - Citation     │                │  │           paper_search | slides |   │ │
+│    Canvas       │                │  │           library_stats             │ │
+└─────────────────┘                │  └─────────────────────────────────────┘ │
+                                   │     │                                    │
+                                   │     ▼  paper_qa: fan out one subagent     │
+                                   │        per paper → section nav →          │
+                                   │        flagship finalizer over raw chunks │
+                                   │  ┌─────────┐ ┌──────────┐ ┌────────────┐  │
+                                   │  │ LiteLLM │ │ Chroma   │ │ SQLite     │  │
+                                   │  │ adapter │ │ (RAG)    │ │ (audit +   │  │
+                                   │  │         │ │          │ │  schema)   │  │
+                                   │  └─────────┘ └──────────┘ └────────────┘  │
+                                   │     ▲ embedder + reranker in a sibling     │
+                                   │       model-server process (:8001)         │
+                                   └──────────────────────────────────────────┘
 ```
 
-Backend-only against a real LLM (requires `backend/.env`):
+Every model call, MCP call, and pipeline step writes a `tool_calls` row before returning — enough state to reconstruct the full agent context from `SELECT * FROM tool_calls WHERE run_id = ?` alone. Paper content is **deduplicated**: one `paper_content` row + one cache dir + one set of chunks/vectors per unique paper, regardless of how many sessions reference it.
 
-```powershell
-cd backend
-.\scripts\smoke_chat_real.ps1
+Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-srs.md).
+
+---
+
+## 📍 Status
+
+| Plan | Scope | State |
+| --- | --- | --- |
+| **A** | Backend foundation + Router-only chat | ✅ complete |
+| **B** | Frontend foundation (React shell, SSE, routing badge, trace panel) | ✅ complete |
+| **C** | Paper Pipeline + Research Agent (ingest, RAG, paper_search, agentic paper_qa, MCP layer, model-server, PDF upload) | ✅ complete — merged (SRS v2.10) |
+| **D** | Citation Canvas + full reference-sources surface | 🔜 planned |
+| **E** | SQL Agent + `library_stats` (sqlite MCP) | 🔜 planned |
+| **F** | Slide Pipeline + Report Agent | 🔜 planned |
+| **G** | Compare view + filesystem / `paperhub.*` MCP | 🔜 planned |
+
+Each plan ships working, testable software on its own. Plans live under [`docs/superpowers/plans/`](docs/superpowers/plans/).
+
+---
+
+## 🧑‍💻 Development
+
+PaperHub is built spec → plan → TDD, with subagent-driven implementation and per-task spec-compliance + code-quality review.
+
+**Backend gates** (from `backend/`):
+
+```bash
+uv run pytest          # 340 tests, hermetic
+uv run ruff check src tests
+uv run mypy src        # --strict
 ```
 
-Full end-to-end smoke (boots backend + frontend, asserts SSE round-trip, exits non-zero on failure — suitable for CI):
+**Frontend gates** (from `frontend/`):
 
-```powershell
-.\scripts\smoke_e2e.ps1
+```bash
+npm test               # Vitest + RTL + MSW (105 tests)
+npm run typecheck      # tsc --strict
+npm run lint           # ESLint flat config
+npm run build          # Vite production build
 ```
 
-MCP surface smokes — verify the v2.5/v2.6 MCP dispatch infrastructure end-to-end:
+**Replay any past chat turn** from SQLite (debugging the agent flow):
 
-```powershell
-cd backend
-.\scripts\smoke_mcp_papers.ps1   # always runnable; boots its own backend on :8770 and hits the in-process `papers` FastMCP server via the MCP wire protocol
-.\scripts\smoke_mcp_web.ps1      # requires `open-websearch serve` on :3000; verifies the daemon advertises `web.search` and returns hits
-```
-
-### Replay a past chat turn from SQLite
-
-```powershell
+```bash
 cd backend
 uv run paperhub-replay --run-id 1
 ```
 
-Full quality gates (must pass before any PR):
-
-```powershell
-uv run pytest -v
-uv run ruff check src tests
-uv run mypy src
-```
+> Contributing AI agents: read [CLAUDE.md](CLAUDE.md) first — it carries the conventions, the fix-now policy, and the agent-flow observability rules.
 
 ---
 
-## Architecture (one screen)
-
-```
-┌─────────────────┐       SSE      ┌──────────────────────────────────────────┐
-│  React shell    │ <───────────── │ FastAPI · POST /chat                     │
-│  (Plan B)       │                │                                          │
-│  - Composer     │                │ ┌──────────────────────────────────────┐ │
-│  - Routing badge│                │ │ LangGraph turn                       │ │
-│  - Trace panel  │                │ │   Router ─► chitchat | paper_qa |    │ │
-│  - Canvas       │                │ │             paper_search | slides |  │ │
-│  - Compare      │                │ │             library_stats            │ │
-└─────────────────┘                │ └──────────────────────────────────────┘ │
-                                   │      │                                    │
-                                   │      ▼                                    │
-                                   │ ┌─────────┐  ┌──────────┐  ┌──────────┐ │
-                                   │ │ LiteLLM │  │ Chroma   │  │ SQLite   │ │
-                                   │ │ adapter │  │ (RAG)    │  │ (audit + │ │
-                                   │ │         │  │          │  │  schema) │ │
-                                   │ └─────────┘  └──────────┘  └──────────┘ │
-                                   └──────────────────────────────────────────┘
-```
-
-Every model call, MCP call, and pipeline step writes a `tool_calls` row before returning. Compare-mode turns share one `run_id` with a `branch` discriminator (`'A'`/`'B'`). Paper content is **deduplicated**: each unique paper has one `paper_content` row, one cache dir under `workspace/papers_cache/`, and one set of chunks + Chroma vectors, regardless of how many sessions reference it.
-
-Full architecture lives in the SRS — see [Documentation](#documentation).
-
----
-
-## Implementation plan
-
-The SRS is decomposed into 7 sequential implementation plans. Each ships working, testable software on its own.
-
-| # | Plan | Ships |
-| --- | --- | --- |
-| **A** | Backend foundation + Router-only chat | FastAPI app, 7-table SQLite schema, tracer, LiteLLM adapter, Router + chitchat, SSE /chat, replay CLI |
-| **B** | Frontend foundation | Vite + Tailwind + Zustand shell, Sidebar / Composer / MessageBubble, SSE consumer, Routing Badge, Trace panel |
-| **C** | Paper Pipeline + Research Agent | Cache-aware ingest, content_key cache lookup, Chroma RAG, paper_search + paper_qa |
-| **D** | Search results + Reference Sources + Citation Canvas | UC-1 / UC-2 / UC-3 end-to-end in browser |
-| **E** | SQL Agent + library_stats | In-process sqlite MCP, sqlglot guard, NL → SQL |
-| **F** | Slide Pipeline + Report Agent | Structure planning, per-section fan-out, figure-path resolution across the cache boundary |
-| **G** | Compare view + paperhub.* MCP + filesystem MCP | Compare composer toggle, branch fan-out, external MCP surfaces |
-
-Each plan lives under [`docs/superpowers/plans/`](docs/superpowers/plans/).
-
----
-
-## Repository layout
+## 📂 Repository layout
 
 ```
 .
 ├── backend/
-│   ├── src/paperhub/         # FastAPI app + agents + tracer + LiteLLM adapter
-│   ├── tests/                # pytest suite (34+ tests, hermetic)
-│   ├── scripts/              # smoke_chat.ps1 (mock) + smoke_chat_real.ps1 (live)
-│   └── pyproject.toml        # uv project, mypy --strict, ruff config
-├── frontend/                 # React + Vite + Tailwind (Plan B)
-├── docs/
-│   └── superpowers/
-│       ├── specs/            # SRS — authoritative architecture document
-│       └── plans/            # implementation plans, one per sub-project
+│   ├── src/paperhub/         # FastAPI app · agents · pipelines · rag · mcp · modelserver · tracer
+│   ├── tests/                # pytest suite (340 tests, hermetic)
+│   └── pyproject.toml        # uv project · mypy --strict · ruff
+├── frontend/                 # React 19 + Vite + Tailwind + Zustand
+├── docs/superpowers/
+│   ├── specs/                # SRS — authoritative architecture document
+│   └── plans/                # implementation plans, one per sub-project
 ├── reference/                # copied source from paper2slides-plus + Intro2GenAI-hw1
 ├── CLAUDE.md                 # AI-agent orientation for this repo
-└── README.md                 # this file
+└── README.md
 ```
 
-`workspace/` (gitignored) holds runtime state — the SQLite database, the future `papers_cache/`, and the future Chroma index.
+`workspace/` (gitignored) holds runtime state — the SQLite database, the papers cache, and the Chroma index.
 
 ---
 
-## Documentation
+## 📖 Documentation
 
-- **System Requirements Specification (SRS)** — [docs/superpowers/specs/2026-05-17-paperhub-srs.md](docs/superpowers/specs/2026-05-17-paperhub-srs.md). The authoritative source for architecture, schema, scope, and acceptance criteria. Read this before changing anything load-bearing.
-- **Implementation plans** — [docs/superpowers/plans/](docs/superpowers/plans/). One plan per sub-project; each plan executes via TDD with subagent-driven implementation + spec-compliance + code-quality reviews per task.
-- **Backend developer docs** — [backend/README.md](backend/README.md).
-
----
-
-## Acceptance criteria
-
-From SRS §I-8 — each plan ticks off a subset:
-
-1. Router top-1 accuracy ≥ 80 % on the 16-prompt fixture (Plan A — fixture in place; live-mode verifiable with `PAPERHUB_ROUTER_LIVE=1`)
-2. Re-importing a paper into a second session is instant (cache hit, no re-download / re-embed) — Plan C
-3. Multi-paper Q&A yields chunks from ≥ 2 distinct `paper_content.id` — Plan C / D
-4. Every chat turn produces a `run_id`; `paperhub-replay` reconstructs the full step list — **Plan A complete**
-5. Compare-mode renders two side-by-side responses with independent trace panels — Plan G
-6. No silent failure: scripted error case (LLM 500 / missing Chroma) shows a visible error in chat AND a red row in the Trace panel — partial in Plan A (the architecture supports it; UI tests in Plan B+)
-7. SSE freshness: tokens arrive ≤ 60 s wall-clock after request — Plan C+
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.10**).
+- **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
+- **[Backend developer docs](backend/README.md)** — backend-specific notes.
 
 ---
 
-## License
+## 📄 License
 
 Not yet specified.
