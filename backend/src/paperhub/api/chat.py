@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
+from paperhub.agents.graph import CLARIFY_FALLBACK
 from paperhub.agents.research import (
     FinalOnlyMessage,
     SearchCandidate,
@@ -461,10 +462,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     # resolved_query. Surface it deliberately — no pipeline,
                     # no degenerate empty-results re-ask. resolved_query is
                     # already captured in the router tracer row + runs table.
-                    final_content = decision.resolved_query or (
-                        "Could you clarify what you'd like help with? "
-                        "A topic, author, or paper title works well."
-                    )
+                    final_content = decision.resolved_query or CLARIFY_FALLBACK
                     token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
                     yield {"event": "token",
                            "data": token_evt.model_dump_json(exclude={"type"})}

@@ -1005,8 +1005,8 @@ async def test_chat_sse_clarify_surfaces_question_no_pipeline(
 ) -> None:
     """When the router emits intent='clarify', the SSE stream must:
     - emit a routing_decision event with intent='clarify'
-    - emit a final event whose content is exactly the resolved_query
-    - NOT emit any token events (the question is surfaced as one final block)
+    - emit exactly one token event carrying the clarifying question text
+    - emit a final event whose content is the resolved_query
     - NOT emit any tool_step events from the paper_search pipeline."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
@@ -1028,7 +1028,16 @@ async def test_chat_sse_clarify_surfaces_question_no_pipeline(
     types = [t for t, _ in events]
     assert "routing_decision" in types
     assert "final" in types
-    # The clarifying question must appear in final.content.
+    # The clarifying question must arrive via exactly one token event.
+    token_events = [(t, d) for t, d in events if t == "token"]
+    assert len(token_events) == 1, (
+        f"Expected exactly 1 token event for clarify, got: {token_events}"
+    )
+    token_text = "".join(d.get("text", "") for _, d in token_events)
+    assert "Which topic do you mean?" in token_text, (
+        f"Clarifying question not found in token stream: {token_text!r}"
+    )
+    # The clarifying question must also appear in final.content.
     final_payload = next(d for t, d in events if t == "final")
     assert "Which topic do you mean?" in final_payload["content"]
     # No paper_search-related tool_step events — the pipeline must not run.
