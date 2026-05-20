@@ -71,6 +71,10 @@ class AgentState(TypedDict, total=False):
     branch: Branch
     session_id: int
     user_message: str
+    # v2.11: the router's anaphora-resolved, self-contained rewrite of
+    # user_message. Downstream agents read this (falling back to
+    # user_message) so a bare follow-up like "推薦幾篇" carries its topic.
+    effective_query: str
     routing_decision: RoutingDecision
     final_response: str
     history: list[dict[str, str]]

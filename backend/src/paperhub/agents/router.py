@@ -57,4 +57,8 @@ async def router_node(
         (decision.model_dump_json(), state["run_id"]),
     )
     await target_conn.commit()
-    return {**state, "routing_decision": decision}
+    return {
+        **state,
+        "routing_decision": decision,
+        "effective_query": decision.resolved_query or user_message,
+    }
