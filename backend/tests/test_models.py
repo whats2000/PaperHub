@@ -74,3 +74,9 @@ def test_router_prompt_mentions_resolved_query_and_clarify() -> None:
     p = PromptRegistry().get("router/v1")
     assert "resolved_query" in p.system
     assert "clarify" in p.system
+
+
+def test_routing_decision_accepts_paper_suggest_intent():
+    d = RoutingDecision(intent="paper_suggest", model_tier="small", confidence=0.9,
+                        reasoning="topic recommendation", resolved_query="recommend papers on X")
+    assert d.intent == "paper_suggest"
