@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from paperhub.agents.state import effective_query
+from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.models.domain import RoutingDecision, ToolCallRecord
 from paperhub.models.events import (
     RoutingDecisionEvent,
@@ -67,3 +68,9 @@ def test_effective_query_prefers_resolved() -> None:
 def test_effective_query_falls_back_when_empty_or_missing() -> None:
     assert effective_query({"user_message": "raw", "effective_query": ""}) == "raw"
     assert effective_query({"user_message": "raw"}) == "raw"
+
+
+def test_router_prompt_mentions_resolved_query_and_clarify() -> None:
+    p = PromptRegistry().get("router/v1")
+    assert "resolved_query" in p.system
+    assert "clarify" in p.system
