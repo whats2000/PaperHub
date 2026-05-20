@@ -68,10 +68,16 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
           // progress card ABOVE the bubble — status on top, then the papers it
           // finds (rendered inside the bubble), then the write-up. Suppress the
           // empty "…" bubble so we don't show two indicators at once.
+          //
+          // Once the result cards arrive, the finding phase is done and the
+          // bubble's own "…" indicator takes over for the final write-up — so
+          // drop the card to avoid a redundant third indicator.
           const intent = msg.routing_decision?.intent;
+          const hasResults = !!msg.search_results && msg.search_results.length > 0;
           const showResearchCard =
             msg.role === "assistant" &&
             msg.status === "streaming" &&
+            !hasResults &&
             (intent === "paper_search" || intent === "paper_suggest");
 
           return (
