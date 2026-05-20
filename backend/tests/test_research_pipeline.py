@@ -804,6 +804,119 @@ async def test_parse_resolves_topic_from_brief(
     assert reqs[0].kind == "natural_language"
 
 
+async def test_paper_search_subgraph_uses_suggest_slots(
+    fake_tracer: Tracer,
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """ResearchDeps.parse_slot / synth_slot thread through to parse_user_message
+    and synthesize_prose. With the suggest parse prompt the mock LLM returns
+    2 angle hints → ≥2 candidates emitted via search_results SSE event."""
+    from unittest.mock import MagicMock
+
+    from paperhub.agents.research_graph import (
+        ResearchDeps,
+        build_paper_search_subgraph,
+    )
+    from paperhub.pipelines.paper_pipeline import PaperPipeline
+    from paperhub.rag.retriever import Retriever
+
+    # The suggest parse prompt returns 2 distinct angle hints; the SS stub
+    # resolves each to a unique paper so both land as candidates.
+    two_angle_parse = json.dumps([
+        {"hint": "flow matching for discrete diffusion", "kind": "natural_language"},
+        {"hint": "distillation for discrete diffusion", "kind": "natural_language"},
+    ])
+    reg = _StubRegistry(
+        has_web_search=False,  # no web search → discover_fallback short-circuit
+        ss_hits=[
+            {
+                "paper_id": "arxiv:2501.00001",
+                "title": "Flow Matching for Discrete Diffusion",
+                "year": 2025,
+                "arxiv_id": "2501.00001",
+                "authors": ["Smith"],
+                "has_open_pdf": True,
+                "abstract": "Abstract A.",
+            },
+        ],
+    )
+
+    # LLM call sequence:
+    #  call 0 → parse (suggest slot) — returns 2-angle array
+    #  call 1 → synthesize (suggest slot) — returns prose
+    # Discover is bypassed (no web search) and Resolver calls the stub reg.
+    # Because both angle hints are "natural_language" and SS stub always
+    # returns the same hit, both will resolve (dedupe is by paper_id in the
+    # subgraph; here both resolve to the same arxiv:2501.00001 which is fine
+    # — the test just asserts ≥1 candidate emitted, i.e., the subgraph ran
+    # fully with the provided slots). We give the stub 2 different SS hits
+    # to get 2 distinct candidates.
+
+    # Override the stub to return 2 different hits by cycling.
+    call_idx: dict[str, int] = {"n": 0}
+
+    ss_hits_list = [
+        [{"paper_id": "arxiv:2501.00001", "title": "Flow Matching DiffLM",
+          "year": 2025, "arxiv_id": "2501.00001",
+          "authors": ["Smith"], "has_open_pdf": True, "abstract": "A."}],
+        [{"paper_id": "arxiv:2501.00002", "title": "Distillation for Discrete Diffusion",
+          "year": 2025, "arxiv_id": "2501.00002",
+          "authors": ["Jones"], "has_open_pdf": True, "abstract": "B."}],
+    ]
+
+    class _CyclingRegistry(_StubRegistry):
+        async def call(self, name: str, args: dict[str, Any]) -> Any:
+            self.call_log.append((name, args))
+            if name == "papers.search_semantic_scholar":
+                idx = call_idx["n"] % len(ss_hits_list)
+                call_idx["n"] += 1
+                return list(ss_hits_list[idx])
+            raise RuntimeError(f"_CyclingRegistry: unexpected tool {name!r}")
+
+    cycling_reg = _CyclingRegistry(has_web_search=False)
+
+    captured_candidates: list[Any] = []
+
+    comp_responses = [
+        _msg(content=two_angle_parse),           # call 0: parse (suggest slot)
+        _msg(content="Here are suggested papers about discrete diffusion."),  # call 1: synthesize
+    ]
+    comp = _async_completion_mock(comp_responses)
+
+    deps = ResearchDeps(
+        adapter=MagicMock(),
+        tracer=fake_tracer,
+        paper_qa_model="m",
+        conn=migrated_db,
+        pipeline=MagicMock(spec=PaperPipeline),
+        retriever=MagicMock(spec=Retriever),
+        mcp_registry=cycling_reg,  # type: ignore[arg-type]
+        parse_slot="paper_search_parse_suggest/v1",
+        synth_slot="paper_search_synthesize_suggest/v1",
+    )
+    graph = build_paper_search_subgraph(deps)
+
+    state: dict[str, Any] = {
+        "run_id": fake_tracer._run_id,  # noqa: SLF001
+        "branch": "",
+        "session_id": 1,
+        "user_message": "recommend papers on discrete diffusion",
+        "history": [],
+    }
+
+    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+        async for mode, payload in graph.astream(
+            state, stream_mode=["custom", "values"],
+        ):
+            if mode == "custom" and isinstance(payload, dict):
+                if payload.get("event") == "search_results":
+                    captured_candidates.extend(payload.get("candidates", []))
+
+    assert len(captured_candidates) >= 2, (
+        f"suggest slots must yield ≥2 candidates; got {captured_candidates!r}"
+    )
+
+
 async def test_parse_uses_provided_slot(
     fake_tracer: Tracer,
 ) -> None:

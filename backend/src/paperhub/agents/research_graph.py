@@ -109,6 +109,13 @@ class ResearchDeps:
     # thread the field through (run-89 failure pattern).
     paper_qa_subagent_model: str | None = None
     paper_qa_max_section_reads: int | None = None
+    # v2.11: prompt slots for the paper_search Parser and Synthesizer.
+    # Defaults preserve the existing paper_search behaviour exactly.
+    # Set to "paper_search_parse_suggest/v1" / "paper_search_synthesize_suggest/v1"
+    # to activate suggest-mode (multi-angle topic decomposition instead of
+    # explicit-paper parsing).
+    parse_slot: str = "paper_search_parse/v1"
+    synth_slot: str = "paper_search_synthesize/v1"
 
 
 def _kwargs(deps: ResearchDeps) -> ResearchExtraKwargs:
@@ -161,6 +168,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
             effective_query(state),
             tracer=deps.tracer,
             model=parser_model,
+            slot=deps.parse_slot,
             **_kwargs(deps),
         )
         last_step = await _drain_and_stream_tool_steps(last_step, run_id)
@@ -331,6 +339,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
             user_message=effective_query(state),
             tracer=deps.tracer,
             model=synth_model,
+            slot=deps.synth_slot,
             **_kwargs(deps),
         )
         last_step = await _drain_and_stream_tool_steps(last_step, run_id)
