@@ -5871,3 +5871,464 @@ Browser verification (manual, after re-ingest + backend restart):
 - Update at PR time (separate commit): [`CLAUDE.md`](../../../CLAUDE.md), [`docs/superpowers/specs/2026-05-17-paperhub-srs.md`](../../../docs/superpowers/specs/2026-05-17-paperhub-srs.md) — SRS v2.10 revision entry, §III-3 Research Agent row paper_qa paragraph, §III-5.2 RAG retrieval section.
 
 ---
+
+## Plan C v2.11 — Router context dispatch (anaphora-resolved task brief) — small follow-up patch
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use [superpowers:subagent-driven-development](../../../C:/Users/eddie/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development) (recommended) or [superpowers:executing-plans](../../../C:/Users/eddie/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/executing-plans). Steps use `- [ ]` for tracking.
+
+**Goal:** Stop downstream agents (paper_search Parser, paper_qa subagent/finalizer, chitchat) from acting on a bare anaphoric follow-up (e.g. "推薦幾篇") by having the history-aware router resolve the latest turn into a self-contained task brief and dispatch *that* — or, when the turn can't be resolved even with history, ask a deliberate clarifying question instead of dead-ending in an empty-results re-ask.
+
+**Why now (root-cause evidence — run 100, session 72).** Live two-turn testing: turn 1 established the topic "continuous-diffusion flow matching / short-cut models / distillation, do these exist for discrete diffusion (DLMs)?"; the assistant offered to search "Discrete Flow Matching / Discrete Diffusion Distillation"; turn 2 was the bare "推薦幾篇" (recommend a few). Reading the recorded run from SQLite (per the CLAUDE.md tracing recipe): `router:classify` got `"推薦幾篇"` → classified `paper_search` ✓; `paper_search:parse` got only `{"user_message":"推薦幾篇"}` → `result_summary_json.requests == []` → finalize emitted 0 candidates → synthesize asked "請問您對哪個領域或主題的論文感興趣呢？". The topic lived in the prior turns the Parser never saw. The router **does** read `state["history"]` ([`router.py:21,51`](../../../backend/src/paperhub/agents/router.py#L21)); the Parser is fed only `state["user_message"]` ([`research_graph.py:160-161`](../../../backend/src/paperhub/agents/research_graph.py#L160)). The router is living proof the history wiring works — this patch resolves the brief once at the router and dispatches it to every downstream stage.
+
+**Architecture.** Extend the router's structured output (`RoutingDecision`) with one field, `resolved_query` — the anaphora-free, self-contained rewrite of the user's latest message. The router writes it onto a new `AgentState` slot `effective_query`, and every downstream agent reads `effective_query` (falling back to raw `user_message`) instead of the raw turn, via a single DRY helper. A new `intent="clarify"` lets the router short-circuit the pipeline and surface its own clarifying question. The raw user text is still recorded verbatim in the `messages` table (recorded **before** routing at [`chat.py:408`](../../../backend/src/paperhub/api/chat.py#L408)), so the transcript and the frontend-rebuilt `history` stay truthful — only the *agents* see the resolved brief. Observability is free: the router already runs `record_result(decision.model_dump())`, so `resolved_query` lands in the `tool_calls` row and the `runs.routing_decision_json`.
+
+**Backward-compat.** `resolved_query` defaults to `""`. Existing router mocks/tests that emit only the four legacy fields still parse (the empty default makes `effective_query` fall back to raw `user_message`). No existing test changes to keep passing.
+
+### v2.11 File Structure
+
+| File | Change |
+| --- | --- |
+| [`backend/src/paperhub/models/domain.py`](../../../backend/src/paperhub/models/domain.py) | add `resolved_query` to `RoutingDecision`; add `"clarify"` to `Intent`; add `effective_query` to `AgentState` |
+| [`backend/src/paperhub/agents/router.py`](../../../backend/src/paperhub/agents/router.py) | set `effective_query` from `resolved_query` (fallback raw) |
+| [`backend/src/paperhub/agents/state.py`](../../../backend/src/paperhub/agents/state.py) | add `effective_query()` accessor helper |
+| [`backend/src/paperhub/agents/research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) | feed `effective_query` to parse / synthesize / qa-subagent / qa-finalize |
+| [`backend/src/paperhub/agents/chitchat.py`](../../../backend/src/paperhub/agents/chitchat.py) | read `effective_query` |
+| [`backend/src/paperhub/agents/graph.py`](../../../backend/src/paperhub/agents/graph.py) | add `clarify` node + route |
+| [`backend/src/paperhub/api/chat.py`](../../../backend/src/paperhub/api/chat.py) | add `elif intent == "clarify"` branch |
+| [`backend/src/paperhub/llm/prompts/router_v1.yaml`](../../../backend/src/paperhub/llm/prompts/router_v1.yaml) | instruct model to emit `resolved_query` + use `clarify` |
+| tests | `test_models.py`, `test_graph.py`, `test_research_pipeline.py`, `test_chitchat.py`, `test_chat_sse.py` |
+
+### v2.11-1 — `resolved_query` field + `clarify` intent
+
+**Files:** Modify [`domain.py`](../../../backend/src/paperhub/models/domain.py) (`Intent` line 5, `RoutingDecision` lines 26-31). Test: `tests/test_models.py`.
+
+- [ ] **Step 1: Write the failing test** — add to `tests/test_models.py`:
+
+```python
+from paperhub.models.domain import RoutingDecision
+
+
+def test_routing_decision_resolved_query_defaults_empty():
+    # Legacy 4-field payload still validates; resolved_query defaults to "".
+    d = RoutingDecision(intent="paper_search", model_tier="small", confidence=0.9, reasoning="r")
+    assert d.resolved_query == ""
+
+
+def test_routing_decision_accepts_clarify_intent_and_brief():
+    d = RoutingDecision(
+        intent="clarify", model_tier="small", confidence=0.5,
+        reasoning="ambiguous follow-up",
+        resolved_query="Which topic would you like papers on?",
+    )
+    assert d.intent == "clarify"
+    assert d.resolved_query.startswith("Which topic")
+```
+
+- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_models.py::test_routing_decision_resolved_query_defaults_empty tests/test_models.py::test_routing_decision_accepts_clarify_intent_and_brief -v` → FAIL (`resolved_query` unexpected under `extra=forbid` / `"clarify"` not a valid Intent).
+
+- [ ] **Step 3: Implement** — in `domain.py` extend the `Intent` literal and add the field:
+
+```python
+Intent = Literal[
+    "paper_search", "paper_qa", "slides", "library_stats", "chitchat", "clarify",
+]
+```
+
+```python
+class RoutingDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent: Intent
+    model_tier: ModelTier
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    # v2.11: self-contained, anaphora-free rewrite of the user's latest
+    # turn (resolved against history by the router). For actionable
+    # intents this is the task brief downstream agents act on; for
+    # intent="clarify" it carries the clarifying question to show the
+    # user. Empty string => downstream falls back to the raw user_message.
+    resolved_query: str = ""
+```
+
+- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_models.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "feat(router): add resolved_query field + clarify intent to RoutingDecision"`
+
+### v2.11-2 — `effective_query` state slot + router sets it
+
+**Files:** Modify [`domain.py`](../../../backend/src/paperhub/models/domain.py) (`AgentState` lines 61-68), [`router.py`](../../../backend/src/paperhub/agents/router.py) (return, lines 55-60). Test: `tests/test_graph.py`.
+
+- [ ] **Step 1: Write the failing test** — add to `tests/test_graph.py`:
+
+```python
+from paperhub.agents.router import router_node
+from paperhub.llm.litellm_adapter import LiteLlmAdapter
+
+
+async def test_router_sets_effective_query_from_resolved(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "推薦幾篇"}
+    out = await router_node(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
+        mock_response='{"intent":"paper_search","model_tier":"small","confidence":1.0,'
+                      '"reasoning":"r","resolved_query":"recommend discrete diffusion distillation papers"}',
+    )
+    assert out["effective_query"] == "recommend discrete diffusion distillation papers"
+
+
+async def test_router_effective_query_falls_back_to_raw(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "hello"}
+    out = await router_node(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
+        mock_response='{"intent":"chitchat","model_tier":"small","confidence":0.85,"reasoning":"greeting"}',
+    )
+    assert out["effective_query"] == "hello"
+```
+
+- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_graph.py::test_router_sets_effective_query_from_resolved tests/test_graph.py::test_router_effective_query_falls_back_to_raw -v` → FAIL (`KeyError: 'effective_query'`).
+
+- [ ] **Step 3: Implement** — in `domain.py` add to `AgentState` after `user_message`:
+
+```python
+    # v2.11: the router's anaphora-resolved, self-contained rewrite of
+    # user_message. Downstream agents read this (falling back to
+    # user_message) so a bare follow-up like "推薦幾篇" carries its topic.
+    effective_query: str
+```
+
+In `router.py` change the return to:
+
+```python
+    return {
+        **state,
+        "routing_decision": decision,
+        "effective_query": decision.resolved_query or user_message,
+    }
+```
+
+- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_graph.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "feat(router): set effective_query state slot from resolved_query"`
+
+### v2.11-3 — DRY `effective_query()` accessor helper
+
+**Files:** Modify [`state.py`](../../../backend/src/paperhub/agents/state.py). Test: `tests/test_models.py`.
+
+- [ ] **Step 1: Write the failing test** — add to `tests/test_models.py`:
+
+```python
+from paperhub.agents.state import effective_query
+
+
+def test_effective_query_prefers_resolved():
+    assert effective_query({"user_message": "raw", "effective_query": "brief"}) == "brief"
+
+
+def test_effective_query_falls_back_when_empty_or_missing():
+    assert effective_query({"user_message": "raw", "effective_query": ""}) == "raw"
+    assert effective_query({"user_message": "raw"}) == "raw"
+```
+
+- [ ] **Step 2: Run to verify it fails** — → FAIL (`ImportError: cannot import name 'effective_query'`).
+
+- [ ] **Step 3: Implement** — replace `state.py` with:
+
+```python
+from paperhub.models.domain import AgentState
+
+__all__ = ["AgentState", "effective_query"]
+
+
+def effective_query(state: AgentState) -> str:
+    """The text downstream agents should act on: the router's
+    anaphora-resolved brief when present, else the raw user_message
+    (v2.11). One source of truth for the fallback semantics."""
+    return state.get("effective_query") or state["user_message"]
+```
+
+- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_models.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "feat(agents): add effective_query accessor with raw-message fallback"`
+
+### v2.11-4 — Feed `effective_query` to the paper_search Parser (the regression fix)
+
+**Files:** Modify [`research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) (`ps_parse` lines 160-161; synthesize line 331). Test: `tests/test_research_pipeline.py`.
+
+Note: `parse_user_message`'s parameter is *named* `user_message` — do NOT change its signature; pass the resolved brief as that argument so the Parser receives self-contained input.
+
+- [ ] **Step 1: Write the failing/contract test** — add to `tests/test_research_pipeline.py` (match the file's existing `parse_user_message` mock mechanism):
+
+```python
+import aiosqlite
+from paperhub.agents.research_pipeline import parse_user_message
+from paperhub.tracing.tracer import Tracer
+
+
+async def test_parse_resolves_topic_from_brief(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    brief = "recommend representative papers on discrete diffusion distillation"
+    reqs = await parse_user_message(
+        brief, tracer=tracer, model="gpt-4o-mini",
+        mock_response='[{"hint":"discrete diffusion distillation","kind":"natural_language"}]',
+    )
+    assert len(reqs) == 1
+    assert reqs[0].kind == "natural_language"
+```
+
+(If `parse_user_message` does not take `mock_response` via `**litellm_kwargs`, align with the file's existing parse test. The contract — non-empty requests for a self-contained brief — is what matters.)
+
+- [ ] **Step 2: Run** — `uv run pytest tests/test_research_pipeline.py::test_parse_resolves_topic_from_brief -v` → PASS once mock mechanism matches (pins the contract).
+
+- [ ] **Step 3: Implement** — in `research_graph.py` add the import alongside the other `agents` imports:
+
+```python
+from paperhub.agents.state import effective_query
+```
+
+Change `ps_parse` (line 160-161) `parse_user_message(state["user_message"],` → `parse_user_message(effective_query(state),`, and synthesize (line 331) `user_message=state["user_message"],` → `user_message=effective_query(state),`.
+
+- [ ] **Step 4: Run** — `uv run pytest tests/test_research_pipeline.py tests/test_graph.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "fix(paper_search): feed resolved brief (effective_query) to Parser + Synthesizer"`
+
+### v2.11-5 — Feed `effective_query` to paper_qa subagent + finalizer, and chitchat
+
+**Files:** Modify [`research_graph.py`](../../../backend/src/paperhub/agents/research_graph.py) (qa subagent line 438; qa finalize line 480), [`chitchat.py`](../../../backend/src/paperhub/agents/chitchat.py) (line 17). Test: `tests/test_chitchat.py`.
+
+- [ ] **Step 1: Write the failing test** — add to `tests/test_chitchat.py` (match the file's fixture/mocking style):
+
+```python
+async def test_chitchat_uses_effective_query(migrated_db) -> None:
+    from paperhub.agents.chitchat import chitchat_stream
+    from paperhub.llm.litellm_adapter import LiteLlmAdapter
+    from paperhub.tracing.tracer import Tracer
+
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state = {"run_id": 1, "branch": "", "session_id": 1,
+             "user_message": "go on", "effective_query": "explain flow matching more"}
+    async for _ in chitchat_stream(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini", mock_response="ok",
+    ):
+        pass
+    async with migrated_db.execute(
+        "SELECT args_redacted_json FROM tool_calls WHERE run_id=1 AND tool='generate'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert "explain flow matching more" in row[0]
+```
+
+- [ ] **Step 2: Run to verify it fails** — → FAIL (recorded arg is `"go on"`).
+
+- [ ] **Step 3: Implement** — in `chitchat.py` import the helper and switch line 17:
+
+```python
+from paperhub.agents.state import AgentState, effective_query
+```
+
+```python
+    user_message = effective_query(state)
+```
+
+In `research_graph.py`: qa subagent (line 438) `user_message=state["user_message"],` → `user_message=effective_query(state),`; qa finalize (line 480) likewise.
+
+- [ ] **Step 4: Run** — `uv run pytest tests/test_chitchat.py tests/test_graph.py tests/test_research_pipeline.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "fix(paper_qa,chitchat): act on resolved brief (effective_query)"`
+
+### v2.11-6 — Clarify branch (`build_graph` node + streaming chat dispatch)
+
+**Files:** Modify [`graph.py`](../../../backend/src/paperhub/agents/graph.py) (lines 58-89), [`chat.py`](../../../backend/src/paperhub/api/chat.py) (intent dispatch chain, ~line 444-458). Tests: `tests/test_graph.py`, `tests/test_chat_sse.py`.
+
+- [ ] **Step 1: Write the failing tests** — add to `tests/test_graph.py`:
+
+```python
+async def test_clarify_path(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    deps = GraphDeps(
+        adapter=LiteLlmAdapter(), tracer=tracer,
+        router_model="gpt-4o-mini", chitchat_model="gpt-4o-mini",
+        router_mock='{"intent":"clarify","model_tier":"small","confidence":0.4,'
+                    '"reasoning":"no topic yet","resolved_query":"Which research topic would you like papers on?"}',
+    )
+    graph = build_graph(deps)
+    state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "推薦幾篇"}
+    result = await graph.ainvoke(state)
+    assert result["routing_decision"].intent == "clarify"
+    assert result["final_response"] == "Which research topic would you like papers on?"
+```
+
+And add to `tests/test_chat_sse.py` (adapt to the file's existing `monkeypatch.setenv("PAPERHUB_ROUTER_MOCK", ...)` + SSE-collection harness):
+
+```python
+async def test_chat_clarify_branch_emits_question_no_pipeline(monkeypatch, client):
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"clarify","model_tier":"small","confidence":0.4,'
+        '"reasoning":"ambiguous","resolved_query":"Which topic do you mean?"}',
+    )
+    events = await collect_sse(client, {"user_message": "推薦幾篇", "history": []})
+    final = [e for e in events if e["event"] == "final"]
+    assert final and "Which topic" in final[-1]["data"]
+    tool_steps = [e for e in events if e["event"] == "tool_step"]
+    assert not any("paper_search" in e["data"] for e in tool_steps)
+```
+
+- [ ] **Step 2: Run to verify they fail** — `build_graph` has no `clarify` route; chat.py falls into the `else: stub_response` branch → content is a stub, not the question.
+
+- [ ] **Step 3: Implement** — in `graph.py` add a clarify node (after `_stub_library_stats`, line 62):
+
+```python
+    async def _clarify(state: AgentState) -> AgentState:
+        return {**state, "final_response": state["routing_decision"].resolved_query}
+```
+
+Register + route (lines 73-79):
+
+```python
+    g.add_node("clarify", _clarify)
+    routes: dict[Hashable, str] = {
+        "chitchat": "chitchat",
+        "slides": "slides",
+        "library_stats": "library_stats",
+        "clarify": "clarify",
+    }
+```
+
+And include clarify in the terminal-edge loop (line 87):
+
+```python
+    for terminal in ("chitchat", "slides", "library_stats", "clarify"):
+        g.add_edge(terminal, END)
+```
+
+In `chat.py`, insert the branch in the intent dispatch chain after the `chitchat` branch (before `elif intent == "paper_search":`):
+
+```python
+                elif intent == "clarify":
+                    # The router (which sees history) judged the turn
+                    # un-resolvable and supplied a clarifying question in
+                    # resolved_query. Surface it deliberately — no pipeline,
+                    # no degenerate empty-results re-ask. resolved_query is
+                    # already captured in the router tracer row + runs table.
+                    final_content = decision.resolved_query or (
+                        "Could you clarify what you'd like help with? "
+                        "A topic, author, or paper title works well."
+                    )
+                    token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
+                    yield {"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})}
+```
+
+- [ ] **Step 4: Run** — `uv run pytest tests/test_graph.py tests/test_chat_sse.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "feat(router): add clarify branch — deliberate clarifying question over empty-results re-ask"`
+
+### v2.11-7 — Router prompt emits `resolved_query` + uses `clarify`
+
+**Files:** Modify [`router_v1.yaml`](../../../backend/src/paperhub/llm/prompts/router_v1.yaml). Test: prompt-render assertion in `tests/test_models.py`; LLM behaviour verified by smoke (v2.11-8).
+
+- [ ] **Step 1: Write the failing test** — add to `tests/test_models.py`:
+
+```python
+from paperhub.llm.prompts.registry import PromptRegistry
+
+
+def test_router_prompt_mentions_resolved_query_and_clarify():
+    p = PromptRegistry().get("router/v1")
+    assert "resolved_query" in p.system
+    assert "clarify" in p.system
+```
+
+- [ ] **Step 2: Run to verify it fails** — current prompt mentions neither.
+
+- [ ] **Step 3: Implement** — replace `router_v1.yaml` with (adds `clarify` to the intent list, the new field to the JSON contract, and a context-resolution instruction; the prompt already receives `history`):
+
+```yaml
+system: |
+  You are PaperHub's intent router. The conversation so far is provided as
+  prior turns; the user's MOST RECENT message is shown below. Do two jobs:
+
+  (1) Classify the most recent message into exactly one intent:
+    - paper_search    user wants to find/discover papers
+    - paper_qa        user asks a question about already-indexed papers
+    - slides          user asks to generate slides / a deck
+    - library_stats   user asks a count/stat over their saved papers/sessions
+    - chitchat        greeting, meta-question, off-topic
+    - clarify         the message cannot be turned into a self-contained,
+                      actionable request EVEN using the prior turns (e.g. a
+                      bare "推薦幾篇" / "go on" with no topic anywhere in the
+                      conversation). Use this instead of guessing.
+
+  (2) Produce `resolved_query`: a SELF-CONTAINED rewrite of the user's most
+      recent message with all pronouns / anaphora / ellipsis resolved against
+      the prior turns. The rewrite must make sense on its own with NO history.
+      Examples:
+        - history offered "Discrete Flow Matching / discrete-diffusion
+          distillation"; latest msg "推薦幾篇" →
+          resolved_query: "recommend representative papers on Discrete Flow
+          Matching and discrete-diffusion distillation for diffusion language
+          models"
+        - latest msg "explain its training data"; history names paper X →
+          resolved_query: "explain the training data of paper X"
+      If the message is ALREADY self-contained, copy it verbatim.
+      If intent == "clarify", put the clarifying QUESTION to ask the user in
+      `resolved_query` instead.
+
+  IMPORTANT — session-aware override:
+    The user turn includes `enabled_refs_count` (integer). If the user's
+    question would naturally be `paper_qa` (asks about, compares, summarises,
+    or wants to "discuss" specific named papers / architectures / methods)
+    BUT `enabled_refs_count == 0`, classify as `paper_search` instead.
+    Surface this in `reasoning`, e.g. "user named papers X / Y but session
+    has 0 refs — search first".
+
+  Pick `model_tier`:
+    - small     for chitchat, clarify, library_stats, and most paper_search
+    - flagship  for paper_qa and slides
+
+  Return STRICT JSON with EXACTLY these five fields and no others:
+    {
+      "intent":        one of paper_search | paper_qa | slides | library_stats | chitchat | clarify,
+      "model_tier":    one of small | flagship,
+      "confidence":    number between 0.0 and 1.0,
+      "reasoning":     short string (<= 1 sentence) explaining the choice,
+      "resolved_query": self-contained rewrite of the latest message (or the
+                        clarifying question when intent == "clarify")
+    }
+  No prose, no markdown, no code fences. JSON only.
+user: |
+  enabled_refs_count: {enabled_refs_count}
+
+  User message:
+  {user_message}
+```
+
+- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_models.py -v` → PASS.
+- [ ] **Step 5: Commit** — `git commit -m "feat(router): prompt resolves anaphora into resolved_query + clarify"`
+
+### v2.11-8 — Full gate + real-LLM trace verification
+
+- [ ] **Step 1: Full backend gate** (from `backend/`): `uv run pytest -v`; `uv run ruff check src tests`; `uv run mypy src` → all green. (`effective_query(state) -> str`; `AgentState` is `total=False` so the helper's `state["user_message"]` access matches existing call sites.)
+- [ ] **Step 2: Mocked smoke** — `.\scripts\smoke_chat.ps1` → exit 0.
+- [ ] **Step 3: Real-LLM verification of the original regression** (requires `backend/.env`). Reproduce the session-72 shape: turn 1 establishes "discrete diffusion distillation / flow matching", turn 2 is "推薦幾篇". Read the new run from SQLite per the CLAUDE.md tracing recipe — `uv run paperhub-replay --run-id <N>` then `SELECT step_index, tool, args_redacted_json, result_summary_json FROM tool_calls WHERE run_id=<N> ORDER BY step_index;`. Expected (confirmed from the trace, **not** assumed):
+  - `router:classify` `result_summary_json.resolved_query` is a self-contained topic brief (NOT "推薦幾篇").
+  - `paper_search:parse` `args_redacted_json.user_message` equals that brief and `result_summary_json.requests` is NON-empty.
+  - The turn ends with resolved candidates / a topical synthesis — not "請問您對哪個領域或主題的論文感興趣呢？".
+- [ ] **Step 4: Docs** — `CLAUDE.md` (bump Plan C follow-ups + add a "Pointers" entry: *"Why does a bare follow-up like '推薦幾篇' now work? → router resolves anaphora into `resolved_query`; downstream agents read `effective_query` (v2.11)"*); SRS §III-7 / §III-3 v2.11 changelog entry (history-aware stage resolves once; downstream stays history-free); update the Plan C "as-shipped" list to include v2.11. Commit: `git commit -m "docs: record Plan C v2.11 router context dispatch"`.
+
+### v2.11 self-review (author)
+
+- **Decision coverage:** extend-the-router ✓ (v2.11-1,2,7); all-agents scope ✓ (v2.11-4,5); router-asks-clarifying-Q ✓ (v2.11-1,6,7); observability ✓ (`resolved_query` lands in the router `tool_calls` row via existing `record_result(decision.model_dump())`; clarify needs no new model call).
+- **Backward-compat:** `resolved_query` defaults to `""`; legacy 4-field mocks/tests keep passing (v2.11-1 first test pins this).
+- **DRY:** single `effective_query()` helper used at all five read sites.
+- **Type consistency:** `effective_query(state: AgentState) -> str`; field `resolved_query` / slot `effective_query` used identically across v2.11-1…7.
+- **Out of scope:** the `paper_qa_stream` legacy façade ([`research.py:161`](../../../backend/src/paperhub/agents/research.py#L161)) only consumes the question inside the subgraph (covered); its empty-refs sentinel doesn't touch the query, so no change needed there.
