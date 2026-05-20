@@ -49,7 +49,7 @@ MAX_SECTION_READS: int = 5
 #   [chunk:101, chunk:102]    ✗ old missed (repeated `chunk:` prefix)
 #   (chunk:101) or chunk:101  ✗ old missed (non-bracketed)
 #
-# Empirical: gemini-2.5-flash-lite uses the third + fourth form heavily.
+# Empirical: gemini-3.1-flash-lite uses the third + fourth form heavily.
 # Scanning for the token directly catches every variant and is robust to
 # future format drift.
 _CHUNK_MARKER_RE = re.compile(r"chunk:(\d+)")
