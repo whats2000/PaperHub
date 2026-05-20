@@ -242,7 +242,9 @@ async def test_ingest_arxiv_renders_from_flattened_source(
             IngestRequest(session_id=session_id, arxiv_id=_FIXTURE_ARXIV_ID)
         )
 
-    assert captured["source"].name == "source.flattened.tex"
+    # Renders from the figure-normalized flattened copy, NOT the original main
+    # .tex (whose \input chains made pandoc hang/OOM).
+    assert captured["source"].name == "source.render.tex"
     # Figures live in the extracted source tree, passed so pandoc can embed them.
     assert "resource_dir" in captured
 

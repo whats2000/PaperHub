@@ -42,6 +42,7 @@ from paperhub.pipelines.extract import (
     extract_pdf,
     extract_pdf_page1_text,
 )
+from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
@@ -247,12 +248,20 @@ class PaperPipeline:
         # hang/OOM resolving includes (arxiv:2410.12557 reproduced that), and
         # its char offsets align with chunk char_start/char_end + sections_json
         # (all computed against flattened_text) for the Citation Canvas.
+        # Rasterize PDF figures -> PNG + rewrite \includegraphics refs so pandoc
+        # can embed them (arxiv figures are commonly PDF, often extensionless).
+        # Render from this normalized copy; chunk/section offsets keep using the
+        # unmodified full_text. Figures live in the extracted source tree
+        # (source_path.parent) — pass it as resource_dir so pandoc finds + embeds
+        # them into a self-contained artefact for the Citation Canvas.
         html_path = cache_dir / "source.html"
-        # Figures live in the extracted source tree (source_path.parent), not
-        # next to the flattened .tex — pass it as resource_dir so pandoc finds
-        # + embeds them into a self-contained artefact for the Citation Canvas.
+        render_tex_path = cache_dir / "source.render.tex"
+        render_tex_path.write_text(
+            rasterize_and_normalize_figures(full_text, source_path.parent),
+            encoding="utf-8",
+        )
         render_html(
-            source=flat_path, kind="latex", out_path=html_path,
+            source=render_tex_path, kind="latex", out_path=html_path,
             resource_dir=source_path.parent,
         )
 
@@ -389,9 +398,14 @@ class PaperPipeline:
             source_path = ext.main_path
             flat_path = cache_dir / "source.flattened.tex"
             flat_path.write_text(full_text, encoding="utf-8")
-            # Render from the flattened single-file source (see arxiv branch):
-            # avoids pandoc hang/OOM on \input chains + aligns canvas offsets.
-            render_source = flat_path
+            # Render from a figure-normalized copy of the flattened source (see
+            # arxiv branch): avoids pandoc hang/OOM on \input chains, rasterizes
+            # PDF figures, and aligns canvas offsets (chunks use full_text).
+            render_source = cache_dir / "source.render.tex"
+            render_source.write_text(
+                rasterize_and_normalize_figures(full_text, source_path.parent),
+                encoding="utf-8",
+            )
             # Figures live in the extracted source tree, not next to the
             # flattened .tex — let pandoc find + embed them.
             render_resource_dir: Path | None = source_path.parent
