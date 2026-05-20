@@ -181,22 +181,33 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
     async def _ps_process(state: AgentState) -> AgentState:
         writer = get_stream_writer()
         run_id: int = state["run_id"]
-        last_step = int(state.get("ps_last_step_index", -1))
+        baseline_step = int(state.get("ps_last_step_index", -1))
         requests: list[ParsedRequest] = list(state.get("ps_parsed_requests") or [])
         # Lock-guarded incremental drain: each gather task calls this
         # after every Discoverer iteration / Resolver call so the
         # frontend trace panel sees rows as they close, not all-at-once
-        # 40+ seconds later when gather() resolves. Same pattern as
-        # _pq_map below.
+        # 40+ seconds later when gather() resolves.
+        #
+        # Drain bookkeeping uses a ``set[int]`` of emitted step_indexes
+        # against a FIXED ``baseline_step`` rather than a monotonic
+        # ``last_step`` watermark. The tracer assigns step_index at OPEN
+        # time but commits at CLOSE time, so a request that opened first
+        # (low index) but finished slowest commits AFTER a sibling's
+        # higher index. A monotonic watermark advances past the low index
+        # before it was ever read, permanently dropping that row from the
+        # trace stream (the missing #10/#12 in real runs). The set-based
+        # dedup is robust against any commit-order interleaving — same fix
+        # as _pq_dispatch below.
+        emitted_indices: set[int] = set()
         drain_lock = asyncio.Lock()
 
         async def _emit_progress() -> None:
-            nonlocal last_step
             async with drain_lock:
-                recs = await drain_tool_calls_since(deps.conn, run_id, last_step)
+                recs = await drain_tool_calls_since(deps.conn, run_id, baseline_step)
                 for rec in recs:
-                    writer({"event": "tool_step", "record": rec})
-                    last_step = rec["step_index"]
+                    if rec["step_index"] not in emitted_indices:
+                        writer({"event": "tool_step", "record": rec})
+                        emitted_indices.add(rec["step_index"])
 
         async def _process_one(req: ParsedRequest) -> ResolvedPaper | ParsedRequest:
             """Discover → Resolve, exactly one pass.
@@ -254,12 +265,16 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         not_found: list[ParsedRequest] = [
             r for r in results if isinstance(r, ParsedRequest)
         ]
-        last_step = await _drain_and_stream_tool_steps(last_step, run_id)
+        # Final sweep: catch any rows committed between a task's last
+        # _emit_progress and gather() resolving. Set-based, so already-
+        # streamed rows are skipped.
+        await _emit_progress()
+        next_last_step = max(emitted_indices) if emitted_indices else baseline_step
         return {
             **state,
             "ps_resolved": resolved,
             "ps_not_found": not_found,
-            "ps_last_step_index": last_step,
+            "ps_last_step_index": next_last_step,
         }
 
     async def _ps_finalize(state: AgentState) -> AgentState:
