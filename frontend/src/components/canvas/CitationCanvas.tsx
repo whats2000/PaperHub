@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { getChunk, getDocumentMode, API_BASE_URL } from "@/lib/api";
 import { findAndHighlight } from "@/lib/findAndHighlight";
+import { applyIframeTheme } from "@/lib/applyIframeTheme";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -23,10 +25,13 @@ export function CitationCanvas() {
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
 
-  // Derive active session's enabled references (mirror ReferenceSourcesPanel)
+  // Derive the active session's enabled references (mirror ReferenceSourcesPanel)
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const sessions = useChatStore((s) => s.sessions);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
+
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const activeSession =
     activeSessionId !== null
@@ -39,21 +44,34 @@ export function CitationCanvas() {
       : [];
   const refs = allRefs.filter((r) => r.enabled);
 
-  // Local state
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
   const [stale, setStale] = useState(false);
-  const [mode, setMode] = useState<"pdf" | "html" | null>(null);
+  // Per-paper resolved view mode. This Record IS the keep-alive cache: every
+  // paper we resolve a mode for gets an iframe that stays mounted, so switching
+  // back is instant (no re-parse / MathJax re-render).
+  const [modeByPaper, setModeByPaper] = useState<Record<number, "pdf" | "html">>(
+    {},
+  );
   const [overflowOpen, setOverflowOpen] = useState(false);
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  // Tracks the src URL that the iframe has *actually* finished loading.
-  const loadedSrcRef = useRef<string | null>(null);
+  // paper_content_id -> its mounted iframe element
+  const iframeEls = useRef<Map<number, HTMLIFrameElement>>(new Map());
 
   const firstEnabledRef = refs.length > 0 ? refs[0] : null;
-  const effectivePaperId = displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null;
+  const effectivePaperId =
+    displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null;
+  const activeMode =
+    effectivePaperId != null ? (modeByPaper[effectivePaperId] ?? null) : null;
 
-  // Resolve effect — keyed on requestNonce so same chunk re-clicked re-resolves
+  const titleFor = (pid: number): string =>
+    allRefs.find((r) => r.paper_content_id === pid)?.title ?? `Paper ${pid}`;
+  const srcFor = (pid: number, m: "pdf" | "html"): string =>
+    `${API_BASE_URL}/papers/content/${pid}/${m === "pdf" ? "pdf" : "html"}`;
+
+  // Resolve a clicked citation → its paper + highlight target. Keyed on
+  // requestNonce so the same chunk re-clicked re-resolves. Clears the request
+  // when done so a later browse-mode open doesn't re-jump here.
   useEffect(() => {
     if (!open || requestedChunkId == null) return;
     let cancelled = false;
@@ -75,9 +93,6 @@ export function CitationCanvas() {
         }
       })
       .finally(() => {
-        // Clear the request so a later browse-mode open (References button,
-        // which doesn't set a new request) doesn't re-resolve this chunk and
-        // jump back to it — even though the canvas remounts on each open.
         if (!cancelled) consumeCitation();
       });
     return () => {
@@ -86,53 +101,73 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
-  // Mode effect — keyed on effectivePaperId
+  // Resolve the document mode for the displayed paper once (cached in
+  // modeByPaper). Re-runs when modeByPaper changes but early-returns if already
+  // known, so it never loops or re-fetches.
   useEffect(() => {
-    if (effectivePaperId == null) return;
+    if (effectivePaperId == null || modeByPaper[effectivePaperId] != null) return;
+    const pid = effectivePaperId;
     let cancelled = false;
-    getDocumentMode(effectivePaperId)
+    getDocumentMode(pid)
       .then((m) => {
-        if (!cancelled) setMode(m);
+        if (!cancelled) setModeByPaper((prev) => ({ ...prev, [pid]: m }));
       })
       .catch(() => {
-        if (!cancelled) setMode("html");
+        if (!cancelled) setModeByPaper((prev) => ({ ...prev, [pid]: "html" }));
       });
     return () => {
       cancelled = true;
-      // Reset mode so the next paper doesn't briefly show the old mode's iframe.
-      setMode(null);
     };
-  }, [effectivePaperId]);
+  }, [effectivePaperId, modeByPaper]);
 
-  const src =
-    effectivePaperId != null && mode != null
-      ? `${API_BASE_URL}/papers/content/${effectivePaperId}/${mode === "pdf" ? "pdf" : "html"}`
-      : undefined;
-
-  // Highlight effect — same-paper re-highlight when the iframe is already loaded
+  // Re-apply the dark/light treatment to every loaded HTML iframe when the
+  // theme toggles (or new papers mount).
   useEffect(() => {
-    if (!activeChunk || mode !== "html") return;
-    if (activeChunk.paper_content_id !== effectivePaperId) return;
-    if (!src || loadedSrcRef.current !== src) return;
-    const doc = iframeRef.current?.contentDocument;
+    for (const [pid, el] of iframeEls.current) {
+      const doc = el.contentDocument;
+      if (doc?.body && modeByPaper[pid] === "html") {
+        applyIframeTheme(doc, isDark);
+      }
+    }
+  }, [isDark, modeByPaper]);
+
+  // Highlight the active paper's passage when it (or the active paper) changes
+  // and that iframe is already loaded (same-paper re-click / mode-resolve).
+  useEffect(() => {
+    if (
+      !activeChunk ||
+      activeMode !== "html" ||
+      effectivePaperId == null ||
+      activeChunk.paper_content_id !== effectivePaperId
+    ) {
+      return;
+    }
+    const doc = iframeEls.current.get(effectivePaperId)?.contentDocument;
     if (!doc || doc.readyState !== "complete" || !doc.body) return;
     const found = findAndHighlight(doc, activeChunk.text);
     if (!found) toast.message("Couldn't locate this passage in the paper");
-  }, [activeChunk, effectivePaperId, mode, src]);
+  }, [activeChunk, effectivePaperId, activeMode]);
 
-  const handleIframeLoad = (): void => {
-    if (src == null) return;
-    loadedSrcRef.current = src;
-    if (mode !== "html" || !activeChunk) return;
-    if (activeChunk.paper_content_id !== effectivePaperId) return;
-    const doc = iframeRef.current?.contentDocument;
-    if (!doc || !doc.body) return;
+  const handleIframeLoad = (pid: number): void => {
+    const doc = iframeEls.current.get(pid)?.contentDocument;
+    if (!doc) return;
+    if (modeByPaper[pid] === "html") applyIframeTheme(doc, isDark);
+    // Highlight only when this is the active paper opened from a citation.
+    if (
+      pid !== effectivePaperId ||
+      modeByPaper[pid] !== "html" ||
+      !activeChunk ||
+      activeChunk.paper_content_id !== pid ||
+      !doc.body
+    ) {
+      return;
+    }
     const found = findAndHighlight(doc, activeChunk.text);
     if (!found) toast.message("Couldn't locate this passage in the paper");
   };
 
-  const handleTabClick = (pcid: number) => {
-    setDisplayedPaperId(pcid);
+  const handleTabClick = (pid: number) => {
+    setDisplayedPaperId(pid);
     setActiveChunk(null);
     setStale(false);
     setOverflowOpen(false);
@@ -143,6 +178,9 @@ export function CitationCanvas() {
   const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);
   const overflowTabs = refs.slice(MAX_VISIBLE_TABS);
   const hasOverflow = overflowTabs.length > 0;
+
+  // Every paper we've resolved a mode for keeps its iframe mounted.
+  const mountedPapers = Object.keys(modeByPaper).map(Number);
 
   return (
     <aside
@@ -232,7 +270,7 @@ export function CitationCanvas() {
 
         {/* PDF citation notice */}
         {activeChunk &&
-          mode === "pdf" &&
+          activeMode === "pdf" &&
           activeChunk.paper_content_id === effectivePaperId && (
             <div
               role="status"
@@ -243,17 +281,28 @@ export function CitationCanvas() {
             </div>
           )}
 
-        {/* iframe — only when we know the mode */}
-        {src != null && (
-          <iframe
-            ref={iframeRef}
-            title="Citation Canvas"
-            src={src}
-            onLoad={handleIframeLoad}
-            sandbox="allow-scripts allow-same-origin"
-            className="h-full w-full flex-1 bg-white"
-          />
-        )}
+        {/* Keep-alive iframes: one per visited paper, only the active visible. */}
+        {mountedPapers.map((pid) => {
+          const m = modeByPaper[pid];
+          if (m == null) return null;
+          const isActive = pid === effectivePaperId;
+          return (
+            <iframe
+              key={pid}
+              ref={(el) => {
+                if (el) iframeEls.current.set(pid, el);
+                else iframeEls.current.delete(pid);
+              }}
+              title={`Citation Canvas — ${titleFor(pid)}`}
+              data-active={isActive}
+              src={srcFor(pid, m)}
+              onLoad={() => handleIframeLoad(pid)}
+              sandbox="allow-scripts allow-same-origin"
+              hidden={!isActive}
+              className="h-full w-full flex-1 bg-white"
+            />
+          );
+        })}
       </div>
     </aside>
   );
