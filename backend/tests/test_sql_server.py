@@ -42,6 +42,7 @@ async def test_describe_returns_columns(sql_ctx) -> None:
     cols = await _describe_handler("papers")
     names = {c["name"] for c in cols}
     assert {"session_id", "paper_content_id", "enabled"} <= names
+    assert all("name" in c and "type" in c for c in cols)
 
 
 @pytest.mark.asyncio
@@ -61,3 +62,13 @@ async def test_query_rejects_write(sql_ctx) -> None:
     out = await _query_handler("DELETE FROM papers")
     assert out["error"] == "rejected"
     assert "SELECT" in out["reason"] or "WITH" in out["reason"]
+
+
+@pytest.mark.asyncio
+async def test_query_caps_rows_at_200(sql_ctx) -> None:
+    # sql_ctx already created session 1 + one run.  Add 201 more runs.
+    for _ in range(201):
+        await sql_ctx.conn.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await sql_ctx.conn.commit()
+    out = await _query_handler("SELECT id FROM runs")
+    assert len(out["rows"]) == 200
