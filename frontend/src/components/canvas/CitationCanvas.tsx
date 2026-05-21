@@ -5,18 +5,30 @@ import { useTheme } from "next-themes";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
-import { getChunk, getDocumentMode } from "@/lib/api";
-import { findAndHighlight } from "@/lib/findAndHighlight";
-import { applyIframeTheme } from "@/lib/applyIframeTheme";
+import {
+  getChunk,
+  getDocumentMode,
+  fetchPaperHtml,
+  fetchPaperPdfData,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { HtmlView } from "@/components/canvas/HtmlView";
+import { PdfView } from "@/components/canvas/PdfView";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
 const MAX_VISIBLE_TABS = 3;
+
+interface DocEntry {
+  mode: "pdf" | "html";
+  status: "ready" | "error";
+  html?: string;
+  pdfData?: Uint8Array;
+}
 
 export function CitationCanvas() {
   const open = useCanvasStore((s) => s.open);
@@ -47,18 +59,13 @@ export function CitationCanvas() {
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
   const [stale, setStale] = useState(false);
-  // Per-paper resolved view mode. This Record IS the keep-alive cache: every
-  // paper we resolve a mode for gets an iframe that stays mounted, so switching
-  // back is instant (no re-parse / MathJax re-render).
-  const [modeByPaper, setModeByPaper] = useState<Record<number, "pdf" | "html">>(
-    {},
-  );
+  // Per-paper fetched document content. Survives the whole session (the canvas
+  // stays mounted) so re-opening / tab-switching never re-fetches.
+  const [docByPaper, setDocByPaper] = useState<Record<number, DocEntry>>({});
   const [overflowOpen, setOverflowOpen] = useState(false);
 
-  // paper_content_id -> its mounted iframe element
-  const iframeEls = useRef<Map<number, HTMLIFrameElement>>(new Map());
-  // Papers whose mode we've already kicked off a fetch for (prefetch dedupe).
-  const fetchedModes = useRef<Set<number>>(new Set());
+  // Papers we've already kicked off a fetch for (prefetch dedupe).
+  const fetchedDocs = useRef<Set<number>>(new Set());
 
   const refIds = refs.map((r) => r.paper_content_id);
   const refIdsKey = refIds.join(",");
@@ -66,21 +73,12 @@ export function CitationCanvas() {
   const firstEnabledRef = refs.length > 0 ? refs[0] : null;
   const effectivePaperId =
     displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null;
-  const activeMode =
-    effectivePaperId != null ? (modeByPaper[effectivePaperId] ?? null) : null;
-
-  const titleFor = (pid: number): string =>
-    allRefs.find((r) => r.paper_content_id === pid)?.title ?? `Paper ${pid}`;
-  // SAME-ORIGIN, relative URL (proxied by Vite to the backend). A cross-origin
-  // iframe (backend :8000 vs app :5173) has a null contentDocument, which
-  // breaks highlighting + dark-mode injection. The relative path keeps the
-  // iframe same-origin so we can read its document.
-  const srcFor = (pid: number, m: "pdf" | "html"): string =>
-    `/papers/content/${pid}/${m === "pdf" ? "pdf" : "html"}`;
+  const activeDoc =
+    effectivePaperId != null ? (docByPaper[effectivePaperId] ?? null) : null;
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
-  // requestNonce so the same chunk re-clicked re-resolves. Clears the request
-  // when done so a later browse-mode open doesn't re-jump here.
+  // requestNonce so the same chunk re-clicked re-resolves; consumes the request
+  // so a later browse-mode open doesn't re-jump here.
   useEffect(() => {
     if (!open || requestedChunkId == null) return;
     let cancelled = false;
@@ -110,80 +108,37 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
-  // Background prefetch: resolve the view-mode for EVERY enabled reference (not
-  // just the visible one) when the session's reference set changes — so each
-  // paper's iframe mounts + loads in the background and is ready before the
-  // user opens the panel. `fetchedModes` dedupes so each paper is probed once.
+  // Background prefetch: fetch the document (mode + content) for EVERY enabled
+  // reference when the session's reference set changes, so each paper is ready
+  // before the user opens it. `fetchedDocs` dedupes so each paper loads once.
   useEffect(() => {
     let cancelled = false;
     for (const pid of refIds) {
-      if (fetchedModes.current.has(pid)) continue;
-      fetchedModes.current.add(pid);
-      getDocumentMode(pid)
-        .then((m) => {
+      if (fetchedDocs.current.has(pid)) continue;
+      fetchedDocs.current.add(pid);
+      void (async () => {
+        try {
+          const mode = await getDocumentMode(pid);
+          const entry: DocEntry =
+            mode === "pdf"
+              ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
+              : { mode, status: "ready", html: await fetchPaperHtml(pid) };
+          if (!cancelled) setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
+        } catch {
           if (!cancelled)
-            setModeByPaper((prev) =>
-              prev[pid] != null ? prev : { ...prev, [pid]: m },
-            );
-        })
-        .catch(() => {
-          if (!cancelled)
-            setModeByPaper((prev) =>
-              prev[pid] != null ? prev : { ...prev, [pid]: "html" },
-            );
-        });
+            setDocByPaper((prev) => ({
+              ...prev,
+              [pid]: { mode: "html", status: "error" },
+            }));
+          fetchedDocs.current.delete(pid); // allow a retry on a later pass
+        }
+      })();
     }
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refIdsKey]);
-
-  // Re-apply the dark/light treatment to every loaded HTML iframe when the
-  // theme toggles (or new papers mount).
-  useEffect(() => {
-    for (const [pid, el] of iframeEls.current) {
-      const doc = el.contentDocument;
-      if (doc?.body && modeByPaper[pid] === "html") {
-        applyIframeTheme(doc, isDark);
-      }
-    }
-  }, [isDark, modeByPaper]);
-
-  // Highlight the active paper's passage when it (or the active paper) changes
-  // and that iframe is already loaded (same-paper re-click / mode-resolve).
-  useEffect(() => {
-    if (
-      !activeChunk ||
-      activeMode !== "html" ||
-      effectivePaperId == null ||
-      activeChunk.paper_content_id !== effectivePaperId
-    ) {
-      return;
-    }
-    const doc = iframeEls.current.get(effectivePaperId)?.contentDocument;
-    if (!doc || doc.readyState !== "complete" || !doc.body) return;
-    const found = findAndHighlight(doc, activeChunk.text);
-    if (!found) toast.message("Couldn't locate this passage in the paper");
-  }, [activeChunk, effectivePaperId, activeMode]);
-
-  const handleIframeLoad = (pid: number): void => {
-    const doc = iframeEls.current.get(pid)?.contentDocument;
-    if (!doc) return;
-    if (modeByPaper[pid] === "html") applyIframeTheme(doc, isDark);
-    // Highlight only when this is the active paper opened from a citation.
-    if (
-      pid !== effectivePaperId ||
-      modeByPaper[pid] !== "html" ||
-      !activeChunk ||
-      activeChunk.paper_content_id !== pid ||
-      !doc.body
-    ) {
-      return;
-    }
-    const found = findAndHighlight(doc, activeChunk.text);
-    if (!found) toast.message("Couldn't locate this passage in the paper");
-  };
 
   const handleTabClick = (pid: number) => {
     setDisplayedPaperId(pid);
@@ -193,7 +148,7 @@ export function CitationCanvas() {
   };
 
   // Stay mounted while there are references to prefetch (even when closed) so
-  // their iframes load + cache for the session; only truly render nothing when
+  // their content loads + caches for the session; render nothing only when
   // closed AND there's nothing to prefetch.
   if (!open && refs.length === 0) return null;
 
@@ -201,10 +156,9 @@ export function CitationCanvas() {
   const overflowTabs = refs.slice(MAX_VISIBLE_TABS);
   const hasOverflow = overflowTabs.length > 0;
 
-  // Keep an iframe mounted for every enabled reference of THIS session that has
-  // a resolved mode (prefetched). Scoping to current refs drops the previous
-  // session's iframes when references change.
-  const mountedPapers = refIds.filter((pid) => modeByPaper[pid] != null);
+  // HTML papers stay mounted (hidden) for instant switching; PDF papers render
+  // only when active (react-pdf is heavy). Content is cached either way.
+  const htmlPapers = refIds.filter((pid) => docByPaper[pid]?.mode === "html");
 
   return (
     <aside
@@ -283,7 +237,6 @@ export function CitationCanvas() {
 
       {/* Body */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
-        {/* Stale/404 notice */}
         {stale && (
           <div
             role="status"
@@ -294,9 +247,8 @@ export function CitationCanvas() {
           </div>
         )}
 
-        {/* PDF citation notice */}
         {activeChunk &&
-          activeMode === "pdf" &&
+          activeDoc?.mode === "pdf" &&
           activeChunk.paper_content_id === effectivePaperId && (
             <div
               role="status"
@@ -307,31 +259,50 @@ export function CitationCanvas() {
             </div>
           )}
 
-        {/* Keep-alive iframes: one per visited paper, only the active visible. */}
-        {mountedPapers.map((pid) => {
-          const m = modeByPaper[pid];
-          if (m == null) return null;
+        {/* Loading / error for the active paper */}
+        {effectivePaperId != null && activeDoc == null && !stale && (
+          <div className="p-4 text-xs text-muted-foreground">Loading paper…</div>
+        )}
+        {activeDoc?.status === "error" && (
+          <div className="p-4 text-xs text-destructive">
+            Couldn&apos;t load this paper.
+          </div>
+        )}
+
+        {/* HTML papers: kept mounted (hidden) for instant switching. */}
+        {htmlPapers.map((pid) => {
+          const doc = docByPaper[pid];
+          if (doc?.status !== "ready" || doc.html == null) return null;
           const isActive = pid === effectivePaperId;
           return (
-            <iframe
+            <div
               key={pid}
-              ref={(el) => {
-                if (el) iframeEls.current.set(pid, el);
-                else iframeEls.current.delete(pid);
-              }}
-              title={`Citation Canvas — ${titleFor(pid)}`}
-              data-active={isActive}
-              src={srcFor(pid, m)}
-              onLoad={() => handleIframeLoad(pid)}
-              // HTML: sandbox (allow-scripts for MathJax, allow-same-origin so
-              // we can read the doc to highlight). PDF: no sandbox — the
-              // browser's native PDF viewer can be blocked by the sandbox.
-              sandbox={m === "pdf" ? undefined : "allow-scripts allow-same-origin"}
               hidden={!isActive}
-              className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
-            />
+              className="flex h-full w-full flex-1 flex-col"
+            >
+              <HtmlView
+                html={doc.html}
+                isDark={isDark}
+                highlightText={
+                  isActive &&
+                  activeChunk &&
+                  activeChunk.paper_content_id === pid
+                    ? activeChunk.text
+                    : null
+                }
+                onHighlightMiss={() =>
+                  toast.message("Couldn't locate this passage in the paper")
+                }
+              />
+            </div>
           );
         })}
+
+        {/* PDF papers: render only the active one (react-pdf is heavy). */}
+        {effectivePaperId != null &&
+          activeDoc?.mode === "pdf" &&
+          activeDoc.status === "ready" &&
+          activeDoc.pdfData != null && <PdfView data={activeDoc.pdfData} />}
       </div>
     </aside>
   );

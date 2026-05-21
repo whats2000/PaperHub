@@ -16,6 +16,14 @@ import {
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), message: vi.fn() } }));
 import { toast } from "sonner";
 
+// react-pdf pulls in pdfjs (worker, canvas) which doesn't run under jsdom —
+// stub it to a simple marker so we can assert the PDF path without rendering.
+vi.mock("@/components/canvas/PdfView", () => ({
+  PdfView: ({ data }: { data: Uint8Array }) => (
+    <div data-testid="pdf-view">pdf:{data.length}</div>
+  ),
+}));
+
 import { CitationCanvas } from "@/components/canvas/CitationCanvas";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
@@ -36,8 +44,8 @@ function ref(over: Partial<ReferenceItem> = {}): ReferenceItem {
   };
 }
 
-const activeIframe = (c: HTMLElement): HTMLIFrameElement | null =>
-  c.querySelector('iframe[data-active="true"]');
+const htmlBody = (label: string) =>
+  `<!DOCTYPE html><html><body><p>${label} body</p></body></html>`;
 
 const server = setupServer(
   http.get(`${API_BASE_URL}/chunks/42`, () =>
@@ -53,6 +61,12 @@ const server = setupServer(
   ),
   http.get(`${API_BASE_URL}/papers/content/8/document`, () =>
     HttpResponse.json({ mode: "html" }),
+  ),
+  http.get(`${API_BASE_URL}/papers/content/7/html`, () =>
+    HttpResponse.text(htmlBody("Paper A")),
+  ),
+  http.get(`${API_BASE_URL}/papers/content/8/html`, () =>
+    HttpResponse.text(htmlBody("Paper B")),
   ),
 );
 
@@ -71,6 +85,9 @@ beforeEach(() => {
   ]);
 });
 
+const activeHtmlView = (c: HTMLElement): HTMLIFrameElement | null =>
+  c.querySelector('div:not([hidden]) > iframe[title="Citation Canvas"]');
+
 describe("CitationCanvas reading panel", () => {
   it("renders nothing when closed with no references", () => {
     useChatStore.getState().setReferences(99, []);
@@ -78,68 +95,46 @@ describe("CitationCanvas reading panel", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("prefetches all references while closed (iframes mounted, panel hidden)", async () => {
-    const { container } = render(<CitationCanvas />);
-    // Closed but refs exist → panel stays mounted (hidden) and prefetches both
-    // papers' iframes so they're ready before the user opens it.
-    await waitFor(() =>
-      expect(container.querySelectorAll("iframe")).toHaveLength(2),
-    );
-    expect(
-      container.querySelector('aside[aria-label="Citation Canvas"]'),
-    ).toHaveAttribute("aria-hidden", "true");
-  });
-
-  it("opening via citation resolves the chunk and shows that paper (html)", async () => {
+  it("embeds the paper HTML via srcdoc (same-origin) when opened via citation", async () => {
     const { container } = render(<CitationCanvas />);
     act(() => useCanvasStore.getState().openCitation(42));
-    await waitFor(() =>
-      expect(activeIframe(container)).toHaveAttribute(
-        "src",
-        "/papers/content/7/html",
-      ),
-    );
-    expect(activeIframe(container)).toHaveAttribute(
-      "sandbox",
-      "allow-scripts allow-same-origin",
-    );
+    await waitFor(() => {
+      const iframe = activeHtmlView(container);
+      expect(iframe).not.toBeNull();
+      expect(iframe?.getAttribute("srcdoc")).toContain("Paper A body");
+    });
   });
 
-  it("renders a switcher tab per enabled reference; clicking switches the paper and keeps both iframes alive", async () => {
+  it("switches papers via the tab switcher", async () => {
     const { container } = render(<CitationCanvas />);
     act(() => useCanvasStore.getState().toggleCanvas());
     await waitFor(() =>
-      expect(activeIframe(container)).toHaveAttribute(
-        "src",
-        "/papers/content/7/html",
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper A body",
       ),
     );
-    expect(screen.getByRole("button", { name: /Paper A/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Paper B/ }));
     await waitFor(() =>
-      expect(activeIframe(container)).toHaveAttribute(
-        "src",
-        "/papers/content/8/html",
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper B body",
       ),
     );
-    // Keep-alive: the previously-viewed Paper A iframe is still mounted.
-    expect(container.querySelectorAll("iframe")).toHaveLength(2);
   });
 
-  it("shows the source PDF (not html) for a pdf-rendered paper", async () => {
+  it("renders a PDF via react-pdf (PdfView) for pdf-rendered papers", async () => {
     server.use(
       http.get(`${API_BASE_URL}/papers/content/7/document`, () =>
         HttpResponse.json({ mode: "pdf" }),
       ),
-    );
-    const { container } = render(<CitationCanvas />);
-    act(() => useCanvasStore.getState().openCitation(42));
-    await waitFor(() =>
-      expect(activeIframe(container)).toHaveAttribute(
-        "src",
-        "/papers/content/7/pdf",
+      http.get(`${API_BASE_URL}/papers/content/7/pdf`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3, 4]).buffer, {
+          headers: { "Content-Type": "application/pdf" },
+        }),
       ),
     );
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+    expect(await screen.findByTestId("pdf-view")).toBeInTheDocument();
     expect(
       await screen.findByText(/source PDF|isn't available for PDF/i),
     ).toBeInTheDocument();
@@ -162,10 +157,9 @@ describe("CitationCanvas reading panel", () => {
   it("close hides the panel (aria-hidden) and clears open", async () => {
     const { container } = render(<CitationCanvas />);
     act(() => useCanvasStore.getState().openCitation(42));
-    await waitFor(() => expect(activeIframe(container)).not.toBeNull());
+    await waitFor(() => expect(activeHtmlView(container)).not.toBeNull());
     await userEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(useCanvasStore.getState().open).toBe(false);
-    // Panel stays mounted (keep-alive cache survives) but is hidden + inert.
     expect(
       container.querySelector('aside[aria-label="Citation Canvas"]'),
     ).toHaveAttribute("aria-hidden", "true");
