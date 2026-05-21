@@ -8,6 +8,7 @@ import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
+import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
 import { cn } from "@/lib/utils";
 
 const CitationCanvas = lazy(() =>
@@ -24,6 +25,10 @@ export function ChatPage() {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
   const { send } = useChatStream();
+
+  // Close the canvas when the user switches chat sessions (it shows the
+  // previous session's references).
+  useCloseCanvasOnSessionChange(activeSessionId);
 
   const activeSession =
     activeSessionId === null
