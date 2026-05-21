@@ -23,3 +23,5 @@ user: |
 
   NOT_FOUND (angles the pipeline couldn't locate a paper for):
   {not_found_block}
+
+  Write your prose in {response_language}, but keep paper titles verbatim.

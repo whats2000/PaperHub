@@ -30,7 +30,7 @@ async def test_stream_yields_tokens() -> None:
     chunks: list[str] = []
     async for token in adapter.stream(
         slot="chitchat/v1",
-        variables={"user_message": "hi"},
+        variables={"user_message": "hi", "response_language": "English"},
         model="gpt-4o-mini",
         mock_response="Hello there!",
     ):

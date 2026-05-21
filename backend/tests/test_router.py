@@ -33,6 +33,53 @@ async def test_router_node_returns_routing_decision(
     assert updated["routing_decision"].intent == "paper_search"
 
 
+async def test_router_propagates_response_language(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The router's detected language round-trips into AgentState so
+    downstream final-response agents answer in the user's language."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1,
+        "user_message": "推薦幾篇關於 MoE routing 的論文",
+    }
+    adapter = LiteLlmAdapter()
+    updated = await router_node(
+        state, adapter=adapter, tracer=tracer, model="gpt-4o-mini",
+        mock_response='{"intent":"paper_suggest","model_tier":"small",'
+                      '"confidence":0.9,"reasoning":"topic recs",'
+                      '"resolved_query":"recommend papers on MoE routing",'
+                      '"response_language":"Traditional Chinese"}',
+    )
+    assert updated["routing_decision"].response_language == "Traditional Chinese"
+    assert updated["response_language"] == "Traditional Chinese"
+
+
+async def test_router_response_language_defaults_empty(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A router response omitting response_language parses with "" (the
+    field is optional), and state mirrors that empty value."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1, "user_message": "hi",
+    }
+    adapter = LiteLlmAdapter()
+    updated = await router_node(
+        state, adapter=adapter, tracer=tracer, model="gpt-4o-mini",
+        mock_response='{"intent":"chitchat","model_tier":"small",'
+                      '"confidence":0.8,"reasoning":"greeting"}',
+    )
+    assert updated["routing_decision"].response_language == ""
+    assert updated["response_language"] == ""
+
+
 async def test_router_persists_decision_on_run(
     migrated_db: aiosqlite.Connection,
 ) -> None:

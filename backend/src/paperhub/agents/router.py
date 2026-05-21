@@ -61,4 +61,5 @@ async def router_node(
         **state,
         "routing_decision": decision,
         "effective_query": decision.resolved_query or user_message,
+        "response_language": decision.response_language,
     }

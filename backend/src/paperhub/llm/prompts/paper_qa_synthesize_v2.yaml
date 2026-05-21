@@ -28,4 +28,5 @@ user: |
   {per_paper_block}
   --- END PAPERS ---
 
-  Compose the synthesis.
+  Compose the synthesis. Write the prose in {response_language}, but keep the
+  `[chunk:<id>]` citation markers and the paper TITLES exactly as given.

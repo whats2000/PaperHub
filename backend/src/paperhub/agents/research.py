@@ -22,7 +22,7 @@ from typing import Any
 
 import aiosqlite
 
-from paperhub.agents.state import AgentState
+from paperhub.agents.state import AgentState, response_language
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
 
@@ -148,6 +148,7 @@ async def paper_qa_finalize(
             variables={
                 "user_message": user_message,
                 "per_paper_block": per_paper_block,
+                "response_language": response_language(state),
             },
             model=model,
             history=state.get("history"),
