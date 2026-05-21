@@ -23,7 +23,7 @@ from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
-from paperhub.db.migrate import apply_schema
+from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
     build_paperhub_papers_server,
@@ -42,6 +42,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
+        # Reclaim storage from chats soft-deleted longer ago than the
+        # retention window (their messages/runs/papers cascade away).
+        purged = await purge_deleted_sessions(conn, settings.session_retention_days)
+        if purged:
+            _LOG.info("purged %d soft-deleted session(s) past retention", purged)
     # ChromaStore holds a PersistentClient; chromadb manages its own cleanup.
     app.state.chroma = ChromaStore(settings.chroma_dir)
 

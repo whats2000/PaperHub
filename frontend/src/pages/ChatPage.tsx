@@ -8,6 +8,7 @@ import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
+import { useSessionsSync } from "@/hooks/useSessionsSync";
 import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
 import { useCanvasResize } from "@/hooks/useCanvasResize";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const CitationCanvas = lazy(() =>
 
 export function ChatPage() {
   useGlobalShortcuts();
+  useSessionsSync();
   useReferencesSync();
   const canvasOpen = useCanvasStore((s) => s.open);
   const { width: canvasWidth, resizing, onPointerDown } = useCanvasResize();

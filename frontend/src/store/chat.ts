@@ -7,6 +7,8 @@ import type {
   ToolCallRecord,
   ReferenceItem,
   SearchResultCandidate,
+  SessionSummary,
+  BackendMessage,
 } from "@/types/domain";
 import { createBackendSession } from "@/lib/api";
 
@@ -66,6 +68,12 @@ interface ChatState {
     candidates: SearchResultCandidate[],
   ) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
+  // Cross-device sync (backend is source of truth)
+  reconcileBackendSessions: (summaries: SessionSummary[]) => void;
+  hydrateSessionMessages: (
+    sessionId: number,
+    messages: BackendMessage[],
+  ) => void;
 }
 
 function deriveTitle(content: string): string {
@@ -355,6 +363,96 @@ export const useChatStore = create<ChatState>()(
         get().patchSessionBackendId(sessionId, backendId);
         return backendId;
       },
+
+      reconcileBackendSessions: (summaries) =>
+        set((s) => {
+          // Mirror the DB: the backend is the source of truth for which
+          // sessions exist. Add backend sessions we don't have, and PRUNE
+          // local sessions whose backend row is gone (deleted elsewhere, or
+          // never persisted) — that's what stops phantom chats lingering in
+          // one browser's localStorage and ghosts reappearing after a delete.
+          const byBackendId = new Map(summaries.map((x) => [x.id, x]));
+
+          const kept = s.sessions
+            .filter(
+              (sess) =>
+                // A local draft that hasn't been sent yet (no backend row).
+                sess.backend_session_id === null ||
+                // Still exists in the DB.
+                byBackendId.has(sess.backend_session_id) ||
+                // Never yank the session the user is currently in, even if it
+                // isn't listed yet (e.g. brand-new, no messages persisted).
+                sess.id === s.activeSessionId ||
+                // SAFETY: never drop a session that holds messages locally.
+                // GET /sessions only lists sessions with messages in the DB,
+                // so a chat whose history lives only in this browser would
+                // otherwise be pruned — silent data loss. We only prune EMPTY
+                // local sessions the backend doesn't know about (phantom
+                // "New chat" clutter, or backend-only sessions deleted
+                // elsewhere that were never opened/hydrated here).
+                sess.messages.length > 0,
+            )
+            .map((sess) => {
+              // Backend owns the title (derived from the first message).
+              const summary =
+                sess.backend_session_id !== null
+                  ? byBackendId.get(sess.backend_session_id)
+                  : undefined;
+              return summary ? { ...sess, title: summary.title } : sess;
+            });
+
+          const localBackendIds = new Set(
+            kept
+              .map((sess) => sess.backend_session_id)
+              .filter((id): id is number => id !== null),
+          );
+
+          let nextId = s._nextId;
+          const additions: ChatSession[] = [];
+          for (const summary of summaries) {
+            if (localBackendIds.has(summary.id)) continue;
+            additions.push({
+              id: nextId,
+              title: summary.title,
+              messages: [],
+              backend_session_id: summary.id,
+            });
+            nextId += 1;
+          }
+
+          // No-op guard: nothing added and nothing pruned/retitled.
+          if (
+            additions.length === 0 &&
+            kept.length === s.sessions.length &&
+            kept.every((sess, i) => sess === s.sessions[i])
+          ) {
+            return s;
+          }
+          // Backend list is newest-first; show backend sessions ahead of any
+          // local-only draft, preserving backend order.
+          return { sessions: [...additions, ...kept], _nextId: nextId };
+        }),
+
+      hydrateSessionMessages: (sessionId, messages) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            // Only fill a placeholder — never clobber a session that already
+            // holds (possibly live-streaming) messages in this browser.
+            if (sess.id !== sessionId || sess.messages.length > 0) return sess;
+            const mapped: ChatMessage[] = messages
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .map((m) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                run_id: m.run_id,
+                status: "ok" as const,
+                ...(m.routing_decision
+                  ? { routing_decision: m.routing_decision }
+                  : {}),
+              }));
+            return { ...sess, messages: mapped };
+          }),
+        })),
     }),
     {
       name: "paperhub-chat-v1",

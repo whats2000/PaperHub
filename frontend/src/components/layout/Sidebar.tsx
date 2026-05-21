@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesPanel";
-import { deleteBackendSession } from "@/lib/api";
+import { deleteBackendSession, restoreBackendSession } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 
 export function Sidebar() {
@@ -44,25 +44,40 @@ export function Sidebar() {
 
     const backendSessionId = removed.backend_session_id;
 
-    let undone = false;
+    // Delete authoritatively + immediately so the chat is gone on every
+    // device right away (empty sessions are hard-deleted server-side; ones
+    // with content are tombstoned). A local-only draft has no backend row.
+    if (backendSessionId != null) {
+      void deleteBackendSession(backendSessionId).catch((err: unknown) => {
+        // Roll the local removal back so the UI matches the server.
+        useChatStore.getState().restoreSession(removed, idx);
+        toast.error("Failed to delete chat", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     toast("Chat deleted", {
       description: removed.title,
       action: {
         label: "Undo",
         onClick: () => {
-          undone = true;
           useChatStore.getState().restoreSession(removed, idx);
+          // Un-tombstone on the server. An empty session was hard-deleted, so
+          // restore 404s — that's expected: the local copy is back and the
+          // backend row re-materialises on the next message. Only surface a
+          // genuine (non-404) failure.
+          if (backendSessionId != null) {
+            void restoreBackendSession(backendSessionId).catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.includes("404")) {
+                toast.error("Couldn't restore this chat on the server");
+              }
+            });
+          }
         },
       },
       duration: 5000,
-      onAutoClose: () => {
-        if (undone || backendSessionId == null) return;
-        void deleteBackendSession(backendSessionId).catch((err: unknown) => {
-          toast.error("Failed to delete chat on server", {
-            description: err instanceof Error ? err.message : String(err),
-          });
-        });
-      },
     });
   };
 
