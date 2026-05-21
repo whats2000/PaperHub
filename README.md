@@ -12,8 +12,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-340%20backend%20%2B%20105%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/Plan%20C-merged%20(SRS%20v2.10)-success)
+![Tests](https://img.shields.io/badge/tests-434%20backend%20%2B%20174%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/Plan%20D-merged%20(SRS%20v2.13)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 </div>
@@ -25,7 +25,8 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 ## ✨ What it does
 
 - **🔎 Agentic paper retrieval.** Ask a question across your enabled papers and a per-paper subagent *navigates each paper by its section table-of-contents* (`list_sections` → `read_section`) rather than blind cosine-similarity top-k, then a flagship model synthesises across papers over the raw cited chunks.
-- **🧷 Citation Canvas.** Inline `[chunk:N]` markers in every answer link back to the exact passage — click to scroll + highlight the source. No ungrounded claims.
+- **🧷 Citation Canvas.** Inline `[chunk:N]` markers in every answer link back to the exact passage — click to open a side-by-side reading panel that scrolls to and highlights the cited chunk, in both the LaTeX-rendered HTML *and* the source PDF. Multi-chunk markers (`[chunk:a, b]`) are each clickable. No ungrounded claims.
+- **🌍 Answers in your language.** The router detects the language of your question, so asking in Chinese is answered in Chinese — citation markers and paper titles preserved.
 - **🧭 Visible routing + tracing.** A routing badge shows which agent + model handled each turn; an expandable trace panel lists every model/MCP/pipeline step with latency and status. The full DAG replays from SQLite.
 - **🌐 Discovery via web + Semantic Scholar.** `paper_search` decomposes into Parser → Discover (no-key multi-engine web search) → Resolve (Semantic Scholar) → Synthesize, so even vague references ("that diffusion paper everyone cites") resolve to a citable hit.
 - **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant.
@@ -178,7 +179,7 @@ Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-
 | **A** | Backend foundation + Router-only chat | ✅ complete |
 | **B** | Frontend foundation (React shell, SSE, routing badge, trace panel) | ✅ complete |
 | **C** | Paper Pipeline + Research Agent (ingest, RAG, paper_search, agentic paper_qa, MCP layer, model-server, PDF upload) | ✅ complete — merged (SRS v2.10) |
-| **D** | Citation Canvas + full reference-sources surface | 🔜 planned |
+| **D** | Search results + Reference Sources + Citation Canvas (HTML + PDF passage highlighting) | ✅ complete — merged (SRS v2.13) |
 | **E** | SQL Agent + `library_stats` (sqlite MCP) | 🔜 planned |
 | **F** | Slide Pipeline + Report Agent | 🔜 planned |
 | **G** | Compare view + filesystem / `paperhub.*` MCP | 🔜 planned |
@@ -194,7 +195,7 @@ PaperHub is built spec → plan → TDD, with subagent-driven implementation and
 **Backend gates** (from `backend/`):
 
 ```bash
-uv run pytest          # 340 tests, hermetic
+uv run pytest          # 434 tests, hermetic
 uv run ruff check src tests
 uv run mypy src        # --strict
 ```
@@ -202,7 +203,7 @@ uv run mypy src        # --strict
 **Frontend gates** (from `frontend/`):
 
 ```bash
-npm test               # Vitest + RTL + MSW (105 tests)
+npm test               # Vitest + RTL + MSW (174 tests)
 npm run typecheck      # tsc --strict
 npm run lint           # ESLint flat config
 npm run build          # Vite production build
@@ -225,7 +226,7 @@ uv run paperhub-replay --run-id 1
 .
 ├── backend/
 │   ├── src/paperhub/         # FastAPI app · agents · pipelines · rag · mcp · modelserver · tracer
-│   ├── tests/                # pytest suite (340 tests, hermetic)
+│   ├── tests/                # pytest suite (434 tests, hermetic)
 │   └── pyproject.toml        # uv project · mypy --strict · ruff
 ├── frontend/                 # React 19 + Vite + Tailwind + Zustand
 ├── docs/superpowers/
@@ -242,7 +243,7 @@ uv run paperhub-replay --run-id 1
 
 ## 📖 Documentation
 
-- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.10**).
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.13**).
 - **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
 - **[Backend developer docs](backend/README.md)** — backend-specific notes.
 
