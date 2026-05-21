@@ -456,6 +456,9 @@ export const useChatStore = create<ChatState>()(
                 ...(m.routing_decision
                   ? { routing_decision: m.routing_decision }
                   : {}),
+                ...(m.search_results
+                  ? { search_results: m.search_results }
+                  : {}),
               }));
             return { ...sess, messages: mapped };
           }),

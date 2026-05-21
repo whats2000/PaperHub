@@ -125,4 +125,7 @@ export interface BackendMessage {
   run_id: number | null;
   created_at: string;
   routing_decision?: RoutingDecision;
+  /** Paper-search result cards emitted on this turn, replayed so they show on
+   *  every device (null for non-search turns). */
+  search_results?: SearchResultCandidate[] | null;
 }

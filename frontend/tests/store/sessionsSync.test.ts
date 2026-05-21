@@ -186,6 +186,42 @@ describe("hydrateSessionMessages", () => {
     expect(msgs[1]!.routing_decision?.intent).toBe("chitchat");
   });
 
+  it("replays search-result cards so they show on every device", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "find flow matching", run_id: 1, created_at: "t1" },
+      {
+        role: "assistant",
+        content: "Here are some papers",
+        run_id: 1,
+        created_at: "t2",
+        search_results: [
+          {
+            paper_id: "arxiv:1",
+            title: "Flow matching",
+            authors: ["A"],
+            year: 2024,
+            abstract: "x",
+            arxiv_id: "1",
+            has_open_pdf: true,
+            reason: "relevant",
+            finalize: true,
+            auto_added: true,
+            papers_id: 3,
+            error: null,
+            already_in_session: false,
+          },
+        ],
+      },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.search_results).toHaveLength(1);
+    expect(msgs[1]!.search_results![0]!.title).toBe("Flow matching");
+  });
+
   it("does not clobber a session that already has messages", () => {
     useChatStore.setState({
       sessions: [

@@ -554,6 +554,21 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                     for c in enriched
                                 ],
                             )
+                            # Persist the cards on the run so they replay
+                            # cross-device (GET /sessions/{id}/messages), not
+                            # just in the browser that ran the search.
+                            await conn.execute(
+                                "UPDATE runs SET search_results_json = ? "
+                                "WHERE id = ?",
+                                (
+                                    json.dumps(
+                                        [c.model_dump() for c in sr_evt.candidates],
+                                        separators=(",", ":"),
+                                    ),
+                                    run_id,
+                                ),
+                            )
+                            await conn.commit()
                             yield {
                                 "event": sr_evt.type,
                                 "data": sr_evt.model_dump_json(exclude={"type"}),

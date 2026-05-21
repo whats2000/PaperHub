@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.models.events import SearchCandidateModel
 
 router = APIRouter()
 
@@ -42,6 +43,7 @@ class MessageOut(BaseModel):
     run_id: int | None
     created_at: str
     routing_decision: RoutingDecisionOut | None = None
+    search_results: list[SearchCandidateModel] | None = None
 
 
 @router.post("/sessions", response_model=CreateSessionResponse, status_code=201)
@@ -123,7 +125,8 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                 raise HTTPException(404, f"chat_sessions row {session_id} not found")
         async with conn.execute(
             """
-            SELECT m.role, m.content, m.run_id, m.created_at, r.routing_decision_json
+            SELECT m.role, m.content, m.run_id, m.created_at,
+                   r.routing_decision_json, r.search_results_json
             FROM messages m
             LEFT JOIN runs r ON r.id = m.run_id
             WHERE m.session_id = ?
@@ -134,13 +137,22 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
             rows = await cur.fetchall()
 
     out: list[MessageOut] = []
-    for role, content, run_id, created_at, routing_json in rows:
+    for role, content, run_id, created_at, routing_json, cards_json in rows:
         decision: RoutingDecisionOut | None = None
-        if role == "assistant" and routing_json:
-            try:
-                decision = RoutingDecisionOut(**json.loads(routing_json))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                decision = None
+        cards: list[SearchCandidateModel] | None = None
+        if role == "assistant":
+            if routing_json:
+                try:
+                    decision = RoutingDecisionOut(**json.loads(routing_json))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    decision = None
+            if cards_json:
+                try:
+                    cards = [
+                        SearchCandidateModel(**c) for c in json.loads(cards_json)
+                    ]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    cards = None
         out.append(
             MessageOut(
                 role=str(role),
@@ -148,6 +160,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                 run_id=int(run_id) if run_id is not None else None,
                 created_at=str(created_at),
                 routing_decision=decision,
+                search_results=cards,
             )
         )
     return out

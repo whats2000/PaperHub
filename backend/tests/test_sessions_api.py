@@ -257,6 +257,45 @@ async def test_get_session_messages_returns_history(
     assert msgs[1]["routing_decision"]["intent"] == "chitchat"
 
 
+async def test_get_session_messages_replays_search_result_cards(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """Inline paper-search cards are persisted per run and replayed, so they
+    render identically on every device (not just the browser that ran the
+    search)."""
+    db_path = tmp_path / "paperhub.db"
+    candidates = (
+        '[{"paper_id":"arxiv:1","title":"Flow matching","authors":["A"],'
+        '"year":2024,"abstract":"x","arxiv_id":"1","has_open_pdf":true,'
+        '"reason":"relevant","finalize":true,"auto_added":true,"papers_id":3,'
+        '"error":null,"already_in_session":false}]'
+    )
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status, search_results_json) "
+            "VALUES (1, 1, 'ok', ?)",
+            (candidates,),
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'user', 'find flow matching', 1), "
+            "(1, 'assistant', 'Here are some papers [chunk:3]', 1)",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/messages")
+    assert resp.status_code == 200
+    msgs = resp.json()
+    # User turn carries no cards; assistant turn replays them.
+    assert msgs[0]["search_results"] is None
+    cards = msgs[1]["search_results"]
+    assert cards is not None and len(cards) == 1
+    assert cards[0]["title"] == "Flow matching"
+    assert cards[0]["papers_id"] == 3
+    assert cards[0]["auto_added"] is True
+
+
 async def test_get_session_messages_404_for_missing(
     sessions_client: AsyncClient,
 ) -> None:
