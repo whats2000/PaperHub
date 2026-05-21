@@ -274,18 +274,6 @@ export function CitationCanvas() {
           </div>
         )}
 
-        {activeChunk &&
-          activeDoc?.mode === "pdf" &&
-          activeChunk.paper_content_id === effectivePaperId && (
-            <div
-              role="status"
-              className="m-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
-            >
-              Showing the source PDF — passage highlighting isn&apos;t available
-              for PDF papers.
-            </div>
-          )}
-
         {/* Error for the active paper (loading is covered by the swap spinner). */}
         {activeDoc?.status === "error" && (
           <div className="p-4 text-xs text-destructive">

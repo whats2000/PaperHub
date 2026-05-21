@@ -5,7 +5,6 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
 import { PaperLoading } from "@/components/canvas/PaperLoading";
-import { HIGHLIGHT_CLASS } from "@/lib/findAndHighlight";
 import { locatePassage, type PdfPassageMatch } from "@/lib/pdfHighlight";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
@@ -15,8 +14,19 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-const escapeHtml = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+interface HighlightBoxes {
+  pageNumber: number;
+  rects: Rect[];
+  /** Stable per cited passage, so the overlay remounts (→ scrolls) on a NEW
+   *  citation but not on a resize-driven rect recompute. */
+  key: string;
+}
 
 interface Props {
   /** Raw PDF bytes (fetched same-origin via the API). */
@@ -28,26 +38,29 @@ interface Props {
 }
 
 /**
- * Renders a PDF inline as scrollable canvas pages via react-pdf — no iframe, so
- * no cross-origin issue and no browser download. The text layer is rendered so
- * the cited passage can be located and highlighted (the matched pdf.js text
- * items are wrapped in `<mark>` via `customTextRenderer`) and scrolled to.
+ * Renders a PDF inline as scrollable canvas pages via react-pdf. The text layer
+ * is rendered (so text is selectable), and the cited passage is highlighted by
+ * drawing translucent boxes over the matched pdf.js text items — positioned
+ * from the page's own viewport geometry (the same transform the canvas uses).
+ *
+ * We deliberately do NOT use react-pdf's `customTextRenderer`: it rewrites text-
+ * layer spans by an index that drifts on marked-content (figure) pages,
+ * mislocating the highlight and shifting the page's selectable text. A geometry
+ * overlay is independent of the text layer, so it always aligns with the canvas.
  */
 export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(0);
   const [match, setMatch] = useState<PdfPassageMatch | null>(null);
+  const [highlight, setHighlight] = useState<HighlightBoxes | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
-  // Per-document text-item index, built once and reused across passage changes.
+  // Per-document text-item strings, built once and reused across passages.
   const pageTextRef = useRef<string[][] | null>(null);
 
   // pdfjs TRANSFERS (detaches) the ArrayBuffer it's given to its worker, so
   // passing the cached bytes directly would corrupt them and make a second
-  // render ("switch away and back") fail with "Couldn't render this PDF". Give
-  // pdfjs a fresh COPY each mount and keep the cached original intact.
-  // (`file` is memoized so react-pdf — which compares by reference — doesn't
-  // reload on unrelated re-renders.)
+  // render fail. Give pdfjs a fresh COPY each mount; keep the cached original.
   const file = useMemo(() => ({ data: data.slice() }), [data]);
 
   // Fit pages to the container width (minus padding), tracking resize.
@@ -61,8 +74,8 @@ export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // Locate the cited passage once the document is loaded (numPages flips after
-  // onLoadSuccess, by which point pdfRef is set) or when the passage changes.
+  // Locate the cited passage (which page + which text items) once the document
+  // is loaded (numPages flips after onLoadSuccess) or when the passage changes.
   useEffect(() => {
     const pdf = pdfRef.current;
     if (!pdf || !highlightText) {
@@ -92,19 +105,51 @@ export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightText, numPages]);
 
-  // Wrap the matched text items in <mark> on the target page (other pages get
-  // the default renderer). Keyed on `match` so it re-applies on a new citation.
-  const renderHighlightedText = useCallback(
-    ({ str, itemIndex }: { str: string; itemIndex: number }) =>
-      match && match.itemIndexes.has(itemIndex)
-        ? `<mark class="${HIGHLIGHT_CLASS}">${escapeHtml(str)}</mark>`
-        : escapeHtml(str),
-    [match],
-  );
+  // Compute highlight rectangles from PDF geometry at the current render scale,
+  // so the overlay aligns exactly with the canvas regardless of the text layer.
+  useEffect(() => {
+    const pdf = pdfRef.current;
+    if (!pdf || !match || width <= 0) {
+      setHighlight(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const page = await pdf.getPage(match.pageNumber);
+      const scale = width / page.getViewport({ scale: 1 }).width;
+      const viewport = page.getViewport({ scale });
+      const text = await page.getTextContent();
+      const rects: Rect[] = [];
+      for (const idx of match.itemIndexes) {
+        const item = text.items[idx];
+        if (!item || !("transform" in item)) continue;
+        const tx = pdfjs.Util.transform(
+          viewport.transform,
+          item.transform,
+        ) as number[];
+        const fontHeight = Math.hypot(tx[2] ?? 0, tx[3] ?? 0);
+        rects.push({
+          left: tx[4] ?? 0,
+          top: (tx[5] ?? 0) - fontHeight,
+          width: item.width * scale,
+          height: fontHeight,
+        });
+      }
+      if (cancelled) return;
+      setHighlight({
+        pageNumber: match.pageNumber,
+        rects,
+        key: `${match.pageNumber}:${[...match.itemIndexes].join(",")}`,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [match, width]);
 
-  // Scroll to the highlight once its text layer has rendered into the DOM.
-  const scrollToHighlight = useCallback(() => {
-    const el = containerRef.current?.querySelector(`.${HIGHLIGHT_CLASS}`);
+  // Scroll the highlight into view when its overlay mounts (remounts per the
+  // `key`, i.e. once per cited passage — not on resize-driven rect updates).
+  const scrollHighlightIntoView = useCallback((el: HTMLDivElement | null) => {
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -130,17 +175,36 @@ export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
         }
       >
         {Array.from({ length: numPages }, (_, i) => {
-          const isTarget = match?.pageNumber === i + 1;
+          const isTarget = highlight?.pageNumber === i + 1;
           return (
             <Page
               key={i}
               pageNumber={i + 1}
               width={width > 0 ? width : undefined}
-              className="mx-auto mb-3 shadow"
+              className="relative mx-auto mb-3 shadow"
               renderAnnotationLayer={false}
-              customTextRenderer={isTarget ? renderHighlightedText : undefined}
-              onRenderTextLayerSuccess={isTarget ? scrollToHighlight : undefined}
-            />
+            >
+              {isTarget && highlight && (
+                <div
+                  key={highlight.key}
+                  ref={scrollHighlightIntoView}
+                  className="pointer-events-none absolute inset-0 z-10"
+                >
+                  {highlight.rects.map((r, k) => (
+                    <div
+                      key={k}
+                      className="absolute rounded-[2px] bg-yellow-300/45"
+                      style={{
+                        left: r.left,
+                        top: r.top,
+                        width: r.width,
+                        height: r.height,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </Page>
           );
         })}
       </Document>
