@@ -63,8 +63,10 @@ def build_graph(deps: GraphDeps) -> Any:
     async def _stub_slides(state: AgentState) -> AgentState:
         return {**state, "final_response": await stub_response(state, intent="slides")}
 
-    async def _stub_library_stats(state: AgentState) -> AgentState:
-        return {**state, "final_response": await stub_response(state, intent="library_stats")}
+    async def _library_stats(state: AgentState) -> AgentState:
+        # chat.py drives the streaming SQL agent directly; this node exists for
+        # build_graph completeness (the SSE path is the user-facing one).
+        return {**state, "final_response": "library_stats handled by the SQL Agent (see chat SSE path)."}
 
     async def _clarify(state: AgentState) -> AgentState:
         decision = state["routing_decision"]
@@ -82,7 +84,7 @@ def build_graph(deps: GraphDeps) -> Any:
     g.add_node("router", _router)
     g.add_node("chitchat", _chitchat)
     g.add_node("slides", _stub_slides)
-    g.add_node("library_stats", _stub_library_stats)
+    g.add_node("library_stats", _library_stats)
     g.add_node("clarify", _clarify)
     routes: dict[Hashable, str] = {
         "chitchat": "chitchat",
