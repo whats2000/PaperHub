@@ -144,15 +144,15 @@ When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`
 ## 🗺️ Architecture (one screen)
 
 ```
-┌─────────────────┐       SSE      ┌──────────────────────────────────────────┐
-│  React shell    │ ◄───────────── │ FastAPI · POST /chat                     │
-│  - Composer     │                │  ┌─────────────────────────────────────┐ │
-│  - Routing badge│                │  │ LangGraph turn                      │ │
-│  - Trace panel  │                │  │  Router ─► chitchat | paper_qa |    │ │
-│  - Citation     │                │  │           paper_search | slides |   │ │
-│    Canvas       │                │  │           library_stats             │ │
-└─────────────────┘                │  └─────────────────────────────────────┘ │
-                                   │     │                                    │
+┌─────────────────┐       SSE      ┌───────────────────────────────────────────┐
+│  React shell    │ ◄───────────── │ FastAPI · POST /chat                      │
+│  - Composer     │                │  ┌─────────────────────────────────────┐  │
+│  - Routing badge│                │  │ LangGraph turn                      │  │
+│  - Trace panel  │                │  │  Router ─► chitchat | paper_qa |    │  │
+│  - Citation     │                │  │           paper_search | slides |   │  │
+│    Canvas       │                │  │           library_stats             │  │
+└─────────────────┘                │  └─────────────────────────────────────┘  │
+                                   │     │                                     │
                                    │     ▼  paper_qa: fan out one subagent     │
                                    │        per paper → section nav →          │
                                    │        flagship finalizer over raw chunks │
@@ -161,9 +161,9 @@ When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`
                                    │  │ adapter │ │ (RAG)    │ │ (audit +   │  │
                                    │  │         │ │          │ │  schema)   │  │
                                    │  └─────────┘ └──────────┘ └────────────┘  │
-                                   │     ▲ embedder + reranker in a sibling     │
-                                   │       model-server process (:8001)         │
-                                   └──────────────────────────────────────────┘
+                                   │     ▲ embedder + reranker in a sibling    │
+                                   │       model-server process (:8001)        │
+                                   └───────────────────────────────────────────┘
 ```
 
 Every model call, MCP call, and pipeline step writes a `tool_calls` row before returning — enough state to reconstruct the full agent context from `SELECT * FROM tool_calls WHERE run_id = ?` alone. Paper content is **deduplicated**: one `paper_content` row + one cache dir + one set of chunks/vectors per unique paper, regardless of how many sessions reference it.
