@@ -3,6 +3,8 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
+import { PaperLoading } from "@/components/canvas/PaperLoading";
+
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
 // import.meta.url so the worker is bundled + served from the app origin.
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -53,9 +55,7 @@ export function PdfView({ data }: Props) {
       <Document
         file={file}
         onLoadSuccess={({ numPages: n }) => setNumPages(n)}
-        loading={
-          <div className="p-4 text-xs text-muted-foreground">Loading PDF…</div>
-        }
+        loading={<PaperLoading label="Loading PDF…" />}
         error={
           <div className="p-4 text-xs text-destructive">
             Couldn&apos;t render this PDF.
