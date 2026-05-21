@@ -1142,4 +1142,418 @@ If desired, update the Plan table in `CLAUDE.md` to mark Plan D status + link th
 **Type consistency:** `ChunkResolution` (Task 2) is consumed in Tasks 6/7; the backend `ChunkResolution` Pydantic model (Task 1) matches its fields (`id`, `paper_content_id`, `section`, `text`). `useCanvasStore` actions (`openCitation`, `closeCanvas`) and state (`open`, `chunkId`) defined in Task 3 are used identically in Tasks 6/7/8. `HIGHLIGHT_CLASS` / `CHUNK_MARKER_RE` / `buildChunkOrdinalMap` exported in Tasks 4-5 are imported by name in Tasks 5/6. `getChunk` (Task 2) used in Task 7.
 
 **Out of scope (per brainstorm):** section-jump fallback on a failed search (only a toast is in scope); standalone canvas-open from the Reference Sources panel.
+
+---
+
+# Wave 2 — Citation Canvas → Reference Reading Panel (post-review redesign)
+
+> **Status:** added after Wave 1 shipped + live UI testing. Wave 1 delivered a single-chunk overlay drawer. Live testing surfaced three problems that this wave fixes. The earlier "standalone canvas-open" item that Wave 1 declared out-of-scope is now **in scope** (the user wants it).
+
+## Why this wave exists
+
+1. **Bad UX — overlay, not push.** Wave 1's `CitationCanvas` is `fixed right-0 z-40` — it floats over the chat. The left chat sidebar (`Shell.tsx`) instead uses an animated CSS-grid column that *pushes* `<main>`. The canvas must mirror that: a right-side column that pushes the chat and animates open/closed.
+2. **Single-paper only.** Wave 1 shows exactly the one paper tied to the clicked citation, with no way to browse the session's other references. The redesign turns the canvas into a **reading panel** with a **paper switcher** at the top — one tab per enabled reference, overflowing to a "…" dropdown when there are more than fit. The composer **References** button (currently a disabled `BookOpen` placeholder tooltipped "Coming in Plan D — toggle which papers are in scope for this turn") becomes the **toggle** that opens/closes this panel.
+3. **404 on citation click (diagnosed, evidence-based).** Clicking a citation in older answers 404s. Root cause confirmed against the live `workspace/paperhub.db`: cited ids `74674…74792` are **absent** from `chunks` (current range `74924–76741`), while newer ids (`74927`, `75528`, …) resolve fine. The `workspace/*.bak.v2.10` artefacts show the corpus was **re-ingested**; `paperhub-reingest` preserves `paper_content.id` but **deletes + re-inserts `chunks` with fresh AUTOINCREMENT ids**, orphaning every `[chunk:<id>]` marker in answers generated before the reingest. The click path is correct (the Wave 1 Task 6 test proves the real id is passed). **Plan D scope:** handle the 404 gracefully (clear inline "passage no longer available — paper re-indexed" notice, distinct from a network error; NFR-02). **Out of Plan D scope (Plan C reingest follow-up):** making chunk ids stable across reingest so historical citations survive.
+
+## Target behaviour
+
+- Right-side panel that **pushes** the chat (animated grid column; collapses to zero width when closed), mirroring the left sidebar.
+- **Paper switcher** header: a tab per *enabled* reference paper of the active session; when more than `MAX_VISIBLE_TABS` (3), the overflow goes into a "…" dropdown. The active tab is the displayed paper.
+- The composer **References** (`BookOpen`) button **toggles** the panel (open in browse mode / close).
+- Clicking a `[chunk:<id>]` marker opens the panel, switches the switcher to that chunk's paper, and scrolls+highlights the passage. Opening via the References button shows the active/first paper with **no** highlight (browse mode).
+- A stale/missing chunk (`getChunk` 404) shows an inline notice in the panel (panel still opens, tabs still usable); a real network error shows a `toast.error`.
+
+## File structure (Wave 2)
+
+- **Modify:** `frontend/src/store/canvas.ts` — redesign state (`requestedChunkId`, `requestNonce`) + actions (`openCitation`, `toggleCanvas`, `closeCanvas`).
+- **Rewrite:** `frontend/src/components/canvas/CitationCanvas.tsx` — reading panel (switcher + iframe + resolve + 404 + highlight), fill-column root (not `fixed`).
+- **Modify:** `frontend/src/pages/ChatPage.tsx` — horizontal push layout (animated grid; canvas pushes chat).
+- **Modify:** `frontend/src/components/chat/Composer.tsx` — wire the `References` button to `toggleCanvas`, remove its disabled placeholder.
+- **Tests:** update `frontend/tests/store/canvas.test.ts`, `frontend/tests/components/CitationCanvas.test.tsx`; add `frontend/tests/components/Composer.canvas.test.tsx` (or extend the existing Composer test).
+
+`CitationMarker` (Wave 1) is unchanged — it still calls `openCitation(chunkId)`.
+
+---
+
+## Task W2-1: Canvas store redesign
+
+**Files:**
+- Modify: `frontend/src/store/canvas.ts`
+- Modify: `frontend/tests/store/canvas.test.ts`
+
+The store stays tiny: it records *what the user requested* (a citation, or a browse toggle); the component owns the resolved paper + highlight. `requestNonce` lets the same chunk re-trigger resolution if clicked twice.
+
+- [ ] **Step 1: Replace the test** `frontend/tests/store/canvas.test.ts`:
+
+```typescript
+import { beforeEach, describe, expect, it } from "vitest";
+import { useCanvasStore } from "@/store/canvas";
+
+beforeEach(() => useCanvasStore.setState({ open: false, requestedChunkId: null, requestNonce: 0 }));
+
+describe("canvas store", () => {
+  it("starts closed with no request", () => {
+    const s = useCanvasStore.getState();
+    expect(s.open).toBe(false);
+    expect(s.requestedChunkId).toBeNull();
+  });
+
+  it("openCitation opens, records the chunk, and bumps the nonce", () => {
+    const before = useCanvasStore.getState().requestNonce;
+    useCanvasStore.getState().openCitation(42);
+    const s = useCanvasStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.requestedChunkId).toBe(42);
+    expect(s.requestNonce).toBe(before + 1);
+  });
+
+  it("clicking the same chunk again re-bumps the nonce (re-triggers resolve)", () => {
+    useCanvasStore.getState().openCitation(42);
+    const n1 = useCanvasStore.getState().requestNonce;
+    useCanvasStore.getState().openCitation(42);
+    expect(useCanvasStore.getState().requestNonce).toBe(n1 + 1);
+  });
+
+  it("toggleCanvas opens when closed and closes when open", () => {
+    expect(useCanvasStore.getState().open).toBe(false);
+    useCanvasStore.getState().toggleCanvas();
+    expect(useCanvasStore.getState().open).toBe(true);
+    useCanvasStore.getState().toggleCanvas();
+    expect(useCanvasStore.getState().open).toBe(false);
+  });
+
+  it("toggleCanvas open does NOT set a chunk request (browse mode)", () => {
+    useCanvasStore.getState().toggleCanvas();
+    expect(useCanvasStore.getState().requestedChunkId).toBeNull();
+  });
+
+  it("closeCanvas closes but preserves the last requested chunk", () => {
+    useCanvasStore.getState().openCitation(7);
+    useCanvasStore.getState().closeCanvas();
+    expect(useCanvasStore.getState().open).toBe(false);
+    expect(useCanvasStore.getState().requestedChunkId).toBe(7);
+  });
+});
 ```
+
+- [ ] **Step 2: Run → fail.** `npx vitest run tests/store/canvas.test.ts` (old shape: `chunkId`/`openCitation` signature differs).
+
+- [ ] **Step 3: Rewrite** `frontend/src/store/canvas.ts`:
+
+```typescript
+import { create } from "zustand";
+
+interface CanvasState {
+  open: boolean;
+  /** The chunk the user clicked a citation for. Null when opened via the
+   *  References button (browse mode). The component resolves it → paper. */
+  requestedChunkId: number | null;
+  /** Bumped on every openCitation so clicking the SAME chunk twice re-triggers
+   *  resolution in the component (which keys an effect on this). */
+  requestNonce: number;
+  openCitation: (chunkId: number) => void;
+  /** References button: open in browse mode if closed, else close. */
+  toggleCanvas: () => void;
+  closeCanvas: () => void;
+}
+
+export const useCanvasStore = create<CanvasState>((set) => ({
+  open: false,
+  requestedChunkId: null,
+  requestNonce: 0,
+  openCitation: (chunkId) =>
+    set((s) => ({ open: true, requestedChunkId: chunkId, requestNonce: s.requestNonce + 1 })),
+  toggleCanvas: () => set((s) => ({ open: !s.open })),
+  closeCanvas: () => set({ open: false }),
+}));
+```
+
+- [ ] **Step 4: Run → pass.** `npx vitest run tests/store/canvas.test.ts` (6 tests).
+- [ ] **Step 5: Gates + commit.** `npm run typecheck`; `npm run lint`. NOTE: `MessageBubble.citations.test.tsx` calls `useCanvasStore.getState().closeCanvas()` in `beforeEach` — still valid. The `CitationMarker` still calls `openCitation(chunkId)` — still valid. Commit: `git commit -m "feat(frontend): canvas store redesign for reading-panel (browse + citation modes)"`.
+
+---
+
+## Task W2-2: CitationCanvas → reading panel
+
+**Files:**
+- Rewrite: `frontend/src/components/canvas/CitationCanvas.tsx`
+- Rewrite: `frontend/tests/components/CitationCanvas.test.tsx`
+
+The panel reads the active session's *enabled* references from the chat store (same derivation as `ReferenceSourcesPanel`: `activeSessionId → session.backend_session_id → referencesBySession[backendId]`, filter `enabled`). It renders a switcher (tabs + overflow dropdown), an iframe for the displayed paper, resolves the requested chunk to pick the displayed paper + highlight target, and handles the 404 stale case.
+
+**Component contract:**
+- Local state: `displayedPaperId: number | null`, `activeChunk: ChunkResolution | null`, `stale: boolean`.
+- Enabled refs derived from the store (mirror `ReferenceSourcesPanel` lines 38–47).
+- Effective displayed paper = `displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null`.
+- Resolve effect keyed on `[requestNonce]`: if `open && requestedChunkId != null`, `getChunk(requestedChunkId)` → success: `setActiveChunk(c); setDisplayedPaperId(c.paper_content_id); setStale(false)`. On error whose message matches `/\b404\b/`: `setActiveChunk(null); setStale(true)`. Other error: `toast.error("Couldn't load the cited paper")`. (Guard with a `cancelled` flag.)
+- Tab click → `setDisplayedPaperId(pcid); setActiveChunk(null); setStale(false)` (browse, no highlight).
+- iframe `src = displayedPaperId ? \`${API_BASE_URL}/papers/content/${displayedPaperId}/html\` : undefined`, `sandbox="allow-scripts allow-same-origin"`, `title="Citation Canvas"`.
+- Highlight discipline (reuse Wave 1's `loadedSrcRef`): in `onLoad` set `loadedSrcRef.current = src` then, if `activeChunk && activeChunk.paper_content_id === displayedPaperId`, `findAndHighlight(doc, activeChunk.text)` and toast.message on miss. Also a `[activeChunk, displayedPaperId]` effect that highlights when `loadedSrcRef.current === src` (same-paper case). (`findAndHighlight` is idempotent.)
+- Returns `null` when `!open`.
+
+- [ ] **Step 1: Replace the test** `frontend/tests/components/CitationCanvas.test.tsx`:
+
+```typescript
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), message: vi.fn() } }));
+import { toast } from "sonner";
+
+import { CitationCanvas } from "@/components/canvas/CitationCanvas";
+import { useCanvasStore } from "@/store/canvas";
+import { useChatStore } from "@/store/chat";
+import { API_BASE_URL } from "@/lib/api";
+import type { ReferenceItem } from "@/types/domain";
+
+function ref(over: Partial<ReferenceItem> = {}): ReferenceItem {
+  return {
+    papers_id: 1, paper_content_id: 7, enabled: true, added_at: "2024-01-01",
+    arxiv_id: "1706.03762", title: "Attention Is All You Need", year: 2017, kind: "arxiv",
+    ...over,
+  };
+}
+
+const server = setupServer(
+  http.get(`${API_BASE_URL}/chunks/42`, () =>
+    HttpResponse.json({ id: 42, paper_content_id: 7, section: "3.2", text: "Expert collapse is mitigated." }),
+  ),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+beforeEach(() => {
+  vi.clearAllMocks();
+  useCanvasStore.setState({ open: false, requestedChunkId: null, requestNonce: 0 });
+  useChatStore.getState().reset();
+  // Seed an active session with two enabled references.
+  const sid = useChatStore.getState().newSession();
+  useChatStore.getState().patchSessionBackendId(sid, 99);
+  useChatStore.getState().setReferences(99, [
+    ref({ papers_id: 1, paper_content_id: 7, title: "Paper A" }),
+    ref({ papers_id: 2, paper_content_id: 8, title: "Paper B", arxiv_id: "2005.14165" }),
+  ]);
+});
+
+describe("CitationCanvas reading panel", () => {
+  it("renders nothing when closed", () => {
+    const { container } = render(<CitationCanvas />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("opening via citation resolves the chunk and shows that paper", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+    const iframe = await screen.findByTitle(/citation canvas/i);
+    await waitFor(() =>
+      expect(iframe).toHaveAttribute("src", `${API_BASE_URL}/papers/content/7/html`),
+    );
+    expect(iframe).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
+  });
+
+  it("renders a switcher tab per enabled reference; clicking one switches the paper", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().toggleCanvas()); // browse mode → defaults to first ref (paper 7)
+    await screen.findByTitle(/citation canvas/i);
+    expect(screen.getByRole("button", { name: /Paper A/ })).toBeInTheDocument();
+    const tabB = screen.getByRole("button", { name: /Paper B/ });
+    await userEvent.click(tabB);
+    await waitFor(() =>
+      expect(screen.getByTitle(/citation canvas/i)).toHaveAttribute(
+        "src", `${API_BASE_URL}/papers/content/8/html`,
+      ),
+    );
+  });
+
+  it("shows a stale-passage notice when getChunk 404s, panel still open", async () => {
+    server.use(http.get(`${API_BASE_URL}/chunks/42`, () => HttpResponse.json({ detail: "no chunk 42" }, { status: 404 })));
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+    expect(await screen.findByText(/no longer available|re-indexed/i)).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled(); // 404 is a known-stale case, not a network error
+  });
+
+  it("close removes the panel from the DOM", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+    await screen.findByTitle(/citation canvas/i);
+    await userEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.queryByLabelText(/citation canvas/i)).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run → fail.** `npx vitest run tests/components/CitationCanvas.test.tsx`.
+
+- [ ] **Step 3: Rewrite** `frontend/src/components/canvas/CitationCanvas.tsx`. Read `frontend/src/components/references/ReferenceSourcesPanel.tsx` (lines 31–47) for the refs-derivation pattern and `frontend/src/components/chat/AttachPaperMenu.tsx` for the project's `@base-ui` Popover idiom (use it for the overflow "…" dropdown). Implement to the contract above. Key points the implementer must honour:
+  - Derive enabled refs from the store; `displayedPaperId ?? firstEnabledRef?.paper_content_id` is the effective paper.
+  - `MAX_VISIBLE_TABS = 3`; refs beyond that go into a `@base-ui` Popover triggered by a "…" button. Each menu item / tab is a `<button>` whose accessible name contains the paper title (the test queries `getByRole("button", { name: /Paper B/ })`). If a paper in the overflow dropdown is the active one, surface it (e.g. show its title on the "…" trigger or mark it) — but the test only requires it be reachable as a button by name when ≤3 refs (so with 2 refs both are visible tabs; the dropdown path is exercised manually).
+  - Resolve effect keyed on `[requestNonce]` (NOT `[requestedChunkId]`, so re-clicking the same chunk re-resolves). Guard with `cancelled`. Match 404 via the thrown `Error` message containing `404` (apiFetch throws `API 404: ...`).
+  - 404 → render an inline notice containing text like "This citation's passage is no longer available — the paper may have been re-indexed." (the test matches `/no longer available|re-indexed/i`). Do NOT call `toast.error` for the 404 case.
+  - Root element: `<aside aria-label="Citation Canvas" className="flex h-full w-full flex-col border-l border-border bg-card">` — a FILL-COLUMN, NOT `fixed`. (The push layout in W2-3 owns the width.)
+  - Keep the close button (`aria-label="Close canvas"` → `closeCanvas()`), the `loadedSrcRef` highlight discipline, and the toast.message-on-miss from Wave 1.
+
+  Provide a complete implementation (no placeholders). The implementer writes it following the contract; this is an integration task, so the implementer should verify each test passes and not weaken any assertion. If `act()` warnings appear from the store-driven open, keep the `act()` wrapping already in the test.
+
+- [ ] **Step 4: Run → pass.** `npx vitest run tests/components/CitationCanvas.test.tsx` (5 tests). Run the full suite `npx vitest run` to catch regressions (MessageBubble citation tests still pass — they only assert the marker→`openCitation` call, which is unchanged).
+- [ ] **Step 5: Gates + commit.** `npm run typecheck`; `npm run lint`. Commit: `git commit -m "feat(frontend): CitationCanvas reading panel with paper switcher + stale-chunk notice"`.
+
+---
+
+## Task W2-3: Push layout + Composer References toggle
+
+**Files:**
+- Modify: `frontend/src/pages/ChatPage.tsx`
+- Modify: `frontend/src/components/chat/Composer.tsx`
+- Test: extend `frontend/tests/components/Composer.test.tsx` (or add `Composer.canvas.test.tsx`)
+
+### Part A — push layout in ChatPage
+
+Replace ChatPage's vertical wrapper with a horizontal grid whose right column animates from `0` (closed) to a clamped width (open), pushing the chat. Mirror `Shell.tsx`'s `transition-[grid-template-columns] duration-200` idiom. Keep the lazy-load + mount-on-open (so no chunk/iframe fetch when closed).
+
+```tsx
+import { lazy, Suspense } from "react";
+import { toast } from "sonner";
+
+import { ChatThread } from "@/components/chat/ChatThread";
+import { Composer } from "@/components/chat/Composer";
+import { useChatStream } from "@/hooks/useChatStream";
+import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useReferencesSync } from "@/hooks/useReferencesSync";
+import { cn } from "@/lib/utils";
+
+const CitationCanvas = lazy(() =>
+  import("@/components/canvas/CitationCanvas").then((m) => ({ default: m.CitationCanvas })),
+);
+
+export function ChatPage() {
+  useGlobalShortcuts();
+  useReferencesSync();
+  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const newSession = useChatStore((s) => s.newSession);
+  const canvasOpen = useCanvasStore((s) => s.open);
+  const { send } = useChatStream();
+
+  const activeSession =
+    activeSessionId === null
+      ? null
+      : (sessions.find((s) => s.id === activeSessionId) ?? null);
+
+  const isStreaming =
+    activeSession?.messages.some((m) => m.status === "streaming") ?? false;
+
+  const handleSubmit = (text: string): void => {
+    const sessionId = activeSessionId ?? newSession();
+    send(sessionId, text).catch((err: unknown) => {
+      toast.error("Request failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  return (
+    <div
+      className={cn(
+        "grid flex-1 min-h-0 transition-[grid-template-columns] duration-200",
+        canvasOpen ? "grid-cols-[1fr_clamp(360px,38vw,560px)]" : "grid-cols-[1fr_0px]",
+      )}
+    >
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <ChatThread session={activeSession} />
+        <Composer onSubmit={handleSubmit} disabled={isStreaming} />
+      </div>
+      <div className="overflow-hidden">
+        {canvasOpen && (
+          <Suspense fallback={null}>
+            <CitationCanvas />
+          </Suspense>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### Part B — Composer References button → toggle
+
+In `frontend/src/components/chat/Composer.tsx`: remove the `References` entry from the disabled `CAPABILITIES` array (keep `Slides` + `Compare`), and render an ENABLED `BookOpen` button before the disabled placeholders that calls `useCanvasStore.getState().toggleCanvas()` (import `useCanvasStore`). Tooltip: `"Toggle the reference reading panel"`. Give it `aria-label="References"`.
+
+Concretely, add near the other imports: `import { useCanvasStore } from "@/store/canvas";` and inside the component read `const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);`. In the tool row, after `<AttachPaperMenu />` and before the `CAPABILITIES.map(...)`, insert:
+
+```tsx
+                <Tooltip>
+                  <TooltipTrigger render={<span tabIndex={0} className="inline-flex" />}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => toggleCanvas()}
+                      className="h-8 w-8"
+                      aria-label="References"
+                    >
+                      <BookOpen className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Toggle the reference reading panel</p>
+                  </TooltipContent>
+                </Tooltip>
+```
+
+Remove the `BookOpen` `References` object from `CAPABILITIES` (so it's no longer rendered as a disabled icon). Keep `Presentation`/`Slides` and `Columns2`/`Compare` disabled placeholders. `BookOpen` is already imported.
+
+- [ ] **Step 1: Write the failing test** — `frontend/tests/components/Composer.canvas.test.tsx`:
+
+```typescript
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { Composer } from "@/components/chat/Composer";
+import { useCanvasStore } from "@/store/canvas";
+
+beforeEach(() => useCanvasStore.setState({ open: false, requestedChunkId: null, requestNonce: 0 }));
+
+describe("Composer References button", () => {
+  it("is enabled and toggles the canvas open/closed", async () => {
+    render(<Composer onSubmit={() => {}} disabled={false} />);
+    const btn = screen.getByRole("button", { name: /^references$/i });
+    expect(btn).toBeEnabled();
+    await userEvent.click(btn);
+    expect(useCanvasStore.getState().open).toBe(true);
+    await userEvent.click(btn);
+    expect(useCanvasStore.getState().open).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run → fail** (References is currently a disabled placeholder). `npx vitest run tests/components/Composer.canvas.test.tsx`.
+- [ ] **Step 3: Implement Parts A + B.**
+- [ ] **Step 4: Run → pass.** That test + `npm run build` (confirm the `CitationCanvas-*.js` chunk still splits — the lazy import is retained). Full suite `npx vitest run` (no regressions; the existing Composer test may assert the References placeholder was disabled — UPDATE that assertion if present, since References is now enabled).
+- [ ] **Step 5: Gates + commit.** `npm run typecheck`; `npm run lint`. Commit: `git commit -m "feat(frontend): push-layout canvas column + References toggle button"`.
+
+---
+
+## Task W2-4: Gates + SRS reconciliation
+
+- [ ] **Step 1: Full gates.** From `frontend/`: `npx vitest run`, `npm run typecheck`, `npm run lint`, `npm run build`. From `backend/`: unchanged, but run `uv run pytest -q` to confirm nothing regressed.
+- [ ] **Step 2: SRS v2.14.** Update `docs/superpowers/specs/2026-05-17-paperhub-srs.md`: bump version to v2.14; add a revision-history row describing the reading-panel redesign (push layout, paper switcher, References-button toggle, browse mode, stale-chunk 404 notice) + note the reingest-renumbers-chunk-ids limitation as a Plan C follow-up; update FR-03 wording to describe the reading panel + switcher + toggle (not just the single-chunk drawer).
+- [ ] **Step 3: Manual smoke (human).** Start the stack, open a NEW session (so chunk ids are current), attach ≥2 papers, ask a `paper_qa` question, verify: References button toggles the panel; the panel pushes the chat; switcher tabs switch papers; clicking a citation switches+scrolls+highlights; a citation in a pre-reingest answer shows the stale notice (not a crash).
+- [ ] **Step 4: Commit any SRS changes.** `git commit -m "docs(srs): v2.14 Citation Canvas reading-panel redesign"`.
+
+## Wave 2 Self-Review
+
+- **Push not overlay** → W2-3 Part A (animated grid column).
+- **Paper switcher (tabs + overflow dropdown)** → W2-2.
+- **References button toggles panel** → W2-3 Part B + W2-1 `toggleCanvas`.
+- **Citation click switches+scrolls+highlights; browse mode no highlight** → W2-1 (`requestedChunkId`/nonce) + W2-2 (resolve effect + highlight discipline).
+- **404 stale-chunk graceful notice (NFR-02)** → W2-2 (404 branch, inline notice, no toast.error).
+- **Type consistency:** `useCanvasStore` new shape (`open`, `requestedChunkId`, `requestNonce`, `openCitation`, `toggleCanvas`, `closeCanvas`) defined in W2-1, consumed in W2-2 (`requestNonce` effect, `closeCanvas`), W2-3 (`toggleCanvas`, `open`), and unchanged `CitationMarker` (`openCitation`). `ChunkResolution` (Wave 1 Task 2) reused. `findAndHighlight` (Wave 1 Task 5) reused.
+- **Out of Plan D scope:** stable chunk ids across reingest (Plan C reingest follow-up) — Wave 2 only handles the 404 gracefully.
