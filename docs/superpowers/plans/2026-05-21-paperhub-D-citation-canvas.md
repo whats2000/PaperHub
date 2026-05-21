@@ -1647,7 +1647,37 @@ useEffect(() => {
 - [ ] Test: a unit test for `applyIframeTheme(doc, true)` injects `#ph-dark` with a `filter` rule into a jsdom `Document`; `applyIframeTheme(doc, false)` removes it. (Mirror `findAndHighlight.test.ts`.)
 
 ## Wave 3 Self-Review
-- Session-swap closes the panel → W3-1.
-- Loaded papers cached (instant re-display) + browser byte cache → W3-2.
-- Dark-mode-aware document → W3-3.
-- All HTML-mode-only where relevant (PDF native viewer unaffected). `findAndHighlight` highlight discipline preserved across the keep-alive iframe set (highlight targets the ACTIVE paper's iframe doc).
+- Session-swap closes the panel → W3-1 (extracted to `useCloseCanvasOnSessionChange` for testability).
+- Loaded papers cached (instant re-display) → W3-2 (`modeByPaper` cache + one mounted iframe per visited paper, only active visible). Backend HTTP cache header deliberately NOT added — caching rendered HTML while the operator is actively re-ingesting risks serving stale content (the very cause of the v2.13 404).
+- Dark-mode-aware document → W3-3 (`applyIframeTheme`, HTML-mode only; PDF native viewer unaffected).
+- `findAndHighlight` highlight discipline preserved across the keep-alive iframe set (highlight targets the ACTIVE paper's iframe doc; hidden iframes get theme-by-pid but never highlight).
+
+### Wave 3 known follow-ups (out of scope; deferred with reason)
+1. **Browse-mode default-paper flip (review B2).** Before any tab/citation interaction, the displayed paper derives live from `firstEnabledRef` (`refs[0]`, backend `added_at DESC`). `useReferencesSync` replaces the whole refs array on refetch, so a paper added/reordered while the panel is open in browse mode can flip the displayed paper. Narrow (pre-interaction only). The clean fix (seed `displayedPaperId` once on open) collides with the repo's strict lint rules (`react-hooks/set-state-in-effect`, `react-hooks/refs` ban ref-read-in-render); deferred rather than adding an eslint-disable.
+2. **`modeByPaper` keep-alive cap (review B5).** All visited papers' iframes stay mounted for the panel's lifetime (panel remounts per open, so bounded by papers-browsed-per-open). Plan suggested an ~8 LRU cap; not implemented — acceptable given few refs/session. Add an LRU eviction if a session ever browses many large papers.
+3. **Dark-mode + hidden-iframe-onLoad integration tests.** jsdom doesn't populate iframe `contentDocument` from `src`, so the dark-mode application and hidden-iframe non-highlighting seams are covered only by the `applyIframeTheme` + `findAndHighlight` unit tests, not an integration test.
+
+---
+
+# Wave 4 + 5 — Same-origin content + library-based viewer (post-live-testing)
+
+> Live testing revealed the iframe-`src`-to-backend approach was **cross-origin** (app `:5173`, backend `:8000`): `contentDocument` was null, so highlight + dark-mode silently no-op'd ("never work"), and the PDF iframe blanked / triggered a browser download. Wave 4 first tried a Vite proxy; Wave 5 superseded it with embedded content + a real PDF library (user direction: "stop building it yourself, use a package").
+
+## What shipped (final)
+- **Backend (W2-0, already shipped):** `GET /papers/content/{id}/document` → `{mode}` (top-level `*.pdf` ⇒ pdf) + `GET /papers/content/{id}/pdf` (inline `FileResponse`).
+- **W5 — content fetched + embedded (same-origin):**
+  - `frontend/src/lib/api.ts`: `fetchPaperHtml(id)` (text) + `fetchPaperPdfData(id)` (`Uint8Array`) — fetched via CORS (the backend CORS middleware already allows GET from `:5173`).
+  - `frontend/src/components/canvas/HtmlView.tsx`: iframe `srcDoc={html}` (same-origin → `applyIframeTheme` + `findAndHighlight` work; MathJax runs; figures data-URI inlined). Self-applies theme + highlight on load + on `[isDark, highlightText]` change.
+  - `frontend/src/components/canvas/PdfView.tsx`: **`react-pdf`** (`pdfjs`); worker via `new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)`; `AnnotationLayer.css` + `TextLayer.css`; `<Document file={{ data }}>` (memoized) + a `<Page>` per page fit to the container width (ResizeObserver). No iframe, no download.
+  - `frontend/src/components/canvas/CitationCanvas.tsx`: rewritten to fetch+cache content per paper in `docByPaper` (survives the session via the always-mounted panel), prefetch all enabled refs, render the active paper's `HtmlView`/`PdfView`. HTML views stay mounted (hidden) for instant switching; PDF renders only when active (react-pdf is heavy).
+  - Vite proxy (W4a) **removed** — embedding makes it unnecessary.
+- **Dependency:** `react-pdf` added (lazy-loaded with the canvas chunk; pulls a ~1 MB pdf.worker asset, isolated from the main bundle).
+
+## Tests
+- `CitationCanvas.test.tsx`: react-pdf is `vi.mock`ed (pdfjs can't run in jsdom); MSW serves `/document`, `/html` (text), `/pdf` (arraybuffer). Asserts: HTML embedded via `srcDoc` (contains the body), tab-switch swaps the active `srcDoc`, PDF path renders the mocked `PdfView` + the inline note, stale-404 notice (no `toast.error`), close → `open=false` + `aria-hidden`.
+- `applyIframeTheme.test.ts` + `findAndHighlight.test.ts` unit-cover the theme + highlight logic that `HtmlView` invokes.
+
+## Wave 4/5 known follow-ups (out of scope)
+1. **Operator setup:** `npm install` (adds react-pdf) + a dev-server restart to pick up the new dependency. No proxy needed.
+2. **Non-inlined HTML assets:** the renderer inlines raster figures as data URIs, so `srcDoc` shows them; a paper with non-inlined assets referenced by relative URL would 404 (rare). A same-origin asset route or absolute-URL rewrite would close it.
+3. **PDF keep-alive:** PDF papers re-render (pdfjs re-parse) on re-activation since only the active PDF is mounted (HTML papers are kept mounted). Acceptable; the bytes are cached so there's no re-fetch.
