@@ -98,6 +98,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # W6-1: Idempotent column-add for chunks.dom_id
+    # (pre-existing DBs created before Plan D Wave 6 won't have this column).
+    # Populated at re-ingest / sentinel-injection time; rows that haven't been
+    # processed keep NULL.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "dom_id" not in cols:
+        await conn.execute(
+            "ALTER TABLE chunks ADD COLUMN dom_id TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # A5: Ensure papers.paper_content_id FK has ON DELETE RESTRICT.
     # PRAGMA foreign_key_list returns rows where column 6 is `on_delete`.
     # -----------------------------------------------------------------------

@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     section TEXT,
     char_start INTEGER NOT NULL,
     char_end INTEGER NOT NULL,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    dom_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
