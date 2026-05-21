@@ -95,7 +95,10 @@ const PREFIX_LEN = 150;
  */
 const MIN_MATCH = 30;
 
-const HIGHLIGHT_MS = 2500;
+// Keep the highlight up long enough to survive the smooth-scroll AND give the
+// reader time to find + read the passage (2.5s often expired mid-scroll). The
+// PDF overlay persists until the next citation; this is the HTML counterpart.
+const HIGHLIGHT_MS = 10000;
 
 const normalize = (s: string): string => s.replace(/\s+/g, " ").trim();
 

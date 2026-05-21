@@ -62,6 +62,9 @@ export function CitationCanvas() {
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
   const [stale, setStale] = useState(false);
+  // Bumped on every resolved citation so re-clicking the SAME chunk re-fires
+  // the highlight + scroll (the view keys on chunk values, which don't change).
+  const [highlightNonce, setHighlightNonce] = useState(0);
   // Per-paper fetched document content. Survives the whole session (the canvas
   // stays mounted) so re-opening / tab-switching never re-fetches.
   const [docByPaper, setDocByPaper] = useState<Record<number, DocEntry>>({});
@@ -99,6 +102,7 @@ export function CitationCanvas() {
         setActiveChunk(c);
         setDisplayedPaperId(c.paper_content_id);
         setStale(false);
+        setHighlightNonce((n) => n + 1);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -295,6 +299,11 @@ export function CitationCanvas() {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
+                nonce={
+                  isActive && activeChunk?.paper_content_id === pid
+                    ? highlightNonce
+                    : 0
+                }
                 highlightDomId={
                   isActive &&
                   activeChunk &&
@@ -338,6 +347,11 @@ export function CitationCanvas() {
                   activeChunk?.paper_content_id === effectivePaperId
                     ? activeChunk.text
                     : null
+                }
+                nonce={
+                  activeChunk?.paper_content_id === effectivePaperId
+                    ? highlightNonce
+                    : 0
                 }
                 onHighlightMiss={() =>
                   toast.message("Couldn't locate this passage in the PDF")

@@ -33,6 +33,8 @@ interface Props {
   data: Uint8Array;
   /** Cited passage to highlight + scroll to, when this PDF is the cited paper. */
   highlightText?: string | null;
+  /** Bumped per resolved citation so re-clicking the SAME chunk re-scrolls. */
+  nonce?: number;
   /** Called when the passage couldn't be located in the PDF text. */
   onHighlightMiss?: () => void;
 }
@@ -48,7 +50,7 @@ interface Props {
  * mislocating the highlight and shifting the page's selectable text. A geometry
  * overlay is independent of the text layer, so it always aligns with the canvas.
  */
-export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
+export function PdfView({ data, highlightText, nonce = 0, onHighlightMiss }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(0);
   const [match, setMatch] = useState<PdfPassageMatch | null>(null);
@@ -186,7 +188,7 @@ export function PdfView({ data, highlightText, onHighlightMiss }: Props) {
             >
               {isTarget && highlight && (
                 <div
-                  key={highlight.key}
+                  key={`${highlight.key}:${nonce}`}
                   ref={scrollHighlightIntoView}
                   className="pointer-events-none absolute inset-0 z-10"
                 >

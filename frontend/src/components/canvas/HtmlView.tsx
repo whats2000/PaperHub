@@ -21,6 +21,9 @@ interface Props {
   sectionTitle: string | null;
   /** Called when anchor, text, and section all failed to locate anything. */
   onHighlightMiss?: () => void;
+  /** Bumped per resolved citation so re-clicking the SAME chunk re-fires the
+   *  highlight + scroll even though the target values are unchanged. */
+  nonce: number;
 }
 
 /**
@@ -37,6 +40,7 @@ export function HtmlView({
   highlightText,
   sectionTitle,
   onHighlightMiss,
+  nonce,
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
 
@@ -59,7 +63,7 @@ export function HtmlView({
   useEffect(() => {
     apply();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, highlightDomId, highlightText, sectionTitle]);
+  }, [isDark, highlightDomId, highlightText, sectionTitle, nonce]);
 
   return (
     <iframe
