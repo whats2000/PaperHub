@@ -1088,13 +1088,12 @@ async def test_chat_sse_library_stats_streams_tokens(
 
     app = _wire_test_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        async with client.stream(
-            "POST", "/chat",
-            json={"session_id": None, "user_message": "how many papers do I have?"},
-        ) as response:
-            assert response.status_code == 200
-            events = await _consume_sse(response.aiter_bytes())
+    async with AsyncClient(transport=transport, base_url="http://test") as client, client.stream(
+        "POST", "/chat",
+        json={"session_id": None, "user_message": "how many papers do I have?"},
+    ) as response:
+        assert response.status_code == 200
+        events = await _consume_sse(response.aiter_bytes())
 
     types = [t for t, _ in events]
     assert "routing_decision" in types
