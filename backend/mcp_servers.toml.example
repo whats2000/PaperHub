@@ -106,15 +106,21 @@ launch_env = { PORT = "3000", MODE = "http", ALLOWED_SEARCH_ENGINES = "duckduckg
 # `@latest` to skip the registry round-trip and start faster.)
 launch_ready_timeout = 60.0
 
+# ─── paperhub-sql (Plan E — in-process FastMCP) ──────────────────────────
+# The SQL Agent's three read-only tools (list_tables / describe / query),
+# re-exposed over MCP via the FastMCP sub-app mounted at /mcp-sql. No extra
+# process: this server lives inside the FastAPI app and shares the same
+# SQLite connection pool the backend uses. External MCP clients reach it at
+# the same URL.
+
+[[server]]
+name = "sql"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp-sql"
+expose = ["list_tables", "describe", "query"]
+timeout_seconds = 8.0
+
 # ─── future blocks ───────────────────────────────────────────────────────
-# Plan E will add a sqlite block:
-#   [[server]]
-#   name = "sql"
-#   transport = "stdio"
-#   command = "uv"
-#   args = ["run", "paperhub-sqlite-mcp"]
-#   expose = ["query"]
-#
 # Plan G will add filesystem + paperhub.*:
 #   [[server]]
 #   name = "fs"

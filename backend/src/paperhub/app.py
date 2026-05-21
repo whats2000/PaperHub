@@ -27,6 +27,8 @@ from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
     build_paperhub_papers_server,
+    build_paperhub_sql_server,
+    mount_inprocess_mcp,
     mount_paperhub_papers_on,
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
@@ -262,6 +264,10 @@ def create_app() -> FastAPI:
     # Task v2.5-4) reach the three Research Agent tools over the MCP wire
     # protocol via this URL — uniform dispatch path with `web.*`.
     mount_paperhub_papers_on(app, build_paperhub_papers_server(), path="/mcp")
+    # Mount the in-process `paperhub-sql` FastMCP server at /mcp-sql.
+    # The SQL Agent (Plan E) reaches the three read-only SQL tools over the
+    # MCP wire protocol via this URL — same loopback convention as papers.
+    mount_inprocess_mcp(app, build_paperhub_sql_server(), path="/mcp-sql")
     return app
 
 

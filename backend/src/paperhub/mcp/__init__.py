@@ -29,6 +29,7 @@ from .server_context import (
     reset_request_context,
     set_request_context,
 )
+from .sql_server import build_paperhub_sql_server
 
 __all__ = [
     "ClientHeadersContext",
@@ -40,6 +41,7 @@ __all__ = [
     "MCPUnavailableError",
     "PaperhubPapersRequestContext",
     "build_paperhub_papers_server",
+    "build_paperhub_sql_server",
     "current_client_headers_context",
     "current_request_context",
     "load_mcp_servers",
