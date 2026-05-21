@@ -18,8 +18,8 @@ class _StepBuffer:
     result: dict[str, Any] | None = None
     token_in: int | None = None
     token_out: int | None = None
-    forced_error: str | None = None
     forced_status: str | None = None
+    forced_error: str | None = None
 
     def record_args(self, args: dict[str, Any]) -> None:
         self.args = args
