@@ -27,6 +27,7 @@ from paperhub.agents.research_tools import (
     add_paper_to_session_dispatch,
 )
 from paperhub.agents.router import router_node
+from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
 from paperhub.api.deps import get_chroma
@@ -633,6 +634,19 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             }
                     if not final_only_seen:
                         final_content = "".join(qa_chunks)
+                elif intent == "library_stats":
+                    registry = request.app.state.mcp_registry
+                    sql_chunks: list[str] = []
+                    async for token in sql_agent_stream(
+                        state, adapter=adapter, tracer=tracer, registry=registry,
+                        planner_model=settings.sql_agent_model,
+                        answer_model=settings.sql_answer_model,
+                    ):
+                        sql_chunks.append(token)
+                        token_evt = TokenEvent(run_id=run_id, branch="", text=token)
+                        yield {"event": "token",
+                               "data": token_evt.model_dump_json(exclude={"type"})}
+                    final_content = "".join(sql_chunks)
                 else:
                     final_content = await stub_response(state, intent=intent)
 

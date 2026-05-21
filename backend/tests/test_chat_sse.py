@@ -1050,6 +1050,64 @@ async def test_chat_sse_paper_suggest_runs_pipeline(
     assert sr_idx < final_idx
 
 
+# ---------------------------------------------------------------------------
+# Task 7: library_stats intent — SQL Agent streamed via chat dispatch
+# ---------------------------------------------------------------------------
+
+async def test_chat_sse_library_stats_streams_tokens(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """library_stats intent must stream tokens from sql_agent_stream and emit
+    a final event whose content joins the tokens."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"library_stats","model_tier":"small","confidence":0.95,'
+        '"reasoning":"count papers"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    _canned_tokens = ["You have ", "3 papers."]
+
+    async def _fake_sql_agent_stream(
+        state: Any,
+        *,
+        adapter: Any,
+        tracer: Any,
+        registry: Any,
+        planner_model: Any,
+        answer_model: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        for tok in _canned_tokens:
+            yield tok
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "sql_agent_stream", _fake_sql_agent_stream)
+
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "how many papers do I have?"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    assert "routing_decision" in types
+    assert "token" in types, f"Expected token events for library_stats, got: {types}"
+    assert "final" in types
+
+    token_text = "".join(d.get("text", "") for t, d in events if t == "token")
+    assert "3 papers." in token_text
+
+    final_payload = next(d for t, d in events if t == "final")
+    assert final_payload["content"] == "You have 3 papers."
+
+
 async def test_chat_sse_clarify_surfaces_question_no_pipeline(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
