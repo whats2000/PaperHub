@@ -70,6 +70,12 @@ const server = setupServer(
   http.get(`${API_BASE_URL}/papers/content/8/html`, () =>
     HttpResponse.text(htmlBody("Paper B")),
   ),
+  http.get(`${API_BASE_URL}/papers/content/9/document`, () =>
+    HttpResponse.json({ mode: "html" }),
+  ),
+  http.get(`${API_BASE_URL}/papers/content/9/html`, () =>
+    HttpResponse.text(htmlBody("Paper C")),
+  ),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
@@ -153,6 +159,31 @@ describe("CitationCanvas reading panel", () => {
     expect(
       await screen.findByText(/source PDF|isn't available for PDF/i),
     ).toBeInTheDocument();
+  });
+
+  it("defaults to the current session's paper after a session switch (not the previous one)", async () => {
+    const { container } = render(<CitationCanvas />);
+    // Open a citation in session A → shows paper 7.
+    act(() => useCanvasStore.getState().openCitation(42));
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper A body",
+      ),
+    );
+    // Switch to a different session (B) whose references are a different paper.
+    act(() => {
+      const sidB = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(sidB, 100);
+      useChatStore.getState().setReferences(100, [
+        ref({ papers_id: 9, paper_content_id: 9, title: "Paper C" }),
+      ]);
+    });
+    // The panel must show session B's paper (9), not the leftover paper 7.
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper C body",
+      ),
+    );
   });
 
   it("shows a stale notice when getChunk 404s, no toast.error", async () => {

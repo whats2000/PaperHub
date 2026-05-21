@@ -73,8 +73,16 @@ export function CitationCanvas() {
   const refIdsKey = refIds.join(",");
 
   const firstEnabledRef = refs.length > 0 ? refs[0] : null;
+  // Ignore a `displayedPaperId` that isn't among THIS session's references —
+  // the canvas stays mounted across session switches (W4b), so a leftover
+  // selection from a previous session would otherwise show the wrong paper.
+  // Falling back to the current session's first reference fixes that.
+  const validDisplayedId =
+    displayedPaperId !== null && refIds.includes(displayedPaperId)
+      ? displayedPaperId
+      : null;
   const effectivePaperId =
-    displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null;
+    validDisplayedId ?? firstEnabledRef?.paper_content_id ?? null;
   const activeDoc =
     effectivePaperId != null ? (docByPaper[effectivePaperId] ?? null) : null;
 
