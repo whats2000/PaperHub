@@ -1681,3 +1681,44 @@ useEffect(() => {
 1. **Operator setup:** `npm install` (adds react-pdf) + a dev-server restart to pick up the new dependency. No proxy needed.
 2. **Non-inlined HTML assets:** the renderer inlines raster figures as data URIs, so `srcDoc` shows them; a paper with non-inlined assets referenced by relative URL would 404 (rare). A same-origin asset route or absolute-URL rewrite would close it.
 3. **PDF keep-alive:** PDF papers re-render (pdfjs re-parse) on re-activation since only the active PDF is mounted (HTML papers are kept mounted). Acceptable; the bytes are cached so there's no re-fetch.
+
+---
+
+# Wave 6 — Deterministic citation anchors (source sentinels)
+
+> Click-time text-search resolves *most* citations but misses chunks whose text was mangled by rendering (math-heavy passages). Inject a hidden marker at each chunk's start during ingest so the canvas resolves a citation by `getElementById` — deterministic — falling back to text-search only where a marker couldn't be placed.
+
+## Model (user's framing)
+- One marker per chunk, at its **start**. A chunk's highlight region is `[its marker, next chunk's marker)` within the section — markers partition the content, so no end-markers needed.
+- Anchor id `phchunk-{ordinal}` where ordinal = the chunk's 0-based index within the paper. Stored on the chunk row so the frontend maps a clicked chunk → its anchor.
+- **LaTeX-rendered (HTML) papers only.** PDF papers render via react-pdf (no HTML DOM to anchor); they keep the "highlighting unavailable for PDF" note.
+
+## Alignment (the load-bearing detail)
+Chunk `char_start` is relative to `strip_latex_comments(full_text)`. The renderer renders a *figure-normalized* copy of the raw flattened text. To put a sentinel at the position a chunk's `char_start` denotes, injection MUST happen on the comment-stripped text, in this order:
+1. `base = strip_latex_comments(full_text)` — chunk offsets index this.
+2. Inject a sentinel token at each chunk's `char_start` in `base`, **back-to-front** so earlier offsets stay valid → `base_marked`.
+3. `render_source = rasterize_and_normalize_figures(base_marked, resource_dir)` — only rewrites `\includegraphics` args; doesn't disturb sentinels elsewhere.
+4. `render_html(render_source, kind="latex", …)` → HTML containing the sentinel tokens as text.
+5. Post-process the HTML: replace each surviving sentinel with `<span id="phchunk-{ordinal}"></span>`. Chunks whose sentinel didn't survive (mangled / skipped) get **no** `dom_id` → runtime text-search fallback.
+
+This same order works for **existing** papers via a re-render CLI that reads the stored flattened source + the existing chunk `char_start`s (no re-chunk, no re-embed, no chunk-id change — so existing message citations keep working).
+
+## Math safety
+A sentinel inside `$…$` / `\(…\)` / `\[…\]` / `\begin{equation|align|math|...}…\end{…}` would be swallowed into the math TeX and break MathJax (and the post-process would inject a `<span>` inside math). So: scan `base` for math regions and **skip** injecting at any `char_start` that falls inside one (that chunk → text-search fallback). Chunk starts are usually at paragraph boundaries (text mode), so most are safe.
+
+## Sentinel token
+A unique ASCII token that survives pandoc latex→html intact and is regex-recoverable: `PHCHUNKANCHOR{ordinal}END` (letters+digits only — no chars pandoc reflows). Post-process regex `/PHCHUNKANCHOR(\d+)END/g` → `<span id="phchunk-$1"></span>`. Served HTML contains spans, not tokens.
+
+## Schema
+`ALTER TABLE chunks ADD COLUMN dom_id TEXT` (nullable; idempotent migration). `null` = no anchor (use fallback).
+
+## Tasks
+- [ ] **W6-1 — sentinel util + schema (backend, TDD).** `backend/src/paperhub/pipelines/sentinels.py`: `find_math_spans(text) -> list[(start,end)]`; `inject_sentinels(base, starts) -> (marked, set_of_injected_ordinals)` (back-to-front, math-safe skip); `postprocess_sentinels(html) -> (html, {ordinal: dom_id})`. Schema migration for `chunks.dom_id`. Tests: injection preserves offsets, math positions skipped, round-trip (inject→postprocess) yields the expected `phchunk-N` spans, tokens survive a representative pandoc-style transform.
+- [ ] **W6-2 — wire into LaTeX ingest.** In `paper_pipeline.py` `_ingest_arxiv` (and the LaTeX branch of `_ingest_upload`): after `chunk_text`, build `base`+`base_marked` per the order above, render the marked source, post-process, and persist `dom_id` per chunk. Store `dom_id` in `_persist_paper_content_and_chunks` (chunks insert). Guard: only the LaTeX render path.
+- [ ] **W6-3 — re-render CLI** `paperhub-rerender-html`: for each LaTeX `paper_content`, read flattened source + existing chunks (id, char_start, order), recompute `base`, inject at existing `char_start`s, normalize, render, post-process, rewrite `html_path`, `UPDATE chunks SET dom_id=…`. No re-chunk/embed. Run it once to upgrade existing papers.
+- [ ] **W6-4 — `GET /chunks/{id}` returns `dom_id`** (+ keep `text` for fallback). Add `dom_id` to the `ChunkResolution` model.
+- [ ] **W6-5 — frontend resolve.** `ChunkResolution` gains `dom_id: string | null`. In `HtmlView`, when `dom_id` is set, `getElementById(dom_id)` in the iframe doc → scroll into view + highlight the region from that span up to the next `[id^="phchunk-"]` element (or block). Fall back to `findAndHighlight(text)` when `dom_id` is null or the element is missing. (`findAndHighlight` stays as the fallback.)
+
+## Out of scope
+- PDF papers (react-pdf; no HTML anchors).
+- Chunks whose start is inside math (rare) — text-search fallback.
