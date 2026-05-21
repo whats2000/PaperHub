@@ -1582,3 +1582,72 @@ describe("Composer References button", () => {
 - **404 stale-chunk graceful notice (NFR-02)** → W2-2 (404 branch, inline notice, no toast.error).
 - **Type consistency:** `useCanvasStore` new shape (`open`, `requestedChunkId`, `requestNonce`, `openCitation`, `toggleCanvas`, `closeCanvas`) defined in W2-1, consumed in W2-2 (`requestNonce` effect, `closeCanvas`), W2-3 (`toggleCanvas`, `open`), and unchanged `CitationMarker` (`openCitation`). `ChunkResolution` (Wave 1 Task 2) reused. `findAndHighlight` (Wave 1 Task 5) reused.
 - **Out of Plan D scope:** stable chunk ids across reingest (Plan C reingest follow-up) — Wave 2 only handles the 404 gracefully.
+
+---
+
+# Wave 3 — Reading-panel polish (post-Wave-2 live testing)
+
+> Three UX issues found while testing Wave 2 live. All centred on the reading panel.
+
+## W3-1: Close the canvas when the chat session changes
+
+**Why:** the canvas shows the *active session's* references. Switching sessions while the panel is open leaves it showing the previous session's paper (and switcher tabs for refs that don't belong to the new session). Closing it on session change is the correct reset (re-open shows the new session's refs).
+
+**Files:** `frontend/src/pages/ChatPage.tsx` (always mounted — owns this).
+
+**Implementation:** track the previous `activeSessionId` in a ref *inside an effect* (ref access in effects is allowed; ref access during render is NOT — that's why this lives in an effect, not render). On a real change (not initial mount), call `closeCanvas()`.
+
+```tsx
+import { lazy, Suspense, useEffect, useRef } from "react";
+// ...
+const closeCanvas = useCanvasStore((s) => s.closeCanvas);
+const prevSessionRef = useRef(activeSessionId);
+useEffect(() => {
+  if (prevSessionRef.current !== activeSessionId) {
+    prevSessionRef.current = activeSessionId;
+    closeCanvas();
+  }
+}, [activeSessionId, closeCanvas]);
+```
+
+- [ ] Test (`frontend/tests/pages/ChatPage.canvas.test.tsx` or extend): render ChatPage with a session, open the canvas (`useCanvasStore.getState().toggleCanvas()`), switch `activeSessionId` (via `useChatStore.getState().selectSession(otherId)`), assert `useCanvasStore.getState().open === false`. (ChatPage needs the chat-stream/store deps; if too heavy to render, instead verify via a focused hook test or accept manual verification — keep the test honest, skip with a reason if jsdom can't drive it.)
+- [ ] Verify `closeCanvas()` in an effect does NOT trip the `react-hooks/set-state-in-effect` lint rule (it's a zustand action, not a React `useState` setter). If it does, move the close into the chat store's `selectSession` action instead.
+
+## W3-2: Cache rendered pages (keep loaded papers alive)
+
+**Why:** switching switcher tabs (or re-opening a paper) re-sets the iframe `src`, forcing a full re-parse + MathJax re-render — slow for large papers. Keep each *visited* paper's iframe mounted and just toggle visibility, so switching back is instant.
+
+**Files:** `frontend/src/components/canvas/CitationCanvas.tsx`.
+
+**Implementation:**
+- Track `visited: { paperContentId: number; mode: "pdf" | "html"; src: string }[]` (component state). When the active paper's `mode` resolves and yields a `src`, append it to `visited` if that `paperContentId` isn't already present (dedupe by paperContentId; cap the list at e.g. 8 most-recent to bound memory).
+- Render ONE iframe per visited entry, all mounted; only the active one visible (`hidden={entry.paperContentId !== effectivePaperId}` or `style={{ display: ... }}` — use `hidden` so layout collapses). Active iframe fills the body; others are display:none but stay loaded.
+- Track loaded state + highlight per active iframe: a `Map<number, HTMLIFrameElement>` via callback refs keyed by paperContentId; `loadedPaperIds: Set<number>`. On a paper's iframe `onLoad`, mark it loaded, and if it's the active paper + html + has an `activeChunk` for it, highlight (also apply dark-mode style — W3-3). The same-paper highlight effect targets the active paper's iframe doc.
+- **Also (backend, cheap first-load win):** add `Cache-Control: public, max-age=31536000, immutable` to the `FileResponse`s in `serve_html` + `serve_pdf` (content is content-addressed by `paper_content` id / sha) so the browser caches the bytes across reloads/sessions. `headers={"Cache-Control": "..."}` on the `FileResponse`.
+
+- [ ] Tests: jsdom can't truly verify "no re-parse", but assert structure: after visiting paper 7 then paper 8 then back to 7, there are 2 iframes mounted (one per visited paper) and the paper-7 iframe was not re-created (e.g. stable via `key`/ref identity, or assert both `src`s are present in the DOM simultaneously with only one visible). Backend: add a test that `serve_html`/`serve_pdf` responses carry a `Cache-Control` header.
+
+## W3-3: Dark-mode-aware iframe HTML
+
+**Why:** the rendered paper HTML is light (white bg). In the app's dark theme the iframe is a jarring white block. Invert/adapt the document for dark mode (HTML mode only; the native PDF viewer can't be styled).
+
+**Files:** `frontend/src/components/canvas/CitationCanvas.tsx`.
+
+**Implementation:**
+- Detect dark mode via `next-themes` `useTheme()` (`resolvedTheme === "dark"`) — the app already uses next-themes (`ThemeToggle`). 
+- On iframe load (and when `resolvedTheme` changes while open), inject/remove a `<style id="ph-dark">` into the iframe document (mode `"html"` only). Use the invert-with-image-reinvert trick so figures stay correct:
+  ```css
+  html { background: #0f1115 !important; }
+  html { filter: invert(0.9) hue-rotate(180deg); }
+  img, svg, video, canvas, [style*="background"] { filter: invert(1) hue-rotate(180deg); }
+  ```
+  Inject only when dark; remove the style node when light. Factor this as a small helper `applyIframeTheme(doc, dark)` (parallels `findAndHighlight`'s style injection).
+- Apply on every iframe `onLoad` and via an effect keyed on `resolvedTheme` (re-apply to the active iframe's doc when the user toggles theme with the panel open).
+
+- [ ] Test: a unit test for `applyIframeTheme(doc, true)` injects `#ph-dark` with a `filter` rule into a jsdom `Document`; `applyIframeTheme(doc, false)` removes it. (Mirror `findAndHighlight.test.ts`.)
+
+## Wave 3 Self-Review
+- Session-swap closes the panel → W3-1.
+- Loaded papers cached (instant re-display) + browser byte cache → W3-2.
+- Dark-mode-aware document → W3-3.
+- All HTML-mode-only where relevant (PDF native viewer unaffected). `findAndHighlight` highlight discipline preserved across the keep-alive iframe set (highlight targets the ACTIVE paper's iframe doc).
