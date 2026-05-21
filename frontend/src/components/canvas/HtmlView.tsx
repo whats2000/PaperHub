@@ -1,15 +1,18 @@
 import { useEffect, useRef } from "react";
 
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
-import { findAndHighlight } from "@/lib/findAndHighlight";
+import { findAndHighlight, highlightChunkRange } from "@/lib/findAndHighlight";
 
 interface Props {
   /** The paper's rendered HTML, embedded via `srcdoc` (same-origin). */
   html: string;
   isDark: boolean;
-  /** When set, the passage to scroll-to + highlight once the doc is ready. */
+  /** Deterministic anchor (`phchunk-N` span) for the cited chunk, when ingest
+   *  placed one. Preferred over text-search. */
+  highlightDomId: string | null;
+  /** Fallback passage text to locate when there's no anchor (or it's absent). */
   highlightText: string | null;
-  /** Called when `highlightText` couldn't be located in the document. */
+  /** Called when neither the anchor nor the text could be located. */
   onHighlightMiss?: () => void;
 }
 
@@ -20,25 +23,33 @@ interface Props {
  * to text-search + highlight the cited passage. `allow-scripts` lets MathJax
  * run; figures are data-URI inlined by the renderer.
  */
-export function HtmlView({ html, isDark, highlightText, onHighlightMiss }: Props) {
+export function HtmlView({
+  html,
+  isDark,
+  highlightDomId,
+  highlightText,
+  onHighlightMiss,
+}: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
 
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
     if (!doc?.body) return;
     applyIframeTheme(doc, isDark);
-    if (highlightText) {
-      const found = findAndHighlight(doc, highlightText);
-      if (!found) onHighlightMiss?.();
-    }
+    if (!highlightDomId && !highlightText) return;
+    // Prefer the deterministic anchor; fall back to text-search.
+    const found =
+      (highlightDomId !== null && highlightChunkRange(doc, highlightDomId)) ||
+      (highlightText !== null && findAndHighlight(doc, highlightText));
+    if (!found) onHighlightMiss?.();
   };
 
-  // Re-apply when the theme toggles or the target passage changes (the iframe
-  // is already loaded in those cases, so onLoad won't fire again).
+  // Re-apply when the theme toggles or the target changes (the iframe is
+  // already loaded in those cases, so onLoad won't fire again).
   useEffect(() => {
     apply();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, highlightText]);
+  }, [isDark, highlightDomId, highlightText]);
 
   return (
     <iframe

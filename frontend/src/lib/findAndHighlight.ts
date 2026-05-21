@@ -166,3 +166,30 @@ function clearHighlight(doc: Document): void {
     el.classList.remove(HIGHLIGHT_CLASS);
   });
 }
+
+const BLOCK_SELECTOR =
+  "p,li,blockquote,h1,h2,h3,h4,h5,h6,td,figure,section,div";
+
+/**
+ * Deterministically locate a chunk by its ingest-time anchor (`<span id>`
+ * injected at the chunk's start) and highlight the block it begins, scrolling
+ * it into view. Returns whether the anchor element exists. This is the
+ * preferred resolver (no text matching); callers fall back to
+ * `findAndHighlight` when there's no `dom_id` or the anchor is absent (e.g. a
+ * chunk whose sentinel landed in math and was skipped at ingest).
+ */
+export function highlightChunkRange(doc: Document, domId: string): boolean {
+  const start = doc.getElementById(domId);
+  if (!start) return false;
+  clearHighlight(doc);
+  ensureHighlightStyle(doc);
+  const target = start.closest(BLOCK_SELECTOR) ?? start.parentElement ?? start;
+  target.classList.add(HIGHLIGHT_CLASS);
+  if (typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  const win = doc.defaultView;
+  const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
+  setTimeoutFn(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
+  return true;
+}

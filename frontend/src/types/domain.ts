@@ -76,6 +76,9 @@ export interface ChunkResolution {
   paper_content_id: number;
   section: string | null;
   text: string;
+  /** Deterministic anchor (`<span id>`) injected at the chunk's start during
+   *  ingest, when its sentinel survived rendering; null → use text-search. */
+  dom_id: string | null;
 }
 
 export interface AttachResult {

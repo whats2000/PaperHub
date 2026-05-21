@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findAndHighlight, HIGHLIGHT_CLASS } from "@/lib/findAndHighlight";
+import {
+  findAndHighlight,
+  highlightChunkRange,
+  HIGHLIGHT_CLASS,
+} from "@/lib/findAndHighlight";
 
 function docFrom(html: string): Document {
   return new DOMParser().parseFromString(
@@ -7,6 +11,23 @@ function docFrom(html: string): Document {
     "text/html",
   );
 }
+
+describe("highlightChunkRange", () => {
+  it("highlights the block of an existing anchor and returns true", () => {
+    const doc = docFrom(
+      '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-0")).toBe(true);
+    const hl = doc.querySelector(`.${HIGHLIGHT_CLASS}`);
+    expect(hl?.tagName).toBe("P");
+  });
+
+  it("returns false when the anchor is absent (caller falls back to text-search)", () => {
+    const doc = docFrom("<p>no anchor here</p>");
+    expect(highlightChunkRange(doc, "phchunk-9")).toBe(false);
+    expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)).toBeNull();
+  });
+});
 
 describe("findAndHighlight", () => {
   it("finds text within a single text node and highlights it", () => {

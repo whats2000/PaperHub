@@ -55,6 +55,7 @@ const server = setupServer(
       paper_content_id: 7,
       section: "3.2",
       text: "Expert collapse is mitigated.",
+      dom_id: null,
     }),
   ),
   http.get(`${API_BASE_URL}/papers/content/7/document`, () =>

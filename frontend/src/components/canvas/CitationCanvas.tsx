@@ -298,6 +298,13 @@ export function CitationCanvas() {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
+                highlightDomId={
+                  isActive &&
+                  activeChunk &&
+                  activeChunk.paper_content_id === pid
+                    ? activeChunk.dom_id
+                    : null
+                }
                 highlightText={
                   isActive &&
                   activeChunk &&
