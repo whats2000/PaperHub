@@ -61,6 +61,7 @@ async def test_get_chunk_returns_resolution(
         "paper_content_id": 1,
         "section": "3.2 Routing",
         "text": "Expert collapse is mitigated by load balancing.",
+        "dom_id": None,
     }
 
 
