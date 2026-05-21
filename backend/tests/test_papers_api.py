@@ -985,6 +985,286 @@ async def test_delete_library_paper_cleans_on_disk_cache(
     assert not cache_dir.exists(), "cache dir should be rmtreed"
 
 
+# ---------------------------------------------------------------------------
+# W2-0: GET /papers/content/{id}/document  and  GET /papers/content/{id}/pdf
+# ---------------------------------------------------------------------------
+
+
+async def test_document_mode_html_for_latex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LaTeX paper (no top-level .pdf) → /document returns {"mode": "html"}."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    latex_dir = tmp_path / "latex_paper"
+    latex_dir.mkdir()
+    (latex_dir / "source.flattened.tex").write_text(
+        "\\documentclass{article}", encoding="utf-8"
+    )
+    (latex_dir / "source.html").write_text(
+        "<html><body>ok</body></html>", encoding="utf-8"
+    )
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:latex1','arxiv','latex1','L','[]',2024,'', ?, ?, ?)",
+            (
+                str(latex_dir / "source.flattened.tex"),
+                str(latex_dir),
+                str(latex_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/document")
+
+    assert r.status_code == 200
+    assert r.json() == {"mode": "html"}
+
+
+async def test_document_mode_pdf_for_pdf_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-rendered paper (top-level foo.pdf present) → /document returns {"mode": "pdf"}."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    pdf_dir = tmp_path / "pdf_paper"
+    pdf_dir.mkdir()
+    (pdf_dir / "source.html").write_text(
+        "<html><body>broken render</body></html>", encoding="utf-8"
+    )
+    (pdf_dir / "foo.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:pdf1','arxiv','pdf1','P','[]',2024,'', ?, ?, ?)",
+            (
+                str(pdf_dir / "foo.pdf"),
+                str(pdf_dir),
+                str(pdf_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/document")
+
+    assert r.status_code == 200
+    assert r.json() == {"mode": "pdf"}
+
+
+async def test_document_mode_pdf_ignores_subdir_pdfs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A .pdf inside a subdirectory must NOT trigger pdf mode (guard against
+    LaTeX papers that have figure PDFs under source/)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    latex_dir = tmp_path / "latex_with_figures"
+    latex_dir.mkdir()
+    (latex_dir / "source.flattened.tex").write_text(
+        "\\documentclass{article}", encoding="utf-8"
+    )
+    (latex_dir / "source.html").write_text("<html/>\n", encoding="utf-8")
+    sub = latex_dir / "figures"
+    sub.mkdir()
+    (sub / "fig1.pdf").write_bytes(b"%PDF-1.4 figure")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:latexfigs','arxiv','latexfigs','LF','[]',2024,'', ?, ?, ?)",
+            (
+                str(latex_dir / "source.flattened.tex"),
+                str(latex_dir),
+                str(latex_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/document")
+
+    assert r.status_code == 200
+    assert r.json() == {"mode": "html"}
+
+
+async def test_document_404_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /papers/content/99999/document → 404 when no such paper_content row."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/papers/content/99999/document")
+
+    assert r.status_code == 404
+
+
+async def test_serve_pdf_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /papers/content/{id}/pdf → 200, application/pdf, inline disposition."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    pdf_dir = tmp_path / "pdf_paper_inline"
+    pdf_dir.mkdir()
+    pdf_file = pdf_dir / "source.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 inline test")
+    (pdf_dir / "source.html").write_text("<html/>\n", encoding="utf-8")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:pdfx1','arxiv','pdfx1','PX','[]',2024,'', ?, ?, ?)",
+            (
+                str(pdf_file),
+                str(pdf_dir),
+                str(pdf_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/pdf")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert "inline" in r.headers.get("content-disposition", "")
+
+
+async def test_serve_pdf_fallback_to_glob_when_source_path_not_pdf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If source_path doesn't end in .pdf, fall back to first *.pdf glob in source_dir."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    pdf_dir = tmp_path / "pdf_fallback"
+    pdf_dir.mkdir()
+    pdf_file = pdf_dir / "paper.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 fallback")
+    (pdf_dir / "source.html").write_text("<html/>\n", encoding="utf-8")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:pdfx2','arxiv','pdfx2','PX2','[]',2024,'', ?, ?, ?)",
+            (
+                str(pdf_dir / "source.html"),  # source_path is NOT a pdf
+                str(pdf_dir),
+                str(pdf_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/pdf")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+
+
+async def test_serve_pdf_404_for_latex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LaTeX paper (no .pdf at top level) → GET .../pdf → 404."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    latex_dir = tmp_path / "latex_no_pdf"
+    latex_dir.mkdir()
+    (latex_dir / "source.flattened.tex").write_text(
+        "\\documentclass{article}", encoding="utf-8"
+    )
+    (latex_dir / "source.html").write_text("<html/>\n", encoding="utf-8")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute(
+            "INSERT INTO paper_content "
+            "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:latexpdf','arxiv','latexpdf','LP','[]',2024,'', ?, ?, ?)",
+            (
+                str(latex_dir / "source.flattened.tex"),
+                str(latex_dir),
+                str(latex_dir / "source.html"),
+            ),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        pcid = int(row[0])
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pcid}/pdf")
+
+    assert r.status_code == 404
+
+
+async def test_serve_pdf_404_when_no_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /papers/content/99999/pdf → 404 when no such paper_content row."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/papers/content/99999/pdf")
+
+    assert r.status_code == 404
+
+
 async def test_delete_library_paper_preserves_sibling_caches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -387,6 +387,91 @@ async def remove_from_session(papers_id: int) -> None:
         await conn.commit()
 
 
+class DocumentModeResponse(BaseModel):
+    mode: str  # "html" | "pdf"
+
+
+@router.get("/content/{paper_content_id}/document", response_model=DocumentModeResponse)
+async def document_mode(paper_content_id: int) -> DocumentModeResponse:
+    """Return whether this paper should be viewed as HTML or PDF.
+
+    A top-level ``*.pdf`` in ``source_dir_path`` means the HTML was rendered
+    from a PDF (PyMuPDF) and is visually broken — the Citation Canvas should
+    show the original PDF instead.  If no top-level PDF exists the paper was
+    rendered from LaTeX (pandoc) and HTML is fine.
+
+    Note: uses top-level glob only (not rglob) so figure PDFs inside a
+    ``source/`` subdirectory of a LaTeX paper don't false-positive.
+    """
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT source_dir_path FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    source_dir = Path(row[0])
+    # Top-level glob only — rglob would pick up figure PDFs inside source/ subdirs
+    # of a LaTeX paper, making them false-positive as PDF-rendered.
+    pdfs = sorted(source_dir.glob("*.pdf"))  # noqa: ASYNC240
+    mode = "pdf" if pdfs else "html"
+    return DocumentModeResponse(mode=mode)
+
+
+@router.get("/content/{paper_content_id}/pdf")
+async def serve_pdf(paper_content_id: int) -> FileResponse:
+    """Serve the original PDF file inline so the Citation Canvas can display
+    it in an iframe for PDF-rendered papers (arXiv-PDF-fallback and pdf_upload).
+
+    Resolution order:
+    1. If ``source_path`` ends with ``.pdf`` (case-insensitive) and exists on
+       disk, serve it directly.
+    2. Otherwise, fall back to the first top-level ``*.pdf`` in
+       ``source_dir_path`` (sorted for determinism).
+    3. If neither yields a file, raise 404.
+    """
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT source_path, source_dir_path FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    source_path, source_dir_path = row[0], row[1]
+
+    pdf_path: Path | None = None
+    # 1. Prefer source_path when it is itself the PDF.
+    if source_path and Path(source_path).suffix.lower() == ".pdf":
+        candidate = Path(source_path)
+        if candidate.is_file():  # noqa: ASYNC240
+            pdf_path = candidate
+    # 2. Fallback: first top-level *.pdf in source_dir (top-level only, not rglob).
+    if pdf_path is None and source_dir_path:
+        candidates = sorted(Path(source_dir_path).glob("*.pdf"))  # noqa: ASYNC240
+        if candidates:
+            pdf_path = candidates[0]
+
+    if pdf_path is None:
+        raise HTTPException(
+            404,
+            f"no PDF file found for paper_content {paper_content_id}",
+        )
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        content_disposition_type="inline",
+    )
+
+
 @router.get("/content/{paper_content_id}/html")
 async def serve_html(paper_content_id: int) -> FileResponse:
     """Served as a file to keep the Citation Canvas in Plan D simple
