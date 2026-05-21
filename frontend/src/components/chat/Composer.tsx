@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { AttachPaperMenu } from "@/components/chat/AttachPaperMenu";
 import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
 
 interface Props {
   onSubmit: (text: string) => void;
@@ -28,12 +29,6 @@ interface Capability {
 }
 
 const CAPABILITIES: Capability[] = [
-  {
-    icon: BookOpen,
-    label: "References",
-    tooltip:
-      "Coming in Plan D — toggle which papers are in scope for this turn",
-  },
   {
     icon: Presentation,
     label: "Slides",
@@ -49,6 +44,7 @@ const CAPABILITIES: Capability[] = [
 export function Composer({ onSubmit, disabled }: Props) {
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
+  const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const value = draft;
@@ -97,6 +93,25 @@ export function Composer({ onSubmit, disabled }: Props) {
             <TooltipProvider>
               <div className="flex items-center gap-0.5">
                 <AttachPaperMenu />
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span tabIndex={0} className="inline-flex" />}
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => toggleCanvas()}
+                      className="h-8 w-8"
+                      aria-label="References"
+                    >
+                      <BookOpen className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Toggle the reference reading panel</p>
+                  </TooltipContent>
+                </Tooltip>
                 {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
                   <Tooltip key={label}>
                     <TooltipTrigger
