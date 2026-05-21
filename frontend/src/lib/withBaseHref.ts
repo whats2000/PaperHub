@@ -13,6 +13,22 @@
  * relative-URL element. Falls back to creating a head, or prepending, when the
  * markup lacks one.
  */
+/**
+ * Remove dead / unnecessary external `<script>`s pandoc's MathJax template
+ * injects, which stall the page load:
+ * - `polyfill.io` — sold + served malware in 2024, now blocked/dead at most
+ *   networks, so the browser hangs on it before timing out (and it's a
+ *   supply-chain risk). Modern browsers don't need it.
+ * - `html5shiv` — an old-IE shim, irrelevant in modern browsers.
+ * MathJax itself (the CDN script that actually typesets math) is left intact.
+ */
+export function stripDeadCdnScripts(html: string): string {
+  return html.replace(
+    /<script\b[^>]*\bsrc="[^"]*(?:polyfill\.io|html5shiv)[^"]*"[^>]*>\s*<\/script>/gi,
+    "",
+  );
+}
+
 export function withBaseHref(html: string, baseHref: string): string {
   const baseTag = `<base href="${baseHref}">`;
   if (/<head[^>]*>/i.test(html)) {

@@ -12,7 +12,7 @@ import {
   fetchPaperPdfData,
   API_BASE_URL,
 } from "@/lib/api";
-import { withBaseHref } from "@/lib/withBaseHref";
+import { withBaseHref, stripDeadCdnScripts } from "@/lib/withBaseHref";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -133,11 +133,12 @@ export function CitationCanvas() {
               : {
                   mode,
                   status: "ready",
-                  // Inject <base> so the paper's relative asset URLs
-                  // (`asset/...`, served by the backend) resolve to the
+                  // Strip the dead polyfill.io/html5shiv scripts (they stall
+                  // the load), then inject <base> so the paper's relative asset
+                  // URLs (`asset/...`, served by the backend) resolve to the
                   // backend, not the app origin (srcdoc's default base).
                   html: withBaseHref(
-                    await fetchPaperHtml(pid),
+                    stripDeadCdnScripts(await fetchPaperHtml(pid)),
                     `${API_BASE_URL}/papers/content/${pid}/`,
                   ),
                 };
