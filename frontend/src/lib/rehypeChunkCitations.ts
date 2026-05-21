@@ -1,6 +1,10 @@
 import type { Root, Text, Element, ElementContent } from "hast";
 import { visit } from "unist-util-visit";
-import { CHUNK_MARKER_RE, buildChunkOrdinalMap } from "@/lib/chunkCitations";
+import {
+  CHUNK_MARKER_RE,
+  buildChunkOrdinalMap,
+  parseChunkIds,
+} from "@/lib/chunkCitations";
 
 /**
  * Rehype plugin: rewrite `[chunk:<id>]` text occurrences into
@@ -29,15 +33,18 @@ export function rehypeChunkCitations() {
         if (m.index > last) {
           out.push({ type: "text", value: node.value.slice(last, m.index) });
         }
-        const id = Number(m[1]);
-        const ordinal = ordinals.get(id) ?? 0;
-        const cite: Element = {
-          type: "element",
-          tagName: "chunk-cite",
-          properties: { dataChunkId: id, dataOrdinal: ordinal },
-          children: [],
-        };
-        out.push(cite);
+        // A marker may carry several ids (`[chunk:101,102]`); emit one
+        // superscript per id (CitationMarker spaces adjacent ones).
+        for (const id of parseChunkIds(m[1] ?? "")) {
+          const ordinal = ordinals.get(id) ?? 0;
+          const cite: Element = {
+            type: "element",
+            tagName: "chunk-cite",
+            properties: { dataChunkId: id, dataOrdinal: ordinal },
+            children: [],
+          };
+          out.push(cite);
+        }
         last = m.index + m[0].length;
       }
       if (last < node.value.length) {
