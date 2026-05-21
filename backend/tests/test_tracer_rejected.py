@@ -22,3 +22,19 @@ async def test_mark_rejected_writes_rejected_status(migrated_db: aiosqlite.Conne
     assert row is not None
     assert row[0] == "rejected"
     assert "DROP" in row[1]
+
+
+@pytest.mark.asyncio
+async def test_mark_rejected_survives_later_mark_error(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+
+    async with tracer.step(agent="sql", tool="sql.query", model=None) as step:
+        step.mark_rejected("policy stop")
+        step.mark_error("later fault")  # must NOT downgrade rejected -> error
+
+    async with migrated_db.execute("SELECT status FROM tool_calls WHERE run_id = 1") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == "rejected"
