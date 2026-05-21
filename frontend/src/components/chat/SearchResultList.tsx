@@ -203,9 +203,9 @@ export function SearchResultList({ candidates, sessionId }: Props) {
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Found papers
       </p>
-      {candidates.map((c) => (
+      {candidates.map((c, i) => (
         <article
-          key={c.paper_id}
+          key={`${c.paper_id}-${i}`}
           className="rounded-lg border border-border bg-card p-3 space-y-1.5"
         >
           <div className="flex items-start justify-between gap-3">
