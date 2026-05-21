@@ -193,3 +193,34 @@ export function highlightChunkRange(doc: Document, domId: string): boolean {
   setTimeoutFn(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
   return true;
 }
+
+/**
+ * Last-resort resolver: scroll to the heading that matches a chunk's section
+ * title and flash it. Used when neither the deterministic anchor nor the
+ * text-search located the exact passage (e.g. a math/table-heavy chunk) — so a
+ * citation always lands at least at the right section instead of dead-ending.
+ * Returns whether a matching heading was found.
+ */
+export function scrollToSection(doc: Document, sectionTitle: string): boolean {
+  const target = normalize(sectionTitle);
+  if (!target) return false;
+  const headings = doc.querySelectorAll("h1,h2,h3,h4,h5,h6");
+  for (const h of Array.from(headings)) {
+    const ht = normalize(h.textContent ?? "");
+    // Pandoc headings may carry a section number prefix, so match loosely.
+    if (ht && (ht === target || ht.includes(target) || target.includes(ht))) {
+      clearHighlight(doc);
+      ensureHighlightStyle(doc);
+      const el = h as HTMLElement;
+      el.classList.add(HIGHLIGHT_CLASS);
+      if (typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      const win = doc.defaultView;
+      const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
+      setTimeoutFn(() => el.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
+      return true;
+    }
+  }
+  return false;
+}

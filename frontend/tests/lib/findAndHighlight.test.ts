@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   findAndHighlight,
   highlightChunkRange,
+  scrollToSection,
   HIGHLIGHT_CLASS,
 } from "@/lib/findAndHighlight";
 
@@ -26,6 +27,19 @@ describe("highlightChunkRange", () => {
     const doc = docFrom("<p>no anchor here</p>");
     expect(highlightChunkRange(doc, "phchunk-9")).toBe(false);
     expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)).toBeNull();
+  });
+});
+
+describe("scrollToSection", () => {
+  it("matches a heading by title (loose) and highlights it", () => {
+    const doc = docFrom("<h2>3.2 Expert Routing</h2><p>body</p>");
+    expect(scrollToSection(doc, "Expert Routing")).toBe(true);
+    expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)?.tagName).toBe("H2");
+  });
+
+  it("returns false when no heading matches", () => {
+    const doc = docFrom("<h1>Introduction</h1><p>body</p>");
+    expect(scrollToSection(doc, "Conclusions")).toBe(false);
   });
 });
 

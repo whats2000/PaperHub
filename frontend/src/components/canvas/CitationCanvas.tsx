@@ -312,6 +312,13 @@ export function CitationCanvas() {
                     ? activeChunk.text
                     : null
                 }
+                sectionTitle={
+                  isActive &&
+                  activeChunk &&
+                  activeChunk.paper_content_id === pid
+                    ? activeChunk.section
+                    : null
+                }
                 onHighlightMiss={() =>
                   toast.message("Couldn't locate this passage in the paper")
                 }

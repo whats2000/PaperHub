@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
-import { findAndHighlight, highlightChunkRange } from "@/lib/findAndHighlight";
+import {
+  findAndHighlight,
+  highlightChunkRange,
+  scrollToSection,
+} from "@/lib/findAndHighlight";
 
 interface Props {
   /** The paper's rendered HTML, embedded via `srcdoc` (same-origin). */
@@ -12,7 +16,10 @@ interface Props {
   highlightDomId: string | null;
   /** Fallback passage text to locate when there's no anchor (or it's absent). */
   highlightText: string | null;
-  /** Called when neither the anchor nor the text could be located. */
+  /** Last-resort: the chunk's section title, to scroll to its heading when the
+   *  anchor + text-search both miss (so a citation never dead-ends). */
+  sectionTitle: string | null;
+  /** Called when anchor, text, and section all failed to locate anything. */
   onHighlightMiss?: () => void;
 }
 
@@ -28,6 +35,7 @@ export function HtmlView({
   isDark,
   highlightDomId,
   highlightText,
+  sectionTitle,
   onHighlightMiss,
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
@@ -36,11 +44,13 @@ export function HtmlView({
     const doc = ref.current?.contentDocument;
     if (!doc?.body) return;
     applyIframeTheme(doc, isDark);
-    if (!highlightDomId && !highlightText) return;
-    // Prefer the deterministic anchor; fall back to text-search.
+    if (!highlightDomId && !highlightText && !sectionTitle) return;
+    // Resolution order, best → last-resort: deterministic anchor → text-search
+    // → section heading (so a citation always lands somewhere useful).
     const found =
       (highlightDomId !== null && highlightChunkRange(doc, highlightDomId)) ||
-      (highlightText !== null && findAndHighlight(doc, highlightText));
+      (highlightText !== null && findAndHighlight(doc, highlightText)) ||
+      (sectionTitle !== null && scrollToSection(doc, sectionTitle));
     if (!found) onHighlightMiss?.();
   };
 
@@ -49,7 +59,7 @@ export function HtmlView({
   useEffect(() => {
     apply();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, highlightDomId, highlightText]);
+  }, [isDark, highlightDomId, highlightText, sectionTitle]);
 
   return (
     <iframe
