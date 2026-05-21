@@ -83,7 +83,7 @@ describe("CitationCanvas reading panel", () => {
     await waitFor(() =>
       expect(activeIframe(container)).toHaveAttribute(
         "src",
-        `${API_BASE_URL}/papers/content/7/html`,
+        "/papers/content/7/html",
       ),
     );
     expect(activeIframe(container)).toHaveAttribute(
@@ -98,7 +98,7 @@ describe("CitationCanvas reading panel", () => {
     await waitFor(() =>
       expect(activeIframe(container)).toHaveAttribute(
         "src",
-        `${API_BASE_URL}/papers/content/7/html`,
+        "/papers/content/7/html",
       ),
     );
     expect(screen.getByRole("button", { name: /Paper A/ })).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("CitationCanvas reading panel", () => {
     await waitFor(() =>
       expect(activeIframe(container)).toHaveAttribute(
         "src",
-        `${API_BASE_URL}/papers/content/8/html`,
+        "/papers/content/8/html",
       ),
     );
     // Keep-alive: the previously-viewed Paper A iframe is still mounted.
@@ -124,7 +124,7 @@ describe("CitationCanvas reading panel", () => {
     await waitFor(() =>
       expect(activeIframe(container)).toHaveAttribute(
         "src",
-        `${API_BASE_URL}/papers/content/7/pdf`,
+        "/papers/content/7/pdf",
       ),
     );
     expect(

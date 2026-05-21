@@ -5,7 +5,7 @@ import { useTheme } from "next-themes";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
-import { getChunk, getDocumentMode, API_BASE_URL } from "@/lib/api";
+import { getChunk, getDocumentMode } from "@/lib/api";
 import { findAndHighlight } from "@/lib/findAndHighlight";
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
 import { Button } from "@/components/ui/button";
@@ -66,8 +66,12 @@ export function CitationCanvas() {
 
   const titleFor = (pid: number): string =>
     allRefs.find((r) => r.paper_content_id === pid)?.title ?? `Paper ${pid}`;
+  // SAME-ORIGIN, relative URL (proxied by Vite to the backend). A cross-origin
+  // iframe (backend :8000 vs app :5173) has a null contentDocument, which
+  // breaks highlighting + dark-mode injection. The relative path keeps the
+  // iframe same-origin so we can read its document.
   const srcFor = (pid: number, m: "pdf" | "html"): string =>
-    `${API_BASE_URL}/papers/content/${pid}/${m === "pdf" ? "pdf" : "html"}`;
+    `/papers/content/${pid}/${m === "pdf" ? "pdf" : "html"}`;
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
   // requestNonce so the same chunk re-clicked re-resolves. Clears the request
@@ -297,7 +301,10 @@ export function CitationCanvas() {
               data-active={isActive}
               src={srcFor(pid, m)}
               onLoad={() => handleIframeLoad(pid)}
-              sandbox="allow-scripts allow-same-origin"
+              // HTML: sandbox (allow-scripts for MathJax, allow-same-origin so
+              // we can read the doc to highlight). PDF: no sandbox — the
+              // browser's native PDF viewer can be blocked by the sandbox.
+              sandbox={m === "pdf" ? undefined : "allow-scripts allow-same-origin"}
               hidden={!isActive}
               className="h-full w-full flex-1 bg-white"
             />
