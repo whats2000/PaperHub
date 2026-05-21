@@ -26,8 +26,13 @@ export function PdfView({ data }: Props) {
   const [width, setWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // react-pdf compares `file` by reference — memoize so it doesn't reload.
-  const file = useMemo(() => ({ data }), [data]);
+  // pdfjs TRANSFERS (detaches) the ArrayBuffer it's given to its worker, so
+  // passing the cached bytes directly would corrupt them and make a second
+  // render ("switch away and back") fail with "Couldn't render this PDF". Give
+  // pdfjs a fresh COPY each mount and keep the cached original intact.
+  // (`file` is memoized so react-pdf — which compares by reference — doesn't
+  // reload on unrelated re-renders.)
+  const file = useMemo(() => ({ data: data.slice() }), [data]);
 
   // Fit pages to the container width (minus padding), tracking resize.
   useEffect(() => {

@@ -20,8 +20,13 @@ export function applyIframeTheme(doc: Document, dark: boolean): void {
   if (existing) return;
   const style = doc.createElement("style");
   style.id = DARK_STYLE_ID;
+  // The invert trick: a normal white-bg/black-text page inverts to a dark bg
+  // with light text. Set the base background to WHITE first so transparent
+  // pages also invert to dark. Do NOT set a dark background here — the filter
+  // would invert it back to light (white-on-white). Re-invert media so figures
+  // keep their true colours.
   style.textContent = `
-    html { background: #0f1115 !important; filter: invert(0.92) hue-rotate(180deg); }
+    html { background: #ffffff; filter: invert(0.9) hue-rotate(180deg); }
     img, svg, video, canvas, [style*="background-image"] {
       filter: invert(1) hue-rotate(180deg);
     }
