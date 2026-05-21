@@ -3,7 +3,12 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    title TEXT NOT NULL DEFAULT 'New chat'
+    title TEXT NOT NULL DEFAULT 'New chat',
+    -- Soft-delete tombstone: NULL = live. Set when a session WITH content is
+    -- deleted, so Undo can restore it and other devices hide it on next list.
+    -- Empty sessions are hard-deleted instead; tombstoned rows are purged after
+    -- a retention window (see purge_deleted_sessions).
+    deleted_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS paper_content (
@@ -56,6 +61,7 @@ CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     routing_decision_json TEXT,
+    search_results_json TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT,
     status TEXT NOT NULL DEFAULT 'running'

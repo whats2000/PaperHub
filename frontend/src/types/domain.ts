@@ -107,3 +107,25 @@ export interface ChatSession {
   messages: ChatMessage[];
   backend_session_id: number | null;
 }
+
+/** Backend-of-record session row (GET /sessions). The frontend merges these
+ *  into the local store on load so sessions are shared across devices. */
+export interface SessionSummary {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+/** One persisted message replayed from GET /sessions/{id}/messages. */
+export interface BackendMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  run_id: number | null;
+  created_at: string;
+  routing_decision?: RoutingDecision;
+  /** Paper-search result cards emitted on this turn, replayed so they show on
+   *  every device (null for non-search turns). */
+  search_results?: SearchResultCandidate[] | null;
+}

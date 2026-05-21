@@ -61,10 +61,51 @@ async def _rebuild_messages_table(conn: aiosqlite.Connection) -> None:
         raise
 
 
+async def purge_deleted_sessions(
+    conn: aiosqlite.Connection, retention_days: int
+) -> int:
+    """Hard-delete soft-deleted sessions whose tombstone is older than the
+    retention window, reclaiming their cascaded papers/messages/runs/tool_calls.
+
+    Returns the number of sessions purged. A retention of 0 purges every
+    tombstoned session immediately. Requires `PRAGMA foreign_keys = ON` for the
+    cascade (open_db sets this).
+    """
+    cur = await conn.execute(
+        "DELETE FROM chat_sessions "
+        "WHERE deleted_at IS NOT NULL "
+        "AND deleted_at < datetime('now', ?)",
+        (f"-{int(retention_days)} days",),
+    )
+    await conn.commit()
+    return cur.rowcount if cur.rowcount is not None else 0
+
+
 async def apply_schema(conn: aiosqlite.Connection) -> None:
     sql = (files("paperhub.db") / "schema.sql").read_text(encoding="utf-8")
     await conn.executescript(sql)
     # executescript auto-commits; no explicit commit needed here.
+
+    # -----------------------------------------------------------------------
+    # Idempotent column-add for chat_sessions.deleted_at (soft-delete
+    # tombstone). Pre-existing DBs created before this migration won't have it.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "deleted_at" not in cols:
+        await conn.execute("ALTER TABLE chat_sessions ADD COLUMN deleted_at TEXT")
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
+    # Idempotent column-add for runs.search_results_json (paper-search cards
+    # persisted per turn so they replay cross-device). Pre-existing DBs won't
+    # have it.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(runs)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "search_results_json" not in cols:
+        await conn.execute("ALTER TABLE runs ADD COLUMN search_results_json TEXT")
+        await conn.commit()
 
     # -----------------------------------------------------------------------
     # C4: Idempotent column-add migration for paper_content.abstract

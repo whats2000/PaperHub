@@ -7,6 +7,8 @@ import type {
   ToolCallRecord,
   ReferenceItem,
   SearchResultCandidate,
+  SessionSummary,
+  BackendMessage,
 } from "@/types/domain";
 import { createBackendSession } from "@/lib/api";
 
@@ -66,6 +68,12 @@ interface ChatState {
     candidates: SearchResultCandidate[],
   ) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
+  // Cross-device sync (backend is source of truth)
+  reconcileBackendSessions: (summaries: SessionSummary[]) => void;
+  hydrateSessionMessages: (
+    sessionId: number,
+    messages: BackendMessage[],
+  ) => void;
 }
 
 function deriveTitle(content: string): string {
@@ -355,6 +363,110 @@ export const useChatStore = create<ChatState>()(
         get().patchSessionBackendId(sessionId, backendId);
         return backendId;
       },
+
+      reconcileBackendSessions: (summaries) =>
+        set((s) => {
+          // STRICT MIRROR: the backend DB is the single source of truth for
+          // which chats exist. The frontend list must match it exactly so a
+          // chat deleted on one device disappears on every other device.
+          //
+          //   Keep a local session ONLY if:
+          //     - it has NO backend row yet (an unsent draft — never a
+          //       cross-device entity), OR
+          //     - the DB still lists it (matched by backend_session_id).
+          //
+          //   Everything else is pruned — including a session that still has
+          //   messages cached locally but whose backend row is gone (deleted
+          //   elsewhere). That cached copy is exactly the "deleted in A but
+          //   still in B" ghost; strict mirror removes it.
+          const byBackendId = new Map(summaries.map((x) => [x.id, x]));
+
+          const kept = s.sessions
+            .filter(
+              (sess) =>
+                sess.backend_session_id === null ||
+                byBackendId.has(sess.backend_session_id),
+            )
+            .map((sess) => {
+              // Backend owns the title (derived from the first message).
+              const summary =
+                sess.backend_session_id !== null
+                  ? byBackendId.get(sess.backend_session_id)
+                  : undefined;
+              return summary ? { ...sess, title: summary.title } : sess;
+            });
+
+          const localBackendIds = new Set(
+            kept
+              .map((sess) => sess.backend_session_id)
+              .filter((id): id is number => id !== null),
+          );
+
+          let nextId = s._nextId;
+          const additions: ChatSession[] = [];
+          for (const summary of summaries) {
+            if (localBackendIds.has(summary.id)) continue;
+            additions.push({
+              id: nextId,
+              title: summary.title,
+              messages: [],
+              backend_session_id: summary.id,
+            });
+            nextId += 1;
+          }
+
+          // Backend list is newest-first; show backend sessions ahead of any
+          // local-only draft, preserving backend order.
+          const sessions = [...additions, ...kept];
+          // If the active session was pruned (deleted elsewhere), clear it so
+          // the UI doesn't point at a chat that no longer exists.
+          const activeStillExists = sessions.some(
+            (sess) => sess.id === s.activeSessionId,
+          );
+
+          // No-op guard: nothing added, nothing pruned/retitled, active intact.
+          if (
+            additions.length === 0 &&
+            kept.length === s.sessions.length &&
+            kept.every((sess, i) => sess === s.sessions[i]) &&
+            activeStillExists
+          ) {
+            return s;
+          }
+          return {
+            sessions,
+            _nextId: nextId,
+            activeSessionId: activeStillExists ? s.activeSessionId : null,
+          };
+        }),
+
+      hydrateSessionMessages: (sessionId, messages) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            if (sess.id !== sessionId) return sess;
+            // Replace the local copy with the DB's (the backend is the source
+            // of truth for the chat record), EXCEPT while a turn is streaming
+            // — the DB doesn't hold the in-flight message yet, so replacing
+            // would clobber live state. This guard also covers a fetch that
+            // resolves mid-turn.
+            if (sess.messages.some((m) => m.status === "streaming")) return sess;
+            const mapped: ChatMessage[] = messages
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .map((m) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                run_id: m.run_id,
+                status: "ok" as const,
+                ...(m.routing_decision
+                  ? { routing_decision: m.routing_decision }
+                  : {}),
+                ...(m.search_results
+                  ? { search_results: m.search_results }
+                  : {}),
+              }));
+            return { ...sess, messages: mapped };
+          }),
+        })),
     }),
     {
       name: "paperhub-chat-v1",

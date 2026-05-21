@@ -70,6 +70,15 @@ class ChatRequest(BaseModel):
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
     if session_id is not None:
+        # The client may hold a backend_session_id (in localStorage) that no
+        # longer exists in the DB — a reset workspace, a deleted session, or a
+        # different machine sharing the same UI. Trusting it blindly made
+        # _new_run's FK insert raise `FOREIGN KEY constraint failed`. Ensure the
+        # row exists (no-op when it already does, preserving title/created_at).
+        await conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id) VALUES (?)", (session_id,)
+        )
+        await conn.commit()
         return session_id
     await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
     await conn.commit()
@@ -77,6 +86,19 @@ async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) ->
         row = await cur.fetchone()
     assert row is not None
     return int(row[0])
+
+
+def _derive_title(content: str) -> str:
+    """Backend mirror of the frontend ``deriveTitle`` — first ~40 chars of the
+    first user message, word-trimmed with an ellipsis. Kept in sync so a title
+    derived backend-side (for GET /sessions) matches what the browser shows."""
+    trimmed = " ".join(content.split())
+    if len(trimmed) <= 40:
+        return trimmed
+    cut = trimmed[:40]
+    last_space = cut.rfind(" ")
+    head = cut[:last_space] if last_space > 20 else cut
+    return head + "…"
 
 
 async def _new_run(conn: aiosqlite.Connection, session_id: int) -> int:
@@ -232,6 +254,13 @@ async def _record_user_message(
         "INSERT INTO messages (session_id, role, content, run_id) "
         "VALUES (?, 'user', ?, ?)",
         (session_id, content, run_id),
+    )
+    # Promote the still-default title from the first user message so the
+    # session is identifiable in GET /sessions across devices. Only fires while
+    # the title is the seed 'New chat' — later turns never overwrite it.
+    await conn.execute(
+        "UPDATE chat_sessions SET title = ? WHERE id = ? AND title = 'New chat'",
+        (_derive_title(content), session_id),
     )
     await conn.commit()
 
@@ -525,6 +554,21 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                     for c in enriched
                                 ],
                             )
+                            # Persist the cards on the run so they replay
+                            # cross-device (GET /sessions/{id}/messages), not
+                            # just in the browser that ran the search.
+                            await conn.execute(
+                                "UPDATE runs SET search_results_json = ? "
+                                "WHERE id = ?",
+                                (
+                                    json.dumps(
+                                        [c.model_dump() for c in sr_evt.candidates],
+                                        separators=(",", ":"),
+                                    ),
+                                    run_id,
+                                ),
+                            )
+                            await conn.commit()
                             yield {
                                 "event": sr_evt.type,
                                 "data": sr_evt.model_dump_json(exclude={"type"}),

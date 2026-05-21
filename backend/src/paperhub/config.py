@@ -43,6 +43,10 @@ class Settings:
     # turn before the loop is force-stopped.
     paper_qa_max_section_reads: int
 
+    # Days a soft-deleted chat session is retained before being permanently
+    # purged (cascading its messages/runs/papers) at startup.
+    session_retention_days: int
+
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
 
@@ -94,6 +98,9 @@ def load_settings() -> Settings:
         # 6. Agent tunables.
         paper_qa_max_section_reads=int(
             os.environ.get("PAPERHUB_PAPER_QA_MAX_SECTION_READS", "5"),
+        ),
+        session_retention_days=int(
+            os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),
 
         # 8. Logging.

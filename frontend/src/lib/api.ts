@@ -4,6 +4,8 @@ import type {
   AttachResult,
   IngestResult,
   ChunkResolution,
+  SessionSummary,
+  BackendMessage,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -98,6 +100,21 @@ export async function ingestPaper(
   });
 }
 
+/** List backend-of-record sessions (those with ≥1 message), newest activity
+ * first. The frontend merges these into the local store on load so sessions
+ * are shared across devices, not trapped in one browser's localStorage. */
+export async function listSessions(): Promise<SessionSummary[]> {
+  return apiFetch<SessionSummary[]>("/sessions");
+}
+
+/** Replay a session's persisted message history (chronological). Used to
+ * lazily hydrate a session opened from the cross-device list. */
+export async function fetchSessionMessages(
+  sessionId: number,
+): Promise<BackendMessage[]> {
+  return apiFetch<BackendMessage[]>(`/sessions/${sessionId}/messages`);
+}
+
 export async function createBackendSession(): Promise<number> {
   const data = await apiFetch<{ session_id: number }>("/sessions", {
     method: "POST",
@@ -105,11 +122,20 @@ export async function createBackendSession(): Promise<number> {
   return data.session_id;
 }
 
-/** Delete a backend session and everything tied to it (membership rows,
- * messages, runs, tool_calls). `paper_content` rows survive — they're
- * deduplicated across sessions. */
+/** Delete a backend session. Empty sessions are removed outright; sessions
+ * with content are soft-deleted (tombstoned) so they vanish from every device
+ * immediately but can be restored. `paper_content` rows always survive —
+ * they're deduplicated across sessions. */
 export async function deleteBackendSession(sessionId: number): Promise<void> {
   await apiFetch<undefined>(`/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+/** Undo a soft delete — clear the tombstone so the session is live again on
+ * every device, with its message history intact. */
+export async function restoreBackendSession(sessionId: number): Promise<void> {
+  await apiFetch<undefined>(`/sessions/${sessionId}/restore`, {
+    method: "POST",
+  });
 }
 
 /** Custom error thrown by deleteLibraryPaper when the paper is still attached
