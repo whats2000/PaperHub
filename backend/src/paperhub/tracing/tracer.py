@@ -19,6 +19,7 @@ class _StepBuffer:
     token_in: int | None = None
     token_out: int | None = None
     forced_error: str | None = None
+    forced_status: str | None = None
 
     def record_args(self, args: dict[str, Any]) -> None:
         self.args = args
@@ -35,6 +36,12 @@ class _StepBuffer:
         propagates out of the ``with`` block. Used by callers that catch
         exceptions from a dispatched tool but still want the trace to
         show the failure."""
+        self.forced_error = message
+
+    def mark_rejected(self, message: str) -> None:
+        """Force status='rejected' (NFR-05 scope boundary). Distinct from
+        mark_error: a rejection is a deliberate policy stop, not a fault."""
+        self.forced_status = "rejected"
         self.forced_error = message
 
 
@@ -78,7 +85,9 @@ class Tracer:
                               started, status, error)
             raise
         else:
-            if buf.forced_error is not None:
+            if buf.forced_status is not None:
+                status, error = buf.forced_status, buf.forced_error
+            elif buf.forced_error is not None:
                 status, error = "error", buf.forced_error
             await self._write(buf, index, agent, tool, model, parent_step,
                               started, status, error)
