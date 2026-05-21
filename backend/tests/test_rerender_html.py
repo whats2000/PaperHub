@@ -155,8 +155,19 @@ async def test_rerender_sets_dom_ids_and_writes_html(
         source_path=str(main_tex),
         source_dir_path=str(cache_dir),
     )
-    # Seed two chunks at small char offsets (within the tiny doc).
-    await _seed_chunks(test_db, pcid, char_starts=[0, 50])
+    # Seed two chunks at PROSE offsets (the body text). The LaTeX-safe mask
+    # only injects at brace-depth-0, non-math, non-fragile-env positions, so a
+    # chunk start must land in real prose — not at `\documentclass` (offset 0)
+    # or inside a `\section{}` argument. (_TINY_TEX has no comments, so the
+    # stripped→original offset map is the identity here.)
+    await _seed_chunks(
+        test_db,
+        pcid,
+        char_starts=[
+            _TINY_TEX.index("Hello world"),
+            _TINY_TEX.index("Here is the method"),
+        ],
+    )
 
     n_chunks, n_anchored = await rr_mod._rerender_one(pcid, conn=test_db)
 

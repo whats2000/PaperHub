@@ -242,3 +242,18 @@ def test_chunker_strips_comment_after_latex_line_break():
     assert "real content here" in joined
     # Both \\ row-end markers preserved.
     assert "\\\\" in joined
+
+
+def test_map_stripped_offsets_to_original() -> None:
+    from paperhub.pipelines.chunker import (
+        map_stripped_offsets_to_original,
+        strip_latex_comments,
+    )
+
+    text = "alpha % comment here\nbeta gamma"
+    stripped = strip_latex_comments(text)
+    sp = stripped.index("beta")
+    [orig] = map_stripped_offsets_to_original(text, [sp])
+    assert text[orig : orig + 4] == "beta"
+    assert map_stripped_offsets_to_original(text, [0]) == [0]
+    assert map_stripped_offsets_to_original(text, [len(stripped)]) == [len(text)]

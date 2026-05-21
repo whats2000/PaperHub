@@ -34,7 +34,12 @@ from paperhub.pipelines.arxiv_client import (
     download_arxiv_source,
     search_arxiv,
 )
-from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
+from paperhub.pipelines.chunker import (
+    Chunk,
+    chunk_text,
+    map_stripped_offsets_to_original,
+    strip_latex_comments,
+)
 from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import (
     _extract_pdf_metadata,
@@ -265,9 +270,14 @@ class PaperPipeline:
         # artefact for the Citation Canvas.
         # NOTE: chunk text comes from chunk_text(full_text) — the unmarked source —
         # so chunk texts are always clean and never contain sentinel tokens.
-        base = strip_latex_comments(full_text)
-        starts = [c.char_start for c in chunks]
-        marked, _injected = inject_sentinels(base, starts)
+        # Inject into the RAW full_text (not the comment-stripped text): pandoc
+        # fails on comment-stripped LaTeX for some papers, but renders the raw
+        # source fine. Chunk char_start offsets are in stripped coords, so map
+        # them back to raw-text positions first.
+        starts = map_stripped_offsets_to_original(
+            full_text, [c.char_start for c in chunks],
+        )
+        marked, _injected = inject_sentinels(full_text, starts)
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
@@ -445,9 +455,13 @@ class PaperPipeline:
             # flattened .tex — let pandoc find + embed them.
             # NOTE: chunk texts come from chunk_text(full_text) — the unmarked
             # source — so chunk texts are always clean and never contain sentinels.
-            base = strip_latex_comments(full_text)
-            starts = [c.char_start for c in chunks]
-            marked, _injected = inject_sentinels(base, starts)
+            # Inject into the RAW full_text (pandoc fails on comment-stripped
+            # LaTeX for some papers); chunk offsets are in stripped coords, so
+            # map them back to raw-text positions.
+            starts = map_stripped_offsets_to_original(
+                full_text, [c.char_start for c in chunks],
+            )
+            marked, _injected = inject_sentinels(full_text, starts)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
                 rasterize_and_normalize_figures(marked, source_path.parent),
