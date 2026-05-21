@@ -93,6 +93,45 @@ describe("useSessionsSync", () => {
     );
   });
 
+  it("re-syncs (replaces) the active session's messages on activation", async () => {
+    // Core cross-device fix: a session cached with stale local messages must
+    // refresh from the DB when re-opened, not stay frozen at the local copy.
+    server.use(
+      http.get(`${API_BASE_URL}/sessions`, () =>
+        HttpResponse.json([
+          { id: 7, title: "S", created_at: "t", updated_at: "t", message_count: 2 },
+        ]),
+      ),
+      http.get(`${API_BASE_URL}/sessions/7/messages`, () =>
+        HttpResponse.json([
+          { role: "user", content: "q", run_id: 1, created_at: "t1" },
+          { role: "assistant", content: "fresh from DB", run_id: 1, created_at: "t2" },
+        ]),
+      ),
+    );
+
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 1,
+          title: "S",
+          messages: [{ role: "user", content: "stale local only", run_id: null, status: "ok" }],
+          backend_session_id: 7,
+        },
+      ],
+      activeSessionId: 1,
+      _nextId: 2,
+    });
+
+    renderHook(() => useSessionsSync());
+
+    await waitFor(() => {
+      const msgs = useChatStore.getState().sessions[0]!.messages;
+      expect(msgs).toHaveLength(2);
+      expect(msgs[1]!.content).toBe("fresh from DB");
+    });
+  });
+
   it("does not fetch history for a session without a backend id", async () => {
     const msgHandler = vi.fn(() => HttpResponse.json([]));
     server.use(

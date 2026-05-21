@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 import { fetchSessionMessages, listSessions } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 
 /**
- * Makes the backend the source of truth for the session list.
+ * Makes the backend the source of truth for both the session LIST and each
+ * session's MESSAGE record.
  *
  * Sessions used to live only in this browser's localStorage, so a chat started
  * on one device was invisible on another — and a stale local id could even
@@ -13,11 +14,13 @@ import { useChatStore } from "@/store/chat";
  *  1. On mount, fetches GET /sessions and mirrors it into the store — adding
  *     backend-of-record sessions not present locally AND pruning local
  *     sessions whose backend row is gone (deleted elsewhere or never
- *     persisted). This keeps every device showing the same set and stops
- *     phantom/ghost chats from lingering in one browser's localStorage.
- *  2. Lazily replays a session's history (GET /sessions/{id}/messages) the
- *     first time it becomes active with a backend id but no loaded messages —
- *     e.g. a session that arrived from the backend list on another device.
+ *     persisted). Every device shows the same set; no phantom/ghost chats.
+ *  2. Whenever a session becomes active (mount, switch, reload), re-fetches
+ *     its history from GET /sessions/{id}/messages and REPLACES the local
+ *     copy. Without this the chat record was effectively local-only: once a
+ *     browser had cached a session's messages it never re-read the DB, so a
+ *     turn added on another device never showed up here. The replace is
+ *     skipped for an in-flight (streaming) turn so live state isn't clobbered.
  *
  * localStorage stays as a cache; failures degrade silently (a warn, no toast)
  * so a backend hiccup never blocks the UI.
@@ -27,10 +30,6 @@ export function useSessionsSync(): void {
     (s) => s.reconcileBackendSessions,
   );
   const hydrateSessionMessages = useChatStore((s) => s.hydrateSessionMessages);
-
-  // Sessions whose history we've already fetched, so an empty backend-only
-  // session (or a re-select) doesn't refetch on every active-id change.
-  const hydratedRef = useRef<Set<number>>(new Set());
 
   // 1. Pull the cross-device session list once on mount and mirror it.
   useEffect(() => {
@@ -47,31 +46,29 @@ export function useSessionsSync(): void {
     };
   }, [reconcileBackendSessions]);
 
-  // 2. Lazily hydrate the active session's history when it has a backend id
-  //    but no loaded messages yet. Selectors return primitives so their
-  //    snapshots stay referentially stable (an object literal would loop).
+  // 2. Re-sync the active session's message record from the DB on every
+  //    activation (mount / switch). Keyed on activeSessionId only, so it fires
+  //    when the user opens a session — NOT on every local message change (that
+  //    would refetch after each turn). hydrateSessionMessages re-checks the
+  //    streaming guard at apply time, so a fetch that resolves mid-turn can't
+  //    clobber an in-flight response.
   const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const backendId = useChatStore((s) => {
-    if (s.activeSessionId === null) return null;
-    const sess = s.sessions.find((x) => x.id === s.activeSessionId);
-    if (!sess || sess.backend_session_id === null) return null;
-    return sess.messages.length > 0 ? null : sess.backend_session_id;
-  });
 
   useEffect(() => {
-    if (activeSessionId === null || backendId === null) return;
-    if (hydratedRef.current.has(backendId)) return;
-    hydratedRef.current.add(backendId);
+    if (activeSessionId === null) return;
+    const sess = useChatStore
+      .getState()
+      .sessions.find((x) => x.id === activeSessionId);
+    if (!sess || sess.backend_session_id === null) return;
+    if (sess.messages.some((m) => m.status === "streaming")) return;
 
-    const localId = activeSessionId;
+    const backendId = sess.backend_session_id;
     let cancelled = false;
     fetchSessionMessages(backendId)
       .then((messages) => {
-        if (!cancelled) hydrateSessionMessages(localId, messages);
+        if (!cancelled) hydrateSessionMessages(activeSessionId, messages);
       })
       .catch((err: unknown) => {
-        // Allow a later retry if the fetch failed.
-        hydratedRef.current.delete(backendId);
         console.warn(
           `[useSessionsSync] failed to load history for session ${backendId}:`,
           err,
@@ -80,5 +77,5 @@ export function useSessionsSync(): void {
     return () => {
       cancelled = true;
     };
-  }, [backendId, activeSessionId, hydrateSessionMessages]);
+  }, [activeSessionId, hydrateSessionMessages]);
 }
