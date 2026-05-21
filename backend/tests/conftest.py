@@ -13,6 +13,8 @@ import pytest_asyncio
 # load_settings() sees it. Must happen at module import time, not
 # inside a fixture.
 os.environ.setdefault("PAPERHUB_INPROCESS_MODELS", "1")
+# Keep the boot banner out of test output.
+os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
 
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402

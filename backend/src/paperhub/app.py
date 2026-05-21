@@ -93,6 +93,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             _prewarm_models(), name="paperhub-prewarm",
         )
 
+    _print_boot_banner(settings, app)
+
     try:
         yield
     finally:
@@ -104,6 +106,98 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await prewarm
         # Lifespan: chroma cleanup handled internally by chromadb.
         await app.state.mcp_registry.shutdown()
+
+
+# PaperHub wordmark (figlet "slant"). A clear, iconic "we're up" marker so the
+# transient connection errors the UI logs while polling a not-yet-listening
+# backend aren't mistaken for a failed boot — this banner only prints once the
+# whole stack (DB, vectors, model server, MCP) is wired and about to serve.
+_BANNER_ART = [
+    r"    ____                        __  __      __  ",
+    r"   / __ \____ _____  ___  _____/ / / /_  __/ /_ ",
+    r"  / /_/ / __ `/ __ \/ _ \/ ___/ /_/ / / / / __ \ ",
+    r" / ____/ /_/ / /_/ /  __/ /  / __  / /_/ / /_/ / ",
+    r"/_/    \__,_/ .___/\___/_/  /_/ /_/\__,_/_.___/  ",
+    r"           /_/                                   ",
+]
+
+
+def _print_boot_banner(settings: object, app: FastAPI) -> None:
+    """Print an iconic 'boot complete' banner to stdout once the full stack is
+    wired. Skipped under tests / when ``PAPERHUB_BOOT_BANNER=0``."""
+    if os.environ.get("PAPERHUB_BOOT_BANNER", "1") == "0":
+        return
+
+    import sys
+
+    # A real console renders ANSI colour + Unicode box chars (Windows writes via
+    # the UTF-16 console API, so code page doesn't matter). When redirected to a
+    # pipe/file the encoding may be a legacy code page that mangles — or can't
+    # encode — box chars, so fall back to plain ASCII there.
+    fancy = sys.stdout.isatty()
+
+    def c(code: str) -> str:
+        return code if fancy else ""
+
+    amber, dim, bold, green, reset = (
+        c("\033[38;5;208m"),
+        c("\033[2m"),
+        c("\033[1m"),
+        c("\033[38;5;42m"),
+        c("\033[0m"),
+    )
+
+    try:
+        from importlib.metadata import version
+
+        ver = f"v{version('paperhub')}"
+    except Exception:  # noqa: BLE001
+        ver = ""
+
+    s = settings  # has model_server_*, inprocess_models, db_path
+    model = (
+        "in-process"
+        if getattr(s, "inprocess_models", False)
+        else f"{getattr(s, 'model_server_host', '?')}:{getattr(s, 'model_server_port', '?')}"
+    )
+    mcp_names = sorted(getattr(app.state.mcp_registry, "_clients", {}) or {})
+    mcp = ", ".join(mcp_names) if mcp_names else "none (web search optional)"
+
+    dash = "—" if fancy else "-"
+    # Body lines (plain text; width is measured on these, color added after).
+    rows = [
+        f"{'PaperHub ready':<16}{ver}",
+        "",
+        f"{'Open the app':<16}http://localhost:5173",
+        f"{'Model server':<16}{model}",
+        f"{'MCP servers':<16}{mcp}",
+        "",
+        "Connection errors logged above were the UI polling before",
+        f"this point {dash} boot is complete, they're safe to ignore.",
+    ]
+    width = max(len(r) for r in rows)
+    tl, tr, bl, br, h, v = ("╭", "╮", "╰", "╯", "─", "│") if fancy else (
+        "+", "+", "+", "+", "-", "|",
+    )
+    top = f"{amber}{tl}{h * (width + 2)}{tr}{reset}"
+    bottom = f"{amber}{bl}{h * (width + 2)}{br}{reset}"
+
+    out = ["", *[f"{amber}{line}{reset}" for line in _BANNER_ART], "", top]
+    for r in rows:
+        # Bold the headline, dim the footnote, plain for the status rows.
+        if r.startswith("PaperHub ready"):
+            text = f"{bold}{green}{r}{reset}"
+        elif r.startswith("Connection") or r.startswith("this point"):
+            text = f"{dim}{r}{reset}"
+        else:
+            text = r
+        pad = " " * (width - len(r))
+        out.append(f"{amber}{v}{reset} {text}{pad} {amber}{v}{reset}")
+    out.append(bottom)
+    out.append("")
+    # The banner is cosmetic — never let an encoding hiccup break boot.
+    with contextlib.suppress(Exception):
+        print("\n".join(out), flush=True)
 
 
 async def _prewarm_models() -> None:
