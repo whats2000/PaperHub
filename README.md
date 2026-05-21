@@ -12,8 +12,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-434%20backend%20%2B%20174%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/Plan%20D-merged%20(SRS%20v2.13)-success)
+![Tests](https://img.shields.io/badge/tests-448%20backend%20%2B%20192%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/Plan%20D-merged%20(SRS%20v2.15)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 </div>
@@ -31,6 +31,7 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 - **🌐 Discovery via web + Semantic Scholar.** `paper_search` decomposes into Parser → Discover (no-key multi-engine web search) → Resolve (Semantic Scholar) → Synthesize, so even vague references ("that diffusion paper everyone cites") resolve to a citable hit.
 - **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant.
 - **➗ Math renders.** LaTeX in answers (`$…$`, `$$…$$`) renders as real equations via KaTeX.
+- **💾 Pick up on any device.** Sessions and their full chat record live in the backend, not the browser — open the app anywhere and your conversations, paper-search cards, and references are all there. Deleting a chat removes it everywhere (with Undo); empty scratch chats are cleaned up automatically.
 - **🔌 MCP-native.** The agent's own tools are served over MCP (in-process FastMCP at `/mcp`); external clients (Claude Desktop, Cursor) can reach the same surface.
 
 ---
