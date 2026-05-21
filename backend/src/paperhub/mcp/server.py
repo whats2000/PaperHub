@@ -421,27 +421,14 @@ def mount_paperhub_papers_on(
     Idempotent in spirit but not in fact — calling twice would mount the
     sub-app twice. The caller (FastAPI ``create_app``) is responsible for
     calling this exactly once during app construction.
+
+    Delegates the generic mount mechanics to
+    :func:`paperhub.mcp.mounting.mount_inprocess_mcp` — the local import
+    avoids a circular import (mounting.py imports
+    ``PaperhubPapersRequestContextMiddleware`` from this module).
     """
-    sub_app = server.streamable_http_app()
-    sub_app.add_middleware(PaperhubPapersRequestContextMiddleware)
-    app.mount(path, sub_app)
-
-    # Chain the sub-app's lifespan into the parent's. We also copy the
-    # parent's `state.settings` onto the sub-app *after* the parent's
-    # lifespan has populated it — the middleware reads
-    # `request.app.state.settings` and `request.app` here is the sub-app
-    # (Starlette overwrites `scope["app"]` on mount dispatch), so this is
-    # the only way to surface the parent's resolved Settings without
-    # re-running `load_settings()` per request.
-    parent_lifespan = app.router.lifespan_context
-
-    @asynccontextmanager
-    async def _chained(target_app: FastAPI) -> AsyncIterator[None]:
-        async with parent_lifespan(target_app), sub_app.router.lifespan_context(sub_app):
-            sub_app.state.settings = target_app.state.settings
-            yield
-
-    app.router.lifespan_context = _chained
+    from paperhub.mcp.mounting import mount_inprocess_mcp
+    mount_inprocess_mcp(app, server, path=path)
     _LOG.info(
         "mcp.server mounted name=%s path=%s db=%s",
         server.name,
