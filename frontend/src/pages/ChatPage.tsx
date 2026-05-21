@@ -60,12 +60,13 @@ export function ChatPage() {
         <ChatThread session={activeSession} />
         <Composer onSubmit={handleSubmit} disabled={isStreaming} />
       </div>
+      {/* Canvas stays mounted for the whole session (collapsed to 0 width when
+          closed) so its prefetched, kept-alive paper iframes survive open/close
+          and don't re-render on re-open. */}
       <div className="min-h-0 overflow-hidden">
-        {canvasOpen && (
-          <Suspense fallback={null}>
-            <CitationCanvas />
-          </Suspense>
-        )}
+        <Suspense fallback={null}>
+          <CitationCanvas />
+        </Suspense>
       </div>
     </div>
   );

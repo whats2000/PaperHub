@@ -72,9 +72,22 @@ beforeEach(() => {
 });
 
 describe("CitationCanvas reading panel", () => {
-  it("renders nothing when closed", () => {
+  it("renders nothing when closed with no references", () => {
+    useChatStore.getState().setReferences(99, []);
     const { container } = render(<CitationCanvas />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("prefetches all references while closed (iframes mounted, panel hidden)", async () => {
+    const { container } = render(<CitationCanvas />);
+    // Closed but refs exist → panel stays mounted (hidden) and prefetches both
+    // papers' iframes so they're ready before the user opens it.
+    await waitFor(() =>
+      expect(container.querySelectorAll("iframe")).toHaveLength(2),
+    );
+    expect(
+      container.querySelector('aside[aria-label="Citation Canvas"]'),
+    ).toHaveAttribute("aria-hidden", "true");
   });
 
   it("opening via citation resolves the chunk and shows that paper (html)", async () => {
@@ -146,11 +159,15 @@ describe("CitationCanvas reading panel", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("close removes the panel", async () => {
+  it("close hides the panel (aria-hidden) and clears open", async () => {
     const { container } = render(<CitationCanvas />);
     act(() => useCanvasStore.getState().openCitation(42));
     await waitFor(() => expect(activeIframe(container)).not.toBeNull());
     await userEvent.click(screen.getByRole("button", { name: /close/i }));
-    expect(screen.queryByLabelText(/citation canvas/i)).toBeNull();
+    expect(useCanvasStore.getState().open).toBe(false);
+    // Panel stays mounted (keep-alive cache survives) but is hidden + inert.
+    expect(
+      container.querySelector('aside[aria-label="Citation Canvas"]'),
+    ).toHaveAttribute("aria-hidden", "true");
   });
 });
