@@ -3,118 +3,251 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useCanvasStore } from "@/store/canvas";
-import { getChunk, API_BASE_URL } from "@/lib/api";
+import { useChatStore } from "@/store/chat";
+import { getChunk, getDocumentMode, API_BASE_URL } from "@/lib/api";
 import { findAndHighlight } from "@/lib/findAndHighlight";
 import { Button } from "@/components/ui/button";
-import type { ChunkResolution } from "@/types/domain";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import type { ChunkResolution, ReferenceItem } from "@/types/domain";
+
+const MAX_VISIBLE_TABS = 3;
 
 export function CitationCanvas() {
   const open = useCanvasStore((s) => s.open);
-  const chunkId = useCanvasStore((s) => s.chunkId);
+  const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
+  const requestNonce = useCanvasStore((s) => s.requestNonce);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
 
-  const [chunk, setChunk] = useState<ChunkResolution | null>(null);
+  // Derive active session's enabled references (mirror ReferenceSourcesPanel)
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const sessions = useChatStore((s) => s.sessions);
+  const referencesBySession = useChatStore((s) => s.referencesBySession);
+
+  const activeSession =
+    activeSessionId !== null
+      ? (sessions.find((s) => s.id === activeSessionId) ?? null)
+      : null;
+  const backendSessionId = activeSession?.backend_session_id ?? null;
+  const allRefs: ReferenceItem[] =
+    backendSessionId !== null
+      ? (referencesBySession[backendSessionId] ?? [])
+      : [];
+  const refs = allRefs.filter((r) => r.enabled);
+
+  // Local state
+  const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
+  const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
+  const [stale, setStale] = useState(false);
+  const [mode, setMode] = useState<"pdf" | "html" | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Tracks the src URL that the iframe has *actually* finished loading.
-  // Updated in onLoad before highlighting, so we never search a stale document.
   const loadedSrcRef = useRef<string | null>(null);
 
-  // Fetch the chunk whenever the canvas opens with a new chunkId.
-  // Cancel stale requests so a quick open→open→close doesn't clobber state.
+  const firstEnabledRef = refs.length > 0 ? refs[0] : null;
+  const effectivePaperId = displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null;
+
+  // Resolve effect — keyed on requestNonce so same chunk re-clicked re-resolves
   useEffect(() => {
-    if (!open || chunkId == null) return;
+    if (!open || requestedChunkId == null) return;
     let cancelled = false;
-    getChunk(chunkId)
+    getChunk(requestedChunkId)
       .then((c) => {
-        if (!cancelled) setChunk(c);
+        if (cancelled) return;
+        setActiveChunk(c);
+        setDisplayedPaperId(c.paper_content_id);
+        setStale(false);
       })
-      .catch(() => {
-        if (!cancelled) toast.error("Couldn't load the cited paper");
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/\b404\b/.test(msg)) {
+          setActiveChunk(null);
+          setStale(true);
+        } else {
+          toast.error("Couldn't load the cited paper");
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [open, chunkId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestNonce]);
 
-  // Highlight effect keyed on chunk.
-  //
-  // Two cases:
-  //   A) Cross-paper navigation: the iframe src changes → onLoad fires → we
-  //      highlight in the onLoad handler below. The [chunk] effect must NOT
-  //      run here: between the src change and the new onLoad, contentDocument
-  //      is still the OLD paper's fully-loaded DOM, so findAndHighlight would
-  //      search the wrong document and fire a spurious miss-toast.
-  //   B) Same-paper navigation: src is unchanged, onLoad does NOT re-fire.
-  //      loadedSrcRef.current === src is already true (set by the previous
-  //      onLoad), so we detect this and call findAndHighlight directly.
-  //
-  // findAndHighlight always calls clearHighlight first (idempotent), so calling
-  // it from both this effect and onLoad is safe — a double-call just re-marks
-  // the same spot, which is a no-op from the user's perspective.
+  // Mode effect — keyed on effectivePaperId
   useEffect(() => {
-    if (!chunk) return;
-    // Guard: only highlight when the iframe has actually loaded THIS paper's src.
-    // If loadedSrcRef.current !== src, the iframe is mid-navigation and still
-    // showing a stale document — onLoad will handle highlighting once it fires.
-    const targetSrc = `${API_BASE_URL}/papers/content/${chunk.paper_content_id}/html`;
-    if (loadedSrcRef.current !== targetSrc) return;
-    const doc = iframeRef.current?.contentDocument;
-    if (!doc || doc.readyState !== "complete" || !doc.body) return;
-    const found = findAndHighlight(doc, chunk.text);
-    if (!found) toast.message("Couldn't locate this passage in the paper");
-  }, [chunk]);
-
-  if (!open) return null;
+    if (effectivePaperId == null) return;
+    let cancelled = false;
+    getDocumentMode(effectivePaperId)
+      .then((m) => {
+        if (!cancelled) setMode(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMode("html");
+      });
+    return () => {
+      cancelled = true;
+      // Reset mode so the next paper doesn't briefly show the old mode's iframe.
+      setMode(null);
+    };
+  }, [effectivePaperId]);
 
   const src =
-    chunk == null
-      ? undefined
-      : `${API_BASE_URL}/papers/content/${chunk.paper_content_id}/html`;
+    effectivePaperId != null && mode != null
+      ? `${API_BASE_URL}/papers/content/${effectivePaperId}/${mode === "pdf" ? "pdf" : "html"}`
+      : undefined;
+
+  // Highlight effect — same-paper re-highlight when the iframe is already loaded
+  useEffect(() => {
+    if (!activeChunk || mode !== "html") return;
+    if (activeChunk.paper_content_id !== effectivePaperId) return;
+    if (!src || loadedSrcRef.current !== src) return;
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc || doc.readyState !== "complete" || !doc.body) return;
+    const found = findAndHighlight(doc, activeChunk.text);
+    if (!found) toast.message("Couldn't locate this passage in the paper");
+  }, [activeChunk, effectivePaperId, mode, src]);
 
   const handleIframeLoad = (): void => {
-    if (chunk == null) return;
+    if (src == null) return;
+    loadedSrcRef.current = src;
+    if (mode !== "html" || !activeChunk) return;
+    if (activeChunk.paper_content_id !== effectivePaperId) return;
     const doc = iframeRef.current?.contentDocument;
     if (!doc || !doc.body) return;
-    // Record that the iframe has now loaded the target src BEFORE highlighting,
-    // so the [chunk] effect's guard (loadedSrcRef.current === targetSrc) becomes
-    // true for any same-paper re-highlight that follows.
-    loadedSrcRef.current = src ?? null;
-    // findAndHighlight is idempotent (clears then re-adds), so calling it here
-    // AND in the [chunk] effect above for the same chunk is harmless.
-    const found = findAndHighlight(doc, chunk.text);
+    const found = findAndHighlight(doc, activeChunk.text);
     if (!found) toast.message("Couldn't locate this passage in the paper");
   };
 
+  const handleTabClick = (pcid: number) => {
+    setDisplayedPaperId(pcid);
+    setActiveChunk(null);
+    setStale(false);
+    setOverflowOpen(false);
+  };
+
+  if (!open) return null;
+
+  const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);
+  const overflowTabs = refs.slice(MAX_VISIBLE_TABS);
+  const hasOverflow = overflowTabs.length > 0;
+
   return (
     <aside
-      className="fixed right-0 top-0 z-40 flex h-full w-[min(560px,45vw)] flex-col border-l border-border bg-card shadow-xl"
       aria-label="Citation Canvas"
+      className="flex h-full w-full flex-col border-l border-border bg-card"
     >
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
-        <span className="truncate text-sm font-medium">
-          {chunk?.section ? `§ ${chunk.section}` : "Cited passage"}
-        </span>
+      {/* Header: paper switcher + close */}
+      <header className="flex items-center justify-between border-b border-border px-2 py-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+          {visibleTabs.map((r) => (
+            <button
+              key={r.paper_content_id}
+              type="button"
+              onClick={() => handleTabClick(r.paper_content_id)}
+              className={
+                "truncate rounded px-2 py-1 text-xs font-medium transition-colors " +
+                (effectivePaperId === r.paper_content_id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground")
+              }
+              title={r.title}
+            >
+              {r.title}
+            </button>
+          ))}
+          {hasOverflow && (
+            <Popover open={overflowOpen} onOpenChange={setOverflowOpen}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="More papers"
+                  />
+                }
+              >
+                …
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="start" className="w-56 p-1">
+                <div className="flex flex-col gap-0.5">
+                  {overflowTabs.map((r) => (
+                    <button
+                      key={r.paper_content_id}
+                      type="button"
+                      onClick={() => handleTabClick(r.paper_content_id)}
+                      className={
+                        "w-full truncate rounded px-2 py-1.5 text-left text-xs font-medium transition-colors " +
+                        (effectivePaperId === r.paper_content_id
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground")
+                      }
+                      title={r.title}
+                    >
+                      {r.title}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+
         <Button
           type="button"
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-7 w-7 shrink-0"
           aria-label="Close canvas"
           onClick={closeCanvas}
         >
           <X className="h-4 w-4" />
         </Button>
       </header>
-      {src && (
-        <iframe
-          ref={iframeRef}
-          title="Citation Canvas"
-          src={src}
-          onLoad={handleIframeLoad}
-          sandbox="allow-scripts allow-same-origin"
-          className="h-full w-full flex-1 bg-white"
-        />
-      )}
+
+      {/* Body */}
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+        {/* Stale/404 notice */}
+        {stale && (
+          <div
+            role="status"
+            className="m-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          >
+            This citation&apos;s passage is no longer available — the paper may
+            have been re-indexed.
+          </div>
+        )}
+
+        {/* PDF citation notice */}
+        {activeChunk &&
+          mode === "pdf" &&
+          activeChunk.paper_content_id === effectivePaperId && (
+            <div
+              role="status"
+              className="m-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
+            >
+              Showing the source PDF — passage highlighting isn&apos;t available
+              for PDF papers.
+            </div>
+          )}
+
+        {/* iframe — only when we know the mode */}
+        {src != null && (
+          <iframe
+            ref={iframeRef}
+            title="Citation Canvas"
+            src={src}
+            onLoad={handleIframeLoad}
+            sandbox="allow-scripts allow-same-origin"
+            className="h-full w-full flex-1 bg-white"
+          />
+        )}
+      </div>
     </aside>
   );
 }

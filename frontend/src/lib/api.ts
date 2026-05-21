@@ -152,6 +152,17 @@ export async function getChunk(chunkId: number): Promise<ChunkResolution> {
   return apiFetch<ChunkResolution>(`/chunks/${chunkId}`);
 }
 
+/** Which document to show in the Citation Canvas: a PDF-rendered paper's
+ *  HTML is broken (PyMuPDF), so the canvas shows the original PDF instead. */
+export async function getDocumentMode(
+  paperContentId: number,
+): Promise<"pdf" | "html"> {
+  const d = await apiFetch<{ mode: "pdf" | "html" }>(
+    `/papers/content/${paperContentId}/document`,
+  );
+  return d.mode;
+}
+
 const ARXIV_NEW = /^(\d{4}\.\d{4,5})(v\d+)?$/i;
 const ARXIV_OLD = /^([a-z-]+(\.[A-Z]{2})?\/\d{7})(v\d+)?$/i;
 
