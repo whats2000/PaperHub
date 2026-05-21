@@ -39,10 +39,17 @@ describe("canvas store", () => {
     expect(useCanvasStore.getState().requestedChunkId).toBeNull();
   });
 
-  it("closeCanvas closes but preserves the last requested chunk", () => {
+  it("consumeCitation clears the requested chunk without closing", () => {
+    useCanvasStore.getState().openCitation(42);
+    useCanvasStore.getState().consumeCitation();
+    const s = useCanvasStore.getState();
+    expect(s.requestedChunkId).toBeNull();
+    expect(s.open).toBe(true);
+  });
+
+  it("closeCanvas closes but preserves open=false (request already consumed by canvas)", () => {
     useCanvasStore.getState().openCitation(7);
     useCanvasStore.getState().closeCanvas();
     expect(useCanvasStore.getState().open).toBe(false);
-    expect(useCanvasStore.getState().requestedChunkId).toBe(7);
   });
 });

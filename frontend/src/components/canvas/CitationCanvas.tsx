@@ -20,6 +20,7 @@ export function CitationCanvas() {
   const open = useCanvasStore((s) => s.open);
   const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
   const requestNonce = useCanvasStore((s) => s.requestNonce);
+  const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
 
   // Derive active session's enabled references (mirror ReferenceSourcesPanel)
@@ -72,6 +73,12 @@ export function CitationCanvas() {
         } else {
           toast.error("Couldn't load the cited paper");
         }
+      })
+      .finally(() => {
+        // Clear the request so a later browse-mode open (References button,
+        // which doesn't set a new request) doesn't re-resolve this chunk and
+        // jump back to it — even though the canvas remounts on each open.
+        if (!cancelled) consumeCitation();
       });
     return () => {
       cancelled = true;
