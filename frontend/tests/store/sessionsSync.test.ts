@@ -81,45 +81,60 @@ describe("reconcileBackendSessions", () => {
     expect(ids).toEqual([8]);
   });
 
-  it("NEVER prunes a session that has local messages, even if unlisted", () => {
-    // Safety against data loss: GET /sessions only lists sessions with
-    // messages in the DB. A chat whose history lives only in this browser
-    // must survive reconcile.
+  it("STRICT: prunes a backend-id session gone from the DB even with local messages", () => {
+    // A chat deleted on another device: its backend row is gone, but this
+    // browser cached its messages. Strict mirror must drop it — otherwise it's
+    // the "deleted in A, still in B" ghost.
     useChatStore.setState({
       sessions: [
         {
           id: 1,
-          title: "Local-only history",
+          title: "Deleted elsewhere",
           messages: [
-            { role: "user", content: "important", run_id: null },
+            { role: "user", content: "old", run_id: null },
             { role: "assistant", content: "reply", run_id: null },
           ],
           backend_session_id: 7,
         },
       ],
-      activeSessionId: null,
+      activeSessionId: 1,
       _nextId: 2,
     });
-    // Server returns an empty list — must NOT wipe the local chat.
     useChatStore.getState().reconcileBackendSessions([]);
-    const sessions = useChatStore.getState().sessions;
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0]!.messages).toHaveLength(2);
+    expect(useChatStore.getState().sessions).toHaveLength(0);
+    // Active pointer cleared since the session it referenced is gone.
+    expect(useChatStore.getState().activeSessionId).toBeNull();
   });
 
-  it("keeps local-only drafts (no backend id) and the active session", () => {
+  it("keeps a local unsent draft (no backend id) — never a cross-device chat", () => {
+    useChatStore.setState({
+      sessions: [
+        { id: 1, title: "New chat", messages: [], backend_session_id: null },
+      ],
+      activeSessionId: 1,
+      _nextId: 2,
+    });
+    useChatStore.getState().reconcileBackendSessions([]);
+    expect(useChatStore.getState().sessions).toHaveLength(1);
+    expect(useChatStore.getState().activeSessionId).toBe(1);
+  });
+
+  it("keeps null-backend drafts but prunes an active backend-id session gone from DB", () => {
     useChatStore.setState({
       sessions: [
         { id: 1, title: "Draft", messages: [], backend_session_id: null },
-        { id: 2, title: "Active unsaved", messages: [], backend_session_id: 99 },
+        { id: 2, title: "Active, deleted on server", messages: [], backend_session_id: 99 },
       ],
       activeSessionId: 2,
       _nextId: 3,
     });
-    // Server knows neither (draft never sent; 99 not yet listed).
+    // Server knows neither: the null draft stays (never cross-device); the
+    // backend-id session 99 is gone from the DB, so strict mirror prunes it
+    // even though it's active, and clears the active pointer.
     useChatStore.getState().reconcileBackendSessions([]);
-    const ids = useChatStore.getState().sessions.map((s) => s.id).sort();
-    expect(ids).toEqual([1, 2]);
+    const ids = useChatStore.getState().sessions.map((s) => s.id);
+    expect(ids).toEqual([1]);
+    expect(useChatStore.getState().activeSessionId).toBeNull();
   });
 
   it("preserves the active session's local messages", () => {

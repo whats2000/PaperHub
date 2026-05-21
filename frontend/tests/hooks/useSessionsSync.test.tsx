@@ -54,7 +54,19 @@ describe("useSessionsSync", () => {
   });
 
   it("lazily hydrates the active session's history when it has no messages", async () => {
-    const listHandler = vi.fn(() => HttpResponse.json([]));
+    // The session must be in the backend list, or strict mirror prunes it
+    // before it can be hydrated.
+    const listHandler = vi.fn(() =>
+      HttpResponse.json([
+        {
+          id: 7,
+          title: "S",
+          created_at: "t",
+          updated_at: "t",
+          message_count: 2,
+        },
+      ]),
+    );
     server.use(
       http.get(`${API_BASE_URL}/sessions`, listHandler),
       http.get(`${API_BASE_URL}/sessions/7/messages`, () =>

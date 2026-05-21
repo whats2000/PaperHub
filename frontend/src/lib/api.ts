@@ -115,22 +115,6 @@ export async function fetchSessionMessages(
   return apiFetch<BackendMessage[]>(`/sessions/${sessionId}/messages`);
 }
 
-/** Upload a browser-local chat into the DB so it becomes the source of truth
- * and shows on every device. Idempotent by id (re-import won't duplicate
- * messages). Returns the session id the backend used (the supplied id when
- * given). */
-export async function importSession(payload: {
-  id?: number;
-  title: string;
-  messages: { role: "user" | "assistant"; content: string }[];
-}): Promise<number> {
-  const data = await apiFetch<{ session_id: number }>("/sessions/import", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  return data.session_id;
-}
-
 export async function createBackendSession(): Promise<number> {
   const data = await apiFetch<{ session_id: number }>("/sessions", {
     method: "POST",

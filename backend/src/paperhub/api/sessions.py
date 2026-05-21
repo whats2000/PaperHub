@@ -7,10 +7,9 @@ Browser available from app load.
 from __future__ import annotations
 
 import json
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
@@ -45,23 +44,6 @@ class MessageOut(BaseModel):
     routing_decision: RoutingDecisionOut | None = None
 
 
-class ImportMessage(BaseModel):
-    role: Literal["user", "assistant", "system"]
-    content: str
-
-
-class ImportSessionRequest(BaseModel):
-    # When set, the chat keeps its original id so two devices importing the
-    # same local chat converge instead of duplicating.
-    id: int | None = None
-    title: str = "New chat"
-    messages: list[ImportMessage] = Field(default_factory=list)
-
-
-class ImportSessionResponse(BaseModel):
-    session_id: int
-
-
 @router.post("/sessions", response_model=CreateSessionResponse, status_code=201)
 async def create_session() -> CreateSessionResponse:
     """Create an empty chat_sessions row.
@@ -78,63 +60,6 @@ async def create_session() -> CreateSessionResponse:
         if session_id is None:
             raise HTTPException(status_code=500, detail="session creation failed")
     return CreateSessionResponse(session_id=session_id)
-
-
-@router.post(
-    "/sessions/import", response_model=ImportSessionResponse, status_code=200
-)
-async def import_session(req: ImportSessionRequest) -> ImportSessionResponse:
-    """Upload a browser-local chat into the DB so the DB is the single source
-    of truth and the chat shows up on every device.
-
-    Idempotent by id: if the session already exists with messages, the content
-    is left alone (re-import from a second device is a no-op). A soft-deleted
-    session is revived (importing it signals the user wants it). Imported
-    messages carry no run linkage (run_id NULL) — history text is preserved;
-    per-turn trace/routing are not reconstructed.
-    """
-    settings = load_settings()
-    async with open_db(settings.db_path) as conn:
-        if req.id is not None:
-            await conn.execute(
-                "INSERT OR IGNORE INTO chat_sessions (id, title) VALUES (?, ?)",
-                (req.id, req.title),
-            )
-            session_id = req.id
-        else:
-            cur = await conn.execute(
-                "INSERT INTO chat_sessions (title) VALUES (?)", (req.title,)
-            )
-            last_id = cur.lastrowid
-            if last_id is None:
-                raise HTTPException(500, "session import failed")
-            session_id = last_id
-
-        # Importing means the user wants this chat live again.
-        await conn.execute(
-            "UPDATE chat_sessions SET deleted_at = NULL WHERE id = ?", (session_id,)
-        )
-        # Promote a real title onto a row that's still the default.
-        if req.title and req.title != "New chat":
-            await conn.execute(
-                "UPDATE chat_sessions SET title = ? WHERE id = ? AND title = 'New chat'",
-                (req.title, session_id),
-            )
-
-        # Only seed messages when the session has none — keeps re-import (and
-        # cross-device double-import) from duplicating history.
-        async with conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE session_id = ?", (session_id,)
-        ) as cur:
-            row = await cur.fetchone()
-        has_messages = row is not None and int(row[0]) > 0
-        if not has_messages and req.messages:
-            await conn.executemany(
-                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                [(session_id, m.role, m.content) for m in req.messages],
-            )
-        await conn.commit()
-    return ImportSessionResponse(session_id=session_id)
 
 
 @router.get("/sessions", response_model=list[SessionSummary])

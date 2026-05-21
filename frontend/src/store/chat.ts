@@ -366,31 +366,26 @@ export const useChatStore = create<ChatState>()(
 
       reconcileBackendSessions: (summaries) =>
         set((s) => {
-          // Mirror the DB: the backend is the source of truth for which
-          // sessions exist. Add backend sessions we don't have, and PRUNE
-          // local sessions whose backend row is gone (deleted elsewhere, or
-          // never persisted) — that's what stops phantom chats lingering in
-          // one browser's localStorage and ghosts reappearing after a delete.
+          // STRICT MIRROR: the backend DB is the single source of truth for
+          // which chats exist. The frontend list must match it exactly so a
+          // chat deleted on one device disappears on every other device.
+          //
+          //   Keep a local session ONLY if:
+          //     - it has NO backend row yet (an unsent draft — never a
+          //       cross-device entity), OR
+          //     - the DB still lists it (matched by backend_session_id).
+          //
+          //   Everything else is pruned — including a session that still has
+          //   messages cached locally but whose backend row is gone (deleted
+          //   elsewhere). That cached copy is exactly the "deleted in A but
+          //   still in B" ghost; strict mirror removes it.
           const byBackendId = new Map(summaries.map((x) => [x.id, x]));
 
           const kept = s.sessions
             .filter(
               (sess) =>
-                // A local draft that hasn't been sent yet (no backend row).
                 sess.backend_session_id === null ||
-                // Still exists in the DB.
-                byBackendId.has(sess.backend_session_id) ||
-                // Never yank the session the user is currently in, even if it
-                // isn't listed yet (e.g. brand-new, no messages persisted).
-                sess.id === s.activeSessionId ||
-                // SAFETY: never drop a session that holds messages locally.
-                // GET /sessions only lists sessions with messages in the DB,
-                // so a chat whose history lives only in this browser would
-                // otherwise be pruned — silent data loss. We only prune EMPTY
-                // local sessions the backend doesn't know about (phantom
-                // "New chat" clutter, or backend-only sessions deleted
-                // elsewhere that were never opened/hydrated here).
-                sess.messages.length > 0,
+                byBackendId.has(sess.backend_session_id),
             )
             .map((sess) => {
               // Backend owns the title (derived from the first message).
@@ -420,17 +415,29 @@ export const useChatStore = create<ChatState>()(
             nextId += 1;
           }
 
-          // No-op guard: nothing added and nothing pruned/retitled.
+          // Backend list is newest-first; show backend sessions ahead of any
+          // local-only draft, preserving backend order.
+          const sessions = [...additions, ...kept];
+          // If the active session was pruned (deleted elsewhere), clear it so
+          // the UI doesn't point at a chat that no longer exists.
+          const activeStillExists = sessions.some(
+            (sess) => sess.id === s.activeSessionId,
+          );
+
+          // No-op guard: nothing added, nothing pruned/retitled, active intact.
           if (
             additions.length === 0 &&
             kept.length === s.sessions.length &&
-            kept.every((sess, i) => sess === s.sessions[i])
+            kept.every((sess, i) => sess === s.sessions[i]) &&
+            activeStillExists
           ) {
             return s;
           }
-          // Backend list is newest-first; show backend sessions ahead of any
-          // local-only draft, preserving backend order.
-          return { sessions: [...additions, ...kept], _nextId: nextId };
+          return {
+            sessions,
+            _nextId: nextId,
+            activeSessionId: activeStillExists ? s.activeSessionId : null,
+          };
         }),
 
       hydrateSessionMessages: (sessionId, messages) =>
