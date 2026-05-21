@@ -111,8 +111,14 @@ export function CitationCanvas() {
   // Background prefetch: fetch the document (mode + content) for EVERY enabled
   // reference when the session's reference set changes, so each paper is ready
   // before the user opens it. `fetchedDocs` dedupes so each paper loads once.
+  //
+  // NOTE: deliberately NO per-effect `cancelled` flag. Under React StrictMode
+  // the effect runs setup→cleanup→setup on the same instance; a `cancelled`
+  // guard from the first setup would discard the in-flight fetch's result while
+  // the dedup ref blocks the second setup from re-fetching — leaving the paper
+  // stuck "Loading…". Letting `setDocByPaper` always run (a no-op if unmounted
+  // in React 18+) + deduping on the ref is StrictMode-safe.
   useEffect(() => {
-    let cancelled = false;
     for (const pid of refIds) {
       if (fetchedDocs.current.has(pid)) continue;
       fetchedDocs.current.add(pid);
@@ -123,20 +129,16 @@ export function CitationCanvas() {
             mode === "pdf"
               ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
               : { mode, status: "ready", html: await fetchPaperHtml(pid) };
-          if (!cancelled) setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
+          setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
         } catch {
-          if (!cancelled)
-            setDocByPaper((prev) => ({
-              ...prev,
-              [pid]: { mode: "html", status: "error" },
-            }));
+          setDocByPaper((prev) => ({
+            ...prev,
+            [pid]: { mode: "html", status: "error" },
+          }));
           fetchedDocs.current.delete(pid); // allow a retry on a later pass
         }
       })();
     }
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refIdsKey]);
 
