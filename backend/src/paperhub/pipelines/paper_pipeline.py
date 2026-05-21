@@ -44,6 +44,7 @@ from paperhub.pipelines.extract import (
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.renderer import render_html
+from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
 
@@ -242,28 +243,51 @@ class PaperPipeline:
         flat_path = cache_dir / "source.flattened.tex"
         flat_path.write_text(full_text, encoding="utf-8")
 
-        # Render to HTML from the FLATTENED source, not the original main
-        # .tex. The flattened file is a single self-contained document
-        # (\input chains already inlined by extract_latex), so pandoc can't
-        # hang/OOM resolving includes (arxiv:2410.12557 reproduced that), and
-        # its char offsets align with chunk char_start/char_end + sections_json
-        # (all computed against flattened_text) for the Citation Canvas.
+        # Chunk first — offsets are relative to strip_latex_comments(full_text),
+        # which is exactly what chunk_text computes internally (strip_comments=True).
+        # Chunking before rendering lets us inject sentinel tokens at each chunk's
+        # start offset in the comment-stripped text, so the rendered HTML carries
+        # deterministic <span id="phchunk-N"> anchors for the Citation Canvas.
+        chunks = chunk_text(full_text)
+
+        # Inject chunk-start sentinels into the comment-stripped source, then
+        # normalize figures and render to HTML from that sentinel-marked copy.
+        # Render from the FLATTENED source, not the original main .tex:
+        # the flattened file is a single self-contained document (\input chains
+        # already inlined by extract_latex), so pandoc can't hang/OOM resolving
+        # includes (arxiv:2410.12557 reproduced that), and its char offsets align
+        # with chunk char_start/char_end + sections_json (all computed against
+        # flattened_text) for the Citation Canvas.
         # Rasterize PDF figures -> PNG + rewrite \includegraphics refs so pandoc
         # can embed them (arxiv figures are commonly PDF, often extensionless).
-        # Render from this normalized copy; chunk/section offsets keep using the
-        # unmodified full_text. Figures live in the extracted source tree
-        # (source_path.parent) — pass it as resource_dir so pandoc finds + embeds
-        # them into a self-contained artefact for the Citation Canvas.
+        # Figures live in the extracted source tree (source_path.parent) — pass
+        # it as resource_dir so pandoc finds + embeds them into a self-contained
+        # artefact for the Citation Canvas.
+        # NOTE: chunk text comes from chunk_text(full_text) — the unmarked source —
+        # so chunk texts are always clean and never contain sentinel tokens.
+        base = strip_latex_comments(full_text)
+        starts = [c.char_start for c in chunks]
+        marked, _injected = inject_sentinels(base, starts)
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
-            rasterize_and_normalize_figures(full_text, source_path.parent),
+            rasterize_and_normalize_figures(marked, source_path.parent),
             encoding="utf-8",
         )
         render_html(
             source=render_tex_path, kind="latex", out_path=html_path,
             resource_dir=source_path.parent,
         )
+        # Rewrite rendered HTML: replace surviving sentinel tokens with
+        # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.
+        # Sentinels that pandoc dropped or mangled (e.g. those that landed in
+        # math — inject_sentinels skips math spans) keep dom_id=None and fall
+        # back to runtime text-search in the Citation Canvas.
+        _raw_html = html_path.read_text(encoding="utf-8")
+        _new_html, _dom_map = postprocess_sentinels(_raw_html)
+        html_path.write_text(_new_html, encoding="utf-8")
+        for i, c in enumerate(chunks):
+            c.dom_id = _dom_map.get(i)
 
         # Metadata: use caller-supplied override when available (avoids an
         # arXiv API round-trip when the caller already has metadata from
@@ -274,8 +298,6 @@ class PaperPipeline:
             else self._lookup_arxiv_metadata(arxiv_id)
         )
 
-        # Chunk + embed.
-        chunks = chunk_text(full_text)
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
 
@@ -397,6 +419,8 @@ class PaperPipeline:
         target = cache_dir / req.upload_path.name
         target.write_bytes(req.upload_path.read_bytes())
 
+        html_path = cache_dir / "source.html"
+
         if kind == "latex":
             source_dir = target.parent
             ext = extract_latex(source_dir)
@@ -404,31 +428,56 @@ class PaperPipeline:
             source_path = ext.main_path
             flat_path = cache_dir / "source.flattened.tex"
             flat_path.write_text(full_text, encoding="utf-8")
+
+            # Chunk first (offsets are relative to strip_latex_comments(full_text),
+            # which chunk_text computes internally). Chunking before rendering lets
+            # us inject sentinel tokens at each chunk's start offset in the
+            # comment-stripped text so the rendered HTML gets deterministic
+            # <span id="phchunk-N"> anchors for the Citation Canvas.
+            chunks = chunk_text(full_text)
+
+            # Inject sentinels into the comment-stripped flattened source, then
+            # normalize figures and render to HTML from the sentinel-marked copy.
             # Render from a figure-normalized copy of the flattened source (see
             # arxiv branch): avoids pandoc hang/OOM on \input chains, rasterizes
             # PDF figures, and aligns canvas offsets (chunks use full_text).
-            render_source = cache_dir / "source.render.tex"
-            render_source.write_text(
-                rasterize_and_normalize_figures(full_text, source_path.parent),
-                encoding="utf-8",
-            )
             # Figures live in the extracted source tree, not next to the
             # flattened .tex — let pandoc find + embed them.
-            render_resource_dir: Path | None = source_path.parent
+            # NOTE: chunk texts come from chunk_text(full_text) — the unmarked
+            # source — so chunk texts are always clean and never contain sentinels.
+            base = strip_latex_comments(full_text)
+            starts = [c.char_start for c in chunks]
+            marked, _injected = inject_sentinels(base, starts)
+            render_source = cache_dir / "source.render.tex"
+            render_source.write_text(
+                rasterize_and_normalize_figures(marked, source_path.parent),
+                encoding="utf-8",
+            )
+            render_html(
+                source=render_source, kind=kind, out_path=html_path,
+                resource_dir=source_path.parent,
+            )
+            # Rewrite rendered HTML: replace surviving sentinel tokens with
+            # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.
+            # Sentinels dropped/mangled by pandoc keep dom_id=None and fall back
+            # to runtime text-search in the Citation Canvas.
+            _raw_html = html_path.read_text(encoding="utf-8")
+            _new_html, _dom_map = postprocess_sentinels(_raw_html)
+            html_path.write_text(_new_html, encoding="utf-8")
+            for i, c in enumerate(chunks):
+                c.dom_id = _dom_map.get(i)
+
             pdf_headings: list[tuple[str, int]] = []
         else:
             # PDF: detect headings (font-size band) for section navigation;
             # strip_comments=False at chunk time (PDF text isn't LaTeX).
+            # No sentinel injection for PDF — chunks keep dom_id=None.
             full_text, pdf_headings = extract_pdf_with_headings(target)
             source_path = target
-            render_source = source_path
-            render_resource_dir = None
-
-        html_path = cache_dir / "source.html"
-        render_html(
-            source=render_source, kind=kind, out_path=html_path,
-            resource_dir=render_resource_dir,
-        )
+            render_html(
+                source=source_path, kind=kind, out_path=html_path,
+                resource_dir=None,
+            )
 
         # Honor caller-supplied metadata override (e.g. a title typed in the
         # upload modal) the same way the arxiv branch does. Without one, try
@@ -483,7 +532,7 @@ class PaperPipeline:
                 chunks, full_text, strip_comments=False,
             )
         else:
-            chunks = chunk_text(full_text)
+            # LaTeX: chunks already populated above with dom_ids set.
             sections_json = self._build_sections_json(chunks, full_text)
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
@@ -718,9 +767,9 @@ class PaperPipeline:
             for c in chunks:
                 await self._conn.execute(
                     "INSERT INTO chunks "
-                    "(paper_content_id, section, char_start, char_end, text) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (paper_content_id, c.section, c.char_start, c.char_end, c.text),
+                    "(paper_content_id, section, char_start, char_end, text, dom_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id),
                 )
                 async with self._conn.execute("SELECT last_insert_rowid()") as cur:
                     cid_row = await cur.fetchone()

@@ -27,12 +27,13 @@ _PARA_BOUNDARY_RE = re.compile(r"\n\s*\n")
 _SENT_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-@dataclass(frozen=True)
+@dataclass
 class Chunk:
     section: str | None
     char_start: int
     char_end: int
     text: str
+    dom_id: str | None = None
 
 
 def strip_latex_comments(text: str) -> str:

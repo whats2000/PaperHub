@@ -606,3 +606,152 @@ def test_build_sections_json_token_count_excludes_latex_comments() -> None:
         f"token count ({expected_tokens}) by {abs(reported_tokens - expected_tokens)}; "
         "_build_sections_json is slicing the un-stripped (commented) text"
     )
+
+
+# ---------------------------------------------------------------------------
+# W6-2: sentinel injection in LaTeX render path → dom_id persisted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_latex_ingest_persists_dom_ids(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+) -> None:
+    """After LaTeX ingest, chunks must carry non-null dom_id values ('phchunk-N')
+    and the final source.html must contain <span id="phchunk-0"> but NOT the raw
+    PHCHUNKANCHOR sentinel token.
+
+    render_html is stubbed to write the marked (sentinel-injected) source text
+    directly to the HTML file — this simulates pandoc passing the sentinel tokens
+    through unchanged (the real case for plain-text tokens in body paragraphs).
+    """
+    pipeline, conn, cache_root = pipeline_env
+
+    # Build a tiny two-section LaTeX doc that produces at least 2 chunks.
+    # Use 40 repetitions so each section is large enough to produce ≥1 chunk.
+    sample_tex = (
+        "\\section{Introduction}\n" + ("Intro body here is a sentence. " * 40) + "\n\n"
+        "\\section{Method}\n" + ("Method body here is a sentence. " * 40) + "\n"
+    )
+    src_dir = cache_root / "sentinel_test_src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "main.tex").write_text(sample_tex, encoding="utf-8")
+
+    # Create a session.
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('sentinel test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    captured_render_source: dict[str, str] = {}
+
+    def _stub_render_html(
+        *, source: Path, kind: str, out_path: Path, resource_dir: Path | None = None,
+    ) -> Path:
+        """Write the marked source text verbatim as the HTML — sentinels survive."""
+        content = source.read_text(encoding="utf-8")
+        captured_render_source["content"] = content
+        out_path.write_text(content, encoding="utf-8")
+        return out_path
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=_make_fake_download(src_dir),
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.search_arxiv",
+            side_effect=_fake_search_arxiv,
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.render_html",
+            side_effect=_stub_render_html,
+        ),
+    ):
+        result = await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id="sentinel-test-w6-2")
+        )
+
+    assert result.cache_hit is False
+
+    # (a) At least one chunk must have a non-null dom_id like 'phchunk-0'.
+    async with conn.execute(
+        "SELECT dom_id FROM chunks WHERE paper_content_id = ? ORDER BY id",
+        (result.paper_content_id,),
+    ) as cur:
+        chunk_rows = await cur.fetchall()
+    assert chunk_rows, "no chunks persisted"
+    dom_ids = [row[0] for row in chunk_rows]
+    non_null = [d for d in dom_ids if d is not None]
+    assert non_null, (
+        f"all dom_ids are null; expected at least phchunk-0. dom_ids={dom_ids}"
+    )
+    # The first non-null dom_id should follow the phchunk-N pattern.
+    assert all(d.startswith("phchunk-") for d in non_null), (
+        f"unexpected dom_id format: {non_null}"
+    )
+
+    # (b) The source.html must contain the <span id> anchor and NOT the raw token.
+    async with conn.execute(
+        "SELECT html_path FROM paper_content WHERE id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        pc_row = await cur.fetchone()
+    assert pc_row is not None
+    html_content = Path(str(pc_row[0])).read_text(encoding="utf-8")  # noqa: ASYNC240
+    assert '<span id="phchunk-0">' in html_content, (
+        "source.html missing <span id=\"phchunk-0\"> anchor"
+    )
+    assert "PHCHUNKANCHOR" not in html_content, (
+        "raw PHCHUNKANCHOR sentinel token found in source.html — postprocess_sentinels not applied"
+    )
+
+    # (c) Sentinel tokens must NOT appear in any chunk's text.
+    async with conn.execute(
+        "SELECT text FROM chunks WHERE paper_content_id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        text_rows = await cur.fetchall()
+    for (text,) in text_rows:
+        assert "PHCHUNKANCHOR" not in text, (
+            f"sentinel token leaked into chunk text: {text[:80]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_pdf_upload_ingest_leaves_dom_id_null(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+) -> None:
+    """PDF-path chunks must keep dom_id=NULL — no sentinel injection for PDF papers."""
+    pipeline, conn, _cache = pipeline_env
+
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('pdf dom_id test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    # Use the existing sample PDF fixture.
+    result = await pipeline.ingest(
+        IngestRequest(
+            session_id=session_id,
+            upload_path=_SAMPLE_PDF,
+            upload_kind="pdf",
+        )
+    )
+
+    # All chunks for a PDF paper must have dom_id=NULL.
+    async with conn.execute(
+        "SELECT COUNT(*), COUNT(dom_id) FROM chunks WHERE paper_content_id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        counts_row = await cur.fetchone()
+    assert counts_row is not None
+    total, non_null_count = int(counts_row[0]), int(counts_row[1])
+    assert total >= 1, "PDF ingest produced no chunks"
+    assert non_null_count == 0, (
+        f"PDF chunks have non-null dom_id (expected 0, got {non_null_count}/{total})"
+    )
