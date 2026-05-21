@@ -22,7 +22,14 @@ async def _mcp_call(tracer: Tracer, registry: _Registry, tool: str, args: dict[s
             step.mark_rejected(str(result.get("reason", "rejected")))
             step.record_result(result)
         else:
-            step.record_result({"ok": True})
+            # Record the real payload so the trace can reconstruct what the
+            # agent saw (agent-flow observability policy). Truncate large rows.
+            summary: dict[str, Any] = {"ok": True}
+            if isinstance(result, dict):
+                summary["payload"] = result
+            elif isinstance(result, list):
+                summary["payload"] = result[:50]
+            step.record_result(summary)
         return result
 
 

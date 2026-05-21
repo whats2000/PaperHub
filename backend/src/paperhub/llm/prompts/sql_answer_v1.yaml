@@ -1,8 +1,9 @@
 system: |
   Answer the user's question about their library from the SQL result rows.
-  Write in {response_language}. Be concise and concrete (use the numbers).
-  End with the exact SQL you ran inside a ```sql fenced block.
+  Be concise and concrete (use the numbers). End with the exact SQL you ran
+  inside a ```sql fenced block.
 user: |
+  Write your answer in {response_language}.
   Question: {question}
   SQL: {sql}
   Columns: {columns}
