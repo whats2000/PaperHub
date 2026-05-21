@@ -62,13 +62,12 @@ def validate_read_only_sql(sql: str) -> str:
         )
 
     # Collect CTE alias names so we can skip them during the table allowlist
-    # check.  In sqlglot 30.x, WITH...SELECT parses to exp.Select; the CTE
-    # definitions live in stmt.args['with_'] (an exp.With node whose
-    # .expressions are exp.CTE nodes).  The alias is a virtual table name —
-    # not a physical DB table — so it must NOT be checked against the
-    # allowlist.
+    # check.  We locate the exp.With node via the public stmt.find(exp.With)
+    # API; its .expressions are exp.CTE nodes whose .alias is the virtual
+    # table name.  CTE aliases are NOT physical DB tables, so they must NOT
+    # be checked against the allowlist.
     cte_aliases: set[str] = set()
-    with_node = stmt.args.get("with_")
+    with_node = stmt.find(exp.With)
     if with_node is not None:
         for cte in with_node.expressions:
             if cte.alias:
