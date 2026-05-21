@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withBaseHref } from "@/lib/withBaseHref";
+import { withBaseHref, stripDeadCdnScripts } from "@/lib/withBaseHref";
 
 const BASE = "http://localhost:8000/papers/content/7/";
 
@@ -22,6 +22,19 @@ describe("withBaseHref", () => {
   it("prepends the tag when there's no head or html", () => {
     const out = withBaseHref("<p>hi</p>", BASE);
     expect(out.startsWith(`<base href="${BASE}">`)).toBe(true);
+  });
+
+  it("strips the dead polyfill.io + html5shiv scripts but keeps MathJax", () => {
+    const html =
+      '<head>' +
+      '<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>' +
+      '<script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>' +
+      '<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>' +
+      "</head>";
+    const out = stripDeadCdnScripts(html);
+    expect(out).not.toContain("polyfill.io");
+    expect(out).not.toContain("html5shiv");
+    expect(out).toContain("mathjax"); // the math typesetter is preserved
   });
 
   it("makes a relative asset URL resolve against the backend (DOMParser check)", () => {
