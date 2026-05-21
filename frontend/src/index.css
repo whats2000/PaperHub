@@ -150,3 +150,12 @@
     @apply font-sans;
     }
 }
+/* Cited-passage highlight inside the PDF text layer (react-pdf). The text layer
+   is transparent and sits over the canvas, so a translucent <mark> background
+   highlights the underlying rendered text. */
+.react-pdf__Page__textContent mark.ph-cite-hl,
+.textLayer mark.ph-cite-hl {
+  background-color: rgba(253, 224, 71, 0.5);
+  border-radius: 2px;
+  color: transparent;
+}

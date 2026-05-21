@@ -344,7 +344,17 @@ export function CitationCanvas() {
           activeDoc.status === "ready" &&
           activeDoc.pdfData != null && (
             <DeferredRemount swapKey={effectivePaperId}>
-              <PdfView data={activeDoc.pdfData} />
+              <PdfView
+                data={activeDoc.pdfData}
+                highlightText={
+                  activeChunk?.paper_content_id === effectivePaperId
+                    ? activeChunk.text
+                    : null
+                }
+                onHighlightMiss={() =>
+                  toast.message("Couldn't locate this passage in the PDF")
+                }
+              />
             </DeferredRemount>
           )}
       </div>

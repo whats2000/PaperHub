@@ -14,19 +14,52 @@ function docFrom(html: string): Document {
 }
 
 describe("highlightChunkRange", () => {
-  it("highlights the block of an existing anchor and returns true", () => {
+  it("wraps the chunk's text in a span and returns true", () => {
     const doc = docFrom(
       '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
     );
     expect(highlightChunkRange(doc, "phchunk-0")).toBe(true);
     const hl = doc.querySelector(`.${HIGHLIGHT_CLASS}`);
-    expect(hl?.tagName).toBe("P");
+    expect(hl?.tagName).toBe("SPAN");
+    expect(hl?.textContent).toBe("Expert collapse is mitigated.");
   });
 
   it("returns false when the anchor is absent (caller falls back to text-search)", () => {
     const doc = docFrom("<p>no anchor here</p>");
     expect(highlightChunkRange(doc, "phchunk-9")).toBe(false);
     expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)).toBeNull();
+  });
+});
+
+describe("highlightChunkRange — full chunk between sentinels", () => {
+  it("wraps every text node from this sentinel up to the next, across blocks", () => {
+    const doc = docFrom(
+      '<p><span id="phchunk-0"></span>First paragraph.</p>' +
+        "<p>Middle paragraph.</p>" +
+        '<p><span id="phchunk-1"></span>Next chunk starts here.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-0")).toBe(true);
+    const text = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`))
+      .map((m) => m.textContent)
+      .join("|");
+    expect(text).toContain("First paragraph.");
+    expect(text).toContain("Middle paragraph."); // spans across blocks
+    expect(text).not.toContain("Next chunk"); // stops before the next sentinel
+  });
+
+  it("uses the next sentinel in document order even when ordinals have gaps", () => {
+    // phchunk-1 was skipped at ingest (sentinel landed in math); the next
+    // existing anchor is phchunk-2, and that must bound the highlight.
+    const doc = docFrom(
+      '<p><span id="phchunk-0"></span>Chunk zero body.</p>' +
+        '<p><span id="phchunk-2"></span>Chunk two body.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-0")).toBe(true);
+    const text = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`))
+      .map((m) => m.textContent)
+      .join("|");
+    expect(text).toContain("Chunk zero body.");
+    expect(text).not.toContain("Chunk two body.");
   });
 });
 

@@ -20,8 +20,16 @@ import { toast } from "sonner";
 // react-pdf pulls in pdfjs (worker, canvas) which doesn't run under jsdom —
 // stub it to a simple marker so we can assert the PDF path without rendering.
 vi.mock("@/components/canvas/PdfView", () => ({
-  PdfView: ({ data }: { data: Uint8Array }) => (
-    <div data-testid="pdf-view">pdf:{data.length}</div>
+  PdfView: ({
+    data,
+    highlightText,
+  }: {
+    data: Uint8Array;
+    highlightText?: string | null;
+  }) => (
+    <div data-testid="pdf-view">
+      pdf:{data.length}:{highlightText ?? ""}
+    </div>
   ),
 }));
 
@@ -155,10 +163,10 @@ describe("CitationCanvas reading panel", () => {
     );
     render(<CitationCanvas />);
     act(() => useCanvasStore.getState().openCitation(42));
-    expect(await screen.findByTestId("pdf-view")).toBeInTheDocument();
-    expect(
-      await screen.findByText(/source PDF|isn't available for PDF/i),
-    ).toBeInTheDocument();
+    const view = await screen.findByTestId("pdf-view");
+    expect(view).toBeInTheDocument();
+    // The cited chunk's text is passed through for in-PDF highlighting.
+    expect(view).toHaveTextContent("Expert collapse is mitigated.");
   });
 
   it("defaults to the current session's paper after a session switch (not the previous one)", async () => {

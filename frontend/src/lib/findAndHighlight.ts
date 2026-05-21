@@ -14,9 +14,68 @@ function ensureHighlightStyle(doc: Document): void {
   style.id = HIGHLIGHT_STYLE_ID;
   style.textContent =
     `.${HIGHLIGHT_CLASS} { background-color: #fde68a; color: inherit; ` +
-    `border-radius: 2px; box-shadow: 0 0 0 2px #fde68a; ` +
+    `border-radius: 2px; padding: 0 1px; ` +
     `transition: background-color 0.3s ease; }`;
   (doc.head ?? doc.documentElement).appendChild(style);
+}
+
+// Marker we tag chunk-range wrappers with, so cleanup can unwrap exactly the
+// spans we injected (vs class-only highlights from the text/section fallbacks).
+const WRAP_ATTR = "data-ph-cite";
+
+function scheduleClear(doc: Document, fn: () => void): void {
+  const win = doc.defaultView;
+  const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
+  setTimeoutFn(fn, HIGHLIGHT_MS);
+}
+
+/**
+ * Collect the text nodes that fall strictly between two chunk sentinels —
+ * `start` (this chunk's `<span id="phchunk-N">`) and `next` (the next sentinel
+ * in document order, regardless of ordinal, since math-skipped chunks leave
+ * gaps). When there's no next sentinel (last chunk), bound the scan to the
+ * enclosing section so we don't run to the end of the document.
+ */
+function collectChunkTextNodes(
+  doc: Document,
+  start: Element,
+  next: Element | null,
+): Text[] {
+  const root = next ? doc.body : (start.closest("section") ?? doc.body);
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    const t = node as Text;
+    const afterStart =
+      (start.compareDocumentPosition(t) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+      0;
+    const beforeNext =
+      next === null ||
+      (next.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING) !==
+        0;
+    if (afterStart && beforeNext && t.data.trim() !== "") nodes.push(t);
+    node = walker.nextNode();
+  }
+  return nodes;
+}
+
+/** Wrap each text node in a highlight span (markers are element boundaries, so
+ *  the chunk edges fall between nodes — no offset splitting needed). */
+function wrapTextNodes(doc: Document, nodes: Text[]): HTMLElement[] {
+  const wrappers: HTMLElement[] = [];
+  for (const t of nodes) {
+    const parent = t.parentNode;
+    if (!parent) continue;
+    const span = doc.createElement("span");
+    span.className = HIGHLIGHT_CLASS;
+    span.setAttribute(WRAP_ATTR, "1");
+    parent.replaceChild(span, t);
+    span.appendChild(t);
+    wrappers.push(span);
+  }
+  return wrappers;
 }
 
 /**
@@ -68,7 +127,7 @@ interface NodeSpan {
  *      only if that boundary is at or beyond MIN_MATCH
  *   4. needle up to MIN_MATCH chars (floor), only if needle >= MIN_MATCH
  */
-function buildTargets(needle: string): string[] {
+export function buildTargets(needle: string): string[] {
   const norm = normalize(needle);
   if (!norm) return [];
 
@@ -162,13 +221,19 @@ export function findAndHighlight(doc: Document, needle: string): boolean {
 }
 
 function clearHighlight(doc: Document): void {
+  // Unwrap chunk-range wrappers (restore the original text nodes).
+  doc.querySelectorAll(`[${WRAP_ATTR}]`).forEach((span) => {
+    const parent = span.parentNode;
+    if (!parent) return;
+    while (span.firstChild) parent.insertBefore(span.firstChild, span);
+    parent.removeChild(span);
+    if (typeof parent.normalize === "function") parent.normalize();
+  });
+  // Remove class-only highlights (text-search / section fallbacks).
   doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((el) => {
     el.classList.remove(HIGHLIGHT_CLASS);
   });
 }
-
-const BLOCK_SELECTOR =
-  "p,li,blockquote,h1,h2,h3,h4,h5,h6,td,figure,section,div";
 
 /**
  * Deterministically locate a chunk by its ingest-time anchor (`<span id>`
@@ -183,14 +248,27 @@ export function highlightChunkRange(doc: Document, domId: string): boolean {
   if (!start) return false;
   clearHighlight(doc);
   ensureHighlightStyle(doc);
-  const target = start.closest(BLOCK_SELECTOR) ?? start.parentElement ?? start;
-  target.classList.add(HIGHLIGHT_CLASS);
-  if (typeof target.scrollIntoView === "function") {
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  // The chunk runs from its own sentinel to the NEXT sentinel IN DOCUMENT ORDER
+  // — not `phchunk-N+1`, because chunks whose sentinel landed in math keep no
+  // anchor and leave ordinal gaps. Querying the live anchors and taking the one
+  // after this gives the true chunk boundary.
+  const markers = Array.from(doc.querySelectorAll('[id^="phchunk-"]'));
+  const idx = markers.findIndex((m) => m.id === domId);
+  const next = idx >= 0 ? (markers[idx + 1] ?? null) : null;
+
+  // Wrap the text nodes between the two sentinels — the exact chunk, across
+  // blocks, never the whole paragraph.
+  const wrappers = wrapTextNodes(
+    doc,
+    collectChunkTextNodes(doc, start, next),
+  );
+
+  const anchor = wrappers[0] ?? start;
+  if (typeof anchor.scrollIntoView === "function") {
+    anchor.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  const win = doc.defaultView;
-  const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
-  setTimeoutFn(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
+  scheduleClear(doc, () => clearHighlight(doc));
   return true;
 }
 
