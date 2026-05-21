@@ -1175,6 +1175,31 @@ If desired, update the Plan table in `CLAUDE.md` to mark Plan D status + link th
 
 ---
 
+## Task W2-0: Backend — serve PDF for PDF-rendered papers
+
+**Why:** The canvas renders `paper_content.html_path`. For LaTeX-sourced papers that HTML is good (pandoc). But papers rendered from a PDF — both `kind='pdf_upload'` AND `kind='arxiv'` that fell back to the arXiv source-archive PDF (SRS v2.7 size-cap fallback) — get a PyMuPDF `get_text("html")` render that is visually broken. For those, the canvas should display the original PDF (browser-native viewer), not the broken HTML. `kind` is NOT a reliable discriminator (arxiv-PDF-fallback keeps `kind='arxiv'`). The reliable signal is on disk: a **top-level `.pdf` in `source_dir_path`** means the paper was rendered from a PDF (LaTeX renders have `source.flattened.tex` and no top-level PDF; verified against the live cache).
+
+**Files:**
+- Modify: `backend/src/paperhub/api/papers.py` (add two routes near `serve_html`)
+- Modify: `backend/tests/test_papers_api.py` (or `test_chunks_api.py`) — add tests
+
+**Endpoints:**
+1. `GET /papers/content/{id}/document` → `{"mode": "pdf" | "html"}`. Resolves the paper, globs `Path(source_dir_path).glob("*.pdf")` (top level only); a hit → `"pdf"`, else `"html"`. 404 if the paper_content row is missing.
+2. `GET /papers/content/{id}/pdf` → `FileResponse(pdf_path, media_type="application/pdf", content_disposition_type="inline")` so the browser renders it inline in the iframe (NOT a download). Pick the PDF: prefer `source_path` if it ends in `.pdf` and exists, else the first top-level `*.pdf` in `source_dir_path`. 404 if the paper is missing; 404 (or 410) if no PDF exists for it.
+
+- [ ] **Step 1: Write failing tests** (mirror the `test_papers_api.py` ASGI + `PAPERHUB_WORKSPACE` + `_seed_paper_content` pattern). Seed two papers in a tmp workspace: (a) a LaTeX one whose `source_dir_path` contains only `source.flattened.tex` + `source.html` (write those files into tmp), (b) a PDF one whose `source_dir_path` contains a `foo.pdf` + `source.html`. Assert:
+  - `GET /papers/content/{latex_id}/document` → `200 {"mode": "html"}`.
+  - `GET /papers/content/{pdf_id}/document` → `200 {"mode": "pdf"}`.
+  - `GET /papers/content/{pdf_id}/pdf` → `200`, `content-type: application/pdf`, inline disposition.
+  - `GET /papers/content/{latex_id}/pdf` → `404`/`410` (no PDF).
+  - `GET /papers/content/99999/document` → `404`.
+- [ ] **Step 2: Run → fail.** `uv run pytest tests/test_papers_api.py -k document_or_pdf -v` (name your tests accordingly).
+- [ ] **Step 3: Implement** the two routes in `papers.py` (reuse `load_settings()` + `open_db()` like `serve_html`; the SELECT pulls `source_path, source_dir_path`). Sync `Path.glob`/`is_file` is acceptable here (same scope decision as `serve_html`, which already uses sync `path.is_file()` with a `# noqa: ASYNC240`).
+- [ ] **Step 4: Run → pass.** Then `uv run ruff check src tests` + `uv run mypy src`.
+- [ ] **Step 5: Commit.** `git commit -m "feat(api): serve PDF for PDF-rendered papers + /document mode probe"`.
+
+---
+
 ## Task W2-1: Canvas store redesign
 
 **Files:**
@@ -1287,8 +1312,8 @@ The panel reads the active session's *enabled* references from the chat store (s
 - Effective displayed paper = `displayedPaperId ?? firstEnabledRef?.paper_content_id ?? null`.
 - Resolve effect keyed on `[requestNonce]`: if `open && requestedChunkId != null`, `getChunk(requestedChunkId)` → success: `setActiveChunk(c); setDisplayedPaperId(c.paper_content_id); setStale(false)`. On error whose message matches `/\b404\b/`: `setActiveChunk(null); setStale(true)`. Other error: `toast.error("Couldn't load the cited paper")`. (Guard with a `cancelled` flag.)
 - Tab click → `setDisplayedPaperId(pcid); setActiveChunk(null); setStale(false)` (browse, no highlight).
-- iframe `src = displayedPaperId ? \`${API_BASE_URL}/papers/content/${displayedPaperId}/html\` : undefined`, `sandbox="allow-scripts allow-same-origin"`, `title="Citation Canvas"`.
-- Highlight discipline (reuse Wave 1's `loadedSrcRef`): in `onLoad` set `loadedSrcRef.current = src` then, if `activeChunk && activeChunk.paper_content_id === displayedPaperId`, `findAndHighlight(doc, activeChunk.text)` and toast.message on miss. Also a `[activeChunk, displayedPaperId]` effect that highlights when `loadedSrcRef.current === src` (same-paper case). (`findAndHighlight` is idempotent.)
+- **Document mode (PDF vs HTML), per W2-0:** when `displayedPaperId` changes, fetch the mode via a new `getDocumentMode(paperContentId): Promise<"pdf"|"html">` API client (`GET /papers/content/{id}/document` → `{mode}`). iframe `src` = `${API_BASE_URL}/papers/content/${displayedPaperId}/pdf` when mode is `"pdf"`, else `${API_BASE_URL}/papers/content/${displayedPaperId}/html`. `sandbox="allow-scripts allow-same-origin"`, `title="Citation Canvas"`. (Browser renders the PDF natively in the iframe.)
+- **Highlight only for HTML mode** (PDF in a native viewer has no searchable DOM; SRS §I-7 — no PDF.js). Reuse Wave 1's `loadedSrcRef`: in `onLoad`, set `loadedSrcRef.current = src`; then, if `mode === "html" && activeChunk && activeChunk.paper_content_id === displayedPaperId`, `findAndHighlight(doc, activeChunk.text)` and toast.message on miss. Also a `[activeChunk, displayedPaperId, mode]` effect that highlights when `loadedSrcRef.current === src`. (`findAndHighlight` is idempotent.) When a citation is opened (`activeChunk` set) but the resolved paper is `mode === "pdf"`, show a small inline note like "Showing the source PDF — passage highlighting isn't available for PDF papers." instead of attempting a highlight.
 - Returns `null` when `!open`.
 
 - [ ] **Step 1: Replace the test** `frontend/tests/components/CitationCanvas.test.tsx`:
