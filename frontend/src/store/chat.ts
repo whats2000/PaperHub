@@ -443,9 +443,13 @@ export const useChatStore = create<ChatState>()(
       hydrateSessionMessages: (sessionId, messages) =>
         set((s) => ({
           sessions: s.sessions.map((sess) => {
-            // Only fill a placeholder — never clobber a session that already
-            // holds (possibly live-streaming) messages in this browser.
-            if (sess.id !== sessionId || sess.messages.length > 0) return sess;
+            if (sess.id !== sessionId) return sess;
+            // Replace the local copy with the DB's (the backend is the source
+            // of truth for the chat record), EXCEPT while a turn is streaming
+            // — the DB doesn't hold the in-flight message yet, so replacing
+            // would clobber live state. This guard also covers a fetch that
+            // resolves mid-turn.
+            if (sess.messages.some((m) => m.status === "streaming")) return sess;
             const mapped: ChatMessage[] = messages
               .filter((m) => m.role === "user" || m.role === "assistant")
               .map((m) => ({

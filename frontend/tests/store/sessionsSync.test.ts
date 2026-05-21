@@ -222,13 +222,15 @@ describe("hydrateSessionMessages", () => {
     expect(msgs[1]!.search_results![0]!.title).toBe("Flow matching");
   });
 
-  it("does not clobber a session that already has messages", () => {
+  it("REPLACES a non-streaming session's messages with the DB copy", () => {
+    // The backend is the source of truth for the chat record, so re-opening a
+    // session refreshes it — picking up turns added on another device.
     useChatStore.setState({
       sessions: [
         {
           id: 1,
           title: "S",
-          messages: [{ role: "user", content: "live", run_id: null }],
+          messages: [{ role: "user", content: "stale local", run_id: null, status: "ok" }],
           backend_session_id: 7,
         },
       ],
@@ -236,8 +238,29 @@ describe("hydrateSessionMessages", () => {
     });
     useChatStore.getState().hydrateSessionMessages(1, history);
     const msgs = useChatStore.getState().sessions[0]!.messages;
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]!.content).toBe("live");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.content).toBe("What is RAG?");
+  });
+
+  it("does NOT clobber a session with an in-flight (streaming) turn", () => {
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 1,
+          title: "S",
+          messages: [
+            { role: "user", content: "live question", run_id: null, status: "ok" },
+            { role: "assistant", content: "", run_id: null, status: "streaming" },
+          ],
+          backend_session_id: 7,
+        },
+      ],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, history);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]!.status).toBe("streaming");
   });
 
   it("drops system messages", () => {
