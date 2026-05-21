@@ -57,6 +57,11 @@ export function CitationCanvas() {
 
   // paper_content_id -> its mounted iframe element
   const iframeEls = useRef<Map<number, HTMLIFrameElement>>(new Map());
+  // Papers whose mode we've already kicked off a fetch for (prefetch dedupe).
+  const fetchedModes = useRef<Set<number>>(new Set());
+
+  const refIds = refs.map((r) => r.paper_content_id);
+  const refIdsKey = refIds.join(",");
 
   const firstEnabledRef = refs.length > 0 ? refs[0] : null;
   const effectivePaperId =
@@ -105,24 +110,34 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
-  // Resolve the document mode for the displayed paper once (cached in
-  // modeByPaper). Re-runs when modeByPaper changes but early-returns if already
-  // known, so it never loops or re-fetches.
+  // Background prefetch: resolve the view-mode for EVERY enabled reference (not
+  // just the visible one) when the session's reference set changes — so each
+  // paper's iframe mounts + loads in the background and is ready before the
+  // user opens the panel. `fetchedModes` dedupes so each paper is probed once.
   useEffect(() => {
-    if (effectivePaperId == null || modeByPaper[effectivePaperId] != null) return;
-    const pid = effectivePaperId;
     let cancelled = false;
-    getDocumentMode(pid)
-      .then((m) => {
-        if (!cancelled) setModeByPaper((prev) => ({ ...prev, [pid]: m }));
-      })
-      .catch(() => {
-        if (!cancelled) setModeByPaper((prev) => ({ ...prev, [pid]: "html" }));
-      });
+    for (const pid of refIds) {
+      if (fetchedModes.current.has(pid)) continue;
+      fetchedModes.current.add(pid);
+      getDocumentMode(pid)
+        .then((m) => {
+          if (!cancelled)
+            setModeByPaper((prev) =>
+              prev[pid] != null ? prev : { ...prev, [pid]: m },
+            );
+        })
+        .catch(() => {
+          if (!cancelled)
+            setModeByPaper((prev) =>
+              prev[pid] != null ? prev : { ...prev, [pid]: "html" },
+            );
+        });
+    }
     return () => {
       cancelled = true;
     };
-  }, [effectivePaperId, modeByPaper]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refIdsKey]);
 
   // Re-apply the dark/light treatment to every loaded HTML iframe when the
   // theme toggles (or new papers mount).
@@ -177,18 +192,25 @@ export function CitationCanvas() {
     setOverflowOpen(false);
   };
 
-  if (!open) return null;
+  // Stay mounted while there are references to prefetch (even when closed) so
+  // their iframes load + cache for the session; only truly render nothing when
+  // closed AND there's nothing to prefetch.
+  if (!open && refs.length === 0) return null;
 
   const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);
   const overflowTabs = refs.slice(MAX_VISIBLE_TABS);
   const hasOverflow = overflowTabs.length > 0;
 
-  // Every paper we've resolved a mode for keeps its iframe mounted.
-  const mountedPapers = Object.keys(modeByPaper).map(Number);
+  // Keep an iframe mounted for every enabled reference of THIS session that has
+  // a resolved mode (prefetched). Scoping to current refs drops the previous
+  // session's iframes when references change.
+  const mountedPapers = refIds.filter((pid) => modeByPaper[pid] != null);
 
   return (
     <aside
       aria-label="Citation Canvas"
+      aria-hidden={!open}
+      inert={!open ? true : undefined}
       className="flex h-full w-full flex-col border-l border-border bg-card"
     >
       {/* Header: paper switcher + close */}
@@ -306,7 +328,7 @@ export function CitationCanvas() {
               // browser's native PDF viewer can be blocked by the sandbox.
               sandbox={m === "pdf" ? undefined : "allow-scripts allow-same-origin"}
               hidden={!isActive}
-              className="h-full w-full flex-1 bg-white"
+              className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
             />
           );
         })}
