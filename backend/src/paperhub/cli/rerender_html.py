@@ -26,7 +26,7 @@ from pathlib import Path
 import aiosqlite
 
 from paperhub.config import load_settings
-from paperhub.pipelines.chunker import strip_latex_comments
+from paperhub.pipelines.chunker import map_stripped_offsets_to_original
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
@@ -90,12 +90,14 @@ async def _rerender_one(
         return (0, 0)
 
     chunk_ids = [cid for cid, _ in chunk_rows]
-    starts = [cs for _, cs in chunk_rows]
+    stripped_starts = [cs for _, cs in chunk_rows]
 
-    # Build the sentinel-marked source identical to the ingest path.
+    # Build the sentinel-marked source identical to the ingest path: inject into
+    # the RAW full_text (pandoc fails on comment-stripped LaTeX for some papers)
+    # at offsets mapped from the stored stripped-coord chunk char_starts.
     full_text = flat_path.read_text(encoding="utf-8")  # noqa: ASYNC240
-    base = strip_latex_comments(full_text)
-    marked, _injected = inject_sentinels(base, starts)
+    starts = map_stripped_offsets_to_original(full_text, stripped_starts)
+    marked, _injected = inject_sentinels(full_text, starts)
 
     render_source = source_dir / "source.render.tex"
     render_source.write_text(  # noqa: ASYNC240

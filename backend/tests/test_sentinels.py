@@ -151,6 +151,48 @@ def test_inject_sentinels_does_not_skip_outside_math() -> None:
     assert sentinel_token(0) in marked
 
 
+def test_inject_sentinels_skips_inside_fragile_table_env() -> None:
+    # A sentinel inside a tabular breaks pandoc — must be skipped.
+    base = "Intro text.\n\\begin{table}\n\\begin{tabular}{cc}\nHERE a & b\n" \
+        "\\end{tabular}\n\\end{table}\nMore text."
+    pos = base.index("HERE")
+    _marked, injected = inject_sentinels(base, [pos])
+    assert injected == set()
+
+
+def test_inject_sentinels_skips_inside_brace_group() -> None:
+    # Inside a command argument (brace depth > 0) → unsafe.
+    base = r"A \section{HERE title} B"
+    pos = base.index("HERE")
+    _marked, injected = inject_sentinels(base, [pos])
+    assert injected == set()
+
+
+def test_inject_sentinels_allows_inside_itemize() -> None:
+    # itemize is text-flow (not fragile) → injecting in item text is safe.
+    base = "\\begin{itemize}\n\\item HERE first item\n\\end{itemize}"
+    pos = base.index("HERE")
+    marked, injected = inject_sentinels(base, [pos])
+    assert injected == {0}
+    assert sentinel_token(0) in marked
+
+
+def test_inject_sentinels_allows_plain_paragraph() -> None:
+    base = "First paragraph.\n\nHERE second paragraph with prose."
+    pos = base.index("HERE")
+    _marked, injected = inject_sentinels(base, [pos])
+    assert injected == {0}
+
+
+def test_inject_sentinels_ignores_braces_inside_comments() -> None:
+    # A `%` comment containing unbalanced braces must not throw off brace depth,
+    # so a safe position AFTER the comment is still injectable.
+    base = "Text. % a comment with { unbalanced brace\nHERE more prose."
+    pos = base.index("HERE")
+    _marked, injected = inject_sentinels(base, [pos])
+    assert injected == {0}
+
+
 # ---------------------------------------------------------------------------
 # postprocess_sentinels
 # ---------------------------------------------------------------------------

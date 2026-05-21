@@ -42,6 +42,70 @@ def find_math_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in _MATH_SPAN_RE.finditer(text)]
 
 
+# Environments where inserting plain text breaks pandoc / the LaTeX structure
+# (tables, floats, code listings, graphics, matrix-like). Math environments are
+# handled separately by `find_math_spans`. Anything NOT in this set (document,
+# abstract, itemize, enumerate, quote, theorem, ...) is text-flow and safe to
+# inject into. A sentinel inside one of these breaks rendering — observed in
+# live re-render: pandoc exit 64 on `\end{table}` etc. — so we skip those.
+_FRAGILE_ENVS = frozenset({
+    "tabular", "tabularx", "tabular*", "longtable", "array", "table", "table*",
+    "figure", "figure*", "wrapfigure", "subfigure", "tikzpicture", "picture",
+    "verbatim", "verbatim*", "lstlisting", "minted", "algorithm", "algorithmic",
+    "algorithm2e", "pmatrix", "bmatrix", "vmatrix", "matrix", "cases", "split",
+    "tabbing", "supertabular",
+})
+
+_BEGIN_END_RE = re.compile(r"\\(begin|end)\s*\{([^}]*)\}")
+
+
+def _safe_injection_mask(base: str) -> list[bool]:
+    """For each index in *base*, whether injecting a plain-text sentinel there
+    is LaTeX-safe: brace-depth 0, not inside math, and not inside a fragile
+    environment (see `_FRAGILE_ENVS`). Also unsafe inside `\\begin{}`/`\\end{}`
+    commands and command names themselves."""
+    n = len(base)
+    math = [False] * (n + 1)
+    for s, e in find_math_spans(base):
+        for k in range(s, min(e, n)):
+            math[k] = True
+
+    safe = [False] * (n + 1)
+    brace = 0
+    fragile = 0
+    i = 0
+    while i < n:
+        ch = base[i]
+        if ch == "\\":
+            m = _BEGIN_END_RE.match(base, i)
+            if m:
+                kind, env = m.group(1), m.group(2).strip().rstrip("*")
+                if env in _FRAGILE_ENVS:
+                    fragile = fragile + 1 if kind == "begin" else max(0, fragile - 1)
+                # The whole `\begin{}`/`\end{}` command span stays unsafe.
+                i = m.end()
+                continue
+            # Other command or escaped char: skip the backslash + next char so a
+            # literal `\{` / `\}` / `\\` isn't miscounted as a brace.
+            i += 2
+            continue
+        if ch == "%":
+            # Unescaped comment (\% was consumed above) → skip to end of line so
+            # braces inside the comment aren't counted. The raw text we inject
+            # into still has comments; this keeps the brace/env tracking honest.
+            nl = base.find("\n", i)
+            i = len(base) if nl < 0 else nl
+            continue
+        if ch == "{":
+            brace += 1
+        elif ch == "}":
+            brace = max(0, brace - 1)
+        safe[i] = brace == 0 and fragile == 0 and not math[i]
+        i += 1
+    safe[n] = brace == 0 and fragile == 0
+    return safe
+
+
 def inject_sentinels(
     base: str,
     starts: list[int],
@@ -49,28 +113,22 @@ def inject_sentinels(
     """Insert ``sentinel_token(i)`` at ``starts[i]`` in *base*.
 
     Inserts back-to-front so earlier offsets stay valid after each insertion.
-    Skips any start that falls inside a detected math span (see
-    `find_math_spans`).  Returns ``(marked_text, injected_ordinals)`` where
-    ``injected_ordinals`` is the set of ordinal indices that were successfully
-    inserted (a start outside ``[0, len(base)]`` or inside math is excluded).
+    Skips any start that is not a LaTeX-safe injection point — inside math, a
+    fragile environment (tables/floats/code), a brace group, or a command — so
+    the sentinel never breaks pandoc rendering (those chunks fall back to
+    runtime text-search). Returns ``(marked_text, injected_ordinals)``.
     """
-    math = find_math_spans(base)
-
-    def _in_math(pos: int) -> bool:
-        return any(s <= pos < e for s, e in math)
+    safe = _safe_injection_mask(base)
 
     injected: set[int] = set()
     # Process in descending position order (back-to-front) so each insertion
-    # only shifts characters to its RIGHT.  Characters to the LEFT — which are
-    # the positions we haven't processed yet — are unaffected.  We therefore
-    # apply each insertion directly at `pos` in the *current* `out`: all
-    # previously inserted tokens sit strictly to the right of `pos` in `out`,
-    # so `out[:pos]` is identical to `base[:pos]` for every step.
+    # only shifts characters to its RIGHT — positions not yet processed (to the
+    # LEFT) are unaffected, so `out[:pos]` always equals `base[:pos]`.
     order = sorted(range(len(starts)), key=lambda i: starts[i], reverse=True)
     out = base
     for i in order:
         pos = starts[i]
-        if pos < 0 or pos > len(base) or _in_math(pos):
+        if pos < 0 or pos > len(base) or not safe[pos]:
             continue
         out = out[:pos] + sentinel_token(i) + out[pos:]
         injected.add(i)
