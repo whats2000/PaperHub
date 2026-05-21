@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -103,6 +104,19 @@ describe("CitationCanvas reading panel", () => {
       expect(iframe).not.toBeNull();
       expect(iframe?.getAttribute("srcdoc")).toContain("Paper A body");
     });
+  });
+
+  it("loads paper content under StrictMode (no stuck 'Loading…')", async () => {
+    // StrictMode double-invokes effects (setup→cleanup→setup). A `cancelled`
+    // guard + fetch dedup would discard the in-flight result and block the
+    // re-fetch, leaving the paper stuck loading. This guards that regression.
+    const { container } = render(<CitationCanvas />, { wrapper: StrictMode });
+    act(() => useCanvasStore.getState().openCitation(42));
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper A body",
+      ),
+    );
   });
 
   it("switches papers via the tab switcher", async () => {
