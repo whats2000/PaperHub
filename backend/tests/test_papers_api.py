@@ -1265,6 +1265,108 @@ async def test_serve_pdf_404_when_no_row(
     assert r.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# GET /papers/content/{id}/asset/{path} — serve figures as files (no inline)
+# ---------------------------------------------------------------------------
+
+
+async def test_serve_asset_serves_figure_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Figures are no longer base64-inlined into source.html (that OOM'd the
+    canvas). They live on disk and are served by relative path under the paper's
+    source_dir_path so the iframe loads them lazily."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    cache_dir = tmp_path / "cache"
+    (cache_dir / "source" / "figs").mkdir(parents=True)
+    png = bytes.fromhex("89504e470d0a1a0a")  # PNG magic header is enough
+    (cache_dir / "source" / "figs" / "pic.png").write_bytes(png)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        pc_id = await _seed_paper_content(
+            conn,
+            content_key="arxiv:1706.03762",
+            title="T",
+            arxiv_id="1706.03762",
+            html_path=str(cache_dir / "source.html"),
+        )
+        # _seed_paper_content hard-codes source_dir_path='/tmp'; point it at cache_dir.
+        await conn.execute(
+            "UPDATE paper_content SET source_dir_path = ? WHERE id = ?",
+            (str(cache_dir), pc_id),
+        )
+        await conn.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pc_id}/asset/source/figs/pic.png")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content == png
+
+
+async def test_serve_asset_blocks_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ../ escape outside source_dir_path must be refused (no arbitrary file read)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret", encoding="utf-8")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        pc_id = await _seed_paper_content(
+            conn, content_key="arxiv:x", title="T", arxiv_id="x",
+            html_path=str(cache_dir / "source.html"),
+        )
+        await conn.execute(
+            "UPDATE paper_content SET source_dir_path = ? WHERE id = ?",
+            (str(cache_dir), pc_id),
+        )
+        await conn.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pc_id}/asset/../secret.txt")
+
+    assert r.status_code in (400, 404)
+    assert "top secret" not in r.text
+
+
+async def test_serve_asset_404_when_file_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative path that resolves inside source_dir but has no file → 404."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        pc_id = await _seed_paper_content(
+            conn, content_key="arxiv:y", title="T", arxiv_id="y",
+            html_path=str(cache_dir / "source.html"),
+        )
+        await conn.execute(
+            "UPDATE paper_content SET source_dir_path = ? WHERE id = ?",
+            (str(cache_dir), pc_id),
+        )
+        await conn.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/content/{pc_id}/asset/source/figs/nope.png")
+
+    assert r.status_code == 404
+
+
 async def test_delete_library_paper_preserves_sibling_caches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

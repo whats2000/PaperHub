@@ -1,4 +1,5 @@
 import base64
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -170,49 +171,80 @@ def test_render_latex_pandoc_uses_mathjax_and_resource_path_not_embed(tmp_path: 
     assert "--embed-resources" not in argv  # external MathJax, fast ingest
 
 
-def test_inline_local_images_embeds_relative_img_as_data_uri(tmp_path: Path) -> None:
-    """Figures stay external in pandoc output (no --embed-resources); we inline
-    the local raster <img> refs ourselves so the artefact is self-contained
-    without fetching MathJax."""
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+def test_externalize_local_images_rewrites_to_relative_asset_path(tmp_path: Path) -> None:
+    """Figures must NOT be base64-inlined (a 70MB-HTML OOM'd the Citation Canvas
+    iframe — arxiv:2605.02881 had 70MB of figures). Instead each local raster
+    <img src> is rewritten to a relative ``asset/<path>`` URL the iframe resolves
+    against its backend src; the figure bytes stay on disk and are served lazily.
+    Remote, data:, and missing srcs are left untouched."""
     from paperhub.pipelines import renderer
 
+    # html lives at tmp_path/out.html; figures under tmp_path/source/ — mirrors
+    # production (html_path = cache_dir/source.html, resource_dir = cache_dir/source).
     res_dir = tmp_path / "source"
     (res_dir / "figs").mkdir(parents=True)
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
-        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-    )
-    (res_dir / "figs" / "pic.png").write_bytes(png)
+    (res_dir / "figs" / "pic.png").write_bytes(base64.b64decode(_TINY_PNG_B64))
     html = tmp_path / "out.html"
     html.write_text(
         '<html><body><img src="figs/pic.png" />'
-        '<img src="https://x/y.png" /><img src="data:image/png;base64,AAAA" /></body></html>',
+        '<img src="https://x/y.png" />'
+        '<img src="data:image/png;base64,AAAA" />'
+        '<img src="figs/missing.png" /></body></html>',
         encoding="utf-8",
     )
-    renderer._inline_local_images(html, res_dir)
+    renderer._externalize_local_images(html, res_dir)
     out = html.read_text(encoding="utf-8")
-    assert 'src="data:image/png;base64,' in out  # local figure inlined
+    assert 'src="asset/source/figs/pic.png"' in out  # rewritten to served path
+    assert "data:image/png;base64,iVBOR" not in out  # NEVER base64-inlined
     assert 'src="https://x/y.png"' in out  # remote left alone
-    assert out.count("data:image/png;base64,AAAA") == 1  # pre-existing data: untouched
+    assert 'src="data:image/png;base64,AAAA"' in out  # pre-existing data: untouched
+    assert 'src="figs/missing.png"' in out  # missing file left as-is
+    assert (res_dir / "figs" / "pic.png").is_file()  # bytes stay on disk
 
 
-def test_render_html_embeds_image_from_resource_dir(tmp_path: Path) -> None:
-    """End-to-end: a flattened .tex in one dir referencing an image that lives
-    in a separate resource dir must produce HTML with the image embedded as a
-    data: URI (so the Citation Canvas renders figures regardless of serving dir)."""
+def test_externalize_data_uri_images_writes_files_and_rewrites(tmp_path: Path) -> None:
+    """PyMuPDF's get_text('html') inlines page images as base64 data URIs (the
+    PDF-render counterpart of the figure-bloat bug). Extract each to a file under
+    out_dir and rewrite the src to a relative asset/ URL so the PDF-render HTML
+    is no longer a multi-MB inline blob."""
+    from paperhub.pipelines import renderer
+
+    html = (
+        "<html><body>"
+        f'<img src="data:image/png;base64,{_TINY_PNG_B64}"/>'
+        f'<img src="data:image/png;base64,{_TINY_PNG_B64}"/>'
+        "</body></html>"
+    )
+    out_dir = tmp_path / "pdf_assets"
+    new_html = renderer._externalize_data_uri_images(
+        html, out_dir=out_dir, html_dir=tmp_path
+    )
+    assert "data:image" not in new_html, "data URIs must be extracted, not kept inline"
+    srcs = re.findall(r'src="(asset/[^"]+)"', new_html)
+    assert len(srcs) == 2, "both images rewritten to relative asset paths"
+    for rel in srcs:
+        on_disk = tmp_path / rel[len("asset/") :]
+        assert on_disk.is_file(), f"extracted image {rel} should exist on disk"
+
+
+def test_render_html_externalizes_figure_not_inline(tmp_path: Path) -> None:
+    """End-to-end: a flattened .tex referencing an image must produce HTML that
+    references the figure by a relative asset/ URL, NOT as an inline data: URI
+    (which is what OOM'd the canvas)."""
     if shutil.which("pandoc") is None:
         pytest.skip("pandoc binary not installed")
-    tex_dir = tmp_path / "cache"
-    tex_dir.mkdir()
-    res_dir = tmp_path / "source"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    res_dir = cache_dir / "source"  # under cache dir, like production
     (res_dir / "figs").mkdir(parents=True)
-    # Minimal valid 1x1 transparent PNG.
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
-        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-    )
-    (res_dir / "figs" / "pic.png").write_bytes(png)
-    tex = tex_dir / "source.flattened.tex"
+    (res_dir / "figs" / "pic.png").write_bytes(base64.b64decode(_TINY_PNG_B64))
+    tex = cache_dir / "source.flattened.tex"
     tex.write_text(
         r"\documentclass{article}\usepackage{graphicx}"
         r"\begin{document}\includegraphics{figs/pic.png}"
@@ -220,10 +252,11 @@ def test_render_html_embeds_image_from_resource_dir(tmp_path: Path) -> None:
         r"\end{document}",
         encoding="utf-8",
     )
-    out = tex_dir / "source.html"
+    out = cache_dir / "source.html"
     render_html(source=tex, kind="latex", out_path=out, resource_dir=res_dir)
     html = out.read_text(encoding="utf-8")
-    assert "data:image" in html, "figure should be embedded as a data: URI"
+    assert "data:image" not in html, "figure must NOT be inlined as a data: URI"
+    assert "asset/source/figs/pic.png" in html, "figure rewritten to served relative URL"
     # MathJax stays an external CDN <script> (not fetched+inlined): keeps the
     # HTML lean and ingest fast.
     assert "mathjax" in html.lower(), "MathJax script should be referenced"
