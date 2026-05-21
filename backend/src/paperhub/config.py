@@ -21,6 +21,10 @@ class Settings:
     paper_qa_model: str
     # paper_qa per-paper subagent (section navigation + chunk picking).
     paper_qa_subagent_model: str
+    # SQL Agent NL2SQL planner + self-repair (small tier).
+    sql_agent_model: str
+    # SQL Agent answer phrasing (flagship tier).
+    sql_answer_model: str
 
     # ── 4. Local embedding + rerank (hosted in the modelserver process) ─
     embedding_model: str
@@ -74,6 +78,12 @@ def load_settings() -> Settings:
         ),
         paper_qa_subagent_model=os.environ.get(
             "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", "gemini/gemini-3.1-flash-lite",
+        ),
+        sql_agent_model=os.environ.get(
+            "PAPERHUB_SQL_AGENT_MODEL", "gemini/gemini-3.1-flash-lite",
+        ),
+        sql_answer_model=os.environ.get(
+            "PAPERHUB_SQL_ANSWER_MODEL", "gemini/gemini-2.5-pro",
         ),
 
         # 4. Local embedding + rerank.

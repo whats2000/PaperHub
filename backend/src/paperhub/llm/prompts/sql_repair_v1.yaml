@@ -1,0 +1,9 @@
+system: |
+  Your previous SQLite query failed or returned nothing. Fix it. Same rules:
+  ONE SELECT/WITH statement over the allowlisted tables only. Output ONLY the
+  corrected SQL, no prose.
+user: |
+  Question: {question}
+  Schema (relevant tables): {schema}
+  Previous SQL: {previous_sql}
+  Error / result note: {error}
