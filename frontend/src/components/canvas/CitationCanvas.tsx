@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/popover";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
+import { DeferredRemount } from "@/components/canvas/DeferredRemount";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
 const MAX_VISIBLE_TABS = 3;
@@ -164,6 +165,9 @@ export function CitationCanvas() {
   }, [refIdsKey]);
 
   const handleTabClick = (pid: number) => {
+    // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
+    // unmounts the old reader and mounts the new one across a task boundary —
+    // so this swap can stay a plain synchronous state update without freezing.
     setDisplayedPaperId(pid);
     setActiveChunk(null);
     setStale(false);
@@ -282,10 +286,7 @@ export function CitationCanvas() {
             </div>
           )}
 
-        {/* Loading / error for the active paper */}
-        {effectivePaperId != null && activeDoc == null && !stale && (
-          <div className="p-4 text-xs text-muted-foreground">Loading paper…</div>
-        )}
+        {/* Error for the active paper (loading is covered by the swap spinner). */}
         {activeDoc?.status === "error" && (
           <div className="p-4 text-xs text-destructive">
             Couldn&apos;t load this paper.
@@ -335,11 +336,17 @@ export function CitationCanvas() {
           );
         })}
 
-        {/* PDF papers: render only the active one (react-pdf is heavy). */}
+        {/* PDF papers: render only the active one (react-pdf is heavy).
+            DeferredRemount remounts the reader across a task boundary on a
+            paper swap, so the old PDF tears down before the new one mounts. */}
         {effectivePaperId != null &&
           activeDoc?.mode === "pdf" &&
           activeDoc.status === "ready" &&
-          activeDoc.pdfData != null && <PdfView data={activeDoc.pdfData} />}
+          activeDoc.pdfData != null && (
+            <DeferredRemount swapKey={effectivePaperId}>
+              <PdfView data={activeDoc.pdfData} />
+            </DeferredRemount>
+          )}
       </div>
     </aside>
   );
