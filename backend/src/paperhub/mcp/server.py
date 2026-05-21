@@ -61,7 +61,7 @@ from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.mcp.server_context import (
     PaperhubPapersRequestContext,
-    current_request_context,
+    require_request_context,
     reset_request_context,
     set_request_context,
 )
@@ -128,7 +128,7 @@ def _tool_step(
 
 
 async def _search_library_handler(query: str, max_results: int = 8) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"query": query, "max_results": max_results}
     async with _tool_step(ctx, f"paper_search:{SERVER_NAME}.search_library", args) as step:
         hits = [
@@ -148,7 +148,7 @@ async def _search_library_handler(query: str, max_results: int = 8) -> list[dict
 async def _search_semantic_scholar_handler(
     query: str, max_results: int = 8,
 ) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"query": query, "max_results": max_results}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.search_semantic_scholar", args,
@@ -167,7 +167,7 @@ async def _search_semantic_scholar_handler(
 async def _find_related_papers_handler(
     paper_id: str, mode: str, max_results: int = 8,
 ) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"paper_id": paper_id, "mode": mode, "max_results": max_results}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.find_related_papers", args,
@@ -180,24 +180,6 @@ async def _find_related_papers_handler(
         if step is not None:
             step.record_result({"count": len(related)})
     return related
-
-
-def _require_context() -> PaperhubPapersRequestContext:
-    """Fetch the current request context or raise a clean error.
-
-    Translates :class:`LookupError` from the unset ContextVar into a
-    :class:`RuntimeError` whose message identifies the missing piece — so an
-    external MCP client misconfiguring its request gets a useful diagnostic
-    rather than an opaque transport error.
-    """
-    try:
-        return current_request_context()
-    except LookupError as exc:
-        raise RuntimeError(
-            "paperhub-papers MCP tool invoked without a request context "
-            "(no X-Paperhub-Session-Id header set, and no test fixture "
-            "primed the contextvar)"
-        ) from exc
 
 
 # ---------------------------------------------------------------------------
