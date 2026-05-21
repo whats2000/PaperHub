@@ -27,12 +27,13 @@ _PARA_BOUNDARY_RE = re.compile(r"\n\s*\n")
 _SENT_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-@dataclass(frozen=True)
+@dataclass
 class Chunk:
     section: str | None
     char_start: int
     char_end: int
     text: str
+    dom_id: str | None = None
 
 
 def strip_latex_comments(text: str) -> str:
@@ -61,6 +62,45 @@ def strip_latex_comments(text: str) -> str:
         return backslashes
 
     return _COMMENT_FULL_RE.sub(_replace, text)
+
+
+def _removed_comment_spans(text: str) -> list[tuple[int, int]]:
+    """Char spans REMOVED by :func:`strip_latex_comments` — the ``%``-to-EOL
+    portion of each *unescaped* comment (the preceding backslashes are kept).
+    Returned in order, non-overlapping."""
+    spans: list[tuple[int, int]] = []
+    for m in _COMMENT_FULL_RE.finditer(text):
+        backslashes = m.group(1)
+        if len(backslashes) % 2 == 0:  # even (incl. zero) → real comment
+            spans.append((m.start() + len(backslashes), m.end()))
+    return spans
+
+
+def map_stripped_offsets_to_original(text: str, offsets: list[int]) -> list[int]:
+    """Translate *offsets* that index ``strip_latex_comments(text)`` into
+    offsets into the ORIGINAL *text*.
+
+    Chunk ``char_start``/``char_end`` are relative to the comment-stripped text,
+    but pandoc must render the RAW text (stripping comments breaks some LaTeX).
+    This lets us place a chunk-start sentinel into the raw text at the position
+    the stripped offset denotes. An offset of ``len(stripped)`` maps to
+    ``len(text)``.
+    """
+    removed = _removed_comment_spans(text)
+    kept_to_orig: list[int] = []
+    n = len(text)
+    ri = 0
+    i = 0
+    while i < n:
+        if ri < len(removed) and i == removed[ri][0]:
+            i = removed[ri][1]
+            ri += 1
+            continue
+        kept_to_orig.append(i)
+        i += 1
+    kept_to_orig.append(n)  # offset == len(stripped) → end of original
+    last = len(kept_to_orig) - 1
+    return [kept_to_orig[o] if 0 <= o <= last else n for o in offsets]
 
 
 def chunk_text(

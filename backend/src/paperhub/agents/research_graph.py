@@ -68,7 +68,7 @@ from paperhub.agents.research_pipeline import (
     resolve_via_ss,
     synthesize_prose,
 )
-from paperhub.agents.state import AgentState, effective_query
+from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.mcp.registry import MCPRegistry
@@ -355,6 +355,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
             tracer=deps.tracer,
             model=synth_model,
             slot=deps.synth_slot,
+            response_language=response_language(state),
             **_kwargs(deps),
         )
         last_step = await _drain_and_stream_tool_steps(last_step, run_id)

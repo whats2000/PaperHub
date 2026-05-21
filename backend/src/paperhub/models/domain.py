@@ -37,6 +37,12 @@ class RoutingDecision(BaseModel):
     # intent="clarify" it carries the clarifying question to show the
     # user. Empty string => downstream falls back to the raw user_message.
     resolved_query: str = ""
+    # Human-readable name of the language the user wrote their latest turn in
+    # (e.g. "Traditional Chinese", "English", "Japanese"), detected by the
+    # router. Every downstream agent writes its FINAL response in this language
+    # so a Chinese question isn't answered in English. Empty => agents fall
+    # back to "the user's language".
+    response_language: str = ""
 
 
 class PaperQaPlan(BaseModel):
@@ -75,6 +81,10 @@ class AgentState(TypedDict, total=False):
     # user_message. Downstream agents read this (falling back to
     # user_message) so a bare follow-up like "推薦幾篇" carries its topic.
     effective_query: str
+    # v2.13: human-readable language of the user's latest turn (router-set,
+    # from RoutingDecision.response_language). Final-response agents read this
+    # (fallback "the user's language") so they answer in the user's language.
+    response_language: str
     routing_decision: RoutingDecision
     final_response: str
     history: list[dict[str, str]]

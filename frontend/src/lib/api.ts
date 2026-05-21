@@ -3,6 +3,7 @@ import type {
   LibraryItem,
   AttachResult,
   IngestResult,
+  ChunkResolution,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -143,6 +144,42 @@ export async function deleteLibraryPaper(
   }
   const text = await res.text().catch(() => "");
   throw new Error(`API ${res.status}: ${text}`);
+}
+
+/** Resolve a `[chunk:<id>]` citation marker to the paper it lives in and the
+ * passage text the Citation Canvas searches for in the rendered HTML. */
+export async function getChunk(chunkId: number): Promise<ChunkResolution> {
+  return apiFetch<ChunkResolution>(`/chunks/${chunkId}`);
+}
+
+/** Which document to show in the Citation Canvas: a PDF-rendered paper's
+ *  HTML is broken (PyMuPDF), so the canvas shows the original PDF instead. */
+export async function getDocumentMode(
+  paperContentId: number,
+): Promise<"pdf" | "html"> {
+  const d = await apiFetch<{ mode: "pdf" | "html" }>(
+    `/papers/content/${paperContentId}/document`,
+  );
+  return d.mode;
+}
+
+/** Fetch a paper's rendered HTML as a string. The Citation Canvas embeds it via
+ * an iframe `srcdoc` so the document is SAME-ORIGIN (the app can read its DOM to
+ * highlight + theme it) — a cross-origin iframe `src` would block that. */
+export async function fetchPaperHtml(paperContentId: number): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/papers/content/${paperContentId}/html`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.text();
+}
+
+/** Fetch a paper's PDF bytes. Passed to react-pdf as `{ data }` so it renders
+ * inline from local bytes — no cross-origin iframe, no browser download. */
+export async function fetchPaperPdfData(
+  paperContentId: number,
+): Promise<Uint8Array> {
+  const res = await fetch(`${API_BASE_URL}/papers/content/${paperContentId}/pdf`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 const ARXIV_NEW = /^(\d{4}\.\d{4,5})(v\d+)?$/i;

@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -12,6 +13,8 @@ import type { ChatMessage } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
+import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
+import { CitationMarker } from "@/components/canvas/CitationMarker";
 
 interface Props {
   message: ChatMessage;
@@ -88,7 +91,21 @@ export function MessageBubble({
             // we want for arbitrary tool-result strings flowing into assistant content.
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
+              rehypePlugins={[rehypeKatex, rehypeChunkCitations]}
+              components={{
+                "chunk-cite": ({ node }: ExtraProps) => {
+                  const props = (node?.properties ?? {}) as {
+                    dataChunkId?: number | string;
+                    dataOrdinal?: number | string;
+                  };
+                  return (
+                    <CitationMarker
+                      chunkId={Number(props.dataChunkId)}
+                      ordinal={Number(props.dataOrdinal)}
+                    />
+                  );
+                },
+              } as Components}
             >
               {message.content || " "}
             </ReactMarkdown>

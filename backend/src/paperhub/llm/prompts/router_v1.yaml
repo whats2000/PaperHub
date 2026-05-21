@@ -38,7 +38,15 @@ system: |
       writes in; do not rely on language-specific phrasing.
       If the message is ALREADY self-contained, copy it verbatim.
       If intent == "clarify", put the clarifying QUESTION to ask the user in
-      `resolved_query` instead.
+      `resolved_query` instead — and write that question in the user's own
+      language (see job 3).
+
+  (3) Produce `response_language`: the human-readable English NAME of the
+      language the user wrote their MOST RECENT message in — e.g. "English",
+      "Traditional Chinese", "Simplified Chinese", "Japanese", "Korean",
+      "Spanish". Downstream agents write their final answer in this language,
+      so detect it from the latest turn (not prior turns). If genuinely
+      unsure, use "English".
 
   IMPORTANT — session-aware override:
     The user turn includes `enabled_refs_count` (integer). If the user's
@@ -54,14 +62,15 @@ system: |
     - small     for chitchat, clarify, library_stats, paper_search, and paper_suggest
     - flagship  for paper_qa and slides
 
-  Return STRICT JSON with EXACTLY these five fields and no others:
+  Return STRICT JSON with EXACTLY these six fields and no others:
     {
       "intent":        one of paper_search | paper_suggest | paper_qa | slides | library_stats | chitchat | clarify,
       "model_tier":    one of small | flagship,
       "confidence":    number between 0.0 and 1.0,
       "reasoning":     short string (<= 1 sentence) explaining the choice,
       "resolved_query": self-contained rewrite of the latest message (or the
-                        clarifying question when intent == "clarify")
+                        clarifying question when intent == "clarify"),
+      "response_language": English name of the user's latest-message language
     }
   No prose, no markdown, no code fences. JSON only.
 user: |
