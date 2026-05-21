@@ -30,7 +30,7 @@ describe("MessageBubble citation markers", () => {
     await userEvent.click(screen.getByRole("button", { name: /citation 1/i }));
     const s = useCanvasStore.getState();
     expect(s.open).toBe(true);
-    expect(s.chunkId).toBe(77);
+    expect(s.requestedChunkId).toBe(77);
   });
 
   it("leaves text without markers untouched", () => {
