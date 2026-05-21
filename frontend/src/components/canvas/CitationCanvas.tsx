@@ -10,7 +10,9 @@ import {
   getDocumentMode,
   fetchPaperHtml,
   fetchPaperPdfData,
+  API_BASE_URL,
 } from "@/lib/api";
+import { withBaseHref } from "@/lib/withBaseHref";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -128,7 +130,17 @@ export function CitationCanvas() {
           const entry: DocEntry =
             mode === "pdf"
               ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
-              : { mode, status: "ready", html: await fetchPaperHtml(pid) };
+              : {
+                  mode,
+                  status: "ready",
+                  // Inject <base> so the paper's relative asset URLs
+                  // (`asset/...`, served by the backend) resolve to the
+                  // backend, not the app origin (srcdoc's default base).
+                  html: withBaseHref(
+                    await fetchPaperHtml(pid),
+                    `${API_BASE_URL}/papers/content/${pid}/`,
+                  ),
+                };
           setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
         } catch {
           setDocByPaper((prev) => ({
