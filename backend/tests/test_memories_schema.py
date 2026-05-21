@@ -58,3 +58,20 @@ async def test_fts_sync_on_update_and_delete(migrated_db: aiosqlite.Connection) 
     await migrated_db.commit()
     async with migrated_db.execute("SELECT m.id FROM memories_fts f JOIN memories m ON m.id=f.rowid WHERE memories_fts MATCH 'beta'") as cur:
         assert not await cur.fetchall()
+
+
+@pytest.mark.asyncio
+async def test_cascade_delete_removes_memories_and_fts(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute(
+        "INSERT INTO memories (scope, session_id, content) VALUES ('session', 1, 'cascade test token')"
+    )
+    await migrated_db.commit()
+    await migrated_db.execute("DELETE FROM chat_sessions WHERE id=1")
+    await migrated_db.commit()
+    async with migrated_db.execute("SELECT COUNT(*) FROM memories") as cur:
+        assert (await cur.fetchone())[0] == 0
+    async with migrated_db.execute(
+        "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'cascade'"
+    ) as cur:
+        assert (await cur.fetchone())[0] == 0
