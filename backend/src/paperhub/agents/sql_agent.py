@@ -14,10 +14,35 @@ class _Registry(Protocol):
     async def call(self, namespaced_name: str, args: dict[str, Any]) -> Any: ...
 
 
+def _normalize_mcp_result(raw: Any) -> Any:
+    """Normalise the return value of ``MCPClient.call_tool``.
+
+    The PaperHub SQL FastMCP server uses ``json_response = True`` and
+    ``stateless_http = True``.  The MCP SDK returns the tool payload as
+    ``structuredContent`` when the handler returns a dict AND the server
+    is configured to emit structured output.  In practice, the in-process
+    SQL server's ``json_response=True`` path surfaces the payload as
+    ``joined_text`` (a JSON string) rather than as a parsed dict, because
+    the stateless HTTP transport does not populate ``structuredContent``
+    for every FastMCP version.  Normalise: if the raw result is a JSON
+    string, parse it so callers can do ``result.get("error")``.
+    """
+    if not isinstance(raw, str):
+        return raw
+    stripped = raw.strip()
+    if not (stripped.startswith("{") or stripped.startswith("[")):
+        return raw
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return raw
+
+
 async def _mcp_call(tracer: Tracer, registry: _Registry, tool: str, args: dict[str, Any]) -> Any:
     async with tracer.step(agent="sql", tool=tool, model=None) as step:
         step.record_args(args)
-        result = await registry.call(tool, args)
+        raw = await registry.call(tool, args)
+        result = _normalize_mcp_result(raw)
         if isinstance(result, dict) and result.get("error") == "rejected":
             step.mark_rejected(str(result.get("reason", "rejected")))
             step.record_result(result)

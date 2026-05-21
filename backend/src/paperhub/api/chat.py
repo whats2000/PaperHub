@@ -442,6 +442,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
     adapter = LiteLlmAdapter()
     router_mock = os.environ.get("PAPERHUB_ROUTER_MOCK")
     chitchat_mock = os.environ.get("PAPERHUB_CHITCHAT_MOCK")
+    sql_planner_mock = os.environ.get("PAPERHUB_SQL_PLANNER_MOCK")
+    sql_answer_mock = os.environ.get("PAPERHUB_SQL_ANSWER_MOCK")
 
     async def stream_events() -> AsyncIterator[dict[str, Any]]:
         async with open_db(settings.db_path) as conn:
@@ -637,10 +639,16 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                 elif intent == "library_stats":
                     registry = request.app.state.mcp_registry
                     sql_chunks: list[str] = []
+                    sql_stream_kwargs: dict[str, Any] = {}
+                    if sql_planner_mock is not None:
+                        sql_stream_kwargs["planner_mock"] = sql_planner_mock
+                    if sql_answer_mock is not None:
+                        sql_stream_kwargs["answer_mock"] = sql_answer_mock
                     async for token in sql_agent_stream(
                         state, adapter=adapter, tracer=tracer, registry=registry,
                         planner_model=settings.sql_agent_model,
                         answer_model=settings.sql_answer_model,
+                        **sql_stream_kwargs,
                     ):
                         sql_chunks.append(token)
                         token_evt = TokenEvent(run_id=run_id, branch="", text=token)
