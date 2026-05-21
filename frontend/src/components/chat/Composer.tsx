@@ -45,6 +45,7 @@ export function Composer({ onSubmit, disabled }: Props) {
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
   const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
+  const canvasOpen = useCanvasStore((s) => s.open);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const value = draft;
@@ -102,7 +103,12 @@ export function Composer({ onSubmit, disabled }: Props) {
                       variant="ghost"
                       size="icon"
                       onClick={() => toggleCanvas()}
-                      className="h-8 w-8"
+                      aria-pressed={canvasOpen}
+                      className={
+                        canvasOpen
+                          ? "h-8 w-8 bg-accent text-foreground"
+                          : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                      }
                       aria-label="References"
                     >
                       <BookOpen className="h-4 w-4" />
