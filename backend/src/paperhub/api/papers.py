@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import shutil
 import tempfile
 from pathlib import Path
@@ -493,6 +494,42 @@ async def serve_html(paper_content_id: int) -> FileResponse:
     if not path.is_file():  # noqa: ASYNC240
         raise HTTPException(410, f"html_path on disk missing: {path}")
     return FileResponse(path, media_type="text/html")
+
+
+@router.get("/content/{paper_content_id}/asset/{asset_path:path}")
+async def serve_asset(paper_content_id: int, asset_path: str) -> FileResponse:
+    """Serve a figure (or other static asset) referenced by ``source.html`` by
+    its path relative to the paper's ``source_dir_path``.
+
+    Figures are no longer base64-inlined into ``source.html`` (a 70MB inline
+    HTML OOM'd the Citation Canvas iframe — arxiv:2605.02881). The renderer
+    rewrites each ``<img>`` to a relative ``asset/<path>`` URL; because the
+    iframe loads the HTML from ``/papers/content/{id}/html``, the browser
+    resolves those to this route and fetches each figure lazily as a file.
+
+    Path-traversal is blocked: the resolved target must stay inside
+    ``source_dir_path``."""
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT source_dir_path FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, f"no source dir for paper_content {paper_content_id}")
+    # Sync path ops are acceptable here (same scope decision as serve_html/serve_pdf).
+    base_dir = Path(row[0]).resolve()  # noqa: ASYNC240
+    target = (base_dir / asset_path).resolve()  # noqa: ASYNC240
+    # Containment guard — refuse any ../ escape outside the paper's cache dir.
+    if base_dir != target and base_dir not in target.parents:
+        raise HTTPException(400, "asset path escapes paper directory")
+    if not target.is_file():  # noqa: ASYNC240
+        raise HTTPException(404, f"asset not found: {asset_path}")
+    media_type, _ = mimetypes.guess_type(target.name)
+    return FileResponse(target, media_type=media_type or "application/octet-stream")
 
 
 @router.delete("/content/{paper_content_id}", status_code=204)
