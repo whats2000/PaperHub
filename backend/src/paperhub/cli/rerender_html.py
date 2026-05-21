@@ -1,121 +1,203 @@
-"""Re-render every cached ``source.html`` with the current renderer.
+"""Re-render HTML with chunk-start sentinel anchors for existing LaTeX papers.
 
-The Citation Canvas renderer used to base64-inline figures, which produced
-multi-MB / 70MB HTML files that OOM'd the iframe (arxiv:2605.02881). The
-renderer now serves figures as files (relative ``asset/`` URLs), but already
--cached ``source.html`` artefacts are still the old bloated blobs. This command
-re-runs ``render_html`` over each paper's on-disk cache (the figure-normalized
-``source.render.tex`` + ``source/`` subtree are already present), rewriting
-``source.html`` in place. Chunks/embeddings are untouched (use
-``paperhub-reingest`` for those).
+Reads the flattened ``.tex`` source already stored in the paper cache, injects
+``PHCHUNKANCHOR{N}END`` sentinel tokens at each chunk's ``char_start``, runs the
+render pipeline, post-processes the resulting HTML to replace each surviving
+token with ``<span id="phchunk-N">``, and writes ``dom_id`` back to the
+``chunks`` table.
+
+Does NOT re-chunk, re-embed, or change chunk ids — existing message citations
+keep working.  Only LaTeX papers (those that have ``source.flattened.tex``)
+are processed; PDF-only papers are skipped.
 
 Usage::
 
-    uv run python -m paperhub.cli.rerender_html              # all paper_content rows
-    uv run python -m paperhub.cli.rerender_html --paper-content-id 15
-    uv run python -m paperhub.cli.rerender_html --dry-run    # report only
+    uv run paperhub-rerender-html                        # all LaTeX papers
+    uv run paperhub-rerender-html --paper-content-id 7  # just one
+    uv run paperhub-rerender-html --db /path/to/custom.db
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
+import aiosqlite
+
 from paperhub.config import load_settings
-from paperhub.db.connection import open_db
+from paperhub.pipelines.chunker import strip_latex_comments
+from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.renderer import render_html
+from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 
 _LOG = logging.getLogger("paperhub.rerender_html")
 
 
-def _file_size(path_str: str | None) -> int:
-    """Size of ``path_str`` in bytes, or 0 if absent. Sequential CLI: sync I/O ok."""
-    if not path_str:
-        return 0
-    p = Path(path_str)
-    return p.stat().st_size if p.is_file() else 0  # noqa: ASYNC240 — sequential CLI
+async def _rerender_one(
+    pcid: int,
+    *,
+    conn: aiosqlite.Connection,
+) -> tuple[int, int]:
+    """Re-render HTML with sentinel anchors for one paper_content row.
 
+    Returns ``(chunks_total, chunks_anchored)``.  Both are 0 when the paper
+    is skipped (not a LaTeX paper or missing flattened source).
+    """
+    async with conn.execute(
+        "SELECT source_path, source_dir_path FROM paper_content WHERE id = ?",
+        (pcid,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        _LOG.warning("pcid=%d: paper_content row missing — skipped", pcid)
+        return (0, 0)
 
-def _rerender_one(
-    *, source_path: str | None, source_dir_path: str | None, html_path: str | None,
-) -> str:
-    """Re-render one paper's source.html in place. Returns a one-word status."""
-    if not html_path or not source_dir_path:
-        return "skipped(no-paths)"
-    cache_dir = Path(source_dir_path)
-    out_path = Path(html_path)
-    render_tex = cache_dir / "source.render.tex"
+    source_path_raw: str | None = row[0]
+    source_dir_path_raw: str | None = row[1]
 
-    if render_tex.is_file():
-        # LaTeX: figures live next to the main .tex (source_path's parent),
-        # mirroring paper_pipeline's render call.
-        resource_dir = (
-            Path(source_path).parent if source_path else cache_dir / "source"
+    # Resolve the cache dir.
+    if source_dir_path_raw is not None:
+        source_dir = Path(source_dir_path_raw)
+    elif source_path_raw is not None:
+        source_dir = Path(source_path_raw).parent
+    else:
+        _LOG.warning("pcid=%d: no source_dir_path or source_path — skipped", pcid)
+        return (0, 0)
+
+    # LaTeX detection: must have the flattened .tex produced at ingest time.
+    flat_path = source_dir / "source.flattened.tex"
+    if not flat_path.exists():  # noqa: ASYNC240 — sequential CLI; sync I/O is fine
+        _LOG.debug("pcid=%d: no source.flattened.tex — PDF paper, skipped", pcid)
+        return (0, 0)
+
+    # resource_dir for figure resolution: the extracted source/ subtree, i.e.
+    # the directory that contains the original main .tex file (source_path).
+    # Fall back to the cache dir itself when source_path is absent.
+    resource_dir = Path(source_path_raw).parent if source_path_raw is not None else source_dir
+
+    # Load chunks in id order (= enumerate order from ingest).
+    async with conn.execute(
+        "SELECT id, char_start FROM chunks WHERE paper_content_id = ? ORDER BY id",
+        (pcid,),
+    ) as cur:
+        chunk_rows: list[tuple[int, int]] = [
+            (int(r[0]), int(r[1])) for r in await cur.fetchall()
+        ]
+
+    if not chunk_rows:
+        _LOG.warning("pcid=%d: no chunks — skipped", pcid)
+        return (0, 0)
+
+    chunk_ids = [cid for cid, _ in chunk_rows]
+    starts = [cs for _, cs in chunk_rows]
+
+    # Build the sentinel-marked source identical to the ingest path.
+    full_text = flat_path.read_text(encoding="utf-8")  # noqa: ASYNC240
+    base = strip_latex_comments(full_text)
+    marked, _injected = inject_sentinels(base, starts)
+
+    render_source = source_dir / "source.render.tex"
+    render_source.write_text(  # noqa: ASYNC240
+        rasterize_and_normalize_figures(marked, resource_dir),
+        encoding="utf-8",
+    )
+
+    html_path = source_dir / "source.html"
+    render_html(
+        source=render_source,
+        kind="latex",
+        out_path=html_path,
+        resource_dir=resource_dir,
+    )
+
+    raw_html = html_path.read_text(encoding="utf-8")  # noqa: ASYNC240
+    new_html, dom_map = postprocess_sentinels(raw_html)
+    html_path.write_text(new_html, encoding="utf-8")  # noqa: ASYNC240
+
+    # Update dom_id for each chunk by its positional ordinal (id order).
+    for ordinal, cid in enumerate(chunk_ids):
+        dom_id = dom_map.get(ordinal)
+        await conn.execute(
+            "UPDATE chunks SET dom_id = ? WHERE id = ?",
+            (dom_id, cid),
         )
-        render_html(
-            source=render_tex, kind="latex", out_path=out_path,
-            resource_dir=resource_dir,
-        )
-        return "rendered(latex)"
-    if source_path and Path(source_path).suffix.lower() == ".pdf" and Path(source_path).is_file():
-        render_html(source=Path(source_path), kind="pdf", out_path=out_path)
-        return "rendered(pdf)"
-    return "skipped(no-source)"
+    await conn.commit()
+
+    anchored = len(dom_map)
+    _LOG.info(
+        "pcid=%d: %d chunks, %d anchored",
+        pcid,
+        len(chunk_ids),
+        anchored,
+    )
+    return (len(chunk_ids), anchored)
 
 
 async def _amain() -> int:
-    parser = argparse.ArgumentParser(prog="paperhub-rerender-html")
-    parser.add_argument("--paper-content-id", type=int, default=None)
-    parser.add_argument("--dry-run", action="store_true")
+    parser = argparse.ArgumentParser(
+        prog="paperhub-rerender-html",
+        description=(
+            "Re-render HTML for existing LaTeX papers, injecting chunk-start "
+            'sentinel anchors (<span id="phchunk-N">) and setting chunks.dom_id. '
+            "Does NOT re-chunk or re-embed. PDF-only papers are skipped."
+        ),
+    )
+    parser.add_argument(
+        "--paper-content-id",
+        type=int,
+        default=None,
+        help="Re-render just this paper_content.id (default: all LaTeX papers).",
+    )
+    parser.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="Path to the SQLite DB (default: from settings / PAPERHUB_WORKSPACE).",
+    )
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
 
     settings = load_settings()
-    async with open_db(settings.db_path) as conn:
+    db_path = Path(args.db) if args.db is not None else settings.db_path
+
+    async with aiosqlite.connect(db_path) as conn:
         if args.paper_content_id is not None:
-            sql = (
-                "SELECT id, source_path, source_dir_path, html_path "
-                "FROM paper_content WHERE id = ?"
-            )
-            params: tuple[int, ...] = (args.paper_content_id,)
+            ids = [args.paper_content_id]
         else:
-            sql = (
-                "SELECT id, source_path, source_dir_path, html_path "
-                "FROM paper_content ORDER BY id"
-            )
-            params = ()
-        async with conn.execute(sql, params) as cur:
-            rows = await cur.fetchall()
+            async with conn.execute(
+                "SELECT id FROM paper_content ORDER BY id"
+            ) as cur:
+                ids = [int(r[0]) for r in await cur.fetchall()]
 
-    if not rows:
-        _LOG.info("no paper_content rows to re-render")
-        return 0
+        _LOG.info("scanning %d paper(s)...", len(ids))
+        total_processed = 0
+        total_chunks = 0
+        total_anchored = 0
+        for pcid in ids:
+            try:
+                n_chunks, n_anchored = await _rerender_one(pcid, conn=conn)
+                if n_chunks > 0:
+                    total_processed += 1
+                    total_chunks += n_chunks
+                    total_anchored += n_anchored
+            except Exception as exc:  # noqa: BLE001 — per-paper recovery
+                _LOG.exception("pcid=%d failed: %s", pcid, exc)
 
-    for row in rows:
-        pcid, source_path, source_dir_path, html_path = (
-            int(row[0]), row[1], row[2], row[3],
-        )
-        before = _file_size(html_path)
-        if args.dry_run:
-            _LOG.info("pcid=%d dry-run: would re-render (was %d bytes)", pcid, before)
-            continue
-        try:
-            status = _rerender_one(
-                source_path=source_path, source_dir_path=source_dir_path,
-                html_path=html_path,
-            )
-        except Exception as exc:  # noqa: BLE001 — report + continue across papers
-            _LOG.warning("pcid=%d: re-render FAILED: %s: %s", pcid, type(exc).__name__, exc)
-            continue
-        after = _file_size(html_path)
-        _LOG.info("pcid=%d: %s  %d -> %d bytes", pcid, status, before, after)
+    print(
+        f"Done. papers processed: {total_processed}, "
+        f"total chunks: {total_chunks}, "
+        f"total anchored: {total_anchored}."
+    )
     return 0
 
 
 def main() -> None:
-    sys.exit(asyncio.run(_amain()))
+    raise SystemExit(asyncio.run(_amain()))
 
 
 if __name__ == "__main__":
