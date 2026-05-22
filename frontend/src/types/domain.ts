@@ -4,6 +4,7 @@ export type Intent =
   | "paper_qa"
   | "slides"
   | "library_stats"
+  | "memory"
   | "chitchat";
 
 export type ModelTier = "small" | "flagship";
@@ -90,6 +91,28 @@ export interface AttachResult {
 
 export type IngestResult = AttachResult;
 
+export interface DeckMeta {
+  deck_id: number;
+  session_id: number;
+  page_count: number;
+  theme: string;
+  status: "ok" | "error";
+  plan: unknown;
+  speaker_notes: Record<string, string>;
+  contributing_paper_ids: number[];
+  updated_at: string;
+}
+
+export interface DeckEventData {
+  deck_id: number;
+  session_id: number;
+  page_count: number;
+  title: string;
+  status: "ok" | "error";
+  contributing_papers: { id: number; title: string }[];
+  has_notes: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -99,6 +122,7 @@ export interface ChatMessage {
   status?: "streaming" | "ok" | "error";
   error?: string;
   search_results?: SearchResultCandidate[];
+  deck?: DeckEventData;
 }
 
 export interface ChatSession {
