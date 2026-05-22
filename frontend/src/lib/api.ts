@@ -6,6 +6,8 @@ import type {
   ChunkResolution,
   SessionSummary,
   BackendMessage,
+  MemoryItem,
+  MemoryStatus,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -231,6 +233,40 @@ export function parseArxivId(input: string): string | null {
   const mOld = s.match(ARXIV_OLD);
   if (mOld && mOld[1]) return `arxiv:${mOld[1]}`;
   return null;
+}
+
+/** List all memories for a session (active + superseded). */
+export async function listMemories(sessionId: number): Promise<MemoryItem[]> {
+  return apiFetch<MemoryItem[]>(`/memories?session_id=${sessionId}`);
+}
+
+/** Update a memory's content and/or status. Requires the owning session id
+ *  for ownership verification (sent as `X-Paperhub-Session-Id`). */
+export async function patchMemory(
+  memoryId: number,
+  patch: { content?: string; status?: MemoryStatus },
+  sessionId: number,
+): Promise<MemoryItem> {
+  return apiFetch<MemoryItem>(`/memories/${memoryId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Paperhub-Session-Id": String(sessionId),
+    },
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Hard-delete a memory row. Requires the owning session id
+ *  for ownership verification (sent as `X-Paperhub-Session-Id`). */
+export async function deleteMemory(
+  memoryId: number,
+  sessionId: number,
+): Promise<void> {
+  await apiFetch<undefined>(`/memories/${memoryId}`, {
+    method: "DELETE",
+    headers: { "X-Paperhub-Session-Id": String(sessionId) },
+  });
 }
 
 /** Multipart PDF upload. Backend hashes the bytes → sha256-keyed cache,
