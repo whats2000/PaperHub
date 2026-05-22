@@ -254,7 +254,10 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        # X-Paperhub-Session-Id is sent by the Memory Manager PATCH/DELETE
+        # (FR-11) for ownership checks; without it in allow_headers the browser
+        # CORS preflight is rejected and the request fails before reaching us.
+        allow_headers=["Content-Type", "X-Paperhub-Session-Id"],
     )
     app.include_router(health.router)
     app.include_router(chat.router)
