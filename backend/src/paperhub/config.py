@@ -59,6 +59,16 @@ class Settings:
     # FTS. NOT implemented yet — always falls back to FTS when False.
     memory_semantic_enabled: bool
 
+    # ── 9. Report Agent (slides) model selection ────────────────────────
+    # Deck planner — decomposes the user request into a slide outline.
+    report_plan_model: str
+    # Section generator — writes one slide frame per planned section.
+    report_section_model: str
+    # Speaker notes generator — writes per-frame speaker notes.
+    report_notes_model: str
+    # Reference resolver — small-tier tool used for citation lookup.
+    report_resolve_model: str
+
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
 
@@ -131,4 +141,18 @@ def load_settings() -> Settings:
 
         # 8. Logging.
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),
+
+        # 9. Report Agent (slides) model selection.
+        report_plan_model=os.environ.get(
+            "PAPERHUB_REPORT_PLAN_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_section_model=os.environ.get(
+            "PAPERHUB_REPORT_SECTION_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_notes_model=os.environ.get(
+            "PAPERHUB_REPORT_NOTES_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_resolve_model=os.environ.get(
+            "PAPERHUB_REPORT_RESOLVE_MODEL", "gemini/gemini-3.1-flash-lite",
+        ),
     )
