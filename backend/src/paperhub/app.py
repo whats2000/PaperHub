@@ -26,6 +26,7 @@ from paperhub.db.connection import open_db
 from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
+    build_paperhub_memory_server,
     build_paperhub_papers_server,
     build_paperhub_sql_server,
     mount_inprocess_mcp,
@@ -268,6 +269,11 @@ def create_app() -> FastAPI:
     # The SQL Agent (Plan E) reaches the three read-only SQL tools over the
     # MCP wire protocol via this URL — same loopback convention as papers.
     mount_inprocess_mcp(app, build_paperhub_sql_server(), path="/mcp-sql")
+    # Mount the in-process `paperhub-memory` FastMCP server at /mcp-memory.
+    # The ONLY write MCP surface: recall/add/edit/forget with scope enforcement.
+    # The Memory Agent (Plan E) reaches all four tools over the MCP wire
+    # protocol via this URL — same loopback convention as papers + sql.
+    mount_inprocess_mcp(app, build_paperhub_memory_server(), path="/mcp-memory")
     return app
 
 

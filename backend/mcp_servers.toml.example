@@ -120,6 +120,22 @@ url = "http://localhost:8000/mcp-sql"
 expose = ["list_tables", "describe", "query"]
 timeout_seconds = 8.0
 
+# ─── paperhub-memory (Plan E — in-process FastMCP) ───────────────────────
+# The ONLY write MCP surface: four tools (recall / add / edit / forget) with
+# deterministic scope enforcement (NFR-05). Session-scoped memories are
+# visible only to the session that created them; global memories are visible
+# from all sessions. Scope violations are returned as {"error":"rejected",...}
+# so the calling agent can mark its tracer step status='rejected'.
+# No extra process: this server lives inside the FastAPI app and shares the
+# same SQLite connection pool the backend uses.
+
+[[server]]
+name = "memory"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp-memory"
+expose = ["recall", "add", "edit", "forget"]
+timeout_seconds = 8.0
+
 # ─── future blocks ───────────────────────────────────────────────────────
 # Plan G will add filesystem + paperhub.*:
 #   [[server]]
