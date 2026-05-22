@@ -211,15 +211,19 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 response_language=lang,
             )
 
-        # persist notes file + version snapshot
-        slides_dir.mkdir(parents=True, exist_ok=True)
-        (slides_dir / "speaker_notes.json").write_text(
-            json.dumps(notes, ensure_ascii=False), encoding="utf-8"
-        )
-        if result.ok:
-            VersionHistory(str(slides_dir)).save_version(
-                result.tex, "Generated deck", notes
+        # persist notes file + version snapshot — blocking disk IO is pushed
+        # to a worker thread so it never stalls the chat event loop.
+        def _persist() -> None:
+            slides_dir.mkdir(parents=True, exist_ok=True)
+            (slides_dir / "speaker_notes.json").write_text(
+                json.dumps(notes, ensure_ascii=False), encoding="utf-8"
             )
+            if result.ok:
+                VersionHistory(str(slides_dir)).save_version(
+                    result.tex, "Generated deck", notes
+                )
+
+        await asyncio.to_thread(_persist)
 
         await upsert_deck(
             deps.conn,
