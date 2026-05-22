@@ -87,21 +87,26 @@ async def sql_agent_stream(
     language = response_language(state)
     session_id = state.get("session_id")
 
-    await _mcp_call(tracer, registry, "sql.list_tables", {})
+    pc_schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "paper_content"})
+    p_schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "papers"})
+
+    def _cols(schema: Any) -> str:
+        return ", ".join(c["name"] for c in schema) if isinstance(schema, list) else "(unavailable)"
+
+    table_schemas = f"paper_content columns: {_cols(pc_schema)}\npapers columns: {_cols(p_schema)}"
 
     sql = await _plan_sql(
         adapter,
         tracer,
         slot="sql_planner/v1",
         model=planner_model,
-        variables={"session_id": session_id, "question": question},
+        variables={"session_id": session_id, "question": question, "table_schemas": table_schemas},
         mock=planner_mock,
     )
 
     result = await _mcp_call(tracer, registry, "sql.query", {"sql": sql})
     rows = result.get("rows") if isinstance(result, dict) else None
     if (not isinstance(result, dict)) or ("error" in result) or (not rows):
-        schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "papers"})
         repaired = await _plan_sql(
             adapter,
             tracer,
@@ -109,8 +114,9 @@ async def sql_agent_stream(
             model=planner_model,
             variables={
                 "question": question,
-                "schema": json.dumps(schema),
+                "schema": json.dumps(pc_schema),
                 "previous_sql": sql,
+                "table_schemas": table_schemas,
                 "error": (
                     (result.get("reason") or result.get("error") or "empty result")
                     if isinstance(result, dict)
