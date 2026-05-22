@@ -72,6 +72,19 @@ class ToolCallRecord(BaseModel):
     error: str | None
 
 
+class PlannedSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    intent: str
+    paper_content_ids: list[int]
+
+
+class SlidePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    sections: list[PlannedSection]
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
@@ -123,3 +136,9 @@ class AgentState(TypedDict, total=False):
     #     rather than analyst-prose summaries.
     pq_papers: list[tuple[int, str]]
     pq_per_paper_picks: list[Any]  # list[PerPaperPicks]
+    # ------------------------------------------------------------------
+    # Report (slides) subgraph fields (Plan F v2.18):
+    # ------------------------------------------------------------------
+    current_view_page: int       # v2.18: slide on screen (frontend-supplied; Phase 2 uses it)
+    report_deck_id: int          # v2.18: set by sl_emit
+    report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
