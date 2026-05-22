@@ -20,7 +20,32 @@ class _FakeRegistry:
         if name == "sql.list_tables":
             return ["papers", "paper_content"]
         if name == "sql.describe":
-            return [{"name": "session_id", "type": "INTEGER"}]
+            table = args.get("table", "")
+            if table == "paper_content":
+                return [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "content_key", "type": "TEXT"},
+                    {"name": "kind", "type": "TEXT"},
+                    {"name": "arxiv_id", "type": "TEXT"},
+                    {"name": "sha256", "type": "TEXT"},
+                    {"name": "title", "type": "TEXT"},
+                    {"name": "authors_json", "type": "TEXT"},
+                    {"name": "year", "type": "INTEGER"},
+                    {"name": "abstract", "type": "TEXT"},
+                    {"name": "sections_json", "type": "TEXT"},
+                    {"name": "source_path", "type": "TEXT"},
+                    {"name": "ingested_at", "type": "TEXT"},
+                ]
+            if table == "papers":
+                return [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "session_id", "type": "INTEGER"},
+                    {"name": "paper_content_id", "type": "INTEGER"},
+                    {"name": "enabled", "type": "INTEGER"},
+                    {"name": "added_at", "type": "TEXT"},
+                ]
+            # fallback for any other table
+            return [{"name": "id", "type": "INTEGER"}]
         if name == "sql.query":
             return {"columns": ["n"], "rows": [[3]]}
         raise AssertionError(name)
@@ -496,10 +521,10 @@ async def test_sql_agent_query_failed_triggers_self_repair(
     assert len(query_calls) == 2, (
         f"Bug 3: expected 2 sql.query calls, got {len(query_calls)}"
     )
-    # sql.describe called exactly once (self-repair step)
+    # sql.describe called for paper_content + papers (schema introspection upfront)
     describe_calls = [c for c in reg.calls if c[0] == "sql.describe"]
-    assert len(describe_calls) == 1, (
-        f"Bug 3: expected 1 sql.describe call, got {len(describe_calls)}"
+    assert len(describe_calls) == 2, (
+        f"Bug 3: expected 2 sql.describe calls (paper_content + papers), got {len(describe_calls)}"
     )
     # The query_failed step must NOT be status='rejected' in the tracer
     # (query_failed is a repairable execution error, not a policy rejection).
@@ -510,3 +535,67 @@ async def test_sql_agent_query_failed_triggers_self_repair(
     assert not any(s == "rejected" for s in statuses), (
         f"Bug 3: query_failed must not be marked 'rejected', got statuses: {statuses}"
     )
+
+
+# ---------------------------------------------------------------------------
+# W1.1 — paper_content vs papers distinction + column schema injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_library_question_targets_paper_content(migrated_db, monkeypatch) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    registry = _FakeRegistry()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers do I have in my library?",
+        "effective_query": "how many papers do I have in my library?",
+        "response_language": "English",
+    }
+    tokens = []
+    async for tok in sql_agent_stream(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, registry=registry,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM paper_content",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM paper_content\n```",
+    ):
+        tokens.append(tok)
+    assert len([c for c in registry.calls if c[0] == "sql.query"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_planner_receives_column_schema(migrated_db) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    captured: list[dict] = []
+    import paperhub.agents.sql_agent as sa_mod
+    original = sa_mod._plan_sql
+    async def capture_plan_sql(adapter, tracer, *, slot, model, variables, mock=None):
+        captured.append(variables)
+        return await original(adapter, tracer, slot=slot, model=model, variables=variables, mock=mock)
+    sa_mod._plan_sql = capture_plan_sql
+    try:
+        tracer = Tracer(migrated_db, run_id=1, branch="")
+        state: AgentState = {
+            "run_id": 1, "session_id": 1,
+            "user_message": "which papers have 'diffusion' in the title?",
+            "effective_query": "which papers have 'diffusion' in the title?",
+            "response_language": "English",
+        }
+        async for _ in sql_agent_stream(
+            state, adapter=LiteLlmAdapter(), tracer=tracer, registry=_FakeRegistry(),
+            planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+            planner_mock="SELECT title FROM paper_content WHERE title LIKE '%diffusion%'",
+            answer_mock="No papers yet.\n```sql\n...\n```",
+        ):
+            pass
+    finally:
+        sa_mod._plan_sql = original
+    assert captured, "planner was never called"
+    schema_text = str(captured[0].get("schema", "")) + str(captured[0].get("table_schemas", ""))
+    assert "paper_content" in schema_text
+    assert "title" in schema_text
