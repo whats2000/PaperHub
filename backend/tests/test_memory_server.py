@@ -1,7 +1,7 @@
 import aiosqlite
 import pytest
 
-from paperhub.mcp.memory_server import _add_handler, _edit_handler, _recall_handler
+from paperhub.mcp.memory_server import _add_handler, _edit_handler, _forget_handler, _recall_handler
 from paperhub.mcp.server_context import (
     PaperhubPapersRequestContext,
     reset_request_context,
@@ -45,3 +45,22 @@ async def test_edit_other_session_returns_rejected(mem_ctx) -> None:
         mid = (await cur.fetchone())[0]
     out = await _edit_handler(memory_id=int(mid), content="hijack")
     assert out["error"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_forget_other_session_returns_rejected(mem_ctx) -> None:
+    await mem_ctx.conn.execute(
+        "INSERT INTO memories (scope, session_id, content) VALUES ('session', 1, 'owned by 1')"
+    )
+    await mem_ctx.conn.commit()
+    async with mem_ctx.conn.execute("SELECT last_insert_rowid()") as cur:
+        mid = (await cur.fetchone())[0]
+    out = await _forget_handler(memory_id=int(mid))
+    assert out["error"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_forget_global_ok_via_handler(mem_ctx) -> None:
+    out_add = await _add_handler(content="global note via handler", scope="global")
+    out_forget = await _forget_handler(memory_id=int(out_add["id"]))
+    assert out_forget.get("ok") is True

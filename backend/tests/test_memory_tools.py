@@ -59,3 +59,23 @@ async def test_forget_global_allowed_from_any_session(two_sessions) -> None:
 async def test_add_session_without_session_id_raises(two_sessions) -> None:
     with pytest.raises(MemoryScopeError):
         await add_memory(two_sessions, session_id=None, content="x", scope="session")
+
+
+@pytest.mark.asyncio
+async def test_forget_other_session_memory_rejected(two_sessions) -> None:
+    mid = await add_memory(two_sessions, session_id=1, content="owned by 1", scope="session")
+    with pytest.raises(MemoryScopeError):
+        await forget_memory(two_sessions, session_id=2, memory_id=mid)
+
+
+@pytest.mark.asyncio
+async def test_session_scope_recall_excludes_other_sessions(two_sessions) -> None:
+    await add_memory(two_sessions, session_id=1, content="session-one secret", scope="session")
+    hits = await recall_memories(two_sessions, session_id=2, query="secret", scope="session")
+    assert all("session-one secret" not in h.content for h in hits)
+
+
+@pytest.mark.asyncio
+async def test_forget_missing_memory_raises(two_sessions) -> None:
+    with pytest.raises(MemoryScopeError):
+        await forget_memory(two_sessions, session_id=1, memory_id=99999)
