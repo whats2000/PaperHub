@@ -100,6 +100,23 @@ CREATE TABLE IF NOT EXISTS memories (
     CHECK ((scope = 'global') = (session_id IS NULL))
 );
 
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    tex_path TEXT NOT NULL,
+    pdf_path TEXT,
+    speaker_notes_json TEXT,
+    plan_json TEXT,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    theme TEXT NOT NULL DEFAULT 'metropolis',
+    contributing_paper_ids_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (session_id)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content,
     content='memories',
