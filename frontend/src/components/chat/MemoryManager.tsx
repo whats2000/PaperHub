@@ -230,7 +230,11 @@ function AddMemoryComposer({ sessionId }: { sessionId: number }) {
       />
       <div className="flex items-center gap-1.5 flex-wrap">
         {/* Scope toggle */}
-        <div className="flex rounded border border-border overflow-hidden text-xs">
+        <div
+          role="group"
+          aria-label="Memory scope"
+          className="flex rounded border border-border overflow-hidden text-xs"
+        >
           <button
             type="button"
             disabled={busy}

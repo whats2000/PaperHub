@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
@@ -43,6 +43,34 @@ export function ChatPage() {
   // Close the canvas when the user switches chat sessions (it shows the
   // previous session's references).
   useCloseCanvasOnSessionChange(activeSessionId);
+
+  // Fix 1: whenever the Canvas opens (via References button, openCitation, or
+  // any other path) ensure Memory is closed. Uses Zustand's subscribe API
+  // (calling setState in a subscription callback — not synchronously in the
+  // effect body — satisfies the react-hooks/set-state-in-effect rule).
+  // This covers the `openCitation` path which sets open=true on the store
+  // directly, bypassing handleToggleCanvas.
+  useEffect(() => {
+    return useCanvasStore.subscribe((state) => {
+      if (state.open) setMemoryOpen(false);
+    });
+  }, []);
+
+  // Fix 3: close Memory on session switch. Memory content is per-session.
+  // Uses Zustand's subscribe API (same approach as Fix 1) so setState is
+  // called in a subscription callback rather than synchronously in the effect
+  // body, satisfying the react-hooks/set-state-in-effect rule.
+  const prevSessionForMemoryRef = useRef(
+    useChatStore.getState().activeSessionId,
+  );
+  useEffect(() => {
+    return useChatStore.subscribe((state) => {
+      if (prevSessionForMemoryRef.current !== state.activeSessionId) {
+        prevSessionForMemoryRef.current = state.activeSessionId;
+        setMemoryOpen(false);
+      }
+    });
+  }, []);
 
   const activeSession =
     activeSessionId === null
@@ -124,11 +152,29 @@ export function ChatPage() {
         )}
         {/* Disable pointer events while dragging so the cursor can't enter
             cross-document iframes and swallow window pointermove events. */}
-        <div className={cn("h-full", resizing && "pointer-events-none")}>
-          {memoryOpen && backendSessionId !== null ? (
-            /* Memory Manager in the right-panel slot — same width + animation
-               as the Citation Canvas. */
-            <div className="flex flex-col h-full bg-card border-l border-border overflow-hidden">
+        <div className={cn("h-full relative", resizing && "pointer-events-none")}>
+          {/* Fix 2: CitationCanvas is ALWAYS mounted (never conditionally
+              removed) so its fetched-document cache (iframes/PDF state) stays
+              alive across open/close cycles. It hides itself via aria-hidden +
+              inert when canvasOpen=false (see CitationCanvas.tsx).
+              When Memory is open we additionally force it invisible so it
+              cannot receive focus or pointer events from beneath the overlay. */}
+          <div
+            className="h-full w-full"
+            hidden={memoryOpen}
+            aria-hidden={memoryOpen || undefined}
+            {...(memoryOpen ? { inert: true } : {})}
+          >
+            <Suspense fallback={null}>
+              <CitationCanvas />
+            </Suspense>
+          </div>
+
+          {/* Memory Manager: absolutely overlays the Citation Canvas inside
+              the right-panel column when memoryOpen is true. Not mounted when
+              there is no backend session to avoid a meaningless fetch. */}
+          {memoryOpen && backendSessionId !== null && (
+            <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
               <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
                 Memory
               </div>
@@ -138,10 +184,6 @@ export function ChatPage() {
                 </Suspense>
               </div>
             </div>
-          ) : (
-            <Suspense fallback={null}>
-              <CitationCanvas />
-            </Suspense>
           )}
         </div>
       </div>
