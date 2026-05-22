@@ -1,4 +1,4 @@
-"""In-process read-only `sql` FastMCP server (SRS v2.16, Plan E Wave 1).
+"""In-process read-only `sql` FastMCP server (SRS v2.16, Plan E Wave 1, wire-fix).
 
 Tools (namespace ``sql.*``):
   * list_tables()        -> list[str]            (the §III-6 allowlist)
@@ -71,9 +71,14 @@ async def _query_handler(sql: str) -> Any:
     except SqlValidationError as exc:
         return {"error": "rejected", "reason": str(exc)}
     ctx = require_request_context()
-    async with ctx.conn.execute(sql) as cur:
-        fetched = await cur.fetchmany(_MAX_ROWS)
-        columns = [d[0] for d in (cur.description or [])]
+    try:
+        async with ctx.conn.execute(sql) as cur:
+            fetched = await cur.fetchmany(_MAX_ROWS)
+            columns = [d[0] for d in (cur.description or [])]
+    except Exception as exc:  # aiosqlite wraps sqlite3 errors as sqlite3.Error subclasses
+        # Return a structured error so the SQL Agent's self-repair path triggers
+        # (error key present → repair condition fires) rather than aborting the turn.
+        return {"error": "query_failed", "reason": str(exc)}
     return {"columns": columns, "rows": [list(r) for r in fetched]}
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
@@ -21,15 +22,13 @@ class _Registry(Protocol):
 
 
 def _normalize(result: Any) -> Any:
-    """Mirror sql_agent._normalize_mcp_result: parse FastMCP JSON-string results."""
-    if isinstance(result, str):
-        s = result.strip()
-        if s[:1] in ("{", "["):
-            try:
-                return json.loads(s)
-            except json.JSONDecodeError:
-                return result
-    return result
+    """Normalise a raw MCP result.
+
+    Delegates to the shared :func:`~paperhub.agents._mcp_result.normalize_mcp_result`
+    which handles JSON-string parsing AND the FastMCP ``{"result": X}`` list-return
+    envelope (Bug 2 fix).
+    """
+    return normalize_mcp_result(result)
 
 
 async def _mcp(
@@ -78,7 +77,19 @@ async def memory_node(
             **kwargs,
         ):
             parts.append(tok)
-        op_dict = json.loads("".join(parts))
+        raw_text = "".join(parts).strip()
+        # Strip markdown code fences the LLM may wrap around the JSON
+        # (e.g. ```json\n{...}\n```).  Mirror the same approach used by
+        # sql_agent._plan_sql which strips backticks + the "sql" prefix.
+        if raw_text.startswith("```"):
+            raw_text = raw_text.lstrip("`")
+            # Remove optional language tag (e.g. "json") on the first line.
+            if "\n" in raw_text:
+                first, rest = raw_text.split("\n", 1)
+                # If the first "line" is just a language identifier, drop it.
+                raw_text = rest if first.strip().lower() in ("json", "") else first + "\n" + rest
+            raw_text = raw_text.rstrip("`").strip()
+        op_dict = json.loads(raw_text)
         step.record_result(op_dict)
 
     kind: str = op_dict.get("op", "")

@@ -340,3 +340,221 @@ async def test_memory_node_no_match_returns_not_found_message(
     assert "couldn't find a matching note" in out["final_response"].lower(), (
         f"Expected no-match message, got: {out['final_response']!r}"
     )
+
+
+# ── Bug 1 regression: fenced JSON from real LLMs ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_memory_node_add_fenced_json_parses(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 1 regression: when the LLM wraps its JSON response in ```json fences,
+    op-extraction must still parse it — no JSONDecodeError.
+
+    The real Gemini wire shape:
+        ```json
+        {"op":"add","scope":"session","content":"x","target":"","confirmation":"ok"}
+        ```
+    """
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1,
+        "session_id": 1,
+        "user_message": "remember I'm testing fenced JSON",
+        "effective_query": "remember I'm testing fenced JSON",
+        "response_language": "English",
+    }
+    fenced_op = (
+        "```json\n"
+        '{"op":"add","scope":"session","content":"fenced content test","target":"",'
+        '"confirmation":"Noted — fenced JSON parsed correctly."}\n'
+        "```"
+    )
+    out = await memory_node(
+        state,
+        adapter=LiteLlmAdapter(),
+        tracer=tracer,
+        registry=_FakeRegistry(migrated_db),
+        model="gpt-4o-mini",
+        op_mock=fenced_op,
+    )
+    # Must not raise JSONDecodeError and must return the confirmation.
+    assert out.get("final_response") == "Noted — fenced JSON parsed correctly.", (
+        f"Expected confirmation, got: {out.get('final_response')!r}"
+    )
+    # Memory must have been persisted.
+    async with migrated_db.execute("SELECT content FROM memories") as cur:
+        rows = await cur.fetchall()
+    assert rows and "fenced content test" in rows[0][0]
+
+
+@pytest.mark.asyncio
+async def test_memory_node_add_bare_fence_parses(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 1 regression: triple-backtick without a language tag must also parse."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1,
+        "session_id": 1,
+        "user_message": "remember bare fence test",
+        "effective_query": "remember bare fence test",
+        "response_language": "English",
+    }
+    bare_fenced_op = (
+        "```\n"
+        '{"op":"add","scope":"session","content":"bare fence content","target":"",'
+        '"confirmation":"Saved bare."}\n'
+        "```"
+    )
+    out = await memory_node(
+        state,
+        adapter=LiteLlmAdapter(),
+        tracer=tracer,
+        registry=_FakeRegistry(migrated_db),
+        model="gpt-4o-mini",
+        op_mock=bare_fenced_op,
+    )
+    assert out.get("final_response") == "Saved bare.", (
+        f"Expected confirmation, got: {out.get('final_response')!r}"
+    )
+    async with migrated_db.execute("SELECT content FROM memories") as cur:
+        rows = await cur.fetchall()
+    assert rows and "bare fence content" in rows[0][0]
+
+
+# ── Bug 2 regression: recall result is {"result":[...]} envelope ─────────────
+
+
+class _EnvelopeRecallRegistry:
+    """Registry whose memory.recall returns the FastMCP list-return envelope.
+
+    This is the real MCP wire shape when FastMCP wraps a list return in
+    {"result": [...]}.  The existing tests used a plain list; this exercises
+    the envelope-unwrapping path added in Bug 2 fix.
+    """
+
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self.conn = conn
+        self.edit_called = False
+        self.forget_called = False
+
+    async def call(self, name: str, args: dict) -> object:
+        from paperhub.agents import memory_tools as mt
+
+        if name == "memory.recall":
+            hits = await mt.recall_memories(
+                self.conn, session_id=1, query=args["query"], scope="both"
+            )
+            raw_list = [{"id": h.id, "scope": h.scope, "content": h.content} for h in hits]
+            # Simulate FastMCP's {"result": [...]} envelope for list returns.
+            return {"result": raw_list}
+        if name == "memory.edit":
+            self.edit_called = True
+            await mt.edit_memory(
+                self.conn, session_id=1, memory_id=args["memory_id"], content=args["content"]
+            )
+            return {"ok": True}
+        if name == "memory.forget":
+            self.forget_called = True
+            await mt.forget_memory(self.conn, session_id=1, memory_id=args["memory_id"])
+            return {"ok": True}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_memory_node_edit_with_envelope_recall(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 2 regression: edit op where recall returns {"result":[...]} envelope.
+
+    The node must unwrap the envelope and find the matching memory — NOT return
+    'couldn't find a matching note'.
+    """
+    from paperhub.agents import memory_tools as mt
+
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    await mt.add_memory(migrated_db, session_id=1, content="envelope edit target", scope="session")
+
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1,
+        "session_id": 1,
+        "user_message": "update that note",
+        "effective_query": "update that note",
+        "response_language": "English",
+    }
+    reg = _EnvelopeRecallRegistry(migrated_db)
+    out = await memory_node(
+        state,
+        adapter=LiteLlmAdapter(),
+        tracer=tracer,
+        registry=reg,
+        model="gpt-4o-mini",
+        op_mock=(
+            '{"op":"edit","scope":"session","content":"envelope edited content",'
+            '"target":"envelope edit target","confirmation":"Envelope edit confirmed."}'
+        ),
+    )
+    # Confirm the edit confirmation was returned (not the no-match fallback).
+    assert out["final_response"] == "Envelope edit confirmed.", (
+        f"Bug 2: envelope not unwrapped; got: {out['final_response']!r}"
+    )
+    assert reg.edit_called, "Bug 2: memory.edit was never called"
+    async with migrated_db.execute("SELECT content FROM memories") as cur:
+        rows = await cur.fetchall()
+    assert rows and rows[0][0] == "envelope edited content"
+
+
+@pytest.mark.asyncio
+async def test_memory_node_forget_with_envelope_recall(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 2 regression: forget op where recall returns {"result":[...]} envelope.
+
+    The node must unwrap the envelope and call memory.forget — NOT return
+    'couldn't find a matching note'.
+    """
+    from paperhub.agents import memory_tools as mt
+
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    await mt.add_memory(migrated_db, session_id=1, content="envelope forget target", scope="session")
+
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1,
+        "session_id": 1,
+        "user_message": "forget that note",
+        "effective_query": "forget that note",
+        "response_language": "English",
+    }
+    reg = _EnvelopeRecallRegistry(migrated_db)
+    out = await memory_node(
+        state,
+        adapter=LiteLlmAdapter(),
+        tracer=tracer,
+        registry=reg,
+        model="gpt-4o-mini",
+        op_mock=(
+            '{"op":"forget","scope":"session","content":"",'
+            '"target":"envelope forget target","confirmation":"Envelope forget confirmed."}'
+        ),
+    )
+    assert out["final_response"] == "Envelope forget confirmed.", (
+        f"Bug 2: envelope not unwrapped; got: {out['final_response']!r}"
+    )
+    assert reg.forget_called, "Bug 2: memory.forget was never called"
+    async with migrated_db.execute("SELECT COUNT(*) FROM memories") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == 0

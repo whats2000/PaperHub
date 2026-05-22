@@ -425,3 +425,88 @@ async def test_sql_agent_recall_disabled_skips_injection(migrated_db: aiosqlite.
     assert row is not None
     result_payload = json.loads(row[0])
     assert result_payload.get("recall_hit") is False
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 regression — sql.query execution error triggers self-repair
+# ---------------------------------------------------------------------------
+
+
+class _QueryFailedRegistry:
+    """Registry whose first sql.query returns {"error":"query_failed",...} and
+    second returns valid rows — simulating what _query_handler now returns for a
+    real SQLite execution error (e.g. no such column).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._query_n = 0
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return ["papers"]
+        if name == "sql.describe":
+            return [{"name": "id", "type": "INTEGER"}, {"name": "session_id", "type": "INTEGER"}]
+        if name == "sql.query":
+            self._query_n += 1
+            if self._query_n == 1:
+                # Mirrors what _query_handler returns for OperationalError.
+                return {"error": "query_failed", "reason": "no such column: summary"}
+            return {"columns": ["n"], "rows": [[7]]}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_query_failed_triggers_self_repair(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 3 regression: when sql.query returns {"error":"query_failed",...},
+    the SQL Agent must enter the self-repair path (call sql.describe, re-plan,
+    retry sql.query) and produce an answer from the repaired result.
+
+    Before the fix, _query_handler raised an exception on execution errors —
+    which propagated out of _mcp_call and aborted the turn before self-repair
+    could run.
+    """
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    reg = _QueryFailedRegistry()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "how many papers?",
+        "effective_query": "how many papers?", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT summary FROM papers",          # bad sql (no such col)
+        repair_mock="SELECT count(*) AS n FROM papers",    # repaired sql
+        answer_mock="You have 7 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+    ):
+        tokens.append(tok)
+
+    out = "".join(tokens)
+    assert "7" in out, f"Bug 3: repaired answer not in output: {out!r}"
+    # sql.query called twice (first fail, then repaired)
+    query_calls = [c for c in reg.calls if c[0] == "sql.query"]
+    assert len(query_calls) == 2, (
+        f"Bug 3: expected 2 sql.query calls, got {len(query_calls)}"
+    )
+    # sql.describe called exactly once (self-repair step)
+    describe_calls = [c for c in reg.calls if c[0] == "sql.describe"]
+    assert len(describe_calls) == 1, (
+        f"Bug 3: expected 1 sql.describe call, got {len(describe_calls)}"
+    )
+    # The query_failed step must NOT be status='rejected' in the tracer
+    # (query_failed is a repairable execution error, not a policy rejection).
+    async with migrated_db.execute(
+        "SELECT status FROM tool_calls WHERE run_id = 1 AND tool = 'sql.query'"
+    ) as cur:
+        statuses = [r[0] for r in await cur.fetchall()]
+    assert not any(s == "rejected" for s in statuses), (
+        f"Bug 3: query_failed must not be marked 'rejected', got statuses: {statuses}"
+    )

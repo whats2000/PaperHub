@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 import aiosqlite
 
+from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.agents.memory_recall import build_memory_context_block
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.llm.adapter import LlmAdapter
@@ -20,25 +21,10 @@ class _Registry(Protocol):
 def _normalize_mcp_result(raw: Any) -> Any:
     """Normalise the return value of ``MCPClient.call_tool``.
 
-    The PaperHub SQL FastMCP server uses ``json_response = True`` and
-    ``stateless_http = True``.  The MCP SDK returns the tool payload as
-    ``structuredContent`` when the handler returns a dict AND the server
-    is configured to emit structured output.  In practice, the in-process
-    SQL server's ``json_response=True`` path surfaces the payload as
-    ``joined_text`` (a JSON string) rather than as a parsed dict, because
-    the stateless HTTP transport does not populate ``structuredContent``
-    for every FastMCP version.  Normalise: if the raw result is a JSON
-    string, parse it so callers can do ``result.get("error")``.
+    Thin re-export of :func:`~paperhub.agents._mcp_result.normalize_mcp_result`
+    kept for backwards compatibility with existing imports in tests.
     """
-    if not isinstance(raw, str):
-        return raw
-    stripped = raw.strip()
-    if not (stripped.startswith("{") or stripped.startswith("[")):
-        return raw
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return raw
+    return normalize_mcp_result(raw)
 
 
 async def _mcp_call(tracer: Tracer, registry: _Registry, tool: str, args: dict[str, Any]) -> Any:
