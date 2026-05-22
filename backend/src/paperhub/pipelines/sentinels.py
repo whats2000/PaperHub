@@ -37,9 +37,60 @@ _MATH_SPAN_RE = re.compile(
 )
 
 
+def _mask_noncontent_dollars(text: str) -> str:
+    """Return a copy of *text* (same length, offsets preserved) with the two
+    classes of ``$`` that LaTeX does NOT treat as math delimiters blanked to a
+    space, so `_MATH_SPAN_RE`'s sequential ``$...$`` pairing only ever sees real
+    inline-math dollars:
+
+    1. **Escaped** ``\\$`` — a literal dollar sign in body text.
+    2. Dollars **inside ``%`` comments** — not math at all.
+
+    Without this, a single stray ``$`` (one paper observed had 67 in comments +
+    one escaped) shifts every subsequent pairing, so a *closing* ``$`` is read
+    as an *opener* and the regex swallows tens of thousands of characters of
+    prose as one giant "math" span — which marks that whole region unsafe and
+    silently kills chunk anchoring for the rest of the document.
+
+    Math-env and bracket delimiters (``\\(``, ``\\[``, ``\\begin{equation}`` …)
+    are left intact: the backslash-escape skip steps past ``\\X`` without
+    altering it; only an escaped dollar's ``$`` is blanked.
+    """
+    out = list(text)
+    n = len(text)
+    i = 0
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            # Escaped pair: blank a literal `\$`'s dollar; leave `\(`, `\[`,
+            # `\begin`, etc. untouched. Skip both chars so an escaped `\%`
+            # doesn't start a comment.
+            if i + 1 < n and text[i + 1] == "$":
+                out[i + 1] = " "
+            i += 2
+            continue
+        if ch == "%":
+            # Unescaped comment → blank to end of line (the `$`s inside are not
+            # math). `\%` was consumed by the branch above, so this is a real
+            # comment start.
+            nl = text.find("\n", i)
+            end = n if nl < 0 else nl
+            for k in range(i, end):
+                out[k] = " "
+            i = end
+            continue
+        i += 1
+    return "".join(out)
+
+
 def find_math_spans(text: str) -> list[tuple[int, int]]:
-    """Return (start, end) char spans of LaTeX math regions in *text*."""
-    return [(m.start(), m.end()) for m in _MATH_SPAN_RE.finditer(text)]
+    """Return (start, end) char spans of LaTeX math regions in *text*.
+
+    Dollars inside comments and escaped ``\\$`` are neutralised first (see
+    `_mask_noncontent_dollars`) so ``$...$`` pairing doesn't drift; spans are
+    reported against the ORIGINAL offsets (the mask preserves length)."""
+    masked = _mask_noncontent_dollars(text)
+    return [(m.start(), m.end()) for m in _MATH_SPAN_RE.finditer(masked)]
 
 
 # Environments where inserting plain text breaks pandoc / the LaTeX structure
@@ -85,9 +136,17 @@ def _safe_injection_mask(base: str) -> list[bool]:
                 # The whole `\begin{}`/`\end{}` command span stays unsafe.
                 i = m.end()
                 continue
-            # Other command or escaped char: skip the backslash + next char so a
-            # literal `\{` / `\}` / `\\` isn't miscounted as a brace.
-            i += 2
+            # Control word (`\` + letters) or control symbol (`\` + a single
+            # non-letter, e.g. `\$`, `\%`, `\\`, `\{`). The whole token stays
+            # unsafe — injecting inside a command name corrupts it (default
+            # `safe` is False; we just advance past it without setting True).
+            j = i + 1
+            if j < n and base[j].isalpha():
+                while j < n and base[j].isalpha():
+                    j += 1
+            else:
+                j = i + 2
+            i = j
             continue
         if ch == "%":
             # Unescaped comment (\% was consumed above) → skip to end of line so
@@ -98,8 +157,15 @@ def _safe_injection_mask(base: str) -> list[bool]:
             continue
         if ch == "{":
             brace += 1
-        elif ch == "}":
+            # The brace char itself is not an injection point.
+            i += 1
+            continue
+        if ch == "}":
             brace = max(0, brace - 1)
+            # Likewise the closing brace — only positions AFTER it are safe, so
+            # an anchor never lands between content and its closing brace.
+            i += 1
+            continue
         safe[i] = brace == 0 and fragile == 0 and not math[i]
         i += 1
     safe[n] = brace == 0 and fragile == 0
@@ -110,29 +176,72 @@ def inject_sentinels(
     base: str,
     starts: list[int],
 ) -> tuple[str, set[int]]:
-    """Insert ``sentinel_token(i)`` at ``starts[i]`` in *base*.
+    """Insert ``sentinel_token(i)`` as an anchor for the chunk beginning at
+    ``starts[i]`` in *base*.
 
-    Inserts back-to-front so earlier offsets stay valid after each insertion.
-    Skips any start that is not a LaTeX-safe injection point — inside math, a
-    fragile environment (tables/floats/code), a brace group, or a command — so
-    the sentinel never breaks pandoc rendering (those chunks fall back to
-    runtime text-search). Returns ``(marked_text, injected_ordinals)``.
+    The token is placed at the chunk's start when that position is a LaTeX-safe
+    injection point. When the start is unsafe (inside math, a fragile
+    environment, a brace group, or a command — see `_safe_injection_mask`), the
+    anchor FALLS BACK to a nearby safe point instead of being dropped, so the
+    chunk is still anchored close to its content:
+
+    - **forward** to the first safe point within the chunk's own span (bounded
+      by the next chunk's start) — lands on the chunk's own prose, e.g. just
+      past a leading ``\\textbf{...}`` / ``\\paragraph{...}`` / ``\\label{...}``;
+    - else **backward** to the nearest safe point before the start (bounded by
+      the previous chunk's start) — lands just before e.g. the ``\\begin{table}``
+      a pure table-content chunk lives in, so a citation scrolls to the table
+      rather than dead-ending at the section heading.
+
+    The token is NEVER placed inside an unsafe span (that would break pandoc /
+    MathJax) — only at a safe fallback near it. Inserts back-to-front so earlier
+    offsets stay valid. Returns ``(marked_text, injected_ordinals)``.
     """
+    n = len(base)
     safe = _safe_injection_mask(base)
 
-    injected: set[int] = set()
-    # Process in descending position order (back-to-front) so each insertion
-    # only shifts characters to its RIGHT — positions not yet processed (to the
-    # LEFT) are unaffected, so `out[:pos]` always equals `base[:pos]`.
-    order = sorted(range(len(starts)), key=lambda i: starts[i], reverse=True)
-    out = base
-    for i in order:
+    # Document-order traversal so each chunk's fallback search can be bounded by
+    # its neighbours (forward stays inside this chunk; backward stays after the
+    # previous chunk).
+    order = sorted(range(len(starts)), key=lambda i: starts[i])
+
+    resolved: dict[int, int] = {}  # ordinal -> chosen injection position
+    for k, i in enumerate(order):
         pos = starts[i]
-        if pos < 0 or pos > len(base) or not safe[pos]:
+        if pos < 0 or pos > n:
             continue
+        next_start = starts[order[k + 1]] if k + 1 < len(order) else n
+        prev_start = starts[order[k - 1]] if k > 0 else 0
+        if safe[pos]:
+            resolved[i] = pos
+            continue
+        # Forward within this chunk's span [pos, next_start).
+        fwd = next(
+            (q for q in range(pos, min(next_start, n)) if safe[q]),
+            None,
+        )
+        if fwd is not None:
+            resolved[i] = fwd
+            continue
+        # Backward to the nearest safe point, not crossing into the previous
+        # chunk (exclusive of prev_start so we don't collide with its anchor).
+        bwd = next(
+            (q for q in range(min(pos, n), prev_start, -1) if safe[q]),
+            None,
+        )
+        if bwd is not None:
+            resolved[i] = bwd
+
+    # Insert back-to-front. Sorting by (position DESC, ordinal DESC) keeps each
+    # insertion shifting only characters to its right, and when several chunks
+    # resolve to the SAME position the lowest ordinal ends up leftmost (document
+    # order preserved within the tie group).
+    out = base
+    for i in sorted(resolved, key=lambda j: (resolved[j], j), reverse=True):
+        pos = resolved[i]
         out = out[:pos] + sentinel_token(i) + out[pos:]
-        injected.add(i)
-    return out, injected
+
+    return out, set(resolved)
 
 
 _TOKEN_RE = re.compile(r"PHCHUNKANCHOR(\d+)END")

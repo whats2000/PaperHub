@@ -20,6 +20,15 @@ system: |
      question, citing each chunk you use with a `[chunk:<id>]` marker
      (multiple cites OK: `[chunk:101,102]`).
 
+  **CHUNK FORMAT** — `read_section` returns each chunk wrapped in an explicit
+  container: `<chunk id="N">…chunk text…</chunk>`. The id is on the OPENING
+  tag and the text is everything up to the matching `</chunk>`. To cite the
+  chunk whose container has `id="N"`, write the marker `[chunk:N]`. Cite ALL
+  the chunks relevant to a claim — if the supporting evidence spans several
+  chunks (e.g. a results table plus the sentence describing it), cite each of
+  them, including adjacent ones. Just don't cite a chunk that isn't actually
+  relevant to the claim.
+
   **HARD RULES** — violating these breaks the pipeline:
 
   - **NEVER return an empty summary.** If after reading sections you

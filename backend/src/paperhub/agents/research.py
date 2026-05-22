@@ -126,7 +126,8 @@ async def paper_qa_finalize(
     parts: list[str] = []
     for pp in per_paper_picks:
         chunks_block = "\n\n".join(
-            f"[chunk:{c.chunk_id}]\n{c.text}" for c in pp.picked_chunks
+            f'<chunk id="{c.chunk_id}">\n{c.text}\n</chunk>'
+            for c in pp.picked_chunks
         ) or "(no chunks cited)"
         parts.append(
             f'## "{pp.title}"\n'
