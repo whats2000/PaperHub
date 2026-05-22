@@ -779,6 +779,7 @@ async def synthesize_prose(
     slot: str = "paper_search_synthesize/v1",
     registry: PromptRegistry | None = None,
     response_language: str = "the user's language",
+    memory_context: str = "",
     **litellm_kwargs: Any,
 ) -> str:
     """Write the prose summary the user sees in the chat bubble.
@@ -803,6 +804,7 @@ async def synthesize_prose(
         resolved_block=resolved_block,
         not_found_block=not_found_block,
         response_language=response_language,
+        memory_context=memory_context,
     )
     messages = [
         {"role": "system", "content": system},
@@ -836,5 +838,6 @@ async def synthesize_prose(
             ],
             "not_found": [req.hint for req in not_found],
             "content": content,
+            "recall_hit": bool(memory_context),
         })
     return content

@@ -1,7 +1,10 @@
 import aiosqlite
 import pytest
 
-from paperhub.agents.memory_recall import build_memory_context_block
+from paperhub.agents.memory_recall import (
+    build_active_memory_block,
+    build_memory_context_block,
+)
 from paperhub.agents.memory_tools import add_memory
 
 
@@ -13,6 +16,47 @@ async def test_context_block_includes_relevant_memories(migrated_db: aiosqlite.C
     block = await build_memory_context_block(migrated_db, session_id=1, query="Chinese answer please", enabled=True)
     assert "Traditional Chinese" in block
     assert block.startswith("Relevant remembered facts")
+
+
+@pytest.mark.asyncio
+async def test_active_block_surfaces_pref_regardless_of_query(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The unconditional active block returns a standing preference even when
+    it shares no tokens with any query (FTS would miss it)."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.commit()
+    await add_memory(
+        migrated_db, session_id=None, content="always respond in Japanese", scope="global"
+    )
+    block = await build_active_memory_block(migrated_db, session_id=1)
+    assert "Japanese" in block
+    assert block.startswith("Active remembered facts")
+
+
+@pytest.mark.asyncio
+async def test_active_block_excludes_superseded_and_other_sessions(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")  # 1
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")  # 2
+    await migrated_db.commit()
+    await add_memory(migrated_db, session_id=2, content="other session note", scope="session")
+    await add_memory(migrated_db, session_id=None, content="stale global", scope="global")
+    await migrated_db.execute(
+        "UPDATE memories SET status='superseded' WHERE content='stale global'"
+    )
+    await migrated_db.commit()
+    block = await build_active_memory_block(migrated_db, session_id=1)
+    assert "other session note" not in block
+    assert "stale global" not in block
+
+
+@pytest.mark.asyncio
+async def test_active_block_empty_when_no_memories(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    assert await build_active_memory_block(migrated_db, session_id=1) == ""
 
 
 @pytest.mark.asyncio

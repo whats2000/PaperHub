@@ -8,6 +8,7 @@ import aiosqlite
 from paperhub.agents.memory_tools import recall_memories
 
 _HEADER = "Relevant remembered facts (use if helpful, ignore if not):"
+_ACTIVE_HEADER = "Active remembered facts / standing preferences:"
 
 
 async def build_memory_context_block(
@@ -34,3 +35,43 @@ async def build_memory_context_block(
         return ""
     lines = "\n".join(f"- ({h.scope}) {h.content}" for h in hits)
     return f"{_HEADER}\n{lines}"
+
+
+async def build_active_memory_block(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: int | None,
+    limit: int = 20,
+) -> str:
+    """Return a formatted block of ALL active memories visible to the caller.
+
+    Unlike :func:`build_memory_context_block` (which is FTS-keyed on the
+    current query), this fetches active memories UNCONDITIONALLY — so a
+    standing directive like "always respond in Japanese" is always surfaced
+    even when the user's current message shares no tokens with it.  Used by
+    the router to resolve ``response_language`` against a language preference,
+    which then propagates to every downstream final-response prompt.
+
+    Returns an empty string when there are no active memories.
+    """
+    if session_id is None:
+        sql = (
+            "SELECT scope, content FROM memories "
+            "WHERE status = 'active' AND scope = 'global' "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
+        params: tuple[object, ...] = (limit,)
+    else:
+        sql = (
+            "SELECT scope, content FROM memories "
+            "WHERE status = 'active' AND "
+            "(scope = 'global' OR (scope = 'session' AND session_id = ?)) "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
+        params = (session_id, limit)
+    async with conn.execute(sql, params) as cur:
+        rows = await cur.fetchall()
+    if not rows:
+        return ""
+    lines = "\n".join(f"- ({r[0]}) {r[1]}" for r in rows)
+    return f"{_ACTIVE_HEADER}\n{lines}"

@@ -48,7 +48,7 @@ import aiosqlite
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from paperhub.agents.memory_recall import build_memory_context_block
+from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.paper_qa_subagent import (
     MAX_SECTION_READS,
     PerPaperPicks,
@@ -352,6 +352,16 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                 "not_found": [req.hint for req in not_found],
             })
 
+        # Surface active memories (incl. a standing language preference) so the
+        # synthesizer honors them — mirrors the paper_qa finalizer.
+        ps_mem_ctx = (
+            await build_active_memory_block(
+                deps.conn,
+                session_id=state.get("session_id"),
+            )
+            if deps.recall_enabled
+            else ""
+        )
         prose = await synthesize_prose(
             resolved,
             not_found,
@@ -360,6 +370,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
             model=synth_model,
             slot=deps.synth_slot,
             response_language=response_language(state),
+            memory_context=ps_mem_ctx,
             **_kwargs(deps),
         )
         last_step = await _drain_and_stream_tool_steps(last_step, run_id)
@@ -504,11 +515,15 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
                 ),
             }
         # FR-10: build recall-injection block from the session's memories.
-        mem_ctx = await build_memory_context_block(
-            deps.conn,
-            session_id=state.get("session_id"),
-            query=effective_query(state),
-            enabled=deps.recall_enabled,
+        # Unconditional active-memory block (not FTS) so a standing language
+        # preference surfaces regardless of the question's tokens.
+        mem_ctx = (
+            await build_active_memory_block(
+                deps.conn,
+                session_id=state.get("session_id"),
+            )
+            if deps.recall_enabled
+            else ""
         )
         collected: list[str] = []
         async for tok in paper_qa_finalize(

@@ -8,7 +8,7 @@ from typing import Any, Protocol
 import aiosqlite
 
 from paperhub.agents._mcp_result import normalize_mcp_result
-from paperhub.agents.memory_recall import build_memory_context_block
+from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
@@ -132,14 +132,15 @@ async def sql_agent_stream(
     columns = result.get("columns", []) if isinstance(result, dict) else []
     rows = rows or []
 
-    # Build recall-injection block (FR-10). Empty string when disabled or no hits.
+    # Build recall-injection block (FR-10). Empty when disabled or no memories.
+    # Uses the UNCONDITIONAL active-memory block (not FTS) so a standing
+    # directive like "respond in Japanese" always surfaces — an FTS query on
+    # the user's stats question would never match a language preference.
     memory_context: str = ""
-    if conn is not None:
-        memory_context = await build_memory_context_block(
+    if conn is not None and recall_enabled:
+        memory_context = await build_active_memory_block(
             conn,
             session_id=session_id,
-            query=question,
-            enabled=recall_enabled,
         )
 
     kwargs: dict[str, Any] = {}
