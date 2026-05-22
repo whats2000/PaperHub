@@ -53,6 +53,11 @@ class Tracer:
         self._next_index = 0
 
     @property
+    def run_id(self) -> int:
+        """Public accessor for the run ID."""
+        return self._run_id
+
+    @property
     def connection(self) -> aiosqlite.Connection:
         """Public accessor for the underlying DB connection."""
         return self._conn
