@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
@@ -19,6 +19,12 @@ const CitationCanvas = lazy(() =>
   })),
 );
 
+const MemoryManager = lazy(() =>
+  import("@/components/chat/MemoryManager").then((m) => ({
+    default: m.MemoryManager,
+  })),
+);
+
 export function ChatPage() {
   useGlobalShortcuts();
   useSessionsSync();
@@ -30,6 +36,8 @@ export function ChatPage() {
   const newSession = useChatStore((s) => s.newSession);
   const { send } = useChatStream();
 
+  const [showMemoryManager, setShowMemoryManager] = useState(false);
+
   // Close the canvas when the user switches chat sessions (it shows the
   // previous session's references).
   useCloseCanvasOnSessionChange(activeSessionId);
@@ -38,6 +46,8 @@ export function ChatPage() {
     activeSessionId === null
       ? null
       : (sessions.find((s) => s.id === activeSessionId) ?? null);
+
+  const backendSessionId = activeSession?.backend_session_id ?? null;
 
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
@@ -51,6 +61,12 @@ export function ChatPage() {
     });
   };
 
+  const handleToggleMemory = (): void => {
+    // Only toggle open when there is a backend session; always allow close.
+    if (!showMemoryManager && backendSessionId === null) return;
+    setShowMemoryManager((prev) => !prev);
+  };
+
   return (
     <div
       className={cn(
@@ -62,7 +78,27 @@ export function ChatPage() {
     >
       <div className="flex min-h-0 min-w-0 flex-col">
         <ChatThread session={activeSession} />
-        <Composer onSubmit={handleSubmit} disabled={isStreaming} />
+        {/* Memory Manager panel — rendered above the Composer when open.
+            Only shown when there is a real backend session id. */}
+        {showMemoryManager && backendSessionId !== null && (
+          <div className="shrink-0 border-t border-border bg-card max-h-72 overflow-y-auto">
+            <div className="max-w-3xl mx-auto">
+              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
+                Memory
+              </div>
+              <Suspense fallback={null}>
+                <MemoryManager sessionId={backendSessionId} />
+              </Suspense>
+            </div>
+          </div>
+        )}
+        <Composer
+          onSubmit={handleSubmit}
+          disabled={isStreaming}
+          memoryOpen={showMemoryManager}
+          onToggleMemory={handleToggleMemory}
+          memoryDisabled={backendSessionId === null}
+        />
       </div>
       {/* Canvas stays mounted for the whole session (collapsed to 0 width when
           closed) so its prefetched, kept-alive paper iframes survive open/close

@@ -1,6 +1,7 @@
 import { KeyboardEvent, useRef } from "react";
 import {
   BookOpen,
+  BrainCircuit,
   Presentation,
   Columns2,
   Send,
@@ -20,6 +21,12 @@ import { useCanvasStore } from "@/store/canvas";
 interface Props {
   onSubmit: (text: string) => void;
   disabled: boolean;
+  /** Whether the Memory Manager panel is currently open. */
+  memoryOpen?: boolean;
+  /** Called when the user clicks the Memory button to toggle the panel. */
+  onToggleMemory?: () => void;
+  /** True when there is no backend session yet (disables the Memory button). */
+  memoryDisabled?: boolean;
 }
 
 interface Capability {
@@ -41,7 +48,13 @@ const CAPABILITIES: Capability[] = [
   },
 ];
 
-export function Composer({ onSubmit, disabled }: Props) {
+export function Composer({
+  onSubmit,
+  disabled,
+  memoryOpen = false,
+  onToggleMemory,
+  memoryDisabled = false,
+}: Props) {
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
   const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
@@ -116,6 +129,31 @@ export function Composer({ onSubmit, disabled }: Props) {
                   </TooltipTrigger>
                   <TooltipContent side="top">
                     <p>Toggle the reference reading panel</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span tabIndex={0} className="inline-flex" />}
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={onToggleMemory}
+                      disabled={memoryDisabled}
+                      aria-pressed={memoryOpen}
+                      className={
+                        memoryOpen
+                          ? "h-8 w-8 bg-accent text-foreground"
+                          : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                      }
+                      aria-label="Memory"
+                    >
+                      <BrainCircuit className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Manage memory for this session</p>
                   </TooltipContent>
                 </Tooltip>
                 {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
