@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Pencil, Trash2, Check, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Pencil, Trash2, Check, X, Plus } from "lucide-react";
 
-import type { MemoryItem } from "@/types/domain";
+import type { MemoryItem, MemoryScope } from "@/types/domain";
+import { MemoryGateRefused } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -184,6 +185,100 @@ function MemoryRow({
   );
 }
 
+/** Inline composer for adding a new memory entry. Shows a textarea, a scope
+ *  toggle (Project/User), an Add button, and an inline error when the safety
+ *  gate refuses the content. */
+function AddMemoryComposer({ sessionId }: { sessionId: number }) {
+  const addMemoryLocal = useMemoriesStore((s) => s.addMemoryLocal);
+  const [content, setContent] = useState("");
+  const [scope, setScope] = useState<MemoryScope>("session");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  async function handleAdd() {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await addMemoryLocal(sessionId, trimmed, scope);
+      setContent("");
+      textareaRef.current?.focus();
+    } catch (err) {
+      if (err instanceof MemoryGateRefused) {
+        setError(`Couldn't save: ${err.reason}`);
+      } else {
+        setError("Couldn't save memory — please try again.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="px-3 py-2 border-b border-border">
+      <Textarea
+        ref={textareaRef}
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        disabled={busy}
+        placeholder="Add a memory…"
+        aria-label="New memory content"
+        className="text-xs min-h-0 mb-1.5 resize-none"
+        rows={2}
+      />
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Scope toggle */}
+        <div className="flex rounded border border-border overflow-hidden text-xs">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setScope("session")}
+            aria-pressed={scope === "session"}
+            className={`px-2 py-0.5 transition-colors ${
+              scope === "session"
+                ? "bg-accent text-foreground font-medium"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Project (session)
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setScope("global")}
+            aria-pressed={scope === "global"}
+            className={`px-2 py-0.5 transition-colors border-l border-border ${
+              scope === "global"
+                ? "bg-accent text-foreground font-medium"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            User (global)
+          </button>
+        </div>
+        <span className="flex-1" />
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="default"
+          disabled={busy || content.trim() === ""}
+          onClick={() => void handleAdd()}
+          aria-label="Add memory"
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
+      </div>
+      {error !== null && (
+        <p role="alert" className="mt-1 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Section with a heading label and a list of memory rows. Renders nothing if
  *  the items array is empty. */
 function MemorySection({
@@ -235,6 +330,7 @@ export function MemoryManager({ sessionId }: Props) {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
+      <AddMemoryComposer sessionId={sessionId} />
       {!hasAny ? (
         <p className="text-xs text-muted-foreground text-center px-4 py-8">
           No memories yet — facts the assistant learns during your sessions will

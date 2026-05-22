@@ -1,10 +1,15 @@
 import { create } from "zustand";
-import type { MemoryItem, MemoryStatus } from "@/types/domain";
-import { listMemories, patchMemory, deleteMemory } from "@/lib/api";
+import type { MemoryItem, MemoryStatus, MemoryScope } from "@/types/domain";
+import { listMemories, patchMemory, deleteMemory, createMemory } from "@/lib/api";
 
 interface MemoriesState {
   memoriesBySession: Record<number, MemoryItem[]>;
   fetchMemories: (sessionId: number) => Promise<void>;
+  addMemoryLocal: (
+    sessionId: number,
+    content: string,
+    scope: MemoryScope,
+  ) => Promise<void>;
   patchMemoryLocal: (
     sessionId: number,
     memoryId: number,
@@ -20,6 +25,16 @@ export const useMemoriesStore = create<MemoriesState>((set) => ({
     const items = await listMemories(sessionId);
     set((s) => ({
       memoriesBySession: { ...s.memoriesBySession, [sessionId]: items },
+    }));
+  },
+
+  addMemoryLocal: async (sessionId, content, scope) => {
+    const created = await createMemory(content, scope, sessionId);
+    set((s) => ({
+      memoriesBySession: {
+        ...s.memoriesBySession,
+        [sessionId]: [...(s.memoriesBySession[sessionId] ?? []), created],
+      },
     }));
   },
 

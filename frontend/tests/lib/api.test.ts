@@ -7,6 +7,8 @@ import {
   listMemories,
   patchMemory,
   deleteMemory,
+  createMemory,
+  MemoryGateRefused,
   API_BASE_URL,
 } from "@/lib/api";
 import type { MemoryItem } from "@/types/domain";
@@ -188,5 +190,83 @@ describe("deleteMemory", () => {
     expect(capturedDeleteRequest).toBeDefined();
     expect(capturedDeleteRequest!.method).toBe("DELETE");
     expect(capturedDeleteRequest!.headers.get("x-paperhub-session-id")).toBe("7");
+  });
+});
+
+// ── createMemory ─────────────────────────────────────────────────────────────
+
+const newMemory: MemoryItem = {
+  id: 10,
+  scope: "global",
+  session_id: 7,
+  content: "Prefers bullet-point summaries.",
+  created_at: "2026-05-22T10:00:00Z",
+  updated_at: "2026-05-22T10:00:00Z",
+  status: "active",
+  supersedes: null,
+  superseded_by: null,
+};
+
+let capturedCreateRequest: Request | undefined;
+
+const createMemoryServer = setupServer(
+  http.post(`${API_BASE_URL}/memories`, ({ request }) => {
+    capturedCreateRequest = request.clone();
+    return HttpResponse.json(newMemory, { status: 201 });
+  }),
+);
+
+describe("createMemory — success", () => {
+  beforeAll(() => createMemoryServer.listen({ onUnhandledRequest: "bypass" }));
+  afterAll(() => createMemoryServer.close());
+
+  it("sends POST with body + X-Paperhub-Session-Id and returns the created item", async () => {
+    const result = await createMemory(
+      "Prefers bullet-point summaries.",
+      "global",
+      7,
+    );
+
+    expect(result.id).toBe(10);
+    expect(result.scope).toBe("global");
+    expect(result.status).toBe("active");
+
+    expect(capturedCreateRequest).toBeDefined();
+    expect(capturedCreateRequest!.method).toBe("POST");
+    expect(capturedCreateRequest!.headers.get("x-paperhub-session-id")).toBe(
+      "7",
+    );
+    const body = (await capturedCreateRequest!.json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toEqual({
+      content: "Prefers bullet-point summaries.",
+      scope: "global",
+    });
+  });
+});
+
+describe("createMemory — 422 gate refusal", () => {
+  const gateServer = setupServer(
+    http.post(`${API_BASE_URL}/memories`, () =>
+      HttpResponse.json(
+        { detail: "sensitive personal information detected" },
+        { status: 422 },
+      ),
+    ),
+  );
+
+  beforeAll(() => gateServer.listen({ onUnhandledRequest: "bypass" }));
+  afterAll(() => gateServer.close());
+
+  it("throws MemoryGateRefused with the server reason on 422", async () => {
+    const err = await createMemory("my password is abc123", "session", 7).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(MemoryGateRefused);
+    expect((err as MemoryGateRefused).reason).toMatch(
+      /sensitive personal information/i,
+    );
   });
 });

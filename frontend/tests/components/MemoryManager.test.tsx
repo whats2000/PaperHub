@@ -10,6 +10,22 @@ import { API_BASE_URL } from "@/lib/api";
 import type { MemoryItem } from "@/types/domain";
 
 // ---------------------------------------------------------------------------
+// Additional fixture for "add memory" tests
+// ---------------------------------------------------------------------------
+
+const createdGlobalMemory: MemoryItem = {
+  id: 99,
+  scope: "global",
+  session_id: null,
+  content: "Always respond in English.",
+  created_at: "2026-05-22T10:00:00Z",
+  updated_at: "2026-05-22T10:00:00Z",
+  status: "active",
+  supersedes: null,
+  superseded_by: null,
+};
+
+// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
@@ -67,9 +83,16 @@ describe("MemoryManager", () => {
 
     render(<MemoryManager sessionId={7} />);
 
-    // Section headings (FP#2 — exact strings)
-    expect(await screen.findByText("Project (session)")).toBeInTheDocument();
-    expect(screen.getByText("User (global)")).toBeInTheDocument();
+    // Wait for memory content to confirm the data has loaded.
+    await screen.findByText("User prefers concise answers.");
+
+    // Section headings (FP#2 — exact strings). The scope-toggle buttons in
+    // AddMemoryComposer also render "Project (session)" / "User (global)", so
+    // assert there is at least one h3 element with that label text.
+    const projectHeadings = screen.getAllByText("Project (session)");
+    expect(projectHeadings.some((el) => el.tagName === "H3")).toBe(true);
+    const globalHeadings = screen.getAllByText("User (global)");
+    expect(globalHeadings.some((el) => el.tagName === "H3")).toBe(true);
 
     // Status badges
     expect(screen.getByText("active")).toBeInTheDocument();
@@ -217,8 +240,96 @@ describe("MemoryManager", () => {
 
     expect(await screen.findByText(/no memories/i)).toBeInTheDocument();
 
-    // Section headings must NOT appear when empty
-    expect(screen.queryByText("Project (session)")).not.toBeInTheDocument();
-    expect(screen.queryByText("User (global)")).not.toBeInTheDocument();
+    // Section headings (h3) must NOT appear when empty. The scope-toggle
+    // buttons in AddMemoryComposer still render the same text as plain
+    // <button> elements, so we check no h3 carries those labels.
+    const h3s = document.querySelectorAll("h3");
+    const h3Texts = Array.from(h3s).map((el) => el.textContent ?? "");
+    expect(h3Texts).not.toContain("Project (session)");
+    expect(h3Texts).not.toContain("User (global)");
+  });
+
+  it("add-memory: POST /memories with body + session header; new item appears in list", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    let capturedSessionHeader: string | null = null;
+
+    server.use(
+      http.get(`${API_BASE_URL}/memories`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/memories`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        capturedSessionHeader = request.headers.get("x-paperhub-session-id");
+        return HttpResponse.json(createdGlobalMemory, { status: 201 });
+      }),
+    );
+
+    render(<MemoryManager sessionId={7} />);
+
+    // Wait for component to settle (empty-state)
+    expect(await screen.findByText(/no memories/i)).toBeInTheDocument();
+
+    // Type content in the add-memory textarea
+    const textarea = screen.getByRole("textbox", { name: /new memory content/i });
+    await userEvent.type(textarea, "Always respond in English.");
+
+    // Switch scope to "User (global)"
+    await userEvent.click(screen.getByRole("button", { name: /user \(global\)/i }));
+
+    // Click Add
+    await userEvent.click(screen.getByRole("button", { name: /add memory/i }));
+
+    await waitFor(() => {
+      expect(capturedBody).toBeDefined();
+    });
+
+    // Assert POST body and ownership header
+    expect(capturedBody).toEqual({
+      content: "Always respond in English.",
+      scope: "global",
+    });
+    expect(capturedSessionHeader).toBe("7");
+
+    // New item must appear in the list
+    expect(
+      await screen.findByText("Always respond in English."),
+    ).toBeInTheDocument();
+
+    // Textarea is cleared after success
+    expect(textarea).toHaveValue("");
+  });
+
+  it("add-memory: 422 gate refusal shows inline error, no item added", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/memories`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/memories`, () =>
+        HttpResponse.json(
+          { detail: "sensitive personal information detected" },
+          { status: 422 },
+        ),
+      ),
+    );
+
+    render(<MemoryManager sessionId={7} />);
+
+    await screen.findByText(/no memories/i);
+
+    const textarea = screen.getByRole("textbox", { name: /new memory content/i });
+    await userEvent.type(textarea, "my secret password is abc123");
+
+    await userEvent.click(screen.getByRole("button", { name: /add memory/i }));
+
+    // Inline error must appear
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBeInTheDocument();
+    expect(alert.textContent).toMatch(/couldn't save/i);
+
+    // The textarea content is preserved (not cleared on error)
+    expect(textarea).toHaveValue("my secret password is abc123");
+
+    // The item must NOT appear as a memory row (<p> element in the list).
+    // (The text still lives in the textarea itself, so we cannot use
+    //  queryByText directly — instead assert no <p> carries it.)
+    const paragraphs = document.querySelectorAll("p");
+    const pTexts = Array.from(paragraphs).map((el) => el.textContent ?? "");
+    expect(pTexts).not.toContain("my secret password is abc123");
   });
 });

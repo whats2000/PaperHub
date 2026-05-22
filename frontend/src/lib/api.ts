@@ -8,6 +8,7 @@ import type {
   BackendMessage,
   MemoryItem,
   MemoryStatus,
+  MemoryScope,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -267,6 +268,61 @@ export async function deleteMemory(
     method: "DELETE",
     headers: { "X-Paperhub-Session-Id": String(sessionId) },
   });
+}
+
+/** Custom error thrown by createMemory when the safety gate refuses the content
+ * (HTTP 422). The `reason` field carries the backend's explanation so the UI
+ * can show it inline. */
+export class MemoryGateRefused extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(`Memory gate refused: ${reason}`);
+    this.name = "MemoryGateRefused";
+    this.reason = reason;
+  }
+}
+
+/** Create a new memory entry for the given session. Scope "session" pins the
+ *  memory to this session; "global" applies across all sessions.
+ *
+ * @throws MemoryGateRefused on HTTP 422 (safety gate rejected the content).
+ */
+export async function createMemory(
+  content: string,
+  scope: MemoryScope,
+  sessionId: number,
+): Promise<MemoryItem> {
+  const res = await fetch(`${API_BASE_URL}/memories`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Paperhub-Session-Id": String(sessionId),
+    },
+    body: JSON.stringify({ content, scope }),
+  });
+  if (res.status === 422) {
+    let reason = "may be sensitive content";
+    try {
+      const body = (await res.json()) as {
+        detail?: string | { msg?: string } | Array<{ msg?: string }>;
+      };
+      if (typeof body.detail === "string") {
+        reason = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        reason = body.detail.map((d) => d.msg ?? "").join("; ") || reason;
+      } else if (body.detail && typeof body.detail === "object" && "msg" in body.detail) {
+        reason = body.detail.msg ?? reason;
+      }
+    } catch {
+      // ignore parse error — use default reason
+    }
+    throw new MemoryGateRefused(reason);
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return (await res.json()) as MemoryItem;
 }
 
 /** Multipart PDF upload. Backend hashes the bytes → sha256-keyed cache,
