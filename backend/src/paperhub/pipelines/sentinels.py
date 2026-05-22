@@ -110,11 +110,20 @@ _FRAGILE_ENVS = frozenset({
 _BEGIN_END_RE = re.compile(r"\\(begin|end)\s*\{([^}]*)\}")
 
 
-def _safe_injection_mask(base: str) -> list[bool]:
-    """For each index in *base*, whether injecting a plain-text sentinel there
-    is LaTeX-safe: brace-depth 0, not inside math, and not inside a fragile
-    environment (see `_FRAGILE_ENVS`). Also unsafe inside `\\begin{}`/`\\end{}`
-    commands and command names themselves."""
+def _safe_injection_mask(base: str) -> tuple[list[bool], list[bool]]:
+    """Return ``(safe, fragile_at)``, two per-index boolean masks over *base*.
+
+    ``safe[i]`` — injecting a plain-text sentinel at ``i`` is LaTeX-safe:
+    brace-depth 0, not inside math, and not inside a fragile environment (see
+    `_FRAGILE_ENVS`). Also unsafe inside `\\begin{}`/`\\end{}` commands, command
+    names, and on the brace characters themselves.
+
+    ``fragile_at[i]`` — index ``i`` is inside a fragile environment (a
+    table/figure/verbatim/…), including its ``\\begin``/``\\end`` command spans.
+    Callers use this to decide an anchor's fallback direction: a chunk that
+    starts inside a table should anchor BEFORE the table (so a highlight range
+    spans it) rather than forward, which would skip past the whole float.
+    """
     n = len(base)
     math = [False] * (n + 1)
     for s, e in find_math_spans(base):
@@ -122,17 +131,30 @@ def _safe_injection_mask(base: str) -> list[bool]:
             math[k] = True
 
     safe = [False] * (n + 1)
+    fragile_at = [False] * (n + 1)
     brace = 0
     fragile = 0
     i = 0
+
+    def _fill_fragile(start: int, stop: int) -> None:
+        for k in range(start, min(stop, n)):
+            fragile_at[k] = fragile > 0
+
     while i < n:
         ch = base[i]
         if ch == "\\":
             m = _BEGIN_END_RE.match(base, i)
             if m:
                 kind, env = m.group(1), m.group(2).strip().rstrip("*")
-                if env in _FRAGILE_ENVS:
-                    fragile = fragile + 1 if kind == "begin" else max(0, fragile - 1)
+                is_fragile_env = env in _FRAGILE_ENVS
+                if kind == "begin":
+                    if is_fragile_env:
+                        fragile += 1
+                    _fill_fragile(i, m.end())  # the begin command is inside
+                else:
+                    _fill_fragile(i, m.end())  # the end command is still inside
+                    if is_fragile_env:
+                        fragile = max(0, fragile - 1)
                 # The whole `\begin{}`/`\end{}` command span stays unsafe.
                 i = m.end()
                 continue
@@ -146,6 +168,7 @@ def _safe_injection_mask(base: str) -> list[bool]:
                     j += 1
             else:
                 j = i + 2
+            _fill_fragile(i, j)
             i = j
             continue
         if ch == "%":
@@ -153,23 +176,29 @@ def _safe_injection_mask(base: str) -> list[bool]:
             # braces inside the comment aren't counted. The raw text we inject
             # into still has comments; this keeps the brace/env tracking honest.
             nl = base.find("\n", i)
-            i = len(base) if nl < 0 else nl
+            end = len(base) if nl < 0 else nl
+            _fill_fragile(i, end)
+            i = end
             continue
         if ch == "{":
             brace += 1
             # The brace char itself is not an injection point.
+            fragile_at[i] = fragile > 0
             i += 1
             continue
         if ch == "}":
             brace = max(0, brace - 1)
             # Likewise the closing brace — only positions AFTER it are safe, so
             # an anchor never lands between content and its closing brace.
+            fragile_at[i] = fragile > 0
             i += 1
             continue
         safe[i] = brace == 0 and fragile == 0 and not math[i]
+        fragile_at[i] = fragile > 0
         i += 1
     safe[n] = brace == 0 and fragile == 0
-    return safe
+    fragile_at[n] = fragile > 0
+    return safe, fragile_at
 
 
 def inject_sentinels(
@@ -183,22 +212,28 @@ def inject_sentinels(
     injection point. When the start is unsafe (inside math, a fragile
     environment, a brace group, or a command — see `_safe_injection_mask`), the
     anchor FALLS BACK to a nearby safe point instead of being dropped, so the
-    chunk is still anchored close to its content:
+    chunk is still anchored close to its content. The fallback DIRECTION depends
+    on why the start is unsafe:
 
-    - **forward** to the first safe point within the chunk's own span (bounded
-      by the next chunk's start) — lands on the chunk's own prose, e.g. just
-      past a leading ``\\textbf{...}`` / ``\\paragraph{...}`` / ``\\label{...}``;
-    - else **backward** to the nearest safe point before the start (bounded by
-      the previous chunk's start) — lands just before e.g. the ``\\begin{table}``
-      a pure table-content chunk lives in, so a citation scrolls to the table
-      rather than dead-ending at the section heading.
+    - a chunk that **starts inside a fragile environment** (a table/figure) is
+      anchored **backward**, just before the ``\\begin{table}`` — so the
+      highlight range (this sentinel → the next one, after the float) SPANS the
+      table. Going forward would skip past the whole float and anchor *after*
+      it, leaving the table itself un-highlighted.
+    - otherwise (a leading command/brace like ``\\textbf{...}`` /
+      ``\\paragraph{...}`` / ``\\label{...}``) the anchor goes **forward** to the
+      first safe point within the chunk's own span — landing on the chunk's own
+      prose.
 
-    The token is NEVER placed inside an unsafe span (that would break pandoc /
-    MathJax) — only at a safe fallback near it. Inserts back-to-front so earlier
-    offsets stay valid. Returns ``(marked_text, injected_ordinals)``.
+    Each direction is bounded by the chunk's neighbours (forward stays inside
+    this chunk; backward stays after the previous chunk), and the other
+    direction is tried if the preferred one finds nothing. The token is NEVER
+    placed inside an unsafe span (that would break pandoc / MathJax) — only at a
+    safe fallback near it. Inserts back-to-front so earlier offsets stay valid.
+    Returns ``(marked_text, injected_ordinals)``.
     """
     n = len(base)
-    safe = _safe_injection_mask(base)
+    safe, fragile_at = _safe_injection_mask(base)
 
     # Document-order traversal so each chunk's fallback search can be bounded by
     # its neighbours (forward stays inside this chunk; backward stays after the
@@ -215,22 +250,18 @@ def inject_sentinels(
         if safe[pos]:
             resolved[i] = pos
             continue
-        # Forward within this chunk's span [pos, next_start).
-        fwd = next(
-            (q for q in range(pos, min(next_start, n)) if safe[q]),
-            None,
-        )
-        if fwd is not None:
-            resolved[i] = fwd
-            continue
-        # Backward to the nearest safe point, not crossing into the previous
-        # chunk (exclusive of prev_start so we don't collide with its anchor).
-        bwd = next(
-            (q for q in range(min(pos, n), prev_start, -1) if safe[q]),
-            None,
-        )
-        if bwd is not None:
-            resolved[i] = bwd
+
+        # Forward stays inside this chunk [pos, next_start); backward stays after
+        # the previous chunk (exclusive of prev_start, so anchors don't collide).
+        fwd = next((q for q in range(pos, min(next_start, n)) if safe[q]), None)
+        bwd = next((q for q in range(min(pos, n), prev_start, -1) if safe[q]), None)
+        if fragile_at[pos]:
+            # Inside a table/figure: anchor before it so the highlight spans it.
+            cand = bwd if bwd is not None else fwd
+        else:
+            cand = fwd if fwd is not None else bwd
+        if cand is not None:
+            resolved[i] = cand
 
     # Insert back-to-front. Sorting by (position DESC, ordinal DESC) keeps each
     # insertion shifting only characters to its right, and when several chunks
