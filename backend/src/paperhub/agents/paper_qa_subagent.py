@@ -170,7 +170,13 @@ async def _read_section(
             [],
         )
     picks = [PickedChunk(chunk_id=r[0], text=r[1], section=r[2]) for r in rows]
-    body = "\n\n".join(f"[chunk:{p.chunk_id}]\n{p.text}" for p in picks)
+    # Wrap each chunk in an explicit <chunk id="N">…</chunk> container so the
+    # boundary + id binding is unambiguous, and the input label is NOT the same
+    # token (`[chunk:N]`) the model must EMIT as a citation — keeping "here is a
+    # chunk" distinct from "cite it" reduces mis-attribution on dense text.
+    body = "\n\n".join(
+        f'<chunk id="{p.chunk_id}">\n{p.text}\n</chunk>' for p in picks
+    )
     return (body, picks)
 
 

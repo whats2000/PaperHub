@@ -62,6 +62,38 @@ def test_find_math_spans_none() -> None:
     assert spans == []
 
 
+def test_find_math_spans_ignores_dollars_in_comments() -> None:
+    """A `$` inside a `%` comment is not a math delimiter; counting it would
+    drift `$...$` pairing and swallow prose. The real inline math after it must
+    still be the only span, and prose between must NOT be covered."""
+    text = "rate is high $x$ here\n% a comment with a stray $ sign\nmore $y$ end"
+    spans = find_math_spans(text)
+    # Exactly the two real inline-math spans: "$x$" and "$y$".
+    matched = [text[s:e] for s, e in spans]
+    assert matched == ["$x$", "$y$"]
+    # The prose word "more" is not inside any span.
+    mpos = text.index("more")
+    assert not any(s <= mpos < e for s, e in spans)
+
+
+def test_find_math_spans_ignores_escaped_dollar() -> None:
+    """An escaped `\\$` (literal dollar in body text) is not a delimiter."""
+    text = r"It cost \$5 and then $z$ and \$10 more."
+    spans = find_math_spans(text)
+    matched = [text[s:e] for s, e in spans]
+    assert matched == ["$z$"]
+
+
+def test_find_math_spans_single_comment_dollar_does_not_swallow_prose() -> None:
+    """One stray comment `$` with otherwise-balanced math must not turn the
+    tail of the document into a giant span (the observed real-world failure)."""
+    text = "% stray $ here\n" + "word " * 50 + "$a$ tail"
+    spans = find_math_spans(text)
+    # Only the real "$a$" — no multi-thousand-char span.
+    assert all(e - s <= len("$a$") for s, e in spans)
+    assert any(text[s:e] == "$a$" for s, e in spans)
+
+
 # ---------------------------------------------------------------------------
 # inject_sentinels
 # ---------------------------------------------------------------------------
@@ -125,22 +157,37 @@ def test_inject_sentinels_multiple_back_to_front_preserves_offsets() -> None:
     assert marked[idx1 + len(tok1):] == "HIJ"
 
 
-def test_inject_sentinels_skips_inside_inline_math() -> None:
+def _token_inside(marked: str, base: str, unsafe_substr: str) -> bool:
+    """True if sentinel_token(0) landed INSIDE the span occupied by
+    *unsafe_substr* in the original *base* (which would break pandoc/MathJax)."""
+    tok = sentinel_token(0)
+    ti = marked.find(tok)
+    if ti < 0:
+        return False
+    # Map the token index back to an original offset (chars before it, minus the
+    # token's own width if it sits after other tokens — only one token here).
+    orig_offset = ti
+    s = base.index(unsafe_substr)
+    e = s + len(unsafe_substr)
+    return s < orig_offset < e
+
+
+def test_inject_sentinels_never_inside_inline_math_but_anchors_nearby() -> None:
+    # A sentinel inside "$x + y$" would break MathJax — it must NOT land there,
+    # but the chunk should still be anchored at a safe fallback (after the math).
     base = r"text $x + y$ more"
-    # Position 6 is inside "$x + y$" (starts at 5, ends at 12).
-    dollar_start = base.index("$")
-    inside = dollar_start + 2  # definitely inside
+    inside = base.index("$") + 2
     marked, injected = inject_sentinels(base, [inside])
-    assert 0 not in injected
-    assert sentinel_token(0) not in marked
+    assert injected == {0}  # anchored via fallback
+    assert not _token_inside(marked, base, "$x + y$")
 
 
-def test_inject_sentinels_skips_inside_equation_env() -> None:
+def test_inject_sentinels_never_inside_equation_env() -> None:
     base = r"before \begin{equation} E=mc^2 \end{equation} after"
-    inside = base.index("E")  # inside the equation env
+    inside = base.index("E")
     marked, injected = inject_sentinels(base, [inside])
-    assert 0 not in injected
-    assert sentinel_token(0) not in marked
+    assert injected == {0}
+    assert not _token_inside(marked, base, r"\begin{equation} E=mc^2 \end{equation}")
 
 
 def test_inject_sentinels_does_not_skip_outside_math() -> None:
@@ -151,21 +198,38 @@ def test_inject_sentinels_does_not_skip_outside_math() -> None:
     assert sentinel_token(0) in marked
 
 
-def test_inject_sentinels_skips_inside_fragile_table_env() -> None:
-    # A sentinel inside a tabular breaks pandoc — must be skipped.
-    base = "Intro text.\n\\begin{table}\n\\begin{tabular}{cc}\nHERE a & b\n" \
-        "\\end{tabular}\n\\end{table}\nMore text."
+def test_inject_sentinels_never_inside_fragile_table_but_anchors_before() -> None:
+    # The whole chunk is table content (forward finds no safe point in-chunk),
+    # so the anchor falls BACK to just before the table — never inside it.
+    base = (
+        "Intro text. \\begin{table}\n\\begin{tabular}{cc}\nHERE a & b\n"
+        "\\end{tabular}\n\\end{table}"
+    )
     pos = base.index("HERE")
-    _marked, injected = inject_sentinels(base, [pos])
-    assert injected == set()
+    marked, injected = inject_sentinels(base, [pos])
+    assert injected == {0}  # anchored (backward fallback)
+    # The token sits before \begin{table}, not inside the table markup.
+    tok_idx = marked.find(sentinel_token(0))
+    assert tok_idx <= base.index("\\begin{table}")
 
 
-def test_inject_sentinels_skips_inside_brace_group() -> None:
-    # Inside a command argument (brace depth > 0) → unsafe.
+def test_inject_sentinels_forward_fallback_lands_in_chunk_prose() -> None:
+    # A chunk starting on a command (`\textbf{...}`) is unsafe at its start;
+    # the anchor walks forward to the chunk's own prose.
+    base = r"\textbf{Results.} On LIBERO it achieves 97.2 percent."
+    marked, injected = inject_sentinels(base, [0])
+    assert injected == {0}
+    # Token is past the \textbf{...} group, before the prose.
+    tok_idx = marked.find(sentinel_token(0))
+    assert tok_idx >= base.index("}")
+
+
+def test_inject_sentinels_never_inside_brace_group() -> None:
     base = r"A \section{HERE title} B"
     pos = base.index("HERE")
-    _marked, injected = inject_sentinels(base, [pos])
-    assert injected == set()
+    marked, injected = inject_sentinels(base, [pos])
+    assert injected == {0}
+    assert not _token_inside(marked, base, "{HERE title}")
 
 
 def test_inject_sentinels_allows_inside_itemize() -> None:
