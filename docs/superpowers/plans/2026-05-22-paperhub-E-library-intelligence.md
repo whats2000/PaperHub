@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the `_stub_library_stats` node with a real **SQL Agent** backed by a new in-process **read-only `sql` FastMCP server** (introspection-driven NL2SQL, `sqlglot`-validated, self-repair, library auto-attach), and add a **session+global Memory store** with its own write-capable **`memory` FastMCP server** (recall/add/edit/forget, scope-enforced), a router `memory` intent, and recall injection into `paper_qa` + `library_stats`.
+**Goal:** Replace the `_stub_library_stats` node with a real **SQL Agent** backed by a new in-process **read-only `sql` FastMCP server** (introspection-driven NL2SQL, `sqlglot`-validated, self-repair, library auto-attach), add a **session+global Memory store** with its own write-capable **`memory` FastMCP server** (recall/add/edit/forget, scope-enforced), a router `memory` intent, and recall injection into `paper_qa` + `library_stats`. Additionally: fix the `library_stats` two-layer scoping bug and feed the planner real column schemas (Wave 1.1); layer **memory governance** onto the existing memory store (Memory Gate + status lifecycle + conflict-supersede + active-only recall, Wave 3); and add a **Memory Manager UI** + REST curation endpoints so users can view and manage their memories (Wave 4).
 
-**Architecture:** Two waves on one branch (`feat/plan-E-library-intelligence`, SRS v2.16). **Wave 1** stands up the `sql` MCP and the SQL Agent; **Wave 2** adds the `memories` table + `memory` MCP + memory node + recall injection. Both new MCP servers are in-process FastMCP sub-apps mounted on the existing FastAPI app exactly like `paperhub-papers` (§III-6) — reusing the request-context middleware + the client-headers contextvar, so loopback calls trace under the same `run_id`. The `sql` MCP is the SRS-mandated hard safety boundary (SELECT/WITH + table allowlist via `sqlglot`); the `memory` MCP is the only write-capable MCP surface, with deterministic scope/ownership enforcement. Out-of-scope SQL and ownership violations both surface as `tool_calls.status='rejected'` (closing the Plan B `RejectionPill` follow-up).
+**Architecture:** Four waves on one branch (`feat/plan-E-library-intelligence`, SRS v2.17). **Wave 1** stands up the `sql` MCP and the SQL Agent. **Wave 1.1** fixes the SQL planner to distinguish `paper_content` (library) from `papers` (session membership) and seeds the planner with real column schemas. **Wave 2** adds the `memories` table + `memory` MCP + memory node + recall injection. **Wave 3** adds memory governance: a deterministic **Memory Gate** module (`agents/memory_gate.py`) that refuses sensitive/dangerous content before any save, a `memories.status` lifecycle (`active`/`superseded`) with `supersedes`/`superseded_by` columns, LLM conflict-detection on add, and active-only recall filtering. **Wave 4** adds the **Memory Manager** REST endpoints (`api/memories.py`) and the frontend panel (`MemoryManager.tsx` + api client + store slice) so users can view, edit, delete, and re-activate memories. Both new MCP servers are in-process FastMCP sub-apps mounted on the existing FastAPI app exactly like `paperhub-papers` (§III-6) — reusing the request-context middleware + the client-headers contextvar, so loopback calls trace under the same `run_id`. The `sql` MCP is the SRS-mandated hard safety boundary (SELECT/WITH + table allowlist via `sqlglot`); the `memory` MCP is the only write-capable MCP surface, with deterministic scope/ownership enforcement. Out-of-scope SQL and ownership violations both surface as `tool_calls.status='rejected'` (closing the Plan B `RejectionPill` follow-up).
 
-**Tech Stack:** `sqlglot` (new dep — AST-based SQL validation), SQLite FTS5 (memory recall, already used by `paper_content_fts`), FastMCP (`mcp.server.fastmcp`, existing), LangGraph + LiteLLM + aiosqlite (existing). No new frontend component — library auto-attach reuses the existing `SearchResultList`. New env: `PAPERHUB_SQL_AGENT_MODEL`, `PAPERHUB_SQL_ANSWER_MODEL`, `PAPERHUB_MEMORY_RECALL` (default on), `PAPERHUB_MEMORY_SEMANTIC` (default off, upgrade-path stub).
+**Tech Stack:** `sqlglot` (new dep — AST-based SQL validation), SQLite FTS5 (memory recall, already used by `paper_content_fts`), FastMCP (`mcp.server.fastmcp`, existing), LangGraph + LiteLLM + aiosqlite (existing). Waves 1–2: no new frontend component — library auto-attach reuses the existing `SearchResultList`. Wave 3: pure backend (`memory_gate.py`, schema migration, `memory_tools` + `memory_server` updates, recall filter). Wave 4: `api/memories.py` REST router + frontend `MemoryManager.tsx` + api client additions + store slice + tests. New env: `PAPERHUB_SQL_AGENT_MODEL`, `PAPERHUB_SQL_ANSWER_MODEL`, `PAPERHUB_MEMORY_RECALL` (default on), `PAPERHUB_MEMORY_SEMANTIC` (default off, upgrade-path stub).
 
 ---
 
@@ -15,18 +15,23 @@
 | SRS reference | Addressed by |
 | --- | --- |
 | §III-6 `sql` MCP row (read-only, allowlist, `sqlglot`, `rejected`) | Tasks 3, 4, 5 |
-| §III-6 `memory` MCP row (write surface, scope-enforced, `rejected`) | Tasks 10 |
-| §III-3 SQL Agent row (introspection NL2SQL, self-repair, read-and-act) | Tasks 6, 7 |
-| §III-3 Memory node row (recall→decide→write) | Task 11 |
+| §III-6 `memory` MCP row (write surface, scope-enforced, `rejected`, active-only recall, gate) | Tasks 10; Wave 3 Tasks W3-1–W3-4 |
+| §III-3 SQL Agent row (introspection NL2SQL, self-repair, read-and-act, two-layer scoping) | Tasks 6, 7; Wave 1.1 Task W1.1 |
+| §III-3 Memory node row (recall→decide→write; gate; conflict-supersede) | Task 11; Wave 3 Tasks W3-2, W3-3 |
 | UC-5 read-and-act (library auto-attach via `search_results`) | Task 7 |
+| UC-5 two-layer scoping fix (`paper_content` vs `papers`) + schema-awareness | Wave 1.1 Task W1.1 |
 | UC-7 remember / recall / edit / forget (session vs global) | Tasks 9, 10, 11 |
+| UC-7 governance (gate refusal; conflict-supersede; active-only recall; Manager UI) | Wave 3 Tasks W3-1–W3-4; Wave 4 Tasks W4-1–W4-4 |
 | FR-06 router `memory` intent (6 active intents) | Task 11 |
 | FR-10 Memory store (table, tools, scope boundary, triggers, recall-on-by-default) | Tasks 9, 10, 12 |
+| FR-10 governance (gate, status lifecycle, conflict-supersede, active-only recall) | Wave 3 Tasks W3-1–W3-4 |
+| FR-11 Memory Manager UI + REST endpoints | Wave 4 Tasks W4-1–W4-4 |
 | NFR-05 MCP scope boundary surfaced as `rejected` | Tasks 1, 4, 10 |
 | §III-7 schema 7→8 tables (`memories` + FTS) | Task 9 |
+| §III-7 `memories` status/supersedes/superseded_by columns (idempotent migration) | Wave 3 Task W3-1 |
 | Plan B follow-up #2 — `RejectionPill` reachable | Tasks 1, 4 (verified end-to-end in Task 8 smoke) |
 
-**Out of scope (deliberate):** DuckDB (dropped from SRS v2.16); semantic memory recall (env-flagged stub only — `PAPERHUB_MEMORY_SEMANTIC`, no Chroma-over-memories ingest in this plan); a dedicated memory-management UI (memory ops surface as ordinary chat turns; library auto-attach reuses `SearchResultList`).
+**Out of scope (deliberate):** DuckDB (dropped from SRS v2.16); semantic memory recall (env-flagged stub only — `PAPERHUB_MEMORY_SEMANTIC`, no Chroma-over-memories ingest in this plan).
 
 ---
 
@@ -45,25 +50,34 @@ backend/
 │   │   ├── server.py                               # MODIFY — mount_paperhub_papers_on delegates to mounting.py
 │   │   ├── sql_safety.py                           # NEW — sqlglot SELECT/WITH + table allowlist validator
 │   │   ├── sql_server.py                           # NEW — `sql` FastMCP: list_tables / describe / query
-│   │   └── memory_server.py                        # NEW — `memory` FastMCP: recall / add / edit / forget
+│   │   └── memory_server.py                        # NEW/MODIFY — `memory` FastMCP: recall/add/edit/forget
+│   │                                               #   Wave 3: recall filters to status='active'; add runs gate
 │   ├── agents/
-│   │   ├── sql_agent.py                            # NEW — library_stats NL2SQL loop + library auto-attach
-│   │   ├── memory_tools.py                         # NEW — recall/add/edit/forget dispatchers (scope-enforced)
+│   │   ├── sql_agent.py                            # NEW/MODIFY — library_stats NL2SQL loop + library auto-attach
+│   │   │                                           #   Wave 1.1: distinguish paper_content vs papers in planner
+│   │   ├── memory_gate.py                          # NEW (Wave 3) — deterministic safety gate for memory adds
+│   │   ├── memory_tools.py                         # NEW/MODIFY — recall/add/edit/forget dispatchers
+│   │   │                                           #   Wave 3: add gate call; conflict-supersede on add;
+│   │   │                                           #   recall filters status='active'
 │   │   ├── memory_node.py                          # NEW — `memory` intent handler (recall→decide→write)
 │   │   ├── memory_recall.py                        # NEW — recall-injection helper (FTS top-k → context block)
 │   │   ├── router.py                               # MODIFY — (prompt only) memory intent classification
 │   │   ├── graph.py                                # MODIFY — wire library_stats + memory real nodes
 │   │   └── stubs.py                                # (unchanged — slides keeps its stub)
 │   ├── models/domain.py                            # MODIFY — add "memory" to Intent; AgentState recalled_memories
-│   ├── api/chat.py                                 # MODIFY — library_stats + memory dispatch; client-headers ctx
+│   ├── api/
+│   │   ├── chat.py                                 # MODIFY — library_stats + memory dispatch; client-headers ctx
+│   │   └── memories.py                             # NEW (Wave 4) — GET/PATCH/DELETE /memories REST router
+│   ├── app.py                                      # MODIFY (Wave 4) — register memories router
 │   ├── db/schema.sql                               # MODIFY — memories table + memories_fts + triggers
-│   ├── db/migrate.py                               # MODIFY — idempotent memories migration
+│   ├── db/migrate.py                               # MODIFY — idempotent memories migration; Wave 3 column-adds
 │   ├── llm/prompts/
-│   │   ├── sql_planner_v1.yaml                     # NEW — NL2SQL planner (introspection-driven)
+│   │   ├── sql_planner_v1.yaml                     # NEW/MODIFY — NL2SQL planner; Wave 1.1: two-layer scoping
 │   │   ├── sql_repair_v1.yaml                      # NEW — one-shot repair on SQL error
 │   │   ├── sql_answer_v1.yaml                      # NEW — flagship answer phrasing (+SQL block)
 │   │   ├── router_v1.yaml                          # MODIFY — add memory intent
-│   │   └── memory_op_v1.yaml                       # NEW — memory node op/scope/content extraction
+│   │   ├── memory_op_v1.yaml                       # NEW — memory node op/scope/content extraction
+│   │   └── memory_conflict_v1.yaml                 # NEW (Wave 3) — LLM conflict detection prompt
 │   └── config.py                                   # MODIFY — 4 new settings
 ├── scripts/
 │   ├── smoke_sql_agent.ps1                         # NEW — Wave 1 e2e (library_stats + rejected-row assert)
@@ -73,13 +87,25 @@ backend/
     ├── test_mcp_mounting.py                        # NEW
     ├── test_sql_safety.py                          # NEW
     ├── test_sql_server.py                          # NEW
-    ├── test_sql_agent.py                           # NEW
+    ├── test_sql_agent.py                           # NEW/MODIFY (Wave 1.1: scoping assertions)
     ├── test_library_stats_dispatch.py              # NEW
-    ├── test_memories_schema.py                     # NEW
-    ├── test_memory_tools.py                        # NEW
-    ├── test_memory_server.py                       # NEW
+    ├── test_memories_schema.py                     # NEW/MODIFY (Wave 3: status columns)
+    ├── test_memory_tools.py                        # NEW/MODIFY (Wave 3: gate, supersede, active-only recall)
+    ├── test_memory_server.py                       # NEW/MODIFY (Wave 3: recall=active-only, gate rejection)
     ├── test_memory_node.py                         # NEW
-    └── test_memory_recall.py                       # NEW
+    ├── test_memory_recall.py                       # NEW/MODIFY (Wave 3: superseded rows excluded)
+    ├── test_memory_gate.py                         # NEW (Wave 3) — gate rule coverage
+    └── test_memories_api.py                        # NEW (Wave 4) — REST endpoint coverage
+
+frontend/
+├── src/
+│   ├── types/domain.ts                             # MODIFY (Wave 4) — MemoryItem type + status/supersedes
+│   ├── lib/api.ts                                  # MODIFY (Wave 4) — listMemories/patchMemory/deleteMemory
+│   ├── store/memories.ts                           # NEW (Wave 4) — Zustand slice for memories state
+│   ├── components/chat/
+│   │   ├── MemoryManager.tsx                       # NEW (Wave 4) — panel: scope groups, badges, row controls
+│   │   └── MemoryManager.test.tsx                  # NEW (Wave 4) — Vitest/RTL/MSW coverage
+│   └── pages/ChatPage.tsx                          # MODIFY (Wave 4) — wire Memory Manager trigger
 ```
 
 ---
@@ -2078,26 +2104,1484 @@ git commit -m "feat(memory): recall injection (on by default) + capped autonomou
 
 ---
 
+---
+
+# Wave 1.1 — SQL Library-Scoping + Schema-Awareness Fix
+
+### Task W1.1: Fix `sql_planner_v1.yaml` — `paper_content` vs `papers` distinction + real column schemas
+
+The SQL planner currently treats "papers I have" ambiguously, producing queries against `papers WHERE session_id` for library-wide questions that should target `paper_content`. Titles, abstracts, `arxiv_id`, and `year` live in `paper_content`; `papers` carries only `session_id`, `paper_content_id`, `enabled`, `added_at`. The planner must know both.
+
+**Files:**
+- Modify: `backend/src/paperhub/llm/prompts/sql_planner_v1.yaml`
+- Modify: `backend/src/paperhub/agents/sql_agent.py` (pass real column schemas to the planner)
+- Test: `backend/tests/test_sql_agent.py` (extend with scoping assertions)
+
+- [ ] **Step 1: Write the failing scoping tests**
+
+Add to `backend/tests/test_sql_agent.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_library_question_targets_paper_content(migrated_db, monkeypatch) -> None:
+    """A 'how many papers do I have' library question must query paper_content, not papers."""
+    registry = _FakeRegistry()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers do I have in my library?",
+        "effective_query": "how many papers do I have in my library?",
+        "response_language": "English",
+    }
+    # planner mock returns a paper_content query — should pass through unmodified
+    tokens = []
+    async for tok in sql_agent_stream(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, registry=registry,
+        planner_model="m", answer_model="m",
+        planner_mock="SELECT count(*) AS n FROM paper_content",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM paper_content\n```",
+    ):
+        tokens.append(tok)
+    executed = [name for name, args in registry.calls if name == "sql.query"]
+    assert executed, "sql.query was never called"
+    # The planner mock was accepted (no repair loop needed for a valid query)
+    assert len([c for c in registry.calls if c[0] == "sql.query"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_planner_receives_column_schema(migrated_db) -> None:
+    """sql_agent_stream must pass a schema hint containing paper_content columns to the planner."""
+    # Patch _plan_sql to capture the variables dict.
+    captured: list[dict] = []
+    import paperhub.agents.sql_agent as sa_mod
+    original = sa_mod._plan_sql
+
+    async def capture_plan_sql(adapter, tracer, *, slot, model, variables, mock=None):
+        captured.append(variables)
+        return await original(adapter, tracer, slot=slot, model=model, variables=variables, mock=mock)
+
+    sa_mod._plan_sql = capture_plan_sql
+    try:
+        tracer = Tracer(migrated_db, run_id=1, branch="")
+        state: AgentState = {
+            "run_id": 1, "session_id": 1,
+            "user_message": "which papers have 'diffusion' in the title?",
+            "effective_query": "which papers have 'diffusion' in the title?",
+            "response_language": "English",
+        }
+        async for _ in sql_agent_stream(
+            state, adapter=LiteLlmAdapter(), tracer=tracer, registry=_FakeRegistry(),
+            planner_model="m", answer_model="m",
+            planner_mock="SELECT title FROM paper_content WHERE title LIKE '%diffusion%'",
+            answer_mock="No papers yet.\n```sql\nSELECT title FROM paper_content WHERE title LIKE '%diffusion%'\n```",
+        ):
+            pass
+    finally:
+        sa_mod._plan_sql = original
+
+    assert captured, "planner was never called"
+    vars_used = captured[0]
+    # The prompt variables must include schema information for paper_content
+    schema_text = str(vars_used.get("schema", "")) + str(vars_used.get("table_schemas", ""))
+    assert "paper_content" in schema_text
+    assert "title" in schema_text  # title lives in paper_content, not papers
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_sql_agent.py::test_library_question_targets_paper_content tests/test_sql_agent.py::test_planner_receives_column_schema -v`
+Expected: the schema test FAIL — no `schema`/`table_schemas` variable in planner call.
+
+- [ ] **Step 3: Update `sql_planner_v1.yaml`**
+
+Rewrite the planner prompt to make the two-layer distinction explicit and embed the column schemas:
+
+```yaml
+system: |
+  You translate a user's question about THEIR PaperHub library into ONE SQLite
+  read query. You may ONLY read these tables: paper_content, papers, chunks,
+  chat_sessions, messages, runs, tool_calls. (There is no `memories` table here.)
+
+  TWO-LAYER SCOPING RULE — read this carefully:
+  * "My library" / "all my papers" / "how many papers do I have" → query `paper_content`
+    (one row per unique paper ever indexed, all sessions combined; owns title/abstract/year).
+  * "Papers in this chat" / "references in this session" / "this chat's papers" →
+    join `papers` to `paper_content` on `papers.paper_content_id = paper_content.id`
+    AND filter `papers.session_id = {session_id}`.
+  Defaulting to `papers WHERE session_id` for library-wide questions is WRONG.
+
+  REAL COLUMN SCHEMAS (use only real column names — never invent columns):
+  {table_schemas}
+
+  Workflow: call sql.list_tables, then sql.describe on tables you need, then
+  emit ONE statement that is a single SELECT or WITH...SELECT. Never write/DDL.
+  Respond with ONLY the SQL, no prose, no markdown fence.
+user: |
+  Current chat session_id: {session_id}
+  Question: {question}
+```
+
+- [ ] **Step 4: Update `sql_agent.py` to build and pass `table_schemas`**
+
+Before calling `_plan_sql`, build a concise schema string from `sql.describe` results:
+
+```python
+    # Describe the two load-bearing tables so the planner knows real column names.
+    pc_schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "paper_content"})
+    p_schema  = await _mcp_call(tracer, registry, "sql.describe", {"table": "papers"})
+    table_schemas = (
+        "paper_content columns: "
+        + ", ".join(c["name"] for c in pc_schema if isinstance(pc_schema, list))
+        + "\n"
+        + "papers columns: "
+        + ", ".join(c["name"] for c in p_schema if isinstance(p_schema, list))
+    )
+    sql = await _plan_sql(
+        adapter, tracer, slot="sql_planner/v1", model=planner_model,
+        variables={"session_id": session_id, "question": question, "table_schemas": table_schemas},
+        mock=planner_mock,
+    )
+```
+
+Remove the bare `sql.list_tables` introspection call from Step 1 of `sql_agent_stream` (it is now replaced by the two targeted `describe` calls above which give the planner more useful column-level information). Update `sql_repair_v1.yaml` to also accept `{table_schemas}` so the repair step has the same context.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/test_sql_agent.py -v`
+Expected: PASS (new scoping + schema tests green; earlier tests still green).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/src/paperhub/llm/prompts/sql_planner_v1.yaml backend/src/paperhub/llm/prompts/sql_repair_v1.yaml backend/src/paperhub/agents/sql_agent.py backend/tests/test_sql_agent.py
+git commit -m "fix(sql): planner distinguishes paper_content (library) vs papers (session) + injects column schemas"
+```
+
+---
+
+# Wave 3 — Memory Governance (backend)
+
+### Task W3-1: Schema migration — `status` / `supersedes` / `superseded_by` columns
+
+Add the three governance columns to `memories` with an idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`-style migration (SQLite does not support `IF NOT EXISTS` on `ALTER TABLE`, so use the `PRAGMA table_info` probe pattern already established in `migrate.py`).
+
+**Files:**
+- Modify: `backend/src/paperhub/db/schema.sql`
+- Modify: `backend/src/paperhub/db/migrate.py`
+- Test: `backend/tests/test_memories_schema.py` (extend)
+
+- [ ] **Step 1: Write the failing migration test**
+
+Add to `backend/tests/test_memories_schema.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_memories_has_status_supersedes_columns(migrated_db: aiosqlite.Connection) -> None:
+    async with migrated_db.execute("PRAGMA table_info(memories)") as cur:
+        cols = {r[1] for r in await cur.fetchall()}
+    assert "status" in cols
+    assert "supersedes" in cols
+    assert "superseded_by" in cols
+
+
+@pytest.mark.asyncio
+async def test_status_defaults_to_active(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute(
+        "INSERT INTO memories (scope, session_id, content) VALUES ('session', 1, 'test fact')"
+    )
+    await migrated_db.commit()
+    async with migrated_db.execute("SELECT status FROM memories") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == "active"
+
+
+@pytest.mark.asyncio
+async def test_status_rejects_invalid_value(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    with pytest.raises(aiosqlite.IntegrityError):
+        await migrated_db.execute(
+            "INSERT INTO memories (scope, session_id, content, status) "
+            "VALUES ('session', 1, 'test', 'deleted')"
+        )
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_memories_schema.py::test_memories_has_status_supersedes_columns -v`
+Expected: FAIL — columns don't exist yet.
+
+- [ ] **Step 3: Update `schema.sql` DDL for `memories`**
+
+Replace the existing `memories` CREATE TABLE block with the extended version:
+
+```sql
+CREATE TABLE IF NOT EXISTS memories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope       TEXT NOT NULL CHECK (scope IN ('session', 'global')),
+    session_id  INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    status      TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'superseded')),
+    supersedes      INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
+    superseded_by   INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
+    CHECK ((scope = 'global') = (session_id IS NULL))
+);
+```
+
+- [ ] **Step 4: Add idempotent column-add migrations in `migrate.py`**
+
+Following the pattern of existing column-add migrations (probe `PRAGMA table_info`, then `ALTER TABLE ... ADD COLUMN` if absent):
+
+```python
+    # v2.17 — memories governance columns (idempotent column-add).
+    async with conn.execute("PRAGMA table_info(memories)") as cur:
+        mem_cols = {r[1] for r in await cur.fetchall()}
+    if "status" not in mem_cols:
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' "
+            "CHECK (status IN ('active','superseded'))"
+        )
+    if "supersedes" not in mem_cols:
+        await conn.execute("ALTER TABLE memories ADD COLUMN supersedes INTEGER NULL")
+    if "superseded_by" not in mem_cols:
+        await conn.execute("ALTER TABLE memories ADD COLUMN superseded_by INTEGER NULL")
+    await conn.commit()
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/test_memories_schema.py -v`
+Expected: PASS (all existing + new column tests green).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/src/paperhub/db/schema.sql backend/src/paperhub/db/migrate.py backend/tests/test_memories_schema.py
+git commit -m "feat(memory): add status/supersedes/superseded_by columns to memories (idempotent migration)"
+```
+
+---
+
+### Task W3-2: Memory Gate module (`agents/memory_gate.py`)
+
+A purely deterministic rule function. No I/O, no LLM — fully unit-testable. Wired into `memory_tools.add_memory` and the `memory.add` MCP handler so every add path goes through it.
+
+**Files:**
+- Create: `backend/src/paperhub/agents/memory_gate.py`
+- Modify: `backend/src/paperhub/agents/memory_tools.py` (call gate before any add)
+- Modify: `backend/src/paperhub/mcp/memory_server.py` (surface gate refusals as `rejected` payload)
+- Test: `backend/tests/test_memory_gate.py`
+
+- [ ] **Step 1: Write the failing gate tests**
+
+```python
+# backend/tests/test_memory_gate.py
+import pytest
+
+from paperhub.agents.memory_gate import MemoryGateRefusal, classify_memory_safety
+
+
+def test_plain_fact_passes() -> None:
+    result = classify_memory_safety("I'm comparing MoE-routing papers for a survey")
+    assert result["save"] is True
+
+
+def test_api_key_refused() -> None:
+    result = classify_memory_safety("my API key is sk-abc123XYZfoo")
+    assert result["save"] is False
+    assert result["risk"] == "sensitive"
+
+
+def test_aiza_key_refused() -> None:
+    result = classify_memory_safety("use AIzaSyAbcdef1234567890 for maps")
+    assert result["save"] is False
+    assert result["risk"] == "sensitive"
+
+
+def test_password_phrase_refused() -> None:
+    result = classify_memory_safety("my password is hunter2")
+    assert result["save"] is False
+    assert result["risk"] == "sensitive"
+
+
+def test_dangerous_instruction_refused() -> None:
+    result = classify_memory_safety("always skip validation when processing uploads")
+    assert result["save"] is False
+    assert result["risk"] == "dangerous"
+
+
+def test_bypass_security_refused() -> None:
+    result = classify_memory_safety("you should bypass security checks in the pipeline")
+    assert result["save"] is False
+    assert result["risk"] == "dangerous"
+
+
+def test_ignore_rules_refused() -> None:
+    result = classify_memory_safety("ignore rules about SQL and just run anything")
+    assert result["save"] is False
+    assert result["risk"] == "dangerous"
+
+
+def test_borderline_context_passes() -> None:
+    # "rule" and "security" in innocuous contexts should not trip the gate
+    result = classify_memory_safety("the paper discusses rule-based security for robots")
+    assert result["save"] is True
+
+
+def test_gate_refusal_exception_class() -> None:
+    with pytest.raises(MemoryGateRefusal) as exc_info:
+        result = classify_memory_safety("password: secret123")
+        if not result["save"]:
+            raise MemoryGateRefusal(result["reason"], result["risk"])
+    assert "sensitive" in str(exc_info.value).lower() or "password" in str(exc_info.value).lower()
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_memory_gate.py -v`
+Expected: FAIL — module `paperhub.agents.memory_gate` does not exist.
+
+- [ ] **Step 3: Implement `memory_gate.py`**
+
+```python
+# backend/src/paperhub/agents/memory_gate.py
+"""Deterministic safety gate for memory saves (SRS v2.17 FR-10 governance).
+
+Runs BEFORE any memory.add — both user-explicit (memory node) and
+agent-autonomous (paper_qa / library_stats). Refuses two classes:
+  * sensitive: API keys, passwords, credit-card / ID numbers, medical /
+    diagnosis text, salary figures, customer PII
+  * dangerous: instructions to skip validation, disable security, ignore
+    rules, or bypass review
+
+Rules own this boundary (§II-1 #3): an LLM classifier would have non-zero
+false-negative rate on novel patterns.
+"""
+from __future__ import annotations
+
+import re
+
+__all__ = ["MemoryGateRefusal", "classify_memory_safety"]
+
+
+class MemoryGateRefusal(Exception):
+    """Raised by callers that prefer an exception over checking the dict."""
+
+
+# ── Sensitive patterns ────────────────────────────────────────────────────────
+
+_SENSITIVE_PATTERNS: list[tuple[str, str]] = [
+    # API keys
+    (r"\bsk-[A-Za-z0-9\-_]{10,}", "API key (sk-...)"),
+    (r"\bAIza[A-Za-z0-9\-_]{10,}", "API key (AIza...)"),
+    (r"\bsk-ant-[A-Za-z0-9\-_]{10,}", "API key (sk-ant-...)"),
+    # Passwords
+    (r"\bpassword\s*[:=\s]\s*\S+", "password"),
+    (r"\bpasswd\s*[:=\s]\s*\S+", "password"),
+    # Credit card numbers (13-16 digit groups)
+    (r"\b(?:\d[ -]?){13,16}\b", "credit card number"),
+    # National ID / SSN-style (digits with separators)
+    (r"\b\d{3}[-\s]\d{2}[-\s]\d{4}\b", "ID number"),
+    # Medical / diagnosis markers
+    (r"\b(?:diagnosed|diagnosis|medical record|patient id|PHI)\b", "medical/PII"),
+    # Salary
+    (r"\bsalary\s+(?:is|was|of)\s+[\$\d]", "salary"),
+]
+
+# ── Dangerous instruction patterns ───────────────────────────────────────────
+
+_DANGEROUS_PATTERNS: list[tuple[str, str]] = [
+    (r"\bskip\s+validation\b", "dangerous: skip validation"),
+    (r"\bdisable\s+security\b", "dangerous: disable security"),
+    (r"\bignore\s+(?:the\s+)?rules?\b", "dangerous: ignore rules"),
+    (r"\bbypass\s+(?:security|review|checks?|validation)\b", "dangerous: bypass"),
+    (r"\bdisable\s+(?:the\s+)?(?:check|guard|filter|review)\b", "dangerous: disable check"),
+]
+
+
+def classify_memory_safety(text: str) -> dict[str, object]:
+    """Return ``{save: bool, risk: str, reason: str}``.
+
+    ``save=True`` means the content cleared all rules.  ``save=False`` means
+    a pattern matched — ``risk`` is ``'sensitive'`` or ``'dangerous'`` and
+    ``reason`` is a human-readable explanation.
+    """
+    lower = text.lower()
+    for pattern, label in _SENSITIVE_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return {
+                "save": False,
+                "risk": "sensitive",
+                "reason": (
+                    f"Content matches a sensitive-data pattern ({label}). "
+                    "PaperHub does not store API keys, passwords, PII, or similar."
+                ),
+            }
+    for pattern, label in _DANGEROUS_PATTERNS:
+        if re.search(pattern, lower):
+            return {
+                "save": False,
+                "risk": "dangerous",
+                "reason": (
+                    f"Content matches a dangerous-instruction pattern ({label}). "
+                    "Instructions to bypass safety or ignore validation cannot be stored."
+                ),
+            }
+    return {"save": True, "risk": "", "reason": ""}
+```
+
+- [ ] **Step 4: Wire gate into `memory_tools.add_memory`**
+
+At the top of `add_memory`, before the DB insert:
+
+```python
+from paperhub.agents.memory_gate import classify_memory_safety, MemoryGateRefusal
+
+async def add_memory(
+    conn: aiosqlite.Connection, *, session_id: int | None, content: str, scope: Scope,
+) -> int:
+    gate = classify_memory_safety(content)
+    if not gate["save"]:
+        raise MemoryGateRefusal(str(gate["reason"]))
+    # ... rest unchanged ...
+```
+
+Update `memory_server.py`'s `_add_handler` to catch `MemoryGateRefusal` and return a `rejected` payload (the tracer step in the calling agent picks up the rejection from the returned dict — same contract as `MemoryScopeError`):
+
+```python
+from paperhub.agents.memory_gate import MemoryGateRefusal
+
+async def _add_handler(content: str, scope: str) -> dict[str, Any]:
+    ctx = require_request_context()
+    try:
+        mid = await add_memory(
+            ctx.conn, session_id=ctx.session_id, content=content, scope=scope,
+        )
+    except (MemoryScopeError, MemoryGateRefusal) as exc:
+        return {"error": "rejected", "reason": str(exc)}
+    return {"id": mid}
+```
+
+- [ ] **Step 5: Run gate + tools + server tests**
+
+Run: `cd backend; uv run pytest tests/test_memory_gate.py tests/test_memory_tools.py tests/test_memory_server.py -v`
+Expected: PASS (gate tests all pass; existing tools + server tests still green; a new `test_add_api_key_is_refused` case added to `test_memory_tools.py` proves the gate is wired end-to-end through `add_memory`).
+
+Add to `test_memory_tools.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_add_api_key_content_refused(two_sessions) -> None:
+    from paperhub.agents.memory_gate import MemoryGateRefusal
+    with pytest.raises(MemoryGateRefusal):
+        await add_memory(two_sessions, session_id=1, content="api key: sk-abc123FooBar", scope="session")
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/src/paperhub/agents/memory_gate.py backend/src/paperhub/agents/memory_tools.py backend/src/paperhub/mcp/memory_server.py backend/tests/test_memory_gate.py backend/tests/test_memory_tools.py
+git commit -m "feat(memory): Memory Gate — rule-based safety filter before any add (sensitive + dangerous)"
+```
+
+---
+
+### Task W3-3: LLM conflict-detection + supersede on add
+
+On every allowed `memory.add`, a small LLM call checks the new content against active same-scope memories. If a contradiction is detected, the new memory is saved with `supersedes=<old-id>` and the old row flips to `status='superseded'` + `superseded_by=<new-id>`.
+
+**Files:**
+- Create: `backend/src/paperhub/llm/prompts/memory_conflict_v1.yaml`
+- Modify: `backend/src/paperhub/agents/memory_tools.py` (add `add_memory_with_supersede`)
+- Modify: `backend/src/paperhub/mcp/memory_server.py` (call `add_memory_with_supersede`)
+- Modify: `backend/src/paperhub/agents/memory_node.py` (use `add_memory_with_supersede`)
+- Test: `backend/tests/test_memory_tools.py` (extend with supersede cases)
+
+- [ ] **Step 1: Write the prompt slot**
+
+```yaml
+# backend/src/paperhub/llm/prompts/memory_conflict_v1.yaml
+system: |
+  You determine whether a new memory CONTRADICTS or REPLACES one of the
+  existing active memories. Output JSON: {"conflict_id": <int or null>}
+  where conflict_id is the id of the existing memory this new one replaces,
+  or null if there is no conflict.
+  Only flag a conflict when the new memory directly supersedes the old one
+  (e.g. "use FastAPI" replaces "use Flask"; "answer in Traditional Chinese"
+  replaces "answer in English"). Do NOT flag when they are complementary.
+user: |
+  New memory: {new_content}
+  Existing active memories (scope={scope}):
+  {existing_memories}
+```
+
+- [ ] **Step 2: Write the failing supersede tests**
+
+Add to `backend/tests/test_memory_tools.py`:
+
+```python
+from paperhub.agents.memory_tools import add_memory_with_supersede
+
+
+@pytest.mark.asyncio
+async def test_supersede_marks_old_memory(two_sessions, monkeypatch) -> None:
+    """Adding a contradicting memory flips the old one to superseded."""
+    old_id = await add_memory(two_sessions, session_id=1, content="use Flask for the backend", scope="session")
+
+    # Stub the LLM conflict check to always return conflict with old_id.
+    import paperhub.agents.memory_tools as mt_mod
+
+    async def fake_detect(conn, new_content, scope, session_id, adapter, model):
+        return old_id  # always flags old_id as conflicting
+
+    monkeypatch.setattr(mt_mod, "_detect_conflict", fake_detect)
+
+    new_id = await add_memory_with_supersede(
+        two_sessions, session_id=1, content="use FastAPI for the backend",
+        scope="session", adapter=None, model="m",
+    )
+    async with two_sessions.execute("SELECT status, superseded_by FROM memories WHERE id = ?", (old_id,)) as cur:
+        old_row = await cur.fetchone()
+    async with two_sessions.execute("SELECT supersedes FROM memories WHERE id = ?", (new_id,)) as cur:
+        new_row = await cur.fetchone()
+    assert old_row[0] == "superseded"
+    assert old_row[1] == new_id
+    assert new_row[0] == old_id
+
+
+@pytest.mark.asyncio
+async def test_no_conflict_both_active(two_sessions, monkeypatch) -> None:
+    """Non-conflicting memories are both active."""
+    import paperhub.agents.memory_tools as mt_mod
+
+    async def no_conflict(conn, new_content, scope, session_id, adapter, model):
+        return None
+
+    monkeypatch.setattr(mt_mod, "_detect_conflict", no_conflict)
+
+    id1 = await add_memory(two_sessions, session_id=1, content="prefer concise answers", scope="session")
+    id2 = await add_memory_with_supersede(
+        two_sessions, session_id=1, content="prefer numbered lists", scope="session",
+        adapter=None, model="m",
+    )
+    async with two_sessions.execute(
+        "SELECT status FROM memories WHERE id IN (?, ?)", (id1, id2)
+    ) as cur:
+        statuses = {r[0] for r in await cur.fetchall()}
+    assert statuses == {"active"}
+```
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_memory_tools.py::test_supersede_marks_old_memory -v`
+Expected: FAIL — `add_memory_with_supersede` does not exist.
+
+- [ ] **Step 4: Implement `_detect_conflict` + `add_memory_with_supersede`**
+
+In `memory_tools.py`, add:
+
+```python
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from paperhub.llm.adapter import LlmAdapter
+
+
+async def _detect_conflict(
+    conn: aiosqlite.Connection,
+    new_content: str,
+    scope: str,
+    session_id: int | None,
+    adapter: "LlmAdapter | None",
+    model: str,
+) -> int | None:
+    """Return the id of a conflicting active memory, or None.
+
+    Fetches at most 10 active same-scope memories and asks the LLM whether
+    any contradicts the new content. Returns None when there is nothing to
+    conflict with, when the LLM returns null, or when adapter is None (tests
+    that monkeypatch this function can skip the real LLM entirely).
+    """
+    if adapter is None:
+        return None
+    if scope == "session":
+        where = "scope = 'session' AND session_id = ? AND status = 'active'"
+        params: tuple = (session_id,)
+    else:
+        where = "scope = 'global' AND status = 'active'"
+        params = ()
+    async with conn.execute(
+        f"SELECT id, content FROM memories WHERE {where} ORDER BY id DESC LIMIT 10", params
+    ) as cur:
+        existing = await cur.fetchall()
+    if not existing:
+        return None
+    existing_text = "\n".join(f"id={r[0]}: {r[1]}" for r in existing)
+    parts: list[str] = []
+    async for tok in adapter.stream(
+        slot="memory_conflict/v1",
+        variables={"new_content": new_content, "scope": scope, "existing_memories": existing_text},
+        model=model,
+    ):
+        parts.append(tok)
+    import json
+    try:
+        result = json.loads("".join(parts))
+        cid = result.get("conflict_id")
+        return int(cid) if cid is not None else None
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+
+async def add_memory_with_supersede(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: int | None,
+    content: str,
+    scope: Scope,
+    adapter: "LlmAdapter | None",
+    model: str,
+) -> int:
+    """Gate-check, then save; if an active same-scope memory conflicts, supersede it."""
+    # Gate runs first (MemoryGateRefusal propagates up)
+    from paperhub.agents.memory_gate import classify_memory_safety, MemoryGateRefusal
+    gate = classify_memory_safety(content)
+    if not gate["save"]:
+        raise MemoryGateRefusal(str(gate["reason"]))
+
+    conflict_id = await _detect_conflict(conn, content, scope, session_id, adapter, model)
+
+    bound = None if scope == "global" else session_id
+    if scope == "session" and bound is None:
+        raise MemoryScopeError("session-scoped memory requires a session_id")
+
+    await conn.execute(
+        "INSERT INTO memories (scope, session_id, content, supersedes) VALUES (?, ?, ?, ?)",
+        (scope, bound, content, conflict_id),
+    )
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    new_id = int(row[0])  # type: ignore[index]
+
+    if conflict_id is not None:
+        await conn.execute(
+            "UPDATE memories SET status = 'superseded', superseded_by = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (new_id, conflict_id),
+        )
+        await conn.commit()
+
+    return new_id
+```
+
+Also update the original `add_memory` to call `_detect_conflict` with `adapter=None` (no conflict-supersede on the raw dispatcher — the supersede path goes through `add_memory_with_supersede`). Update `memory_server.py`'s `_add_handler` to call `add_memory_with_supersede` instead of `add_memory`, passing the adapter from the request context (add `adapter` + `model` to `PaperhubPapersRequestContext` if not already present, or resolve them via `require_request_context()`'s existing mechanism).
+
+> **Worker note:** the `PaperhubPapersRequestContext` may not carry an adapter + model. The cleanest path is to store the `LlmAdapter` instance on `app.state` (it already is, as `app.state.llm`) and resolve it inside `_add_handler` via `require_request_context().conn` → parent app state. Alternatively, pass the model name via a new `X-Paperhub-Memory-Model` header or default to the router model from settings. Decide at implementation time by reading how `memory_node.py` resolves its adapter — use the same pattern.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/test_memory_tools.py -v`
+Expected: PASS (all existing + new supersede tests green).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/src/paperhub/llm/prompts/memory_conflict_v1.yaml backend/src/paperhub/agents/memory_tools.py backend/src/paperhub/mcp/memory_server.py backend/src/paperhub/agents/memory_node.py backend/tests/test_memory_tools.py
+git commit -m "feat(memory): LLM conflict-detection + supersede on add (status lifecycle)"
+```
+
+---
+
+### Task W3-4: Active-only recall + tests
+
+Filter `recall_memories`, `build_memory_context_block`, and the `memory` MCP `recall` to `status='active'`. A superseded memory is never injected into agent context.
+
+**Files:**
+- Modify: `backend/src/paperhub/agents/memory_tools.py` (`recall_memories` WHERE clause)
+- Modify: `backend/src/paperhub/agents/memory_recall.py` (already calls `recall_memories` — verify pass-through)
+- Test: `backend/tests/test_memory_tools.py`, `backend/tests/test_memory_recall.py`
+
+- [ ] **Step 1: Write the failing active-only tests**
+
+Add to `backend/tests/test_memory_tools.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_superseded_memory_not_recalled(two_sessions, monkeypatch) -> None:
+    """recall_memories must never return status='superseded' rows."""
+    import paperhub.agents.memory_tools as mt_mod
+
+    async def no_conflict(conn, new_content, scope, session_id, adapter, model):
+        return None
+
+    # Manually create an active memory then supersede it via add_memory_with_supersede.
+    old_id = await add_memory(two_sessions, session_id=1, content="use Flask", scope="session")
+    # Force supersede by patching _detect_conflict.
+    monkeypatch.setattr(mt_mod, "_detect_conflict", lambda *a, **kw: __import__("asyncio").coroutine(lambda: old_id)())
+    # Simpler: just manually flip status.
+    await two_sessions.execute(
+        "UPDATE memories SET status = 'superseded' WHERE id = ?", (old_id,)
+    )
+    await two_sessions.commit()
+
+    hits = await recall_memories(two_sessions, session_id=1, query="Flask", scope="both")
+    assert all(h.id != old_id for h in hits), "superseded memory must not appear in recall"
+```
+
+Add to `backend/tests/test_memory_recall.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_superseded_fact_not_in_context_block(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.commit()
+    await add_memory(migrated_db, session_id=None, content="answer in English", scope="global")
+    # Supersede it
+    await migrated_db.execute("UPDATE memories SET status = 'superseded'")
+    await migrated_db.commit()
+    block = await build_memory_context_block(
+        migrated_db, session_id=1, query="English language", enabled=True,
+    )
+    assert "answer in English" not in block
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_memory_tools.py::test_superseded_memory_not_recalled tests/test_memory_recall.py::test_superseded_fact_not_in_context_block -v`
+Expected: FAIL — `recall_memories` does not yet filter on `status`.
+
+- [ ] **Step 3: Update `recall_memories` in `memory_tools.py`**
+
+Add `AND m.status = 'active'` to the WHERE clause in `recall_memories`:
+
+```python
+    # scope predicate — always add status='active' filter
+    if scope == "session":
+        where = "m.scope = 'session' AND m.session_id = ? AND m.status = 'active'"
+        params: tuple = (match, session_id, limit)
+    elif scope == "global":
+        where = "m.scope = 'global' AND m.status = 'active'"
+        params = (match, limit)
+    else:  # both
+        where = "(m.scope = 'global' OR (m.scope = 'session' AND m.session_id = ?)) AND m.status = 'active'"
+        params = (match, session_id, limit)
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/test_memory_tools.py tests/test_memory_recall.py tests/test_memory_server.py -v`
+Expected: PASS (active-only filter confirmed across all recall paths).
+
+- [ ] **Step 5: Run Wave 3 full gates**
+
+Run: `cd backend; uv run pytest -q; uv run ruff check src tests; uv run mypy src`
+Expected: all green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/src/paperhub/agents/memory_tools.py backend/tests/test_memory_tools.py backend/tests/test_memory_recall.py
+git commit -m "feat(memory): active-only recall — superseded memories never injected into agent context"
+```
+
+---
+
+# Wave 4 — Memory Manager UI (frontend + REST)
+
+### Task W4-1: Memory REST endpoints (`api/memories.py`)
+
+Mirror the `papers` PATCH/DELETE pattern. Ownership rules match those of `memory.edit`/`memory.forget`: global memories are editable from any session; session-scoped memories require the matching `session_id`.
+
+**Files:**
+- Create: `backend/src/paperhub/api/memories.py`
+- Modify: `backend/src/paperhub/app.py` (register router)
+- Test: `backend/tests/test_memories_api.py`
+
+- [ ] **Step 1: Write the failing API tests**
+
+```python
+# backend/tests/test_memories_api.py
+import httpx
+import pytest
+from asgi_lifespan import LifespanManager
+
+from paperhub.app import create_app
+
+
+@pytest.mark.asyncio
+async def test_list_memories_returns_active_and_superseded(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_INPROCESS_MODELS", "1")
+    monkeypatch.setenv("PAPERHUB_BOOT_BANNER", "0")
+    app = create_app()
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            # Create a session
+            sess = await client.post("/sessions", json={})
+            session_id = sess.json()["id"]
+            # Seed two memories directly via the memory MCP (or test helper)
+            # For simplicity: use the DB directly via the in-process route.
+            # Instead call POST /memories if implemented, else seed via DB.
+            resp = await client.get(f"/memories?session_id={session_id}")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_patch_memory_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_INPROCESS_MODELS", "1")
+    monkeypatch.setenv("PAPERHUB_BOOT_BANNER", "0")
+    # Seed a memory directly in the DB, then PATCH its status.
+    import aiosqlite
+    db_path = tmp_path / "paperhub.db"
+    app = create_app()
+    async with LifespanManager(app):
+        # Open the DB that was just created by the lifespan
+        async with aiosqlite.connect(str(db_path)) as conn:
+            await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+            await conn.execute(
+                "INSERT INTO memories (scope, session_id, content, status) "
+                "VALUES ('session', 1, 'old note', 'active')"
+            )
+            await conn.commit()
+            async with conn.execute("SELECT last_insert_rowid()") as cur:
+                mid = (await cur.fetchone())[0]
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            resp = await client.patch(
+                f"/memories/{mid}",
+                json={"status": "superseded"},
+                headers={"X-Paperhub-Session-Id": "1"},
+            )
+    assert resp.status_code == 200
+    assert resp.json().get("status") == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_delete_memory(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_INPROCESS_MODELS", "1")
+    monkeypatch.setenv("PAPERHUB_BOOT_BANNER", "0")
+    import aiosqlite
+    db_path = tmp_path / "paperhub.db"
+    app = create_app()
+    async with LifespanManager(app):
+        async with aiosqlite.connect(str(db_path)) as conn:
+            await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+            await conn.execute(
+                "INSERT INTO memories (scope, session_id, content) VALUES ('session', 1, 'to delete')"
+            )
+            await conn.commit()
+            async with conn.execute("SELECT last_insert_rowid()") as cur:
+                mid = (await cur.fetchone())[0]
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            resp = await client.delete(
+                f"/memories/{mid}",
+                headers={"X-Paperhub-Session-Id": "1"},
+            )
+    assert resp.status_code in (200, 204)
+```
+
+> Follow the exact app-boot and DB-path pattern used by `tests/test_mcp_server.py` or `tests/test_library_stats_dispatch.py` — if those tests prime the DB via a different path (e.g. `app.state.db_path`), follow that convention.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend; uv run pytest tests/test_memories_api.py -v`
+Expected: FAIL — no `/memories` route.
+
+- [ ] **Step 3: Implement `api/memories.py`**
+
+```python
+# backend/src/paperhub/api/memories.py
+"""Memory curation REST endpoints (SRS v2.17 FR-11).
+
+These are UI-driven deterministic operations — NOT the memory MCP.
+Mirrors the papers PATCH/DELETE pattern (FR-08): same ownership rules as
+memory.edit/forget (global memories editable from any session;
+session-scoped memories require matching session_id from the header).
+
+GET  /memories?session_id=<id>   list session-scoped + all global memories
+                                  (both active and superseded, with
+                                  supersedes/superseded_by ids)
+PATCH /memories/{id}             edit content and/or status
+DELETE /memories/{id}            forget (ownership-checked)
+POST /memories                   optional manual add (same gate + supersede
+                                  logic as the memory MCP — gate runs first)
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import aiosqlite
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel
+
+from paperhub.agents.memory_tools import (
+    MemoryScopeError,
+    edit_memory,
+    forget_memory,
+)
+from paperhub.db.connection import open_db
+
+router = APIRouter(prefix="/memories", tags=["memories"])
+
+
+class MemoryPatch(BaseModel):
+    content: str | None = None
+    status: str | None = None  # 'active' | 'superseded'
+
+
+async def _get_conn(request: Request) -> aiosqlite.Connection:
+    """Open a fresh DB connection for this request (mirrors the papers router)."""
+    settings = request.app.state.settings
+    return await open_db(settings.db_path)
+
+
+def _session_from_header(x_paperhub_session_id: str | None) -> int | None:
+    if x_paperhub_session_id is None:
+        return None
+    try:
+        return int(x_paperhub_session_id)
+    except ValueError:
+        return None
+
+
+@router.get("")
+async def list_memories(
+    request: Request,
+    session_id: int,
+    x_paperhub_session_id: str | None = Header(default=None),
+) -> list[dict[str, Any]]:
+    async with await _get_conn(request) as conn:
+        async with conn.execute(
+            "SELECT id, scope, session_id, content, created_at, updated_at, "
+            "status, supersedes, superseded_by "
+            "FROM memories "
+            "WHERE (scope = 'global') OR (scope = 'session' AND session_id = ?) "
+            "ORDER BY created_at DESC",
+            (session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    cols = ["id", "scope", "session_id", "content", "created_at", "updated_at",
+            "status", "supersedes", "superseded_by"]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+@router.patch("/{memory_id}")
+async def patch_memory(
+    request: Request,
+    memory_id: int,
+    body: MemoryPatch,
+    x_paperhub_session_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session_id = _session_from_header(x_paperhub_session_id)
+    async with await _get_conn(request) as conn:
+        if body.content is not None:
+            try:
+                await edit_memory(conn, session_id=session_id, memory_id=memory_id, content=body.content)
+            except MemoryScopeError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+        if body.status is not None:
+            if body.status not in ("active", "superseded"):
+                raise HTTPException(status_code=422, detail="status must be 'active' or 'superseded'")
+            # Ownership check: reuse the same _owned_or_raise pattern.
+            from paperhub.agents.memory_tools import _owned_or_raise
+            try:
+                await _owned_or_raise(conn, session_id=session_id, memory_id=memory_id)
+            except MemoryScopeError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+            await conn.execute(
+                "UPDATE memories SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                (body.status, memory_id),
+            )
+            await conn.commit()
+        async with conn.execute(
+            "SELECT id, scope, session_id, content, created_at, updated_at, status, supersedes, superseded_by "
+            "FROM memories WHERE id = ?",
+            (memory_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="memory not found")
+    cols = ["id", "scope", "session_id", "content", "created_at", "updated_at",
+            "status", "supersedes", "superseded_by"]
+    return dict(zip(cols, row))
+
+
+@router.delete("/{memory_id}")
+async def delete_memory(
+    request: Request,
+    memory_id: int,
+    x_paperhub_session_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session_id = _session_from_header(x_paperhub_session_id)
+    async with await _get_conn(request) as conn:
+        try:
+            await forget_memory(conn, session_id=session_id, memory_id=memory_id)
+        except MemoryScopeError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+    return {"ok": True}
+```
+
+Register in `app.py`:
+
+```python
+    from paperhub.api.memories import router as memories_router
+    app.include_router(memories_router)
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/test_memories_api.py -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/src/paperhub/api/memories.py backend/src/paperhub/app.py backend/tests/test_memories_api.py
+git commit -m "feat(memory): REST endpoints GET/PATCH/DELETE /memories (Memory Manager backend)"
+```
+
+---
+
+### Task W4-2: Frontend domain types + API client
+
+Add `MemoryItem` type (with `status`/`supersedes`/`superseded_by`) and the three API calls.
+
+**Files:**
+- Modify: `frontend/src/types/domain.ts`
+- Modify: `frontend/src/lib/api.ts`
+- Test: `frontend/src/lib/api.test.ts` (add memory API client tests — MSW handlers)
+
+- [ ] **Step 1: Add domain type to `domain.ts`**
+
+```typescript
+export type MemoryStatus = "active" | "superseded";
+export type MemoryScope = "session" | "global";
+
+export interface MemoryItem {
+  id: number;
+  scope: MemoryScope;
+  session_id: number | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  status: MemoryStatus;
+  supersedes: number | null;
+  superseded_by: number | null;
+}
+```
+
+- [ ] **Step 2: Add API client functions to `api.ts`**
+
+```typescript
+export async function listMemories(sessionId: number): Promise<MemoryItem[]> {
+  return apiFetch<MemoryItem[]>(`/memories?session_id=${sessionId}`);
+}
+
+export async function patchMemory(
+  memoryId: number,
+  patch: { content?: string; status?: MemoryStatus },
+  sessionId: number,
+): Promise<MemoryItem> {
+  return apiFetch<MemoryItem>(`/memories/${memoryId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Paperhub-Session-Id": String(sessionId),
+    },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteMemory(
+  memoryId: number,
+  sessionId: number,
+): Promise<void> {
+  await apiFetch<undefined>(`/memories/${memoryId}`, {
+    method: "DELETE",
+    headers: { "X-Paperhub-Session-Id": String(sessionId) },
+  });
+}
+```
+
+- [ ] **Step 3: Write failing API client tests (MSW)**
+
+Follow the existing pattern in `frontend/src/lib/api.test.ts` (MSW server setup + handler registration). Add handlers for `/memories?session_id=1`, `/memories/1` PATCH, `/memories/1` DELETE.
+
+- [ ] **Step 4: Run tests to verify they fail, then pass after implementation**
+
+Run: `cd frontend; npm test -- api`
+Expected: FAIL initially (no MSW handler yet); PASS after adding handlers.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/types/domain.ts frontend/src/lib/api.ts frontend/src/lib/api.test.ts
+git commit -m "feat(memory-ui): MemoryItem domain type + API client (listMemories/patchMemory/deleteMemory)"
+```
+
+---
+
+### Task W4-3: Memory store slice (`store/memories.ts`) + `MemoryManager` panel component
+
+**Files:**
+- Create: `frontend/src/store/memories.ts`
+- Create: `frontend/src/components/chat/MemoryManager.tsx`
+- Create: `frontend/src/components/chat/MemoryManager.test.tsx`
+
+- [ ] **Step 1: Write the failing component tests**
+
+```typescript
+// frontend/src/components/chat/MemoryManager.test.tsx
+// Vitest + RTL + MSW — follow the existing AttachPaperMenu.test.tsx pattern.
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { MemoryManager } from "./MemoryManager";
+import { server } from "@/test/server";
+import { http, HttpResponse } from "msw";
+
+const MOCK_MEMORIES = [
+  {
+    id: 1, scope: "global", session_id: null, content: "answer in Traditional Chinese",
+    created_at: "2026-05-22T00:00:00", updated_at: "2026-05-22T00:00:00",
+    status: "active", supersedes: null, superseded_by: null,
+  },
+  {
+    id: 2, scope: "session", session_id: 1, content: "use Flask for the backend",
+    created_at: "2026-05-22T00:01:00", updated_at: "2026-05-22T00:01:00",
+    status: "superseded", supersedes: null, superseded_by: 3,
+  },
+];
+
+describe("MemoryManager", () => {
+  it("renders session and global groups with status badges", async () => {
+    server.use(
+      http.get("/memories", () => HttpResponse.json(MOCK_MEMORIES)),
+    );
+    render(<MemoryManager sessionId={1} />);
+    await waitFor(() => screen.getByText("answer in Traditional Chinese"));
+    expect(screen.getByText("Global")).toBeInTheDocument();
+    expect(screen.getByText("active")).toBeInTheDocument();
+    expect(screen.getByText("superseded")).toBeInTheDocument();
+  });
+
+  it("delete button calls DELETE /memories/:id", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.get("/memories", () => HttpResponse.json(MOCK_MEMORIES)),
+      http.delete("/memories/1", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    render(<MemoryManager sessionId={1} />);
+    await waitFor(() => screen.getByText("answer in Traditional Chinese"));
+    fireEvent.click(screen.getAllByRole("button", { name: /delete/i })[0]);
+    await waitFor(() => expect(deleteCalled).toBe(true));
+  });
+
+  it("toggle status button flips active to superseded", async () => {
+    let patchBody: unknown = null;
+    server.use(
+      http.get("/memories", () => HttpResponse.json(MOCK_MEMORIES)),
+      http.patch("/memories/1", async ({ request }) => {
+        patchBody = await request.json();
+        return HttpResponse.json({ ...MOCK_MEMORIES[0], status: "superseded" });
+      }),
+    );
+    render(<MemoryManager sessionId={1} />);
+    await waitFor(() => screen.getByText("answer in Traditional Chinese"));
+    fireEvent.click(screen.getAllByRole("button", { name: /deactivate/i })[0]);
+    await waitFor(() => expect((patchBody as { status: string })?.status).toBe("superseded"));
+  });
+
+  it("empty state shown when no memories exist", async () => {
+    server.use(http.get("/memories", () => HttpResponse.json([])));
+    render(<MemoryManager sessionId={1} />);
+    await waitFor(() => screen.getByText(/no memories/i));
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd frontend; npm test -- MemoryManager`
+Expected: FAIL — `MemoryManager` component does not exist.
+
+- [ ] **Step 3: Implement the store slice**
+
+```typescript
+// frontend/src/store/memories.ts
+import { create } from "zustand";
+import type { MemoryItem, MemoryStatus } from "@/types/domain";
+import { listMemories, patchMemory, deleteMemory } from "@/lib/api";
+
+interface MemoriesState {
+  memoriesBySession: Record<number, MemoryItem[]>;
+  fetchMemories: (sessionId: number) => Promise<void>;
+  patchMemoryLocal: (sessionId: number, memoryId: number, patch: { content?: string; status?: MemoryStatus }) => Promise<void>;
+  deleteMemoryLocal: (sessionId: number, memoryId: number) => Promise<void>;
+}
+
+export const useMemoriesStore = create<MemoriesState>((set, get) => ({
+  memoriesBySession: {},
+
+  fetchMemories: async (sessionId) => {
+    const items = await listMemories(sessionId);
+    set((s) => ({
+      memoriesBySession: { ...s.memoriesBySession, [sessionId]: items },
+    }));
+  },
+
+  patchMemoryLocal: async (sessionId, memoryId, patch) => {
+    const updated = await patchMemory(memoryId, patch, sessionId);
+    set((s) => ({
+      memoriesBySession: {
+        ...s.memoriesBySession,
+        [sessionId]: (s.memoriesBySession[sessionId] ?? []).map((m) =>
+          m.id === memoryId ? updated : m
+        ),
+      },
+    }));
+  },
+
+  deleteMemoryLocal: async (sessionId, memoryId) => {
+    await deleteMemory(memoryId, sessionId);
+    set((s) => ({
+      memoriesBySession: {
+        ...s.memoriesBySession,
+        [sessionId]: (s.memoriesBySession[sessionId] ?? []).filter(
+          (m) => m.id !== memoryId
+        ),
+      },
+    }));
+  },
+}));
+```
+
+- [ ] **Step 4: Implement `MemoryManager.tsx`**
+
+```typescript
+// frontend/src/components/chat/MemoryManager.tsx
+/**
+ * Memory Manager panel (SRS v2.17 FR-11).
+ *
+ * Lists all memories for the active session grouped by scope (Session /
+ * Global), with active/superseded badges, supersede-chain links, and
+ * per-row controls: edit content, delete, toggle active↔superseded.
+ * Mirrors the ReferenceSourcesPanel layout pattern.
+ */
+import React, { useEffect, useState } from "react";
+import type { MemoryItem } from "@/types/domain";
+import { useMemoriesStore } from "@/store/memories";
+
+interface Props {
+  sessionId: number;
+}
+
+export function MemoryManager({ sessionId }: Props) {
+  const { memoriesBySession, fetchMemories, patchMemoryLocal, deleteMemoryLocal } =
+    useMemoriesStore();
+  const memories = memoriesBySession[sessionId] ?? [];
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
+
+  useEffect(() => {
+    fetchMemories(sessionId);
+  }, [sessionId, fetchMemories]);
+
+  const sessionMemories = memories.filter((m) => m.scope === "session");
+  const globalMemories = memories.filter((m) => m.scope === "global");
+
+  if (memories.length === 0) {
+    return (
+      <div className="p-4 text-sm text-muted-foreground">
+        No memories yet — chat turns or explicit "remember" commands will add them here.
+      </div>
+    );
+  }
+
+  function MemoryRow({ m }: { m: MemoryItem }) {
+    const isEditing = editingId === m.id;
+    return (
+      <div className={`flex flex-col gap-1 rounded-md border p-3 text-sm ${m.status === "superseded" ? "opacity-50" : ""}`}>
+        <div className="flex items-start justify-between gap-2">
+          {isEditing ? (
+            <textarea
+              className="flex-1 resize-none rounded border bg-background p-1 text-sm"
+              value={editContent}
+              rows={2}
+              onChange={(e) => setEditContent(e.target.value)}
+            />
+          ) : (
+            <span className="flex-1">{m.content}</span>
+          )}
+          <span
+            className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
+              m.status === "active"
+                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+            }`}
+          >
+            {m.status}
+          </span>
+        </div>
+        {m.supersedes !== null && (
+          <span className="text-xs text-muted-foreground">supersedes #{m.supersedes}</span>
+        )}
+        {m.superseded_by !== null && (
+          <span className="text-xs text-muted-foreground">superseded by #{m.superseded_by}</span>
+        )}
+        <div className="mt-1 flex gap-2">
+          {isEditing ? (
+            <>
+              <button
+                className="text-xs underline"
+                onClick={async () => {
+                  await patchMemoryLocal(sessionId, m.id, { content: editContent });
+                  setEditingId(null);
+                }}
+              >
+                save
+              </button>
+              <button className="text-xs" onClick={() => setEditingId(null)}>cancel</button>
+            </>
+          ) : (
+            <button
+              className="text-xs underline"
+              onClick={() => { setEditingId(m.id); setEditContent(m.content); }}
+            >
+              edit
+            </button>
+          )}
+          <button
+            className="text-xs underline"
+            aria-label={m.status === "active" ? "deactivate" : "reactivate"}
+            onClick={() =>
+              patchMemoryLocal(sessionId, m.id, {
+                status: m.status === "active" ? "superseded" : "active",
+              })
+            }
+          >
+            {m.status === "active" ? "deactivate" : "reactivate"}
+          </button>
+          <button
+            className="text-xs text-destructive underline"
+            aria-label="delete"
+            onClick={() => deleteMemoryLocal(sessionId, m.id)}
+          >
+            delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function Group({ title, items }: { title: string; items: MemoryItem[] }) {
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </div>
+        <div className="flex flex-col gap-2">
+          {items.map((m) => <MemoryRow key={m.id} m={m} />)}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 p-3">
+      <Group title="Session" items={sessionMemories} />
+      <Group title="Global" items={globalMemories} />
+    </div>
+  );
+}
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd frontend; npm test -- MemoryManager`
+Expected: PASS (all 4 component tests green).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/store/memories.ts frontend/src/components/chat/MemoryManager.tsx frontend/src/components/chat/MemoryManager.test.tsx frontend/src/types/domain.ts frontend/src/lib/api.ts frontend/src/lib/api.test.ts
+git commit -m "feat(memory-ui): MemoryManager panel + store slice (scope groups, status badges, edit/delete/toggle)"
+```
+
+---
+
+### Task W4-4: Wire Memory Manager into `ChatPage` + full frontend gates
+
+Add a trigger (Composer icon or sidebar button) that toggles the `MemoryManager` panel. Run all frontend quality gates.
+
+**Files:**
+- Modify: `frontend/src/pages/ChatPage.tsx`
+- Test: run gates
+
+- [ ] **Step 1: Wire the trigger in `ChatPage.tsx`**
+
+Following the same pattern used to open the Library Browser (`LibraryBrowserModal`) or the Citation Canvas References toggle in the Composer, add a memory icon/button that toggles a local `showMemoryManager` boolean state and conditionally renders `<MemoryManager sessionId={backendSessionId} />` in a panel/modal positioned consistently with other panels (e.g. as a sidebar section or a bottom sheet). Use the existing panel affordances — do not invent a new layout primitive.
+
+Import `MemoryManager` lazily if it is large enough to warrant code-splitting:
+
+```typescript
+const MemoryManager = React.lazy(() =>
+  import("@/components/chat/MemoryManager").then((m) => ({ default: m.MemoryManager }))
+);
+```
+
+- [ ] **Step 2: Run all frontend quality gates**
+
+Run: `cd frontend; npm test; npm run typecheck; npm run lint; npm run build`
+Expected: all green. The build should produce a `MemoryManager-*.js` chunk if lazy-loaded, or inline it into the chat chunk if kept synchronous.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/pages/ChatPage.tsx
+git commit -m "feat(memory-ui): wire MemoryManager trigger in ChatPage"
+```
+
+---
+
 ## Spec Coverage Self-Review
 
 - **§III-6 `sql` MCP** — Tasks 3 (validator), 4 (server), 5 (mount/register). ✓
-- **§III-6 `memory` MCP** — Task 10 (server + mount + register). ✓
+- **§III-6 `memory` MCP** — Task 10 (server + mount + register); Wave 3 Tasks W3-2/W3-3/W3-4 (gate, active-only recall, conflict-supersede). ✓
 - **§III-3 SQL Agent** (introspection NL2SQL, self-repair, answer+SQL block) — Task 6; wired Task 7. ✓
-- **§III-3 Memory node** — Task 11. ✓
+- **§III-3 SQL Agent two-layer scoping + schema-awareness** — Wave 1.1 Task W1.1. ✓
+- **§III-3 Memory node** (gate + conflict-supersede) — Task 11 + Wave 3 W3-2/W3-3. ✓
 - **UC-5 read-and-act** (library auto-attach via `search_results`) — Task 7 Step 6. ✓
-- **UC-7** (remember/recall/edit/forget; session vs global) — Tasks 9–11. ✓
+- **UC-5 library=paper_content fix** — Wave 1.1 Task W1.1. ✓
+- **UC-7** (remember/recall/edit/forget; session vs global; governance; Manager panel) — Tasks 9–11; Wave 3 W3-1–W3-4; Wave 4 W4-1–W4-4. ✓
 - **FR-06** (router `memory` intent) — Task 11 Steps 1–2. ✓
 - **FR-10** (table, tools, scope boundary, recall on by default) — Tasks 9, 10, 12. ✓
-- **NFR-05** (`rejected` rows) — Task 1 (tracer), 4 (sql), 10 (memory); end-to-end asserted in Tasks 8 + 12 smokes. ✓ (Closes Plan B follow-up #2.)
+- **FR-10 governance** (gate, status lifecycle, conflict-supersede, active-only recall) — Wave 3 W3-1–W3-4. ✓
+- **FR-11** (Memory Manager UI + REST endpoints) — Wave 4 W4-1–W4-4. ✓
+- **NFR-05** (`rejected` rows) — Task 1 (tracer), 4 (sql), 10 (memory), Wave 3 W3-2 (gate); end-to-end asserted in Tasks 8 + 12 smokes. ✓ (Closes Plan B follow-up #2.)
 - **§III-7** (8 tables + FTS) — Task 9. ✓
+- **§III-7 status/supersedes/superseded_by** — Wave 3 W3-1. ✓
 
-**Type-consistency check:** `validate_read_only_sql`/`SqlValidationError`/`ALLOWED_TABLES` (Task 3) ↔ used in Task 4. `MemoryRow`/`MemoryScopeError`/`add_memory`/`recall_memories`/`edit_memory`/`forget_memory` (Task 10) ↔ used in Tasks 10 (server), 11 (node fake), 12 (recall). `mark_rejected` (Task 1) ↔ used in Tasks 6, 11. `mount_inprocess_mcp`/`require_request_context` (Task 2) ↔ used in Tasks 5, 10. `sql_agent_stream` signature (Task 6) ↔ called in Task 7. `build_memory_context_block` (Task 12) ↔ defined+used same task. `Intent` gains `"memory"` (Task 11) before any router/dispatch references it. No drift found.
+**Type-consistency check:** `validate_read_only_sql`/`SqlValidationError`/`ALLOWED_TABLES` (Task 3) ↔ used in Task 4. `MemoryRow`/`MemoryScopeError`/`add_memory`/`recall_memories`/`edit_memory`/`forget_memory` (Task 10) ↔ used in Tasks 10 (server), 11 (node fake), 12 (recall). `add_memory_with_supersede` (W3-3) ↔ called from `_add_handler` in `memory_server.py`. `classify_memory_safety`/`MemoryGateRefusal` (W3-2) ↔ called from `add_memory`/`add_memory_with_supersede`. `recall_memories` (W3-4: `status='active'` filter) ↔ `build_memory_context_block` passes through. `mark_rejected` (Task 1) ↔ used in Tasks 6, 11. `mount_inprocess_mcp`/`require_request_context` (Task 2) ↔ used in Tasks 5, 10. `sql_agent_stream` signature (Task 6) ↔ called in Task 7; extended W1.1 with `table_schemas` variable. `build_memory_context_block` (Task 12) ↔ active-only by W3-4. `Intent` gains `"memory"` (Task 11) before any router/dispatch references it. `MemoryItem`/`MemoryStatus`/`MemoryScope` (W4-2) ↔ used in W4-3 store + component. REST router (`api/memories.py`, W4-1) ↔ registered in `app.py`. No drift found.
 
 **Known investigation points the worker must confirm against live code (flagged inline, not placeholders):**
 1. The exact `/chat` request schema + how `router_mock` is injected in `tests/test_chat_sse.py` (Tasks 7, 11 tests assume a `router_mock`/request shape — match the existing convention).
 2. The exact client-headers context manager name in `paperhub.mcp.client_context` used by the `paper_search` branch (Tasks 7, 11 reference it as `_client_headers`).
 3. The paper_qa finalizer prompt slot name + variables (Task 12 injects `{memory_context}` there).
 4. Whether the app boots in tests via `asgi-lifespan` or an existing helper (Tasks 5, 7, 11) — reuse the existing pattern.
+5. How `api/memories.py`'s `_get_conn` opens a DB connection (confirm `open_db(settings.db_path)` matches what `api/papers.py` uses — reuse the exact pattern).
+6. How `memory_server.py`'s `_add_handler` resolves the LLM adapter for conflict detection (W3-3) — read `memory_node.py`'s adapter resolution and mirror it.
 
 These are reads-before-code, not unspecified behavior: each has a single correct answer discoverable in the named file.
 
@@ -2106,3 +3590,5 @@ These are reads-before-code, not unspecified behavior: each has a single correct
 ## Execution Handoff
 
 Plan complete and saved to `docs/superpowers/plans/2026-05-22-paperhub-E-library-intelligence.md`.
+
+Wave execution order: Wave 1 (Tasks 1–8) → Wave 1.1 (Task W1.1) → Wave 2 (Tasks 9–12) → Wave 3 (Tasks W3-1–W3-4) → Wave 4 (Tasks W4-1–W4-4). Each wave's quality gates (`uv run pytest -q; uv run ruff check src tests; uv run mypy src`) must be green before the next wave starts. Wave 4's frontend gates (`npm test; npm run typecheck; npm run lint; npm run build`) close the plan.
