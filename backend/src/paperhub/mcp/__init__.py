@@ -19,6 +19,7 @@ from .client_context import (
 )
 from .config import MCPServerConfig, load_mcp_servers
 from .errors import MCPError, MCPToolError, MCPUnavailableError
+from .memory_server import build_paperhub_memory_server
 from .mounting import mount_inprocess_mcp
 from .registry import MCPRegistry
 from .server import build_paperhub_papers_server, mount_paperhub_papers_on
@@ -40,6 +41,7 @@ __all__ = [
     "MCPToolError",
     "MCPUnavailableError",
     "PaperhubPapersRequestContext",
+    "build_paperhub_memory_server",
     "build_paperhub_papers_server",
     "build_paperhub_sql_server",
     "current_client_headers_context",
