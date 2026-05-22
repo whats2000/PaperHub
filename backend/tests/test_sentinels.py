@@ -213,6 +213,25 @@ def test_inject_sentinels_never_inside_fragile_table_but_anchors_before() -> Non
     assert tok_idx <= base.index("\\begin{table}")
 
 
+def test_inject_sentinels_table_start_anchors_before_table_not_after() -> None:
+    # A chunk that STARTS with a table but has trailing prose (so a safe
+    # forward point exists past the table). The anchor must land BEFORE the
+    # table — otherwise the highlight range (anchor → next sentinel) skips the
+    # whole float and the table itself is never highlighted (the live bug).
+    base = (
+        "Lead-in prose. "
+        "\\begin{table}\n\\begin{tabular}{cc}\nMolmoAct2 & 97.2\n"
+        "\\end{tabular}\n\\end{table}\n"
+        "Trailing prose after the table."
+    )
+    table_at = base.index("\\begin{table}")
+    marked, injected = inject_sentinels(base, [table_at])
+    assert injected == {0}
+    tok_idx = marked.find(sentinel_token(0))
+    # Anchored before the table, not after \end{table}.
+    assert tok_idx <= table_at
+
+
 def test_inject_sentinels_forward_fallback_lands_in_chunk_prose() -> None:
     # A chunk starting on a command (`\textbf{...}`) is unsafe at its start;
     # the anchor walks forward to the chunk's own prose.
