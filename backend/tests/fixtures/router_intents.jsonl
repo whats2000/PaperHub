@@ -14,3 +14,5 @@
 {"prompt": "List the sessions that reference paper 2403.01234", "expected": "library_stats"}
 {"prompt": "Count my papers by year", "expected": "library_stats"}
 {"prompt": "Which session has the most enabled references?", "expected": "library_stats"}
+{"prompt": "Remember that I prefer concise answers", "expected": "memory"}
+{"prompt": "Forget that note about my reading list", "expected": "memory"}

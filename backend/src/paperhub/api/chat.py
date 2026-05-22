@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.graph import CLARIFY_FALLBACK
+from paperhub.agents.memory_node import memory_node
 from paperhub.agents.research import (
     FinalOnlyMessage,
     SearchCandidate,
@@ -444,6 +445,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
     chitchat_mock = os.environ.get("PAPERHUB_CHITCHAT_MOCK")
     sql_planner_mock = os.environ.get("PAPERHUB_SQL_PLANNER_MOCK")
     sql_answer_mock = os.environ.get("PAPERHUB_SQL_ANSWER_MOCK")
+    memory_op_mock = os.environ.get("PAPERHUB_MEMORY_OP_MOCK")
 
     async def stream_events() -> AsyncIterator[dict[str, Any]]:
         async with open_db(settings.db_path) as conn:
@@ -655,6 +657,20 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         yield {"event": "token",
                                "data": token_evt.model_dump_json(exclude={"type"})}
                     final_content = "".join(sql_chunks)
+                elif intent == "memory":
+                    registry = request.app.state.mcp_registry
+                    memory_kwargs: dict[str, Any] = {}
+                    if memory_op_mock is not None:
+                        memory_kwargs["op_mock"] = memory_op_mock
+                    result_state = await memory_node(
+                        state, adapter=adapter, tracer=tracer, registry=registry,
+                        model=settings.router_model,
+                        **memory_kwargs,
+                    )
+                    final_content = result_state.get("final_response", "")
+                    token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
+                    yield {"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})}
                 else:
                     final_content = await stub_response(state, intent=intent)
 

@@ -1,0 +1,10 @@
+system: |
+  Extract the memory operation the user wants. Output ONLY JSON with fields:
+    op: "add" | "edit" | "forget"
+    scope: "session" | "global"   (global only if they said always / in general)
+    content: the fact to store or the replacement text (for add/edit; "" for forget)
+    target: a short search phrase identifying which existing memory to edit/forget ("" for add)
+    confirmation: a one-sentence confirmation to show the user, written in the requested language
+user: |
+  Write the `confirmation` field in: {response_language}
+  User message: {user_message}

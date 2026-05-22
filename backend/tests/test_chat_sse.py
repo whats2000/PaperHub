@@ -1107,6 +1107,89 @@ async def test_chat_sse_library_stats_streams_tokens(
     assert final_payload["content"] == "You have 3 papers."
 
 
+async def test_chat_sse_memory_intent_persists_row_and_emits_final(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """memory intent must: call memory_node, emit exactly one token event with
+    the confirmation, emit a final event, and persist a memories row in the DB.
+
+    The memory_node is monkeypatched (same pattern as sql_agent_stream for
+    library_stats) so the test does not need the real memory MCP registry.
+    The fake node writes a row directly via aiosqlite to verify persistence.
+    """
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"memory","model_tier":"small","confidence":0.95,'
+        '"reasoning":"user wants to store a preference"}',
+    )
+
+    _confirmation = "Noted — I will remember that."
+
+    async def _fake_memory_node(
+        state: Any,
+        *,
+        adapter: Any,
+        tracer: Any,
+        registry: Any,
+        model: Any,
+        **kwargs: Any,
+    ) -> Any:
+        # Write a row directly so the DB-persistence assertion can verify it.
+        import aiosqlite as _aiosqlite
+
+        from paperhub.config import load_settings as _ls
+        _settings = _ls()
+        async with _aiosqlite.connect(_settings.db_path) as _conn:
+            await _conn.execute(
+                "INSERT INTO memories (scope, session_id, content) VALUES ('session', ?, ?)",
+                (state.get("session_id"), "prefers concise answers"),
+            )
+            await _conn.commit()
+        return {**state, "final_response": _confirmation}
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "memory_node", _fake_memory_node)
+
+    await _bootstrap_schema(tmp_path)
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={"session_id": None, "user_message": "remember that I prefer concise answers"},
+        ) as response:
+            assert response.status_code == 200
+            events = await _consume_sse(response.aiter_bytes())
+
+    types = [t for t, _ in events]
+    assert "routing_decision" in types
+    assert "token" in types, f"Expected token event for memory confirmation, got: {types}"
+    assert "final" in types
+
+    token_text = "".join(d.get("text", "") for t, d in events if t == "token")
+    assert _confirmation in token_text, (
+        f"Expected confirmation text in token stream, got: {token_text!r}"
+    )
+
+    final_payload = next(d for t, d in events if t == "final")
+    assert final_payload["content"] == _confirmation, (
+        f"Expected final.content == confirmation, got: {final_payload['content']!r}"
+    )
+
+    # Verify a memories row was persisted.
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn, conn.execute(
+        "SELECT content FROM memories",
+    ) as cur:
+        rows = await cur.fetchall()
+    assert rows, "Expected at least one memories row after memory intent"
+    assert any("concise" in r[0] for r in rows), (
+        f"Expected 'concise' in memories content, got: {rows}"
+    )
+
+
 async def test_chat_sse_clarify_surfaces_question_no_pipeline(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:

@@ -126,6 +126,30 @@ async def test_router_writes_tool_call_row(
     assert rows == [("router", "classify", "ok")]
 
 
+async def test_router_classifies_memory_intent(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A 'remember that I prefer X' message with a memory mock returns intent == 'memory'."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1,
+        "user_message": "remember that I prefer concise answers",
+    }
+    adapter = LiteLlmAdapter()
+    updated = await router_node(
+        state,
+        adapter=adapter,
+        tracer=tracer,
+        model="gpt-4o-mini",
+        mock_response='{"intent":"memory","model_tier":"small",'
+                      '"confidence":0.95,"reasoning":"user asks to store a preference"}',
+    )
+    assert updated["routing_decision"].intent == "memory"
+
+
 async def test_routing_accuracy_at_least_80_percent(
     migrated_db: aiosqlite.Connection,
 ) -> None:
