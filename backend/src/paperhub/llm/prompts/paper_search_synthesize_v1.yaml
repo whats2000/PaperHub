@@ -31,10 +31,13 @@ user: |
   USER MESSAGE:
   {user_message}
 
+  {memory_context}
   RESOLVED (papers the pipeline successfully landed):
   {resolved_block}
 
   NOT_FOUND (papers the pipeline couldn't locate):
   {not_found_block}
 
-  Write your prose in {response_language}, but keep paper titles verbatim.
+  For the output language: if the remembered facts above state a preferred
+  language, write your prose in THAT language; otherwise write in
+  {response_language}. Either way, keep paper titles verbatim.

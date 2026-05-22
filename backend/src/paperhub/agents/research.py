@@ -111,6 +111,7 @@ async def paper_qa_finalize(
     tracer: Tracer,
     model: str,
     state: AgentState,
+    memory_context: str = "",
     **adapter_kwargs: Any,
 ) -> AsyncIterator[str]:
     """Stream the finalizer LLM over collected PerPaperPicks (v2.10).
@@ -150,6 +151,7 @@ async def paper_qa_finalize(
                 "user_message": user_message,
                 "per_paper_block": per_paper_block,
                 "response_language": response_language(state),
+                "memory_context": memory_context,
             },
             model=model,
             history=state.get("history"),

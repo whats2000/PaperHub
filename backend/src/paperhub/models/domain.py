@@ -3,7 +3,7 @@ from typing import Any, Literal, TypedDict
 from pydantic import BaseModel, ConfigDict, Field
 
 Intent = Literal[
-    "paper_search", "paper_suggest", "paper_qa", "slides", "library_stats", "chitchat", "clarify",
+    "paper_search", "paper_suggest", "paper_qa", "slides", "library_stats", "memory", "chitchat", "clarify",
 ]
 ModelTier = Literal["small", "flagship"]
 ToolStatus = Literal["ok", "error", "rejected"]

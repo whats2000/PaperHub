@@ -27,9 +27,12 @@ system: |
 user: |
   USER QUESTION: {user_message}
 
+  {memory_context}
   --- PAPERS ---
   {per_paper_block}
   --- END PAPERS ---
 
-  Compose the synthesis. Write the prose in {response_language}, but keep the
+  Compose the synthesis. For the output language: if the remembered facts
+  above state a preferred language, write the prose in THAT language;
+  otherwise write in {response_language}. Either way, keep the
   `[chunk:<id>]` citation markers and the paper TITLES exactly as given.

@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.graph import CLARIFY_FALLBACK
+from paperhub.agents.memory_node import memory_node
 from paperhub.agents.research import (
     FinalOnlyMessage,
     SearchCandidate,
@@ -27,6 +28,7 @@ from paperhub.agents.research_tools import (
     add_paper_to_session_dispatch,
 )
 from paperhub.agents.router import router_node
+from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
 from paperhub.api.deps import get_chroma
@@ -385,6 +387,7 @@ async def paper_qa_stream(
         adapter_kwargs=kwargs or None,
         paper_qa_subagent_model=_settings.paper_qa_subagent_model,
         paper_qa_max_section_reads=_settings.paper_qa_max_section_reads,
+        recall_enabled=_settings.memory_recall_enabled,
     )
     graph = build_paper_qa_subgraph(deps)
     streamed_any = False
@@ -441,6 +444,9 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
     adapter = LiteLlmAdapter()
     router_mock = os.environ.get("PAPERHUB_ROUTER_MOCK")
     chitchat_mock = os.environ.get("PAPERHUB_CHITCHAT_MOCK")
+    sql_planner_mock = os.environ.get("PAPERHUB_SQL_PLANNER_MOCK")
+    sql_answer_mock = os.environ.get("PAPERHUB_SQL_ANSWER_MOCK")
+    memory_op_mock = os.environ.get("PAPERHUB_MEMORY_OP_MOCK")
 
     async def stream_events() -> AsyncIterator[dict[str, Any]]:
         async with open_db(settings.db_path) as conn:
@@ -633,6 +639,41 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             }
                     if not final_only_seen:
                         final_content = "".join(qa_chunks)
+                elif intent == "library_stats":
+                    registry = request.app.state.mcp_registry
+                    sql_chunks: list[str] = []
+                    sql_stream_kwargs: dict[str, Any] = {}
+                    if sql_planner_mock is not None:
+                        sql_stream_kwargs["planner_mock"] = sql_planner_mock
+                    if sql_answer_mock is not None:
+                        sql_stream_kwargs["answer_mock"] = sql_answer_mock
+                    async for token in sql_agent_stream(
+                        state, adapter=adapter, tracer=tracer, registry=registry,
+                        planner_model=settings.sql_agent_model,
+                        answer_model=settings.sql_answer_model,
+                        conn=conn,
+                        recall_enabled=settings.memory_recall_enabled,
+                        **sql_stream_kwargs,
+                    ):
+                        sql_chunks.append(token)
+                        token_evt = TokenEvent(run_id=run_id, branch="", text=token)
+                        yield {"event": "token",
+                               "data": token_evt.model_dump_json(exclude={"type"})}
+                    final_content = "".join(sql_chunks)
+                elif intent == "memory":
+                    registry = request.app.state.mcp_registry
+                    memory_kwargs: dict[str, Any] = {}
+                    if memory_op_mock is not None:
+                        memory_kwargs["op_mock"] = memory_op_mock
+                    result_state = await memory_node(
+                        state, adapter=adapter, tracer=tracer, registry=registry,
+                        model=settings.router_model,
+                        **memory_kwargs,
+                    )
+                    final_content = result_state.get("final_response", "")
+                    token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
+                    yield {"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})}
                 else:
                     final_content = await stub_response(state, intent=intent)
 

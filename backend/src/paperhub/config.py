@@ -21,6 +21,10 @@ class Settings:
     paper_qa_model: str
     # paper_qa per-paper subagent (section navigation + chunk picking).
     paper_qa_subagent_model: str
+    # SQL Agent NL2SQL planner + self-repair (small tier).
+    sql_agent_model: str
+    # SQL Agent answer phrasing (flagship tier).
+    sql_answer_model: str
 
     # ── 4. Local embedding + rerank (hosted in the modelserver process) ─
     embedding_model: str
@@ -46,6 +50,14 @@ class Settings:
     # Days a soft-deleted chat session is retained before being permanently
     # purged (cascading its messages/runs/papers) at startup.
     session_retention_days: int
+
+    # ── 7. Memory / recall ──────────────────────────────────────────────
+    # Inject recalled memories into paper_qa / library_stats prompts (ON by
+    # default). Set to "0" to disable.
+    memory_recall_enabled: bool
+    # Upgrade-path stub: use semantic (embedding-based) recall instead of
+    # FTS. NOT implemented yet — always falls back to FTS when False.
+    memory_semantic_enabled: bool
 
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
@@ -75,6 +87,12 @@ def load_settings() -> Settings:
         paper_qa_subagent_model=os.environ.get(
             "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", "gemini/gemini-3.1-flash-lite",
         ),
+        sql_agent_model=os.environ.get(
+            "PAPERHUB_SQL_AGENT_MODEL", "gemini/gemini-3.1-flash-lite",
+        ),
+        sql_answer_model=os.environ.get(
+            "PAPERHUB_SQL_ANSWER_MODEL", "gemini/gemini-2.5-pro",
+        ),
 
         # 4. Local embedding + rerank.
         embedding_model=os.environ.get(
@@ -102,6 +120,14 @@ def load_settings() -> Settings:
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),
+
+        # 7. Memory / recall.
+        memory_recall_enabled=os.environ.get(
+            "PAPERHUB_MEMORY_RECALL", "1",
+        ) not in ("0", "", "false", "False"),
+        memory_semantic_enabled=os.environ.get(
+            "PAPERHUB_MEMORY_SEMANTIC", "0",
+        ) not in ("0", "", "false", "False"),
 
         # 8. Logging.
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),

@@ -2,6 +2,9 @@ system: |
   You are PaperHub's friendly assistant. The user is chatting casually,
   not asking about papers. Respond briefly, warmly, in one or two sentences.
 user: |
-  Write your reply in {response_language}.
+  {memory_context}
+  For the output language: if the remembered facts above state a preferred
+  language, write your reply in THAT language; otherwise write in
+  {response_language}.
 
   {user_message}

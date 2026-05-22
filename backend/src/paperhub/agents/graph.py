@@ -63,12 +63,19 @@ def build_graph(deps: GraphDeps) -> Any:
     async def _stub_slides(state: AgentState) -> AgentState:
         return {**state, "final_response": await stub_response(state, intent="slides")}
 
-    async def _stub_library_stats(state: AgentState) -> AgentState:
-        return {**state, "final_response": await stub_response(state, intent="library_stats")}
+    async def _library_stats(state: AgentState) -> AgentState:
+        # chat.py drives the streaming SQL agent directly; this node exists for
+        # build_graph completeness (the SSE path is the user-facing one).
+        return {**state, "final_response": "library_stats handled by the SQL Agent (see chat SSE path)."}
 
     async def _clarify(state: AgentState) -> AgentState:
         decision = state["routing_decision"]
         return {**state, "final_response": decision.resolved_query or CLARIFY_FALLBACK}
+
+    async def _memory(state: AgentState) -> AgentState:
+        # chat.py drives the memory node directly (same pattern as library_stats);
+        # this node exists for build_graph completeness (the SSE path is user-facing).
+        return {**state, "final_response": "memory handled by the memory node (see chat SSE path)."}
 
     def _route(state: AgentState) -> str:
         intent = state["routing_decision"].intent
@@ -82,12 +89,14 @@ def build_graph(deps: GraphDeps) -> Any:
     g.add_node("router", _router)
     g.add_node("chitchat", _chitchat)
     g.add_node("slides", _stub_slides)
-    g.add_node("library_stats", _stub_library_stats)
+    g.add_node("library_stats", _library_stats)
+    g.add_node("memory", _memory)
     g.add_node("clarify", _clarify)
     routes: dict[Hashable, str] = {
         "chitchat": "chitchat",
         "slides": "slides",
         "library_stats": "library_stats",
+        "memory": "memory",
         "clarify": "clarify",
     }
     if deps.research is not None:
@@ -97,6 +106,6 @@ def build_graph(deps: GraphDeps) -> Any:
         g.add_edge("research", END)
     g.add_edge(START, "router")
     g.add_conditional_edges("router", _route, routes)
-    for terminal in ("chitchat", "slides", "library_stats", "clarify"):
+    for terminal in ("chitchat", "slides", "library_stats", "memory", "clarify"):
         g.add_edge(terminal, END)
     return g.compile()

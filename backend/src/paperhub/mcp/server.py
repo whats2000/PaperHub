@@ -61,7 +61,7 @@ from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.mcp.server_context import (
     PaperhubPapersRequestContext,
-    current_request_context,
+    require_request_context,
     reset_request_context,
     set_request_context,
 )
@@ -128,7 +128,7 @@ def _tool_step(
 
 
 async def _search_library_handler(query: str, max_results: int = 8) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"query": query, "max_results": max_results}
     async with _tool_step(ctx, f"paper_search:{SERVER_NAME}.search_library", args) as step:
         hits = [
@@ -148,7 +148,7 @@ async def _search_library_handler(query: str, max_results: int = 8) -> list[dict
 async def _search_semantic_scholar_handler(
     query: str, max_results: int = 8,
 ) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"query": query, "max_results": max_results}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.search_semantic_scholar", args,
@@ -167,7 +167,7 @@ async def _search_semantic_scholar_handler(
 async def _find_related_papers_handler(
     paper_id: str, mode: str, max_results: int = 8,
 ) -> list[dict[str, Any]]:
-    ctx = _require_context()
+    ctx = require_request_context()
     args = {"paper_id": paper_id, "mode": mode, "max_results": max_results}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.find_related_papers", args,
@@ -180,24 +180,6 @@ async def _find_related_papers_handler(
         if step is not None:
             step.record_result({"count": len(related)})
     return related
-
-
-def _require_context() -> PaperhubPapersRequestContext:
-    """Fetch the current request context or raise a clean error.
-
-    Translates :class:`LookupError` from the unset ContextVar into a
-    :class:`RuntimeError` whose message identifies the missing piece — so an
-    external MCP client misconfiguring its request gets a useful diagnostic
-    rather than an opaque transport error.
-    """
-    try:
-        return current_request_context()
-    except LookupError as exc:
-        raise RuntimeError(
-            "paperhub-papers MCP tool invoked without a request context "
-            "(no X-Paperhub-Session-Id header set, and no test fixture "
-            "primed the contextvar)"
-        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -421,27 +403,14 @@ def mount_paperhub_papers_on(
     Idempotent in spirit but not in fact — calling twice would mount the
     sub-app twice. The caller (FastAPI ``create_app``) is responsible for
     calling this exactly once during app construction.
+
+    Delegates the generic mount mechanics to
+    :func:`paperhub.mcp.mounting.mount_inprocess_mcp` — the local import
+    avoids a circular import (mounting.py imports
+    ``PaperhubPapersRequestContextMiddleware`` from this module).
     """
-    sub_app = server.streamable_http_app()
-    sub_app.add_middleware(PaperhubPapersRequestContextMiddleware)
-    app.mount(path, sub_app)
-
-    # Chain the sub-app's lifespan into the parent's. We also copy the
-    # parent's `state.settings` onto the sub-app *after* the parent's
-    # lifespan has populated it — the middleware reads
-    # `request.app.state.settings` and `request.app` here is the sub-app
-    # (Starlette overwrites `scope["app"]` on mount dispatch), so this is
-    # the only way to surface the parent's resolved Settings without
-    # re-running `load_settings()` per request.
-    parent_lifespan = app.router.lifespan_context
-
-    @asynccontextmanager
-    async def _chained(target_app: FastAPI) -> AsyncIterator[None]:
-        async with parent_lifespan(target_app), sub_app.router.lifespan_context(sub_app):
-            sub_app.state.settings = target_app.state.settings
-            yield
-
-    app.router.lifespan_context = _chained
+    from paperhub.mcp.mounting import mount_inprocess_mcp
+    mount_inprocess_mcp(app, server, path=path)
     _LOG.info(
         "mcp.server mounted name=%s path=%s db=%s",
         server.name,

@@ -19,6 +19,7 @@ if sys.platform == "win32":
 
 from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
+from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.config import Settings, load_settings
@@ -26,7 +27,10 @@ from paperhub.db.connection import open_db
 from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
+    build_paperhub_memory_server,
     build_paperhub_papers_server,
+    build_paperhub_sql_server,
+    mount_inprocess_mcp,
     mount_paperhub_papers_on,
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
@@ -250,18 +254,31 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        # X-Paperhub-Session-Id is sent by the Memory Manager PATCH/DELETE
+        # (FR-11) for ownership checks; without it in allow_headers the browser
+        # CORS preflight is rejected and the request fails before reaching us.
+        allow_headers=["Content-Type", "X-Paperhub-Session-Id"],
     )
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(sessions_api.router)
     app.include_router(papers_api.router)
     app.include_router(chunks_api.router)
+    app.include_router(memories_api.router)
     # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
     # External MCP clients (Claude Desktop, Cursor) and the agent (post
     # Task v2.5-4) reach the three Research Agent tools over the MCP wire
     # protocol via this URL — uniform dispatch path with `web.*`.
     mount_paperhub_papers_on(app, build_paperhub_papers_server(), path="/mcp")
+    # Mount the in-process `paperhub-sql` FastMCP server at /mcp-sql.
+    # The SQL Agent (Plan E) reaches the three read-only SQL tools over the
+    # MCP wire protocol via this URL — same loopback convention as papers.
+    mount_inprocess_mcp(app, build_paperhub_sql_server(), path="/mcp-sql")
+    # Mount the in-process `paperhub-memory` FastMCP server at /mcp-memory.
+    # The ONLY write MCP surface: recall/add/edit/forget with scope enforcement.
+    # The Memory Agent (Plan E) reaches all four tools over the MCP wire
+    # protocol via this URL — same loopback convention as papers + sql.
+    mount_inprocess_mcp(app, build_paperhub_memory_server(), path="/mcp-memory")
     return app
 
 

@@ -3,11 +3,11 @@ import pytest
 
 EXPECTED_TABLES = {
     "chat_sessions", "paper_content", "papers", "chunks",
-    "messages", "runs", "tool_calls",
+    "messages", "runs", "tool_calls", "memories",
 }
 
 
-async def test_all_seven_tables_exist(migrated_db: aiosqlite.Connection) -> None:
+async def test_all_eight_tables_exist(migrated_db: aiosqlite.Connection) -> None:
     async with migrated_db.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     ) as cursor:

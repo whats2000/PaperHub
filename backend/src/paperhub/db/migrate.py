@@ -178,6 +178,30 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await _rebuild_messages_table(conn)
 
     # -----------------------------------------------------------------------
+    # v2.17 — memories governance columns (idempotent column-add).
+    # status / supersedes / superseded_by support memory lifecycle management.
+    # Pre-existing DBs created before Plan E won't have these columns.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(memories)") as cur:
+        mem_cols = {r[1] for r in await cur.fetchall()}
+    if "status" not in mem_cols:
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' "
+            "CHECK (status IN ('active','superseded'))"
+        )
+    if "supersedes" not in mem_cols:
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN supersedes INTEGER NULL "
+            "REFERENCES memories(id) ON DELETE SET NULL"
+        )
+    if "superseded_by" not in mem_cols:
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN superseded_by INTEGER NULL "
+            "REFERENCES memories(id) ON DELETE SET NULL"
+        )
+    await conn.commit()
+
+    # -----------------------------------------------------------------------
     # Rebuild the FTS index from paper_content if the index is empty
     # but the source table has rows (handles upgrades from pre-FTS schemas).
     # -----------------------------------------------------------------------
