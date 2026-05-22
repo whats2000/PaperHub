@@ -5,6 +5,7 @@ export type Intent =
   | "slides"
   | "library_stats"
   | "memory"
+  | "clarify"
   | "chitchat";
 
 export type ModelTier = "small" | "flagship";
