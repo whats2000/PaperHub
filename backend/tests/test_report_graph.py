@@ -25,6 +25,7 @@ class _Adapter:
 
 @pytest.mark.asyncio
 async def test_create_deck_happy_path(fake_tracer, migrated_db, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("paperhub.agents.report_graph._pdflatex_available", lambda: True)
     # one enabled paper
     await migrated_db.execute(
         "INSERT INTO paper_content (content_key, kind, arxiv_id, title, source_path, source_dir_path, html_path) "
@@ -90,3 +91,29 @@ async def test_empty_enabled_set_message(fake_tracer, migrated_db, tmp_path) -> 
         if mode == "values" and isinstance(payload, dict) and payload.get("final_response"):
             final = payload["final_response"]
     assert final is not None and "enable" in final.lower()
+
+
+@pytest.mark.asyncio
+async def test_missing_pdflatex_message(fake_tracer, migrated_db, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("paperhub.agents.report_graph._pdflatex_available", lambda: False)
+    await migrated_db.execute(
+        "INSERT INTO paper_content (content_key, kind, arxiv_id, title, source_path, source_dir_path, html_path) "
+        "VALUES ('arxiv:1','arxiv','2403.01','A','p',?,'h')", (str(tmp_path / "s"),))
+    await migrated_db.execute("INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1,1,1)")
+    await migrated_db.commit()
+    deps = ReportDeps(adapter=_Adapter(), tracer=fake_tracer, conn=migrated_db, retriever=None,
+                      workspace=tmp_path, plan_model="m", section_model="m", notes_model="m",
+                      resolve_model="m", recall_enabled=False)
+    graph = build_report_subgraph(deps)
+    state: dict[str, Any] = {
+        "run_id": fake_tracer.run_id, "branch": "", "session_id": 1,
+        "user_message": "slides", "effective_query": "slides",
+        "routing_decision": RoutingDecision(
+            intent="slides", model_tier="flagship", confidence=0.9, reasoning="x"
+        ),
+    }
+    final = None
+    async for mode, payload in graph.astream(state, stream_mode=["custom", "values"]):
+        if mode == "values" and isinstance(payload, dict) and payload.get("final_response"):
+            final = payload["final_response"]
+    assert final is not None and "latex" in final.lower()

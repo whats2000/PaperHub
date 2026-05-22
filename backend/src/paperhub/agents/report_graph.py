@@ -1,11 +1,12 @@
 """Report Agent subgraph (Plan F Phase 1 — create-only).
 
-START → sl_resolve → {empty | create} → sl_generate → END
+START → sl_resolve → {empty | no_latex | create} → sl_generate → END
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,15 @@ _EMPTY_MSG = (
     "I couldn't find any enabled reference papers in this chat. "
     "Add and enable at least one reference, then ask me to make slides."
 )
+_NO_LATEX_MSG = (
+    "Slide generation needs a LaTeX distribution (TeX Live or MikTeX) with "
+    "pdflatex on PATH. Install one and try again."
+)
+
+
+def _pdflatex_available() -> bool:
+    """Return True if ``pdflatex`` is discoverable on PATH."""
+    return bool(shutil.which("pdflatex"))
 
 
 @dataclass
@@ -75,10 +85,17 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
     def _route(state: AgentState) -> str:
         papers = state.get("report_papers")
-        return "create" if papers else "empty"
+        if not papers:
+            return "empty"
+        if not _pdflatex_available():
+            return "no_latex"
+        return "create"
 
     async def _empty(state: AgentState) -> AgentState:
         return {**state, "final_response": _EMPTY_MSG}
+
+    async def _no_latex(state: AgentState) -> AgentState:
+        return {**state, "final_response": _NO_LATEX_MSG}
 
     async def _generate(state: AgentState) -> AgentState:
         writer = get_stream_writer()
@@ -278,13 +295,15 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
     g: StateGraph[AgentState, Any] = StateGraph(AgentState)
     g.add_node("sl_resolve", _resolve)
     g.add_node("sl_empty", _empty)
+    g.add_node("sl_no_latex", _no_latex)
     g.add_node("sl_generate", _generate)
     g.add_edge(START, "sl_resolve")
     g.add_conditional_edges(
         "sl_resolve",
         _route,
-        {"empty": "sl_empty", "create": "sl_generate"},
+        {"empty": "sl_empty", "no_latex": "sl_no_latex", "create": "sl_generate"},
     )
     g.add_edge("sl_empty", END)
+    g.add_edge("sl_no_latex", END)
     g.add_edge("sl_generate", END)
     return g.compile()
