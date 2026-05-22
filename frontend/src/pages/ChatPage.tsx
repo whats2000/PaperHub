@@ -96,6 +96,7 @@ export function ChatPage() {
       if (prevSessionForMemoryRef.current !== state.activeSessionId) {
         prevSessionForMemoryRef.current = state.activeSessionId;
         setMemoryOpen(false);
+        useSlidesStore.getState().closePanel();
       }
     });
   }, []);
