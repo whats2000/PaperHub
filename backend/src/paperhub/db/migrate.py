@@ -202,6 +202,11 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
     # -----------------------------------------------------------------------
+    # decks (v2.18, Plan F): created by schema.sql's CREATE TABLE IF NOT EXISTS.
+    # Future column-adds go here, mirroring the chat_sessions.deleted_at pattern.
+    # -----------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------
     # Rebuild the FTS index from paper_content if the index is empty
     # but the source table has rows (handles upgrades from pre-FTS schemas).
     # -----------------------------------------------------------------------
