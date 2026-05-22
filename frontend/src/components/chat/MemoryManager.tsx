@@ -11,6 +11,12 @@ interface Props {
   sessionId: number;
 }
 
+/** Stable empty array — returned by the per-session selector when no memories
+ *  have been fetched yet.  Must not be an inline literal (`?? []`) because
+ *  Zustand's useSyncExternalStore calls getSnapshot on every render and a new
+ *  `[]` reference would trigger an infinite re-render loop. */
+const EMPTY_MEMORIES: MemoryItem[] = [];
+
 /** One row in the memory list — handles its own edit mode. */
 function MemoryRow({
   memory,
@@ -139,7 +145,7 @@ function MemoryRow({
               size="icon-xs"
               variant="ghost"
               disabled={busy}
-              onClick={() => setEditing(true)}
+              onClick={() => { setDraft(memory.content); setEditing(true); }}
               aria-label="edit"
               className="text-muted-foreground hover:text-foreground"
             >
@@ -215,9 +221,9 @@ function MemorySection({
  */
 export function MemoryManager({ sessionId }: Props) {
   const fetchMemories = useMemoriesStore((s) => s.fetchMemories);
-  const memoriesBySession = useMemoriesStore((s) => s.memoriesBySession);
-
-  const memories: MemoryItem[] = memoriesBySession[sessionId] ?? [];
+  const memories = useMemoriesStore(
+    (s) => s.memoriesBySession[sessionId] ?? EMPTY_MEMORIES,
+  );
 
   useEffect(() => {
     void fetchMemories(sessionId);

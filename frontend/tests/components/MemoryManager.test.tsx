@@ -119,6 +119,7 @@ describe("MemoryManager", () => {
 
   it("'deactivate' toggle button sends PATCH with {status:'superseded'}", async () => {
     let capturedBody: Record<string, unknown> | undefined;
+    let capturedSessionHeader: string | null = null;
 
     const patchedMemory: MemoryItem = {
       ...sessionMemory,
@@ -132,6 +133,7 @@ describe("MemoryManager", () => {
       ),
       http.patch(`${API_BASE_URL}/memories/1`, async ({ request }) => {
         capturedBody = (await request.json()) as Record<string, unknown>;
+        capturedSessionHeader = request.headers.get("x-paperhub-session-id");
         return HttpResponse.json(patchedMemory);
       }),
     );
@@ -149,6 +151,61 @@ describe("MemoryManager", () => {
     });
 
     expect(capturedBody).toEqual({ status: "superseded" });
+    // Ownership header must be present (mirrors the DELETE test assertion)
+    expect(capturedSessionHeader).toBe("7");
+  });
+
+  it("edit button opens textarea, save sends PATCH with updated content", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    const updatedMemory: MemoryItem = {
+      ...sessionMemory,
+      content: "User prefers bullet-point answers.",
+    };
+
+    server.use(
+      http.get(`${API_BASE_URL}/memories`, () =>
+        HttpResponse.json([sessionMemory]),
+      ),
+      http.patch(`${API_BASE_URL}/memories/1`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(updatedMemory);
+      }),
+    );
+
+    render(<MemoryManager sessionId={7} />);
+
+    await screen.findByText("User prefers concise answers.");
+
+    // Enter edit mode
+    const editBtn = screen.getByRole("button", { name: "edit" });
+    await userEvent.click(editBtn);
+
+    // Textarea should appear seeded with the current content
+    const textarea = screen.getByRole("textbox", {
+      name: "Edit memory content",
+    });
+    expect(textarea).toHaveValue("User prefers concise answers.");
+
+    // Change the value
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, "User prefers bullet-point answers.");
+
+    // Save
+    const saveBtn = screen.getByRole("button", { name: "save" });
+    await userEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(capturedBody).toBeDefined();
+    });
+
+    // PATCH body must carry the edited text
+    expect(capturedBody).toEqual({
+      content: "User prefers bullet-point answers.",
+    });
+
+    // Row should now show the updated content (server response applied)
+    await screen.findByText("User prefers bullet-point answers.");
   });
 
   it("renders empty-state when GET /memories returns []", async () => {
