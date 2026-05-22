@@ -48,6 +48,7 @@ import aiosqlite
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
+from paperhub.agents.memory_recall import build_memory_context_block
 from paperhub.agents.paper_qa_subagent import (
     MAX_SECTION_READS,
     PerPaperPicks,
@@ -116,6 +117,9 @@ class ResearchDeps:
     # explicit-paper parsing).
     parse_slot: str = "paper_search_parse/v1"
     synth_slot: str = "paper_search_synthesize/v1"
+    # v2.16 FR-10: inject recalled memories into the paper_qa finalizer prompt.
+    # Controlled by Settings.memory_recall_enabled (ON by default).
+    recall_enabled: bool = True
 
 
 def _kwargs(deps: ResearchDeps) -> ResearchExtraKwargs:
@@ -499,6 +503,13 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
                     "question or add more references."
                 ),
             }
+        # FR-10: build recall-injection block from the session's memories.
+        mem_ctx = await build_memory_context_block(
+            deps.conn,
+            session_id=state.get("session_id"),
+            query=effective_query(state),
+            enabled=deps.recall_enabled,
+        )
         collected: list[str] = []
         async for tok in paper_qa_finalize(
             per_paper_picks=picks,
@@ -507,6 +518,7 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
             tracer=deps.tracer,
             model=deps.paper_qa_model,
             state=state,
+            memory_context=mem_ctx,
             **_kwargs(deps),
         ):
             writer({"event": "token", "text": tok})

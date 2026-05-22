@@ -5,6 +5,9 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
+import aiosqlite
+
+from paperhub.agents.memory_recall import build_memory_context_block
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
@@ -91,6 +94,8 @@ async def sql_agent_stream(
     planner_mock: str | None = None,
     repair_mock: str | None = None,
     answer_mock: str | None = None,
+    conn: aiosqlite.Connection | None = None,
+    recall_enabled: bool = True,
 ) -> AsyncIterator[str]:
     question = effective_query(state)
     language = response_language(state)
@@ -135,6 +140,16 @@ async def sql_agent_stream(
     columns = result.get("columns", []) if isinstance(result, dict) else []
     rows = rows or []
 
+    # Build recall-injection block (FR-10). Empty string when disabled or no hits.
+    memory_context: str = ""
+    if conn is not None:
+        memory_context = await build_memory_context_block(
+            conn,
+            session_id=session_id,
+            query=question,
+            enabled=recall_enabled,
+        )
+
     kwargs: dict[str, Any] = {}
     if answer_mock is not None:
         kwargs["mock_response"] = answer_mock
@@ -149,10 +164,14 @@ async def sql_agent_stream(
                 "response_language": language,
                 "columns": json.dumps(columns),
                 "rows": json.dumps(rows),
+                "memory_context": memory_context,
             },
             model=answer_model,
             **kwargs,
         ):
             collected.append(tok)
             yield tok
-        step.record_result({"length": sum(len(c) for c in collected)})
+        step.record_result({
+            "length": sum(len(c) for c in collected),
+            "recall_hit": bool(memory_context),
+        })

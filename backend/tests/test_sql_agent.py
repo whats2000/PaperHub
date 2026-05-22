@@ -3,6 +3,7 @@ import json
 import aiosqlite
 import pytest
 
+from paperhub.agents.memory_tools import add_memory
 from paperhub.agents.sql_agent import _normalize_mcp_result, sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
@@ -168,9 +169,35 @@ def test_sql_answer_prompt_interpolates_language() -> None:
         sql="s",
         columns="[]",
         rows="[]",
+        memory_context="",
     )
     assert "Traditional Chinese" in rendered
     assert "{response_language}" not in rendered
+
+
+def test_sql_answer_prompt_interpolates_memory_context() -> None:
+    """memory_context placeholder is rendered when non-empty and absent when empty."""
+    slot = PromptRegistry().get("sql_answer/v1")
+    rendered_with = slot.user_template.format(
+        response_language="English",
+        question="q",
+        sql="s",
+        columns="[]",
+        rows="[]",
+        memory_context="Relevant remembered facts (use if helpful, ignore if not):\n- (global) answer in Traditional Chinese",
+    )
+    assert "Traditional Chinese" in rendered_with
+    assert "{memory_context}" not in rendered_with
+
+    rendered_empty = slot.user_template.format(
+        response_language="English",
+        question="q",
+        sql="s",
+        columns="[]",
+        rows="[]",
+        memory_context="",
+    )
+    assert "{memory_context}" not in rendered_empty
 
 
 # ---------------------------------------------------------------------------
@@ -318,3 +345,83 @@ async def test_sql_agent_json_string_rejected_writes_status(
     ) as cur:
         statuses = [r[0] for r in await cur.fetchall()]
     assert any(s == "rejected" for s in statuses)
+
+
+# ---------------------------------------------------------------------------
+# Recall injection (FR-10, Part 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_recall_injection_with_seeded_memory(migrated_db: aiosqlite.Connection) -> None:
+    """sql_agent_stream runs cleanly with recall_enabled=True and a matching
+    seeded memory.  The sql:answer tracer row records recall_hit=True,
+    confirming the memory_context was non-empty for the answer step."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    # Seed a global memory that will match the query "Traditional Chinese".
+    await add_memory(migrated_db, session_id=None, content="answer in Traditional Chinese", scope="global")
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers in Traditional Chinese?",
+        "effective_query": "how many papers in Traditional Chinese?",
+        "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_FakeRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+        conn=migrated_db,
+        recall_enabled=True,
+    ):
+        tokens.append(tok)
+    assert "".join(tokens)  # answer arrived
+    # The sql:answer step records recall_hit=True when a memory was injected.
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = 1 AND tool = 'sql:answer'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    result_payload = json.loads(row[0])
+    assert result_payload.get("recall_hit") is True
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_recall_disabled_skips_injection(migrated_db: aiosqlite.Connection) -> None:
+    """When recall_enabled=False, the sql:answer tracer row records recall_hit=False
+    even if matching memories exist."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    await add_memory(migrated_db, session_id=None, content="answer in Traditional Chinese", scope="global")
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers in Traditional Chinese?",
+        "effective_query": "how many papers in Traditional Chinese?",
+        "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_FakeRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+        conn=migrated_db,
+        recall_enabled=False,
+    ):
+        tokens.append(tok)
+    assert "".join(tokens)
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = 1 AND tool = 'sql:answer'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    result_payload = json.loads(row[0])
+    assert result_payload.get("recall_hit") is False

@@ -4,6 +4,7 @@ system: |
   inside a ```sql fenced block.
 user: |
   Write your answer in {response_language}.
+  {memory_context}
   Question: {question}
   SQL: {sql}
   Columns: {columns}

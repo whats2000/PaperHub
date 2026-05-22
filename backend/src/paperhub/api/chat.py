@@ -387,6 +387,7 @@ async def paper_qa_stream(
         adapter_kwargs=kwargs or None,
         paper_qa_subagent_model=_settings.paper_qa_subagent_model,
         paper_qa_max_section_reads=_settings.paper_qa_max_section_reads,
+        recall_enabled=_settings.memory_recall_enabled,
     )
     graph = build_paper_qa_subgraph(deps)
     streamed_any = False
@@ -650,6 +651,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         state, adapter=adapter, tracer=tracer, registry=registry,
                         planner_model=settings.sql_agent_model,
                         answer_model=settings.sql_answer_model,
+                        conn=conn,
+                        recall_enabled=settings.memory_recall_enabled,
                         **sql_stream_kwargs,
                     ):
                         sql_chunks.append(token)

@@ -51,6 +51,14 @@ class Settings:
     # purged (cascading its messages/runs/papers) at startup.
     session_retention_days: int
 
+    # ── 7. Memory / recall ──────────────────────────────────────────────
+    # Inject recalled memories into paper_qa / library_stats prompts (ON by
+    # default). Set to "0" to disable.
+    memory_recall_enabled: bool
+    # Upgrade-path stub: use semantic (embedding-based) recall instead of
+    # FTS. NOT implemented yet — always falls back to FTS when False.
+    memory_semantic_enabled: bool
+
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
 
@@ -112,6 +120,14 @@ def load_settings() -> Settings:
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),
+
+        # 7. Memory / recall.
+        memory_recall_enabled=os.environ.get(
+            "PAPERHUB_MEMORY_RECALL", "1",
+        ) not in ("0", "", "false", "False"),
+        memory_semantic_enabled=os.environ.get(
+            "PAPERHUB_MEMORY_SEMANTIC", "0",
+        ) not in ("0", "", "false", "False"),
 
         # 8. Logging.
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),
