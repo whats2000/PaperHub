@@ -8,6 +8,8 @@ from typing import Literal
 
 import aiosqlite
 
+from paperhub.agents.memory_gate import MemoryGateRefusal, classify_memory_safety
+
 Scope = Literal["session", "global"]
 RecallScope = Literal["session", "global", "both"]
 
@@ -50,6 +52,9 @@ async def add_memory(
     ``session_id`` is supplied (session-scoped rows need an owner).
     Global memories always store ``session_id=NULL``.
     """
+    gate = classify_memory_safety(content)
+    if not gate["save"]:
+        raise MemoryGateRefusal(str(gate["reason"]))
     bound: int | None = None if scope == "global" else session_id
     if scope == "session" and bound is None:
         raise MemoryScopeError("session-scoped memory requires a session_id")

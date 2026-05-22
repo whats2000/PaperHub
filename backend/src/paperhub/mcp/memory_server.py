@@ -23,6 +23,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from paperhub.agents.memory_gate import MemoryGateRefusal
 from paperhub.agents.memory_tools import (
     MemoryScopeError,
     RecallScope,
@@ -69,7 +70,7 @@ async def _add_handler(content: str, scope: Scope) -> dict[str, Any]:
     ctx = require_request_context()
     try:
         mid = await add_memory(ctx.conn, session_id=ctx.session_id, content=content, scope=scope)
-    except MemoryScopeError as exc:
+    except (MemoryScopeError, MemoryGateRefusal) as exc:
         return {"error": "rejected", "reason": str(exc)}
     return {"id": mid}
 

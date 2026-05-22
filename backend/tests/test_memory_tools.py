@@ -1,6 +1,7 @@
 import aiosqlite
 import pytest
 
+from paperhub.agents.memory_gate import MemoryGateRefusal
 from paperhub.agents.memory_tools import (
     MemoryScopeError,
     add_memory,
@@ -79,3 +80,18 @@ async def test_session_scope_recall_excludes_other_sessions(two_sessions) -> Non
 async def test_forget_missing_memory_raises(two_sessions) -> None:
     with pytest.raises(MemoryScopeError):
         await forget_memory(two_sessions, session_id=1, memory_id=99999)
+
+
+@pytest.mark.asyncio
+async def test_add_api_key_is_refused(two_sessions) -> None:
+    """add_memory must raise MemoryGateRefusal for API-key content and insert nothing."""
+    with pytest.raises(MemoryGateRefusal):
+        await add_memory(
+            two_sessions,
+            session_id=1,
+            content="my key is sk-abc123XYZfoo",
+            scope="session",
+        )
+    async with two_sessions.execute("SELECT count(*) FROM memories") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == 0
