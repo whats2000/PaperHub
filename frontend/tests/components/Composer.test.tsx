@@ -60,20 +60,49 @@ describe("Composer", () => {
     expect(textbox.value).toBe("");
   });
 
-  it("renders the AttachPaperMenu trigger, an enabled References toggle, a Memory toggle, and 2 disabled capability buttons", () => {
+  it("renders the AttachPaperMenu trigger, enabled References/Memory/Slides toggles, and 1 disabled capability button", () => {
     render(<Composer onSubmit={() => {}} disabled={false} />);
     // The paperclip is now an enabled AttachPaperMenu popover trigger.
     const attach = screen.getByRole("button", { name: /attach paper/i });
     expect(attach).not.toBeDisabled();
-    // References is now wired to the Citation Canvas toggle (Plan D Wave 2).
+    // References is wired to the Citation Canvas toggle (Plan D).
     expect(screen.getByRole("button", { name: /^references$/i })).toBeEnabled();
     // Memory button wired to the MemoryManager panel toggle (Plan E).
     expect(screen.getByRole("button", { name: /^memory$/i })).toBeEnabled();
-    // The remaining placeholder capabilities stay disabled.
-    const labels = ["Slides", "Compare"];
-    for (const label of labels) {
-      const btn = screen.getByRole("button", { name: label });
-      expect(btn).toBeDisabled();
-    }
+    // Slides button is now an active toggle (Plan F) — no longer disabled.
+    expect(screen.getByRole("button", { name: /^slides$/i })).toBeEnabled();
+    // Only Compare remains as a disabled placeholder capability.
+    const compareBtn = screen.getByRole("button", { name: "Compare" });
+    expect(compareBtn).toBeDisabled();
+  });
+
+  it("Slides toggle button calls onToggleSlides and reflects slidesOpen state", async () => {
+    const onToggleSlides = vi.fn();
+    const { rerender } = render(
+      <Composer
+        onSubmit={() => {}}
+        disabled={false}
+        slidesOpen={false}
+        onToggleSlides={onToggleSlides}
+      />,
+    );
+    const slidesBtn = screen.getByRole("button", { name: /^slides$/i });
+    expect(slidesBtn).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(slidesBtn);
+    expect(onToggleSlides).toHaveBeenCalledTimes(1);
+
+    // Rerender with slidesOpen=true to verify aria-pressed updates.
+    rerender(
+      <Composer
+        onSubmit={() => {}}
+        disabled={false}
+        slidesOpen={true}
+        onToggleSlides={onToggleSlides}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /^slides$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

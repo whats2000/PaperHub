@@ -9,6 +9,7 @@ import type {
   SearchResultCandidate,
   SessionSummary,
   BackendMessage,
+  DeckEventData,
 } from "@/types/domain";
 import { createBackendSession } from "@/lib/api";
 
@@ -67,6 +68,7 @@ interface ChatState {
     runId: number,
     candidates: SearchResultCandidate[],
   ) => void;
+  setDeckOnMessage: (sessionId: number, deck: DeckEventData) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
   // Cross-device sync (backend is source of truth)
   reconcileBackendSessions: (summaries: SessionSummary[]) => void;
@@ -354,6 +356,41 @@ export const useChatStore = create<ChatState>()(
             search_results: candidates,
           }),
         })),
+
+      setDeckOnMessage: (sessionId, deck) =>
+        set((s) => {
+          // Find the streaming/last assistant message for this session and
+          // attach the deck. We use run_id if available (same pattern as
+          // setSearchResults but the run_id comes from the deck's session_id,
+          // not a run_id field). Fall back to patching the last assistant msg.
+          const sess = s.sessions.find((x) => x.id === sessionId);
+          if (!sess) return s;
+          // Find the last assistant message (streaming or most-recent ok)
+          const lastAssistantMsg = [...sess.messages]
+            .reverse()
+            .find((m) => m.role === "assistant");
+          if (!lastAssistantMsg || lastAssistantMsg.run_id === null) {
+            // No run_id yet — fall back to patching by position (last assistant msg)
+            return {
+              sessions: s.sessions.map((se) => {
+                if (se.id !== sessionId) return se;
+                const msgs = [...se.messages];
+                const idx = msgs.map((m) => m.role).lastIndexOf("assistant");
+                if (idx < 0) return se;
+                msgs[idx] = { ...msgs[idx]!, deck };
+                return { ...se, messages: msgs };
+              }),
+            };
+          }
+          return {
+            sessions: patchMessageByRunId(
+              s.sessions,
+              sessionId,
+              lastAssistantMsg.run_id,
+              { deck },
+            ),
+          };
+        }),
 
       ensureBackendSession: async (sessionId) => {
         const session = get().sessions.find((s) => s.id === sessionId);

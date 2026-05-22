@@ -3,10 +3,12 @@ import type {
   RoutingDecision,
   SearchResultCandidate,
   ToolCallRecord,
+  DeckEventData,
 } from "@/types/domain";
 import { streamChat } from "@/lib/sse";
 import { listSessionReferences } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useSlidesStore } from "@/store/slides";
 
 interface SessionData { run_id: number; session_id: number; }
 interface ToolStepData { record: ToolCallRecord; }
@@ -107,6 +109,11 @@ export function useChatStream() {
                     .catch(() => undefined);
                 }
               }
+            } else if (event === "deck") {
+              const d = data as DeckEventData;
+              store.getState().setDeckOnMessage(sessionId, d);
+              useSlidesStore.getState().setDeck(d.session_id, d);
+              useSlidesStore.getState().setCurrentPage(d.session_id, 1);
             } else if (event === "final") {
               const f = data as FinalData;
               store.getState().finaliseMessage(sessionId, f.run_id, f.content);
