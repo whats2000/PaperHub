@@ -194,90 +194,85 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
         </a>
       </div>
 
-      {/* Body: filmstrip + main slide */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left filmstrip rail */}
-        <div className="flex flex-col gap-1 p-1 overflow-y-auto border-r border-border bg-muted/30 shrink-0 w-[80px]">
-          {file && (
-            <Document
-              file={file}
-              onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
-            >
-              {Array.from(
-                { length: numPages || deck?.page_count || 0 },
-                (_, i) => {
-                  const pageNum = i + 1;
-                  const isActive = pageNum === currentPage;
-                  return (
-                    <button
-                      key={pageNum}
-                      type="button"
-                      aria-label={`slide ${pageNum}`}
-                      onClick={() => goTo(pageNum)}
-                      className={`w-full rounded overflow-hidden border-2 transition-colors shrink-0 ${
-                        isActive
-                          ? "border-primary"
-                          : "border-transparent hover:border-border"
-                      }`}
-                    >
-                      <Page pageNumber={pageNum} width={64} />
-                      <span className="block text-center text-xs text-muted-foreground py-0.5">
-                        {pageNum}
-                      </span>
-                    </button>
-                  );
-                },
-              )}
-            </Document>
-          )}
-        </div>
+      {/* Body: single Document wraps filmstrip rail + main slide area.
+          react-pdf shares one parsed PDF across all child <Page> components via
+          context — two Documents would transfer (detach) the ArrayBuffer to the
+          pdfjs worker on the first mount, leaving the second with a zero-length
+          buffer and a blank render. */}
+      {file ? (
+        <Document
+          file={file}
+          onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
+          className="flex flex-1 min-h-0 overflow-hidden"
+        >
+          {/* Left filmstrip rail */}
+          <div className="flex flex-col gap-1 p-1 overflow-y-auto border-r border-border bg-muted/30 shrink-0 w-[80px]">
+            {Array.from(
+              { length: numPages || deck?.page_count || 0 },
+              (_, i) => {
+                const pageNum = i + 1;
+                const isActive = pageNum === currentPage;
+                return (
+                  <button
+                    key={pageNum}
+                    type="button"
+                    aria-label={`slide ${pageNum}`}
+                    onClick={() => goTo(pageNum)}
+                    className={`w-full rounded overflow-hidden border-2 transition-colors shrink-0 ${
+                      isActive
+                        ? "border-primary"
+                        : "border-transparent hover:border-border"
+                    }`}
+                  >
+                    <Page pageNumber={pageNum} width={64} />
+                    <span className="block text-center text-xs text-muted-foreground py-0.5">
+                      {pageNum}
+                    </span>
+                  </button>
+                );
+              },
+            )}
+          </div>
 
-        {/* Main content column: current slide + note pane */}
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
-          {/* Current slide */}
+          {/* Main content column: current slide */}
           <div
             ref={mainAreaRef}
             className="flex-1 min-h-0 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-2"
           >
-            {file && (
-              <Document
-                file={file}
-                onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
-              >
-                <Page
-                  pageNumber={currentPage}
-                  width={mainWidth > 0 ? mainWidth : undefined}
-                  className="mx-auto shadow"
-                />
-              </Document>
-            )}
+            <Page
+              pageNumber={currentPage}
+              width={mainWidth > 0 ? mainWidth : undefined}
+              className="mx-auto shadow"
+            />
           </div>
+        </Document>
+      ) : (
+        <div className="flex flex-1 min-h-0 overflow-hidden" />
+      )}
 
-          {/* Draggable divider */}
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            onPointerDown={onDividerPointerDown}
-            className="h-1.5 cursor-row-resize bg-border hover:bg-primary/40 transition-colors shrink-0"
-          />
+      {/* Draggable divider (outside Document — no pdfjs dependency) */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        onPointerDown={onDividerPointerDown}
+        className="h-1.5 cursor-row-resize bg-border hover:bg-primary/40 transition-colors shrink-0"
+      />
 
-          {/* Speaker note pane */}
-          <div
-            className="shrink-0 overflow-y-auto border-t border-border bg-muted/20 px-3 py-2"
-            style={{ height: noteHeight }}
-          >
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Speaker note
-            </p>
-            {speakerNote ? (
-              <p className="text-xs leading-relaxed">{speakerNote}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">
-                No speaker note for this slide
-              </p>
-            )}
-          </div>
-        </div>
+      {/* Speaker note pane (outside Document — no pdfjs dependency) */}
+      <div
+        className="shrink-0 overflow-y-auto border-t border-border bg-muted/20 px-3 py-2"
+        style={{ height: noteHeight }}
+      >
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+          Speaker note
+        </p>
+        {speakerNote ? (
+          <p className="text-xs leading-relaxed">{speakerNote}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            No speaker note for this slide
+          </p>
+        )}
       </div>
     </div>
   );
