@@ -63,3 +63,14 @@ async def test_session_memory_hidden_from_other_sessions(migrated_db: aiosqlite.
         migrated_db, session_id=2, query="secret fact", enabled=True,
     )
     assert block == ""
+
+
+@pytest.mark.asyncio
+async def test_superseded_fact_not_in_context_block(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.commit()
+    await add_memory(migrated_db, session_id=None, content="answer in English", scope="global")
+    await migrated_db.execute("UPDATE memories SET status = 'superseded'")
+    await migrated_db.commit()
+    block = await build_memory_context_block(migrated_db, session_id=1, query="English language", enabled=True)
+    assert "answer in English" not in block

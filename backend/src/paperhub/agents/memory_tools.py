@@ -93,13 +93,13 @@ async def recall_memories(
 
     params: tuple[object, ...]
     if scope == "session":
-        where = "m.scope = 'session' AND m.session_id = ?"
+        where = "m.scope = 'session' AND m.session_id = ? AND m.status = 'active'"
         params = (match, session_id, limit)
     elif scope == "global":
-        where = "m.scope = 'global'"
+        where = "m.scope = 'global' AND m.status = 'active'"
         params = (match, limit)
     else:  # "both"
-        where = "(m.scope = 'global' OR (m.scope = 'session' AND m.session_id = ?))"
+        where = "(m.scope = 'global' OR (m.scope = 'session' AND m.session_id = ?)) AND m.status = 'active'"
         params = (match, session_id, limit)
 
     sql = (

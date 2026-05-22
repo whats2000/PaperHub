@@ -129,3 +129,12 @@ async def test_no_conflict_both_active(two_sessions, monkeypatch) -> None:
     async with two_sessions.execute("SELECT status FROM memories WHERE id IN (?, ?)", (id1, id2)) as cur:
         statuses = {r[0] for r in await cur.fetchall()}
     assert statuses == {"active"}
+
+
+@pytest.mark.asyncio
+async def test_superseded_memory_not_recalled(two_sessions) -> None:
+    old_id = await add_memory(two_sessions, session_id=1, content="use Flask", scope="session")
+    await two_sessions.execute("UPDATE memories SET status = 'superseded' WHERE id = ?", (old_id,))
+    await two_sessions.commit()
+    hits = await recall_memories(two_sessions, session_id=1, query="Flask", scope="both")
+    assert all(h.id != old_id for h in hits), "superseded memory must not appear in recall"
