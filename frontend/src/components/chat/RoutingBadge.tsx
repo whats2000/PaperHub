@@ -14,6 +14,7 @@ const intentLabel: Record<RoutingDecision["intent"], string> = {
   slides: "Slides",
   library_stats: "Library stats",
   memory: "Memory",
+  clarify: "Clarify",
   chitchat: "Chitchat",
 };
 
