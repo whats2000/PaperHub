@@ -30,6 +30,7 @@
 | §III-7 schema 7→8 tables (`memories` + FTS) | Task 9 |
 | §III-7 `memories` status/supersedes/superseded_by columns (idempotent migration) | Wave 3 Task W3-1 |
 | Plan B follow-up #2 — `RejectionPill` reachable | Tasks 1, 4 (verified end-to-end in Task 8 smoke) |
+| **FP#2 — "user vs project" memory distinction** | Met via `scope='session'` (project-scope) / `scope='global'` (user-scope) mapping; UI labels "Project (session)" / "User (global)" in `MemoryManager` (W4-3); gate classifier guidance (W3-2); no scope rename needed |
 
 **Out of scope (deliberate):** DuckDB (dropped from SRS v2.16); semantic memory recall (env-flagged stub only — `PAPERHUB_MEMORY_SEMANTIC`, no Chroma-over-memories ingest in this plan).
 
@@ -2369,6 +2370,8 @@ git commit -m "feat(memory): add status/supersedes/superseded_by columns to memo
 
 A purely deterministic rule function. No I/O, no LLM — fully unit-testable. Wired into `memory_tools.add_memory` and the `memory.add` MCP handler so every add path goes through it.
 
+**Scope classification guidance** (for the LLM scope classifier that runs on content that passes the gate): classify **preference-type content → `global` (user scope)** — keywords like 以後/每次/都用/偏好/不要/習慣/always/prefer/every time/I want → `global`; classify **project/framework/DB/architecture content → `session` (project scope)** — keywords like 這個專案/架構/資料庫/框架/this project/Flask/FastAPI/MySQL/uses X → `session`. Note: `session` == project scope; `global` == user scope (FP#2 — the functional user/project distinction is carried by the existing `scope` values, no rename needed). This mapping must appear in the scope-classification prompt (or as a comment above the classifier call in `memory_tools.py`) and in at least one test assertion (see Step 1 additions below).
+
 **Files:**
 - Create: `backend/src/paperhub/agents/memory_gate.py`
 - Modify: `backend/src/paperhub/agents/memory_tools.py` (call gate before any add)
@@ -2429,6 +2432,23 @@ def test_borderline_context_passes() -> None:
     # "rule" and "security" in innocuous contexts should not trip the gate
     result = classify_memory_safety("the paper discusses rule-based security for robots")
     assert result["save"] is True
+
+
+# ── Scope classification: session==project, global==user (FP#2) ──────────────
+# These document the expected LLM scope-classifier behaviour; the gate itself
+# is scope-agnostic, but `classify_memory_scope` (called after gate passes) must
+# honour this mapping.  Add these assertions to any unit-test that exercises the
+# scope-classification path.
+def test_scope_preference_maps_to_global() -> None:
+    """Personal preferences/habits → global (user scope)."""
+    from paperhub.agents.memory_gate import classify_memory_scope  # type: ignore[attr-defined]
+    assert classify_memory_scope("always answer in Traditional Chinese") == "global"
+
+
+def test_scope_project_setting_maps_to_session() -> None:
+    """Project/framework/DB/architecture settings → session (project scope)."""
+    from paperhub.agents.memory_gate import classify_memory_scope  # type: ignore[attr-defined]
+    assert classify_memory_scope("this project uses FastAPI for the backend") == "session"
 
 
 def test_gate_refusal_exception_class() -> None:
@@ -3261,13 +3281,18 @@ const MOCK_MEMORIES = [
 ];
 
 describe("MemoryManager", () => {
-  it("renders session and global groups with status badges", async () => {
+  it("renders user/project group labels and status badges", async () => {
+    // FP#2: the panel must show "User (global)" and "Project (session)" labels
+    // so the user/project distinction is visible without renaming scope values.
     server.use(
       http.get("/memories", () => HttpResponse.json(MOCK_MEMORIES)),
     );
     render(<MemoryManager sessionId={1} />);
     await waitFor(() => screen.getByText("answer in Traditional Chinese"));
-    expect(screen.getByText("Global")).toBeInTheDocument();
+    // Group labels — session==project, global==user
+    expect(screen.getByText("User (global)")).toBeInTheDocument();
+    expect(screen.getByText("Project (session)")).toBeInTheDocument();
+    // Status badges
     expect(screen.getByText("active")).toBeInTheDocument();
     expect(screen.getByText("superseded")).toBeInTheDocument();
   });
@@ -3373,9 +3398,12 @@ export const useMemoriesStore = create<MemoriesState>((set, get) => ({
 /**
  * Memory Manager panel (SRS v2.17 FR-11).
  *
- * Lists all memories for the active session grouped by scope (Session /
- * Global), with active/superseded badges, supersede-chain links, and
- * per-row controls: edit content, delete, toggle active↔superseded.
+ * Lists all memories for the active session grouped by scope, with section
+ * headers "Project (session)" and "User (global)" so the user/project
+ * distinction (FP#2) is visible in the UI without renaming the shipped
+ * `scope` enum values (`session` == project scope; `global` == user scope).
+ * Includes active/superseded badges, supersede-chain links, and per-row
+ * controls: edit content, delete, toggle active↔superseded.
  * Mirrors the ReferenceSourcesPanel layout pattern.
  */
 import React, { useEffect, useState } from "react";
@@ -3500,8 +3528,11 @@ export function MemoryManager({ sessionId }: Props) {
 
   return (
     <div className="flex flex-col gap-1 p-3">
-      <Group title="Session" items={sessionMemories} />
-      <Group title="Global" items={globalMemories} />
+      {/* "Project (session)" = session-scope memories; "User (global)" = global-scope memories.
+          These labels make the user/project distinction (FP#2) visible without renaming
+          the shipped scope enum values (session==project, global==user). */}
+      <Group title="Project (session)" items={sessionMemories} />
+      <Group title="User (global)" items={globalMemories} />
     </div>
   );
 }
