@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS memories (
     content     TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    status      TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'superseded')),
+    supersedes      INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
+    superseded_by   INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
     CHECK ((scope = 'global') = (session_id IS NULL))
 );
 

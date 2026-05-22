@@ -75,3 +75,34 @@ async def test_cascade_delete_removes_memories_and_fts(migrated_db: aiosqlite.Co
         "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'cascade'"
     ) as cur:
         assert (await cur.fetchone())[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_memories_has_status_supersedes_columns(migrated_db: aiosqlite.Connection) -> None:
+    async with migrated_db.execute("PRAGMA table_info(memories)") as cur:
+        cols = {r[1] for r in await cur.fetchall()}
+    assert "status" in cols
+    assert "supersedes" in cols
+    assert "superseded_by" in cols
+
+
+@pytest.mark.asyncio
+async def test_status_defaults_to_active(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute(
+        "INSERT INTO memories (scope, session_id, content) VALUES ('session', 1, 'test fact')"
+    )
+    await migrated_db.commit()
+    async with migrated_db.execute("SELECT status FROM memories") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == "active"
+
+
+@pytest.mark.asyncio
+async def test_status_rejects_invalid_value(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    with pytest.raises(aiosqlite.IntegrityError):
+        await migrated_db.execute(
+            "INSERT INTO memories (scope, session_id, content, status) "
+            "VALUES ('session', 1, 'test', 'deleted')"
+        )
