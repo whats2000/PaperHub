@@ -155,15 +155,15 @@ export function ChatPage() {
         <div className={cn("h-full relative", resizing && "pointer-events-none")}>
           {/* Fix 2: CitationCanvas is ALWAYS mounted (never conditionally
               removed) so its fetched-document cache (iframes/PDF state) stays
-              alive across open/close cycles. It hides itself via aria-hidden +
-              inert when canvasOpen=false (see CitationCanvas.tsx).
-              When Memory is open we additionally force it invisible so it
-              cannot receive focus or pointer events from beneath the overlay. */}
+              alive across open/close cycles. The wrapper is hidden whenever
+              canvasOpen=false (not when memoryOpen=true) so that closing Memory
+              with canvasOpen still false does NOT briefly reveal the Canvas
+              during the column-collapse animation. */}
           <div
             className="h-full w-full"
-            hidden={memoryOpen}
-            aria-hidden={memoryOpen || undefined}
-            {...(memoryOpen ? { inert: true } : {})}
+            hidden={!canvasOpen}
+            aria-hidden={!canvasOpen || undefined}
+            {...(!canvasOpen ? { inert: true } : {})}
           >
             <Suspense fallback={null}>
               <CitationCanvas />

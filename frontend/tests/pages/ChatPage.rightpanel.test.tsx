@@ -210,16 +210,24 @@ describe("Fix 2 — CitationCanvas always-mounted layout", () => {
    * we render the two-panel div pattern and assert the canvas wrapper is present
    * but hidden when memory is open, and visible when memory is closed.
    */
-  function TwoPanelLayout({ memoryOpen }: { memoryOpen: boolean }) {
+  function TwoPanelLayout({
+    canvasOpen,
+    memoryOpen,
+  }: {
+    canvasOpen: boolean;
+    memoryOpen: boolean;
+  }) {
     return (
       <div>
-        {/* Canvas wrapper — always present, hidden when Memory is open */}
+        {/* Canvas wrapper — always present, hidden when Canvas is NOT open
+            (gated on canvasOpen, NOT on memoryOpen, so closing Memory with
+            canvasOpen=false does not reveal the Canvas during the animation). */}
         <div
           data-testid="canvas-wrapper"
           className="h-full w-full"
-          hidden={memoryOpen}
-          aria-hidden={memoryOpen || undefined}
-          {...(memoryOpen ? { inert: true } : {})}
+          hidden={!canvasOpen}
+          aria-hidden={!canvasOpen || undefined}
+          {...(!canvasOpen ? { inert: true } : {})}
         >
           <div data-testid="citation-canvas-sentinel" />
         </div>
@@ -233,42 +241,72 @@ describe("Fix 2 — CitationCanvas always-mounted layout", () => {
   }
 
   it("CitationCanvas wrapper is present in DOM when Memory is open (not unmounted)", () => {
-    const { rerender } = render(<TwoPanelLayout memoryOpen={false} />);
+    // Canvas closed, Memory closed → wrapper present but hidden.
+    const { rerender } = render(
+      <TwoPanelLayout canvasOpen={false} memoryOpen={false} />,
+    );
 
-    // Canvas visible initially.
     const wrapper = screen.getByTestId("canvas-wrapper");
     expect(wrapper).toBeInTheDocument();
-    expect(wrapper).not.toHaveAttribute("hidden");
+    expect(wrapper).toHaveAttribute("hidden");
 
-    // Open Memory — Canvas wrapper stays in DOM (keep-alive), just hidden.
-    rerender(<TwoPanelLayout memoryOpen={true} />);
+    // Open Canvas → wrapper becomes visible.
+    rerender(<TwoPanelLayout canvasOpen={true} memoryOpen={false} />);
 
     expect(screen.getByTestId("canvas-wrapper")).toBeInTheDocument();
     expect(screen.getByTestId("citation-canvas-sentinel")).toBeInTheDocument();
-    expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("hidden");
+    expect(screen.getByTestId("canvas-wrapper")).not.toHaveAttribute("hidden");
+
+    // Open Memory while Canvas open (mutual-exclusive in real app, but
+    // testing that the wrapper is still present).
+    rerender(<TwoPanelLayout canvasOpen={true} memoryOpen={true} />);
+    expect(screen.getByTestId("canvas-wrapper")).toBeInTheDocument();
   });
 
   it("Memory overlay renders on top when memoryOpen=true, is absent when false", () => {
-    const { rerender } = render(<TwoPanelLayout memoryOpen={false} />);
+    const { rerender } = render(
+      <TwoPanelLayout canvasOpen={false} memoryOpen={false} />,
+    );
     expect(screen.queryByTestId("memory-overlay")).toBeNull();
 
-    rerender(<TwoPanelLayout memoryOpen={true} />);
+    rerender(<TwoPanelLayout canvasOpen={false} memoryOpen={true} />);
     expect(screen.getByTestId("memory-overlay")).toBeInTheDocument();
 
-    rerender(<TwoPanelLayout memoryOpen={false} />);
+    rerender(<TwoPanelLayout canvasOpen={false} memoryOpen={false} />);
     expect(screen.queryByTestId("memory-overlay")).toBeNull();
   });
 
-  it("canvas wrapper has inert attribute when Memory is open (not focusable)", () => {
-    const { rerender } = render(<TwoPanelLayout memoryOpen={false} />);
-    expect(
-      screen.getByTestId("canvas-wrapper").hasAttribute("inert"),
-    ).toBe(false);
-
-    rerender(<TwoPanelLayout memoryOpen={true} />);
+  it("canvas wrapper has inert attribute when Canvas is closed (not focusable)", () => {
+    const { rerender } = render(
+      <TwoPanelLayout canvasOpen={false} memoryOpen={false} />,
+    );
     expect(
       screen.getByTestId("canvas-wrapper").hasAttribute("inert"),
     ).toBe(true);
+
+    rerender(<TwoPanelLayout canvasOpen={true} memoryOpen={false} />);
+    expect(
+      screen.getByTestId("canvas-wrapper").hasAttribute("inert"),
+    ).toBe(false);
+  });
+
+  it("closing Memory with canvasOpen=false does NOT reveal the Canvas (no flash)", () => {
+    // This regression test asserts the fix: when Memory closes and canvasOpen
+    // is still false, the Canvas wrapper must remain hidden/inert.
+    const { rerender } = render(
+      <TwoPanelLayout canvasOpen={false} memoryOpen={true} />,
+    );
+    // Memory open, Canvas closed → wrapper hidden.
+    expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("hidden");
+    expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("inert");
+
+    // Close Memory — canvasOpen is still false.
+    rerender(<TwoPanelLayout canvasOpen={false} memoryOpen={false} />);
+
+    // Canvas wrapper MUST still be hidden — no flash.
+    expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("hidden");
+    expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("inert");
+    expect(screen.queryByTestId("memory-overlay")).toBeNull();
   });
 });
 
@@ -282,6 +320,7 @@ describe("Fix 1+2 integration — citation click while Memory open clears hidden
   }: {
     onMemoryOpen?: (setter: (v: boolean) => void) => void;
   }) {
+    const canvasOpen = useCanvasStore((s) => s.open);
     const [memoryOpen, setMemoryOpen] = useState(false);
 
     // Expose setter for tests.
@@ -299,11 +338,12 @@ describe("Fix 1+2 integration — citation click while Memory open clears hidden
 
     return (
       <div>
+        {/* Canvas wrapper gated on canvasOpen (not !memoryOpen). */}
         <div
           data-testid="canvas-wrapper"
-          hidden={memoryOpen}
-          aria-hidden={memoryOpen || undefined}
-          {...(memoryOpen ? { inert: true } : {})}
+          hidden={!canvasOpen}
+          aria-hidden={!canvasOpen || undefined}
+          {...(!canvasOpen ? { inert: true } : {})}
         />
         {memoryOpen && <div data-testid="memory-overlay" />}
         <span data-testid="memory-state">{memoryOpen ? "open" : "closed"}</span>
@@ -318,7 +358,7 @@ describe("Fix 1+2 integration — citation click while Memory open clears hidden
     // Open Memory to simulate the user having opened it.
     act(() => { setter(true); });
 
-    // Confirm: memory open, canvas wrapper hidden/inert.
+    // Confirm: memory open, canvas wrapper hidden/inert (canvasOpen=false).
     expect(screen.getByTestId("canvas-wrapper")).toHaveAttribute("hidden");
     expect(screen.getByTestId("memory-overlay")).toBeInTheDocument();
 
@@ -326,7 +366,7 @@ describe("Fix 1+2 integration — citation click while Memory open clears hidden
       useCanvasStore.getState().openCitation(7);
     });
 
-    // After: memory closed, canvas wrapper visible + not inert.
+    // After: memory closed (Fix 1 subscription), canvasOpen=true → wrapper visible + not inert.
     expect(screen.getByTestId("memory-state").textContent).toBe("closed");
     expect(screen.getByTestId("canvas-wrapper")).not.toHaveAttribute("hidden");
     expect(screen.getByTestId("canvas-wrapper")).not.toHaveAttribute("inert");
