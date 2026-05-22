@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  @font-face {
+    font-family: "Geist";
+    /* relative to this file (.github/social-preview/); Geist ships with the frontend deps */
+    src: url("../../frontend/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: block;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; }
+  body {
+    font-family: "Geist", "Segoe UI", system-ui, sans-serif;
+    position: relative; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- light (default) ---- */
+  body { background: #faf9fc; color: #1a1320; }
+  .glow-v { background: radial-gradient(circle, rgba(134,59,255,0.20) 0%, rgba(134,59,255,0) 68%); }
+  .glow-c { background: radial-gradient(circle, rgba(71,191,255,0.18) 0%, rgba(71,191,255,0) 68%); }
+  .grid   { background-image: radial-gradient(rgba(134,59,255,0.07) 1.4px, transparent 1.4px); }
+  .tagline { color: #564d66; }
+  .pill { color: #4a3f5c; background: rgba(134,59,255,0.06); border-color: rgba(134,59,255,0.18); }
+
+  /* ---- dark ---- */
+  body.dark { background: #0d0a16; color: #f4f1fb; }
+  body.dark { background: radial-gradient(120% 120% at 50% 0%, #1a1030 0%, #0d0a16 60%); }
+  body.dark .glow-v { background: radial-gradient(circle, rgba(134,59,255,0.42) 0%, rgba(134,59,255,0) 66%); }
+  body.dark .glow-c { background: radial-gradient(circle, rgba(71,191,255,0.34) 0%, rgba(71,191,255,0) 66%); }
+  body.dark .grid   { background-image: radial-gradient(rgba(173,140,255,0.10) 1.4px, transparent 1.4px); }
+  body.dark .tagline { color: #b9b0d0; }
+  body.dark .pill { color: #d9d2ee; background: rgba(255,255,255,0.04); border-color: rgba(173,140,255,0.28); }
+  body.dark .pill b { color: #b78bff; }
+
+  .glow-v { position: absolute; top: -260px; left: -180px; width: 720px; height: 720px; border-radius: 50%; }
+  .glow-c { position: absolute; bottom: -300px; right: -160px; width: 720px; height: 720px; border-radius: 50%; }
+  .grid {
+    position: absolute; inset: 0; background-size: 34px 34px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 75%);
+            mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 75%);
+  }
+  .stage {
+    position: relative; z-index: 2; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 0 80px;
+  }
+  .glyph { height: 122px; width: auto; filter: drop-shadow(0 16px 34px rgba(126,20,255,0.34)); }
+  .wordmark { margin-top: 28px; font-size: 110px; font-weight: 700; letter-spacing: -3px; line-height: 1; }
+  .wordmark .hub {
+    background: linear-gradient(100deg, #9a55ff 0%, #7e14ff 45%, #47bfff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .rule { margin-top: 26px; height: 5px; width: 240px; border-radius: 5px; background: linear-gradient(90deg, #863bff 0%, #47bfff 100%); }
+  .tagline { margin-top: 30px; font-size: 31px; font-weight: 450; letter-spacing: -0.4px; max-width: 940px; }
+  .pills { margin-top: 44px; display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .pill { font-size: 21px; font-weight: 500; padding: 12px 24px; border-radius: 999px; border: 1.5px solid; }
+  .pill b { color: #7e14ff; font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="glow-v"></div>
+  <div class="glow-c"></div>
+  <div class="grid"></div>
+  <div class="stage">
+    <svg class="glyph" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="pg" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#9a55ff"/><stop offset=".55" stop-color="#7e14ff"/><stop offset="1" stop-color="#47bfff"/>
+        </linearGradient>
+      </defs>
+      <rect x="8" y="4" width="29" height="40" rx="6" fill="url(#pg)"/>
+      <rect x="14" y="13" width="17" height="3" rx="1.5" fill="#fff" opacity=".5"/>
+      <rect x="14" y="20" width="17" height="3" rx="1.5" fill="#fff" opacity=".5"/>
+      <rect x="14" y="27" width="13" height="4" rx="2" fill="#8adcff"/>
+      <rect x="14" y="35" width="9" height="3" rx="1.5" fill="#fff" opacity=".5"/>
+      <path d="M27 29 C 34 29, 37 33, 39 38" stroke="#8adcff" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="40" cy="39" r="6" fill="#fff"/>
+      <circle cx="40" cy="39" r="6" fill="none" stroke="#47bfff" stroke-width="2.2"/>
+      <circle cx="40" cy="39" r="2.1" fill="#7e14ff"/>
+    </svg>
+    <div class="wordmark">Paper<span class="hub">Hub</span></div>
+    <div class="rule"></div>
+    <div class="tagline">Every cited sentence traces back to its source.</div>
+    <div class="pills">
+      <div class="pill">Multi-agent routing</div>
+      <div class="pill">In-repo RAG</div>
+      <div class="pill"><b>Citation Canvas</b></div>
+      <div class="pill">MCP-native</div>
+    </div>
+  </div>
+  <script>
+    if (new URLSearchParams(location.search).get("theme") === "dark") document.body.classList.add("dark");
+  </script>
+</body>
+</html>

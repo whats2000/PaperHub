@@ -1,0 +1,601 @@
+import json
+
+import aiosqlite
+import pytest
+
+from paperhub.agents.memory_tools import add_memory
+from paperhub.agents.sql_agent import _normalize_mcp_result, sql_agent_stream
+from paperhub.agents.state import AgentState
+from paperhub.llm.litellm_adapter import LiteLlmAdapter
+from paperhub.llm.prompts.registry import PromptRegistry
+from paperhub.tracing.tracer import Tracer
+
+
+class _FakeRegistry:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return ["papers", "paper_content"]
+        if name == "sql.describe":
+            table = args.get("table", "")
+            if table == "paper_content":
+                return [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "content_key", "type": "TEXT"},
+                    {"name": "kind", "type": "TEXT"},
+                    {"name": "arxiv_id", "type": "TEXT"},
+                    {"name": "sha256", "type": "TEXT"},
+                    {"name": "title", "type": "TEXT"},
+                    {"name": "authors_json", "type": "TEXT"},
+                    {"name": "year", "type": "INTEGER"},
+                    {"name": "abstract", "type": "TEXT"},
+                    {"name": "sections_json", "type": "TEXT"},
+                    {"name": "source_path", "type": "TEXT"},
+                    {"name": "ingested_at", "type": "TEXT"},
+                ]
+            if table == "papers":
+                return [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "session_id", "type": "INTEGER"},
+                    {"name": "paper_content_id", "type": "INTEGER"},
+                    {"name": "enabled", "type": "INTEGER"},
+                    {"name": "added_at", "type": "TEXT"},
+                ]
+            # fallback for any other table
+            return [{"name": "id", "type": "INTEGER"}]
+        if name == "sql.query":
+            return {"columns": ["n"], "rows": [[3]]}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_emits_sql_runs_and_answers(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "how many papers do I have?",
+        "effective_query": "how many papers do I have?", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_FakeRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 3 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+    ):
+        tokens.append(tok)
+    out = "".join(tokens)
+    assert "3 papers" in out
+    assert "```sql" in out
+    async with migrated_db.execute(
+        "SELECT tool FROM tool_calls WHERE run_id = 1 AND tool LIKE 'sql.%'"
+    ) as cur:
+        tools = {r[0] for r in await cur.fetchall()}
+    assert "sql.query" in tools
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — self-repair path test
+# ---------------------------------------------------------------------------
+
+
+class _RepairRegistry:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._query_n = 0
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return ["papers"]
+        if name == "sql.describe":
+            return [{"name": "id", "type": "INTEGER"}]
+        if name == "sql.query":
+            self._query_n += 1
+            if self._query_n == 1:
+                return {"error": "execution failed"}
+            return {"columns": ["n"], "rows": [[5]]}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_self_repair(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    reg = _RepairRegistry()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "how many papers?",
+        "effective_query": "how many papers?", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        repair_mock="SELECT count(*) AS n FROM papers WHERE 1=1",
+        answer_mock="You have 5 papers.\n```sql\nSELECT count(*) AS n FROM papers WHERE 1=1\n```",
+    ):
+        tokens.append(tok)
+
+    out = "".join(tokens)
+    assert "5" in out
+    assert sum(1 for c in reg.calls if c[0] == "sql.query") == 2
+    assert any(c[0] == "sql.describe" for c in reg.calls)
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 — rejected path writes status='rejected'
+# ---------------------------------------------------------------------------
+
+
+class _RejectedRegistry:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return ["papers"]
+        if name == "sql.describe":
+            return [{"name": "id", "type": "INTEGER"}]
+        if name == "sql.query":
+            return {"error": "rejected", "reason": "not allowed"}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_rejected_path_writes_status(migrated_db: aiosqlite.Connection) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    reg = _RejectedRegistry()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "drop everything",
+        "effective_query": "drop everything", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="DROP TABLE papers",
+        repair_mock="DROP TABLE papers",
+        answer_mock="Rejected.\n```sql\nDROP TABLE papers\n```",
+    ):
+        tokens.append(tok)
+
+    async with migrated_db.execute(
+        "SELECT status FROM tool_calls WHERE run_id = 1 AND tool = 'sql.query'"
+    ) as cur:
+        statuses = [r[0] for r in await cur.fetchall()]
+    assert any(s == "rejected" for s in statuses)
+
+
+# ---------------------------------------------------------------------------
+# Fix 5 — language interpolation test (proves the yaml fix)
+# ---------------------------------------------------------------------------
+
+
+def test_sql_answer_prompt_interpolates_language() -> None:
+    slot = PromptRegistry().get("sql_answer/v1")
+    rendered = slot.user_template.format(
+        response_language="Traditional Chinese",
+        question="q",
+        sql="s",
+        columns="[]",
+        rows="[]",
+        memory_context="",
+    )
+    assert "Traditional Chinese" in rendered
+    assert "{response_language}" not in rendered
+
+
+def test_sql_answer_prompt_interpolates_memory_context() -> None:
+    """memory_context placeholder is rendered when non-empty and absent when empty."""
+    slot = PromptRegistry().get("sql_answer/v1")
+    rendered_with = slot.user_template.format(
+        response_language="English",
+        question="q",
+        sql="s",
+        columns="[]",
+        rows="[]",
+        memory_context="Relevant remembered facts (use if helpful, ignore if not):\n- (global) answer in Traditional Chinese",
+    )
+    assert "Traditional Chinese" in rendered_with
+    assert "{memory_context}" not in rendered_with
+
+    rendered_empty = slot.user_template.format(
+        response_language="English",
+        question="q",
+        sql="s",
+        columns="[]",
+        rows="[]",
+        memory_context="",
+    )
+    assert "{memory_context}" not in rendered_empty
+
+
+# ---------------------------------------------------------------------------
+# Fix 6 — _normalize_mcp_result contract + JSON-string registry coverage
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_mcp_result_passthrough_dict() -> None:
+    """Dicts are returned unchanged (not a string)."""
+    d = {"columns": ["n"], "rows": [[3]]}
+    assert _normalize_mcp_result(d) is d
+
+
+def test_normalize_mcp_result_passthrough_list() -> None:
+    """Lists are returned unchanged (not a string)."""
+    lst = ["papers", "paper_content"]
+    assert _normalize_mcp_result(lst) is lst
+
+
+def test_normalize_mcp_result_json_string_dict() -> None:
+    """A JSON-encoded dict string is parsed into a dict."""
+    raw = '{"columns":["n"],"rows":[[3]]}'
+    result = _normalize_mcp_result(raw)
+    assert result == {"columns": ["n"], "rows": [[3]]}
+
+
+def test_normalize_mcp_result_json_string_list() -> None:
+    """A JSON-encoded list string is parsed into a list."""
+    raw = '["papers"]'
+    result = _normalize_mcp_result(raw)
+    assert result == ["papers"]
+
+
+def test_normalize_mcp_result_non_json_string_returned_unchanged() -> None:
+    """A plain (non-JSON) string that doesn't start with { or [ is returned as-is.
+
+    _normalize_mcp_result only attempts json.loads when the stripped string
+    starts with '{' or '['.  Anything else is returned verbatim — callers
+    can detect it as neither dict nor list.
+    """
+    raw = "oops"
+    assert _normalize_mcp_result(raw) == "oops"
+
+
+# ---------------------------------------------------------------------------
+# Registry that returns JSON *strings* (mirrors the real sql FastMCP server)
+# ---------------------------------------------------------------------------
+
+
+class _JsonStringRegistry:
+    """Returns all results as JSON-serialised strings, like the real MCP transport."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return json.dumps(["papers", "paper_content"])
+        if name == "sql.describe":
+            return json.dumps([{"name": "session_id", "type": "INTEGER"}])
+        if name == "sql.query":
+            return json.dumps({"columns": ["n"], "rows": [[3]]})
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_json_string_registry(migrated_db: aiosqlite.Connection) -> None:
+    """sql_agent_stream works correctly when the MCP registry returns JSON strings."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "how many papers do I have?",
+        "effective_query": "how many papers do I have?", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_JsonStringRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 3 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+    ):
+        tokens.append(tok)
+    out = "".join(tokens)
+    assert "3 papers" in out
+    async with migrated_db.execute(
+        "SELECT tool FROM tool_calls WHERE run_id = 1 AND tool LIKE 'sql.%'"
+    ) as cur:
+        tools = {r[0] for r in await cur.fetchall()}
+    assert "sql.query" in tools
+
+
+# ---------------------------------------------------------------------------
+# Registry that returns a JSON-encoded rejected error (mirrors real transport)
+# ---------------------------------------------------------------------------
+
+
+class _JsonStringRejectedRegistry:
+    """Returns the rejected error as a JSON string, as the real MCP transport does."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return json.dumps(["papers"])
+        if name == "sql.describe":
+            return json.dumps([{"name": "id", "type": "INTEGER"}])
+        if name == "sql.query":
+            return json.dumps({"error": "rejected", "reason": "not allowed"})
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_json_string_rejected_writes_status(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """When the MCP returns a JSON-string rejection, tool_calls.status='rejected' is written."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    reg = _JsonStringRejectedRegistry()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "drop everything",
+        "effective_query": "drop everything", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="DROP TABLE papers",
+        repair_mock="DROP TABLE papers",
+        answer_mock="Rejected.\n```sql\nDROP TABLE papers\n```",
+    ):
+        tokens.append(tok)
+
+    async with migrated_db.execute(
+        "SELECT status FROM tool_calls WHERE run_id = 1 AND tool = 'sql.query'"
+    ) as cur:
+        statuses = [r[0] for r in await cur.fetchall()]
+    assert any(s == "rejected" for s in statuses)
+
+
+# ---------------------------------------------------------------------------
+# Recall injection (FR-10, Part 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_recall_injection_with_seeded_memory(migrated_db: aiosqlite.Connection) -> None:
+    """sql_agent_stream runs cleanly with recall_enabled=True and a matching
+    seeded memory.  The sql:answer tracer row records recall_hit=True,
+    confirming the memory_context was non-empty for the answer step."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    # Seed a global memory that will match the query "Traditional Chinese".
+    await add_memory(migrated_db, session_id=None, content="answer in Traditional Chinese", scope="global")
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers in Traditional Chinese?",
+        "effective_query": "how many papers in Traditional Chinese?",
+        "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_FakeRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+        conn=migrated_db,
+        recall_enabled=True,
+    ):
+        tokens.append(tok)
+    assert "".join(tokens)  # answer arrived
+    # The sql:answer step records recall_hit=True when a memory was injected.
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = 1 AND tool = 'sql:answer'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    result_payload = json.loads(row[0])
+    assert result_payload.get("recall_hit") is True
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_recall_disabled_skips_injection(migrated_db: aiosqlite.Connection) -> None:
+    """When recall_enabled=False, the sql:answer tracer row records recall_hit=False
+    even if matching memories exist."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    await add_memory(migrated_db, session_id=None, content="answer in Traditional Chinese", scope="global")
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers in Traditional Chinese?",
+        "effective_query": "how many papers in Traditional Chinese?",
+        "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=_FakeRegistry(),
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM papers",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+        conn=migrated_db,
+        recall_enabled=False,
+    ):
+        tokens.append(tok)
+    assert "".join(tokens)
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = 1 AND tool = 'sql:answer'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    result_payload = json.loads(row[0])
+    assert result_payload.get("recall_hit") is False
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 regression — sql.query execution error triggers self-repair
+# ---------------------------------------------------------------------------
+
+
+class _QueryFailedRegistry:
+    """Registry whose first sql.query returns {"error":"query_failed",...} and
+    second returns valid rows — simulating what _query_handler now returns for a
+    real SQLite execution error (e.g. no such column).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._query_n = 0
+
+    async def call(self, name: str, args: dict):
+        self.calls.append((name, args))
+        if name == "sql.list_tables":
+            return ["papers"]
+        if name == "sql.describe":
+            return [{"name": "id", "type": "INTEGER"}, {"name": "session_id", "type": "INTEGER"}]
+        if name == "sql.query":
+            self._query_n += 1
+            if self._query_n == 1:
+                # Mirrors what _query_handler returns for OperationalError.
+                return {"error": "query_failed", "reason": "no such column: summary"}
+            return {"columns": ["n"], "rows": [[7]]}
+        raise AssertionError(name)
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_query_failed_triggers_self_repair(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Bug 3 regression: when sql.query returns {"error":"query_failed",...},
+    the SQL Agent must enter the self-repair path (call sql.describe, re-plan,
+    retry sql.query) and produce an answer from the repaired result.
+
+    Before the fix, _query_handler raised an exception on execution errors —
+    which propagated out of _mcp_call and aborted the turn before self-repair
+    could run.
+    """
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    adapter = LiteLlmAdapter()
+    reg = _QueryFailedRegistry()
+    state: AgentState = {
+        "run_id": 1, "session_id": 1, "user_message": "how many papers?",
+        "effective_query": "how many papers?", "response_language": "English",
+    }
+    tokens: list[str] = []
+    async for tok in sql_agent_stream(
+        state, adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT summary FROM papers",          # bad sql (no such col)
+        repair_mock="SELECT count(*) AS n FROM papers",    # repaired sql
+        answer_mock="You have 7 papers.\n```sql\nSELECT count(*) AS n FROM papers\n```",
+    ):
+        tokens.append(tok)
+
+    out = "".join(tokens)
+    assert "7" in out, f"Bug 3: repaired answer not in output: {out!r}"
+    # sql.query called twice (first fail, then repaired)
+    query_calls = [c for c in reg.calls if c[0] == "sql.query"]
+    assert len(query_calls) == 2, (
+        f"Bug 3: expected 2 sql.query calls, got {len(query_calls)}"
+    )
+    # sql.describe called for paper_content + papers (schema introspection upfront)
+    describe_calls = [c for c in reg.calls if c[0] == "sql.describe"]
+    assert len(describe_calls) == 2, (
+        f"Bug 3: expected 2 sql.describe calls (paper_content + papers), got {len(describe_calls)}"
+    )
+    # The query_failed step must NOT be status='rejected' in the tracer
+    # (query_failed is a repairable execution error, not a policy rejection).
+    async with migrated_db.execute(
+        "SELECT status FROM tool_calls WHERE run_id = 1 AND tool = 'sql.query'"
+    ) as cur:
+        statuses = [r[0] for r in await cur.fetchall()]
+    assert not any(s == "rejected" for s in statuses), (
+        f"Bug 3: query_failed must not be marked 'rejected', got statuses: {statuses}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# W1.1 — paper_content vs papers distinction + column schema injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_library_question_targets_paper_content(migrated_db, monkeypatch) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    registry = _FakeRegistry()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "session_id": 1,
+        "user_message": "how many papers do I have in my library?",
+        "effective_query": "how many papers do I have in my library?",
+        "response_language": "English",
+    }
+    tokens = []
+    async for tok in sql_agent_stream(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, registry=registry,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        planner_mock="SELECT count(*) AS n FROM paper_content",
+        answer_mock="You have 0 papers.\n```sql\nSELECT count(*) AS n FROM paper_content\n```",
+    ):
+        tokens.append(tok)
+    assert len([c for c in registry.calls if c[0] == "sql.query"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_planner_receives_column_schema(migrated_db) -> None:
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    captured: list[dict] = []
+    import paperhub.agents.sql_agent as sa_mod
+    original = sa_mod._plan_sql
+    async def capture_plan_sql(adapter, tracer, *, slot, model, variables, mock=None):
+        captured.append(variables)
+        return await original(adapter, tracer, slot=slot, model=model, variables=variables, mock=mock)
+    sa_mod._plan_sql = capture_plan_sql
+    try:
+        tracer = Tracer(migrated_db, run_id=1, branch="")
+        state: AgentState = {
+            "run_id": 1, "session_id": 1,
+            "user_message": "which papers have 'diffusion' in the title?",
+            "effective_query": "which papers have 'diffusion' in the title?",
+            "response_language": "English",
+        }
+        async for _ in sql_agent_stream(
+            state, adapter=LiteLlmAdapter(), tracer=tracer, registry=_FakeRegistry(),
+            planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+            planner_mock="SELECT title FROM paper_content WHERE title LIKE '%diffusion%'",
+            answer_mock="No papers yet.\n```sql\n...\n```",
+        ):
+            pass
+    finally:
+        sa_mod._plan_sql = original
+    assert captured, "planner was never called"
+    schema_text = str(captured[0].get("schema", "")) + str(captured[0].get("table_schemas", ""))
+    assert "paper_content" in schema_text
+    assert "title" in schema_text

@@ -129,3 +129,18 @@ export interface BackendMessage {
    *  every device (null for non-search turns). */
   search_results?: SearchResultCandidate[] | null;
 }
+
+export type MemoryStatus = "active" | "superseded";
+export type MemoryScope = "session" | "global";
+
+export interface MemoryItem {
+  id: number;
+  scope: MemoryScope;
+  session_id: number | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  status: MemoryStatus;
+  supersedes: number | null;
+  superseded_by: number | null;
+}

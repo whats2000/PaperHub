@@ -144,3 +144,25 @@ async def test_clarify_path(migrated_db: aiosqlite.Connection) -> None:
     assert result["routing_decision"].intent == "clarify"
     assert result["final_response"] == "Which research topic would you like papers on?"
 
+
+async def test_memory_route(migrated_db: aiosqlite.Connection) -> None:
+    """memory intent routes to the memory node and produces a final_response."""
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    deps = GraphDeps(
+        adapter=LiteLlmAdapter(), tracer=tracer,
+        router_model="gpt-4o-mini", chitchat_model="gpt-4o-mini",
+        router_mock='{"intent":"memory","model_tier":"small","confidence":0.9,'
+                    '"reasoning":"user wants to save a note"}',
+    )
+    graph = build_graph(deps)
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1,
+        "user_message": "remember I prefer concise answers",
+    }
+    result = await graph.ainvoke(state)
+    assert result["routing_decision"].intent == "memory"
+    assert "final_response" in result and result["final_response"]
+

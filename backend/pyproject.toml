@@ -17,6 +17,7 @@ dependencies = [
     "pymupdf>=1.27.2.3",
     "pyyaml>=6.0.3",
     "sentence-transformers>=5.5.0",
+    "sqlglot>=30.8.0",
     "sse-starlette>=3.4.4",
     "tiktoken>=0.13.0",
     "uvicorn[standard]>=0.47.0",

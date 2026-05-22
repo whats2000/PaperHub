@@ -32,6 +32,7 @@ from paperhub.tracing.tracer import Tracer
 __all__ = [
     "PaperhubPapersRequestContext",
     "current_request_context",
+    "require_request_context",
     "reset_request_context",
     "set_request_context",
 ]
@@ -92,3 +93,19 @@ def current_request_context() -> PaperhubPapersRequestContext:
     a useful diagnostic, not a 500.
     """
     return _REQUEST_CONTEXT.get()
+
+
+def require_request_context() -> PaperhubPapersRequestContext:
+    """Fetch the active per-call MCP context or raise a clean RuntimeError.
+
+    Shared by every in-process FastMCP server (papers / sql / memory): the
+    middleware sets it from the X-Paperhub-* headers; tests prime it via
+    set_request_context(). Translates the bare LookupError into a diagnostic.
+    """
+    try:
+        return current_request_context()
+    except LookupError as exc:
+        raise RuntimeError(
+            "in-process MCP tool invoked without a request context "
+            "(no X-Paperhub-Session-Id header, and no fixture primed the contextvar)"
+        ) from exc

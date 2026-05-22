@@ -95,5 +95,5 @@ def test_suggest_prompts_load_and_format():
     synth = reg.get("paper_search_synthesize_suggest/v1")
     synth.user_template.format(
         user_message="m", resolved_block="r", not_found_block="n",
-        response_language="English",
+        response_language="English", memory_context="",
     )  # no KeyError

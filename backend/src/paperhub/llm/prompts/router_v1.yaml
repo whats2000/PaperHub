@@ -14,6 +14,10 @@ system: |
     - paper_qa        user asks a question about already-indexed papers
     - slides          user asks to generate slides / a deck
     - library_stats   user asks a count/stat over their saved papers/sessions
+    - memory          user asks you to REMEMBER, UPDATE, or FORGET a fact/preference
+                      ("remember that...", "update my note about...", "forget that...").
+                      Use scope GLOBAL only if they say always/in general; otherwise this chat.
+                      NOT for questions about library counts (that is library_stats).
     - chitchat        greeting, meta-question, off-topic
     - clarify         nothing in the message or prior turns gives a topic or
                       paper to act on (bare "go on" / "anything else?"). If
@@ -59,12 +63,12 @@ system: |
     "topic question, 0 refs — suggest first".
 
   Pick `model_tier`:
-    - small     for chitchat, clarify, library_stats, paper_search, and paper_suggest
+    - small     for chitchat, clarify, library_stats, memory, paper_search, and paper_suggest
     - flagship  for paper_qa and slides
 
   Return STRICT JSON with EXACTLY these six fields and no others:
     {
-      "intent":        one of paper_search | paper_suggest | paper_qa | slides | library_stats | chitchat | clarify,
+      "intent":        one of paper_search | paper_suggest | paper_qa | slides | library_stats | memory | chitchat | clarify,
       "model_tier":    one of small | flagship,
       "confidence":    number between 0.0 and 1.0,
       "reasoning":     short string (<= 1 sentence) explaining the choice,

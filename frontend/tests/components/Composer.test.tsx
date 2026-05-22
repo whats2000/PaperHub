@@ -60,13 +60,15 @@ describe("Composer", () => {
     expect(textbox.value).toBe("");
   });
 
-  it("renders the AttachPaperMenu trigger, an enabled References toggle, and 2 disabled capability buttons", () => {
+  it("renders the AttachPaperMenu trigger, an enabled References toggle, a Memory toggle, and 2 disabled capability buttons", () => {
     render(<Composer onSubmit={() => {}} disabled={false} />);
     // The paperclip is now an enabled AttachPaperMenu popover trigger.
     const attach = screen.getByRole("button", { name: /attach paper/i });
     expect(attach).not.toBeDisabled();
     // References is now wired to the Citation Canvas toggle (Plan D Wave 2).
     expect(screen.getByRole("button", { name: /^references$/i })).toBeEnabled();
+    // Memory button wired to the MemoryManager panel toggle (Plan E).
+    expect(screen.getByRole("button", { name: /^memory$/i })).toBeEnabled();
     // The remaining placeholder capabilities stay disabled.
     const labels = ["Slides", "Compare"];
     for (const label of labels) {

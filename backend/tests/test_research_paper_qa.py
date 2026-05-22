@@ -210,3 +210,83 @@ async def test_paper_qa_finalizer_uses_synthesize_v2_slot(
     assert any(c["slot"] == "paper_qa_synthesize/v2" for c in adapter.calls), (
         f"Expected paper_qa_synthesize/v2 slot call; got: {[c['slot'] for c in adapter.calls]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# v2.16 FR-10: paper_qa_finalize recall injection
+# ---------------------------------------------------------------------------
+
+
+async def test_paper_qa_finalizer_passes_memory_context_to_prompt(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Tracer,
+) -> None:
+    """When memory_context is non-empty, the finalizer forwards it in the
+    prompt variables so the model sees the recalled facts."""
+    from paperhub.agents.paper_qa_subagent import PerPaperPicks, PickedChunk
+    from paperhub.agents.research import paper_qa_finalize
+
+    picks = [
+        PerPaperPicks(
+            paper_content_id=1,
+            title="SomePaper",
+            picked_chunks=[PickedChunk(chunk_id=10, text="relevant text.", section="Intro")],
+            rationale="Introductory content.",
+        ),
+    ]
+    adapter = _StubAdapter(tokens=["answer with context"])
+    tokens: list[str] = []
+    async for tok in paper_qa_finalize(
+        per_paper_picks=picks,
+        user_message="what is this about?",
+        adapter=adapter,
+        tracer=fake_tracer,
+        model="stub",
+        state={"run_id": fake_tracer._run_id, "history": None},  # type: ignore[arg-type]  # noqa: SLF001
+        memory_context="Relevant remembered facts (use if helpful, ignore if not):\n- (global) answer in Traditional Chinese",
+    ):
+        tokens.append(tok)
+
+    # The memory_context should appear in the prompt variables passed to adapter.stream.
+    synth_calls = [c for c in adapter.calls if c["slot"] == "paper_qa_synthesize/v2"]
+    assert synth_calls, "Expected paper_qa_synthesize/v2 slot call"
+    assert "Traditional Chinese" in synth_calls[0]["variables"].get("memory_context", "")
+
+
+async def test_paper_qa_finalizer_empty_memory_context_renders_harmlessly(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Tracer,
+) -> None:
+    """When memory_context is empty (default), the prompt still renders without
+    a placeholder visible in the output."""
+    from paperhub.agents.paper_qa_subagent import PerPaperPicks, PickedChunk
+    from paperhub.agents.research import paper_qa_finalize
+    from paperhub.llm.prompts.registry import PromptRegistry
+
+    picks = [
+        PerPaperPicks(
+            paper_content_id=1,
+            title="SomePaper",
+            picked_chunks=[PickedChunk(chunk_id=10, text="relevant text.", section="Intro")],
+            rationale="Introductory content.",
+        ),
+    ]
+    adapter = _StubAdapter(tokens=["answer"])
+    tokens: list[str] = []
+    async for tok in paper_qa_finalize(
+        per_paper_picks=picks,
+        user_message="what is this about?",
+        adapter=adapter,
+        tracer=fake_tracer,
+        model="stub",
+        state={"run_id": fake_tracer._run_id, "history": None},  # type: ignore[arg-type]  # noqa: SLF001
+        # memory_context defaults to ""
+    ):
+        tokens.append(tok)
+
+    synth_calls = [c for c in adapter.calls if c["slot"] == "paper_qa_synthesize/v2"]
+    assert synth_calls
+    # Empty memory_context renders without a literal placeholder in the prompt.
+    slot = PromptRegistry().get("paper_qa_synthesize/v2")
+    rendered = slot.user_template.format(**synth_calls[0]["variables"])
+    assert "{memory_context}" not in rendered
