@@ -301,3 +301,134 @@ async def test_delete_memory_row_is_gone(
     resp = await mem_client.get("/memories", params={"session_id": "1"})
     ids = {i["id"] for i in resp.json()}
     assert mid not in ids, "deleted memory must not appear in listing"
+
+
+# ---------------------------------------------------------------------------
+# POST /memories
+# ---------------------------------------------------------------------------
+
+
+async def test_post_global_memory_returns_row_and_appears_in_get(
+    mem_client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST global memory → 200/201, scope=global, status=active, appears in GET.
+
+    Conflict-detection short-circuits (no existing same-scope active rows) so
+    no real LLM call is made — add_memory_with_supersede fails open without a key.
+    """
+    db_path = tmp_path / "paperhub.db"
+    # Ensure the chat_sessions row exists for header session 1.
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id) VALUES (?)", (1,)
+        )
+        await conn.commit()
+
+    resp = await mem_client.post(
+        "/memories",
+        json={"content": "always answer in English", "scope": "global"},
+        headers={_HDR: "1"},
+    )
+    assert resp.status_code in (200, 201)
+    data = resp.json()
+    assert data["scope"] == "global"
+    assert data["status"] == "active"
+    assert data["content"] == "always answer in English"
+
+    # Must appear in a subsequent GET.
+    get_resp = await mem_client.get("/memories", params={"session_id": "1"})
+    assert get_resp.status_code == 200
+    ids = {i["id"] for i in get_resp.json()}
+    assert data["id"] in ids
+
+
+async def test_post_session_memory_returns_row_with_session_id(
+    mem_client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST session-scoped memory → 200/201, scope=session, session_id=1."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id) VALUES (?)", (1,)
+        )
+        await conn.commit()
+
+    resp = await mem_client.post(
+        "/memories",
+        json={"content": "this project uses pytest", "scope": "session"},
+        headers={_HDR: "1"},
+    )
+    assert resp.status_code in (200, 201)
+    data = resp.json()
+    assert data["scope"] == "session"
+    assert data["session_id"] == 1
+    assert data["status"] == "active"
+
+
+async def test_post_sensitive_memory_returns_422_and_not_stored(
+    mem_client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST a sensitive memory (looks like an API key) → 422 (gate refusal).
+
+    The row must NOT appear in a subsequent GET.
+    """
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id) VALUES (?)", (1,)
+        )
+        await conn.commit()
+
+    resp = await mem_client.post(
+        "/memories",
+        json={"content": "my key is sk-abc123longkeyvalue000", "scope": "global"},
+        headers={_HDR: "1"},
+    )
+    assert resp.status_code == 422
+
+    # Confirm not stored.
+    get_resp = await mem_client.get("/memories", params={"session_id": "1"})
+    contents = [i["content"] for i in get_resp.json()]
+    assert not any("sk-abc123longkeyvalue000" in c for c in contents)
+
+
+async def test_post_session_memory_without_session_header_returns_error(
+    mem_client: AsyncClient,
+) -> None:
+    """POST scope=session with no X-Paperhub-Session-Id header → 400/422."""
+    resp = await mem_client.post(
+        "/memories",
+        json={"content": "this project uses pytest", "scope": "session"},
+        # No X-Paperhub-Session-Id header.
+    )
+    assert resp.status_code in (400, 422)
+
+
+# ---------------------------------------------------------------------------
+# CORS preflight regression
+# ---------------------------------------------------------------------------
+
+
+async def test_cors_preflight_allows_paperhub_session_id_header(
+    mem_client: AsyncClient,
+) -> None:
+    """OPTIONS preflight for a memory mutation must include X-Paperhub-Session-Id
+    in Access-Control-Allow-Headers.
+
+    Guards the CORS fix in app.py: without it the browser preflight for
+    PATCH/DELETE/POST with X-Paperhub-Session-Id is rejected before reaching us.
+    """
+    resp = await mem_client.options(
+        "/memories/1",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "x-paperhub-session-id",
+        },
+    )
+    # Starlette CORS middleware returns 200 for a valid preflight.
+    assert resp.status_code == 200
+    allow_headers = resp.headers.get("access-control-allow-headers", "").lower()
+    assert "x-paperhub-session-id" in allow_headers, (
+        f"X-Paperhub-Session-Id not in Access-Control-Allow-Headers: {allow_headers!r}"
+    )

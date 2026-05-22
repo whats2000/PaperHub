@@ -1,8 +1,7 @@
 """Memories REST surface (SRS FR-11 — UI-driven memory curation).
 
-UI-driven deterministic operations: GET (list), PATCH (edit content /
-toggle status), DELETE (forget).  POST is intentionally absent — adds
-happen via chat (the Memory Agent's MCP tools).
+UI-driven deterministic operations: GET (list), POST (add with gate +
+conflict-supersede), PATCH (edit content / toggle status), DELETE (forget).
 
 Connection idiom: mirrors papers.py exactly.  Each endpoint opens a
 fresh DB connection via ``async with open_db(settings.db_path) as conn``
@@ -19,27 +18,36 @@ session context.  A missing or non-integer header is treated as ``None``
 """
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import Any, Literal
 
 import aiosqlite
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
+from paperhub.agents.memory_gate import MemoryGateRefusal
 from paperhub.agents.memory_tools import (
     MemoryScopeError,
     _owned_or_raise,
+    add_memory_with_supersede,
     edit_memory,
     forget_memory,
 )
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.llm.litellm_adapter import LiteLlmAdapter
 
 router = APIRouter(prefix="/memories", tags=["memories"])
 
 
 # ---------------------------------------------------------------------------
-# Request body
+# Request bodies
 # ---------------------------------------------------------------------------
+
+
+class MemoryCreate(BaseModel):
+    content: str
+    scope: Literal["session", "global"]
 
 
 class MemoryPatchBody(BaseModel):
@@ -116,6 +124,63 @@ async def list_memories(
     ) as cur:
         rows = await cur.fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# POST /memories
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CONFLICT_MODEL = "gemini/gemini-3.1-flash-lite"
+
+
+@router.post("", response_model=dict[str, Any], status_code=201)
+async def create_memory(
+    body: MemoryCreate,
+    x_paperhub_session_id: str | None = Header(None),
+) -> dict[str, Any]:
+    """Add a new memory via the full governance path (gate + conflict-supersede).
+
+    Mirrors the MCP ``memory.add`` handler exactly:
+      * Runs :func:`~paperhub.agents.memory_gate.classify_memory_safety`
+        (raises :class:`MemoryGateRefusal` → HTTP 422 so the UI can show
+        "can't store sensitive content").
+      * Runs LLM conflict detection — short-circuits when no existing
+        same-scope active rows exist, and fails open on any LLM error, so
+        no API key is required in tests.
+      * ``scope='session'`` without a ``X-Paperhub-Session-Id`` header →
+        HTTP 400 (can't create a session memory without a session).
+
+    Returns the created :class:`MemoryItem` row dict on success (201).
+    """
+    session_id = _parse_session_id(x_paperhub_session_id)
+
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        try:
+            new_id = await add_memory_with_supersede(
+                conn,
+                session_id=session_id,
+                content=body.content,
+                scope=body.scope,
+                adapter=LiteLlmAdapter(),
+                model=os.environ.get(
+                    "PAPERHUB_MEMORY_CONFLICT_MODEL", _DEFAULT_CONFLICT_MODEL
+                ),
+            )
+        except MemoryGateRefusal as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        async with conn.execute(
+            f"SELECT {_SELECT_COLS} FROM memories WHERE id = ?",
+            (new_id,),
+        ) as cur:
+            row = await cur.fetchone()
+
+    if row is None:
+        raise HTTPException(500, "memory was created but could not be retrieved")
+    return _row_to_dict(row)
 
 
 # ---------------------------------------------------------------------------
@@ -240,4 +305,4 @@ async def delete_memory(
     return {"ok": True}
 
 
-__all__ = ["router", "MemoryPatchBody"]
+__all__ = ["router", "MemoryCreate", "MemoryPatchBody"]
