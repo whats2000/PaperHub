@@ -1,0 +1,11 @@
+system: |
+  You determine whether a new memory CONTRADICTS or REPLACES one of the existing
+  active memories. Output ONLY JSON: {"conflict_id": <int or null>} where conflict_id
+  is the id of the existing memory the new one replaces, or null if no conflict.
+  Only flag when the new memory directly supersedes the old (e.g. "use FastAPI"
+  replaces "use Flask"; "answer in Traditional Chinese" replaces "answer in English").
+  Do NOT flag complementary facts.
+user: |
+  New memory: {new_content}
+  Existing active memories (scope={scope}):
+  {existing_memories}

@@ -18,6 +18,7 @@ this call on the loopback path, and the middleware handles the external path.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 from typing import Any
 
@@ -28,11 +29,12 @@ from paperhub.agents.memory_tools import (
     MemoryScopeError,
     RecallScope,
     Scope,
-    add_memory,
+    add_memory_with_supersede,
     edit_memory,
     forget_memory,
     recall_memories,
 )
+from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.mcp.server_context import require_request_context
 
 __all__ = [
@@ -66,10 +68,25 @@ async def _add_handler(content: str, scope: Scope) -> dict[str, Any]:
     cannot see or modify it).  ``scope='global'`` is visible from all sessions.
     Returns ``{"id": <int>}`` on success or ``{"error": "rejected", ...}``
     when the scope/ownership contract is violated.
+
+    Conflict detection: a small LLM call checks the new content against active
+    same-scope memories and marks the old row ``status='superseded'`` when the
+    new memory directly replaces it.  The LLM call short-circuits (no-conflict)
+    when no existing memories exist, and fails open on any error so the add
+    always succeeds even without a key.
     """
     ctx = require_request_context()
     try:
-        mid = await add_memory(ctx.conn, session_id=ctx.session_id, content=content, scope=scope)
+        mid = await add_memory_with_supersede(
+            ctx.conn,
+            session_id=ctx.session_id,
+            content=content,
+            scope=scope,
+            adapter=LiteLlmAdapter(),
+            model=os.environ.get(
+                "PAPERHUB_MEMORY_CONFLICT_MODEL", "gemini/gemini-3.1-flash-lite"
+            ),
+        )
     except (MemoryScopeError, MemoryGateRefusal) as exc:
         return {"error": "rejected", "reason": str(exc)}
     return {"id": mid}

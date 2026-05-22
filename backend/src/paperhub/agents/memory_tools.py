@@ -2,13 +2,17 @@
 table; scope/ownership enforced deterministically (NFR-05)."""
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import aiosqlite
 
 from paperhub.agents.memory_gate import MemoryGateRefusal, classify_memory_safety
+
+if TYPE_CHECKING:
+    from paperhub.llm.adapter import LlmAdapter
 
 Scope = Literal["session", "global"]
 RecallScope = Literal["session", "global", "both"]
@@ -168,3 +172,122 @@ async def forget_memory(
     await _owned_or_raise(conn, session_id=session_id, memory_id=memory_id)
     await conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
     await conn.commit()
+
+
+async def _detect_conflict(
+    conn: aiosqlite.Connection,
+    new_content: str,
+    scope: Scope,
+    session_id: int | None,
+    adapter: LlmAdapter | None,
+    model: str,
+) -> int | None:
+    """Ask the LLM whether ``new_content`` supersedes an existing active memory.
+
+    Short-circuits to ``None`` (no conflict) when:
+    * ``adapter`` is ``None``
+    * there are no existing active same-scope memories
+
+    Fails open — any exception (LLM unavailable, JSON parse error, missing
+    key) returns ``None`` so the add always succeeds even without a key.
+    """
+    if adapter is None:
+        return None
+
+    # Fetch active same-scope memories.
+    if scope == "session":
+        where = "scope = 'session' AND session_id = ? AND status = 'active'"
+        params: tuple[object, ...] = (session_id,)
+    else:
+        where = "scope = 'global' AND status = 'active'"
+        params = ()
+
+    async with conn.execute(
+        f"SELECT id, content FROM memories WHERE {where}", params
+    ) as cur:
+        existing = await cur.fetchall()
+
+    if not existing:
+        return None
+
+    existing_text = "\n".join(f"[{row[0]}] {row[1]}" for row in existing)
+
+    try:
+        parts: list[str] = []
+        async for tok in adapter.stream(
+            slot="memory_conflict/v1",
+            variables={
+                "new_content": new_content,
+                "scope": scope,
+                "existing_memories": existing_text,
+            },
+            model=model,
+        ):
+            parts.append(tok)
+        raw = "".join(parts).strip()
+        # Strip markdown code fences (e.g. ```json\n{...}\n```).
+        if raw.startswith("```"):
+            raw = raw.lstrip("`")
+            if "\n" in raw:
+                first, rest = raw.split("\n", 1)
+                raw = rest if first.strip().lower() in ("json", "") else first + "\n" + rest
+            raw = raw.rstrip("`").strip()
+        parsed = json.loads(raw)
+        conflict_id = parsed.get("conflict_id")
+        if conflict_id is None:
+            return None
+        return int(conflict_id)
+    except Exception:  # noqa: BLE001 — fail-open: LLM unavailable or parse error
+        return None
+
+
+async def add_memory_with_supersede(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: int | None,
+    content: str,
+    scope: Scope,
+    adapter: LlmAdapter | None,
+    model: str,
+) -> int:
+    """Insert a new memory with optional LLM-driven conflict detection.
+
+    Steps:
+    1. Run :func:`~paperhub.agents.memory_gate.classify_memory_safety` gate
+       (raises :class:`MemoryGateRefusal` on rejection).
+    2. Run :func:`_detect_conflict` — short-circuits to ``None`` when
+       ``adapter`` is ``None`` or no existing memories exist, fails open on
+       any LLM error.
+    3. INSERT the new memory with ``supersedes=conflict_id``.
+    4. If a conflict was detected, flip the old row to
+       ``status='superseded'`` + ``superseded_by=<new-id>``.
+
+    Returns the new memory's ``id``.
+    """
+    gate = classify_memory_safety(content)
+    if not gate["save"]:
+        raise MemoryGateRefusal(str(gate["reason"]))
+    bound: int | None = None if scope == "global" else session_id
+    if scope == "session" and bound is None:
+        raise MemoryScopeError("session-scoped memory requires a session_id")
+
+    conflict_id = await _detect_conflict(conn, content, scope, session_id, adapter, model)
+
+    await conn.execute(
+        "INSERT INTO memories (scope, session_id, content, supersedes) VALUES (?, ?, ?, ?)",
+        (scope, bound, content, conflict_id),
+    )
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    new_id = int(row[0])
+
+    if conflict_id is not None:
+        await conn.execute(
+            "UPDATE memories SET status = 'superseded', superseded_by = ? WHERE id = ?",
+            (new_id, conflict_id),
+        )
+        await conn.commit()
+
+    return new_id

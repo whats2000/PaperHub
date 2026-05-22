@@ -5,6 +5,7 @@ from paperhub.agents.memory_gate import MemoryGateRefusal
 from paperhub.agents.memory_tools import (
     MemoryScopeError,
     add_memory,
+    add_memory_with_supersede,
     edit_memory,
     forget_memory,
     recall_memories,
@@ -95,3 +96,36 @@ async def test_add_api_key_is_refused(two_sessions) -> None:
     async with two_sessions.execute("SELECT count(*) FROM memories") as cur:
         row = await cur.fetchone()
     assert row is not None and row[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_supersede_marks_old_memory(two_sessions, monkeypatch) -> None:
+    old_id = await add_memory(two_sessions, session_id=1, content="use Flask for the backend", scope="session")
+    import paperhub.agents.memory_tools as mt_mod
+    async def fake_detect(conn, new_content, scope, session_id, adapter, model):
+        return old_id
+    monkeypatch.setattr(mt_mod, "_detect_conflict", fake_detect)
+    new_id = await add_memory_with_supersede(
+        two_sessions, session_id=1, content="use FastAPI for the backend",
+        scope="session", adapter=None, model="m",
+    )
+    async with two_sessions.execute("SELECT status, superseded_by FROM memories WHERE id = ?", (old_id,)) as cur:
+        old_row = await cur.fetchone()
+    async with two_sessions.execute("SELECT supersedes FROM memories WHERE id = ?", (new_id,)) as cur:
+        new_row = await cur.fetchone()
+    assert old_row[0] == "superseded" and old_row[1] == new_id and new_row[0] == old_id
+
+
+@pytest.mark.asyncio
+async def test_no_conflict_both_active(two_sessions, monkeypatch) -> None:
+    import paperhub.agents.memory_tools as mt_mod
+    async def no_conflict(conn, new_content, scope, session_id, adapter, model):
+        return None
+    monkeypatch.setattr(mt_mod, "_detect_conflict", no_conflict)
+    id1 = await add_memory(two_sessions, session_id=1, content="prefer concise answers", scope="session")
+    id2 = await add_memory_with_supersede(
+        two_sessions, session_id=1, content="prefer numbered lists", scope="session", adapter=None, model="m",
+    )
+    async with two_sessions.execute("SELECT status FROM memories WHERE id IN (?, ?)", (id1, id2)) as cur:
+        statuses = {r[0] for r in await cur.fetchall()}
+    assert statuses == {"active"}
