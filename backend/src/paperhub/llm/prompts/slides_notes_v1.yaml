@@ -1,0 +1,9 @@
+system: |
+  You write PhD-level speaker notes, one per slide. For each PDF page emit a block
+  starting with a line "[SLIDE N]" (N is the 1-indexed page) followed by the note.
+  Cover what the presenter should SAY, not just what's on the slide.
+user: |
+  BEAMER SOURCE (overlay frames are annotated with page hints):
+  {beamer_code}
+
+  Write the notes in {response_language}. Output [SLIDE N] blocks only.
