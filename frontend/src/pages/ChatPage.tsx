@@ -97,8 +97,8 @@ export function ChatPage() {
   };
 
   const handleToggleMemory = (): void => {
-    // Only open when there is a backend session; always allow close.
-    if (!memoryOpen && backendSessionId === null) return;
+    // Always allowed: with no backend session yet, the panel shows global
+    // (user) memories only (project/session memories need a sent message).
     if (!memoryOpen) {
       // Opening Memory → close Canvas if it was open.
       closeCanvas();
@@ -134,7 +134,6 @@ export function ChatPage() {
           onToggleMemory={handleToggleMemory}
           onToggleCanvas={handleToggleCanvas}
           canvasOpen={canvasOpen}
-          memoryDisabled={backendSessionId === null}
         />
       </div>
       {/* Right panel — shared slot for Citation Canvas and Memory Manager.
@@ -171,9 +170,10 @@ export function ChatPage() {
           </div>
 
           {/* Memory Manager: absolutely overlays the Citation Canvas inside
-              the right-panel column when memoryOpen is true. Not mounted when
-              there is no backend session to avoid a meaningless fetch. */}
-          {memoryOpen && backendSessionId !== null && (
+              the right-panel column when memoryOpen is true. With no backend
+              session yet (empty chat) it shows global (user) memories only;
+              project (session) memory needs at least one sent message. */}
+          {memoryOpen && (
             <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
               <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
                 Memory

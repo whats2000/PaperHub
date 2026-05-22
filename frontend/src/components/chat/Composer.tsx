@@ -25,8 +25,6 @@ interface Props {
   memoryOpen?: boolean;
   /** Called when the user clicks the Memory button to toggle the panel. */
   onToggleMemory?: () => void;
-  /** True when there is no backend session yet (disables the Memory button). */
-  memoryDisabled?: boolean;
   /** Called when the user clicks the References button to toggle the canvas.
    *  When provided, overrides the default internal toggleCanvas behaviour so
    *  the parent (ChatPage) can close the Memory panel before opening the Canvas
@@ -60,7 +58,6 @@ export function Composer({
   disabled,
   memoryOpen = false,
   onToggleMemory,
-  memoryDisabled = false,
   onToggleCanvas,
   canvasOpen: canvasOpenProp,
 }: Props) {
@@ -155,7 +152,6 @@ export function Composer({
                       variant="ghost"
                       size="icon"
                       onClick={onToggleMemory}
-                      disabled={memoryDisabled}
                       aria-pressed={memoryOpen}
                       className={
                         memoryOpen

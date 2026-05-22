@@ -297,6 +297,64 @@ describe("MemoryManager", () => {
     expect(textarea).toHaveValue("");
   });
 
+  it("no backend session: lists global-only (no session_id query), disables Project scope, shows hint", async () => {
+    let capturedUrl: string | undefined;
+
+    server.use(
+      http.get(`${API_BASE_URL}/memories`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([supersededMemory]);
+      }),
+    );
+
+    render(<MemoryManager sessionId={null} />);
+
+    await screen.findByText("User prefers verbose answers.");
+
+    // GET must omit the session_id query param (global-only listing).
+    expect(capturedUrl).toBeDefined();
+    expect(new URL(capturedUrl!).searchParams.has("session_id")).toBe(false);
+
+    // The Project (session) scope toggle is disabled until a message is sent.
+    const projectToggle = screen
+      .getAllByRole("button", { name: /project \(session\)/i })
+      .find((el) => (el as HTMLButtonElement).disabled);
+    expect(projectToggle).toBeDefined();
+
+    // Explanatory hint is visible.
+    expect(
+      screen.getByText(/send at least one message to enable project/i),
+    ).toBeInTheDocument();
+  });
+
+  it("no backend session: add global memory POSTs without an ownership header", async () => {
+    let capturedSessionHeader: string | null = "unset";
+
+    server.use(
+      http.get(`${API_BASE_URL}/memories`, () => HttpResponse.json([])),
+      http.post(`${API_BASE_URL}/memories`, ({ request }) => {
+        capturedSessionHeader = request.headers.get("x-paperhub-session-id");
+        return HttpResponse.json(createdGlobalMemory, { status: 201 });
+      }),
+    );
+
+    render(<MemoryManager sessionId={null} />);
+
+    await screen.findByText(/no memories/i);
+
+    const textarea = screen.getByRole("textbox", { name: /new memory content/i });
+    await userEvent.type(textarea, "Always respond in English.");
+    // Scope is forced to global; click Add directly.
+    await userEvent.click(screen.getByRole("button", { name: /add memory/i }));
+
+    expect(
+      await screen.findByText("Always respond in English."),
+    ).toBeInTheDocument();
+
+    // No ownership header sent (backend treats absence as global-only access).
+    expect(capturedSessionHeader).toBeNull();
+  });
+
   it("add-memory: 422 gate refusal shows inline error, no item added", async () => {
     server.use(
       http.get(`${API_BASE_URL}/memories`, () => HttpResponse.json([])),

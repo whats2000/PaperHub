@@ -104,23 +104,33 @@ _SELECT_COLS = (
 
 @router.get("", response_model=list[dict[str, Any]])
 async def list_memories(
-    session_id: int = Query(..., ge=1),
+    session_id: int | None = Query(None, ge=1),
 ) -> list[dict[str, Any]]:
-    """List all memories visible to ``session_id``:
+    """List all memories visible to the caller:
 
     * ALL global memories (both active and superseded)
-    * ALL memories scoped to ``session_id`` (both active and superseded)
+    * with a ``session_id``: ALSO that session's memories (active + superseded)
+    * without a ``session_id`` (e.g. an empty chat that has no backend session
+      yet): global memories ONLY — there are no session-scoped rows to show.
 
     Ordered by ``created_at DESC`` so the most-recent entries come first.
     """
-    sql = (
-        f"SELECT {_SELECT_COLS} FROM memories "
-        "WHERE (scope = 'global') OR (scope = 'session' AND session_id = ?) "
-        "ORDER BY created_at DESC"
-    )
     settings = load_settings()
+    if session_id is None:
+        sql = (
+            f"SELECT {_SELECT_COLS} FROM memories "
+            "WHERE scope = 'global' ORDER BY created_at DESC"
+        )
+        params: tuple[object, ...] = ()
+    else:
+        sql = (
+            f"SELECT {_SELECT_COLS} FROM memories "
+            "WHERE (scope = 'global') OR (scope = 'session' AND session_id = ?) "
+            "ORDER BY created_at DESC"
+        )
+        params = (session_id,)
     async with open_db(settings.db_path) as conn, conn.execute(
-        sql, (session_id,)
+        sql, params
     ) as cur:
         rows = await cur.fetchall()
     return [_row_to_dict(r) for r in rows]

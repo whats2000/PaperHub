@@ -236,37 +236,50 @@ export function parseArxivId(input: string): string | null {
   return null;
 }
 
-/** List all memories for a session (active + superseded). */
-export async function listMemories(sessionId: number): Promise<MemoryItem[]> {
-  return apiFetch<MemoryItem[]>(`/memories?session_id=${sessionId}`);
+/** List all memories visible to a session (active + superseded). A null
+ *  sessionId (empty chat with no backend session yet) lists global memories
+ *  only. */
+export async function listMemories(
+  sessionId: number | null,
+): Promise<MemoryItem[]> {
+  const qs = sessionId === null ? "" : `?session_id=${sessionId}`;
+  return apiFetch<MemoryItem[]>(`/memories${qs}`);
 }
 
-/** Update a memory's content and/or status. Requires the owning session id
- *  for ownership verification (sent as `X-Paperhub-Session-Id`). */
+/** Build the optional ownership header. A null sessionId (no backend session
+ *  yet) sends no header, which the backend treats as global-only access. */
+function memoryOwnerHeader(sessionId: number | null): Record<string, string> {
+  return sessionId === null ? {} : { "X-Paperhub-Session-Id": String(sessionId) };
+}
+
+/** Update a memory's content and/or status. The owning session id (when
+ *  present) is sent as `X-Paperhub-Session-Id` for ownership verification;
+ *  a null id grants global-only access. */
 export async function patchMemory(
   memoryId: number,
   patch: { content?: string; status?: MemoryStatus },
-  sessionId: number,
+  sessionId: number | null,
 ): Promise<MemoryItem> {
   return apiFetch<MemoryItem>(`/memories/${memoryId}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "X-Paperhub-Session-Id": String(sessionId),
+      ...memoryOwnerHeader(sessionId),
     },
     body: JSON.stringify(patch),
   });
 }
 
-/** Hard-delete a memory row. Requires the owning session id
- *  for ownership verification (sent as `X-Paperhub-Session-Id`). */
+/** Hard-delete a memory row. The owning session id (when present) is sent as
+ *  `X-Paperhub-Session-Id` for ownership verification; a null id grants
+ *  global-only access. */
 export async function deleteMemory(
   memoryId: number,
-  sessionId: number,
+  sessionId: number | null,
 ): Promise<void> {
   await apiFetch<undefined>(`/memories/${memoryId}`, {
     method: "DELETE",
-    headers: { "X-Paperhub-Session-Id": String(sessionId) },
+    headers: memoryOwnerHeader(sessionId),
   });
 }
 
@@ -290,13 +303,13 @@ export class MemoryGateRefused extends Error {
 export async function createMemory(
   content: string,
   scope: MemoryScope,
-  sessionId: number,
+  sessionId: number | null,
 ): Promise<MemoryItem> {
   const res = await fetch(`${API_BASE_URL}/memories`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Paperhub-Session-Id": String(sessionId),
+      ...memoryOwnerHeader(sessionId),
     },
     body: JSON.stringify({ content, scope }),
   });

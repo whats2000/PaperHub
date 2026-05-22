@@ -9,7 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useMemoriesStore } from "@/store/memories";
 
 interface Props {
-  sessionId: number;
+  /** Owning backend session id, or null when the chat has no backend session
+   *  yet (empty chat). A null session lists/manages global (user) memories
+   *  only; project (session) memories require sending at least one message. */
+  sessionId: number | null;
 }
 
 /** Stable empty array — returned by the per-session selector when no memories
@@ -24,7 +27,7 @@ function MemoryRow({
   sessionId,
 }: {
   memory: MemoryItem;
-  sessionId: number;
+  sessionId: number | null;
 }) {
   const patchMemoryLocal = useMemoriesStore((s) => s.patchMemoryLocal);
   const deleteMemoryLocal = useMemoriesStore((s) => s.deleteMemoryLocal);
@@ -188,10 +191,16 @@ function MemoryRow({
 /** Inline composer for adding a new memory entry. Shows a textarea, a scope
  *  toggle (Project/User), an Add button, and an inline error when the safety
  *  gate refuses the content. */
-function AddMemoryComposer({ sessionId }: { sessionId: number }) {
+function AddMemoryComposer({ sessionId }: { sessionId: number | null }) {
   const addMemoryLocal = useMemoriesStore((s) => s.addMemoryLocal);
+  // No backend session yet → only global (user) memories can be added; a
+  // session memory needs an owning session, which doesn't exist until the
+  // chat has at least one message.
+  const sessionScopeAvailable = sessionId !== null;
   const [content, setContent] = useState("");
-  const [scope, setScope] = useState<MemoryScope>("session");
+  const [scope, setScope] = useState<MemoryScope>(
+    sessionScopeAvailable ? "session" : "global",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -237,10 +246,15 @@ function AddMemoryComposer({ sessionId }: { sessionId: number }) {
         >
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !sessionScopeAvailable}
             onClick={() => setScope("session")}
             aria-pressed={scope === "session"}
-            className={`px-2 py-0.5 transition-colors ${
+            title={
+              sessionScopeAvailable
+                ? undefined
+                : "Send at least one message to enable project memory"
+            }
+            className={`px-2 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               scope === "session"
                 ? "bg-accent text-foreground font-medium"
                 : "text-muted-foreground hover:bg-muted"
@@ -274,6 +288,11 @@ function AddMemoryComposer({ sessionId }: { sessionId: number }) {
           <Plus className="h-3 w-3" />
         </Button>
       </div>
+      {!sessionScopeAvailable && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Send at least one message to enable project (session) memory.
+        </p>
+      )}
       {error !== null && (
         <p role="alert" className="mt-1 text-xs text-destructive">
           {error}
@@ -292,7 +311,7 @@ function MemorySection({
 }: {
   label: string;
   items: MemoryItem[];
-  sessionId: number;
+  sessionId: number | null;
 }) {
   if (items.length === 0) return null;
   return (
@@ -321,7 +340,7 @@ function MemorySection({
 export function MemoryManager({ sessionId }: Props) {
   const fetchMemories = useMemoriesStore((s) => s.fetchMemories);
   const memories = useMemoriesStore(
-    (s) => s.memoriesBySession[sessionId] ?? EMPTY_MEMORIES,
+    (s) => s.memoriesBySession[sessionId ?? 0] ?? EMPTY_MEMORIES,
   );
 
   useEffect(() => {

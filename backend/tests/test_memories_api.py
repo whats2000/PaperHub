@@ -95,6 +95,23 @@ async def test_get_memories_returns_list_200(
     assert isinstance(resp.json(), list)
 
 
+async def test_get_memories_no_session_returns_global_only(
+    mem_client: AsyncClient, tmp_path: Path
+) -> None:
+    """GET /memories with NO session_id (empty chat) returns global rows only,
+    never any session-scoped rows."""
+    db_path = tmp_path / "paperhub.db"
+    gid = await _insert_global(db_path, "global fact")
+    sid1 = await _insert_session(db_path, 1, "session 1 note")
+
+    resp = await mem_client.get("/memories")
+    assert resp.status_code == 200
+    items = resp.json()
+    ids = {i["id"] for i in items}
+    assert gid in ids, "global row must be included"
+    assert sid1 not in ids, "session-scoped row must be excluded with no session"
+
+
 async def test_get_memories_includes_global_and_session(
     mem_client: AsyncClient, tmp_path: Path
 ) -> None:
