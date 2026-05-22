@@ -97,7 +97,7 @@ def load_settings() -> Settings:
 
         # 6. Agent tunables.
         paper_qa_max_section_reads=int(
-            os.environ.get("PAPERHUB_PAPER_QA_MAX_SECTION_READS", "5"),
+            os.environ.get("PAPERHUB_PAPER_QA_MAX_SECTION_READS", "8"),
         ),
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
