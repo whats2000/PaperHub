@@ -190,9 +190,15 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             "CHECK (status IN ('active','superseded'))"
         )
     if "supersedes" not in mem_cols:
-        await conn.execute("ALTER TABLE memories ADD COLUMN supersedes INTEGER NULL")
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN supersedes INTEGER NULL "
+            "REFERENCES memories(id) ON DELETE SET NULL"
+        )
     if "superseded_by" not in mem_cols:
-        await conn.execute("ALTER TABLE memories ADD COLUMN superseded_by INTEGER NULL")
+        await conn.execute(
+            "ALTER TABLE memories ADD COLUMN superseded_by INTEGER NULL "
+            "REFERENCES memories(id) ON DELETE SET NULL"
+        )
     await conn.commit()
 
     # -----------------------------------------------------------------------
