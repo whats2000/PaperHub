@@ -277,7 +277,6 @@ async def add_memory_with_supersede(
         "INSERT INTO memories (scope, session_id, content, supersedes) VALUES (?, ?, ?, ?)",
         (scope, bound, content, conflict_id),
     )
-    await conn.commit()
     async with conn.execute("SELECT last_insert_rowid()") as cur:
         row = await cur.fetchone()
     assert row is not None
@@ -285,9 +284,9 @@ async def add_memory_with_supersede(
 
     if conflict_id is not None:
         await conn.execute(
-            "UPDATE memories SET status = 'superseded', superseded_by = ? WHERE id = ?",
+            "UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = datetime('now') WHERE id = ?",
             (new_id, conflict_id),
         )
-        await conn.commit()
+    await conn.commit()
 
     return new_id
