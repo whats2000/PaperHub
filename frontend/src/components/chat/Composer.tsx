@@ -32,6 +32,10 @@ interface Props {
   onToggleCanvas?: () => void;
   /** Whether the Citation Canvas is currently open (controls aria-pressed). */
   canvasOpen?: boolean;
+  /** Whether the Slides panel is currently open. */
+  slidesOpen?: boolean;
+  /** Called when the user clicks the Slides button to toggle the panel. */
+  onToggleSlides?: () => void;
 }
 
 interface Capability {
@@ -41,11 +45,6 @@ interface Capability {
 }
 
 const CAPABILITIES: Capability[] = [
-  {
-    icon: Presentation,
-    label: "Slides",
-    tooltip: "Coming in Plan F — generate slides from the cited papers",
-  },
   {
     icon: Columns2,
     label: "Compare",
@@ -60,6 +59,8 @@ export function Composer({
   onToggleMemory,
   onToggleCanvas,
   canvasOpen: canvasOpenProp,
+  slidesOpen = false,
+  onToggleSlides,
 }: Props) {
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
@@ -165,6 +166,30 @@ export function Composer({
                   </TooltipTrigger>
                   <TooltipContent side="top">
                     <p>Manage memory for this session</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span tabIndex={0} className="inline-flex" />}
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={onToggleSlides}
+                      aria-pressed={slidesOpen}
+                      className={
+                        slidesOpen
+                          ? "h-8 w-8 bg-accent text-foreground"
+                          : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                      }
+                      aria-label="Slides"
+                    >
+                      <Presentation className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Toggle the slide deck panel</p>
                   </TooltipContent>
                 </Tooltip>
                 {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
