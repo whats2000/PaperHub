@@ -256,16 +256,25 @@ export function highlightChunkRange(doc: Document, domId: string): boolean {
   // — not `phchunk-N+1`, because chunks whose sentinel landed in math keep no
   // anchor and leave ordinal gaps. Querying the live anchors and taking the one
   // after this gives the true chunk boundary.
+  //
+  // Several chunks of ONE table all anchor just before it (a table is atomic —
+  // its rows can't hold a sentinel), so consecutive anchors can sit adjacent
+  // with no text between them. Taking the immediate next sentinel would then
+  // give an EMPTY range (scroll, but nothing highlighted). So advance to the
+  // next sentinel that actually has text in between — a clustered table-chunk
+  // citation then highlights the table itself.
   const markers = Array.from(doc.querySelectorAll('[id^="phchunk-"]'));
   const idx = markers.findIndex((m) => m.id === domId);
-  const next = idx >= 0 ? (markers[idx + 1] ?? null) : null;
+  let nodes: Text[] = [];
+  for (let j = idx + 1; idx >= 0 && j <= markers.length; j++) {
+    const next = markers[j] ?? null;
+    nodes = collectChunkTextNodes(doc, start, next);
+    if (nodes.length > 0 || next === null) break;
+  }
 
   // Wrap the text nodes between the two sentinels — the exact chunk, across
   // blocks, never the whole paragraph.
-  const wrappers = wrapTextNodes(
-    doc,
-    collectChunkTextNodes(doc, start, next),
-  );
+  const wrappers = wrapTextNodes(doc, nodes);
 
   const anchor = wrappers[0] ?? start;
   if (typeof anchor.scrollIntoView === "function") {

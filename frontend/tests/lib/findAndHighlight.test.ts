@@ -47,6 +47,24 @@ describe("highlightChunkRange — full chunk between sentinels", () => {
     expect(text).not.toContain("Next chunk"); // stops before the next sentinel
   });
 
+  it("skips clustered empty anchors so a table-chunk citation highlights the table", () => {
+    // Several chunks of one table all anchor just before it, leaving adjacent
+    // empty sentinels. Clicking the first must skip them and highlight the
+    // table, not the empty gap between the clustered anchors.
+    const doc = docFrom(
+      '<p><span id="phchunk-34"></span><span id="phchunk-35"></span>' +
+        '<span id="phchunk-36"></span></p>' +
+        "<table><tbody><tr><td>X-VLA</td><td>3.3</td></tr></tbody></table>" +
+        '<p><span id="phchunk-37"></span>Next section prose.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-35")).toBe(true);
+    const text = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`))
+      .map((m) => m.textContent)
+      .join("|");
+    expect(text).toContain("X-VLA"); // the table got highlighted
+    expect(text).not.toContain("Next section prose."); // stops at phchunk-37
+  });
+
   it("uses the next sentinel in document order even when ordinals have gaps", () => {
     // phchunk-1 was skipped at ingest (sentinel landed in math); the next
     // existing anchor is phchunk-2, and that must bound the highlight.
