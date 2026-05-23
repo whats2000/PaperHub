@@ -70,12 +70,11 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     [rawBytes],
   );
 
-  // Fit the main slide area to its container width. Depends on `file` because
-  // the main area only mounts once the PDF has loaded (before that the body is
-  // a placeholder), so the ref is null on first mount — re-running when `file`
-  // becomes available is what actually measures the now-mounted area. Without
-  // this, mainWidth stays 0 and the page renders at its native ~360px, leaving
-  // the rest of the panel blank.
+  // Fit the main slide area to its container width. Re-runs when `file`
+  // becomes available, because the main area (and its ref) only mounts once
+  // the <Document> renders — on the first mount `file` is null and the ref is
+  // absent, so without `file` in the deps the width would stay 0 and the page
+  // would render at its intrinsic PDF width, leaving the panel half-empty.
   useEffect(() => {
     const el = mainAreaRef.current;
     if (!el) return;
