@@ -55,9 +55,16 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
   const [mainWidth, setMainWidth] = useState(0);
   const [noteHeight, setNoteHeight] = useState(NOTE_DEFAULT_HEIGHT);
   const [filmstripWidth, setFilmstripWidth] = useState(FILMSTRIP_DEFAULT_WIDTH);
+  // Measured thumbnail render width — derived from the rail's actual inner
+  // width (excludes the scrollbar), NOT the style width, so a thumbnail never
+  // overflows + gets clipped on the right when the rail scrolls.
+  const [thumbWidth, setThumbWidth] = useState(
+    FILMSTRIP_DEFAULT_WIDTH - FILMSTRIP_THUMB_INSET,
+  );
 
   const panelRef = useRef<HTMLDivElement>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+  const filmRoRef = useRef<ResizeObserver | null>(null);
 
   // Measure the main slide area via a CALLBACK ref so it fires the instant the
   // element mounts — which is when the <Document> renders (file != null), not
@@ -76,8 +83,29 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     roRef.current = ro;
   }, []);
 
+  // Measure the filmstrip rail's inner content width via a callback ref. We use
+  // clientWidth (excludes border + scrollbar) minus padding (p-1 = 8px) and the
+  // thumbnail button's border (border-2 = 4px), so the thumbnail always fits.
+  const measureFilmstrip = useCallback((el: HTMLDivElement | null) => {
+    filmRoRef.current?.disconnect();
+    filmRoRef.current = null;
+    if (!el) return;
+    const measure = () => setThumbWidth(Math.max(32, el.clientWidth - 12));
+    measure();
+    if (typeof ResizeObserver === "undefined") return; // jsdom guard
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    filmRoRef.current = ro;
+  }, []);
+
   // Disconnect any live observer on unmount.
-  useEffect(() => () => roRef.current?.disconnect(), []);
+  useEffect(
+    () => () => {
+      roRef.current?.disconnect();
+      filmRoRef.current?.disconnect();
+    },
+    [],
+  );
 
   // Fetch PDF bytes on mount / sessionId change; cache by sessionId.
   useEffect(() => {
@@ -251,6 +279,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
         >
           {/* Left filmstrip rail */}
           <div
+            ref={measureFilmstrip}
             className="flex flex-col gap-1 p-1 overflow-y-auto bg-muted/30 shrink-0"
             style={{ width: filmstripWidth }}
           >
@@ -271,13 +300,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
                         : "border-transparent hover:border-border"
                     }`}
                   >
-                    <Page
-                      pageNumber={pageNum}
-                      width={Math.max(
-                        32,
-                        filmstripWidth - FILMSTRIP_THUMB_INSET,
-                      )}
-                    />
+                    <Page pageNumber={pageNum} width={thumbWidth} />
                     <span className="block text-center text-xs text-muted-foreground py-0.5">
                       {pageNum}
                     </span>
