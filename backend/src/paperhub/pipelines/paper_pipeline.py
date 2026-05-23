@@ -14,6 +14,7 @@ is accepted; wrapping in ``asyncio.to_thread`` is deferred.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -57,7 +58,7 @@ from paperhub.pipelines.marker_client import (
     get_marker_client,
 )
 from paperhub.pipelines.marker_health import marker_available
-from paperhub.pipelines.marker_to_asset import strip_html
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, strip_html
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
@@ -752,6 +753,123 @@ class PaperPipeline:
         papers_id = await self._link_to_session(session_id, paper_content_id)
         return IngestResult(
             paper_content_id, papers_id, cache_hit=False, title=title_hint,
+        )
+
+    async def upgrade_pdf_asset_via_marker(
+        self, paper_content_id: int, *, max_pages: int | None,
+    ) -> None:
+        """Upgrade a PDF paper from the PyMuPDF baseline to Marker quality.
+
+        Re-extracts the PDF via the Marker service, overwrites the on-disk
+        PaperAsset, re-chunks + re-embeds from Marker's cleaner structure
+        (better RAG), and flips ``asset_status`` to ``marker_ready``.
+
+        Runs the (multi-minute, blocking) Marker call off the event loop. The
+        re-chunk/re-embed mirrors ``reingest._reingest_one``'s ordering: embed
+        FIRST, then the destructive DELETE + Chroma delete, then INSERT new
+        chunks, recompute ``sections_json``, and re-add Chroma vectors — so a
+        failure before the deletes leaves the baseline intact.
+
+        Exceptions propagate (the worker records ``marker_failed``); they are
+        NOT swallowed here.
+        """
+        async with self._conn.execute(
+            "SELECT kind, source_path, source_dir_path "
+            "FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            raise ValueError(
+                f"paper_content id={paper_content_id} not found"
+            )
+        kind = str(row[0])
+        source_path_raw: str | None = row[1]
+        source_dir_raw: str | None = row[2]
+        if source_path_raw is None or source_dir_raw is None:
+            raise ValueError(
+                f"paper_content id={paper_content_id}: missing source path"
+            )
+        source_path = Path(source_path_raw)
+        cache_dir = Path(source_dir_raw)
+
+        # Only PDF sources are valid Marker inputs. pdf_upload always is; an
+        # arxiv row qualifies only when its source fell back to a .pdf.
+        is_pdf = source_path.suffix.lower() == ".pdf"
+        if not (kind == "pdf_upload" or (kind == "arxiv" and is_pdf)):
+            raise ValueError(
+                f"paper_content id={paper_content_id}: kind={kind!r} "
+                f"source={source_path.name!r} is not a PDF source"
+            )
+
+        # Marker extraction is a blocking, possibly multi-minute httpx call —
+        # run it off the event loop.
+        pdf_bytes = source_path.read_bytes()  # noqa: ASYNC240 — one-shot read before the to_thread Marker call
+        client = self._get_marker_client()
+        doc = await asyncio.to_thread(
+            client.extract, pdf_bytes, max_pages=max_pages,
+        )
+
+        # Overwrite the PyMuPDF baseline asset with Marker quality in place.
+        asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
+        # Re-chunk from Marker's cleaner section structure. PDF text isn't
+        # LaTeX → strip_comments=False (same call shape ingest uses for PDFs).
+        full_text, boundaries = PaperPipeline._marker_text_and_sections(doc)
+        # Marker text comes from resp.json() and can carry lone UTF-16
+        # surrogates (bad OCR / encoding artifacts) that SQLite can't store.
+        # Drop them so the chunk INSERTs never raise UnicodeEncodeError.
+        full_text = full_text.encode("utf-8", "ignore").decode("utf-8")
+        if not boundaries:
+            async with self._conn.execute(
+                "SELECT title FROM paper_content WHERE id = ?",
+                (paper_content_id,),
+            ) as cur:
+                title_row = await cur.fetchone()
+            title = str(title_row[0]) if title_row and title_row[0] else "Full text"
+            boundaries = [(title, 0)]
+        chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
+
+        # Embed FIRST (no mutation yet — safe to fail before the destructive
+        # deletes). Mirrors reingest._reingest_one ordering.
+        texts = [c.text for c in chunks]
+        embeddings = self._embedder.embed(texts)
+        sections_json = self._build_sections_json(
+            chunks, full_text, strip_comments=False,
+        )
+
+        # Destructive replace: delete old chunks + vectors, insert new.
+        await self._conn.execute(
+            "DELETE FROM chunks WHERE paper_content_id = ?", (paper_content_id,),
+        )
+        self._chroma.delete_paper(paper_content_id)
+        await self._conn.commit()
+
+        new_ids: list[int] = []
+        for c in chunks:
+            async with self._conn.execute(
+                "INSERT INTO chunks "
+                "(paper_content_id, section, char_start, char_end, text, dom_id) "
+                "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id),
+            ) as cur:
+                r = await cur.fetchone()
+                assert r is not None
+                new_ids.append(int(r[0]))
+
+        await self._conn.execute(
+            "UPDATE paper_content SET sections_json = ?, asset_status = 'marker_ready' "
+            "WHERE id = ?",
+            (sections_json, paper_content_id),
+        )
+        await self._conn.commit()
+
+        self._chroma.add_chunks(
+            paper_content_id=paper_content_id,
+            chunk_ids=new_ids,
+            texts=texts,
+            embeddings=embeddings,
         )
 
     @staticmethod

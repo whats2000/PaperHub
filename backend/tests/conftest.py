@@ -16,6 +16,10 @@ import pytest_asyncio
 os.environ.setdefault("PAPERHUB_INPROCESS_MODELS", "1")
 # Keep the boot banner out of test output.
 os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
+# Default the background Marker upgrade worker OFF in tests — it would otherwise
+# spawn on every app lifespan and dial the (non-running) Marker service. The
+# dedicated worker test enables it explicitly via run_worker.
+os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
 
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402
