@@ -8,6 +8,18 @@ services:
     # unset to run keyless (no LLM pass). GOOGLE_API_KEY is also accepted.
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Surya batch sizes are the dominant Marker VRAM knob. Each is read from
+      # the environment by surya/settings.py; the upstream GPU DEFAULTS are huge
+      # (DETECTOR=36 ~16GB, RECOGNITION=256/512 ~12-26GB, LAYOUT=32 ~7GB,
+      # TABLE_REC=64 ~10GB), which OOM-crashes a dense page on a 6 GB GPU.
+      # These conservative caps bound peak VRAM so a dense two-column page
+      # completes instead of crashing. Override per-host via host env / .env for
+      # bigger GPUs (e.g. RECOGNITION_BATCH_SIZE=64). VRAM-per-item (surya docs):
+      # detector ~440MB, recognition ~40-50MB, layout ~220MB, table_rec ~150MB.
+      - DETECTOR_BATCH_SIZE=${DETECTOR_BATCH_SIZE:-4}
+      - RECOGNITION_BATCH_SIZE=${RECOGNITION_BATCH_SIZE:-8}
+      - LAYOUT_BATCH_SIZE=${LAYOUT_BATCH_SIZE:-4}
+      - TABLE_REC_BATCH_SIZE=${TABLE_REC_BATCH_SIZE:-4}
     volumes:
       # Surya/marker model weights download ONCE into this named volume on the
       # first /extract and persist across restarts AND image rebuilds, so the

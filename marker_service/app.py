@@ -81,7 +81,29 @@ def _parse_page_range(page_range: str | None) -> list[int] | None:
 
 
 def _converter(page_range: list[int] | None = None) -> PdfConverter:
-    cfg_dict: dict[str, Any] = {"output_format": "json", "extract_images": True}
+    # Low-VRAM + trust-text-layer config (SRS v2.19 Plan F2.1).
+    #
+    # PaperHub's PDFs are digital-born (clean embedded text layer). On a 6 GB
+    # GPU, a dense two-column page makes Marker's LineBuilder flag the page for
+    # Surya re-OCR, triggering the line-level RECOGNITION pass ("Recognizing
+    # Text: 0/211") which fills ~5.9 GB and crashes the worker.
+    #
+    #   force_ocr   -> left UNSET (defaults False): we must NOT force OCR.
+    #   disable_ocr -> True: marker's LineBuilder sets `provider_lines_good =
+    #     True` for every page, so NO page is flagged
+    #     `text_extraction_method='surya'` and the text RECOGNITION pass (the
+    #     VRAM spike) is SKIPPED — the PDF's pdftext layer is trusted instead.
+    #     Crucially this only stops text *recognition*; line DETECTION, LAYOUT
+    #     analysis, and the figure/equation/table processors still run, so the
+    #     value-add (real figures+captions, equations->LaTeX, sections) is kept.
+    #     Source: marker/builders/line.py (`if self.disable_ocr: provider_lines
+    #     _good = True`) + marker/builders/ocr.py (only pages with
+    #     text_extraction_method=='surya' are OCR'd).
+    cfg_dict: dict[str, Any] = {
+        "output_format": "json",
+        "extract_images": True,
+        "disable_ocr": True,
+    }
     if page_range is not None:
         cfg_dict["page_range"] = page_range
     # use_llm + a Gemini service materially improves table/math/layout
