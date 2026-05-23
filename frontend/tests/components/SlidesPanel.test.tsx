@@ -56,4 +56,12 @@ describe("SlidesPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: /next slide/i }));
     expect(useSlidesStore.getState().currentPageBySession[7]).toBe(2);
   });
+
+  it("renders a draggable divider to resize the filmstrip rail", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    const divider = await screen.findByRole("separator", {
+      name: /resize filmstrip/i,
+    });
+    expect(divider).toHaveAttribute("aria-orientation", "vertical");
+  });
 });

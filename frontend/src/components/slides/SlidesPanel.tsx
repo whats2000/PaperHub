@@ -18,6 +18,16 @@ const NOTE_MIN_HEIGHT = 80;
 /** Initial height for the speaker note pane (px). */
 const NOTE_DEFAULT_HEIGHT = 160;
 
+/** Minimum width for the filmstrip rail (px). */
+const FILMSTRIP_MIN_WIDTH = 56;
+/** Maximum width for the filmstrip rail (px). */
+const FILMSTRIP_MAX_WIDTH = 280;
+/** Initial width for the filmstrip rail (px). */
+const FILMSTRIP_DEFAULT_WIDTH = 80;
+/** Horizontal chrome (rail padding + thumbnail border) subtracted from the
+ *  rail width to get the thumbnail render width. Matches the 80→64 default. */
+const FILMSTRIP_THUMB_INSET = 16;
+
 interface Props {
   sessionId: number;
   speakerNotes: Record<string, string>;
@@ -25,7 +35,8 @@ interface Props {
 
 /**
  * SlidesPanel — renders the compiled deck PDF with:
- * - A left filmstrip rail of thumbnail pages (clickable, active page marked).
+ * - A left filmstrip rail of thumbnail pages (clickable, active page marked),
+ *   with a draggable vertical divider to resize the rail.
  * - A main slide area showing the current page at container width.
  * - A header with title, prev/next navigation, page counter, and download links.
  * - A resizable speaker note pane below the slide (draggable horizontal divider).
@@ -43,6 +54,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [mainWidth, setMainWidth] = useState(0);
   const [noteHeight, setNoteHeight] = useState(NOTE_DEFAULT_HEIGHT);
+  const [filmstripWidth, setFilmstripWidth] = useState(FILMSTRIP_DEFAULT_WIDTH);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const roRef = useRef<ResizeObserver | null>(null);
@@ -130,6 +142,31 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     [noteHeight],
   );
 
+  // Draggable vertical divider between the filmstrip rail and the slide area.
+  // Drag right → wider filmstrip; clamped to [MIN, MAX].
+  const onFilmstripDividerPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = filmstripWidth;
+
+      const onMove = (ev: PointerEvent) => {
+        const next = Math.min(
+          Math.max(startWidth + (ev.clientX - startX), FILMSTRIP_MIN_WIDTH),
+          FILMSTRIP_MAX_WIDTH,
+        );
+        setFilmstripWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [filmstripWidth],
+  );
+
   const goTo = (page: number) => {
     const clamped = Math.min(Math.max(page, 1), numPages || 1);
     setCurrentPage(sessionId, clamped);
@@ -213,7 +250,10 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
           className="flex flex-1 min-h-0 overflow-hidden"
         >
           {/* Left filmstrip rail */}
-          <div className="flex flex-col gap-1 p-1 overflow-y-auto border-r border-border bg-muted/30 shrink-0 w-[80px]">
+          <div
+            className="flex flex-col gap-1 p-1 overflow-y-auto bg-muted/30 shrink-0"
+            style={{ width: filmstripWidth }}
+          >
             {Array.from(
               { length: numPages || deck?.page_count || 0 },
               (_, i) => {
@@ -231,7 +271,13 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
                         : "border-transparent hover:border-border"
                     }`}
                   >
-                    <Page pageNumber={pageNum} width={64} />
+                    <Page
+                      pageNumber={pageNum}
+                      width={Math.max(
+                        32,
+                        filmstripWidth - FILMSTRIP_THUMB_INSET,
+                      )}
+                    />
                     <span className="block text-center text-xs text-muted-foreground py-0.5">
                       {pageNum}
                     </span>
@@ -240,6 +286,15 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
               },
             )}
           </div>
+
+          {/* Draggable vertical divider between filmstrip + slide area */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="resize filmstrip"
+            onPointerDown={onFilmstripDividerPointerDown}
+            className="w-1.5 cursor-col-resize bg-border hover:bg-primary/40 transition-colors shrink-0"
+          />
 
           {/* Main content column: current slide */}
           <div
