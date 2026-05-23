@@ -105,7 +105,10 @@ def _converter(page_range: list[int] | None = None) -> PdfConverter:
         "disable_ocr": True,
     }
     if page_range is not None:
-        cfg_dict["page_range"] = page_range
+        # Marker's ConfigParser expects page_range as a comma-separated STRING
+        # (it calls parse_range_str(v) -> v.split(",")); passing a list[int]
+        # raises "AttributeError: 'list' object has no attribute 'split'".
+        cfg_dict["page_range"] = ",".join(str(p) for p in page_range)
     # use_llm + a Gemini service materially improves table/math/layout
     # accuracy. Enabled only when a Gemini API key is present in the env, so
     # the service still runs keyless (current behavior).
