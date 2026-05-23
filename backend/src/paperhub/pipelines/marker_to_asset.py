@@ -19,7 +19,8 @@ from paperhub.pipelines.paper_asset import (
 _TAG = re.compile(r"<[^>]+>")
 
 
-def _strip_html(html: str) -> str:
+def strip_html(html: str) -> str:
+    """Strip HTML tags to plain text (shared with the paper pipeline)."""
     return _TAG.sub("", html or "").strip()
 
 
@@ -56,7 +57,7 @@ def marker_doc_to_asset(doc: MarkerDoc, *, source_dir: Path) -> PaperAsset:
             figures.append(
                 FigureAsset(
                     id=fid,
-                    caption=_strip_html(block.html),
+                    caption=strip_html(block.html),
                     page=block.page,
                     section=sec,
                     image_path=f"figures/{fid}.png",

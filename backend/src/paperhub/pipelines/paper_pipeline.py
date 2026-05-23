@@ -54,7 +54,7 @@ from paperhub.pipelines.marker_client import (
     MarkerDoc,
     get_marker_client,
 )
-from paperhub.pipelines.marker_to_asset import _strip_html, marker_doc_to_asset
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, strip_html
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
@@ -736,7 +736,7 @@ class PaperPipeline:
             if block.block_type in ("Figure", "Picture"):
                 continue
             sec = cls._marker_block_section(block)
-            piece = block.latex.strip() if block.latex else _strip_html(block.html)
+            piece = block.latex.strip() if block.latex else strip_html(block.html)
             if not piece:
                 continue
             if sec and sec not in seen_sections:
