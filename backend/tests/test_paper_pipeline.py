@@ -888,3 +888,97 @@ async def test_pdf_ingest_via_marker_writes_asset(
         chunks_row = await cur.fetchone()
     assert chunks_row is not None
     assert int(chunks_row[0]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# F2-T6: arXiv ingest emits PaperAsset (additive)
+# ---------------------------------------------------------------------------
+
+# A 1x1 PNG in raw bytes (same as _TINY_PNG_B64 decoded above).
+_TINY_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0bIDATx\x9cc\xf8"
+    b"\xcf@\x0f\x00\x03\x86\x01\x80Z4}k\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.mark.asyncio
+async def test_arxiv_ingest_emits_paper_asset(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    tmp_path: Path,
+) -> None:
+    """After arXiv ingest (LaTeX path), read_paper_asset must return a PaperAsset
+    with the sections, figures, and equations from the fixture source."""
+    from paperhub.pipelines.paper_asset import read_paper_asset
+
+    pipeline, conn, cache_root = pipeline_env
+
+    # Build a tiny fake source dir: section + figure + equation.
+    fake_src = tmp_path / "fixture_src"
+    (fake_src / "figs").mkdir(parents=True)
+    (fake_src / "figs" / "f.png").write_bytes(_TINY_PNG_BYTES)
+    (fake_src / "main.tex").write_text(
+        r"""\documentclass{article}
+\begin{document}
+\section{Intro}
+Some body text here is present in the introduction section of this document.
+\begin{figure}
+\includegraphics{figs/f}
+\caption{A diagram.}
+\end{figure}
+\begin{equation}E=mc^2\end{equation}
+\end{document}""",
+        encoding="utf-8",
+    )
+
+    def fake_dl(arxiv_id: str, *, cache_root: Path) -> Path:
+        target = cache_root / arxiv_id / "source"
+        target.mkdir(parents=True, exist_ok=True)
+        for p in fake_src.rglob("*"):
+            if p.is_file():
+                d = target / p.relative_to(fake_src)
+                d.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, d)
+        return target
+
+    # Create a session so the papers FK is satisfied.
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('asset test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=fake_dl,
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.search_arxiv",
+            side_effect=_fake_search_arxiv,
+        ),
+    ):
+        res = await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id="1234.5678")
+        )
+
+    # Read the source_dir_path back from the DB and check the asset.
+    async with conn.execute(
+        "SELECT source_dir_path FROM paper_content WHERE id = ?",
+        (res.paper_content_id,),
+    ) as cur:
+        sdp_row = await cur.fetchone()
+    assert sdp_row is not None
+    asset = read_paper_asset(Path(str(sdp_row[0])))
+
+    assert asset is not None, "PaperAsset must be written for arXiv LaTeX ingest"
+    assert any(s.name == "Intro" for s in asset.sections), (
+        f"Expected section 'Intro' in asset.sections; got {[s.name for s in asset.sections]}"
+    )
+    assert any("diagram" in f.caption.lower() for f in asset.figures), (
+        f"Expected a figure with 'diagram' in caption; got {[f.caption for f in asset.figures]}"
+    )
+    assert any("mc^2" in e.latex for e in asset.equations), (
+        f"Expected equation with 'mc^2'; got {[e.latex for e in asset.equations]}"
+    )

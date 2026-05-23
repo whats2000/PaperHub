@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -48,6 +49,7 @@ from paperhub.pipelines.extract import (
     extract_pdf_with_headings,
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.latex_to_asset import latex_source_to_asset
 from paperhub.pipelines.marker_client import (
     MarkerBlock,
     MarkerClient,
@@ -60,6 +62,8 @@ from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
+
+logger = logging.getLogger(__name__)
 
 _PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 _PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
@@ -267,6 +271,19 @@ class PaperPipeline:
         flat_path = cache_dir / "source.flattened.tex"
         flat_path.write_text(full_text, encoding="utf-8")
 
+        # Emit PaperAsset from the LaTeX source (additive — never breaks ingest).
+        # source_dir = the extracted source/ dir (figure files live here).
+        # cache_dir  = the paper cache root (asset/ is written under it).
+        try:
+            _asset = latex_source_to_asset(source_dir, full_text, source_dir=cache_dir)
+            write_paper_asset(_asset, cache_dir)
+        except Exception:
+            logger.warning(
+                "PaperAsset extraction failed for arxiv %s; continuing",
+                arxiv_id,
+                exc_info=True,
+            )
+
         # Chunk first — offsets are relative to strip_latex_comments(full_text),
         # which is exactly what chunk_text computes internally (strip_comments=True).
         # Chunking before rendering lets us inject sentinel tokens at each chunk's
@@ -376,8 +393,7 @@ class PaperPipeline:
         source identifier, not rendering path) and the same content_key
         as the LaTeX path so cache lookups stay coherent across modes.
         """
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "arxiv source tarball unavailable for %s (%s: %s); "
             "falling back to PDF ingest. Equation rendering quality "
             "will be lower than LaTeX.",
