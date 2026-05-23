@@ -65,15 +65,25 @@ async def generate_section(
     response_language: str,
     memory_context: str,
     chunk_ids: list[int] | None = None,
+    available_figures: list[str] | None = None,
 ) -> str:
     """Stream-generate a single Beamer ``\\begin{frame}...\\end{frame}`` block.
 
     Slot: ``slides_section/v1``.  Traced as ``report:section``.
     Records the section title, chunk IDs used, and the rendered frame text.
+
+    ``available_figures`` is the list of real figure stems on disk (from
+    :func:`~paperhub.pipelines.slide_pipeline.figures.collect_figures`).
+    It is forwarded to the prompt so the LLM only references real files.
     """
+    fig_list = sorted(available_figures) if available_figures else []
     async with tracer.step(agent="report", tool="report:section", model=model) as step:
         step.record_args(
-            {"section_title": section.title, "chunk_ids": chunk_ids or []}
+            {
+                "section_title": section.title,
+                "chunk_ids": chunk_ids or [],
+                "available_figures": fig_list,
+            }
         )
         tokens: list[str] = []
         async for tok in adapter.stream(
@@ -85,6 +95,7 @@ async def generate_section(
                 "chunks_block": chunks_block,
                 "response_language": response_language or "the user's language",
                 "memory_context": memory_context,
+                "available_figures": "\n".join(fig_list) or "(none)",
             },
             model=model,
         ):

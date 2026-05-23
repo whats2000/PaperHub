@@ -11,6 +11,7 @@ def test_slide_slots_load_and_format() -> None:
     sec.user_template.format(
         section_title="Motivation", section_intent="why", chunks_block="...",
         deck_title="X", response_language="English", memory_context="",
+        available_figures="model\nattn",
     )
 
     notes = reg.get("slides_notes/v1")

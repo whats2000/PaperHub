@@ -39,8 +39,32 @@ async def test_generate_section_streams_frame(fake_tracer: Tracer) -> None:
         tracer=fake_tracer, model="m", deck_title="T",
         section=PlannedSection(title="Motivation", intent="why", paper_content_ids=[1]),
         chunks_block="chunk text", response_language="English", memory_context="",
+        available_figures=["model", "attn"],
     )
     assert "\\begin{frame}{Motivation}" in frame
+
+
+@pytest.mark.asyncio
+async def test_generate_section_passes_available_figures_to_template(fake_tracer: Tracer) -> None:
+    """available_figures is forwarded to the adapter as 'available_figures' variable."""
+    received: dict[str, Any] = {}
+
+    class _CapturingAdapter:
+        def stream(self, *, variables: dict[str, Any], **kw: Any):  # type: ignore[no-untyped-def]
+            received.update(variables)
+            async def g():  # type: ignore[no-untyped-def]
+                yield "\\begin{frame}\\end{frame}"
+            return g()
+
+    await generate_section(
+        adapter=_CapturingAdapter(), tracer=fake_tracer, model="m", deck_title="T",
+        section=PlannedSection(title="S", intent="i", paper_content_ids=[]),
+        chunks_block="x", response_language="English", memory_context="",
+        available_figures=["fig_a", "fig_b"],
+    )
+    assert "available_figures" in received
+    assert "fig_a" in received["available_figures"]
+    assert "fig_b" in received["available_figures"]
 
 
 @pytest.mark.asyncio

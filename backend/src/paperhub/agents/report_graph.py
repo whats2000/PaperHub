@@ -23,6 +23,11 @@ from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import AgentState, PlannedSection
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.assemble import AssembleInput, assemble_deck
+from paperhub.pipelines.slide_pipeline.figures import (
+    FigureIndex,
+    collect_figures,
+    neutralize_unknown_graphics,
+)
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
 from paperhub.tracing.tracer import Tracer
 
@@ -123,6 +128,13 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
         retr = deps.retriever
 
+        # Collect real figure dirs + stems BEFORE the section fan-out so every
+        # section gets the same grounded list (avoids race / partial index).
+        raw_cache_dirs = [p["source_dir"] for p in papers if p["source_dir"]]
+        fig_index: FigureIndex = await asyncio.to_thread(
+            collect_figures, raw_cache_dirs
+        )
+
         async def _one_section(section: PlannedSection) -> str:
             chunks: list[Any] = []
             if retr is not None:
@@ -146,6 +158,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 response_language=lang,
                 memory_context=mem,
                 chunk_ids=[c.chunk_id for c in chunks],
+                available_figures=sorted(fig_index.stems),
             )
 
         sem = asyncio.Semaphore(_SECTION_CONCURRENCY)
@@ -158,23 +171,30 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             await asyncio.gather(*[_bounded(s) for s in plan.sections])
         )
 
-        # collect graphicspath dirs across contributing papers
-        cache_dirs = [p["source_dir"] for p in papers if p["source_dir"]]
+        # Record figure index: dirs come from collect_figures (recursive walk,
+        # forward-slashed), stems are the known-real figure basenames.
         async with deps.tracer.step(
             agent="report", tool="report:figure_path_rewrite", model=None
         ) as fstep:
-            fstep.record_args({"cache_dirs": cache_dirs})
-            fstep.record_result({"count": len(cache_dirs)})
+            fstep.record_args({"cache_dirs": raw_cache_dirs})
+            fstep.record_result(
+                {"fig_dirs": fig_index.dirs, "fig_count": len(fig_index.stems)}
+            )
 
         tex = assemble_deck(
             AssembleInput(
                 title=plan.title,
                 theme="metropolis",
                 additional_tex_macros=[],
-                cache_source_dirs=cache_dirs,
+                cache_source_dirs=fig_index.dirs,  # recursive subdirs, posix
                 frames=frames,
             )
         )
+
+        # Safety net: replace any hallucinated \includegraphics{name} that
+        # does not correspond to a real file on disk with a text placeholder,
+        # guaranteeing no "File not found" fatal compile error.
+        tex = neutralize_unknown_graphics(tex, fig_index.stems)
 
         slides_dir = (
             deps.workspace
