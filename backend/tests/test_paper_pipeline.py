@@ -16,6 +16,7 @@ import pytest
 import pytest_asyncio
 
 from paperhub.pipelines.arxiv_client import ArxivResult
+from paperhub.pipelines.marker_client import MarkerBlock, MarkerDoc
 from paperhub.pipelines.paper_pipeline import (
     IngestRequest,
     PaperPipeline,
@@ -42,6 +43,66 @@ class FakeEmbedder:
         vecs = rng.randn(len(texts), 384).astype(np.float32)
         norms = np.linalg.norm(vecs, axis=1, keepdims=True)
         return vecs / np.where(norms > 0, norms, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Fake Marker client (no Docker/service; deterministic MarkerDoc)
+# ---------------------------------------------------------------------------
+
+# A 1x1 transparent PNG (valid, decodes cleanly with base64 validate=True).
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+class _FakeMarker:
+    """Stub MarkerClient.extract → a fixed MarkerDoc with one of each block."""
+
+    def extract(self, pdf_bytes: bytes) -> MarkerDoc:
+        return MarkerDoc(
+            blocks=[
+                MarkerBlock(
+                    block_type="SectionHeader",
+                    html="<h2>Intro</h2>",
+                    section_hierarchy={"1": "Intro"},
+                    page=1,
+                ),
+                MarkerBlock(
+                    block_type="Text",
+                    html=(
+                        "<p>Body text about transformers and attention "
+                        "mechanisms used in modern models.</p>"
+                    ),
+                    section_hierarchy={"1": "Intro"},
+                    page=1,
+                ),
+                MarkerBlock(
+                    block_type="Figure",
+                    html="<p>Figure 1: arch.</p>",
+                    images={"fig.png": _TINY_PNG_B64},
+                    section_hierarchy={"1": "Intro"},
+                    page=1,
+                ),
+                MarkerBlock(
+                    block_type="Equation",
+                    latex="a^2+b^2=c^2",
+                    section_hierarchy={"1": "Intro"},
+                    page=1,
+                ),
+            ]
+        )
+
+
+def _write_minimal_pdf(path: Path) -> None:
+    """Write a structurally valid 1-page PDF (PyMuPDF-built so the metadata +
+    PyMuPDF render paths in the pipeline still work)."""
+    import pymupdf
+
+    doc = pymupdf.open()  # type: ignore[no-untyped-call]
+    doc.new_page()
+    doc.save(str(path))
+    doc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +161,26 @@ async def pipeline_env(
         papers_cache_dir=cache_root,
         chroma=chroma,
         embedder=FakeEmbedder(),
+    )
+    yield pipeline, migrated_db, cache_root
+
+
+@pytest_asyncio.fixture
+async def pipeline_env_with_marker(
+    migrated_db: aiosqlite.Connection,
+    tmp_path: Path,
+) -> AsyncIterator[tuple[PaperPipeline, aiosqlite.Connection, Path]]:
+    """Like ``pipeline_env`` but injects a ``_FakeMarker`` so the PDF ingest
+    path runs without a reachable Marker service."""
+    cache_root = tmp_path / "papers_cache"
+    chroma_dir = tmp_path / "chroma"
+    chroma = ChromaStore(chroma_dir)
+    pipeline = PaperPipeline(
+        migrated_db,
+        papers_cache_dir=cache_root,
+        chroma=chroma,
+        embedder=FakeEmbedder(),
+        marker_client=_FakeMarker(),
     )
     yield pipeline, migrated_db, cache_root
 
@@ -722,10 +803,10 @@ async def test_latex_ingest_persists_dom_ids(
 
 @pytest.mark.asyncio
 async def test_pdf_upload_ingest_leaves_dom_id_null(
-    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    pipeline_env_with_marker: tuple[PaperPipeline, aiosqlite.Connection, Path],
 ) -> None:
     """PDF-path chunks must keep dom_id=NULL — no sentinel injection for PDF papers."""
-    pipeline, conn, _cache = pipeline_env
+    pipeline, conn, _cache = pipeline_env_with_marker
 
     await conn.execute("INSERT INTO chat_sessions (title) VALUES ('pdf dom_id test')")
     await conn.commit()
@@ -755,3 +836,55 @@ async def test_pdf_upload_ingest_leaves_dom_id_null(
     assert non_null_count == 0, (
         f"PDF chunks have non-null dom_id (expected 0, got {non_null_count}/{total})"
     )
+
+
+# ---------------------------------------------------------------------------
+# F2-T5: PDF ingest via Marker → PaperAsset
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pdf_ingest_via_marker_writes_asset(
+    pipeline_env_with_marker: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    tmp_path: Path,
+) -> None:
+    """PDF upload ingest must route through the (faked) Marker client, write a
+    PaperAsset bundle (figures + equations + sections), and re-derive RAG
+    chunks from the Marker block structure."""
+    from paperhub.pipelines.paper_asset import read_paper_asset
+
+    pipeline, conn, _cache_root = pipeline_env_with_marker
+
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('marker test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    pdf = tmp_path / "p.pdf"
+    _write_minimal_pdf(pdf)
+
+    res = await pipeline.ingest(
+        IngestRequest(session_id=session_id, upload_path=pdf, upload_kind="pdf")
+    )
+
+    async with conn.execute(
+        "SELECT source_dir_path FROM paper_content WHERE id = ?",
+        (res.paper_content_id,),
+    ) as cur:
+        sdp_row = await cur.fetchone()
+    assert sdp_row is not None
+    asset = read_paper_asset(Path(str(sdp_row[0])))
+    assert asset is not None
+    assert len(asset.figures) == 1
+    assert asset.equations[0].latex == "a^2+b^2=c^2"
+    assert any(s.name == "Intro" for s in asset.sections)
+
+    async with conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ?",
+        (res.paper_content_id,),
+    ) as cur:
+        chunks_row = await cur.fetchone()
+    assert chunks_row is not None
+    assert int(chunks_row[0]) >= 1

@@ -48,6 +48,14 @@ from paperhub.pipelines.extract import (
     extract_pdf_with_headings,
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.marker_client import (
+    MarkerBlock,
+    MarkerClient,
+    MarkerDoc,
+    get_marker_client,
+)
+from paperhub.pipelines.marker_to_asset import _strip_html, marker_doc_to_asset
+from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.title_extract import llm_extract_title
@@ -124,6 +132,7 @@ class PaperPipeline:
         papers_cache_dir: Path,
         chroma: ChromaStore,
         embedder: Embedder | None = None,
+        marker_client: MarkerClient | None = None,
         llm: LlmAdapter | None = None,
         title_extract_model: str | None = None,
     ) -> None:
@@ -131,12 +140,22 @@ class PaperPipeline:
         self._cache_root = papers_cache_dir
         self._chroma = chroma
         self._embedder = embedder or get_embedder()
+        # Marker HTTP client for PDF extraction. Lazily resolved on first PDF
+        # ingest (mirrors how ``embedder`` defaults), so callers that never
+        # ingest a PDF — and tests — don't need a reachable Marker service.
+        self._marker_client = marker_client
         # Optional LLM fallback for PDF title extraction. Both must be set
         # to enable the path; either ``None`` (legacy callers, tests) leaves
         # the existing metadata + page-1-font heuristic + filename-stem
         # ladder untouched.
         self._llm = llm
         self._title_extract_model = title_extract_model
+
+    def _get_marker_client(self) -> MarkerClient:
+        """Lazily resolve the Marker client on first PDF use (mirrors embedder)."""
+        if self._marker_client is None:
+            self._marker_client = get_marker_client()
+        return self._marker_client
 
     async def ingest(self, req: IngestRequest) -> IngestResult:
         """Ingest a paper, returning immediately on cache hit."""
@@ -483,11 +502,19 @@ class PaperPipeline:
 
             pdf_headings: list[tuple[str, int]] = []
         else:
-            # PDF: detect headings (font-size band) for section navigation;
-            # strip_comments=False at chunk time (PDF text isn't LaTeX).
-            # No sentinel injection for PDF — chunks keep dom_id=None.
-            full_text, pdf_headings = extract_pdf_with_headings(target)
+            # PDF: extract structure via Marker (F2-T5) instead of PyMuPDF
+            # text/images. Marker yields ordered typed blocks (text / figure /
+            # equation / section-header); we write a PaperAsset bundle (figures
+            # + captions + equations + sections — consumed by the F3 slide
+            # agent) and re-derive full_text + section boundaries from the
+            # non-figure blocks in document order.
+            doc = self._get_marker_client().extract(target.read_bytes())
+            asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+            write_paper_asset(asset, cache_dir)
+            full_text, pdf_headings = self._marker_text_and_sections(doc)
             source_path = target
+            # TODO(F2-T5): prefer Marker HTML for the Citation Canvas; for now
+            # keep the PyMuPDF render so the Canvas HTML is unchanged.
             render_html(
                 source=source_path, kind=kind, out_path=html_path,
                 resource_dir=None,
@@ -678,6 +705,48 @@ class PaperPipeline:
         return IngestResult(
             paper_content_id, papers_id, cache_hit=False, title=title_hint,
         )
+
+    @staticmethod
+    def _marker_block_section(block: MarkerBlock) -> str | None:
+        """Deepest section-hierarchy level for a Marker block (mirrors
+        ``marker_to_asset._section_of``)."""
+        sh = block.section_hierarchy or {}
+        if not sh:
+            return None
+        return sh[max(sh.keys())]
+
+    @classmethod
+    def _marker_text_and_sections(
+        cls, doc: MarkerDoc,
+    ) -> tuple[str, list[tuple[str, int]]]:
+        """Derive ``full_text`` + ``(section_name, char_offset)`` boundaries from
+        a Marker doc's non-figure blocks, concatenated in document order.
+
+        Figure blocks are skipped (their HTML is just the caption — captured in
+        the PaperAsset instead). Each block's text is plain-text-extracted from
+        its HTML and joined with blank lines so the chunker sees paragraph
+        breaks. The first char offset at which each NEW section name appears is
+        recorded as a boundary, so chunks are tagged with the owning section.
+        """
+        parts: list[str] = []
+        boundaries: list[tuple[str, int]] = []
+        seen_sections: set[str] = set()
+        cursor = 0
+        for block in doc.blocks:
+            if block.block_type in ("Figure", "Picture"):
+                continue
+            sec = cls._marker_block_section(block)
+            piece = block.latex.strip() if block.latex else _strip_html(block.html)
+            if not piece:
+                continue
+            if sec and sec not in seen_sections:
+                boundaries.append((sec, cursor))
+                seen_sections.add(sec)
+            parts.append(piece)
+            # +2 for the "\n\n" separator joined below.
+            cursor += len(piece) + 2
+        full_text = "\n\n".join(parts)
+        return full_text, boundaries
 
     @staticmethod
     def _pdf_boundaries(
