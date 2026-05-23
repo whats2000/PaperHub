@@ -139,6 +139,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F2.1: Idempotent column-add for paper_content.asset_status
+    # Tracks the PaperAsset build state for each paper.  Values:
+    #   'latex' | 'pymupdf_only' | 'marker_pending' | 'marker_ready' | 'marker_failed'
+    # NULL for rows ingested before Plan F2 (treated as "asset not yet built").
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "asset_status" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN asset_status TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # W6-1: Idempotent column-add for chunks.dom_id
     # (pre-existing DBs created before Plan D Wave 6 won't have this column).
     # Populated at re-ingest / sentinel-injection time; rows that haven't been
