@@ -94,17 +94,6 @@ class _FakeMarker:
         )
 
 
-def _write_minimal_pdf(path: Path) -> None:
-    """Write a structurally valid 1-page PDF (PyMuPDF-built so the metadata +
-    PyMuPDF render paths in the pipeline still work)."""
-    import pymupdf
-
-    doc = pymupdf.open()  # type: ignore[no-untyped-call]
-    doc.new_page()
-    doc.save(str(path))
-    doc.close()
-
-
 # ---------------------------------------------------------------------------
 # Fake ArxivResult (returned by mocked search_arxiv)
 # ---------------------------------------------------------------------------
@@ -165,13 +154,32 @@ async def pipeline_env(
     yield pipeline, migrated_db, cache_root
 
 
+@pytest.fixture(autouse=True)
+def _marker_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every test to a Marker-unreachable world (F2.1).
+
+    PDF ingest now calls ``marker_available()`` synchronously to decide the
+    persisted ``asset_status`` ('marker_pending' vs 'pymupdf_only'). Patch it
+    to ``False`` by default so tests never hit a real socket; the one test that
+    exercises the pending path overrides this locally.
+    """
+    monkeypatch.setattr(
+        "paperhub.pipelines.paper_pipeline.marker_available", lambda: False
+    )
+
+
 @pytest_asyncio.fixture
 async def pipeline_env_with_marker(
     migrated_db: aiosqlite.Connection,
     tmp_path: Path,
 ) -> AsyncIterator[tuple[PaperPipeline, aiosqlite.Connection, Path]]:
-    """Like ``pipeline_env`` but injects a ``_FakeMarker`` so the PDF ingest
-    path runs without a reachable Marker service."""
+    """Like ``pipeline_env`` but injects a ``_FakeMarker``.
+
+    F2.1: PDF ingest no longer calls Marker synchronously — it extracts with
+    PyMuPDF and merely records whether a Marker upgrade should follow. The
+    injected client is harmless (unused by ingest) and kept so a future
+    background-worker test can reuse this fixture.
+    """
     cache_root = tmp_path / "papers_cache"
     chroma_dir = tmp_path / "chroma"
     chroma = ChromaStore(chroma_dir)
@@ -844,42 +852,39 @@ async def test_pdf_upload_ingest_leaves_dom_id_null(
 
 
 @pytest.mark.asyncio
-async def test_pdf_ingest_via_marker_writes_asset(
-    pipeline_env_with_marker: tuple[PaperPipeline, aiosqlite.Connection, Path],
-    tmp_path: Path,
+async def test_pdf_ingest_uses_pymupdf_baseline_when_marker_unavailable(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
 ) -> None:
-    """PDF upload ingest must route through the (faked) Marker client, write a
-    PaperAsset bundle (figures + equations + sections), and re-derive RAG
-    chunks from the Marker block structure."""
+    """F2.1: PDF upload ingest extracts SYNCHRONOUSLY with PyMuPDF (no Marker
+    call), writes a degraded PaperAsset baseline, produces RAG chunks, and —
+    with Marker unreachable (autouse ``_marker_unavailable``) — persists
+    ``asset_status='pymupdf_only'``."""
     from paperhub.pipelines.paper_asset import read_paper_asset
 
-    pipeline, conn, _cache_root = pipeline_env_with_marker
+    pipeline, conn, _cache_root = pipeline_env
 
-    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('marker test')")
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('pymupdf test')")
     await conn.commit()
     async with conn.execute("SELECT last_insert_rowid()") as cur:
         row = await cur.fetchone()
     assert row is not None
     session_id = int(row[0])
 
-    pdf = tmp_path / "p.pdf"
-    _write_minimal_pdf(pdf)
-
     res = await pipeline.ingest(
-        IngestRequest(session_id=session_id, upload_path=pdf, upload_kind="pdf")
+        IngestRequest(
+            session_id=session_id, upload_path=_SAMPLE_PDF, upload_kind="pdf",
+        )
     )
 
     async with conn.execute(
-        "SELECT source_dir_path FROM paper_content WHERE id = ?",
+        "SELECT source_dir_path, asset_status FROM paper_content WHERE id = ?",
         (res.paper_content_id,),
     ) as cur:
         sdp_row = await cur.fetchone()
     assert sdp_row is not None
     asset = read_paper_asset(Path(str(sdp_row[0])))
-    assert asset is not None
-    assert len(asset.figures) == 1
-    assert asset.equations[0].latex == "a^2+b^2=c^2"
-    assert any(s.name == "Intro" for s in asset.sections)
+    assert asset is not None, "PyMuPDF baseline PaperAsset must be written"
+    assert sdp_row[1] == "pymupdf_only"
 
     async with conn.execute(
         "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ?",
@@ -888,6 +893,80 @@ async def test_pdf_ingest_via_marker_writes_asset(
         chunks_row = await cur.fetchone()
     assert chunks_row is not None
     assert int(chunks_row[0]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_pdf_ingest_enqueues_marker_when_available(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the Marker service IS reachable, PDF ingest still returns on the
+    PyMuPDF baseline but records ``asset_status='marker_pending'`` so a
+    background worker can run the high-fidelity upgrade later."""
+    pipeline, conn, _cache_root = pipeline_env
+
+    monkeypatch.setattr(
+        "paperhub.pipelines.paper_pipeline.marker_available", lambda: True
+    )
+
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('pending test')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    res = await pipeline.ingest(
+        IngestRequest(
+            session_id=session_id, upload_path=_SAMPLE_PDF, upload_kind="pdf",
+        )
+    )
+
+    async with conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?",
+        (res.paper_content_id,),
+    ) as cur:
+        as_row = await cur.fetchone()
+    assert as_row is not None
+    assert as_row[0] == "marker_pending"
+
+
+@pytest.mark.asyncio
+async def test_arxiv_latex_ingest_asset_status_is_latex(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+) -> None:
+    """arXiv LaTeX ingest builds the asset synchronously from source, so its
+    ``asset_status`` is 'latex' (never a Marker-pending PDF state)."""
+    pipeline, conn, _ = pipeline_env
+
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('latex status')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=_make_fake_download(_ARXIV_SAMPLE),
+        ),
+        patch(
+            "paperhub.pipelines.paper_pipeline.search_arxiv",
+            side_effect=_fake_search_arxiv,
+        ),
+    ):
+        res = await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id=_FIXTURE_ARXIV_ID)
+        )
+
+    async with conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?",
+        (res.paper_content_id,),
+    ) as cur:
+        as_row = await cur.fetchone()
+    assert as_row is not None
+    assert as_row[0] == "latex"
 
 
 # ---------------------------------------------------------------------------
