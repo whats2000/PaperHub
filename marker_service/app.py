@@ -20,11 +20,12 @@ Reconciled against the REAL marker JSONOutput schema:
 """
 from __future__ import annotations
 
+import os
 import re
 import tempfile
 from typing import Any
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from marker.config.parser import ConfigParser
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
@@ -32,6 +33,15 @@ from marker.models import create_model_dict
 app = FastAPI(title="paperhub-marker")
 
 _models: dict[str, Any] | None = None
+
+
+def _gemini_key() -> str | None:
+    """Gemini key from env (GEMINI_API_KEY preferred, GOOGLE_API_KEY accepted)."""
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+
+
+def _use_llm() -> bool:
+    return bool(_gemini_key())
 
 # block id looks like "/page/0/Figure/3" -> page 0
 _PAGE_RE = re.compile(r"/page/(\d+)/")
@@ -51,14 +61,43 @@ def _ensure_models() -> dict[str, Any]:
     return _models
 
 
-def _converter() -> PdfConverter:
-    cfg = ConfigParser({"output_format": "json", "extract_images": True})
+def _parse_page_range(page_range: str | None) -> list[int] | None:
+    """Parse a page_range form field into the list Marker expects.
+
+    Accepts a comma-separated list of page indices ("0,1,2,3,4") OR a
+    "start-end" inclusive range ("0-4"). Returns None when absent/blank
+    (whole-document behavior).
+    """
+    if not page_range:
+        return None
+    text = page_range.strip()
+    if not text:
+        return None
+    if "-" in text and "," not in text:
+        start_s, _, end_s = text.partition("-")
+        start, end = int(start_s.strip()), int(end_s.strip())
+        return list(range(start, end + 1))
+    return [int(part.strip()) for part in text.split(",") if part.strip()]
+
+
+def _converter(page_range: list[int] | None = None) -> PdfConverter:
+    cfg_dict: dict[str, Any] = {"output_format": "json", "extract_images": True}
+    if page_range is not None:
+        cfg_dict["page_range"] = page_range
+    # use_llm + a Gemini service materially improves table/math/layout
+    # accuracy. Enabled only when a Gemini API key is present in the env, so
+    # the service still runs keyless (current behavior).
+    key = _gemini_key()
+    if key:
+        cfg_dict["use_llm"] = True
+        cfg_dict["gemini_api_key"] = key
+    cfg = ConfigParser(cfg_dict)
     return PdfConverter(
         config=cfg.generate_config_dict(),
         artifact_dict=_ensure_models(),
         renderer=cfg.get_renderer(),
         processor_list=cfg.get_processors(),
-        llm_service=None,
+        llm_service=cfg.get_llm_service() if key else None,
     )
 
 
@@ -146,16 +185,24 @@ def _attach_captions(blocks: list[dict[str, Any]]) -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "models_loaded": _models is not None}
+    return {
+        "status": "ok",
+        "models_loaded": _models is not None,
+        "use_llm": _use_llm(),
+    }
 
 
 @app.post("/extract")
-async def extract(file: UploadFile = File(...)) -> dict[str, Any]:
+async def extract(
+    file: UploadFile = File(...),
+    page_range: str | None = Form(default=None),
+) -> dict[str, Any]:
     data = await file.read()
+    pages = _parse_page_range(page_range)
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
         tf.write(data)
         path = tf.name
-    rendered = _converter()(path)
+    rendered = _converter(pages)(path)
     blocks: list[dict[str, Any]] = []
     _flatten(rendered, blocks)
     _attach_captions(blocks)
