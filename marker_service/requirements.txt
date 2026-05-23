@@ -1,0 +1,4 @@
+marker-pdf
+fastapi
+uvicorn[standard]
+python-multipart
