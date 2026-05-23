@@ -54,10 +54,14 @@ def marker_doc_to_asset(doc: MarkerDoc, *, source_dir: Path) -> PaperAsset:
                 continue
             fid = f"fig-{fig_n:03d}"
             (figs_dir / f"{fid}.png").write_bytes(data)
+            # The marker service resolves the caption (often a sibling Caption
+            # block, not the figure block's own html). Prefer it; fall back to
+            # the figure block html for older/hand-built payloads.
+            caption = block.caption if block.caption is not None else strip_html(block.html)
             figures.append(
                 FigureAsset(
                     id=fid,
-                    caption=strip_html(block.html),
+                    caption=caption,
                     page=block.page,
                     section=sec,
                     image_path=f"figures/{fid}.png",

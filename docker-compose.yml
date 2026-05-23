@@ -1,0 +1,16 @@
+name: paperhub
+services:
+  marker:
+    build: ./marker_service
+    ports: ["8002:8002"]
+    # GPU: requires nvidia-container-toolkit on the host. Marker falls back to
+    # CPU automatically if this block is commented out or no GPU is visible.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+  # NOTE: backend + modelserver services will join here as the project goes full-Docker.

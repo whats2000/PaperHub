@@ -21,6 +21,10 @@ class MarkerBlock:
     images: dict[str, str] = field(default_factory=dict)  # name -> base64 PNG
     bbox: list[float] = field(default_factory=list)
     page: int | None = None
+    # Caption text resolved by the marker service: a figure's caption may live
+    # in a sibling Caption/Footnote block rather than the figure block's own
+    # html, so the service pairs them and writes the result here.
+    caption: str | None = None
 
 
 @dataclass
@@ -38,6 +42,7 @@ def _parse(payload: dict[str, Any]) -> MarkerDoc:
             images=b.get("images") or {},
             bbox=b.get("bbox") or [],
             page=b.get("page"),
+            caption=b.get("caption"),
         )
         for b in payload.get("blocks", [])
     ]
