@@ -75,6 +75,12 @@ class Settings:
     # ── Marker PDF extraction service (v2.19) ───────────────────────────
     marker_service_url: str
     inprocess_marker: bool
+    # Max pages sent to Marker per /extract call. A whole large PDF in one
+    # call can exhaust a small GPU's VRAM → Marker hot-swaps models between
+    # stages → very slow. The client splits the PDF into page-batches of this
+    # size and concatenates the (absolute-page-numbered) blocks. Default 5 is
+    # safe for ~6 GB VRAM; raise it for bigger GPUs.
+    marker_max_pages: int
 
 
 def load_settings() -> Settings:
@@ -149,6 +155,7 @@ def load_settings() -> Settings:
         # Marker PDF extraction service (v2.19).
         marker_service_url=os.environ.get("PAPERHUB_MARKER_URL", "http://127.0.0.1:8002"),
         inprocess_marker=os.environ.get("PAPERHUB_INPROCESS_MARKER", "0") == "1",
+        marker_max_pages=int(os.environ.get("PAPERHUB_MARKER_MAX_PAGES", "5")),
 
         # 9. Report Agent (slides) model selection.
         report_plan_model=os.environ.get(

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+import pymupdf
 
 from paperhub.config import load_settings
 
@@ -59,10 +60,44 @@ class MarkerClient:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=_TIMEOUT, transport=transport)
 
-    def extract(self, pdf_bytes: bytes) -> MarkerDoc:
+    def extract(self, pdf_bytes: bytes, *, max_pages: int | None = None) -> MarkerDoc:
+        """Extract a PDF via the Marker service.
+
+        When ``max_pages`` is ``None`` (the default), the whole PDF is sent in
+        a single ``/extract`` call (legacy behavior). When set, the PDF is
+        split into page-index batches of ``max_pages`` and each batch is POSTed
+        with a ``page_range`` form field; the returned blocks are CONCATENATED
+        in batch order. Marker's ``page_range`` keeps ABSOLUTE page numbers +
+        block ids, so concatenation needs no renumbering. Batching keeps each
+        call under a small GPU's VRAM, avoiding Marker's per-stage model
+        hot-swap (the ~30 min slow path on a 15-page PDF / 6 GB GPU).
+        """
+        if max_pages is None or max_pages <= 0:
+            return self._extract_one(pdf_bytes, page_range=None)
+
+        with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:  # type: ignore[no-untyped-call]
+            page_count = doc.page_count
+        if page_count <= 0:
+            return self._extract_one(pdf_bytes, page_range=None)
+
+        merged: list[MarkerBlock] = []
+        for start in range(0, page_count, max_pages):
+            end = min(start + max_pages, page_count)
+            indices = list(range(start, end))
+            batch = self._extract_one(pdf_bytes, page_range=indices)
+            merged.extend(batch.blocks)
+        return MarkerDoc(blocks=merged)
+
+    def _extract_one(
+        self, pdf_bytes: bytes, *, page_range: list[int] | None,
+    ) -> MarkerDoc:
+        data = None
+        if page_range is not None:
+            data = {"page_range": ",".join(str(i) for i in page_range)}
         resp = self._client.post(
             f"{self._base_url}/extract",
             files={"file": ("paper.pdf", pdf_bytes, "application/pdf")},
+            data=data,
         )
         resp.raise_for_status()
         return _parse(resp.json())

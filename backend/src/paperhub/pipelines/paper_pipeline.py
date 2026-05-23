@@ -524,7 +524,12 @@ class PaperPipeline:
             # + captions + equations + sections — consumed by the F3 slide
             # agent) and re-derive full_text + section boundaries from the
             # non-figure blocks in document order.
-            doc = self._get_marker_client().extract(target.read_bytes())
+            from paperhub.config import load_settings
+
+            max_pages = load_settings().marker_max_pages
+            doc = self._get_marker_client().extract(
+                target.read_bytes(), max_pages=max_pages,
+            )
             asset = marker_doc_to_asset(doc, source_dir=cache_dir)
             write_paper_asset(asset, cache_dir)
             full_text, pdf_headings = self._marker_text_and_sections(doc)
