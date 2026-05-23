@@ -3,6 +3,11 @@ services:
   marker:
     build: ./marker_service
     ports: ["8002:8002"]
+    volumes:
+      # Surya/marker model weights download ONCE into this named volume on the
+      # first /extract and persist across restarts AND image rebuilds, so the
+      # build never re-downloads them. HF_HOME/TORCH_HOME point at /models.
+      - marker-models:/models
     # GPU: requires nvidia-container-toolkit on the host. Marker falls back to
     # CPU automatically if this block is commented out or no GPU is visible.
     deploy:
@@ -14,3 +19,6 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
   # NOTE: backend + modelserver services will join here as the project goes full-Docker.
+
+volumes:
+  marker-models:

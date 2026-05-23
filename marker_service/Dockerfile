@@ -1,9 +1,8 @@
+# syntax=docker/dockerfile:1
 # Clean slim base — let uv resolve marker-pdf's FULL, COHERENT torch ecosystem
-# (torch + torchvision + transformers + surya) in one pass. An earlier attempt
-# reused a conda `pytorch/pytorch` base's pinned torch 2.4.1 and let uv upgrade
-# its companions (triton/torchvision/transformers) — that produced a torch ↔
-# torchvision ABI mismatch (`operator torchvision::nms does not exist`). A clean
-# base avoids the split-brain torch install.
+# (torch + torchvision + transformers + surya) in one pass. (An earlier conda
+# `pytorch/pytorch` base produced a torch ↔ torchvision ABI mismatch —
+# `operator torchvision::nms does not exist` — when uv upgraded the companions.)
 #
 # GPU: the default PyPI torch wheel bundles CUDA userspace libs, so the host RTX
 # GPU is used when nvidia-container-toolkit + the compose `deploy.devices` block
@@ -11,7 +10,6 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    UV_NO_CACHE=1 \
     UV_SYSTEM_PYTHON=1 \
     HF_HOME=/models \
     TORCH_HOME=/models/torch
@@ -27,15 +25,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # official distroless image (no pip-install-uv step).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY pyproject.toml .
-# Install the coherent dependency set declared in pyproject.toml into the
-# system python (--system; UV_SYSTEM_PYTHON keeps it venv-free).
-RUN uv pip install --system -r pyproject.toml
-
-# Pre-download Marker model weights into the image so the first /extract is
-# fast (no cold network fetch at request time).
-RUN python -c "from marker.models import create_model_dict; create_model_dict()"
+# BuildKit cache mount: the downloaded wheels (incl. the ~2 GB torch) persist in
+# the build cache across rebuilds, so a failed build does NOT re-download them.
+# (Hence no UV_NO_CACHE.) --system installs into the base image's python.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r pyproject.toml
 
 COPY app.py .
 
+# Models are NOT baked into the image — they download ONCE into the /models
+# named volume (see docker-compose.yml) on first /extract and persist across
+# container restarts AND image rebuilds, so iterating on the image never
+# re-downloads the Surya/marker weights. (HF_HOME/TORCH_HOME point at /models.)
 EXPOSE 8002
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]
