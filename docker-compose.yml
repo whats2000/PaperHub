@@ -3,6 +3,11 @@ services:
   marker:
     build: ./marker_service
     ports: ["8002:8002"]
+    # Setting GEMINI_API_KEY (host env or a repo-root .env) turns ON Marker's
+    # use_llm accuracy pass (better tables/math/layout via Gemini). Leave it
+    # unset to run keyless (no LLM pass). GOOGLE_API_KEY is also accepted.
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       # Surya/marker model weights download ONCE into this named volume on the
       # first /extract and persist across restarts AND image rebuilds, so the
