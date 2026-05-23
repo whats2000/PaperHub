@@ -9,9 +9,10 @@ asset-extraction the pipeline does at ingest, per paper_content row:
   * ``arxiv`` / ``latex_upload`` → ``latex_source_to_asset`` (CPU-only, fast).
   * ``pdf_upload``              → Marker (``marker_doc_to_asset``), the GPU path.
 
-It touches ONLY the filesystem (writes ``asset/``); chunks, embeddings, and the
-DB are left untouched (use ``paperhub-reingest`` for those). Idempotent: a paper
-that already has ``asset/figures.json`` is skipped unless ``--force``.
+It touches the filesystem (writes ``asset/``) AND updates ``paper_content.asset_status``
+in the DB. Chunks, embeddings, and the rest of the DB are left untouched (use
+``paperhub-reingest`` for those). Idempotent: a paper that already has
+``asset/figures.json`` is skipped unless ``--force``.
 
 CRITICAL — strictly sequential: papers are processed one at a time, and within a
 PDF the Marker client batches pages sequentially (``PAPERHUB_MARKER_MAX_PAGES``).
@@ -23,6 +24,8 @@ Usage:
     uv run paperhub-backfill-assets --paper-content-id 22
     uv run paperhub-backfill-assets --dry-run        # preview, no writes
     uv run paperhub-backfill-assets --force          # rebuild even if asset/ exists
+    uv run paperhub-backfill-assets --enqueue-only   # mark PDF papers marker_pending,
+                                                     # build LaTeX synchronously
 """
 from __future__ import annotations
 
@@ -42,6 +45,19 @@ from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
 from paperhub.pipelines.paper_asset import read_paper_asset, write_paper_asset
 
 _LOG = logging.getLogger("paperhub.backfill_assets")
+
+
+def _is_pdf_source(kind: str | None, source_path: str | None) -> bool:
+    """Return True iff this paper_content row routes to the Marker (PDF) path.
+
+    Mirrors the routing in ``build_asset_for_paper``: a ``pdf_upload`` row always
+    goes to Marker; an ``arxiv``/``latex_upload`` row goes to Marker only when its
+    source file is actually a ``.pdf`` (the LaTeX e-print was unrecoverable at
+    ingest and the pipeline fell back to the PDF).
+    """
+    return kind == "pdf_upload" or (
+        source_path is not None and source_path.lower().endswith(".pdf")
+    )
 
 
 @dataclass
@@ -126,21 +142,148 @@ def build_asset_for_paper(
     )
 
 
+async def run_backfill(
+    args: argparse.Namespace,
+    *,
+    conn: aiosqlite.Connection,
+    marker_client: MarkerClient | None,
+    max_pages: int | None,
+) -> dict[str, int]:
+    """Core backfill loop — testable without argparse or DB connection setup.
+
+    Iterates over the paper_content rows indicated by ``args`` (all rows, or the
+    single ``args.paper_content_id``), calls ``build_asset_for_paper`` for each,
+    and writes ``asset_status`` back to the DB.  Returns a counts dict.
+
+    ``args`` must carry the following attributes (produced by argparse or
+    ``argparse.Namespace(...)`` in tests):
+
+    * ``paper_content_id`` (``int | None``) — target a single row, or all.
+    * ``dry_run`` (``bool``) — skip all writes (filesystem + DB).
+    * ``force`` (``bool``) — rebuild even if ``asset/figures.json`` exists.
+    * ``enqueue_only`` (``bool``) — for PDF-source rows, skip the blocking Marker
+      call and just mark them ``marker_pending``; LaTeX rows still build
+      synchronously.
+    """
+    if args.paper_content_id is not None:
+        ids = [args.paper_content_id]
+    else:
+        async with conn.execute(
+            "SELECT id FROM paper_content ORDER BY id"
+        ) as cur:
+            ids = [int(r[0]) for r in await cur.fetchall()]
+    _LOG.info("backfilling assets for %d paper(s)...", len(ids))
+
+    counts: dict[str, int] = {}
+    for pcid in ids:
+        async with conn.execute(
+            "SELECT kind, source_path, source_dir_path, title "
+            "FROM paper_content WHERE id = ?",
+            (pcid,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            _LOG.warning("pcid=%d: paper_content row missing — skipped", pcid)
+            counts["missing"] = counts.get("missing", 0) + 1
+            continue
+        kind, source_path, source_dir_path, title = (
+            row[0], row[1], row[2], str(row[3] or ""),
+        )
+
+        is_pdf = _is_pdf_source(kind, source_path)
+
+        # --enqueue-only: defer PDF papers to the background worker; build
+        # LaTeX papers synchronously (cheap + high quality, no point deferring).
+        if args.enqueue_only and is_pdf:
+            if args.dry_run:
+                _LOG.info(
+                    "pcid=%d (%s): [dry-run] would mark marker_pending %s",
+                    pcid, kind, title[:40],
+                )
+            else:
+                await conn.execute(
+                    "UPDATE paper_content SET asset_status = 'marker_pending' WHERE id = ?",
+                    (pcid,),
+                )
+                await conn.commit()
+                _LOG.info("pcid=%d (%s): enqueued marker_pending %s", pcid, kind, title[:40])
+            counts["enqueued"] = counts.get("enqueued", 0) + 1
+            continue
+
+        try:
+            # Sync asset build off the event loop (Marker call + file IO).
+            res = await asyncio.to_thread(
+                build_asset_for_paper,
+                kind=kind,
+                source_path=source_path,
+                source_dir_path=source_dir_path,
+                title=title,
+                marker_client=marker_client,
+                max_pages=max_pages,
+                force=args.force,
+                dry_run=args.dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001 — per-paper recovery (e.g. OOM)
+            _LOG.exception("pcid=%d (%s) failed: %s", pcid, kind, exc)
+            counts["error"] = counts.get("error", 0) + 1
+            # For PDF failures, record the failure status so the worker can retry.
+            # For LaTeX failures there is no Marker stage; leave asset_status NULL.
+            if is_pdf and not args.dry_run:
+                await conn.execute(
+                    "UPDATE paper_content SET asset_status = 'marker_failed' WHERE id = ?",
+                    (pcid,),
+                )
+                await conn.commit()
+            continue
+
+        counts[res.status] = counts.get(res.status, 0) + 1
+        _LOG.info(
+            "pcid=%d (%s): %s [figs=%d eqs=%d secs=%d] %s",
+            pcid, kind, res.status, res.figures, res.equations, res.sections,
+            title[:40],
+        )
+
+        # Update asset_status in the DB based on outcome.
+        if res.status == "written" and not args.dry_run:
+            new_status = "marker_ready" if is_pdf else "latex"
+            await conn.execute(
+                "UPDATE paper_content SET asset_status = ? WHERE id = ?",
+                (new_status, pcid),
+            )
+            await conn.commit()
+        # skipped_* / dry_run → leave asset_status unchanged.
+
+    _LOG.info("done. summary: %s", dict(sorted(counts.items())))
+    return counts
+
+
 async def _amain() -> int:
     parser = argparse.ArgumentParser(
         prog="paperhub-backfill-assets",
         description=(
             "Backfill the unified PaperAsset (figures/equations/sections) onto "
             "papers already in the cache. Marker for pdf_upload, LaTeX-source "
-            "for arxiv/latex_upload. Filesystem-only; idempotent; SEQUENTIAL."
+            "for arxiv/latex_upload. Updates paper_content.asset_status in the DB. "
+            "Idempotent; SEQUENTIAL."
         ),
     )
     parser.add_argument("--paper-content-id", type=int, default=None,
                         help="Backfill just this paper_content.id (default: all).")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Print what would happen without writing asset/.")
+                        help="Print what would happen without writing asset/ or the DB.")
     parser.add_argument("--force", action="store_true",
                         help="Rebuild even if asset/ already exists.")
+    parser.add_argument(
+        "--enqueue-only",
+        action="store_true",
+        help=(
+            "Instead of running Marker synchronously for PDF-source papers, just "
+            "mark them asset_status='marker_pending' and let the background worker "
+            "drain them. LaTeX-source papers (arxiv/latex_upload with a .tex source) "
+            "are still built synchronously (fast, no GPU required). Combine with "
+            "--dry-run to preview which papers would be enqueued."
+        ),
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -155,55 +298,7 @@ async def _amain() -> int:
     marker_client = get_marker_client()
 
     async with aiosqlite.connect(settings.db_path) as conn:
-        if args.paper_content_id is not None:
-            ids = [args.paper_content_id]
-        else:
-            async with conn.execute(
-                "SELECT id FROM paper_content ORDER BY id"
-            ) as cur:
-                ids = [int(r[0]) for r in await cur.fetchall()]
-        _LOG.info("backfilling assets for %d paper(s)...", len(ids))
-
-        counts: dict[str, int] = {}
-        for pcid in ids:
-            async with conn.execute(
-                "SELECT kind, source_path, source_dir_path, title "
-                "FROM paper_content WHERE id = ?",
-                (pcid,),
-            ) as cur:
-                row = await cur.fetchone()
-            if row is None:
-                _LOG.warning("pcid=%d: paper_content row missing — skipped", pcid)
-                counts["missing"] = counts.get("missing", 0) + 1
-                continue
-            kind, source_path, source_dir_path, title = (
-                row[0], row[1], row[2], str(row[3] or ""),
-            )
-            try:
-                # Sync asset build off the event loop (Marker call + file IO).
-                res = await asyncio.to_thread(
-                    build_asset_for_paper,
-                    kind=kind,
-                    source_path=source_path,
-                    source_dir_path=source_dir_path,
-                    title=title,
-                    marker_client=marker_client,
-                    max_pages=max_pages,
-                    force=args.force,
-                    dry_run=args.dry_run,
-                )
-            except Exception as exc:  # noqa: BLE001 — per-paper recovery (e.g. OOM)
-                _LOG.exception("pcid=%d (%s) failed: %s", pcid, kind, exc)
-                counts["error"] = counts.get("error", 0) + 1
-                continue
-            counts[res.status] = counts.get(res.status, 0) + 1
-            _LOG.info(
-                "pcid=%d (%s): %s [figs=%d eqs=%d secs=%d] %s",
-                pcid, kind, res.status, res.figures, res.equations, res.sections,
-                title[:40],
-            )
-
-        _LOG.info("done. summary: %s", dict(sorted(counts.items())))
+        await run_backfill(args, conn=conn, marker_client=marker_client, max_pages=max_pages)
     return 0
 
 
