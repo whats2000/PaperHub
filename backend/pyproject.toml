@@ -101,6 +101,7 @@ dev = [
 paperhub-replay = "paperhub.cli.replay:main"
 paperhub-modelserver = "paperhub.modelserver.__main__:main"
 paperhub-reingest = "paperhub.cli.reingest:main"
+paperhub-backfill-assets = "paperhub.cli.backfill_assets:main"
 paperhub-rerender-html = "paperhub.cli.rerender_html:main"
 paperhub-mcp-up = "paperhub.cli.mcp_up:main"
 
