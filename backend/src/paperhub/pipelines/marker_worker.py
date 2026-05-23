@@ -19,12 +19,30 @@ import logging
 from pathlib import Path
 
 import aiosqlite
+import httpx
 
 from paperhub.config import Settings
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.rag.chroma import ChromaStore
 
 logger = logging.getLogger(__name__)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Return True if *exc* is a transient transport/network error.
+
+    Transient errors should NOT flip ``asset_status`` to ``marker_failed`` —
+    the worker leaves the row as ``marker_pending`` so the next poll retries it
+    automatically.  Genuine failures (HTTP 4xx/5xx from the Marker service,
+    mapping errors, etc.) return False so the caller marks the row failed.
+
+    Covers:
+    - ``httpx.TransportError`` (ConnectError, ConnectTimeout, ReadTimeout,
+      WriteTimeout, PoolTimeout, RemoteProtocolError "server disconnected")
+    - ``ConnectionError`` and its OS-level subclasses (ConnectionResetError,
+      ConnectionAbortedError) — e.g. WinError 10053 surfacing unwrapped.
+    """
+    return isinstance(exc, (httpx.TransportError, ConnectionError))
 
 
 def build_worker_pipeline(
@@ -73,17 +91,26 @@ async def run_worker(
             try:
                 await pipeline.upgrade_pdf_asset_via_marker(pcid, max_pages=max_pages)
                 logger.info("marker upgrade succeeded for paper_content %d", pcid)
-            except Exception:
-                logger.exception(
-                    "marker upgrade failed for paper_content %d; "
-                    "keeping PyMuPDF baseline", pcid,
-                )
-                await conn.execute(
-                    "UPDATE paper_content SET asset_status = 'marker_failed' "
-                    "WHERE id = ?",
-                    (pcid,),
-                )
-                await conn.commit()
+            except Exception as exc:
+                if _is_transient(exc):
+                    logger.warning(
+                        "transient marker error for paper_content %d; will retry: %s",
+                        pcid,
+                        exc,
+                    )
+                    # Do NOT flip to marker_failed — leave marker_pending so the
+                    # next worker poll retries when the Marker service recovers.
+                else:
+                    logger.exception(
+                        "marker upgrade failed for paper_content %d; "
+                        "keeping PyMuPDF baseline", pcid,
+                    )
+                    await conn.execute(
+                        "UPDATE paper_content SET asset_status = 'marker_failed' "
+                        "WHERE id = ?",
+                        (pcid,),
+                    )
+                    await conn.commit()
 
         # Idle until stop is set or the poll interval elapses.
         with contextlib.suppress(TimeoutError):

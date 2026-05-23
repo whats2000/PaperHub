@@ -52,8 +52,19 @@ def _marker_client_from_fixture() -> MarkerClient:
 
 
 def _marker_client_raising() -> MarkerClient:
+    """Transport that raises httpx.ConnectError — a TRANSIENT error."""
+
     def handler(req: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("marker unreachable")
+
+    return MarkerClient("http://marker:8002", transport=httpx.MockTransport(handler))
+
+
+def _marker_client_genuine_failure() -> MarkerClient:
+    """Transport that raises a non-transport ValueError — a GENUINE failure."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise ValueError("bad PDF — genuine extraction error")
 
     return MarkerClient("http://marker:8002", transport=httpx.MockTransport(handler))
 
@@ -192,12 +203,13 @@ async def test_upgrade_pdf_asset_via_marker_upgrades_and_reembeds(
 
 
 @pytest.mark.asyncio
-async def test_worker_failure_keeps_baseline_and_marks_failed(
+async def test_worker_genuine_failure_marks_failed(
     conn: aiosqlite.Connection, tmp_path: Path,
 ) -> None:
+    """A non-transport exception (genuine extraction error) → marker_failed."""
     from paperhub.pipelines.marker_worker import run_worker
 
-    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_raising())
+    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_genuine_failure())
     cache_dir = tmp_path / "papers_cache" / "upload" / "fail"
     pcid = await _seed_pending_pdf(conn, chroma, cache_dir, content_key="sha256:fail")
     before_texts = await _chunk_texts(conn, pcid)
@@ -216,6 +228,73 @@ async def test_worker_failure_keeps_baseline_and_marks_failed(
 
     assert await _asset_status(conn, pcid) == "marker_failed"
     # Prior chunks + asset untouched (baseline preserved).
+    assert await _chunk_texts(conn, pcid) == before_texts
+    assert read_paper_asset(cache_dir) is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_transient_error_stays_pending(
+    conn: aiosqlite.Connection, tmp_path: Path,
+) -> None:
+    """A transient transport error (ConnectError) leaves asset_status='marker_pending'
+    so the next worker poll retries it instead of permanently stranding the paper."""
+    from paperhub.pipelines.marker_worker import run_worker
+
+    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_raising())
+    cache_dir = tmp_path / "papers_cache" / "upload" / "transient"
+    pcid = await _seed_pending_pdf(
+        conn, chroma, cache_dir, content_key="sha256:transient"
+    )
+    before_texts = await _chunk_texts(conn, pcid)
+
+    stop = asyncio.Event()
+
+    async def _stop_after_drain() -> None:
+        await asyncio.sleep(0.2)
+        stop.set()
+
+    await asyncio.gather(
+        run_worker(pipeline, conn, stop=stop, max_pages=None, idle_poll_s=0.05),
+        _stop_after_drain(),
+    )
+
+    # Must stay pending — NOT marker_failed — so a future poll can retry.
+    assert await _asset_status(conn, pcid) == "marker_pending"
+    # Baseline chunks and asset must be intact.
+    assert await _chunk_texts(conn, pcid) == before_texts
+    assert read_paper_asset(cache_dir) is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_connection_error_stays_pending(
+    conn: aiosqlite.Connection, tmp_path: Path,
+) -> None:
+    """A raw OS ConnectionError (e.g. WinError 10053) also stays pending."""
+    from paperhub.pipelines.marker_worker import run_worker
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise ConnectionAbortedError("WinError 10053 — connection aborted")
+
+    marker = MarkerClient("http://marker:8002", transport=httpx.MockTransport(handler))
+    pipeline, chroma = _make_pipeline(conn, tmp_path, marker)
+    cache_dir = tmp_path / "papers_cache" / "upload" / "connreset"
+    pcid = await _seed_pending_pdf(
+        conn, chroma, cache_dir, content_key="sha256:connreset"
+    )
+    before_texts = await _chunk_texts(conn, pcid)
+
+    stop = asyncio.Event()
+
+    async def _stop_after_drain() -> None:
+        await asyncio.sleep(0.2)
+        stop.set()
+
+    await asyncio.gather(
+        run_worker(pipeline, conn, stop=stop, max_pages=None, idle_poll_s=0.05),
+        _stop_after_drain(),
+    )
+
+    assert await _asset_status(conn, pcid) == "marker_pending"
     assert await _chunk_texts(conn, pcid) == before_texts
     assert read_paper_asset(cache_dir) is not None
 
