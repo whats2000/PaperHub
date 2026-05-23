@@ -4,14 +4,22 @@
 # already in the cache. Marker for PDF sources (incl. arxiv-via-pdf fallbacks),
 # LaTeX-source for arxiv/latex_upload.
 #
-# Filesystem-only + idempotent (skips papers that already have asset/figures.json
-# unless --force), so NO DB/chroma backup is taken — unlike reingest_all_papers.ps1.
+# Also updates paper_content.asset_status in the DB:
+#   written (LaTeX)  → 'latex'
+#   written (PDF)    → 'marker_ready'
+#   error   (PDF)    → 'marker_failed'
+#   skipped / dry-run → unchanged
+#
+# Idempotent (skips papers that already have asset/figures.json unless --force),
+# so NO DB/chroma backup is needed — unlike reingest_all_papers.ps1.
 #
 # Usage:
-#   .\scripts\backfill_assets.ps1                 # backfill all papers
-#   .\scripts\backfill_assets.ps1 --dry-run       # preview only (no writes)
-#   .\scripts\backfill_assets.ps1 --force         # rebuild even if asset/ exists
-#   .\scripts\backfill_assets.ps1 --paper-content-id 22
+#   .\scripts\backfill_assets.ps1                          # backfill all papers
+#   .\scripts\backfill_assets.ps1 --dry-run                # preview only (no writes)
+#   .\scripts\backfill_assets.ps1 --force                  # rebuild even if asset/ exists
+#   .\scripts\backfill_assets.ps1 --paper-content-id 22   # single paper
+#   .\scripts\backfill_assets.ps1 --enqueue-only           # mark PDF papers
+#       # marker_pending (background worker drains them); build LaTeX synchronously
 $ErrorActionPreference = "Stop"
 
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..\workspace")).Path

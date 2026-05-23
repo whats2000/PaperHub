@@ -6,12 +6,15 @@ LaTeX-source for arxiv/latex_upload. Idempotent (skips rows that already have
 asset/figures.json unless --force); strictly sequential at the CLI level so
 concurrent Marker calls never OOM the GPU.
 """
+import argparse
 import shutil
 from pathlib import Path
 
+import aiosqlite
 import httpx
+import pytest
 
-from paperhub.cli.backfill_assets import build_asset_for_paper
+from paperhub.cli.backfill_assets import build_asset_for_paper, run_backfill
 from paperhub.pipelines.marker_client import MarkerClient
 from paperhub.pipelines.paper_asset import paper_asset_dir, read_paper_asset
 
@@ -174,3 +177,194 @@ def test_backfill_dry_run_writes_nothing(tmp_path: Path) -> None:
     )
     assert res.status == "dry_run"
     assert read_paper_asset(cache_dir) is None  # nothing written
+
+
+# ---------------------------------------------------------------------------
+# DB-level tests: run_backfill sets asset_status + --enqueue-only
+# ---------------------------------------------------------------------------
+
+async def _make_db_with_paper(
+    db_path: Path,
+    *,
+    kind: str,
+    source_path: str,
+    source_dir_path: str,
+    title: str = "Test Paper",
+) -> int:
+    """Create a minimal paper_content row; return its id."""
+    async with aiosqlite.connect(db_path) as conn:
+        # Ensure asset_status column exists (mirrors the F2.1 migration).
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS paper_content ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  kind TEXT,"
+            "  source_path TEXT,"
+            "  source_dir_path TEXT,"
+            "  title TEXT,"
+            "  asset_status TEXT"
+            ")"
+        )
+        cur = await conn.execute(
+            "INSERT INTO paper_content (kind, source_path, source_dir_path, title)"
+            " VALUES (?, ?, ?, ?)",
+            (kind, source_path, source_dir_path, title),
+        )
+        await conn.commit()
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+
+def _args(
+    *,
+    paper_content_id: int | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+    enqueue_only: bool = False,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        paper_content_id=paper_content_id,
+        dry_run=dry_run,
+        force=force,
+        enqueue_only=enqueue_only,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_latex_sets_asset_status_latex(tmp_path: Path) -> None:
+    """Normal (blocking) backfill of a LaTeX-source row → asset_status='latex'."""
+    cache_dir = tmp_path / "cache"
+    source_dir = cache_dir / "source"
+    shutil.copytree(_ARXIV_SAMPLE, source_dir)
+    main_tex = source_dir / "main.tex"
+
+    db_path = tmp_path / "test.db"
+    pcid = await _make_db_with_paper(
+        db_path,
+        kind="arxiv",
+        source_path=str(main_tex),
+        source_dir_path=str(cache_dir),
+    )
+
+    async with aiosqlite.connect(db_path) as conn:
+        await run_backfill(
+            _args(paper_content_id=pcid),
+            conn=conn,
+            marker_client=None,
+            max_pages=5,
+        )
+
+    async with aiosqlite.connect(db_path) as conn, conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "latex"
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_pdf_sets_asset_status_marker_ready(tmp_path: Path) -> None:
+    """Normal (blocking) backfill of a PDF-source row → asset_status='marker_ready'."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True)
+    pdf_path = cache_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+    db_path = tmp_path / "test.db"
+    pcid = await _make_db_with_paper(
+        db_path,
+        kind="pdf_upload",
+        source_path=str(pdf_path),
+        source_dir_path=str(cache_dir),
+    )
+
+    async with aiosqlite.connect(db_path) as conn:
+        await run_backfill(
+            _args(paper_content_id=pcid),
+            conn=conn,
+            marker_client=_marker_client_from_fixture(),
+            max_pages=None,
+        )
+
+    async with aiosqlite.connect(db_path) as conn, conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "marker_ready"
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_enqueue_only_pdf_sets_marker_pending(tmp_path: Path) -> None:
+    """--enqueue-only on a PDF-source row → asset_status='marker_pending', no Marker call."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True)
+    pdf_path = cache_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+    db_path = tmp_path / "test.db"
+    pcid = await _make_db_with_paper(
+        db_path,
+        kind="pdf_upload",
+        source_path=str(pdf_path),
+        source_dir_path=str(cache_dir),
+    )
+
+    # A marker client whose transport raises — any call to it would fail the test.
+    def _raise(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("Marker should NOT be called in --enqueue-only mode for PDFs")
+
+    no_call_client = MarkerClient("http://marker:8002", transport=httpx.MockTransport(_raise))
+
+    async with aiosqlite.connect(db_path) as conn:
+        await run_backfill(
+            _args(paper_content_id=pcid, enqueue_only=True),
+            conn=conn,
+            marker_client=no_call_client,
+            max_pages=None,
+        )
+
+    # No asset should have been written.
+    assert read_paper_asset(cache_dir) is None
+
+    async with aiosqlite.connect(db_path) as conn, conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "marker_pending"
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_enqueue_only_latex_still_builds_sync(tmp_path: Path) -> None:
+    """--enqueue-only on a LaTeX-source row → still built synchronously; asset_status='latex'."""
+    cache_dir = tmp_path / "cache"
+    source_dir = cache_dir / "source"
+    shutil.copytree(_ARXIV_SAMPLE, source_dir)
+    main_tex = source_dir / "main.tex"
+
+    db_path = tmp_path / "test.db"
+    pcid = await _make_db_with_paper(
+        db_path,
+        kind="arxiv",
+        source_path=str(main_tex),
+        source_dir_path=str(cache_dir),
+    )
+
+    async with aiosqlite.connect(db_path) as conn:
+        await run_backfill(
+            _args(paper_content_id=pcid, enqueue_only=True),
+            conn=conn,
+            marker_client=None,
+            max_pages=5,
+        )
+
+    # Asset should exist on disk.
+    asset = read_paper_asset(cache_dir)
+    assert asset is not None
+    assert len(asset.sections) > 0
+
+    async with aiosqlite.connect(db_path) as conn, conn.execute(
+        "SELECT asset_status FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "latex"
