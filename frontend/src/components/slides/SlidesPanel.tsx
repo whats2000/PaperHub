@@ -44,8 +44,28 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
   const [mainWidth, setMainWidth] = useState(0);
   const [noteHeight, setNoteHeight] = useState(NOTE_DEFAULT_HEIGHT);
 
-  const mainAreaRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
+
+  // Measure the main slide area via a CALLBACK ref so it fires the instant the
+  // element mounts — which is when the <Document> renders (file != null), not
+  // on first component mount. This avoids the page rendering at its intrinsic
+  // ~362pt Beamer width and leaving the panel half-blank. A ResizeObserver
+  // keeps the width correct through the panel open-animation + divider drags.
+  const measureMainArea = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
+    if (!el) return;
+    const measure = () => setMainWidth(Math.max(0, el.clientWidth - 16));
+    measure();
+    if (typeof ResizeObserver === "undefined") return; // jsdom guard
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    roRef.current = ro;
+  }, []);
+
+  // Disconnect any live observer on unmount.
+  useEffect(() => () => roRef.current?.disconnect(), []);
 
   // Fetch PDF bytes on mount / sessionId change; cache by sessionId.
   useEffect(() => {
@@ -69,23 +89,6 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     () => (rawBytes ? { data: rawBytes.slice() } : null),
     [rawBytes],
   );
-
-  // Fit the main slide area to its container width. Re-runs when `file`
-  // becomes available, because the main area (and its ref) only mounts once
-  // the <Document> renders — on the first mount `file` is null and the ref is
-  // absent, so without `file` in the deps the width would stay 0 and the page
-  // would render at its intrinsic PDF width, leaving the panel half-empty.
-  useEffect(() => {
-    const el = mainAreaRef.current;
-    if (!el) return;
-    const measure = () => setMainWidth(el.clientWidth - 16);
-    measure();
-    // ResizeObserver is not available in jsdom; guard so tests don't throw.
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [file]);
 
   // Keyboard navigation.
   useEffect(() => {
@@ -240,7 +243,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
 
           {/* Main content column: current slide */}
           <div
-            ref={mainAreaRef}
+            ref={measureMainArea}
             className="flex-1 min-h-0 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-2"
           >
             <Page
