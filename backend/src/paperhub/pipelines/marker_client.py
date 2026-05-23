@@ -25,6 +25,10 @@ class MarkerBlock:
     # in a sibling Caption/Footnote block rather than the figure block's own
     # html, so the service pairs them and writes the result here.
     caption: str | None = None
+    # Marker block id, e.g. "/page/2/Figure/0". section_hierarchy VALUES are
+    # block-id refs to SectionHeader blocks (NOT names), so the mapper resolves
+    # names via a {block_id -> SectionHeader text} map keyed on this.
+    block_id: str | None = None
 
 
 @dataclass
@@ -43,6 +47,7 @@ def _parse(payload: dict[str, Any]) -> MarkerDoc:
             bbox=b.get("bbox") or [],
             page=b.get("page"),
             caption=b.get("caption"),
+            block_id=b.get("block_id"),
         )
         for b in payload.get("blocks", [])
     ]
