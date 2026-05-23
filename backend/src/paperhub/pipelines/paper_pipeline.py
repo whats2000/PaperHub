@@ -56,8 +56,10 @@ from paperhub.pipelines.marker_client import (
     MarkerDoc,
     get_marker_client,
 )
-from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, strip_html
+from paperhub.pipelines.marker_health import marker_available
+from paperhub.pipelines.marker_to_asset import strip_html
 from paperhub.pipelines.paper_asset import write_paper_asset
+from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.title_extract import llm_extract_title
@@ -351,6 +353,8 @@ class PaperPipeline:
         sections_json = self._build_sections_json(chunks, full_text)
 
         # Persist paper_content + chunks in a single transaction.
+        # asset_status='latex': the asset was built synchronously from the
+        # LaTeX e-print source above (no Marker upgrade ever needed).
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
@@ -362,6 +366,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status="latex",
         )
 
         self._chroma.add_chunks(
@@ -411,6 +416,12 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
+        # Build the PyMuPDF "degraded" PaperAsset baseline synchronously (F2.1).
+        # write_paper_asset / pymupdf_to_asset create the asset/ dir; cache_dir
+        # itself already exists (download_arxiv_pdf wrote source.pdf into it).
+        asset = pymupdf_to_asset(pdf_path, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
         metadata: dict[str, object] = (
             asdict(req.metadata_override)
             if req.metadata_override is not None
@@ -427,6 +438,10 @@ class PaperPipeline:
             chunks, full_text, strip_comments=False,
         )
 
+        # PDF source: enqueue a Marker upgrade when the service is reachable,
+        # else stay on the PyMuPDF baseline.
+        asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
@@ -438,6 +453,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -518,24 +534,17 @@ class PaperPipeline:
 
             pdf_headings: list[tuple[str, int]] = []
         else:
-            # PDF: extract structure via Marker (F2-T5) instead of PyMuPDF
-            # text/images. Marker yields ordered typed blocks (text / figure /
-            # equation / section-header); we write a PaperAsset bundle (figures
-            # + captions + equations + sections — consumed by the F3 slide
-            # agent) and re-derive full_text + section boundaries from the
-            # non-figure blocks in document order.
-            from paperhub.config import load_settings
-
-            max_pages = load_settings().marker_max_pages
-            doc = self._get_marker_client().extract(
-                target.read_bytes(), max_pages=max_pages,
-            )
-            asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+            # PDF (F2.1): extract synchronously with PyMuPDF — instant, always
+            # works, never blocks the event loop on a multi-minute Marker run.
+            # Marker is an OPT-IN async upgrade: we merely RECORD whether one
+            # should happen (asset_status='marker_pending') so a background
+            # worker (a later task) runs the high-fidelity pass off the request
+            # path. The PyMuPDF asset is a "degraded" baseline (real figure
+            # files, but no captions/equations) good enough for ingest + RAG.
+            full_text, pdf_headings = extract_pdf_with_headings(target)
+            asset = pymupdf_to_asset(target, source_dir=cache_dir)
             write_paper_asset(asset, cache_dir)
-            full_text, pdf_headings = self._marker_text_and_sections(doc)
             source_path = target
-            # TODO(F2-T5): prefer Marker HTML for the Citation Canvas; for now
-            # keep the PyMuPDF render so the Canvas HTML is unchanged.
             render_html(
                 source=source_path, kind=kind, out_path=html_path,
                 resource_dir=None,
@@ -603,6 +612,15 @@ class PaperPipeline:
             "pdf_upload" if kind == "pdf" else "latex_upload"
         )
 
+        # asset_status: latex uploads build the asset synchronously from source
+        # ('latex'); PDFs use the PyMuPDF baseline and may enqueue a Marker
+        # upgrade when the service is reachable ('marker_pending'), else stay on
+        # the PyMuPDF baseline ('pymupdf_only').
+        if kind == "pdf":
+            asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+        else:
+            asset_status = "latex"
+
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind=db_kind,
@@ -614,6 +632,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -681,6 +700,10 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
+        # 5a. PyMuPDF "degraded" PaperAsset baseline (F2.1).
+        asset = pymupdf_to_asset(pdf_path, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
         # 6. Extract text + chunk. PDF path: heading detection for section
         # navigation; strip_comments=False (PDF text isn't LaTeX).
         full_text, headings = extract_pdf_with_headings(pdf_path)
@@ -701,6 +724,9 @@ class PaperPipeline:
             "abstract": abstract_hint,
         }
 
+        # PDF source: enqueue a Marker upgrade when reachable, else baseline.
+        asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+
         # 7. Persist paper_content + chunks transactionally.
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
@@ -713,6 +739,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -834,6 +861,7 @@ class PaperPipeline:
         html_path: Path,
         chunks: list[Chunk],
         sections_json: str | None = None,
+        asset_status: str | None = None,
     ) -> tuple[int, list[int]]:
         """Persist paper_content + chunks in a single atomic transaction.
 
@@ -845,8 +873,9 @@ class PaperPipeline:
             await self._conn.execute(
                 "INSERT INTO paper_content "
                 "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
-                "abstract, sections_json, source_path, source_dir_path, html_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "abstract, sections_json, source_path, source_dir_path, html_path, "
+                "asset_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     content_key,
                     kind,
@@ -860,6 +889,7 @@ class PaperPipeline:
                     str(source_path),
                     str(source_dir_path),
                     str(html_path),
+                    asset_status,
                 ),
             )
             async with self._conn.execute("SELECT last_insert_rowid()") as cur:

@@ -18,7 +18,6 @@ from httpx import ASGITransport, AsyncClient
 
 from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
-from paperhub.pipelines.marker_client import MarkerBlock, MarkerDoc
 from paperhub.pipelines.title_extract import PaperTitleResult
 
 
@@ -88,49 +87,15 @@ def _build_pdf_with_page1_title(
     return out
 
 
-class _FakeMarker:
-    """Stub MarkerClient.extract → a fixed MarkerDoc, so the upload-PDF ingest
-    path (which routes through Marker as of F2-T5) runs without a reachable
-    Marker service. Returns one text + one figure + one equation block."""
-
-    def extract(self, pdf_bytes: bytes, *, max_pages: int | None = None) -> MarkerDoc:
-        tiny_png = (
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-            "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-        )
-        return MarkerDoc(
-            blocks=[
-                MarkerBlock(
-                    block_type="Text",
-                    html="<p>Body text about a sample paper for ingest tests.</p>",
-                    section_hierarchy={"1": "Introduction"},
-                    page=1,
-                ),
-                MarkerBlock(
-                    block_type="Figure",
-                    html="<p>Figure 1: a figure.</p>",
-                    images={"fig.png": tiny_png},
-                    section_hierarchy={"1": "Introduction"},
-                    page=1,
-                ),
-                MarkerBlock(
-                    block_type="Equation",
-                    latex="e=mc^2",
-                    section_hierarchy={"1": "Introduction"},
-                    page=1,
-                ),
-            ]
-        )
-
-
 @pytest.fixture(autouse=True)
 def _mock_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace ``get_marker_client`` (lazily resolved by PaperPipeline on first
-    PDF ingest) with a fake, so these endpoint tests never hit a real Marker
-    service."""
+    """F2.1: PDF ingest no longer calls Marker synchronously — it extracts with
+    PyMuPDF and probes ``marker_available()`` to record ``asset_status``. Patch
+    the probe to ``False`` so these endpoint tests are deterministic and never
+    open a real socket to a Marker service."""
     monkeypatch.setattr(
-        "paperhub.pipelines.paper_pipeline.get_marker_client",
-        lambda: _FakeMarker(),
+        "paperhub.pipelines.paper_pipeline.marker_available",
+        lambda: False,
     )
 
 
