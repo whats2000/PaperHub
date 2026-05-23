@@ -70,7 +70,12 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     [rawBytes],
   );
 
-  // Fit the main slide area to its container width.
+  // Fit the main slide area to its container width. Depends on `file` because
+  // the main area only mounts once the PDF has loaded (before that the body is
+  // a placeholder), so the ref is null on first mount — re-running when `file`
+  // becomes available is what actually measures the now-mounted area. Without
+  // this, mainWidth stays 0 and the page renders at its native ~360px, leaving
+  // the rest of the panel blank.
   useEffect(() => {
     const el = mainAreaRef.current;
     if (!el) return;
@@ -81,7 +86,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [file]);
 
   // Keyboard navigation.
   useEffect(() => {
