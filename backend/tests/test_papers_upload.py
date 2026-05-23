@@ -93,7 +93,7 @@ class _FakeMarker:
     path (which routes through Marker as of F2-T5) runs without a reachable
     Marker service. Returns one text + one figure + one equation block."""
 
-    def extract(self, pdf_bytes: bytes) -> MarkerDoc:
+    def extract(self, pdf_bytes: bytes, *, max_pages: int | None = None) -> MarkerDoc:
         tiny_png = (
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
             "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="

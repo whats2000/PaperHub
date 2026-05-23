@@ -59,7 +59,7 @@ _TINY_PNG_B64 = (
 class _FakeMarker:
     """Stub MarkerClient.extract → a fixed MarkerDoc with one of each block."""
 
-    def extract(self, pdf_bytes: bytes) -> MarkerDoc:
+    def extract(self, pdf_bytes: bytes, *, max_pages: int | None = None) -> MarkerDoc:
         return MarkerDoc(
             blocks=[
                 MarkerBlock(
