@@ -27,7 +27,9 @@ def build_additional_block(macros: list[str]) -> str:
 def build_graphicspath(cache_source_dirs: list[str]) -> str:
     if not cache_source_dirs:
         return ""
-    dirs = " ".join("{" + d.rstrip("/") + "/}" for d in cache_source_dirs)
+    dirs = " ".join(
+        "{" + d.replace("\\", "/").rstrip("/") + "/}" for d in cache_source_dirs
+    )
     return f"\\graphicspath{{ {dirs} }}"
 
 
