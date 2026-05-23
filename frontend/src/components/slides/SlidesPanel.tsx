@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 
-import { useSlidesStore } from "@/store/slides";
+import {
+  useSlidesStore,
+  FILMSTRIP_MIN_WIDTH,
+  FILMSTRIP_MAX_WIDTH,
+  NOTE_MIN_HEIGHT,
+} from "@/store/slides";
 import { fetchDeckPdfData, deckPdfUrl, deckTexUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
@@ -13,17 +18,6 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-/** Minimum height for the speaker note pane (px). */
-const NOTE_MIN_HEIGHT = 80;
-/** Initial height for the speaker note pane (px). */
-const NOTE_DEFAULT_HEIGHT = 160;
-
-/** Minimum width for the filmstrip rail (px). */
-const FILMSTRIP_MIN_WIDTH = 56;
-/** Maximum width for the filmstrip rail (px). */
-const FILMSTRIP_MAX_WIDTH = 280;
-/** Initial width for the filmstrip rail (px). */
-const FILMSTRIP_DEFAULT_WIDTH = 80;
 /** Horizontal chrome (rail padding + thumbnail border) subtracted from the
  *  rail width to get the thumbnail render width. Matches the 80→64 default. */
 const FILMSTRIP_THUMB_INSET = 16;
@@ -48,18 +42,22 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     (s) => s.currentPageBySession[sessionId] ?? 1,
   );
   const setCurrentPage = useSlidesStore((s) => s.setCurrentPage);
+  // Layout dimensions live in the store so they survive panel close/reopen
+  // (the panel unmounts on close) and reload (persisted to localStorage).
+  const noteHeight = useSlidesStore((s) => s.noteHeight);
+  const setNoteHeight = useSlidesStore((s) => s.setNoteHeight);
+  const filmstripWidth = useSlidesStore((s) => s.filmstripWidth);
+  const setFilmstripWidth = useSlidesStore((s) => s.setFilmstripWidth);
 
   // PDF bytes cache: keyed by sessionId so re-renders don't refetch.
   const [pdfCache, setPdfCache] = useState<Record<number, Uint8Array>>({});
   const [numPages, setNumPages] = useState(0);
   const [mainWidth, setMainWidth] = useState(0);
-  const [noteHeight, setNoteHeight] = useState(NOTE_DEFAULT_HEIGHT);
-  const [filmstripWidth, setFilmstripWidth] = useState(FILMSTRIP_DEFAULT_WIDTH);
   // Measured thumbnail render width — derived from the rail's actual inner
   // width (excludes the scrollbar), NOT the style width, so a thumbnail never
   // overflows + gets clipped on the right when the rail scrolls.
   const [thumbWidth, setThumbWidth] = useState(
-    FILMSTRIP_DEFAULT_WIDTH - FILMSTRIP_THUMB_INSET,
+    filmstripWidth - FILMSTRIP_THUMB_INSET,
   );
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -167,7 +165,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [noteHeight],
+    [noteHeight, setNoteHeight],
   );
 
   // Draggable vertical divider between the filmstrip rail and the slide area.
@@ -192,7 +190,7 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [filmstripWidth],
+    [filmstripWidth, setFilmstripWidth],
   );
 
   const goTo = (page: number) => {
