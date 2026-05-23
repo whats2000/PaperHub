@@ -10,7 +10,9 @@ import pymupdf
 
 from paperhub.config import load_settings
 
-_TIMEOUT = httpx.Timeout(600.0)  # Marker on a big PDF can take minutes
+# A single DENSE two-column page (200+ OCR text lines) on a VRAM-starved 6 GB
+# GPU can take many minutes; the read timeout must clear that worst case.
+_TIMEOUT = httpx.Timeout(1800.0)
 
 
 @dataclass
