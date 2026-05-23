@@ -95,3 +95,7 @@ tmp*/
 
 # git worktrees (e.g. subagent-driven-development scratch checkouts)
 .worktrees/
+
+# Marker service local test artifacts
+marker_service/sample.pdf
+marker_service/*.local.*
