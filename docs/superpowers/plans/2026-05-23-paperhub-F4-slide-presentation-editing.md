@@ -1,4 +1,6 @@
-# Plan F · Phase 2 — Presentation + Editing + Q&A choreography (Implementation Plan)
+# Plan F4 — Presentation + Editing + Q&A choreography (Implementation Plan)
+
+> **Renumbered (SRS v2.19):** this was "Plan F Phase 2". The quality redesign inserted **F2 (Marker ingestion)** and **F3 (PhD-grade slide agent)** ahead of it, so presentation+editing is now **F4** and depends on F3's rebuilt `report_graph.py` (the node names below — `sl_edit_plan`, `sl_edit_frame` — will attach to the F3 topology, not the nuked F1 one).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
