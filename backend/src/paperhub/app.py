@@ -25,7 +25,7 @@ from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.config import Settings, load_settings
-from paperhub.db.connection import open_db
+from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
@@ -119,7 +119,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.marker_worker_conn = None
     if os.environ.get("PAPERHUB_MARKER_WORKER", "1") != "0":
         worker_conn = await aiosqlite.connect(settings.db_path)
-        await worker_conn.execute("PRAGMA foreign_keys = ON")
+        await configure_connection(worker_conn)
         worker_pipeline = build_worker_pipeline(
             worker_conn, settings, chroma=app.state.chroma,
         )
