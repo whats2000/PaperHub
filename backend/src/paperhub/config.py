@@ -72,6 +72,10 @@ class Settings:
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
 
+    # ── Marker PDF extraction service (v2.19) ───────────────────────────
+    marker_service_url: str
+    inprocess_marker: bool
+
 
 def load_settings() -> Settings:
     workspace = Path(os.environ.get("PAPERHUB_WORKSPACE", "./workspace")).resolve()
@@ -141,6 +145,10 @@ def load_settings() -> Settings:
 
         # 8. Logging.
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),
+
+        # Marker PDF extraction service (v2.19).
+        marker_service_url=os.environ.get("PAPERHUB_MARKER_URL", "http://127.0.0.1:8002"),
+        inprocess_marker=os.environ.get("PAPERHUB_INPROCESS_MARKER", "0") == "1",
 
         # 9. Report Agent (slides) model selection.
         report_plan_model=os.environ.get(
