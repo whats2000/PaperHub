@@ -20,11 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the marker-pdf + surya + transformers tree). The uv binary is copied from its
 # official distroless image (no pip-install-uv step).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-COPY requirements.txt .
-# torch is already in the base image; uv reuses the satisfied install rather
-# than re-downloading the multi-GB CUDA wheel. --system installs into the base
-# image's python (no venv).
-RUN uv pip install --system -r requirements.txt
+COPY pyproject.toml .
+# Install the dependencies declared in pyproject.toml. torch is already in the
+# base image; --system installs into the base image's python (NOT a venv), so
+# uv reuses the satisfied torch rather than re-downloading the multi-GB CUDA
+# wheel. (A venv via `uv sync` would re-fetch torch — avoided deliberately.)
+RUN uv pip install --system -r pyproject.toml
 
 # Pre-download Marker model weights into the image so the first /extract is
 # fast (no cold network fetch at request time).
