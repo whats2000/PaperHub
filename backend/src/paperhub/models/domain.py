@@ -85,6 +85,56 @@ class SlidePlan(BaseModel):
     sections: list[PlannedSection]
 
 
+class PaperBrief(BaseModel):
+    """Per-paper understanding produced by the F3 'understand' stage.
+    Carries the contribution, method, key results, figure keys, and
+    equations that the PhD-grade slide agent uses when drafting slides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: int
+    contribution: str
+    method: str
+    key_results: list[str]
+    key_figure_keys: list[str]
+    key_equations: list[str]
+
+
+class OutlineSlide(BaseModel):
+    """One slide entry in a TalkOutline — title, narrative goal, key points,
+    and optional pointers to a figure, equation, chunks, and papers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    goal: str
+    key_points: list[str]
+    figure_key: str | None = None
+    equation: str | None = None
+    chunk_ids: list[int] = []
+    paper_ids: list[int] = []
+
+
+class TalkOutline(BaseModel):
+    """Structured talk outline produced by the F3 'narrate' stage — a title
+    and an ordered list of OutlineSlide entries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    slides: list[OutlineSlide]
+
+
+class SlideDraft(BaseModel):
+    """A single compiled Beamer frame + its speaker note, produced by the
+    F3 'draft' stage for each OutlineSlide."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frame: str
+    note: str
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
