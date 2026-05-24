@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,13 @@ _LOG = logging.getLogger(__name__)
 ReviseFn = Callable[[str, str], Awaitable[str]]  # (pdflatex_log, current_tex) -> fixed_tex
 
 PDFLATEX = shutil.which("pdflatex") or "pdflatex"
+
+_OVERFULL_VBOX_RE = re.compile(r"Overfull \\vbox")
+
+
+def _has_overfull_vbox(log: str) -> bool:
+    """Return True when the pdflatex log contains an Overfull \\vbox warning."""
+    return bool(_OVERFULL_VBOX_RE.search(log))
 
 
 @dataclass(frozen=True)
@@ -71,9 +79,23 @@ async def compile_with_revise(
         except subprocess.TimeoutExpired as exc:
             last_log = f"pdflatex timed out: {exc}"
             proc = subprocess.CompletedProcess([PDFLATEX], 1, "", last_log)
-        if proc.returncode == 0 or pdf_path.exists():
+        pdf_produced = proc.returncode == 0 or pdf_path.exists()
+        if pdf_produced and not _has_overfull_vbox(last_log):
             pages = await asyncio.to_thread(_page_count, pdf_path)
             return CompileResult(True, attempt, current, last_log, pages)
         if attempt <= max_retries:
+            # Either a hard compile error OR a clean-exit-but-Overfull run —
+            # either way, ask the LLM to tighten/fix the TeX and retry.
             current = sanitize_frametitles(await revise(last_log[-4000:], current))
+        elif pdf_produced:
+            # Retries exhausted but a PDF exists (overfull every time).
+            # Return ok=True — a degraded deck is better than a lost deck.
+            pages = await asyncio.to_thread(_page_count, pdf_path)
+            _LOG.warning(
+                "compile_with_revise: Overfull \\vbox persists after %d attempts; "
+                "emitting degraded PDF (%d pages)",
+                max_retries + 1,
+                pages,
+            )
+            return CompileResult(True, max_retries + 1, current, last_log, pages)
     return CompileResult(False, max_retries + 1, current, last_log, 0)
