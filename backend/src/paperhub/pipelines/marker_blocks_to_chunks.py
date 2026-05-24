@@ -41,6 +41,25 @@ _CONTENT_REF_RE = re.compile(r"content-ref\s+src=['\"]([^'\"]+)['\"]")
 _GROUP_TYPES = ("TableGroup", "FigureGroup", "PictureGroup")
 _SKIP_TYPES = ("PageFooter", "PageHeader")
 
+# Parse a "Table N" / "Figure N" label out of a caption. Accepts "Fig", "Fig.",
+# "Figure" (case-insensitive); normalizes to "Table N" / "Figure N".
+_LABEL_RE = re.compile(r"^\s*\*?\s*(Table|Fig(?:ure)?\.?)\s*(\d+)", re.IGNORECASE)
+
+
+def _parse_layout_label(caption: str | None) -> str | None:
+    """Normalize a figure/table label from a caption, or ``None`` if absent.
+
+    ``"Table 1: ..."`` → ``"Table 1"``; ``"Fig. 3 ..."`` / ``"Figure 3 ..."`` →
+    ``"Figure 3"``. Case-insensitive on the keyword."""
+    if not caption:
+        return None
+    m = _LABEL_RE.match(caption)
+    if not m:
+        return None
+    kw = m.group(1).lower()
+    kind = "Table" if kw.startswith("table") else "Figure"
+    return f"{kind} {m.group(2)}"
+
 
 def _content_ref_ids(html: str) -> list[str]:
     """Parse the child block-ids a Group block references via ``content-ref``."""
@@ -72,12 +91,17 @@ class _Piece:
         page: int | None,
         bboxes: list[list[float]],
         atomic: bool,
+        layout_kind: str | None = None,
+        layout_caption: str | None = None,
     ) -> None:
         self.text = text
         self.section = section
         self.page = page
         self.bboxes = bboxes
         self.atomic = atomic  # TableGroup/Figure → never split, own chunk if needed
+        # Layout-index provenance (F2.1 A3) — only on atomic table/figure pieces.
+        self.layout_kind = layout_kind
+        self.layout_caption = layout_caption
 
 
 def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
@@ -148,7 +172,7 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
             piece_section = resolved or current_section
             if piece_section is None:
                 piece_section = _lookahead_section(blocks, idx, _sec)
-            text, bboxes = _render_group(block, by_id)
+            text, bboxes, layout_kind, caption_text = _render_group(block, by_id)
             if not text:
                 continue
             pieces.append(
@@ -158,6 +182,8 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
                     page=block.page,
                     bboxes=bboxes,
                     atomic=True,
+                    layout_kind=layout_kind,
+                    layout_caption=caption_text,
                 )
             )
             continue
@@ -176,7 +202,8 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
             continue
 
         if bt == "Table":
-            # Standalone table not folded into a group (rare).
+            # Standalone table not folded into a group (rare). No caption block
+            # is associated → layout_caption stays None (label unparsable).
             md = html_table_to_markdown(block.html)
             if md:
                 pieces.append(
@@ -186,6 +213,7 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
                         page=block.page,
                         bboxes=[block.bbox] if block.bbox else [],
                         atomic=True,
+                        layout_kind="table",
                     )
                 )
             continue
@@ -204,6 +232,8 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
                         page=block.page,
                         bboxes=[block.bbox] if block.bbox else [],
                         atomic=True,
+                        layout_kind="figure",
+                        layout_caption=caption,
                     )
                 )
             continue
@@ -222,6 +252,31 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
             )
 
     return _group_pieces_to_chunks(pieces)
+
+
+def build_layout_index(chunks: list[tuple[Chunk, int]]) -> list[dict[str, object]]:
+    """Build the per-paper layout index from ``(chunk, chunk_id)`` pairs.
+
+    The worker assigns DB ids only AFTER inserting the chunks (RETURNING id),
+    so this takes the chunk objects zipped with their freshly-assigned ids
+    rather than reading ``chunk.id``. For each chunk tagged with a
+    ``layout_kind`` (an atomic table/figure), emit
+    ``{"kind", "label", "caption", "page", "chunk_id"}`` in document order.
+    Untagged chunks are skipped."""
+    index: list[dict[str, object]] = []
+    for chunk, chunk_id in chunks:
+        if chunk.layout_kind is None:
+            continue
+        index.append(
+            {
+                "kind": chunk.layout_kind,
+                "label": chunk.layout_label,
+                "caption": chunk.layout_caption,
+                "page": chunk.page,
+                "chunk_id": chunk_id,
+            }
+        )
+    return index
 
 
 def _lookahead_section(
@@ -244,14 +299,21 @@ def _lookahead_section(
 
 def _render_group(
     block: MarkerBlock, by_id: dict[str, MarkerBlock]
-) -> tuple[str, list[list[float]]]:
+) -> tuple[str, list[list[float]], str | None, str | None]:
     """Render a ``*Group`` block: caption (italic) above its table/figure.
 
-    Returns the markdown text + the bboxes to union (the group's own bbox, which
-    already covers caption+table)."""
+    Returns ``(markdown_text, bboxes, layout_kind, caption_text)``:
+      * the markdown text + the bboxes to union (the group's own bbox already
+        covers caption+table);
+      * ``layout_kind`` = ``"table"`` if the group contains a Table child, else
+        ``"figure"`` for a Figure/Picture child (``None`` if neither);
+      * ``caption_text`` = the plain caption (no markdown markers) for the
+        layout index, or ``None``."""
     refs = _content_ref_ids(block.html)
     caption_md = ""
     body_md = ""
+    caption_text: str | None = None
+    layout_kind: str | None = None
     for ref in refs:
         child = by_id.get(ref)
         if child is None:
@@ -260,15 +322,20 @@ def _render_group(
             cap = strip_html(child.html)
             if cap:
                 caption_md = f"*{cap}*"
+                caption_text = cap
         elif child.block_type == "Table":
             tbl = html_table_to_markdown(child.html)
             if tbl:
                 body_md = tbl
+            layout_kind = "table"
         elif child.block_type in ("Figure", "Picture"):
             cap = child.caption if child.caption is not None else strip_html(child.html)
             cap = (cap or "").strip()
             if cap and not caption_md:
                 caption_md = f"*{cap}*"
+                caption_text = cap
+            if layout_kind is None:
+                layout_kind = "figure"
     parts = [p for p in (caption_md, body_md) if p]
     text = "\n\n".join(parts)
     # The group's own bbox covers caption+table; prefer it (matches the desired
@@ -279,7 +346,7 @@ def _render_group(
             child = by_id.get(ref)
             if child and child.bbox:
                 bboxes.append(child.bbox)
-    return text, bboxes
+    return text, bboxes, layout_kind, caption_text
 
 
 def _group_pieces_to_chunks(pieces: list[_Piece]) -> list[Chunk]:
@@ -302,6 +369,16 @@ def _group_pieces_to_chunks(pieces: list[_Piece]) -> list[Chunk]:
             bboxes.extend(p.bboxes)
         char_start = cursor
         char_end = cursor + len(text)
+        # An atomic piece always stands alone (flushed before + after), so a
+        # single-piece atomic buffer carries the chunk's layout tags. A
+        # multi-piece (running-text) buffer is never a layout object.
+        layout_kind: str | None = None
+        layout_label: str | None = None
+        layout_caption: str | None = None
+        if len(buf) == 1 and buf[0].layout_kind is not None:
+            layout_kind = buf[0].layout_kind
+            layout_caption = buf[0].layout_caption
+            layout_label = _parse_layout_label(layout_caption)
         chunks.append(
             Chunk(
                 section=buf[0].section,
@@ -312,6 +389,9 @@ def _group_pieces_to_chunks(pieces: list[_Piece]) -> list[Chunk]:
                 match_text=strip_markdown(text),
                 page=buf[0].page,
                 bbox=_bbox_union(bboxes),
+                layout_kind=layout_kind,
+                layout_label=layout_label,
+                layout_caption=layout_caption,
             )
         )
         # +2 accounts for the "\n\n" that would join this chunk to the next in

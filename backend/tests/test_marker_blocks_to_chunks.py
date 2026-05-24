@@ -4,7 +4,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from paperhub.pipelines.marker_blocks_to_chunks import marker_blocks_to_chunks
+from paperhub.pipelines.chunker import Chunk
+from paperhub.pipelines.marker_blocks_to_chunks import (
+    build_layout_index,
+    marker_blocks_to_chunks,
+)
 from paperhub.pipelines.marker_client import _parse
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "marker_table_page.json"
@@ -89,3 +93,91 @@ def test_no_page_mixing_in_a_chunk() -> None:
     # Every chunk carries a single page (or None); pages 5 and 6 never share one.
     for c in chunks:
         assert c.page in (5, 6, None)
+
+
+# ---------------------------------------------------------------------------
+# F2.1 A3: layout tagging + build_layout_index
+# ---------------------------------------------------------------------------
+
+
+def test_table_chunk_is_layout_tagged() -> None:
+    chunks = marker_blocks_to_chunks(_load_doc())
+    tc = _table_chunk(chunks)
+    assert tc.layout_kind == "table"
+    assert tc.layout_label == "Table 1"
+    assert tc.layout_caption is not None
+    assert "Maximum path" in tc.layout_caption
+
+
+def test_non_layout_chunks_untagged() -> None:
+    chunks = marker_blocks_to_chunks(_load_doc())
+    # Text chunks (e.g. the "Why Self-Attention" prose) carry no layout tags.
+    text_chunks = [c for c in chunks if c.layout_kind is None]
+    assert text_chunks  # there is plenty of prose
+    for c in text_chunks:
+        assert c.layout_label is None
+        assert c.layout_caption is None
+
+
+def test_build_layout_index_emits_tagged_entries() -> None:
+    tagged = Chunk(
+        section="3.4 Embeddings",
+        char_start=0,
+        char_end=10,
+        text="*Table 1: foo*\n\n| a | b |",
+        page=5,
+        layout_kind="table",
+        layout_label="Table 1",
+        layout_caption="Table 1: foo",
+    )
+    fig = Chunk(
+        section="2 Background",
+        char_start=20,
+        char_end=30,
+        text="*Figure 2: bar*",
+        page=3,
+        layout_kind="figure",
+        layout_label="Figure 2",
+        layout_caption="Figure 2: bar",
+    )
+    plain = Chunk(section="1", char_start=40, char_end=50, text="prose")
+    index = build_layout_index([(tagged, 101), (plain, 102), (fig, 103)])
+    assert index == [
+        {
+            "kind": "table",
+            "label": "Table 1",
+            "caption": "Table 1: foo",
+            "page": 5,
+            "chunk_id": 101,
+        },
+        {
+            "kind": "figure",
+            "label": "Figure 2",
+            "caption": "Figure 2: bar",
+            "page": 3,
+            "chunk_id": 103,
+        },
+    ]
+
+
+def test_build_layout_index_unlabeled_entry_keeps_kind() -> None:
+    fig = Chunk(
+        section="2",
+        char_start=0,
+        char_end=5,
+        text="*An uncaptioned schematic*",
+        page=7,
+        layout_kind="figure",
+        layout_label=None,
+        layout_caption="An uncaptioned schematic",
+    )
+    index = build_layout_index([(fig, 9)])
+    assert index == [
+        {
+            "kind": "figure",
+            "label": None,
+            "caption": "An uncaptioned schematic",
+            "page": 7,
+            "chunk_id": 9,
+        }
+    ]

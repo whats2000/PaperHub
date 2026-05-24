@@ -245,6 +245,21 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F2.1 A3: Idempotent column-add for paper_content.layout_json (TEXT, JSON
+    # list of {kind,label,caption,page,chunk_id}). A per-paper index of figures
+    # + tables so the paper_qa subagent can later fetch a floated/mis-filed
+    # layout object by its label. Populated by the Marker upgrade path; NULL for
+    # non-Marker (LaTeX / PyMuPDF) rows — unchanged.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "layout_json" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN layout_json TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # decks (v2.18, Plan F): created by schema.sql's CREATE TABLE IF NOT EXISTS.
     # Future column-adds go here, mirroring the chat_sessions.deleted_at pattern.
     # -----------------------------------------------------------------------

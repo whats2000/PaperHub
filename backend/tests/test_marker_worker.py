@@ -246,6 +246,27 @@ async def test_upgrade_pdf_asset_via_marker_upgrades_and_reembeds(
         assert entry["token_count"] >= 0
         assert entry["chunk_count"] >= 1
 
+    # A3: layout_json is non-null, well-formed JSON. The marker_doc fixture has
+    # a Figure ("Figure 1: The Transformer ...") → ≥1 figure entry whose
+    # chunk_id points at a real chunk row.
+    async with conn.execute(
+        "SELECT layout_json FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        lj_row = await cur.fetchone()
+    assert lj_row is not None and lj_row[0] is not None
+    layout = _json.loads(str(lj_row[0]))
+    assert isinstance(layout, list) and layout
+    fig_entries = [e for e in layout if e["kind"] == "figure"]
+    assert fig_entries
+    async with conn.execute(
+        "SELECT id FROM chunks WHERE paper_content_id = ?", (pcid,)
+    ) as cur:
+        chunk_ids = {int(r[0]) for r in await cur.fetchall()}
+    for entry in layout:
+        assert set(entry) == {"kind", "label", "caption", "page", "chunk_id"}
+        assert entry["kind"] in ("figure", "table")
+        assert entry["chunk_id"] in chunk_ids
+
 
 @pytest.mark.asyncio
 async def test_worker_genuine_failure_marks_failed(

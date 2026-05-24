@@ -50,7 +50,10 @@ from paperhub.pipelines.extract import (
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
-from paperhub.pipelines.marker_blocks_to_chunks import marker_blocks_to_chunks
+from paperhub.pipelines.marker_blocks_to_chunks import (
+    build_layout_index,
+    marker_blocks_to_chunks,
+)
 from paperhub.pipelines.marker_client import (
     MarkerClient,
     get_marker_client,
@@ -859,10 +862,16 @@ class PaperPipeline:
                 assert r is not None
                 new_ids.append(int(r[0]))
 
+        # F2.1 A3: build the per-paper figure+table layout index from the
+        # freshly-inserted chunks zipped with their assigned ids, and persist it
+        # in the SAME transaction as sections_json/asset_status.
+        layout_json = json.dumps(
+            build_layout_index(list(zip(chunks, new_ids, strict=True)))
+        )
         await self._conn.execute(
-            "UPDATE paper_content SET sections_json = ?, asset_status = 'marker_ready' "
-            "WHERE id = ?",
-            (sections_json, paper_content_id),
+            "UPDATE paper_content SET sections_json = ?, layout_json = ?, "
+            "asset_status = 'marker_ready' WHERE id = ?",
+            (sections_json, layout_json, paper_content_id),
         )
         await self._conn.commit()
 

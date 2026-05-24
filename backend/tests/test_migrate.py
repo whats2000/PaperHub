@@ -100,3 +100,34 @@ async def test_apply_schema_idempotent_for_page_and_bbox(
             cols = {row[1] for row in await cur.fetchall()}
     assert "page" in cols
     assert "bbox" in cols
+
+
+# ---------------------------------------------------------------------------
+# F2.1 A3: paper_content.layout_json column (per-paper figure+table index)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_paper_content_has_layout_json_column(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """apply_schema must add layout_json to paper_content (F2.1 A3)."""
+    async with migrated_db.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    assert "layout_json" in cols
+
+
+@pytest.mark.asyncio
+async def test_apply_schema_idempotent_for_layout_json(
+    tmp_path: Path,
+) -> None:
+    """Running apply_schema twice must not raise for paper_content.layout_json."""
+    db_path = tmp_path / "idem_layout.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        # Second call must be a no-op, not an error.
+        await apply_schema(conn)
+        async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+    assert "layout_json" in cols
