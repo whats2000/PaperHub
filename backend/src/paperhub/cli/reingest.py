@@ -187,11 +187,14 @@ async def _reingest_one(
     # Insert new chunks; capture auto-assigned ids.
     new_ids: list[int] = []
     for c in chunks:
+        bbox_json = json.dumps(list(c.bbox)) if c.bbox is not None else None
         async with conn.execute(
             "INSERT INTO chunks "
-            "(paper_content_id, section, char_start, char_end, text, match_text) "
-            "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-            (pcid, c.section, c.char_start, c.char_end, c.text, c.match_text),
+            "(paper_content_id, section, char_start, char_end, text, match_text, "
+            "page, bbox) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (pcid, c.section, c.char_start, c.char_end, c.text, c.match_text,
+             c.page, bbox_json),
         ) as cur:
             r = await cur.fetchone()
             assert r is not None

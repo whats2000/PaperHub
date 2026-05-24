@@ -40,7 +40,6 @@ from paperhub.pipelines.chunker import (
     Chunk,
     chunk_text,
     map_stripped_offsets_to_original,
-    strip_latex_comments,
 )
 from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import (
@@ -51,13 +50,13 @@ from paperhub.pipelines.extract import (
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
-from paperhub.pipelines.markdown_strip import strip_markdown
+from paperhub.pipelines.marker_blocks_to_chunks import marker_blocks_to_chunks
 from paperhub.pipelines.marker_client import (
     MarkerClient,
     get_marker_client,
 )
 from paperhub.pipelines.marker_health import marker_available
-from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, marker_doc_to_markdown
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
@@ -72,6 +71,12 @@ _PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
 # Shared tiktoken encoder — hoisted to module level so repeated calls to
 # _build_sections_json don't pay the (cached but misleading) per-call cost.
 _CL100K = tiktoken.get_encoding("cl100k_base")
+
+
+def _bbox_json(bbox: tuple[float, float, float, float] | None) -> str | None:
+    """Serialize a chunk's union bbox to a JSON ``[x0,y0,x1,y1]`` string, or
+    ``None`` for non-Marker chunks (LaTeX / PyMuPDF)."""
+    return json.dumps(list(bbox)) if bbox is not None else None
 
 
 @dataclass(frozen=True)
@@ -813,35 +818,25 @@ class PaperPipeline:
         asset = marker_doc_to_asset(doc, source_dir=cache_dir)
         write_paper_asset(asset, cache_dir)
 
-        # Re-chunk from Marker's cleaner section structure. PDF text isn't
-        # LaTeX → strip_comments=False (same call shape ingest uses for PDFs).
-        full_text, boundaries = marker_doc_to_markdown(doc)
+        # Re-chunk from Marker's block structure via the block-anchored
+        # assembler: each chunk is a group of consecutive blocks sharing one
+        # (section, page), rendered to REAL markdown (tables stay tables) and
+        # carrying its union page + bbox so the Citation Canvas can highlight
+        # geometrically. Replaces the old marker_doc_to_markdown flatten path.
+        chunks = marker_blocks_to_chunks(doc)
         # Marker text comes from resp.json() and can carry lone UTF-16
         # surrogates (bad OCR / encoding artifacts) that SQLite can't store.
-        # Drop them so the chunk INSERTs never raise UnicodeEncodeError.
-        full_text = full_text.encode("utf-8", "ignore").decode("utf-8")
-        if not boundaries:
-            async with self._conn.execute(
-                "SELECT title FROM paper_content WHERE id = ?",
-                (paper_content_id,),
-            ) as cur:
-                title_row = await cur.fetchone()
-            title = str(title_row[0]) if title_row and title_row[0] else "Full text"
-            boundaries = [(title, 0)]
-        chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
-        # Chunk text is organized markdown; store the markdown-stripped plain
-        # text as match_text so the Citation Canvas resolver (start-anchored
-        # prefix search against the PDF text layer) still locates each chunk.
+        # Drop them per chunk so the INSERTs never raise UnicodeEncodeError.
         for c in chunks:
-            c.match_text = strip_markdown(c.text)
+            c.text = c.text.encode("utf-8", "ignore").decode("utf-8")
+            if c.match_text is not None:
+                c.match_text = c.match_text.encode("utf-8", "ignore").decode("utf-8")
 
         # Embed FIRST (no mutation yet — safe to fail before the destructive
         # deletes). Mirrors reingest._reingest_one ordering.
         texts = [c.text for c in chunks]
         embeddings = self._embedder.embed(texts)
-        sections_json = self._build_sections_json(
-            chunks, full_text, strip_comments=False,
-        )
+        sections_json = self._build_sections_json(chunks)
 
         # Destructive replace: delete old chunks + vectors, insert new.
         await self._conn.execute(
@@ -854,10 +849,11 @@ class PaperPipeline:
         for c in chunks:
             async with self._conn.execute(
                 "INSERT INTO chunks "
-                "(paper_content_id, section, char_start, char_end, text, dom_id, match_text) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
-                (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id,
-                 c.match_text),
+                "(paper_content_id, section, char_start, char_end, text, dom_id, "
+                "match_text, page, bbox) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (paper_content_id, c.section, c.char_start, c.char_end, c.text,
+                 c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
             ) as cur:
                 r = await cur.fetchone()
                 assert r is not None
@@ -888,23 +884,23 @@ class PaperPipeline:
 
     @staticmethod
     def _build_sections_json(
-        chunks: list[Chunk], full_text: str, *, strip_comments: bool = True,
+        chunks: list[Chunk], full_text: str | None = None, *,
+        strip_comments: bool = True,
     ) -> str:
-        """Compute the sections_json value from a list of chunks and source text.
+        """Compute the sections_json value from a list of chunks.
 
         Groups chunks by section name, computes char extents and token counts,
         and returns a JSON-encoded list of SectionEntry dicts ordered by
         appearance. Chunks with section=None (preamble / pre-first-section
         text) are excluded — they are not addressable by name.
 
-        ``strip_comments`` MUST match the value passed to ``chunk_text`` for the
-        same source: chunk char offsets are relative to the text the chunker
-        saw (comment-stripped for LaTeX, raw for PDF), so the slicing here has
-        to use the same representation or token_count would misalign.
+        Option (a): token_count is computed by encoding each section's chunk
+        TEXTS directly (no source-text slicing), so this never couples to a
+        ``full_text`` whose char offsets must line up — important for the
+        Marker block-anchored assembler, whose chunks carry offsets over a
+        concatenation the pipeline doesn't hold. ``full_text``/``strip_comments``
+        are accepted for backward compatibility and ignored.
         """
-        # See chunk_text: LaTeX offsets are relative to the comment-stripped
-        # text; PDF offsets are relative to the raw text. Match it.
-        stripped_text = strip_latex_comments(full_text) if strip_comments else full_text
         per_section: dict[str, list[Chunk]] = defaultdict(list)
         section_order: list[str] = []
         for c in chunks:
@@ -917,7 +913,7 @@ class PaperPipeline:
         entries: list[SectionEntry] = []
         for name in section_order:
             group = per_section[name]
-            section_text = stripped_text[group[0].char_start : group[-1].char_end]
+            section_text = "\n\n".join(c.text for c in group)
             entries.append(
                 SectionEntry(
                     name=name,
@@ -982,10 +978,11 @@ class PaperPipeline:
             for c in chunks:
                 await self._conn.execute(
                     "INSERT INTO chunks "
-                    "(paper_content_id, section, char_start, char_end, text, dom_id, match_text) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id,
-                     c.match_text),
+                    "(paper_content_id, section, char_start, char_end, text, dom_id, "
+                    "match_text, page, bbox) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (paper_content_id, c.section, c.char_start, c.char_end, c.text,
+                     c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
                 )
                 async with self._conn.execute("SELECT last_insert_rowid()") as cur:
                     cid_row = await cur.fetchone()

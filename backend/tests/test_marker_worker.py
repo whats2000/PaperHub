@@ -205,15 +205,46 @@ async def test_upgrade_pdf_asset_via_marker_upgrades_and_reembeds(
     # match_text is the markdown-stripped plain text (non-null, marker-free).
     assert any("Transformer" in t for t in after_texts)
     async with conn.execute(
-        "SELECT text, match_text FROM chunks WHERE paper_content_id = ? ORDER BY id",
+        "SELECT text, match_text, page, bbox FROM chunks "
+        "WHERE paper_content_id = ? ORDER BY id",
         (pcid,),
     ) as cur:
         rows = await cur.fetchall()
     assert rows
-    for _text, match_text in rows:
+    for _text, match_text, _page, _bbox in rows:
         assert match_text is not None
         for marker in ("#", "*", "|", "$", "!["):
             assert marker not in str(match_text)
+        # Surrogate-strip safety: lone UTF-16 surrogates must never reach SQLite.
+        assert all(not (0xD800 <= ord(ch) <= 0xDFFF) for ch in str(_text))
+
+    # A2': the block-anchored assembler carries page + bbox provenance.
+    pages = [r[2] for r in rows]
+    assert any(p is not None for p in pages)
+    # bbox is stored as a JSON 4-tuple string when present; parses to a list.
+    import json as _json
+
+    bboxes = [r[3] for r in rows]
+    assert any(b is not None for b in bboxes)
+    for b in bboxes:
+        if b is not None:
+            parsed = _json.loads(str(b))
+            assert isinstance(parsed, list) and len(parsed) == 4
+
+    # sections_json stays non-empty + well-formed (paper_qa list_sections reads it).
+    async with conn.execute(
+        "SELECT sections_json FROM paper_content WHERE id = ?", (pcid,)
+    ) as cur:
+        sj_row = await cur.fetchone()
+    assert sj_row is not None
+    sections = _json.loads(str(sj_row[0]))
+    assert isinstance(sections, list) and sections
+    for entry in sections:
+        assert set(entry) >= {
+            "name", "char_start", "char_end", "token_count", "chunk_count",
+        }
+        assert entry["token_count"] >= 0
+        assert entry["chunk_count"] >= 1
 
 
 @pytest.mark.asyncio

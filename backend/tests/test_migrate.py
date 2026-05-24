@@ -67,3 +67,36 @@ async def test_apply_schema_idempotent_for_match_text(
         async with conn.execute("PRAGMA table_info(chunks)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
     assert "match_text" in cols
+
+
+# ---------------------------------------------------------------------------
+# F2.1 A2': chunks.page + chunks.bbox columns (Marker block provenance)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chunks_has_page_and_bbox_columns(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """apply_schema must add page + bbox to chunks (F2.1 A2')."""
+    async with migrated_db.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    assert "page" in cols
+    assert "bbox" in cols
+
+
+@pytest.mark.asyncio
+async def test_apply_schema_idempotent_for_page_and_bbox(
+    tmp_path: Path,
+) -> None:
+    """Running apply_schema twice must not raise for chunks.page/bbox."""
+    db_path = tmp_path / "idem_page_bbox.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        # Second call must be a no-op, not an error.
+        await apply_schema(conn)
+        async with conn.execute("PRAGMA table_info(chunks)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+    assert "page" in cols
+    assert "bbox" in cols

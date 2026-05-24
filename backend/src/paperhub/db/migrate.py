@@ -230,6 +230,21 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F2.1 A2': Idempotent column-add for chunks.page (INTEGER) + chunks.bbox
+    # (TEXT, JSON [x0,y0,x1,y1]). Marker block-anchored chunks carry their
+    # page index + union bbox so the Citation Canvas can draw a GEOMETRIC
+    # highlight. NULL for non-Marker (LaTeX / PyMuPDF) chunks — unchanged.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "page" not in cols:
+        await conn.execute("ALTER TABLE chunks ADD COLUMN page INTEGER")
+        await conn.commit()
+    if "bbox" not in cols:
+        await conn.execute("ALTER TABLE chunks ADD COLUMN bbox TEXT")
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # decks (v2.18, Plan F): created by schema.sql's CREATE TABLE IF NOT EXISTS.
     # Future column-adds go here, mirroring the chat_sessions.deleted_at pattern.
     # -----------------------------------------------------------------------
