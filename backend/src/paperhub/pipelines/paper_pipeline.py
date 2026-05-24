@@ -850,9 +850,10 @@ class PaperPipeline:
         for c in chunks:
             async with self._conn.execute(
                 "INSERT INTO chunks "
-                "(paper_content_id, section, char_start, char_end, text, dom_id) "
-                "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-                (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id),
+                "(paper_content_id, section, char_start, char_end, text, dom_id, match_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id,
+                 c.match_text),
             ) as cur:
                 r = await cur.fetchone()
                 assert r is not None
@@ -1019,9 +1020,10 @@ class PaperPipeline:
             for c in chunks:
                 await self._conn.execute(
                     "INSERT INTO chunks "
-                    "(paper_content_id, section, char_start, char_end, text, dom_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id),
+                    "(paper_content_id, section, char_start, char_end, text, dom_id, match_text) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id,
+                     c.match_text),
                 )
                 async with self._conn.execute("SELECT last_insert_rowid()") as cur:
                     cid_row = await cur.fetchone()

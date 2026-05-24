@@ -34,6 +34,7 @@ class Chunk:
     char_end: int
     text: str
     dom_id: str | None = None
+    match_text: str | None = None
 
 
 def strip_latex_comments(text: str) -> str:

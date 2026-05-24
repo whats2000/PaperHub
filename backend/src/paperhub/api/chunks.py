@@ -22,6 +22,7 @@ class ChunkResolution(BaseModel):
     section: str | None
     text: str
     dom_id: str | None
+    match_text: str | None
 
 
 @router.get("/{chunk_id}", response_model=ChunkResolution)
@@ -30,7 +31,7 @@ async def get_chunk(chunk_id: int) -> ChunkResolution:
     async with (
         open_db(settings.db_path) as conn,
         conn.execute(
-            "SELECT id, paper_content_id, section, text, dom_id "
+            "SELECT id, paper_content_id, section, text, dom_id, match_text "
             "FROM chunks WHERE id = ?",
             (chunk_id,),
         ) as cur,
@@ -44,4 +45,5 @@ async def get_chunk(chunk_id: int) -> ChunkResolution:
         section=row[2],
         text=row[3],
         dom_id=row[4],
+        match_text=row[5],
     )

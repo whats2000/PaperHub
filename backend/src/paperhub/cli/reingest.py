@@ -189,9 +189,9 @@ async def _reingest_one(
     for c in chunks:
         async with conn.execute(
             "INSERT INTO chunks "
-            "(paper_content_id, section, char_start, char_end, text) "
-            "VALUES (?, ?, ?, ?, ?) RETURNING id",
-            (pcid, c.section, c.char_start, c.char_end, c.text),
+            "(paper_content_id, section, char_start, char_end, text, match_text) "
+            "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            (pcid, c.section, c.char_start, c.char_end, c.text, c.match_text),
         ) as cur:
             r = await cur.fetchone()
             assert r is not None

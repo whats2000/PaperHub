@@ -216,6 +216,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F2.1 A1: Idempotent column-add for chunks.match_text
+    # Stores a markdown-stripped copy of chunk.text for the Citation Canvas
+    # resolver (which matches a plain-text prefix against the PDF text layer).
+    # NULL until a later task populates it; existing rows are unaffected.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "match_text" not in cols:
+        await conn.execute(
+            "ALTER TABLE chunks ADD COLUMN match_text TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # decks (v2.18, Plan F): created by schema.sql's CREATE TABLE IF NOT EXISTS.
     # Future column-adds go here, mirroring the chat_sessions.deleted_at pattern.
     # -----------------------------------------------------------------------
