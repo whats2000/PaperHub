@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from paperhub.pipelines.slide_pipeline.compile import CompileResult, compile_with_revise
+from paperhub.pipelines.slide_pipeline.compile import (
+    CompileResult,
+    _has_overfull_vbox,
+    compile_with_revise,
+)
 
 
 @pytest.mark.asyncio
@@ -102,3 +106,93 @@ async def test_compile_handles_timeout(tmp_path: Path, monkeypatch) -> None:
     )
     assert res.ok is False
     assert "timed out" in res.log
+
+
+# ---------------------------------------------------------------------------
+# _has_overfull_vbox unit tests
+# ---------------------------------------------------------------------------
+
+def test_has_overfull_vbox_detects_warning() -> None:
+    assert _has_overfull_vbox("Overfull \\vbox (12pt too high) has occurred")
+    assert _has_overfull_vbox("some preamble\nOverfull \\vbox (3pt too high) while \\output\nmore text")
+
+
+def test_has_overfull_vbox_returns_false_for_clean_log() -> None:
+    assert not _has_overfull_vbox("")
+    assert not _has_overfull_vbox("Output written on deck.pdf (10 pages).")
+    assert not _has_overfull_vbox("Overfull \\hbox (5pt too wide)")  # hbox is different
+
+
+# ---------------------------------------------------------------------------
+# Overfull vbox triggers a revise cycle
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_overfull_vbox_triggers_revise(tmp_path: Path, monkeypatch) -> None:
+    """A rc=0 run that contains Overfull \\vbox must trigger one revise + recompile."""
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    calls: dict[str, int] = {"n": 0}
+
+    def fake_run(cmd, cwd=None, **kw):
+        import subprocess
+        calls["n"] += 1
+        # Both runs produce a PDF (rc=0); only the first has the Overfull warning.
+        Path(cwd, "deck.pdf").write_bytes(b"%PDF-1.4 fake")
+        stdout = "Overfull \\vbox (12pt too high) while \\output" if calls["n"] == 1 else "Output written on deck.pdf"
+        return subprocess.CompletedProcess(cmd, 0, stdout, "")
+
+    monkeypatch.setattr("paperhub.pipelines.slide_pipeline.compile.subprocess.run", fake_run)
+
+    revised: dict[str, int] = {"n": 0}
+
+    async def revise(log: str, tex: str) -> str:
+        revised["n"] += 1
+        return tex + "\n% tightened"
+
+    res = await compile_with_revise(
+        tex="\\documentclass{beamer}\\begin{document}\\end{document}",
+        workdir=workdir,
+        tex_name="deck.tex",
+        revise=revise,
+        max_retries=2,
+    )
+
+    assert res.ok is True
+    assert revised["n"] == 1          # Overfull run was revised exactly once
+    assert calls["n"] == 2            # two pdflatex invocations total
+    assert "% tightened" in res.tex   # revised source was used
+
+
+@pytest.mark.asyncio
+async def test_overfull_vbox_exhausted_retries_still_emits_pdf(tmp_path: Path, monkeypatch) -> None:
+    """When every attempt has Overfull \\vbox and retries are exhausted,
+    a PDF still exists so we keep ok=True (degraded deck, not lost deck)."""
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+
+    def always_overfull(cmd, cwd=None, **kw):
+        import subprocess
+        Path(cwd, "deck.pdf").write_bytes(b"%PDF-1.4 fake")
+        return subprocess.CompletedProcess(cmd, 0, "Overfull \\vbox (20pt too high)", "")
+
+    monkeypatch.setattr("paperhub.pipelines.slide_pipeline.compile.subprocess.run", always_overfull)
+
+    revise_calls: dict[str, int] = {"n": 0}
+
+    async def revise(log: str, tex: str) -> str:
+        revise_calls["n"] += 1
+        return tex  # unchanged — still overflows
+
+    res = await compile_with_revise(
+        tex="\\documentclass{beamer}\\begin{document}\\end{document}",
+        workdir=workdir,
+        tex_name="deck.tex",
+        revise=revise,
+        max_retries=2,
+    )
+
+    # PDF exists → ok=True (degraded but not lost), revise was called on each non-final attempt
+    assert res.ok is True
+    assert revise_calls["n"] == 2     # one per allowed retry (attempts 1 and 2), not after the last
+    assert (workdir / "deck.pdf").exists()
