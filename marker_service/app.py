@@ -2,7 +2,18 @@
 
 Exposes:
   GET  /health   -> {"status": "ok", "models_loaded": bool}
-  POST /extract   (multipart `file`) -> {"blocks": [ ...flattened... ]}
+  POST /extract   (multipart `file`) -> {"markdown": "<native md>", "blocks": [...]}
+
+Dual output (SRS v2.19 Plan F2.1 A2): one document build, two renders.
+  * `blocks` -> the flattened JSONOutput tree (unchanged; the PaperAsset path
+    depends on this byte-for-byte). Figures+captions, equations->LaTeX, sections.
+  * `markdown` -> Marker's NATIVE markdown rendering of the SAME document, which
+    preserves proper markdown tables (`| col | col |`) in correct reading order;
+    the backend chunks RAG text from this instead of re-assembling block html
+    (which flattened tables and lost structure).
+A single `PdfConverter.build_document(path)` runs layout/line/processors ONCE;
+the JSON renderer (the converter's configured one) and a MarkdownRenderer are
+both applied to that one `Document` — no double model inference.
 
 The flatten contract (the shape marker_client._parse expects):
   {"blocks": [{block_type, html, latex, section_hierarchy,
@@ -29,6 +40,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from marker.config.parser import ConfigParser
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
+from marker.renderers.markdown import MarkdownRenderer
 
 app = FastAPI(title="paperhub-marker")
 
@@ -227,8 +239,32 @@ async def extract(
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
         tf.write(data)
         path = tf.name
-    rendered = _converter(pages)(path)
+    converter = _converter(pages)
+    # Build the Document ONCE (layout/line builders + every processor run here),
+    # then render it twice — no double model inference.
+    #   marker/converters/pdf.py: PdfConverter.build_document(path) -> Document;
+    #   PdfConverter.__call__ does build_document() then
+    #   resolve_dependencies(self.renderer)(document). We do the same by hand so
+    #   we can apply BOTH renderers to the one document.
+    document = converter.build_document(path)
+
+    # JSON render: converter.renderer is the JSONRenderer CLASS (cfg has
+    # output_format="json", so cfg.get_renderer() yielded it and __init__ stored
+    # the class on .renderer). resolve_dependencies injects the same config.
+    json_renderer = converter.resolve_dependencies(converter.renderer)
+    rendered = json_renderer(document)
     blocks: list[dict[str, Any]] = []
     _flatten(rendered, blocks)
     _attach_captions(blocks)
-    return {"blocks": blocks}
+
+    # Markdown render: a MarkdownRenderer over the SAME document. Built via
+    # resolve_dependencies so it inherits the converter's config (math
+    # delimiters, pagination, etc.). MarkdownRenderer.__call__ returns a
+    # MarkdownOutput pydantic model whose `.markdown` is the native markdown
+    # text (proper `| col |` tables in reading order).
+    #   marker/renderers/markdown.py: class MarkdownOutput(markdown: str, ...).
+    md_renderer = converter.resolve_dependencies(MarkdownRenderer)
+    markdown_output = md_renderer(document)
+    markdown: str = getattr(markdown_output, "markdown", "") or ""
+
+    return {"markdown": markdown, "blocks": blocks}
