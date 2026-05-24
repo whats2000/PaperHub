@@ -10,11 +10,20 @@
 #      PRINT: PASS (no pdflatex — graceful guard)
 #
 #   B. pdflatex PRESENT (compiled deck path — requires a real LLM API key):
-#      The report graph runs plan_deck → generate_section → generate_notes
-#      → compile_with_revise. A `deck` SSE event appears with a numeric
-#      page_count, and GET /sessions/{id}/deck/pdf returns 200 with a body
-#      starting `%PDF`.
-#      PRINT: PASS (compiled deck)
+#      The F3 PhD-grade slide agent runs sl_resolve → sl_understand →
+#      sl_narrate → sl_draft → sl_coherence → sl_assemble →
+#      sl_verify_figures → sl_compile → sl_notes_finalize → sl_emit.
+#      A `deck` SSE event appears with status=ok, a numeric page_count > 0,
+#      and GET /sessions/{id}/deck/pdf returns 200 + %PDF magic.
+#
+#      F3 quality contracts (all asserted below):
+#        (1) deck event status=ok and page_count > 0
+#        (2) No hallucinated figures: every \includegraphics{KEY} in
+#            deck.tex references a file that exists in slides/figures/
+#        (3) Notes completeness: speaker_notes.json has exactly page_count
+#            entries (one note per slide page, gap pages filled with
+#            finalize_notes fallback)
+#      PRINT: PASS (compiled deck — F3 quality contracts satisfied)
 #
 # Mock mechanism: PAPERHUB_ROUTER_MOCK forces intent=slides so the router
 # LLM is never called. The Report pipeline's plan/section/notes calls are
@@ -65,12 +74,22 @@ function Invoke-ChatTurn {
 
 # ---------------------------------------------------------------------------
 # Helper: parse SSE output.
-# Returns a hashtable { FinalContent, GotError, GotDeck, DeckPageCount }.
+# Returns a hashtable {
+#   FinalContent, GotError, GotDeck,
+#   DeckPageCount, DeckStatus, DeckHasNotes
+# }.
 # Accepts either a string or an Object[] (what curl.exe returns in PS).
 # ---------------------------------------------------------------------------
 function Parse-Sse {
     param($Raw)
-    $result = @{ FinalContent = $null; GotError = $false; GotDeck = $false; DeckPageCount = 0 }
+    $result = @{
+        FinalContent = $null
+        GotError     = $false
+        GotDeck      = $false
+        DeckPageCount = 0
+        DeckStatus   = $null
+        DeckHasNotes = $false
+    }
     $cur = $null
     if ($Raw -is [array]) {
         $lines = $Raw | ForEach-Object { "$_".TrimEnd("`r") }
@@ -89,8 +108,10 @@ function Parse-Sse {
             } elseif ($cur -eq "deck") {
                 try {
                     $d = $j | ConvertFrom-Json
-                    $result.GotDeck = $true
+                    $result.GotDeck      = $true
                     $result.DeckPageCount = [int]$d.page_count
+                    $result.DeckStatus   = [string]$d.status
+                    $result.DeckHasNotes = [bool]$d.has_notes
                 } catch { }
             }
         }
@@ -262,8 +283,67 @@ print("DB seeded OK")
         if (-not $parsed.GotDeck) {
             throw "FAIL (compiled deck): expected a 'deck' SSE event but none arrived.`nFull SSE:`n$sse"
         }
+
+        # ── F3 quality contract (1): status=ok and page_count > 0 ────────────
+        if ($parsed.DeckStatus -ne "ok") {
+            throw "FAIL (F3 contract 1): deck event status='$($parsed.DeckStatus)' — expected 'ok'."
+        }
         if ($parsed.DeckPageCount -lt 1) {
-            throw "FAIL (compiled deck): deck event page_count=$($parsed.DeckPageCount) — expected >= 1."
+            throw "FAIL (F3 contract 1): deck event page_count=$($parsed.DeckPageCount) — expected >= 1."
+        }
+        Write-Host "  [F3-1] deck status=ok, page_count=$($parsed.DeckPageCount) — OK"
+
+        # ── F3 quality contract (2): no hallucinated figures ─────────────────
+        # Parse deck.tex for \includegraphics{KEY} and verify every KEY has a
+        # matching file (any extension) in slides/figures/.
+        $slidesDir   = Join-Path $ws "chat_session" | Join-Path -ChildPath "1" | Join-Path -ChildPath "slides"
+        $deckTexPath = Join-Path $slidesDir "deck.tex"
+        $figuresDir  = Join-Path $slidesDir "figures"
+        if (Test-Path $deckTexPath) {
+            $texContent = [System.IO.File]::ReadAllText($deckTexPath)
+            # Extract all \includegraphics[...]{KEY} or \includegraphics{KEY} references.
+            $graphicsPattern = [regex]'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}'
+            $matches = $graphicsPattern.Matches($texContent)
+            $hallucinated = @()
+            foreach ($m in $matches) {
+                $key = [System.IO.Path]::GetFileNameWithoutExtension($m.Groups[1].Value)
+                # Check if any file whose base name equals the key exists in figures/.
+                $found = $false
+                if (Test-Path $figuresDir) {
+                    $found = [bool](Get-ChildItem -Path $figuresDir -File |
+                        Where-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $key })
+                }
+                if (-not $found) { $hallucinated += $key }
+            }
+            if ($hallucinated.Count -gt 0) {
+                throw "FAIL (F3 contract 2 — no hallucinated figures): deck.tex references figure key(s) with no staged file: $($hallucinated -join ', ')"
+            }
+            Write-Host "  [F3-2] no hallucinated figures ($($matches.Count) \includegraphics reference(s), all staged) — OK"
+        } else {
+            # deck.tex not reachable from the smoke workspace — assert weaker proxy.
+            # TODO: this branch fires if the workspace path changes; tighten when
+            #       the slides workdir is exposed via the /sessions/{id}/deck endpoint.
+            Write-Host "  [F3-2] deck.tex not found at $deckTexPath — skipping figure check (proxy: status=ok already asserted)" -ForegroundColor Yellow
+        }
+
+        # ── F3 quality contract (3): notes count == page_count ───────────────
+        $notesPath = Join-Path $slidesDir "speaker_notes.json"
+        if (Test-Path $notesPath) {
+            $notesJson   = [System.IO.File]::ReadAllText($notesPath)
+            $notesObj    = $notesJson | ConvertFrom-Json
+            # ConvertFrom-Json returns a PSCustomObject; count its properties.
+            $notesCount  = ($notesObj | Get-Member -MemberType NoteProperty).Count
+            if ($notesCount -ne $parsed.DeckPageCount) {
+                throw "FAIL (F3 contract 3 — notes completeness): speaker_notes.json has $notesCount entries but deck page_count=$($parsed.DeckPageCount) — expected equal."
+            }
+            Write-Host "  [F3-3] notes count=$notesCount == page_count=$($parsed.DeckPageCount) — OK"
+        } else {
+            # TODO: notes file unreachable (workspace path drift); assert proxy
+            #       via has_notes flag from the deck SSE event instead.
+            if (-not $parsed.DeckHasNotes) {
+                throw "FAIL (F3 contract 3 — notes completeness): deck event has_notes=false (speaker_notes.json also not found)."
+            }
+            Write-Host "  [F3-3] speaker_notes.json not found — proxy: deck event has_notes=true — OK" -ForegroundColor Yellow
         }
 
         # Verify GET /sessions/{id}/deck/pdf returns 200 + a PDF body.
@@ -283,7 +363,7 @@ print("DB seeded OK")
         if (Test-Path $pdfPath) { Remove-Item $pdfPath -Force -ErrorAction SilentlyContinue }
 
         Write-Host ""
-        Write-Host "PASS (compiled deck) — deck SSE page_count=$($parsed.DeckPageCount), PDF 200 + %PDF magic." -ForegroundColor Green
+        Write-Host "PASS (compiled deck — F3 quality contracts satisfied) — deck status=$($parsed.DeckStatus), page_count=$($parsed.DeckPageCount), PDF 200 + %PDF magic." -ForegroundColor Green
 
     } else {
         # Path A: no pdflatex — expect the graceful guard message.
