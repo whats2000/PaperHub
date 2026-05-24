@@ -644,10 +644,11 @@ async def test_list_figures_tables_then_read_layout_object_picks_and_cites(
     tool_results = [m for m in final_msgs if m.get("role") == "tool"]
     assert len(tool_results) == 2
 
-    # list_figures_tables result must list the labels (no chunk_id leaked).
+    # list_figures_tables result lists the labels AND their citable chunk ids
+    # (F2.1 A3 — the chunk_id is now exposed as a [chunk:<id>] marker).
     list_body = tool_results[0]["content"]
     assert "Table 1" in list_body and "Figure 2" in list_body
-    assert "99999" not in list_body and "chunk_id" not in list_body
+    assert f"chunk:{cid}" in list_body and "chunk:99999" in list_body
 
     # The read_layout_object result must carry the chunk text in the same
     # <chunk id="N">…</chunk> (p.N) container so the LLM can cite it.
@@ -666,6 +667,165 @@ async def test_list_figures_tables_then_read_layout_object_picks_and_cites(
     assert summary["listed_layout"] == ["Table 1", "Figure 2"]
     assert cid in summary["layout_read_ids"]
     assert cid in summary["chunks_read_ids"]
+
+
+async def test_list_figures_tables_exposes_citable_chunk_id(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Part A: list_figures_tables output exposes the citable [chunk:<id>] for
+    each entry so the LLM can cite a figure/table directly by its numeric id."""
+    pcid, cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="Tables Paper",
+        layout=[
+            {"kind": "Table", "label": "Table 1", "caption": "Main results",
+             "page": 5, "chunk_id": "$CID"},
+        ],
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_figures_tables", {})]),
+        _msg(content="Listed."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Tables Paper",
+            user_message="Where is Table 1?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    assert tool_results
+    list_body = tool_results[-1]["content"]
+    # The citable chunk id must appear so the LLM can emit [chunk:<id>].
+    assert f"chunk:{cid}" in list_body, (
+        f"Expected 'chunk:{cid}' in list_figures_tables output; got:\n{list_body!r}"
+    )
+    assert "Table 1" in list_body
+
+
+async def test_subagent_autofetches_cited_figure_chunk_without_read(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Part B (bug repro): the LLM cites a figure's [chunk:<id>] straight from
+    list_figures_tables WITHOUT calling read_layout_object. The cited chunk
+    must be auto-fetched into picks (scoped to this paper) so the finalizer
+    receives it, and the auto-fetch must be recorded in the trace."""
+    pcid, cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="Transformer",
+        layout=[
+            {"kind": "Figure", "label": "Figure 2", "caption": "Multi-Head Attention",
+             "page": 4, "chunk_id": "$CID"},
+        ],
+        chunk_text="Figure 2: Multi-Head Attention consists of several attention layers.",
+        page=4,
+        section_name="Architecture",
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_figures_tables", {})]),
+        _msg(content=f"The multi-head attention figure is Figure 2 [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Transformer",
+            user_message="Where is the multi-head attention figure?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    # The cited chunk was auto-fetched into picks even though read_layout_object
+    # was never called.
+    assert [c.chunk_id for c in picks.picked_chunks] == [cid]
+    assert picks.picked_chunks[0].text.startswith("Figure 2: Multi-Head Attention")
+
+    # Trace records the auto-fetch + the cited id.
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE tool = 'paper_qa:subagent'"
+    ) as cur:
+        trow = await cur.fetchone()
+    assert trow is not None
+    summary = json.loads(trow[0])
+    assert cid in summary["autofetched_cited_ids"]
+    assert cid in summary["chunks_cited_ids"]
+
+
+async def test_subagent_does_not_autofetch_foreign_or_nonexistent_chunk(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Part B scoping: a cited id that belongs to ANOTHER paper or doesn't
+    exist must NOT be auto-fetched (and must not crash)."""
+    # Paper A — the one the subagent runs over.
+    pcid_a, cid_a = await _seed_paper_with_layout(
+        migrated_db,
+        title="Paper A",
+        layout=[
+            {"kind": "Figure", "label": "Figure 1", "caption": "A's figure",
+             "page": 2, "chunk_id": "$CID"},
+        ],
+        chunk_text="Paper A figure content.",
+    )
+    # Paper B — a foreign paper with its own chunk.
+    pcid_b, cid_b = await _seed_paper_with_layout(
+        migrated_db,
+        title="Paper B",
+        layout=None,
+        chunk_text="Paper B secret content.",
+    )
+    assert cid_b != cid_a
+
+    nonexistent = 999_999
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_figures_tables", {})]),
+        # Cites a foreign chunk and a nonexistent one — neither belongs to A.
+        _msg(content=f"See [chunk:{cid_b}] and [chunk:{nonexistent}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid_a,
+            title="Paper A",
+            user_message="Anything?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    # Neither foreign nor nonexistent chunk is fetched.
+    assert picks.picked_chunks == []
+
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE tool = 'paper_qa:subagent'"
+    ) as cur:
+        trow = await cur.fetchone()
+    assert trow is not None
+    summary = json.loads(trow[0])
+    assert summary["autofetched_cited_ids"] == []
 
 
 async def test_read_layout_object_unknown_label_returns_not_found(
