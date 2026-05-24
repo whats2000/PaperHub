@@ -3,11 +3,17 @@ services:
   marker:
     build: ./marker_service
     ports: ["8002:8002"]
-    # Setting GEMINI_API_KEY (host env or a repo-root .env) turns ON Marker's
-    # use_llm accuracy pass (better tables/math/layout via Gemini). Leave it
-    # unset to run keyless (no LLM pass). GOOGLE_API_KEY is also accepted.
+    # GEMINI_API_KEY turns ON Marker's use_llm accuracy pass (better
+    # tables/math/captions via Gemini). The backend's .env is the project key
+    # store, so the marker container reads the key from there directly — set
+    # GEMINI_API_KEY (or GOOGLE_API_KEY) in backend/.env and it's picked up on
+    # `docker compose up`. Keyless (key absent/blank) runs without the LLM pass.
+    # env_file values do NOT override the `environment:` block below, so the
+    # batch-size caps still win; the key lives only in env_file (no empty
+    # `environment` GEMINI entry to clobber it).
+    env_file:
+      - ./backend/.env
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       # Surya batch sizes are the dominant Marker VRAM knob. Each is read from
       # the environment by surya/settings.py; the upstream GPU DEFAULTS are huge
       # (DETECTOR=36 ~16GB, RECOGNITION=256/512 ~12-26GB, LAYOUT=32 ~7GB,
