@@ -201,6 +201,20 @@ async def test_upgrade_pdf_asset_via_marker_upgrades_and_reembeds(
     assert after_texts != before_texts
     assert "initial baseline chunk one" not in after_texts
 
+    # A1: chunk text is organized markdown (the figure caption appears in it);
+    # match_text is the markdown-stripped plain text (non-null, marker-free).
+    assert any("Transformer" in t for t in after_texts)
+    async with conn.execute(
+        "SELECT text, match_text FROM chunks WHERE paper_content_id = ? ORDER BY id",
+        (pcid,),
+    ) as cur:
+        rows = await cur.fetchall()
+    assert rows
+    for _text, match_text in rows:
+        assert match_text is not None
+        for marker in ("#", "*", "|", "$", "!["):
+            assert marker not in str(match_text)
+
 
 @pytest.mark.asyncio
 async def test_worker_genuine_failure_marks_failed(

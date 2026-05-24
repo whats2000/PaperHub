@@ -51,14 +51,13 @@ from paperhub.pipelines.extract import (
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
+from paperhub.pipelines.markdown_strip import strip_markdown
 from paperhub.pipelines.marker_client import (
-    MarkerBlock,
     MarkerClient,
-    MarkerDoc,
     get_marker_client,
 )
 from paperhub.pipelines.marker_health import marker_available
-from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, strip_html
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, marker_doc_to_markdown
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
@@ -816,7 +815,7 @@ class PaperPipeline:
 
         # Re-chunk from Marker's cleaner section structure. PDF text isn't
         # LaTeX → strip_comments=False (same call shape ingest uses for PDFs).
-        full_text, boundaries = PaperPipeline._marker_text_and_sections(doc)
+        full_text, boundaries = marker_doc_to_markdown(doc)
         # Marker text comes from resp.json() and can carry lone UTF-16
         # surrogates (bad OCR / encoding artifacts) that SQLite can't store.
         # Drop them so the chunk INSERTs never raise UnicodeEncodeError.
@@ -830,6 +829,11 @@ class PaperPipeline:
             title = str(title_row[0]) if title_row and title_row[0] else "Full text"
             boundaries = [(title, 0)]
         chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
+        # Chunk text is organized markdown; store the markdown-stripped plain
+        # text as match_text so the Citation Canvas resolver (start-anchored
+        # prefix search against the PDF text layer) still locates each chunk.
+        for c in chunks:
+            c.match_text = strip_markdown(c.text)
 
         # Embed FIRST (no mutation yet — safe to fail before the destructive
         # deletes). Mirrors reingest._reingest_one ordering.
@@ -872,48 +876,6 @@ class PaperPipeline:
             texts=texts,
             embeddings=embeddings,
         )
-
-    @staticmethod
-    def _marker_block_section(block: MarkerBlock) -> str | None:
-        """Deepest section-hierarchy level for a Marker block (mirrors
-        ``marker_to_asset._section_of``)."""
-        sh = block.section_hierarchy or {}
-        if not sh:
-            return None
-        return sh[max(sh.keys())]
-
-    @classmethod
-    def _marker_text_and_sections(
-        cls, doc: MarkerDoc,
-    ) -> tuple[str, list[tuple[str, int]]]:
-        """Derive ``full_text`` + ``(section_name, char_offset)`` boundaries from
-        a Marker doc's non-figure blocks, concatenated in document order.
-
-        Figure blocks are skipped (their HTML is just the caption — captured in
-        the PaperAsset instead). Each block's text is plain-text-extracted from
-        its HTML and joined with blank lines so the chunker sees paragraph
-        breaks. The first char offset at which each NEW section name appears is
-        recorded as a boundary, so chunks are tagged with the owning section.
-        """
-        parts: list[str] = []
-        boundaries: list[tuple[str, int]] = []
-        seen_sections: set[str] = set()
-        cursor = 0
-        for block in doc.blocks:
-            if block.block_type in ("Figure", "Picture"):
-                continue
-            sec = cls._marker_block_section(block)
-            piece = block.latex.strip() if block.latex else strip_html(block.html)
-            if not piece:
-                continue
-            if sec and sec not in seen_sections:
-                boundaries.append((sec, cursor))
-                seen_sections.add(sec)
-            parts.append(piece)
-            # +2 for the "\n\n" separator joined below.
-            cursor += len(piece) + 2
-        full_text = "\n\n".join(parts)
-        return full_text, boundaries
 
     @staticmethod
     def _pdf_boundaries(
