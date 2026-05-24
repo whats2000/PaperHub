@@ -37,6 +37,11 @@ __all__ = [
 
 MAX_SECTION_READS: int = 5
 
+# Cap on chunks auto-fetched solely because the final summary cited them
+# without a read (Part B safety net). Bounds DB work + abuse from a runaway
+# summary that lists dozens of ids.
+MAX_AUTOFETCH_CITED: int = 8
+
 # ──────────────────────── chunk-marker regex ─────────────────────────
 
 # Matches any ``chunk:<digits>`` occurrence regardless of bracket structure.
@@ -262,24 +267,37 @@ async def _list_figures_tables(
 ) -> tuple[str, list[str]]:
     """Return the LLM-facing figure/table index + the list of labels surfaced.
 
-    Each entry exposes ``{label, kind, caption, page}`` — the internal
-    ``chunk_id`` is deliberately omitted from the LLM-facing text. Returns
-    ``"(none)"`` when ``layout_json`` is NULL/empty.
+    Each entry is rendered as one human-readable line that EXPOSES the citable
+    ``[chunk:<chunk_id>]`` (F2.1 A3) so the LLM can cite a figure/table directly
+    — e.g. ``- Table 1 (table, p.5) [chunk:77339]: Maximum path lengths, ...``.
+    Entries without a usable integer ``chunk_id`` omit the marker (nothing
+    citable). Returns ``"(none)"`` when ``layout_json`` is NULL/empty.
     """
     layout = await _load_layout(paper_content_id=paper_content_id, conn=conn)
     if not layout:
         return ("(none)", [])
-    surfaced = [
-        {
-            "label": e.get("label"),
-            "kind": e.get("kind"),
-            "caption": e.get("caption"),
-            "page": e.get("page"),
-        }
-        for e in layout
-    ]
-    labels = [str(e["label"]) for e in surfaced if e["label"] is not None]
-    return (json.dumps(surfaced), labels)
+    lines: list[str] = []
+    labels: list[str] = []
+    for e in layout:
+        label = e.get("label")
+        if label is None:
+            continue
+        label_s = str(label)
+        labels.append(label_s)
+        kind = e.get("kind")
+        page = e.get("page")
+        caption = e.get("caption")
+        chunk_id = e.get("chunk_id")
+        meta_parts: list[str] = []
+        if kind is not None:
+            meta_parts.append(str(kind))
+        if page is not None:
+            meta_parts.append(f"p.{page}")
+        meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
+        cite = f" [chunk:{chunk_id}]" if isinstance(chunk_id, int) else ""
+        cap = f": {caption}" if caption else ""
+        lines.append(f"- {label_s}{meta}{cite}{cap}")
+    return ("\n".join(lines), labels)
 
 
 async def _read_layout_object(
@@ -333,6 +351,35 @@ async def _read_layout_object(
     if pick.page is not None:
         block += f" (p.{pick.page})"
     return (block, pick)
+
+
+async def _fetch_chunks_scoped(
+    *,
+    paper_content_id: int,
+    chunk_ids: list[int],
+    conn: aiosqlite.Connection,
+) -> dict[int, PickedChunk]:
+    """Fetch the given chunk rows, SCOPED to ``paper_content_id``.
+
+    Ids that don't belong to this paper (foreign paper, or nonexistent) are
+    silently dropped — never fetched. This is the Part B safety net: a chunk
+    the LLM cited straight from ``list_figures_tables`` (without a read) is
+    grounded into the finalizer's picks, but only if it is genuinely THIS
+    paper's chunk.
+    """
+    if not chunk_ids:
+        return {}
+    placeholders = ",".join("?" for _ in chunk_ids)
+    async with conn.execute(
+        f"SELECT id, text, section, page FROM chunks "  # noqa: S608 (placeholders only)
+        f"WHERE paper_content_id = ? AND id IN ({placeholders})",
+        (paper_content_id, *chunk_ids),
+    ) as cur:
+        rows = await cur.fetchall()
+    return {
+        r[0]: PickedChunk(chunk_id=r[0], text=r[1], section=r[2], page=r[3])
+        for r in rows
+    }
 
 
 # ──────────────────────── extraction helper ──────────────────────────
@@ -584,6 +631,26 @@ async def run_paper_qa_subagent(
 
         # Compute picks from whatever the loop produced.
         cited_ids = _extract_cited_chunk_ids(final_summary)
+        # Part B (v2.10 intent): ground every CITED chunk into the finalizer's
+        # picks. A chunk the LLM cited straight from list_figures_tables (which
+        # now exposes [chunk:<id>]) won't be in seen_chunks because it was never
+        # read — fetch it here, SCOPED to this paper_content_id and capped, so a
+        # one-pass "cite from the list" answer is honored instead of being
+        # short-circuited as empty picks.
+        autofetched_cited_ids: list[int] = []
+        missing_cited = [
+            cid for cid in cited_ids if cid not in seen_chunks
+        ][:MAX_AUTOFETCH_CITED]
+        if missing_cited:
+            fetched = await _fetch_chunks_scoped(
+                paper_content_id=paper_content_id,
+                chunk_ids=missing_cited,
+                conn=conn,
+            )
+            for cid, pick in fetched.items():
+                seen_chunks[cid] = pick
+                autofetched_cited_ids.append(cid)
+
         if cited_ids:
             picked = [seen_chunks[cid] for cid in cited_ids if cid in seen_chunks]
         else:
@@ -610,6 +677,7 @@ async def run_paper_qa_subagent(
             "listed_sections": listed_sections,
             "listed_layout": listed_layout,
             "layout_read_ids": layout_read_ids,
+            "autofetched_cited_ids": autofetched_cited_ids,
             "llm_turns": llm_turn_log,
             "tool_call_log": tool_call_log,
         })
