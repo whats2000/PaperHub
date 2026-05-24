@@ -13,6 +13,7 @@ import {
   API_BASE_URL,
 } from "@/lib/api";
 import { withBaseHref, stripDeadCdnScripts } from "@/lib/withBaseHref";
+import { resolveNeedle } from "@/lib/resolveNeedle";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -315,7 +316,7 @@ export function CitationCanvas() {
                   isActive &&
                   activeChunk &&
                   activeChunk.paper_content_id === pid
-                    ? activeChunk.text
+                    ? resolveNeedle(activeChunk)
                     : null
                 }
                 sectionTitle={
@@ -345,7 +346,7 @@ export function CitationCanvas() {
                 data={activeDoc.pdfData}
                 highlightText={
                   activeChunk?.paper_content_id === effectivePaperId
-                    ? activeChunk.text
+                    ? resolveNeedle(activeChunk)
                     : null
                 }
                 nonce={

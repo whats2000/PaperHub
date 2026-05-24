@@ -81,6 +81,10 @@ export interface ChunkResolution {
   /** Deterministic anchor (`<span id>`) injected at the chunk's start during
    *  ingest, when its sentinel survived rendering; null → use text-search. */
   dom_id: string | null;
+  /** Clean, markdown-stripped text for locating the chunk in the PDF/HTML text
+   *  layer. Present for Marker-ingested chunks (Plan F2+); null/absent for older
+   *  chunks — callers fall back to `text`. */
+  match_text?: string | null;
 }
 
 export interface AttachResult {
