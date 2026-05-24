@@ -124,11 +124,18 @@ async def paper_qa_finalize(
     Tracer step name: ``paper_qa:finalize``.
     """
     # Build per_paper_block in Python (not by the LLM).
+    # Chunks with a page (Marker-ingested) include a "(p.N)" annotation so the
+    # finalizer LLM can mention PDF page positions in its answer prose.
     parts: list[str] = []
     for pp in per_paper_picks:
+        def _chunk_block(c: Any) -> str:
+            block = f'<chunk id="{c.chunk_id}">\n{c.text}\n</chunk>'
+            if getattr(c, "page", None) is not None:
+                block += f" (p.{c.page})"
+            return block
+
         chunks_block = "\n\n".join(
-            f'<chunk id="{c.chunk_id}">\n{c.text}\n</chunk>'
-            for c in pp.picked_chunks
+            _chunk_block(c) for c in pp.picked_chunks
         ) or "(no chunks cited)"
         parts.append(
             f'## "{pp.title}"\n'

@@ -106,6 +106,7 @@ class PickedChunk:
     chunk_id: int
     text: str
     section: str | None
+    page: int | None = None  # PDF page from Marker; None for LaTeX/PyMuPDF chunks
 
 
 @dataclass(frozen=True)
@@ -154,9 +155,12 @@ async def _read_section(
     """Return all chunks in the named section.
 
     Returns an error string and empty list when the section doesn't exist.
+    The ``page`` column is included so the LLM can refer to PDF page positions
+    in its cited summary (Marker chunks carry a page; LaTeX/PyMuPDF chunks have
+    page=NULL and the annotation is omitted).
     """
     async with conn.execute(
-        "SELECT id, text, section FROM chunks "
+        "SELECT id, text, section, page FROM chunks "
         "WHERE paper_content_id = ? AND section = ? "
         "ORDER BY char_start",
         (paper_content_id, name),
@@ -169,14 +173,23 @@ async def _read_section(
             }),
             [],
         )
-    picks = [PickedChunk(chunk_id=r[0], text=r[1], section=r[2]) for r in rows]
+    picks = [
+        PickedChunk(chunk_id=r[0], text=r[1], section=r[2], page=r[3])
+        for r in rows
+    ]
     # Wrap each chunk in an explicit <chunk id="N">…</chunk> container so the
     # boundary + id binding is unambiguous, and the input label is NOT the same
     # token (`[chunk:N]`) the model must EMIT as a citation — keeping "here is a
     # chunk" distinct from "cite it" reduces mis-attribution on dense text.
-    body = "\n\n".join(
-        f'<chunk id="{p.chunk_id}">\n{p.text}\n</chunk>' for p in picks
-    )
+    # When page is non-NULL (Marker chunks), append " (p.N)" after the closing
+    # tag so the LLM can mention the PDF location in its prose summary.
+    def _chunk_block(p: PickedChunk) -> str:
+        block = f'<chunk id="{p.chunk_id}">\n{p.text}\n</chunk>'
+        if p.page is not None:
+            block += f" (p.{p.page})"
+        return block
+
+    body = "\n\n".join(_chunk_block(p) for p in picks)
     return (body, picks)
 
 

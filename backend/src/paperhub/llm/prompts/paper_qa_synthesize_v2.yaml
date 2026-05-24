@@ -24,6 +24,10 @@ system: |
   - Be focused and well-structured. Don't restate every chunk verbatim.
   - If only ONE paper has picks, present that paper's findings directly
     without artificial cross-paper structure.
+  - When a chunk has a ``(p.N)`` annotation after its closing tag, mention
+    the PDF page in prose next to the citation, e.g. "(Table 1, p.6)"
+    immediately after the ``[chunk:<id>]`` marker. Omit page mentions for
+    chunks with no ``(p.N)`` annotation (non-Marker sources).
 user: |
   USER QUESTION: {user_message}
 

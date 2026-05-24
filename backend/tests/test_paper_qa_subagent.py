@@ -4,6 +4,8 @@ Covers:
 - Happy path: list_sections → read two sections → cite chunks → return PerPaperPicks
 - Budget exhaustion: force-stop returns all seen chunks as best-effort fallback
 - Unknown section: returns error dict to LLM, no crash, empty picks
+- F2.1 A2': read_section includes page info for Marker chunks; omits for NULL page
+- F2.1 A2': PickedChunk carries page; extraction regex unaffected by page in chunk head
 """
 from __future__ import annotations
 
@@ -307,3 +309,287 @@ async def test_subagent_handles_malformed_tool_call_arguments(
     second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
     tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
     assert tool_results, "no tool result returned to the LLM after malformed args"
+
+
+# ─────────────────────────── F2.1 A2': page in chunk text ───────────────────
+
+
+async def _seed_paper_with_page(
+    conn: aiosqlite.Connection,
+    *,
+    section_name: str = "Results",
+    chunk_text: str = "Accuracy is 94%.",
+    page: int | None = None,
+) -> tuple[int, int]:
+    """Insert a paper + one chunk with optional page. Returns (pcid, chunk_id)."""
+    toc = [{"name": section_name, "char_start": 0, "char_end": len(chunk_text),
+             "token_count": 20, "chunk_count": 1}]
+    await conn.execute(
+        "INSERT INTO paper_content "
+        "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+        "source_path, source_dir_path, html_path, sections_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            f"arxiv:page-test-{page}", "arxiv", f"page-test-{page}", "Page Test Paper",
+            "[]", 2024, "abstract", "/tmp/x.tex", "/tmp", "/tmp/x.html",
+            json.dumps(toc),
+        ),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    pcid = int(row[0])
+
+    await conn.execute(
+        "INSERT INTO chunks (paper_content_id, section, char_start, char_end, text, page) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (pcid, section_name, 0, len(chunk_text), chunk_text, page),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        cr = await cur.fetchone()
+    assert cr is not None
+    cid = int(cr[0])
+    await conn.commit()
+    return pcid, cid
+
+
+async def test_read_section_includes_page_when_chunk_has_page(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """read_section body must contain 'p.6' (or similar) for a chunk with page=6.
+
+    The page info appears in the tool-result message the LLM sees, so it can
+    refer to PDF page positions in its cited summary.
+    """
+    pcid, cid = await _seed_paper_with_page(
+        migrated_db, section_name="Results", chunk_text="Accuracy is 94%.", page=6
+    )
+
+    # LLM sequence: read_section directly → final summary
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_section", {"name": "Results"})]),
+        _msg(content=f"Good results [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Page Test Paper",
+            user_message="What are the results?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    # The second LLM call must include a tool result with "p.6" in the chunk body.
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    assert tool_results, "no tool result for read_section"
+    body = tool_results[-1]["content"]
+    assert "p.6" in body, (
+        f"Expected 'p.6' in read_section tool result for page=6 chunk; got:\n{body!r}"
+    )
+
+
+async def test_read_section_omits_page_when_chunk_has_null_page(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """read_section body must NOT contain any 'p.' marker when chunk.page is NULL.
+
+    LaTeX/PyMuPDF chunks have no page — the format must be unchanged.
+    """
+    pcid, cid = await _seed_paper_with_page(
+        migrated_db, section_name="Methods", chunk_text="We use transformers.", page=None
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_section", {"name": "Methods"})]),
+        _msg(content=f"Uses transformers [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Page Test Paper",
+            user_message="What method is used?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    assert tool_results
+    body = tool_results[-1]["content"]
+    # No 'p.' page annotation should appear for a NULL-page chunk.
+    assert " p." not in body and "page=" not in body, (
+        f"Unexpected page annotation for NULL-page chunk; got:\n{body!r}"
+    )
+
+
+async def test_picked_chunk_carries_page(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """PickedChunk returned from run_paper_qa_subagent must carry .page=6."""
+    pcid, cid = await _seed_paper_with_page(
+        migrated_db, section_name="Results", chunk_text="Accuracy is 94%.", page=6
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_section", {"name": "Results"})]),
+        _msg(content=f"Good results [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Page Test Paper",
+            user_message="What are the results?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    assert len(picks.picked_chunks) == 1
+    assert picks.picked_chunks[0].chunk_id == cid
+    assert picks.picked_chunks[0].page == 6, (
+        f"PickedChunk.page should be 6, got {picks.picked_chunks[0].page!r}"
+    )
+
+
+async def test_picked_chunk_page_is_none_for_non_marker_chunk(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """PickedChunk.page must be None for a chunk with NULL page (non-Marker)."""
+    pcid, cid = await _seed_paper_with_page(
+        migrated_db, section_name="Results", chunk_text="Accuracy is 94%.", page=None
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_section", {"name": "Results"})]),
+        _msg(content=f"Good results [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Page Test Paper",
+            user_message="What are the results?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    assert len(picks.picked_chunks) == 1
+    assert picks.picked_chunks[0].page is None, (
+        f"PickedChunk.page should be None for NULL-page chunk, got {picks.picked_chunks[0].page!r}"
+    )
+
+
+def test_chunk_id_extraction_unaffected_by_page_in_container() -> None:
+    """_extract_cited_chunk_ids must still extract ids correctly when the LLM
+    cites [chunk:123] even if the read_section body had page annotations.
+
+    The extraction regex (chunk:\\d+) scans the LLM *summary*, not the tool
+    result, so this test verifies that the LLM output citation format is
+    unambiguous — the id is still extracted correctly regardless of what
+    was shown in the chunk containers.
+
+    Note: the regex matches ``chunk:<digits>`` tokens; comma-separated ids
+    like ``[chunk:103,104]`` only match 103 (the 104 has no ``chunk:`` prefix
+    — that format extracts a single id per bracket group). The multi-chunk
+    form that works for BOTH ids is ``[chunk:103, chunk:104]``.
+    """
+    from paperhub.agents.paper_qa_subagent import _extract_cited_chunk_ids
+
+    # The LLM prose includes "p.7" (page mention) — must not confuse the extractor.
+    summary = (
+        "The method achieves 94% accuracy [chunk:101] and the ablation on p.7 "
+        "confirms this [chunk:102]. See also [chunk:103] and [chunk:104] for details."
+    )
+    ids = _extract_cited_chunk_ids(summary)
+    assert ids == [101, 102, 103, 104], f"Got: {ids}"
+
+
+async def test_finalizer_per_paper_block_includes_page_for_marker_chunks(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """paper_qa_finalize must include page info in the per_paper_block it builds,
+    so the finalizer LLM can mention PDF page positions in its answer prose.
+    """
+    from paperhub.agents.paper_qa_subagent import PerPaperPicks, PickedChunk
+    from paperhub.agents.research import paper_qa_finalize
+
+    # Chunks: one with page, one without.
+    picks = [
+        PerPaperPicks(
+            paper_content_id=1,
+            title="Results Paper",
+            picked_chunks=[
+                PickedChunk(chunk_id=101, text="Table 1 shows 94% accuracy.", section="Results", page=6),
+                PickedChunk(chunk_id=102, text="Training details.", section="Methods", page=None),
+            ],
+            rationale="Has accuracy results and training details.",
+        ),
+    ]
+
+    stub_tokens = "The accuracy is 94% [chunk:101]."
+
+    class _CaptureAdapter:
+        calls: list[dict[str, Any]] = []
+
+        async def structured(self, **_: Any) -> Any:  # pragma: no cover
+            raise NotImplementedError
+
+        def stream(self, *, slot: str, variables: dict[str, Any], model: str,
+                   history: Any = None, **_: Any) -> Any:
+            self.calls.append({"slot": slot, "variables": dict(variables)})
+
+            async def _gen() -> Any:
+                yield stub_tokens
+
+            return _gen()
+
+    adapter = _CaptureAdapter()
+    tokens: list[str] = []
+    async for tok in paper_qa_finalize(
+        per_paper_picks=picks,
+        user_message="What accuracy?",
+        adapter=adapter,  # type: ignore[arg-type]
+        tracer=fake_tracer,
+        model="stub",
+        state={"run_id": fake_tracer._run_id, "history": None},  # type: ignore[arg-type]  # noqa: SLF001
+    ):
+        tokens.append(tok)
+
+    synth_calls = [c for c in adapter.calls if c["slot"] == "paper_qa_synthesize/v2"]
+    assert synth_calls, "Expected paper_qa_synthesize/v2 call"
+    per_paper_block = synth_calls[0]["variables"]["per_paper_block"]
+    # chunk 101 has page=6 → should appear in per_paper_block
+    assert "p.6" in per_paper_block, (
+        f"Expected 'p.6' in per_paper_block for chunk 101 (page=6); got:\n{per_paper_block!r}"
+    )
+    # chunk 102 has page=None → no 'p.' annotation for it
+    # (We can't easily check the absence per chunk, but we verify p.6 is present for chunk 101)
+    _ = tokens  # tokens consumed — no assertion on LLM output text
