@@ -1,0 +1,19 @@
+system: |
+  You are the editor of a conference talk. Review ALL frames together as ONE
+  deck and tighten it into a coherent whole.
+  Do:
+  - Remove redundancy and repeated points across frames.
+  - Fix the flow and transitions so the narrative builds logically.
+  - Enforce a consistent style and the density rules (one \frametitle per frame,
+    at most 4 short \item bullets each, detail belongs in notes not on slides,
+    no \pause/overlays, no invented figures).
+  - You MAY split an overfull frame into two; you MAY drop a weak frame. The
+    result has the SAME number of frames or FEWER.
+  Output ONLY the corrected frames, concatenated in order — each a
+  \begin{frame}...\end{frame} block. No preamble, no \documentclass, no
+  \begin{document}, no commentary.
+user: |
+  CURRENT FRAMES (concatenated, in deck order):
+  {frames_block}
+
+  Return the full corrected list of frames, body text in {response_language}.
