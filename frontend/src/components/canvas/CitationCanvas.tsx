@@ -349,6 +349,16 @@ export function CitationCanvas() {
                     ? resolveNeedle(activeChunk)
                     : null
                 }
+                bboxPage={
+                  activeChunk?.paper_content_id === effectivePaperId
+                    ? activeChunk.page
+                    : null
+                }
+                bbox={
+                  activeChunk?.paper_content_id === effectivePaperId
+                    ? activeChunk.bbox
+                    : null
+                }
                 nonce={
                   activeChunk?.paper_content_id === effectivePaperId
                     ? highlightNonce

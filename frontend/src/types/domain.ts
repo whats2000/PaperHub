@@ -85,6 +85,15 @@ export interface ChunkResolution {
    *  layer. Present for Marker-ingested chunks (Plan F2+); null/absent for older
    *  chunks — callers fall back to `text`. */
   match_text?: string | null;
+  /** Marker block provenance (F2.1 A2'): 0-based ABSOLUTE page index the chunk
+   *  was extracted from. Drives the exact geometric PDF highlight together with
+   *  `bbox`. Null for non-Marker (LaTeX / PyMuPDF) chunks. */
+  page?: number | null;
+  /** Marker union bbox `[x0,y0,x1,y1]` in PDF points, origin top-left, in the
+   *  page's native coordinate space. When present (with `page`), the Citation
+   *  Canvas draws the PDF highlight from this geometry instead of text-searching.
+   *  Null for non-Marker chunks. */
+  bbox?: number[] | null;
 }
 
 export interface AttachResult {

@@ -6,6 +6,11 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { locatePassage, type PdfPassageMatch } from "@/lib/pdfHighlight";
+import {
+  bboxToRect,
+  hasGeometricRegion,
+  markerPageToPageNumber,
+} from "@/lib/bboxHighlight";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
 // import.meta.url so the worker is bundled + served from the app origin.
@@ -33,6 +38,15 @@ interface Props {
   data: Uint8Array;
   /** Cited passage to highlight + scroll to, when this PDF is the cited paper. */
   highlightText?: string | null;
+  /** Marker chunk provenance (F2.1 A2'): the 0-based ABSOLUTE page index the
+   *  cited chunk was extracted from. When non-null AND `bbox` is a valid
+   *  length-4 region, the highlight is drawn GEOMETRICALLY from the bbox
+   *  (exact — what the agent actually used) and the text-search path is
+   *  skipped. Null → text-search fallback (`highlightText`). */
+  bboxPage?: number | null;
+  /** Marker union bbox `[x0,y0,x1,y1]` in PDF points, top-left origin, native
+   *  page space. Paired with `bboxPage` for the geometric highlight path. */
+  bbox?: number[] | null;
   /** Bumped per resolved citation so re-clicking the SAME chunk re-scrolls. */
   nonce?: number;
   /** Called when the passage couldn't be located in the PDF text. */
@@ -50,7 +64,17 @@ interface Props {
  * mislocating the highlight and shifting the page's selectable text. A geometry
  * overlay is independent of the text layer, so it always aligns with the canvas.
  */
-export function PdfView({ data, highlightText, nonce = 0, onHighlightMiss }: Props) {
+export function PdfView({
+  data,
+  highlightText,
+  bboxPage,
+  bbox,
+  nonce = 0,
+  onHighlightMiss,
+}: Props) {
+  // F2.1 A2': a non-null page + a well-formed length-4 bbox means we draw the
+  // highlight exactly from the chunk's stored geometry (no text search).
+  const useGeometric = hasGeometricRegion({ page: bboxPage, bbox });
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(0);
   const [match, setMatch] = useState<PdfPassageMatch | null>(null);
@@ -80,7 +104,8 @@ export function PdfView({ data, highlightText, nonce = 0, onHighlightMiss }: Pro
   // is loaded (numPages flips after onLoadSuccess) or when the passage changes.
   useEffect(() => {
     const pdf = pdfRef.current;
-    if (!pdf || !highlightText) {
+    // Geometric path owns the highlight when a bbox is present — skip text search.
+    if (!pdf || !highlightText || useGeometric) {
       setMatch(null);
       return;
     }
@@ -105,12 +130,51 @@ export function PdfView({ data, highlightText, nonce = 0, onHighlightMiss }: Pro
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightText, numPages]);
+  }, [highlightText, numPages, useGeometric]);
+
+  // F2.1 A2' — GEOMETRIC highlight: when the chunk carries an exact Marker
+  // region, scale its bbox from native PDF points to the current render width
+  // and draw the box directly. No text search; exact to what the agent used.
+  useEffect(() => {
+    const pdf = pdfRef.current;
+    // Only this effect owns `highlight` in geometric mode; do nothing otherwise.
+    if (!useGeometric) return;
+    let cancelled = false;
+    void (async () => {
+      if (!pdf || width <= 0 || bbox == null || bboxPage == null) {
+        if (!cancelled) setHighlight(null);
+        return;
+      }
+      const pageNumber = markerPageToPageNumber(bboxPage);
+      if (pageNumber < 1 || pageNumber > pdf.numPages) {
+        if (!cancelled) {
+          setHighlight(null);
+          onHighlightMiss?.();
+        }
+        return;
+      }
+      const page = await pdf.getPage(pageNumber);
+      const originalWidth = page.getViewport({ scale: 1 }).width;
+      const rect = bboxToRect(bbox, originalWidth, width);
+      if (cancelled) return;
+      setHighlight({
+        pageNumber,
+        rects: [rect],
+        key: `bbox:${pageNumber}:${bbox.join(",")}`,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useGeometric, bboxPage, bbox?.join(","), width, numPages]);
 
   // Compute highlight rectangles from PDF geometry at the current render scale,
   // so the overlay aligns exactly with the canvas regardless of the text layer.
   useEffect(() => {
     const pdf = pdfRef.current;
+    // The geometric effect owns `highlight` when a bbox is present — don't clobber.
+    if (useGeometric) return;
     if (!pdf || !match || width <= 0) {
       setHighlight(null);
       return;
@@ -147,7 +211,7 @@ export function PdfView({ data, highlightText, nonce = 0, onHighlightMiss }: Pro
     return () => {
       cancelled = true;
     };
-  }, [match, width]);
+  }, [match, width, useGeometric]);
 
   // Scroll the highlight into view when its overlay mounts (remounts per the
   // `key`, i.e. once per cited passage — not on resize-driven rect updates).
