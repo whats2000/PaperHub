@@ -531,6 +531,258 @@ def test_chunk_id_extraction_unaffected_by_page_in_container() -> None:
     assert ids == [101, 102, 103, 104], f"Got: {ids}"
 
 
+# ─────────────────────── F2.1 A3: layout tools ──────────────────────
+
+
+async def _seed_paper_with_layout(
+    conn: aiosqlite.Connection,
+    *,
+    title: str = "Layout Paper",
+    layout: list[dict[str, Any]] | None,
+    chunk_text: str = "Table 1 reports accuracy of 94% across all baselines.",
+    page: int | None = 5,
+    section_name: str = "Results",
+) -> tuple[int, int]:
+    """Insert a paper + one chunk + a layout_json index pointing at it.
+
+    ``layout`` is the JSON list to store in ``paper_content.layout_json``
+    (NULL when None). The single chunk's id is substituted into any layout
+    entry whose ``chunk_id`` sentinel is the string ``"$CID"``.
+    Returns (pcid, chunk_id).
+    """
+    toc = [{"name": section_name, "char_start": 0, "char_end": len(chunk_text),
+            "token_count": 20, "chunk_count": 1}]
+    await conn.execute(
+        "INSERT INTO paper_content "
+        "(content_key, kind, arxiv_id, title, authors_json, year, abstract, "
+        "source_path, source_dir_path, html_path, sections_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            f"arxiv:layout-{title}", "arxiv", f"layout-{title}", title,
+            "[]", 2024, "abstract", "/tmp/x.pdf", "/tmp", "/tmp/x.html",
+            json.dumps(toc),
+        ),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    pcid = int(row[0])
+
+    await conn.execute(
+        "INSERT INTO chunks (paper_content_id, section, char_start, char_end, text, page) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (pcid, section_name, 0, len(chunk_text), chunk_text, page),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        cr = await cur.fetchone()
+    assert cr is not None
+    cid = int(cr[0])
+
+    if layout is not None:
+        resolved = []
+        for entry in layout:
+            e = dict(entry)
+            if e.get("chunk_id") == "$CID":
+                e["chunk_id"] = cid
+            resolved.append(e)
+        await conn.execute(
+            "UPDATE paper_content SET layout_json = ? WHERE id = ?",
+            (json.dumps(resolved), pcid),
+        )
+    await conn.commit()
+    return pcid, cid
+
+
+async def test_list_figures_tables_then_read_layout_object_picks_and_cites(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """The subagent can list layout objects, read Table 1 by label, the
+    table's chunk lands in picked chunks (so the finalizer cites it), and the
+    layout read is recorded in the trace."""
+    pcid, cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="Tables Paper",
+        layout=[
+            {"kind": "Table", "label": "Table 1", "caption": "Main results",
+             "page": 5, "chunk_id": "$CID"},
+            {"kind": "Figure", "label": "Figure 2", "caption": "Architecture",
+             "page": 3, "chunk_id": 99999},
+        ],
+        chunk_text="Table 1 reports accuracy of 94% across all baselines.",
+        page=5,
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_figures_tables", {})]),
+        _msg(tool_calls=[_tool_call("c2", "read_layout_object", {"label": "Table 1"})]),
+        _msg(content=f"Table 1 reports 94% accuracy [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Tables Paper",
+            user_message="What does Table 1 show?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    # The table's chunk is picked + cited.
+    assert [c.chunk_id for c in picks.picked_chunks] == [cid]
+    assert picks.picked_chunks[0].page == 5
+
+    # The messages list is mutated in place across calls, so the final
+    # captured messages contain BOTH tool results: index 0 = list result,
+    # index 1 = read_layout_object result.
+    final_msgs = mock_completion.call_args_list[-1].kwargs["messages"]
+    tool_results = [m for m in final_msgs if m.get("role") == "tool"]
+    assert len(tool_results) == 2
+
+    # list_figures_tables result must list the labels (no chunk_id leaked).
+    list_body = tool_results[0]["content"]
+    assert "Table 1" in list_body and "Figure 2" in list_body
+    assert "99999" not in list_body and "chunk_id" not in list_body
+
+    # The read_layout_object result must carry the chunk text in the same
+    # <chunk id="N">…</chunk> (p.N) container so the LLM can cite it.
+    layout_result = tool_results[1]["content"]
+    assert "Table 1 reports accuracy of 94%" in layout_result
+    assert f'<chunk id="{cid}">' in layout_result
+    assert "p.5" in layout_result
+
+    # Trace records the layout read.
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE tool = 'paper_qa:subagent'"
+    ) as cur:
+        trow = await cur.fetchone()
+    assert trow is not None
+    summary = json.loads(trow[0])
+    assert summary["listed_layout"] == ["Table 1", "Figure 2"]
+    assert cid in summary["layout_read_ids"]
+    assert cid in summary["chunks_read_ids"]
+
+
+async def test_read_layout_object_unknown_label_returns_not_found(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Unknown label → graceful 'not found' tool result, no exception."""
+    pcid, cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="Tables Paper",
+        layout=[
+            {"kind": "Table", "label": "Table 1", "caption": "Main results",
+             "page": 5, "chunk_id": "$CID"},
+        ],
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_layout_object", {"label": "Table 9"})]),
+        _msg(content="No such table found in this paper."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Tables Paper",
+            user_message="What does Table 9 show?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    assert picks.picked_chunks == []
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    assert tool_results
+    body = tool_results[-1]["content"].lower()
+    assert "no such" in body or "not found" in body
+
+
+async def test_read_layout_object_case_insensitive_label_match(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """'table 1' matches stored 'Table 1' (case-insensitive)."""
+    pcid, cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="Tables Paper",
+        layout=[
+            {"kind": "Table", "label": "Table 1", "caption": "Main results",
+             "page": 5, "chunk_id": "$CID"},
+        ],
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "read_layout_object", {"label": "table 1"})]),
+        _msg(content=f"Table 1 [chunk:{cid}]."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="Tables Paper",
+            user_message="What does table 1 show?",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    assert [c.chunk_id for c in picks.picked_chunks] == [cid]
+
+
+async def test_list_figures_tables_null_layout_returns_none_marker(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """NULL layout_json → list_figures_tables returns an empty/'(none)'
+    result, no crash."""
+    pcid, _cid = await _seed_paper_with_layout(
+        migrated_db,
+        title="No Layout Paper",
+        layout=None,
+    )
+
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_figures_tables", {})]),
+        _msg(content="This paper has no figures or tables indexed."),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        picks = await run_paper_qa_subagent(
+            paper_content_id=pcid,
+            title="No Layout Paper",
+            user_message="List the tables.",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            max_section_reads=5,
+        )
+
+    assert picks.picked_chunks == []
+    second_call_msgs = mock_completion.call_args_list[1].kwargs["messages"]
+    tool_results = [m for m in second_call_msgs if m.get("role") == "tool"]
+    body = tool_results[-1]["content"].lower()
+    assert "none" in body or body.strip() in {"[]", "()", ""}
+
+
 async def test_finalizer_per_paper_block_includes_page_for_marker_chunks(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Any,

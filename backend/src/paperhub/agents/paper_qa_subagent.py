@@ -95,6 +95,46 @@ _TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_figures_tables",
+            "description": (
+                "Return the index of this paper's figures and tables "
+                "(label, kind, caption, page). Use this for a question about "
+                "a SPECIFIC table or figure by number — a floated table may "
+                "not appear in any section's prose. "
+                "Free — does not count against the read budget."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_layout_object",
+            "description": (
+                "Return the chunk for the figure/table with the given label "
+                "(e.g. 'Table 1', 'Figure 3'), prefixed with [chunk:<id>]. "
+                "Call list_figures_tables() first to discover valid labels. "
+                "Counts against the read budget."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Exact label from list_figures_tables().",
+                    },
+                },
+                "required": ["label"],
+            },
+        },
+    },
 ]
 
 
@@ -193,6 +233,108 @@ async def _read_section(
     return (body, picks)
 
 
+async def _load_layout(
+    *,
+    paper_content_id: int,
+    conn: aiosqlite.Connection,
+) -> list[dict[str, Any]]:
+    """Return the paper's layout_json as a list of dicts (empty when NULL/invalid)."""
+    async with conn.execute(
+        "SELECT layout_json FROM paper_content WHERE id = ?",
+        (paper_content_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None or row[0] is None:
+        return []
+    try:
+        data = json.loads(row[0])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict)]
+
+
+async def _list_figures_tables(
+    *,
+    paper_content_id: int,
+    conn: aiosqlite.Connection,
+) -> tuple[str, list[str]]:
+    """Return the LLM-facing figure/table index + the list of labels surfaced.
+
+    Each entry exposes ``{label, kind, caption, page}`` — the internal
+    ``chunk_id`` is deliberately omitted from the LLM-facing text. Returns
+    ``"(none)"`` when ``layout_json`` is NULL/empty.
+    """
+    layout = await _load_layout(paper_content_id=paper_content_id, conn=conn)
+    if not layout:
+        return ("(none)", [])
+    surfaced = [
+        {
+            "label": e.get("label"),
+            "kind": e.get("kind"),
+            "caption": e.get("caption"),
+            "page": e.get("page"),
+        }
+        for e in layout
+    ]
+    labels = [str(e["label"]) for e in surfaced if e["label"] is not None]
+    return (json.dumps(surfaced), labels)
+
+
+async def _read_layout_object(
+    *,
+    paper_content_id: int,
+    label: str,
+    conn: aiosqlite.Connection,
+) -> tuple[str, PickedChunk | None]:
+    """Return the chunk for the figure/table with ``label`` (case-insensitive).
+
+    Returns an error string and ``None`` when the label isn't in the layout
+    index or its chunk row is missing. The chunk text is headed
+    ``[chunk:<id>] (p.<page>)`` exactly like ``read_section`` formats chunks.
+    """
+    layout = await _load_layout(paper_content_id=paper_content_id, conn=conn)
+    target = label.strip().casefold()
+    match: dict[str, Any] | None = None
+    for e in layout:
+        lbl = e.get("label")
+        if isinstance(lbl, str) and lbl.strip().casefold() == target:
+            match = e
+            break
+    if match is None:
+        return (
+            json.dumps({
+                "error": (
+                    f"no such table/figure: {label!r}. "
+                    "Call list_figures_tables() to see valid labels."
+                ),
+            }),
+            None,
+        )
+    chunk_id = match.get("chunk_id")
+    if not isinstance(chunk_id, int):
+        return (
+            json.dumps({"error": f"layout object {label!r} has no chunk to read."}),
+            None,
+        )
+    async with conn.execute(
+        "SELECT id, text, section, page FROM chunks WHERE id = ?",
+        (chunk_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return (
+            json.dumps({"error": f"chunk for {label!r} is missing; re-ingest this paper."}),
+            None,
+        )
+    pick = PickedChunk(chunk_id=row[0], text=row[1], section=row[2], page=row[3])
+    block = f'<chunk id="{pick.chunk_id}">\n{pick.text}\n</chunk>'
+    if pick.page is not None:
+        block += f" (p.{pick.page})"
+    return (block, pick)
+
+
 # ──────────────────────── extraction helper ──────────────────────────
 
 
@@ -262,6 +404,8 @@ async def run_paper_qa_subagent(
     # accumulated below and flushed into record_result on step exit.
     tool_call_log: list[dict[str, Any]] = []
     listed_sections: list[str] | None = None  # captured first time list_sections is called
+    listed_layout: list[str] | None = None  # labels surfaced by list_figures_tables
+    layout_read_ids: list[int] = []  # chunk ids fetched via read_layout_object
     llm_turn_log: list[dict[str, Any]] = []  # one entry per LLM turn
 
     # ONE tracer step around the entire loop — one paper_qa:subagent row
@@ -379,10 +523,43 @@ async def run_paper_qa_subagent(
                         tool_log_entry["chunk_ids_returned"] = [
                             p.chunk_id for p in new_picks
                         ]
+                elif name == "list_figures_tables":
+                    result_str, labels = await _list_figures_tables(
+                        paper_content_id=paper_content_id, conn=conn,
+                    )
+                    tool_log_entry["layout_listed"] = labels
+                    if listed_layout is None:
+                        listed_layout = labels
+                elif name == "read_layout_object":
+                    label = str(raw_args.get("label", ""))
+                    if read_count >= max_section_reads:
+                        result_str = json.dumps({
+                            "error": (
+                                f"read budget exhausted ({max_section_reads}). "
+                                "Stop calling tools and write your final summary now."
+                            ),
+                        })
+                        tool_log_entry["error"] = "budget_exhausted"
+                    else:
+                        result_str, pick = await _read_layout_object(
+                            paper_content_id=paper_content_id,
+                            label=label,
+                            conn=conn,
+                        )
+                        if pick is not None:
+                            seen_chunks[pick.chunk_id] = pick
+                            layout_read_ids.append(pick.chunk_id)
+                            read_count += 1
+                            tool_log_entry["chunk_ids_returned"] = [pick.chunk_id]
+                        else:
+                            tool_log_entry["error"] = "layout_not_found"
                 else:
                     # Off-palette tool call — return a clear error.
                     result_str = json.dumps({
-                        "error": f"unknown tool {name!r}. Use list_sections or read_section.",
+                        "error": (
+                            f"unknown tool {name!r}. Use list_sections, read_section, "
+                            "list_figures_tables, or read_layout_object."
+                        ),
                     })
                     tool_log_entry["error"] = "off_palette"
 
@@ -400,9 +577,10 @@ async def run_paper_qa_subagent(
             # tool_calls (meaning it didn't self-terminate after receiving
             # the exhaustion error). Break out and use the fallback.
             if read_count >= max_section_reads and all(
-                c["function"]["name"] == "read_section" for c in tool_calls
+                c["function"]["name"] in ("read_section", "read_layout_object")
+                for c in tool_calls
             ):
-                break  # every read_section call received the exhaustion error; force-stop
+                break  # every read call received the exhaustion error; force-stop
 
         # Compute picks from whatever the loop produced.
         cited_ids = _extract_cited_chunk_ids(final_summary)
@@ -430,6 +608,8 @@ async def run_paper_qa_subagent(
             "summary_len": len(final_summary),
             "final_summary": final_summary,
             "listed_sections": listed_sections,
+            "listed_layout": listed_layout,
+            "layout_read_ids": layout_read_ids,
             "llm_turns": llm_turn_log,
             "tool_call_log": tool_call_log,
         })
