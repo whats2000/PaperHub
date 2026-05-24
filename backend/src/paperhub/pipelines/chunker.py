@@ -35,6 +35,8 @@ class Chunk:
     text: str
     dom_id: str | None = None
     match_text: str | None = None
+    page: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
 
 
 def strip_latex_comments(text: str) -> str:
