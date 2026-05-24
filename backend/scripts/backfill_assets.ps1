@@ -31,6 +31,12 @@ $backend   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 # to cwd — from the repo root that's a different, usually empty workspace).
 $env:PAPERHUB_WORKSPACE = $workspace
 
+# Clear any stale VIRTUAL_ENV so uv doesn't emit a "VIRTUAL_ENV does not match
+# the project environment" WARNING to stderr — under this script's
+# ErrorActionPreference='Stop', that native-stderr line is otherwise promoted to
+# a terminating NativeCommandError and aborts the run before the CLI executes.
+$env:VIRTUAL_ENV = $null
+
 # The PDF path calls the Marker service (default http://127.0.0.1:8002) — make
 # sure `docker compose up -d marker` is running, or PDF papers will error
 # (per-paper recovery keeps the run going; LaTeX papers are unaffected).
