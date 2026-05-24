@@ -1,11 +1,22 @@
-"""Report Agent subgraph (Plan F Phase 1 — create-only).
+"""Report Agent subgraph (Plan F3 — PhD-grade slide topology, SRS v2.19).
 
-START → sl_resolve → {empty | no_latex | create} → sl_generate → END
+START → sl_resolve → {empty | no_latex | create}; the create path runs
+
+    sl_understand → sl_narrate → sl_draft → sl_coherence → sl_assemble
+    → sl_verify_figures → sl_compile → sl_notes_finalize → sl_emit → END
+
+It consumes F2's ``PaperAsset`` (figures+captions, equations, sections) per
+enabled paper, builds a deck-wide collision-free figure inventory, drafts
+concise slide+note pairs grounded in retrieved chunks, deterministically
+rejects any non-inventory figure (the hard no-hallucination guarantee), and
+compiles with an Overfull-aware revise loop. The ``deck`` SSE event + the
+``decks`` row shape are unchanged from F1.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,22 +27,35 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from paperhub.agents.memory_recall import build_active_memory_block
-from paperhub.agents.report_pipeline import generate_notes, generate_section, plan_deck
+from paperhub.agents.report_pipeline import (
+    coherence_pass,
+    draft_slide,
+    finalize_notes,
+    narrate_talk,
+    revise_tex,
+    understand_paper,
+)
 from paperhub.agents.state import response_language
 from paperhub.db.decks import get_deck, upsert_deck
 from paperhub.llm.adapter import LlmAdapter
-from paperhub.models.domain import AgentState, PlannedSection
+from paperhub.models.domain import AgentState, OutlineSlide, PaperBrief, SlideDraft
+from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.assemble import AssembleInput, assemble_deck
-from paperhub.pipelines.slide_pipeline.figures import (
-    FigureIndex,
-    collect_figures,
-    neutralize_unknown_graphics,
+from paperhub.pipelines.slide_pipeline.figure_inventory import (
+    InventoryFigure,
+    build_inventory,
+    stage_inventory,
+    verify_and_fix_graphics,
 )
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
 from paperhub.tracing.tracer import Tracer
 
-_SECTION_CONCURRENCY = 4
+# Find the figures actually referenced across the drafted frames (mirrors the
+# pattern figure_inventory uses) so only those are staged into the deck dir.
+_GRAPHICS_RE = re.compile(r"\\includegraphics(\[[^\]]*\])?\{([^}]+)\}")
+
+_THEME = "metropolis"
 _EMPTY_MSG = (
     "I couldn't find any enabled reference papers in this chat. "
     "Add and enable at least one reference, then ask me to make slides."
@@ -54,6 +78,10 @@ class ReportDeps:
     conn: aiosqlite.Connection
     retriever: Any
     workspace: Path
+    # F1 model-tier names are reused as-is so chat.py / config.py need no
+    # change. The PhD flow maps them onto its stages: plan_model → narrate,
+    # section_model → draft + revise, notes_model → understand, coherence
+    # reuses section_model.
     plan_model: str
     section_model: str
     notes_model: str
@@ -81,6 +109,48 @@ async def _enabled_papers(
         }
         for r in rows
     ]
+
+
+def _inventory_lines(figs: list[InventoryFigure]) -> str:
+    """Render ``key: caption`` lines for a figure inventory (or a placeholder)."""
+    return "\n".join(f"{f.key}: {f.caption}" for f in figs) or "(no figures)"
+
+
+def _paper_block(paper: dict[str, Any], figs: list[InventoryFigure]) -> str:
+    """Assemble the understand prompt's per-paper block from its PaperAsset.
+
+    title + abstract (from paper_content) + section names + this paper's slice
+    of the deck figure inventory (``key: caption``) + equations (LaTeX).
+    """
+    source_dir = Path(str(paper["source_dir"])) if paper.get("source_dir") else None
+    asset = read_paper_asset(source_dir) if source_dir else None
+    section_names = [s.name for s in asset.sections] if asset else []
+    equations = [e.latex for e in asset.equations] if asset else []
+    lines = [
+        f"Title: {paper['title']}",
+        f"Abstract: {(paper['abstract'] or '').strip()}",
+        "Sections: " + (", ".join(section_names) or "(none)"),
+        "Figures:",
+        _inventory_lines(figs),
+        "Equations:",
+        ("\n".join(equations) or "(none)"),
+    ]
+    return "\n".join(lines)
+
+
+def _briefs_block(briefs: list[PaperBrief]) -> str:
+    """Render the per-paper briefs into the narrate prompt's briefs block."""
+    parts: list[str] = []
+    for b in briefs:
+        parts.append(
+            f"paper_id={b.paper_id}\n"
+            f"  contribution: {b.contribution}\n"
+            f"  method: {b.method}\n"
+            f"  key_results: {'; '.join(b.key_results)}\n"
+            f"  key_figure_keys: {', '.join(b.key_figure_keys) or '(none)'}\n"
+            f"  key_equations: {'; '.join(b.key_equations) or '(none)'}"
+        )
+    return "\n\n".join(parts)
 
 
 def build_report_subgraph(deps: ReportDeps) -> Any:
@@ -112,114 +182,179 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 deps.conn, session_id=state.get("session_id")
             )
 
-        papers_block = "\n".join(
-            f"- id={p['id']} · {p['title']} · {(p['abstract'] or '')[:400]}"
-            f" · sections={p['sections_json'] or '[]'}"
-            for p in papers
+        # ---- deck-wide figure inventory (built ONCE, collision-free keys) ----
+        inv: list[InventoryFigure] = await asyncio.to_thread(build_inventory, papers)
+        inv_keys = {f.key for f in inv}
+        inv_by_key = {f.key: f for f in inv}
+        # Per-paper inventory slices (paper enumeration index → "p{idx}-" prefix).
+        per_paper_figs: dict[int, list[InventoryFigure]] = {idx: [] for idx in range(len(papers))}
+        for f in inv:
+            for idx in range(len(papers)):
+                if f.key.startswith(f"p{idx}-"):
+                    per_paper_figs[idx].append(f)
+                    break
+
+        # ---- sl_understand: per-paper briefs (fan-out) ----
+        briefs: list[PaperBrief] = list(
+            await asyncio.gather(
+                *[
+                    understand_paper(
+                        paper_block=_paper_block(p, per_paper_figs.get(idx, [])),
+                        adapter=deps.adapter,
+                        tracer=deps.tracer,
+                        model=deps.notes_model,
+                        response_language=lang,
+                    )
+                    for idx, p in enumerate(papers)
+                ]
+            )
         )
-        plan = await plan_deck(
+
+        # ---- sl_narrate: one cross-paper TalkOutline ----
+        outline = await narrate_talk(
+            briefs_block=_briefs_block(briefs),
+            figure_inventory=_inventory_lines(inv),
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.plan_model,
-            papers_block=papers_block,
             response_language=lang,
             memory_context=mem,
         )
+        # Defensively drop any figure_key not in the deck inventory.
+        slides: list[OutlineSlide] = []
+        for s in outline.slides:
+            if s.figure_key and s.figure_key not in inv_keys:
+                s = s.model_copy(update={"figure_key": None})
+            slides.append(s)
 
+        # ---- sl_draft: per-slide frame+note pairs (fan-out, IN ORDER) ----
         retr = deps.retriever
 
-        # Collect real figure dirs + stems BEFORE the section fan-out so every
-        # section gets the same grounded list (avoids race / partial index).
-        raw_cache_dirs = [p["source_dir"] for p in papers if p["source_dir"]]
-        fig_index: FigureIndex = await asyncio.to_thread(
-            collect_figures, raw_cache_dirs
+        def _chunks_block(chunk_ids: list[int]) -> str:
+            if retr is None or not chunk_ids:
+                return "(no retrieved chunks; ground in the brief)"
+            chunks = retr.retrieve(
+                "",
+                enabled_paper_content_ids=[p["id"] for p in papers],
+                corpus_size=1000,
+                top_k=len(chunk_ids) or 6,
+            )
+            wanted = set(chunk_ids)
+            text = "\n\n".join(
+                c.text for c in chunks if getattr(c, "chunk_id", None) in wanted
+            )
+            return text or "(no retrieved chunks; ground in the brief)"
+
+        def _assigned_figure(key: str | None) -> str | None:
+            if key and key in inv_by_key:
+                f = inv_by_key[key]
+                return f"{f.key}: {f.caption}"
+            return None
+
+        drafts: list[SlideDraft] = list(
+            await asyncio.gather(
+                *[
+                    draft_slide(
+                        deck_title=outline.title,
+                        slide=s,
+                        assigned_figure=_assigned_figure(s.figure_key),
+                        assigned_equation=s.equation,
+                        chunks_block=_chunks_block(s.chunk_ids),
+                        adapter=deps.adapter,
+                        tracer=deps.tracer,
+                        model=deps.section_model,
+                        response_language=lang,
+                        memory_context=mem,
+                    )
+                    for s in slides
+                ]
+            )
         )
 
-        async def _one_section(section: PlannedSection) -> str:
-            chunks: list[Any] = []
-            if retr is not None:
-                chunks = retr.retrieve(
-                    section.intent or section.title,
-                    enabled_paper_content_ids=section.paper_content_ids,
-                    corpus_size=1000,
-                    top_k=6,
-                )
-            chunks_block = (
-                "\n\n".join(c.text for c in chunks)
-                or "(no retrieved chunks; use abstracts)"
+        # ---- sl_coherence: smooth all frames together ----
+        frames = await coherence_pass(
+            frames=[d.frame for d in drafts],
+            adapter=deps.adapter,
+            tracer=deps.tracer,
+            model=deps.section_model,
+            response_language=lang,
+        )
+
+        slides_dir = (
+            deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
+        )
+        figures_dir = slides_dir / "figures"
+
+        # ---- sl_assemble: stage referenced figures + build the deck tex ----
+        referenced: set[str] = set()
+        for frame in frames:
+            for m in _GRAPHICS_RE.finditer(frame):
+                referenced.add(Path(m.group(2)).stem)
+        used = [f for f in inv if f.key in referenced]
+
+        # ADDITIONAL.tex macros from each paper's source dir (arXiv LaTeX path).
+        def _read_macros() -> list[str]:
+            out: list[str] = []
+            for p in papers:
+                sd = p.get("source_dir")
+                if not sd:
+                    continue
+                add = Path(str(sd)) / "ADDITIONAL.tex"
+                if add.exists():
+                    out.append(add.read_text(encoding="utf-8", errors="replace"))
+            return out
+
+        async with deps.tracer.step(
+            agent="report", tool="report:assemble", model=None
+        ) as astep:
+            astep.record_args(
+                {
+                    "frame_count": len(frames),
+                    "referenced_keys": sorted(referenced),
+                }
             )
-            return await generate_section(
+            macros = await asyncio.to_thread(_read_macros)
+            await asyncio.to_thread(stage_inventory, used, figures_dir)
+            tex = assemble_deck(
+                AssembleInput(
+                    title=outline.title,
+                    theme=_THEME,
+                    additional_tex_macros=macros,
+                    # The staged figures dir is the single graphicspath root;
+                    # \includegraphics{<key>} resolves to figures/<key>.<ext>.
+                    cache_source_dirs=[figures_dir.as_posix()],
+                    frames=frames,
+                )
+            )
+            astep.record_result(
+                {
+                    "staged_keys": [f.key for f in used],
+                    "macro_blocks": len(macros),
+                }
+            )
+
+        # ---- sl_verify_figures: deterministic no-hallucination guard ----
+        async with deps.tracer.step(
+            agent="report", tool="report:verify_figures", model=None
+        ) as vstep:
+            vstep.record_args({"allowed_keys": sorted(inv_keys)})
+            tex, rejected = verify_and_fix_graphics(tex, allowed_keys=inv_keys)
+            vstep.record_result({"rejected": rejected})
+
+        # ---- sl_compile: Overfull-aware revise loop ----
+        async def _revise(log: str, cur_tex: str) -> str:
+            return await revise_tex(
+                pdflatex_log=log,
+                tex=cur_tex,
                 adapter=deps.adapter,
                 tracer=deps.tracer,
                 model=deps.section_model,
-                deck_title=plan.title,
-                section=section,
-                chunks_block=chunks_block,
-                response_language=lang,
-                memory_context=mem,
-                chunk_ids=[c.chunk_id for c in chunks],
-                available_figures=sorted(fig_index.stems),
             )
-
-        sem = asyncio.Semaphore(_SECTION_CONCURRENCY)
-
-        async def _bounded(s: PlannedSection) -> str:
-            async with sem:
-                return await _one_section(s)
-
-        frames = list(
-            await asyncio.gather(*[_bounded(s) for s in plan.sections])
-        )
-
-        # Record figure index: dirs come from collect_figures (recursive walk,
-        # forward-slashed), stems are the known-real figure basenames.
-        async with deps.tracer.step(
-            agent="report", tool="report:figure_path_rewrite", model=None
-        ) as fstep:
-            fstep.record_args({"cache_dirs": raw_cache_dirs})
-            fstep.record_result(
-                {"fig_dirs": fig_index.dirs, "fig_count": len(fig_index.stems)}
-            )
-
-        tex = assemble_deck(
-            AssembleInput(
-                title=plan.title,
-                theme="metropolis",
-                additional_tex_macros=[],
-                cache_source_dirs=fig_index.dirs,  # recursive subdirs, posix
-                frames=frames,
-            )
-        )
-
-        # Safety net: replace any hallucinated \includegraphics{name} that
-        # does not correspond to a real file on disk with a text placeholder,
-        # guaranteeing no "File not found" fatal compile error.
-        tex = neutralize_unknown_graphics(tex, fig_index.stems)
-
-        slides_dir = (
-            deps.workspace
-            / "chat_session"
-            / str(state["session_id"])
-            / "slides"
-        )
-
-        async def _revise(log: str, cur_tex: str) -> str:
-            # Phase-1 no-op stub: returns the tex unchanged.
-            # A real revise prompt (slides_revise/v1) lands in Phase 2 Task 2.
-            # Keep the trace step so the wiring is ready.
-            async with deps.tracer.step(
-                agent="report",
-                tool="report:compile_revise",
-                model=deps.section_model,
-            ) as rstep:
-                rstep.record_args({"log_tail": log[-500:]})
-                rstep.record_result({"changed": False})
-                return cur_tex
 
         async with deps.tracer.step(
             agent="report", tool="report:compile", model=None
         ) as cstep:
-            cstep.record_args({"section_count": len(frames)})
+            cstep.record_args({"frame_count": len(frames)})
             result = await compile_mod.compile_with_revise(
                 tex=tex,
                 workdir=slides_dir,
@@ -238,18 +373,19 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             if not result.ok:
                 cstep.mark_error("deck failed to compile after retries")
 
-        notes: dict[str, str] = {}
-        if result.ok:
-            notes = await generate_notes(
-                adapter=deps.adapter,
-                tracer=deps.tracer,
-                model=deps.notes_model,
-                beamer_code=result.tex,
-                response_language=lang,
+        # ---- sl_notes_finalize: map drafted notes → PDF pages (deterministic) ----
+        async with deps.tracer.step(
+            agent="report", tool="report:notes_finalize", model=None
+        ) as nstep:
+            nstep.record_args(
+                {"draft_count": len(drafts), "page_count": result.page_count}
             )
+            notes = (
+                finalize_notes(drafts, result.page_count) if result.ok else {}
+            )
+            nstep.record_result({"note_pages": sorted(notes.keys())})
 
-        # persist notes file + version snapshot — blocking disk IO is pushed
-        # to a worker thread so it never stalls the chat event loop.
+        # persist notes file + version snapshot (blocking IO off the loop).
         def _persist() -> None:
             slides_dir.mkdir(parents=True, exist_ok=True)
             (slides_dir / "speaker_notes.json").write_text(
@@ -269,20 +405,23 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             tex_path=str(slides_dir / "deck.tex"),
             pdf_path=str(slides_dir / "deck.pdf") if result.ok else None,
             speaker_notes=notes,
-            plan=plan.model_dump(),
+            plan=outline.model_dump(),
             page_count=result.page_count,
-            theme="metropolis",
+            theme=_THEME,
             contributing_paper_ids=[p["id"] for p in papers],
             status="ok" if result.ok else "error",
         )
         deck = await get_deck(deps.conn, session_id=state["session_id"])
         assert deck is not None
 
+        # ---- sl_emit: deck event + row (UNCHANGED shape from F1) ----
         async with deps.tracer.step(
             agent="report", tool="report:emit", model=None
         ) as estep:
             estep.record_args({"deck_id": deck.id})
-            estep.record_result({"page_count": deck.page_count, "status": deck.status})
+            estep.record_result(
+                {"page_count": deck.page_count, "status": deck.status}
+            )
 
         writer(
             {
@@ -291,7 +430,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     "deck_id": deck.id,
                     "session_id": deck.session_id,
                     "page_count": deck.page_count,
-                    "title": plan.title,
+                    "title": outline.title,
                     "status": deck.status,
                     "contributing_papers": [
                         {"id": p["id"], "title": p["title"]} for p in papers
@@ -302,7 +441,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         )
 
         final = (
-            f"Generated a {deck.page_count}-slide deck — \"{plan.title}\"."
+            f'Generated a {deck.page_count}-slide deck — "{outline.title}".'
             if result.ok
             else (
                 "I generated the deck but it failed to compile after retries — "
