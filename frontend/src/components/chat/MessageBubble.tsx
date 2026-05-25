@@ -15,6 +15,7 @@ import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
+import { normalizeMath } from "@/lib/normalizeMath";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
 
 interface Props {
@@ -115,7 +116,7 @@ export function MessageBubble({
                 },
               } as Components}
             >
-              {message.content || " "}
+              {normalizeMath(message.content) || " "}
             </ReactMarkdown>
           )}
           {isStreamingWithContent && (
