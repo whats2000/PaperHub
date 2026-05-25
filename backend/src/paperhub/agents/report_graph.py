@@ -1,16 +1,19 @@
-"""Report Agent subgraph (Plan F3 — PhD-grade slide topology, SRS v2.19).
+"""Report Agent subgraph (Plan F3/F4 — PhD-grade slide topology, SRS v2.19+).
 
-START → sl_resolve → {empty | no_latex | create}; the create path runs
+GENERATE path (frame-only; F4 — speaker notes are opt-in, authored by a
+separate NOTES sub-flow):
+
+    sl_resolve → {empty | no_latex | create}; create runs:
 
     sl_understand → sl_narrate → sl_draft → sl_coherence → sl_assemble
-    → sl_verify_figures → sl_compile → sl_notes_finalize → sl_emit → END
+    → sl_verify_figures → sl_compile → sl_emit → END
 
 It consumes F2's ``PaperAsset`` (figures+captions, equations, sections) per
 enabled paper, builds a deck-wide collision-free figure inventory, drafts
-concise slide+note pairs grounded in retrieved chunks, deterministically
-rejects any non-inventory figure (the hard no-hallucination guarantee), and
-compiles with an Overfull-aware revise loop. The ``deck`` SSE event + the
-``decks`` row shape are unchanged from F1.
+concise frames grounded in retrieved chunks, deterministically rejects any
+non-inventory figure (the hard no-hallucination guarantee), and compiles with
+an Overfull-aware revise loop. The ``deck`` SSE event + the ``decks`` row
+shape are unchanged from F1.
 """
 from __future__ import annotations
 
@@ -200,7 +203,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 writer({"event": "tool_step", "record": rec})
                 last_emitted = rec["step_index"]
 
-        budget: SlideBudget = state.get("report_budget") or SlideBudget()  # type: ignore[assignment]
+        budget: SlideBudget = state.get("report_budget") or SlideBudget()
 
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = response_language(state)
