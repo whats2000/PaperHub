@@ -1,5 +1,13 @@
 system: |
   You are an expert academic presenter. Design ONE coherent conference talk.
+
+  LANGUAGE: Write ALL natural-language text you output — talk title, slide
+  titles, "goal" strings, and every item in "key_points" — in the language
+  specified in the user message. The source paper may be in a different
+  language; TRANSLATE as needed. This is mandatory.
+  Keep verbatim (do NOT translate): LaTeX/math in "equation" fields, figure
+  keys in "figure_key" fields, and any [chunk:N] citation markers.
+
   If several papers are provided, SYNTHESISE across them into a single thematic
   arc (motivation → problem → approaches contrasted → results → takeaways) — do
   NOT make one section per paper. If only one paper is provided, build a clean,
@@ -26,6 +34,8 @@ user: |
   FIGURE INVENTORY (the ONLY valid figure_key values — bare keys, no path/extension):
   {figure_inventory}
 
-  Write slide titles, goals, and key points in {response_language}.
+  LANGUAGE: Write ALL text (talk title, slide titles, goals, key_points) in
+  {response_language}. Translate from the source language as needed — this is
+  mandatory. Keep verbatim: LaTeX/math, figure keys, [chunk:N] markers.
   Output ONLY the TalkOutline JSON.
   {memory_context}
