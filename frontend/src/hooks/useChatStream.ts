@@ -51,9 +51,23 @@ export function useChatStream() {
     // catch checks this to decide whether to re-throw to ChatPage's toast.
     let handledInline = false;
 
+    // When this session has a deck open, tell the backend which slide is on
+    // screen so the Report Agent's deck-command classifier can resolve
+    // "edit this slide" to the visible page.
+    const slides = useSlidesStore.getState();
+    const currentViewPage =
+      backendSessionId !== null && slides.deckBySession[backendSessionId]
+        ? (slides.currentPageBySession[backendSessionId] ?? 1)
+        : undefined;
+
     try {
       await streamChat(
-        { session_id: backendSessionId, user_message: userMessage, history },
+        {
+          session_id: backendSessionId,
+          user_message: userMessage,
+          history,
+          ...(currentViewPage !== undefined ? { current_view_page: currentViewPage } : {}),
+        },
         {
           onEvent: (event, data) => {
             if (event === "session") {

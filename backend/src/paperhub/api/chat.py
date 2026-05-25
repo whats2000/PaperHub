@@ -83,6 +83,10 @@ class ChatRequest(BaseModel):
     session_id: int | None = None
     user_message: str
     history: list[HistoryEntry] = Field(default_factory=list)
+    # The slide page currently on screen in the frontend's Slides panel
+    # (1-based). The Report Agent's deck-command classifier reads this to
+    # resolve "edit this slide" to the visible page. 0 = no deck open.
+    current_view_page: int = 0
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
@@ -523,6 +527,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                 "run_id": run_id, "branch": "", "session_id": session_id,
                 "user_message": req.user_message,
                 "history": [h.model_dump() for h in req.history],
+                "current_view_page": req.current_view_page,
             }
             last_emitted_step = -1
             # Outbound MCP-client headers: any `MCPClient.call_tool` made

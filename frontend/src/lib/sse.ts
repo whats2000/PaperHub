@@ -11,6 +11,8 @@ export interface ChatRequestBody {
   session_id: number | null;
   user_message: string;
   history: { role: "user" | "assistant"; content: string }[];
+  /** 1-based page on screen in the Slides panel; sent only when a deck is open. */
+  current_view_page?: number;
 }
 
 export async function streamChat(

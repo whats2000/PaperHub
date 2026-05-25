@@ -150,6 +150,58 @@ async def test_chat_sse_slides_emits_deck_event(
     assert deck_idx < final_idx, "deck event must precede final event"
 
 
+async def test_chat_sse_slides_threads_current_view_page(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    """The ChatRequest.current_view_page must reach the AgentState that flows
+    into report_stream so the deck-command classifier can resolve "edit this
+    slide" to the on-screen page."""
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv(
+        "PAPERHUB_ROUTER_MOCK",
+        '{"intent":"slides","model_tier":"flagship",'
+        '"confidence":0.95,"reasoning":"user wants slides"}',
+    )
+    await _bootstrap_schema(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_report_stream(
+        state: Any,
+        *,
+        adapter: Any,
+        tracer: Any,
+        conn: Any,
+        retriever: Any,
+        settings: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        captured["state"] = state
+        yield FinalOnlyMessage("done")
+
+    import paperhub.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "report_stream", _fake_report_stream)
+
+    app = _wire_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
+        async with client.stream(
+            "POST", "/chat",
+            json={
+                "session_id": None,
+                "user_message": "edit this slide",
+                "current_view_page": 4,
+            },
+        ) as response:
+            assert response.status_code == 200
+            await _consume_sse(response.aiter_bytes())
+
+    assert captured["state"]["current_view_page"] == 4, (
+        f"Expected current_view_page == 4 in AgentState, got: {captured['state']}"
+    )
+
+
 async def test_chat_sse_slides_tool_step_events_forwarded(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
