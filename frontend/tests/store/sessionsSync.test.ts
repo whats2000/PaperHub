@@ -222,6 +222,76 @@ describe("hydrateSessionMessages", () => {
     expect(msgs[1]!.search_results![0]!.title).toBe("Flow matching");
   });
 
+  it("carries a replayed deck onto the assistant message (chip survives refresh)", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "make slides", run_id: 5, created_at: "t1" },
+      {
+        role: "assistant",
+        content: "here is your deck",
+        run_id: 5,
+        created_at: "t2",
+        deck: {
+          deck_id: 700,
+          session_id: 7,
+          page_count: 9,
+          title: "My Deck",
+          status: "ok",
+          contributing_papers: [{ id: 1 }, { id: 2 }],
+          has_notes: true,
+        },
+      },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.deck).toBeDefined();
+    expect(msgs[1]!.deck?.deck_id).toBe(700);
+    expect(msgs[1]!.deck?.page_count).toBe(9);
+  });
+
+  it("leaves deck undefined on a message replayed without a deck", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, history);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.deck).toBeUndefined();
+  });
+
+  it("keeps the deck on refresh re-hydration (proves the card persists)", () => {
+    // Simulate a refresh: the local store is wiped, then the DB replay re-fills
+    // it. The deck must come back with the assistant message.
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    const withDeck: BackendMessage[] = [
+      { role: "user", content: "make slides", run_id: 9, created_at: "t1" },
+      {
+        role: "assistant",
+        content: "deck ready",
+        run_id: 9,
+        created_at: "t2",
+        deck: {
+          deck_id: 900,
+          session_id: 7,
+          page_count: 4,
+          title: "Refreshed Deck",
+          status: "ok",
+          contributing_papers: [{ id: 3 }],
+          has_notes: false,
+        },
+      },
+    ];
+    useChatStore.getState().hydrateSessionMessages(1, withDeck);
+    const msg = useChatStore.getState().sessions[0]!.messages[1];
+    expect(msg?.deck?.deck_id).toBe(900);
+    expect(msg?.deck?.title).toBe("Refreshed Deck");
+  });
+
   it("REPLACES a non-streaming session's messages with the DB copy", () => {
     // The backend is the source of truth for the chat record, so re-opening a
     // session refreshes it — picking up turns added on another device.

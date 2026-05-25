@@ -123,7 +123,9 @@ export interface DeckEventData {
   page_count: number;
   title: string;
   status: "ok" | "error";
-  contributing_papers: { id: number; title: string }[];
+  /** On a live SSE event each entry carries `title`; on message replay the
+   *  backend emits `{id}` only, so `title` is optional. */
+  contributing_papers: { id: number; title?: string }[];
   has_notes: boolean;
 }
 
@@ -166,6 +168,10 @@ export interface BackendMessage {
   /** Paper-search result cards emitted on this turn, replayed so they show on
    *  every device (null for non-search turns). */
   search_results?: SearchResultCandidate[] | null;
+  /** The slide deck generated on this turn, shaped like the `deck` SSE event,
+   *  replayed so the in-chat DeckChip survives a refresh (null for non-slide
+   *  turns). On replay `contributing_papers` entries are `{id}` only. */
+  deck?: DeckEventData | null;
 }
 
 export type MemoryStatus = "active" | "superseded";

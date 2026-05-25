@@ -64,7 +64,7 @@ function assistantMsg(runId: number): ChatMessage {
 }
 
 describe("useDeckSync", () => {
-  it("hydrates the slides store AND the chat message deck from GET /sessions/:id/deck", async () => {
+  it("hydrates ONLY the slides store from GET /sessions/:id/deck (chip comes from the message replay)", async () => {
     server.use(
       http.get(`${API_BASE_URL}/sessions/7/deck`, () =>
         HttpResponse.json(deckMeta(7, 9)),
@@ -87,49 +87,42 @@ describe("useDeckSync", () => {
 
     renderHook(() => useDeckSync());
 
-    // Slides store populated (for the panel badge).
+    // Slides store populated (so the panel can open to the deck).
     await waitFor(() => {
       expect(useSlidesStore.getState().deckBySession[7]).toBeDefined();
     });
     expect(useSlidesStore.getState().deckBySession[7]?.page_count).toBe(9);
 
-    // The chat message's deck is re-attached so the DeckChip re-appears
-    // after a refresh (this is the BUG2 fix — message.deck is otherwise
-    // wiped by hydrateSessionMessages).
+    // The hook no longer patches the chat message — the DeckChip is driven by
+    // the replayed `message.deck` (hydrateSessionMessages), not this hook, so
+    // there is no race. The seeded message stays deckless here.
     const msg = useChatStore.getState().sessions[0]?.messages[0];
-    expect(msg?.deck).toBeDefined();
-    expect(msg?.deck?.deck_id).toBe(700);
-    expect(msg?.deck?.page_count).toBe(9);
+    expect(msg?.deck).toBeUndefined();
   });
 
-  it("clears the deck on the message and store when the backend returns 404", async () => {
+  it("clears the slides store when the backend returns 404", async () => {
     server.use(
       http.get(`${API_BASE_URL}/sessions/8/deck`, () =>
         HttpResponse.text("no deck", { status: 404 }),
       ),
     );
 
-    // Pre-seed a stale deck on both the message and the store.
-    const stale = deckMeta(8, 3);
+    // Pre-seed a stale deck in the slides store.
+    useSlidesStore.getState().setDeck(8, {
+      deck_id: 800,
+      session_id: 8,
+      page_count: 3,
+      title: "stale",
+      status: "ok",
+      contributing_papers: [],
+      has_notes: false,
+    });
     useChatStore.setState({
       sessions: [
         {
           id: 2,
           title: "S2",
-          messages: [
-            {
-              ...assistantMsg(50),
-              deck: {
-                deck_id: stale.deck_id,
-                session_id: 8,
-                page_count: 3,
-                title: "stale",
-                status: "ok",
-                contributing_papers: [],
-                has_notes: false,
-              },
-            },
-          ],
+          messages: [assistantMsg(50)],
           backend_session_id: 8,
         },
       ],
@@ -141,9 +134,8 @@ describe("useDeckSync", () => {
     renderHook(() => useDeckSync());
 
     await waitFor(() => {
-      expect(useChatStore.getState().sessions[0]?.messages[0]?.deck).toBeUndefined();
+      expect(useSlidesStore.getState().deckBySession[8]).toBeUndefined();
     });
-    expect(useSlidesStore.getState().deckBySession[8]).toBeUndefined();
   });
 
   it("shows the right deck per session on switch (A has a deck, B has none)", async () => {
@@ -181,9 +173,6 @@ describe("useDeckSync", () => {
     });
     // A's deck slot is untouched (per-session, not stale-shared).
     expect(useSlidesStore.getState().deckBySession[7]).toBeDefined();
-    // B's active message must NOT show A's deck.
-    const sessB = useChatStore.getState().sessions.find((s) => s.id === 2);
-    expect(sessB?.messages[0]?.deck).toBeUndefined();
   });
 
   it("does not clobber an in-flight streaming turn", async () => {
