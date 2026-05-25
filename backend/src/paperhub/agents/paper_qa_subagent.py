@@ -37,6 +37,11 @@ __all__ = [
 
 MAX_SECTION_READS: int = 5
 
+# Cap on chunks auto-fetched solely because the final summary cited them
+# without a read (Part B safety net). Bounds DB work + abuse from a runaway
+# summary that lists dozens of ids.
+MAX_AUTOFETCH_CITED: int = 8
+
 # ──────────────────────── chunk-marker regex ─────────────────────────
 
 # Matches any ``chunk:<digits>`` occurrence regardless of bracket structure.
@@ -95,6 +100,46 @@ _TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_figures_tables",
+            "description": (
+                "Return the index of this paper's figures and tables "
+                "(label, kind, caption, page). Use this for a question about "
+                "a SPECIFIC table or figure by number — a floated table may "
+                "not appear in any section's prose. "
+                "Free — does not count against the read budget."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_layout_object",
+            "description": (
+                "Return the chunk for the figure/table with the given label "
+                "(e.g. 'Table 1', 'Figure 3'), prefixed with [chunk:<id>]. "
+                "Call list_figures_tables() first to discover valid labels. "
+                "Counts against the read budget."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Exact label from list_figures_tables().",
+                    },
+                },
+                "required": ["label"],
+            },
+        },
+    },
 ]
 
 
@@ -106,6 +151,7 @@ class PickedChunk:
     chunk_id: int
     text: str
     section: str | None
+    page: int | None = None  # PDF page from Marker; None for LaTeX/PyMuPDF chunks
 
 
 @dataclass(frozen=True)
@@ -154,9 +200,12 @@ async def _read_section(
     """Return all chunks in the named section.
 
     Returns an error string and empty list when the section doesn't exist.
+    The ``page`` column is included so the LLM can refer to PDF page positions
+    in its cited summary (Marker chunks carry a page; LaTeX/PyMuPDF chunks have
+    page=NULL and the annotation is omitted).
     """
     async with conn.execute(
-        "SELECT id, text, section FROM chunks "
+        "SELECT id, text, section, page FROM chunks "
         "WHERE paper_content_id = ? AND section = ? "
         "ORDER BY char_start",
         (paper_content_id, name),
@@ -169,15 +218,168 @@ async def _read_section(
             }),
             [],
         )
-    picks = [PickedChunk(chunk_id=r[0], text=r[1], section=r[2]) for r in rows]
+    picks = [
+        PickedChunk(chunk_id=r[0], text=r[1], section=r[2], page=r[3])
+        for r in rows
+    ]
     # Wrap each chunk in an explicit <chunk id="N">…</chunk> container so the
     # boundary + id binding is unambiguous, and the input label is NOT the same
     # token (`[chunk:N]`) the model must EMIT as a citation — keeping "here is a
     # chunk" distinct from "cite it" reduces mis-attribution on dense text.
-    body = "\n\n".join(
-        f'<chunk id="{p.chunk_id}">\n{p.text}\n</chunk>' for p in picks
-    )
+    # When page is non-NULL (Marker chunks), append " (p.N)" after the closing
+    # tag so the LLM can mention the PDF location in its prose summary.
+    def _chunk_block(p: PickedChunk) -> str:
+        block = f'<chunk id="{p.chunk_id}">\n{p.text}\n</chunk>'
+        if p.page is not None:
+            block += f" (p.{p.page})"
+        return block
+
+    body = "\n\n".join(_chunk_block(p) for p in picks)
     return (body, picks)
+
+
+async def _load_layout(
+    *,
+    paper_content_id: int,
+    conn: aiosqlite.Connection,
+) -> list[dict[str, Any]]:
+    """Return the paper's layout_json as a list of dicts (empty when NULL/invalid)."""
+    async with conn.execute(
+        "SELECT layout_json FROM paper_content WHERE id = ?",
+        (paper_content_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None or row[0] is None:
+        return []
+    try:
+        data = json.loads(row[0])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict)]
+
+
+async def _list_figures_tables(
+    *,
+    paper_content_id: int,
+    conn: aiosqlite.Connection,
+) -> tuple[str, list[str]]:
+    """Return the LLM-facing figure/table index + the list of labels surfaced.
+
+    Each entry is rendered as one human-readable line that EXPOSES the citable
+    ``[chunk:<chunk_id>]`` (F2.1 A3) so the LLM can cite a figure/table directly
+    — e.g. ``- Table 1 (table, p.5) [chunk:77339]: Maximum path lengths, ...``.
+    Entries without a usable integer ``chunk_id`` omit the marker (nothing
+    citable). Returns ``"(none)"`` when ``layout_json`` is NULL/empty.
+    """
+    layout = await _load_layout(paper_content_id=paper_content_id, conn=conn)
+    if not layout:
+        return ("(none)", [])
+    lines: list[str] = []
+    labels: list[str] = []
+    for e in layout:
+        label = e.get("label")
+        if label is None:
+            continue
+        label_s = str(label)
+        labels.append(label_s)
+        kind = e.get("kind")
+        page = e.get("page")
+        caption = e.get("caption")
+        chunk_id = e.get("chunk_id")
+        meta_parts: list[str] = []
+        if kind is not None:
+            meta_parts.append(str(kind))
+        if page is not None:
+            meta_parts.append(f"p.{page}")
+        meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
+        cite = f" [chunk:{chunk_id}]" if isinstance(chunk_id, int) else ""
+        cap = f": {caption}" if caption else ""
+        lines.append(f"- {label_s}{meta}{cite}{cap}")
+    return ("\n".join(lines), labels)
+
+
+async def _read_layout_object(
+    *,
+    paper_content_id: int,
+    label: str,
+    conn: aiosqlite.Connection,
+) -> tuple[str, PickedChunk | None]:
+    """Return the chunk for the figure/table with ``label`` (case-insensitive).
+
+    Returns an error string and ``None`` when the label isn't in the layout
+    index or its chunk row is missing. The chunk text is headed
+    ``[chunk:<id>] (p.<page>)`` exactly like ``read_section`` formats chunks.
+    """
+    layout = await _load_layout(paper_content_id=paper_content_id, conn=conn)
+    target = label.strip().casefold()
+    match: dict[str, Any] | None = None
+    for e in layout:
+        lbl = e.get("label")
+        if isinstance(lbl, str) and lbl.strip().casefold() == target:
+            match = e
+            break
+    if match is None:
+        return (
+            json.dumps({
+                "error": (
+                    f"no such table/figure: {label!r}. "
+                    "Call list_figures_tables() to see valid labels."
+                ),
+            }),
+            None,
+        )
+    chunk_id = match.get("chunk_id")
+    if not isinstance(chunk_id, int):
+        return (
+            json.dumps({"error": f"layout object {label!r} has no chunk to read."}),
+            None,
+        )
+    async with conn.execute(
+        "SELECT id, text, section, page FROM chunks WHERE id = ?",
+        (chunk_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return (
+            json.dumps({"error": f"chunk for {label!r} is missing; re-ingest this paper."}),
+            None,
+        )
+    pick = PickedChunk(chunk_id=row[0], text=row[1], section=row[2], page=row[3])
+    block = f'<chunk id="{pick.chunk_id}">\n{pick.text}\n</chunk>'
+    if pick.page is not None:
+        block += f" (p.{pick.page})"
+    return (block, pick)
+
+
+async def _fetch_chunks_scoped(
+    *,
+    paper_content_id: int,
+    chunk_ids: list[int],
+    conn: aiosqlite.Connection,
+) -> dict[int, PickedChunk]:
+    """Fetch the given chunk rows, SCOPED to ``paper_content_id``.
+
+    Ids that don't belong to this paper (foreign paper, or nonexistent) are
+    silently dropped — never fetched. This is the Part B safety net: a chunk
+    the LLM cited straight from ``list_figures_tables`` (without a read) is
+    grounded into the finalizer's picks, but only if it is genuinely THIS
+    paper's chunk.
+    """
+    if not chunk_ids:
+        return {}
+    placeholders = ",".join("?" for _ in chunk_ids)
+    async with conn.execute(
+        f"SELECT id, text, section, page FROM chunks "  # noqa: S608 (placeholders only)
+        f"WHERE paper_content_id = ? AND id IN ({placeholders})",
+        (paper_content_id, *chunk_ids),
+    ) as cur:
+        rows = await cur.fetchall()
+    return {
+        r[0]: PickedChunk(chunk_id=r[0], text=r[1], section=r[2], page=r[3])
+        for r in rows
+    }
 
 
 # ──────────────────────── extraction helper ──────────────────────────
@@ -249,6 +451,8 @@ async def run_paper_qa_subagent(
     # accumulated below and flushed into record_result on step exit.
     tool_call_log: list[dict[str, Any]] = []
     listed_sections: list[str] | None = None  # captured first time list_sections is called
+    listed_layout: list[str] | None = None  # labels surfaced by list_figures_tables
+    layout_read_ids: list[int] = []  # chunk ids fetched via read_layout_object
     llm_turn_log: list[dict[str, Any]] = []  # one entry per LLM turn
 
     # ONE tracer step around the entire loop — one paper_qa:subagent row
@@ -366,10 +570,43 @@ async def run_paper_qa_subagent(
                         tool_log_entry["chunk_ids_returned"] = [
                             p.chunk_id for p in new_picks
                         ]
+                elif name == "list_figures_tables":
+                    result_str, labels = await _list_figures_tables(
+                        paper_content_id=paper_content_id, conn=conn,
+                    )
+                    tool_log_entry["layout_listed"] = labels
+                    if listed_layout is None:
+                        listed_layout = labels
+                elif name == "read_layout_object":
+                    label = str(raw_args.get("label", ""))
+                    if read_count >= max_section_reads:
+                        result_str = json.dumps({
+                            "error": (
+                                f"read budget exhausted ({max_section_reads}). "
+                                "Stop calling tools and write your final summary now."
+                            ),
+                        })
+                        tool_log_entry["error"] = "budget_exhausted"
+                    else:
+                        result_str, pick = await _read_layout_object(
+                            paper_content_id=paper_content_id,
+                            label=label,
+                            conn=conn,
+                        )
+                        if pick is not None:
+                            seen_chunks[pick.chunk_id] = pick
+                            layout_read_ids.append(pick.chunk_id)
+                            read_count += 1
+                            tool_log_entry["chunk_ids_returned"] = [pick.chunk_id]
+                        else:
+                            tool_log_entry["error"] = "layout_not_found"
                 else:
                     # Off-palette tool call — return a clear error.
                     result_str = json.dumps({
-                        "error": f"unknown tool {name!r}. Use list_sections or read_section.",
+                        "error": (
+                            f"unknown tool {name!r}. Use list_sections, read_section, "
+                            "list_figures_tables, or read_layout_object."
+                        ),
                     })
                     tool_log_entry["error"] = "off_palette"
 
@@ -387,12 +624,33 @@ async def run_paper_qa_subagent(
             # tool_calls (meaning it didn't self-terminate after receiving
             # the exhaustion error). Break out and use the fallback.
             if read_count >= max_section_reads and all(
-                c["function"]["name"] == "read_section" for c in tool_calls
+                c["function"]["name"] in ("read_section", "read_layout_object")
+                for c in tool_calls
             ):
-                break  # every read_section call received the exhaustion error; force-stop
+                break  # every read call received the exhaustion error; force-stop
 
         # Compute picks from whatever the loop produced.
         cited_ids = _extract_cited_chunk_ids(final_summary)
+        # Part B (v2.10 intent): ground every CITED chunk into the finalizer's
+        # picks. A chunk the LLM cited straight from list_figures_tables (which
+        # now exposes [chunk:<id>]) won't be in seen_chunks because it was never
+        # read — fetch it here, SCOPED to this paper_content_id and capped, so a
+        # one-pass "cite from the list" answer is honored instead of being
+        # short-circuited as empty picks.
+        autofetched_cited_ids: list[int] = []
+        missing_cited = [
+            cid for cid in cited_ids if cid not in seen_chunks
+        ][:MAX_AUTOFETCH_CITED]
+        if missing_cited:
+            fetched = await _fetch_chunks_scoped(
+                paper_content_id=paper_content_id,
+                chunk_ids=missing_cited,
+                conn=conn,
+            )
+            for cid, pick in fetched.items():
+                seen_chunks[cid] = pick
+                autofetched_cited_ids.append(cid)
+
         if cited_ids:
             picked = [seen_chunks[cid] for cid in cited_ids if cid in seen_chunks]
         else:
@@ -417,6 +675,9 @@ async def run_paper_qa_subagent(
             "summary_len": len(final_summary),
             "final_summary": final_summary,
             "listed_sections": listed_sections,
+            "listed_layout": listed_layout,
+            "layout_read_ids": layout_read_ids,
+            "autofetched_cited_ids": autofetched_cited_ids,
             "llm_turns": llm_turn_log,
             "tool_call_log": tool_call_log,
         })

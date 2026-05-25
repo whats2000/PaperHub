@@ -14,8 +14,10 @@ is accepted; wrapping in ``asyncio.to_thread`` is deferred.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -38,7 +40,6 @@ from paperhub.pipelines.chunker import (
     Chunk,
     chunk_text,
     map_stripped_offsets_to_original,
-    strip_latex_comments,
 )
 from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import (
@@ -48,16 +49,37 @@ from paperhub.pipelines.extract import (
     extract_pdf_with_headings,
 )
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.latex_to_asset import latex_source_to_asset
+from paperhub.pipelines.marker_blocks_to_chunks import (
+    build_layout_index,
+    marker_blocks_to_chunks,
+)
+from paperhub.pipelines.marker_client import (
+    MarkerClient,
+    get_marker_client,
+)
+from paperhub.pipelines.marker_health import marker_available
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
+from paperhub.pipelines.paper_asset import write_paper_asset
+from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
+
+logger = logging.getLogger(__name__)
 
 _PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 _PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
 # Shared tiktoken encoder — hoisted to module level so repeated calls to
 # _build_sections_json don't pay the (cached but misleading) per-call cost.
 _CL100K = tiktoken.get_encoding("cl100k_base")
+
+
+def _bbox_json(bbox: tuple[float, float, float, float] | None) -> str | None:
+    """Serialize a chunk's union bbox to a JSON ``[x0,y0,x1,y1]`` string, or
+    ``None`` for non-Marker chunks (LaTeX / PyMuPDF)."""
+    return json.dumps(list(bbox)) if bbox is not None else None
 
 
 @dataclass(frozen=True)
@@ -124,6 +146,7 @@ class PaperPipeline:
         papers_cache_dir: Path,
         chroma: ChromaStore,
         embedder: Embedder | None = None,
+        marker_client: MarkerClient | None = None,
         llm: LlmAdapter | None = None,
         title_extract_model: str | None = None,
     ) -> None:
@@ -131,12 +154,22 @@ class PaperPipeline:
         self._cache_root = papers_cache_dir
         self._chroma = chroma
         self._embedder = embedder or get_embedder()
+        # Marker HTTP client for PDF extraction. Lazily resolved on first PDF
+        # ingest (mirrors how ``embedder`` defaults), so callers that never
+        # ingest a PDF — and tests — don't need a reachable Marker service.
+        self._marker_client = marker_client
         # Optional LLM fallback for PDF title extraction. Both must be set
         # to enable the path; either ``None`` (legacy callers, tests) leaves
         # the existing metadata + page-1-font heuristic + filename-stem
         # ladder untouched.
         self._llm = llm
         self._title_extract_model = title_extract_model
+
+    def _get_marker_client(self) -> MarkerClient:
+        """Lazily resolve the Marker client on first PDF use (mirrors embedder)."""
+        if self._marker_client is None:
+            self._marker_client = get_marker_client()
+        return self._marker_client
 
     async def ingest(self, req: IngestRequest) -> IngestResult:
         """Ingest a paper, returning immediately on cache hit."""
@@ -248,6 +281,19 @@ class PaperPipeline:
         flat_path = cache_dir / "source.flattened.tex"
         flat_path.write_text(full_text, encoding="utf-8")
 
+        # Emit PaperAsset from the LaTeX source (additive — never breaks ingest).
+        # source_dir = the extracted source/ dir (figure files live here).
+        # cache_dir  = the paper cache root (asset/ is written under it).
+        try:
+            _asset = latex_source_to_asset(source_dir, full_text, source_dir=cache_dir)
+            write_paper_asset(_asset, cache_dir)
+        except Exception:
+            logger.warning(
+                "PaperAsset extraction failed for arxiv %s; continuing",
+                arxiv_id,
+                exc_info=True,
+            )
+
         # Chunk first — offsets are relative to strip_latex_comments(full_text),
         # which is exactly what chunk_text computes internally (strip_comments=True).
         # Chunking before rendering lets us inject sentinel tokens at each chunk's
@@ -315,6 +361,8 @@ class PaperPipeline:
         sections_json = self._build_sections_json(chunks, full_text)
 
         # Persist paper_content + chunks in a single transaction.
+        # asset_status='latex': the asset was built synchronously from the
+        # LaTeX e-print source above (no Marker upgrade ever needed).
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
@@ -326,6 +374,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status="latex",
         )
 
         self._chroma.add_chunks(
@@ -357,8 +406,7 @@ class PaperPipeline:
         source identifier, not rendering path) and the same content_key
         as the LaTeX path so cache lookups stay coherent across modes.
         """
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "arxiv source tarball unavailable for %s (%s: %s); "
             "falling back to PDF ingest. Equation rendering quality "
             "will be lower than LaTeX.",
@@ -376,6 +424,12 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
+        # Build the PyMuPDF "degraded" PaperAsset baseline synchronously (F2.1).
+        # write_paper_asset / pymupdf_to_asset create the asset/ dir; cache_dir
+        # itself already exists (download_arxiv_pdf wrote source.pdf into it).
+        asset = pymupdf_to_asset(pdf_path, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
         metadata: dict[str, object] = (
             asdict(req.metadata_override)
             if req.metadata_override is not None
@@ -392,6 +446,10 @@ class PaperPipeline:
             chunks, full_text, strip_comments=False,
         )
 
+        # PDF source: enqueue a Marker upgrade when the service is reachable,
+        # else stay on the PyMuPDF baseline.
+        asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
@@ -403,6 +461,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -483,10 +542,16 @@ class PaperPipeline:
 
             pdf_headings: list[tuple[str, int]] = []
         else:
-            # PDF: detect headings (font-size band) for section navigation;
-            # strip_comments=False at chunk time (PDF text isn't LaTeX).
-            # No sentinel injection for PDF — chunks keep dom_id=None.
+            # PDF (F2.1): extract synchronously with PyMuPDF — instant, always
+            # works, never blocks the event loop on a multi-minute Marker run.
+            # Marker is an OPT-IN async upgrade: we merely RECORD whether one
+            # should happen (asset_status='marker_pending') so a background
+            # worker (a later task) runs the high-fidelity pass off the request
+            # path. The PyMuPDF asset is a "degraded" baseline (real figure
+            # files, but no captions/equations) good enough for ingest + RAG.
             full_text, pdf_headings = extract_pdf_with_headings(target)
+            asset = pymupdf_to_asset(target, source_dir=cache_dir)
+            write_paper_asset(asset, cache_dir)
             source_path = target
             render_html(
                 source=source_path, kind=kind, out_path=html_path,
@@ -555,6 +620,15 @@ class PaperPipeline:
             "pdf_upload" if kind == "pdf" else "latex_upload"
         )
 
+        # asset_status: latex uploads build the asset synchronously from source
+        # ('latex'); PDFs use the PyMuPDF baseline and may enqueue a Marker
+        # upgrade when the service is reachable ('marker_pending'), else stay on
+        # the PyMuPDF baseline ('pymupdf_only').
+        if kind == "pdf":
+            asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+        else:
+            asset_status = "latex"
+
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind=db_kind,
@@ -566,6 +640,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -633,6 +708,10 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_html(source=pdf_path, kind="pdf", out_path=html_path)
 
+        # 5a. PyMuPDF "degraded" PaperAsset baseline (F2.1).
+        asset = pymupdf_to_asset(pdf_path, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
         # 6. Extract text + chunk. PDF path: heading detection for section
         # navigation; strip_comments=False (PDF text isn't LaTeX).
         full_text, headings = extract_pdf_with_headings(pdf_path)
@@ -653,6 +732,9 @@ class PaperPipeline:
             "abstract": abstract_hint,
         }
 
+        # PDF source: enqueue a Marker upgrade when reachable, else baseline.
+        asset_status = "marker_pending" if marker_available() else "pymupdf_only"
+
         # 7. Persist paper_content + chunks transactionally.
         paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
@@ -665,6 +747,7 @@ class PaperPipeline:
             html_path=html_path,
             chunks=chunks,
             sections_json=sections_json,
+            asset_status=asset_status,
         )
 
         self._chroma.add_chunks(
@@ -679,6 +762,126 @@ class PaperPipeline:
             paper_content_id, papers_id, cache_hit=False, title=title_hint,
         )
 
+    async def upgrade_pdf_asset_via_marker(
+        self, paper_content_id: int, *, max_pages: int | None,
+    ) -> None:
+        """Upgrade a PDF paper from the PyMuPDF baseline to Marker quality.
+
+        Re-extracts the PDF via the Marker service, overwrites the on-disk
+        PaperAsset, re-chunks + re-embeds from Marker's cleaner structure
+        (better RAG), and flips ``asset_status`` to ``marker_ready``.
+
+        Runs the (multi-minute, blocking) Marker call off the event loop. The
+        re-chunk/re-embed mirrors ``reingest._reingest_one``'s ordering: embed
+        FIRST, then the destructive DELETE + Chroma delete, then INSERT new
+        chunks, recompute ``sections_json``, and re-add Chroma vectors — so a
+        failure before the deletes leaves the baseline intact.
+
+        Exceptions propagate (the worker records ``marker_failed``); they are
+        NOT swallowed here.
+        """
+        async with self._conn.execute(
+            "SELECT kind, source_path, source_dir_path "
+            "FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            raise ValueError(
+                f"paper_content id={paper_content_id} not found"
+            )
+        kind = str(row[0])
+        source_path_raw: str | None = row[1]
+        source_dir_raw: str | None = row[2]
+        if source_path_raw is None or source_dir_raw is None:
+            raise ValueError(
+                f"paper_content id={paper_content_id}: missing source path"
+            )
+        source_path = Path(source_path_raw)
+        cache_dir = Path(source_dir_raw)
+
+        # Only PDF sources are valid Marker inputs. pdf_upload always is; an
+        # arxiv row qualifies only when its source fell back to a .pdf.
+        is_pdf = source_path.suffix.lower() == ".pdf"
+        if not (kind == "pdf_upload" or (kind == "arxiv" and is_pdf)):
+            raise ValueError(
+                f"paper_content id={paper_content_id}: kind={kind!r} "
+                f"source={source_path.name!r} is not a PDF source"
+            )
+
+        # Marker extraction is a blocking, possibly multi-minute httpx call —
+        # run it off the event loop.
+        pdf_bytes = source_path.read_bytes()  # noqa: ASYNC240 — one-shot read before the to_thread Marker call
+        client = self._get_marker_client()
+        doc = await asyncio.to_thread(
+            client.extract, pdf_bytes, max_pages=max_pages,
+        )
+
+        # Overwrite the PyMuPDF baseline asset with Marker quality in place.
+        asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+        write_paper_asset(asset, cache_dir)
+
+        # Re-chunk from Marker's block structure via the block-anchored
+        # assembler: each chunk is a group of consecutive blocks sharing one
+        # (section, page), rendered to REAL markdown (tables stay tables) and
+        # carrying its union page + bbox so the Citation Canvas can highlight
+        # geometrically. Replaces the old marker_doc_to_markdown flatten path.
+        chunks = marker_blocks_to_chunks(doc)
+        # Marker text comes from resp.json() and can carry lone UTF-16
+        # surrogates (bad OCR / encoding artifacts) that SQLite can't store.
+        # Drop them per chunk so the INSERTs never raise UnicodeEncodeError.
+        for c in chunks:
+            c.text = c.text.encode("utf-8", "ignore").decode("utf-8")
+            if c.match_text is not None:
+                c.match_text = c.match_text.encode("utf-8", "ignore").decode("utf-8")
+
+        # Embed FIRST (no mutation yet — safe to fail before the destructive
+        # deletes). Mirrors reingest._reingest_one ordering.
+        texts = [c.text for c in chunks]
+        embeddings = self._embedder.embed(texts)
+        sections_json = self._build_sections_json(chunks)
+
+        # Destructive replace: delete old chunks + vectors, insert new.
+        await self._conn.execute(
+            "DELETE FROM chunks WHERE paper_content_id = ?", (paper_content_id,),
+        )
+        self._chroma.delete_paper(paper_content_id)
+        await self._conn.commit()
+
+        new_ids: list[int] = []
+        for c in chunks:
+            async with self._conn.execute(
+                "INSERT INTO chunks "
+                "(paper_content_id, section, char_start, char_end, text, dom_id, "
+                "match_text, page, bbox) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (paper_content_id, c.section, c.char_start, c.char_end, c.text,
+                 c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
+            ) as cur:
+                r = await cur.fetchone()
+                assert r is not None
+                new_ids.append(int(r[0]))
+
+        # F2.1 A3: build the per-paper figure+table layout index from the
+        # freshly-inserted chunks zipped with their assigned ids, and persist it
+        # in the SAME transaction as sections_json/asset_status.
+        layout_json = json.dumps(
+            build_layout_index(list(zip(chunks, new_ids, strict=True)))
+        )
+        await self._conn.execute(
+            "UPDATE paper_content SET sections_json = ?, layout_json = ?, "
+            "asset_status = 'marker_ready' WHERE id = ?",
+            (sections_json, layout_json, paper_content_id),
+        )
+        await self._conn.commit()
+
+        self._chroma.add_chunks(
+            paper_content_id=paper_content_id,
+            chunk_ids=new_ids,
+            texts=texts,
+            embeddings=embeddings,
+        )
+
     @staticmethod
     def _pdf_boundaries(
         headings: list[tuple[str, int]], fallback_name: str,
@@ -690,23 +893,23 @@ class PaperPipeline:
 
     @staticmethod
     def _build_sections_json(
-        chunks: list[Chunk], full_text: str, *, strip_comments: bool = True,
+        chunks: list[Chunk], full_text: str | None = None, *,
+        strip_comments: bool = True,
     ) -> str:
-        """Compute the sections_json value from a list of chunks and source text.
+        """Compute the sections_json value from a list of chunks.
 
         Groups chunks by section name, computes char extents and token counts,
         and returns a JSON-encoded list of SectionEntry dicts ordered by
         appearance. Chunks with section=None (preamble / pre-first-section
         text) are excluded — they are not addressable by name.
 
-        ``strip_comments`` MUST match the value passed to ``chunk_text`` for the
-        same source: chunk char offsets are relative to the text the chunker
-        saw (comment-stripped for LaTeX, raw for PDF), so the slicing here has
-        to use the same representation or token_count would misalign.
+        Option (a): token_count is computed by encoding each section's chunk
+        TEXTS directly (no source-text slicing), so this never couples to a
+        ``full_text`` whose char offsets must line up — important for the
+        Marker block-anchored assembler, whose chunks carry offsets over a
+        concatenation the pipeline doesn't hold. ``full_text``/``strip_comments``
+        are accepted for backward compatibility and ignored.
         """
-        # See chunk_text: LaTeX offsets are relative to the comment-stripped
-        # text; PDF offsets are relative to the raw text. Match it.
-        stripped_text = strip_latex_comments(full_text) if strip_comments else full_text
         per_section: dict[str, list[Chunk]] = defaultdict(list)
         section_order: list[str] = []
         for c in chunks:
@@ -719,7 +922,7 @@ class PaperPipeline:
         entries: list[SectionEntry] = []
         for name in section_order:
             group = per_section[name]
-            section_text = stripped_text[group[0].char_start : group[-1].char_end]
+            section_text = "\n\n".join(c.text for c in group)
             entries.append(
                 SectionEntry(
                     name=name,
@@ -744,6 +947,7 @@ class PaperPipeline:
         html_path: Path,
         chunks: list[Chunk],
         sections_json: str | None = None,
+        asset_status: str | None = None,
     ) -> tuple[int, list[int]]:
         """Persist paper_content + chunks in a single atomic transaction.
 
@@ -755,8 +959,9 @@ class PaperPipeline:
             await self._conn.execute(
                 "INSERT INTO paper_content "
                 "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
-                "abstract, sections_json, source_path, source_dir_path, html_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "abstract, sections_json, source_path, source_dir_path, html_path, "
+                "asset_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     content_key,
                     kind,
@@ -770,6 +975,7 @@ class PaperPipeline:
                     str(source_path),
                     str(source_dir_path),
                     str(html_path),
+                    asset_status,
                 ),
             )
             async with self._conn.execute("SELECT last_insert_rowid()") as cur:
@@ -781,9 +987,11 @@ class PaperPipeline:
             for c in chunks:
                 await self._conn.execute(
                     "INSERT INTO chunks "
-                    "(paper_content_id, section, char_start, char_end, text, dom_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (paper_content_id, c.section, c.char_start, c.char_end, c.text, c.dom_id),
+                    "(paper_content_id, section, char_start, char_end, text, dom_id, "
+                    "match_text, page, bbox) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (paper_content_id, c.section, c.char_start, c.char_end, c.text,
+                     c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
                 )
                 async with self._conn.execute("SELECT last_insert_rowid()") as cur:
                     cid_row = await cur.fetchone()

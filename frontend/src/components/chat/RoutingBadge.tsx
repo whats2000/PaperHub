@@ -13,6 +13,8 @@ const intentLabel: Record<RoutingDecision["intent"], string> = {
   paper_qa: "Paper Q&A",
   slides: "Slides",
   library_stats: "Library stats",
+  memory: "Memory",
+  clarify: "Clarify",
   chitchat: "Chitchat",
 };
 

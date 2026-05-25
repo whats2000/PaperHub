@@ -1,7 +1,7 @@
 import json
 import os
 from collections.abc import AsyncIterator
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal
 
 import aiosqlite
@@ -12,6 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.graph import CLARIFY_FALLBACK
 from paperhub.agents.memory_node import memory_node
+from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
 from paperhub.agents.research import (
     FinalOnlyMessage,
     SearchCandidate,
@@ -32,7 +33,7 @@ from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
 from paperhub.api.deps import get_chroma
-from paperhub.config import load_settings
+from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
@@ -59,6 +60,20 @@ from paperhub.tracing.tracer import Tracer
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Yield types used by the subgraph-driving shims below.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DeckYield:
+    """Emitted by ``report_stream`` when the Report subgraph finishes
+    building a deck.  The ``deck`` dict is the raw payload forwarded
+    verbatim as the ``deck`` SSE event data."""
+
+    deck: dict[str, Any]
+
+
 class HistoryEntry(BaseModel):
     role: Literal["user", "assistant"]
     content: str
@@ -68,6 +83,10 @@ class ChatRequest(BaseModel):
     session_id: int | None = None
     user_message: str
     history: list[HistoryEntry] = Field(default_factory=list)
+    # The slide page currently on screen in the frontend's Slides panel
+    # (1-based). The Report Agent's deck-command classifier reads this to
+    # resolve "edit this slide" to the visible page. 0 = no deck open.
+    current_view_page: int = 0
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
@@ -416,6 +435,53 @@ async def paper_qa_stream(
         yield FinalOnlyMessage(final_text)
 
 
+async def report_stream(
+    state: AgentState,
+    *,
+    adapter: Any,
+    tracer: Tracer,
+    conn: aiosqlite.Connection,
+    retriever: Any,
+    settings: Settings,
+    **kwargs: Any,
+) -> AsyncIterator[Any]:
+    """Run the Report subgraph and yield ToolStepYield / DeckYield /
+    FinalOnlyMessage in stream order.
+
+    The chat layer expects:
+      * ``ToolStepYield`` items → emit ``tool_step`` SSE events;
+      * ``DeckYield`` items → emit ``deck`` SSE events;
+      * ``FinalOnlyMessage`` item → emit the ``final`` SSE event.
+    """
+    deps = ReportDeps(
+        adapter=adapter,
+        tracer=tracer,
+        conn=conn,
+        retriever=retriever,
+        workspace=settings.workspace_dir,
+        plan_model=settings.report_plan_model,
+        section_model=settings.report_section_model,
+        notes_model=settings.report_notes_model,
+        resolve_model=settings.report_resolve_model,
+        recall_enabled=settings.memory_recall_enabled,
+    )
+    graph = build_report_subgraph(deps)
+    final_text = ""
+    async for mode, payload in graph.astream(
+        state, stream_mode=["custom", "values"],
+    ):
+        if mode == "custom":
+            evt = payload.get("event")
+            if evt == "tool_step":
+                yield ToolStepYield(record=payload["record"])
+            elif evt == "deck":
+                yield DeckYield(deck=payload["deck"])
+        elif mode == "values" and isinstance(payload, dict):
+            if "final_response" in payload:
+                final_text = payload["final_response"]
+    yield FinalOnlyMessage(final_text)
+
+
 # Sentinels so the shims can build ResearchDeps without a real
 # pipeline / retriever when the caller is using only one branch.
 # These are never actually invoked because the corresponding subgraph
@@ -461,6 +527,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                 "run_id": run_id, "branch": "", "session_id": session_id,
                 "user_message": req.user_message,
                 "history": [h.model_dump() for h in req.history],
+                "current_view_page": req.current_view_page,
             }
             last_emitted_step = -1
             # Outbound MCP-client headers: any `MCPClient.call_tool` made
@@ -674,6 +741,32 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
                     yield {"event": "token",
                            "data": token_evt.model_dump_json(exclude={"type"})}
+                elif intent == "slides":
+                    slides_retriever = Retriever(chroma=get_chroma(request, settings))
+                    final_content = ""
+                    # report_stream is module-level so monkeypatch can swap it.
+                    async for rs_item in report_stream(
+                        state, adapter=adapter, tracer=tracer, conn=conn,
+                        retriever=slides_retriever, settings=settings,
+                    ):
+                        if isinstance(rs_item, ToolStepYield):
+                            yield {
+                                "event": "tool_step",
+                                "data": json.dumps(
+                                    {"record": rs_item.record},
+                                    separators=(',', ':'),
+                                ),
+                            }
+                            last_emitted_step = max(
+                                last_emitted_step, rs_item.record["step_index"],
+                            )
+                        elif isinstance(rs_item, DeckYield):
+                            yield {
+                                "event": "deck",
+                                "data": json.dumps(rs_item.deck, separators=(',', ':')),
+                            }
+                        elif isinstance(rs_item, FinalOnlyMessage):
+                            final_content = rs_item.content
                 else:
                     final_content = await stub_response(state, intent=intent)
 

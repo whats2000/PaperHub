@@ -59,8 +59,31 @@ class Settings:
     # FTS. NOT implemented yet — always falls back to FTS when False.
     memory_semantic_enabled: bool
 
+    # ── 9. Report Agent (slides) model selection ────────────────────────
+    # Deck planner — decomposes the user request into a slide outline.
+    report_plan_model: str
+    # Section generator — writes one slide frame per planned section.
+    report_section_model: str
+    # Speaker notes generator — writes per-frame speaker notes.
+    report_notes_model: str
+    # Reference resolver — small-tier tool used for citation lookup.
+    report_resolve_model: str
+
     # ── 8. Logging ──────────────────────────────────────────────────────
     log_level: str
+
+    # ── Marker PDF extraction service (v2.19) ───────────────────────────
+    marker_service_url: str
+    inprocess_marker: bool
+    # Max pages sent to Marker per /extract call. A whole large PDF in one
+    # call can exhaust a small GPU's VRAM → Marker hot-swaps models between
+    # stages → very slow. The client splits the PDF into page-batches of this
+    # size and concatenates the (absolute-page-numbered) blocks. Default 1:
+    # a single DENSE two-column page already produces 200+ OCR text lines that
+    # saturate ~6 GB VRAM; batching >1 such page tips into the CUDA
+    # shared-memory fallback (minutes → tens of minutes per call). Raise it for
+    # bigger GPUs or sparse single-column papers.
+    marker_max_pages: int
 
 
 def load_settings() -> Settings:
@@ -131,4 +154,23 @@ def load_settings() -> Settings:
 
         # 8. Logging.
         log_level=os.environ.get("PAPERHUB_LOG_LEVEL", "INFO"),
+
+        # Marker PDF extraction service (v2.19).
+        marker_service_url=os.environ.get("PAPERHUB_MARKER_URL", "http://127.0.0.1:8002"),
+        inprocess_marker=os.environ.get("PAPERHUB_INPROCESS_MARKER", "0") == "1",
+        marker_max_pages=int(os.environ.get("PAPERHUB_MARKER_MAX_PAGES", "1")),
+
+        # 9. Report Agent (slides) model selection.
+        report_plan_model=os.environ.get(
+            "PAPERHUB_REPORT_PLAN_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_section_model=os.environ.get(
+            "PAPERHUB_REPORT_SECTION_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_notes_model=os.environ.get(
+            "PAPERHUB_REPORT_NOTES_MODEL", "gemini/gemini-2.5-pro",
+        ),
+        report_resolve_model=os.environ.get(
+            "PAPERHUB_REPORT_RESOLVE_MODEL", "gemini/gemini-3.1-flash-lite",
+        ),
     )

@@ -100,6 +100,35 @@ CREATE TABLE IF NOT EXISTS memories (
     CHECK ((scope = 'global') = (session_id IS NULL))
 );
 
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    tex_path TEXT NOT NULL,
+    pdf_path TEXT,
+    speaker_notes_json TEXT,
+    plan_json TEXT,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    theme TEXT NOT NULL DEFAULT 'metropolis',
+    contributing_paper_ids_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (session_id)
+);
+
+CREATE TABLE IF NOT EXISTS deck_slides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+    slide_index INTEGER NOT NULL,            -- logical frame order (0-based)
+    frame_tex TEXT NOT NULL,                 -- the \begin{frame}…\end{frame} block
+    note_text TEXT,                          -- NULL until the NOTES flow runs (opt-in)
+    note_language TEXT,                      -- independent of the deck/slide language
+    page_start INTEGER NOT NULL,             -- 1-based PDF page this frame starts on
+    page_end INTEGER NOT NULL,               -- 1-based PDF page this frame ends on
+    UNIQUE (deck_id, slide_index)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content,
     content='memories',

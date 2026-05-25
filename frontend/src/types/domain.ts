@@ -4,6 +4,8 @@ export type Intent =
   | "paper_qa"
   | "slides"
   | "library_stats"
+  | "memory"
+  | "clarify"
   | "chitchat";
 
 export type ModelTier = "small" | "flagship";
@@ -79,6 +81,19 @@ export interface ChunkResolution {
   /** Deterministic anchor (`<span id>`) injected at the chunk's start during
    *  ingest, when its sentinel survived rendering; null → use text-search. */
   dom_id: string | null;
+  /** Clean, markdown-stripped text for locating the chunk in the PDF/HTML text
+   *  layer. Present for Marker-ingested chunks (Plan F2+); null/absent for older
+   *  chunks — callers fall back to `text`. */
+  match_text?: string | null;
+  /** Marker block provenance (F2.1 A2'): 0-based ABSOLUTE page index the chunk
+   *  was extracted from. Drives the exact geometric PDF highlight together with
+   *  `bbox`. Null for non-Marker (LaTeX / PyMuPDF) chunks. */
+  page?: number | null;
+  /** Marker union bbox `[x0,y0,x1,y1]` in PDF points, origin top-left, in the
+   *  page's native coordinate space. When present (with `page`), the Citation
+   *  Canvas draws the PDF highlight from this geometry instead of text-searching.
+   *  Null for non-Marker chunks. */
+  bbox?: number[] | null;
 }
 
 export interface AttachResult {
@@ -90,6 +105,30 @@ export interface AttachResult {
 
 export type IngestResult = AttachResult;
 
+export interface DeckMeta {
+  deck_id: number;
+  session_id: number;
+  page_count: number;
+  theme: string;
+  status: "ok" | "error";
+  plan: unknown;
+  speaker_notes: Record<string, string>;
+  contributing_paper_ids: number[];
+  updated_at: string;
+}
+
+export interface DeckEventData {
+  deck_id: number;
+  session_id: number;
+  page_count: number;
+  title: string;
+  status: "ok" | "error";
+  /** On a live SSE event each entry carries `title`; on message replay the
+   *  backend emits `{id}` only, so `title` is optional. */
+  contributing_papers: { id: number; title?: string }[];
+  has_notes: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -99,6 +138,7 @@ export interface ChatMessage {
   status?: "streaming" | "ok" | "error";
   error?: string;
   search_results?: SearchResultCandidate[];
+  deck?: DeckEventData;
 }
 
 export interface ChatSession {
@@ -128,6 +168,10 @@ export interface BackendMessage {
   /** Paper-search result cards emitted on this turn, replayed so they show on
    *  every device (null for non-search turns). */
   search_results?: SearchResultCandidate[] | null;
+  /** The slide deck generated on this turn, shaped like the `deck` SSE event,
+   *  replayed so the in-chat DeckChip survives a refresh (null for non-slide
+   *  turns). On replay `contributing_papers` entries are `{id}` only. */
+  deck?: DeckEventData | null;
 }
 
 export type MemoryStatus = "active" | "superseded";

@@ -1,6 +1,7 @@
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import aiosqlite
@@ -15,6 +16,10 @@ import pytest_asyncio
 os.environ.setdefault("PAPERHUB_INPROCESS_MODELS", "1")
 # Keep the boot banner out of test output.
 os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
+# Default the background Marker upgrade worker OFF in tests — it would otherwise
+# spawn on every app lifespan and dial the (non-running) Marker service. The
+# dedicated worker test enables it explicitly via run_worker.
+os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
 
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402
@@ -68,6 +73,32 @@ def fake_pipeline() -> MagicMock:
     ``add_paper_to_session_dispatch`` directly, so the pipeline is never
     actually called in the loop tests."""
     return MagicMock(spec=PaperPipeline)
+
+
+@pytest_asyncio.fixture
+async def app_with_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[Any, aiosqlite.Connection]]:
+    """ASGI app + open aiosqlite connection, both pointing at the same DB.
+
+    Yields (app, conn) so tests can seed data via ``conn`` then exercise the
+    app via an httpx ASGITransport client.  Prewarm is disabled so the fixture
+    is fast.  Mirrors the ``mem_client`` fixture in ``test_memories_api.py``
+    but also exposes the raw connection for direct DB seeding.
+    """
+    monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    db_path = tmp_path / "paperhub.db"
+    # Apply schema once so the app's lifespan sees an already-migrated DB.
+    async with aiosqlite.connect(db_path) as bootstrap:
+        await bootstrap.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(bootstrap)
+    from paperhub.app import create_app
+
+    app = create_app()
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        yield app, conn
 
 
 @pytest_asyncio.fixture

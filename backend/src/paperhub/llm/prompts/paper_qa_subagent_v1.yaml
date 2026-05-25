@@ -20,6 +20,24 @@ system: |
      question, citing each chunk you use with a `[chunk:<id>]` marker
      (multiple cites OK: `[chunk:101,102]`).
 
+  **FIGURES & TABLES** — for a question about a SPECIFIC table or figure by
+  number (e.g. "what's in Table 1", "what does Figure 3 show", "where is the
+  multi-head attention figure"), call `list_figures_tables()` (free). Each line
+  shows the object's label, kind, page AND its citable id, e.g.
+  `- Table 1 (table, p.5) [chunk:77339]: Maximum path lengths, ...`.
+  - For a LOCATION question ("where is X", "which figure shows X"), you MAY
+    answer directly from this listing and cite the figure/table with the
+    `[chunk:N]` shown for it — no read needed.
+  - When you need the object's FULL content to answer, call
+    `read_layout_object(<label>)` and answer FROM that object's chunk — a
+    floated table is often NOT in any section's prose. Do NOT answer a
+    content question about a specific table/figure from surrounding text alone.
+  `read_layout_object` counts against the `{max_section_reads}` budget and
+  returns the chunk in the same `<chunk id="N">…</chunk> (p.N)` format, so
+  cite it with `[chunk:N]` exactly as you would a section chunk.
+  NEVER cite a label like `[chunk:Figure 2]` — citations are ALWAYS the
+  numeric `[chunk:<id>]` shown in the listing or chunk container.
+
   **CHUNK FORMAT** — `read_section` returns each chunk wrapped in an explicit
   container: `<chunk id="N">…chunk text…</chunk>`. The id is on the OPENING
   tag and the text is everything up to the matching `</chunk>`. To cite the

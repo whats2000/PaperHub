@@ -150,6 +150,51 @@ async def test_router_classifies_memory_intent(
     assert updated["routing_decision"].intent == "memory"
 
 
+async def test_deck_followups_route_to_slides(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Deck / notes follow-ups must be classified as `slides` so the
+    deck-command dispatcher (Task 7/9) can handle them."""
+    deck_history = [{"role": "assistant", "content": "Generated a 15-slide deck."}]
+    followups = [
+        "generate speaker notes",
+        "把講稿變成繁體中文",
+        "改第三頁更精簡",
+        "make the deck shorter",
+        "redo the slides",
+    ]
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    for msg in followups:
+        await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+        await migrated_db.commit()
+        async with migrated_db.execute("SELECT last_insert_rowid()") as cur:
+            r = await cur.fetchone()
+        assert r is not None
+        run_id = int(r[0])
+        tracer = Tracer(migrated_db, run_id=run_id, branch="")
+        state: AgentState = {
+            "run_id": run_id, "branch": "", "session_id": 1,
+            "user_message": msg,
+            "history": deck_history,
+        }
+        updated = await router_node(
+            state,
+            adapter=LiteLlmAdapter(),
+            tracer=tracer,
+            model="gpt-4o-mini",
+            mock_response=json.dumps({
+                "intent": "slides", "model_tier": "flagship",
+                "confidence": 0.95, "reasoning": "deck follow-up",
+                "resolved_query": msg,
+                "response_language": "Traditional Chinese" if "繁體" in msg or "改" in msg else "English",
+            }),
+        )
+        assert updated["routing_decision"].intent == "slides", (
+            f"Expected slides for follow-up {msg!r}, got "
+            f"{updated['routing_decision'].intent!r}"
+        )
+
+
 async def test_routing_accuracy_at_least_80_percent(
     migrated_db: aiosqlite.Connection,
 ) -> None:

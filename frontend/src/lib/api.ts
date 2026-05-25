@@ -9,6 +9,7 @@ import type {
   MemoryItem,
   MemoryStatus,
   MemoryScope,
+  DeckMeta,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -356,4 +357,29 @@ export async function uploadPdf(
     throw new Error(`API ${res.status}: ${text}`);
   }
   return (await res.json()) as IngestResult;
+}
+
+/** Fetch deck metadata for a session (GET /sessions/{id}/deck).
+ * Throws on non-2xx (including 404 when no deck has been generated yet). */
+export async function getDeck(sessionId: number): Promise<DeckMeta> {
+  return apiFetch<DeckMeta>(`/sessions/${sessionId}/deck`);
+}
+
+/** Build the URL for streaming the session's compiled deck PDF directly from
+ * the backend. Use `fetchDeckPdfData` to load the bytes for react-pdf. */
+export function deckPdfUrl(sessionId: number): string {
+  return `${API_BASE_URL}/sessions/${sessionId}/deck/pdf`;
+}
+
+/** Fetch a session's compiled deck PDF bytes. Passed to react-pdf as
+ * `{ data }` so it renders inline — no cross-origin iframe needed. */
+export async function fetchDeckPdfData(sessionId: number): Promise<Uint8Array> {
+  const res = await fetch(deckPdfUrl(sessionId));
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** Build the URL for downloading the session's deck LaTeX source. */
+export function deckTexUrl(sessionId: number): string {
+  return `${API_BASE_URL}/sessions/${sessionId}/deck/tex`;
 }

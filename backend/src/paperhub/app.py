@@ -6,6 +6,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import aiosqlite
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,11 +20,12 @@ if sys.platform == "win32":
 
 from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
+from paperhub.api import decks as decks_api
 from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.config import Settings, load_settings
-from paperhub.db.connection import open_db
+from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 from paperhub.mcp import (
     MCPRegistry,
@@ -35,6 +37,8 @@ from paperhub.mcp import (
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
 from paperhub.modelserver.spawn import ensure_running as _modelserver_ensure_running
+from paperhub.pipelines.marker_worker import build_worker_pipeline
+from paperhub.pipelines.marker_worker import run_worker as run_marker_worker
 from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.app")
@@ -103,6 +107,34 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # No warm-up to wait on — the stack is ready right now.
         _print_boot_banner(settings, app)
 
+    # Background Marker upgrade worker (Plan F2.1): drains PDF papers marked
+    # 'marker_pending' by re-extracting them via Marker (one at a time — a
+    # concurrent Marker call OOMs a small GPU), upgrading the on-disk
+    # PaperAsset, and re-chunking + re-embedding. Durable: the queue lives in
+    # the DB, so pending papers resume across restarts. Runs on a DEDICATED
+    # long-lived connection (the migration conn above is closed). Disabled with
+    # PAPERHUB_MARKER_WORKER=0 (tests set this so they never spawn it).
+    app.state.marker_worker_task = None
+    app.state.marker_worker_stop = None
+    app.state.marker_worker_conn = None
+    if os.environ.get("PAPERHUB_MARKER_WORKER", "1") != "0":
+        worker_conn = await aiosqlite.connect(settings.db_path)
+        await configure_connection(worker_conn)
+        worker_pipeline = build_worker_pipeline(
+            worker_conn, settings, chroma=app.state.chroma,
+        )
+        stop = asyncio.Event()
+        app.state.marker_worker_conn = worker_conn
+        app.state.marker_worker_stop = stop
+        app.state.marker_worker_task = asyncio.create_task(
+            run_marker_worker(
+                worker_pipeline, worker_conn,
+                stop=stop, max_pages=settings.marker_max_pages,
+            ),
+            name="paperhub-marker-worker",
+        )
+        _LOG.info("marker worker started")
+
     try:
         yield
     finally:
@@ -112,6 +144,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             prewarm.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await prewarm
+        # Stop the Marker worker (guard with a timeout so a slow in-flight
+        # Marker call can't hang shutdown indefinitely).
+        worker_stop = app.state.marker_worker_stop
+        worker_task = app.state.marker_worker_task
+        if worker_stop is not None and worker_task is not None:
+            worker_stop.set()
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(worker_task, timeout=30.0)
+            if not worker_task.done():
+                worker_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await worker_task
+        worker_conn = app.state.marker_worker_conn
+        if worker_conn is not None:
+            with contextlib.suppress(Exception):
+                await worker_conn.close()
         # Lifespan: chroma cleanup handled internally by chromadb.
         await app.state.mcp_registry.shutdown()
 
@@ -265,6 +313,7 @@ def create_app() -> FastAPI:
     app.include_router(papers_api.router)
     app.include_router(chunks_api.router)
     app.include_router(memories_api.router)
+    app.include_router(decks_api.router)
     # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
     # External MCP clients (Claude Desktop, Cursor) and the agent (post
     # Task v2.5-4) reach the three Research Agent tools over the MCP wire

@@ -6,11 +6,14 @@ import { Composer } from "@/components/chat/Composer";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
+import { useSlidesStore } from "@/store/slides";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
 import { useSessionsSync } from "@/hooks/useSessionsSync";
+import { useDeckSync } from "@/hooks/useDeckSync";
 import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
 import { useCanvasResize } from "@/hooks/useCanvasResize";
+import { getDeck } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const CitationCanvas = lazy(() =>
@@ -25,10 +28,17 @@ const MemoryManager = lazy(() =>
   })),
 );
 
+const SlidesPanel = lazy(() =>
+  import("@/components/slides/SlidesPanel").then((m) => ({
+    default: m.SlidesPanel,
+  })),
+);
+
 export function ChatPage() {
   useGlobalShortcuts();
   useSessionsSync();
   useReferencesSync();
+  useDeckSync();
   const canvasOpen = useCanvasStore((s) => s.open);
   const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
@@ -38,28 +48,46 @@ export function ChatPage() {
   const newSession = useChatStore((s) => s.newSession);
   const { send } = useChatStream();
 
+  const slidesOpen = useSlidesStore((s) => s.open);
+  const openSlides = useSlidesStore((s) => s.openPanel);
+  const closeSlides = useSlidesStore((s) => s.closePanel);
+
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [speakerNotes, setSpeakerNotes] = useState<Record<string, string>>({});
 
   // Close the canvas when the user switches chat sessions (it shows the
   // previous session's references).
   useCloseCanvasOnSessionChange(activeSessionId);
 
   // Fix 1: whenever the Canvas opens (via References button, openCitation, or
-  // any other path) ensure Memory is closed. Uses Zustand's subscribe API
-  // (calling setState in a subscription callback — not synchronously in the
-  // effect body — satisfies the react-hooks/set-state-in-effect rule).
-  // This covers the `openCitation` path which sets open=true on the store
-  // directly, bypassing handleToggleCanvas.
+  // any other path) ensure Memory and Slides are closed. Uses Zustand's
+  // subscribe API (calling setState in a subscription callback — not
+  // synchronously in the effect body — satisfies the
+  // react-hooks/set-state-in-effect rule). This covers the `openCitation`
+  // path which sets open=true on the store directly, bypassing handleToggleCanvas.
   useEffect(() => {
     return useCanvasStore.subscribe((state) => {
-      if (state.open) setMemoryOpen(false);
+      if (state.open) {
+        setMemoryOpen(false);
+        useSlidesStore.getState().closePanel();
+      }
     });
   }, []);
 
-  // Fix 3: close Memory on session switch. Memory content is per-session.
-  // Uses Zustand's subscribe API (same approach as Fix 1) so setState is
-  // called in a subscription callback rather than synchronously in the effect
-  // body, satisfying the react-hooks/set-state-in-effect rule.
+  // When Slides opens, close Canvas and Memory.
+  useEffect(() => {
+    return useSlidesStore.subscribe((state) => {
+      if (state.open) {
+        setMemoryOpen(false);
+        useCanvasStore.getState().closeCanvas();
+      }
+    });
+  }, []);
+
+  // Fix 3: close Memory and Slides on session switch. Memory content is
+  // per-session. Uses Zustand's subscribe API (same approach as Fix 1) so
+  // setState is called in a subscription callback rather than synchronously in
+  // the effect body, satisfying the react-hooks/set-state-in-effect rule.
   const prevSessionForMemoryRef = useRef(
     useChatStore.getState().activeSessionId,
   );
@@ -68,6 +96,7 @@ export function ChatPage() {
       if (prevSessionForMemoryRef.current !== state.activeSessionId) {
         prevSessionForMemoryRef.current = state.activeSessionId;
         setMemoryOpen(false);
+        useSlidesStore.getState().closePanel();
       }
     });
   }, []);
@@ -82,10 +111,27 @@ export function ChatPage() {
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
 
-  // The right column is shared between the Citation Canvas and the Memory
-  // Manager. Opening one closes the other; the column width + slide animation
-  // is the same for both.
-  const rightPanelOpen = canvasOpen || memoryOpen;
+  // The right column is shared between the Citation Canvas, Memory Manager,
+  // and Slides panel. Opening one closes the others; the column width + slide
+  // animation is the same for all.
+  const rightPanelOpen = canvasOpen || memoryOpen || slidesOpen;
+
+  // Fetch speaker notes when the Slides panel opens and a backend session
+  // exists. Resets when the session changes.
+  useEffect(() => {
+    if (!slidesOpen || backendSessionId === null) return;
+    let cancelled = false;
+    getDeck(backendSessionId)
+      .then((d) => {
+        if (!cancelled) setSpeakerNotes(d.speaker_notes);
+      })
+      .catch(() => {
+        if (!cancelled) setSpeakerNotes({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slidesOpen, backendSessionId]);
 
   const handleSubmit = (text: string): void => {
     const sessionId = activeSessionId ?? newSession();
@@ -100,8 +146,9 @@ export function ChatPage() {
     // Always allowed: with no backend session yet, the panel shows global
     // (user) memories only (project/session memories need a sent message).
     if (!memoryOpen) {
-      // Opening Memory → close Canvas if it was open.
+      // Opening Memory → close Canvas + Slides if they were open.
       closeCanvas();
+      closeSlides();
       setMemoryOpen(true);
     } else {
       setMemoryOpen(false);
@@ -110,10 +157,22 @@ export function ChatPage() {
 
   const handleToggleCanvas = (): void => {
     if (!canvasOpen) {
-      // Opening Canvas → close Memory if it was open.
+      // Opening Canvas → close Memory + Slides if they were open.
       setMemoryOpen(false);
+      closeSlides();
     }
     toggleCanvas();
+  };
+
+  const handleToggleSlides = (): void => {
+    if (!slidesOpen) {
+      // Opening Slides → close Canvas + Memory if they were open.
+      closeCanvas();
+      setMemoryOpen(false);
+      openSlides();
+    } else {
+      closeSlides();
+    }
   };
 
   return (
@@ -134,6 +193,8 @@ export function ChatPage() {
           onToggleMemory={handleToggleMemory}
           onToggleCanvas={handleToggleCanvas}
           canvasOpen={canvasOpen}
+          slidesOpen={slidesOpen}
+          onToggleSlides={handleToggleSlides}
         />
       </div>
       {/* Right panel — shared slot for Citation Canvas and Memory Manager.
@@ -181,6 +242,25 @@ export function ChatPage() {
               <div className="flex-1 overflow-y-auto">
                 <Suspense fallback={null}>
                   <MemoryManager sessionId={backendSessionId} />
+                </Suspense>
+              </div>
+            </div>
+          )}
+
+          {/* Slides panel: absolutely overlays the right-panel column when
+              slidesOpen is true. Only rendered when a backend session exists
+              (a deck is always session-scoped). */}
+          {slidesOpen && backendSessionId !== null && (
+            <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
+              <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
+                Slides
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <Suspense fallback={null}>
+                  <SlidesPanel
+                    sessionId={backendSessionId}
+                    speakerNotes={speakerNotes}
+                  />
                 </Suspense>
               </div>
             </div>

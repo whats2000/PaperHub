@@ -8,7 +8,6 @@ from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.research_graph import ResearchDeps, build_research_subgraph
 from paperhub.agents.router import router_node
 from paperhub.agents.state import AgentState
-from paperhub.agents.stubs import stub_response
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.tracing.tracer import Tracer
 
@@ -60,8 +59,11 @@ def build_graph(deps: GraphDeps) -> Any:
             collected.append(token)
         return {**state, "final_response": "".join(collected)}
 
-    async def _stub_slides(state: AgentState) -> AgentState:
-        return {**state, "final_response": await stub_response(state, intent="slides")}
+    async def _slides(state: AgentState) -> AgentState:
+        # chat.py drives the Report subgraph directly via the module-level
+        # ``report_stream`` shim; this node exists for build_graph completeness
+        # (the SSE path is the user-facing one — same pattern as library_stats).
+        return {**state, "final_response": "slides handled by the Report Agent (see chat SSE path)."}
 
     async def _library_stats(state: AgentState) -> AgentState:
         # chat.py drives the streaming SQL agent directly; this node exists for
@@ -88,7 +90,7 @@ def build_graph(deps: GraphDeps) -> Any:
     g = StateGraph(AgentState)
     g.add_node("router", _router)
     g.add_node("chitchat", _chitchat)
-    g.add_node("slides", _stub_slides)
+    g.add_node("slides", _slides)
     g.add_node("library_stats", _library_stats)
     g.add_node("memory", _memory)
     g.add_node("clarify", _clarify)

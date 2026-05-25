@@ -139,6 +139,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F2.1: Idempotent column-add for paper_content.asset_status
+    # Tracks the PaperAsset build state for each paper.  Values:
+    #   'latex' | 'pymupdf_only' | 'marker_pending' | 'marker_ready' | 'marker_failed'
+    # NULL for rows ingested before Plan F2 (treated as "asset not yet built").
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "asset_status" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN asset_status TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # W6-1: Idempotent column-add for chunks.dom_id
     # (pre-existing DBs created before Plan D Wave 6 won't have this column).
     # Populated at re-ingest / sentinel-injection time; rows that haven't been
@@ -200,6 +214,57 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             "REFERENCES memories(id) ON DELETE SET NULL"
         )
     await conn.commit()
+
+    # -----------------------------------------------------------------------
+    # F2.1 A1: Idempotent column-add for chunks.match_text
+    # Stores a markdown-stripped copy of chunk.text for the Citation Canvas
+    # resolver (which matches a plain-text prefix against the PDF text layer).
+    # NULL until a later task populates it; existing rows are unaffected.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "match_text" not in cols:
+        await conn.execute(
+            "ALTER TABLE chunks ADD COLUMN match_text TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
+    # F2.1 A2': Idempotent column-add for chunks.page (INTEGER) + chunks.bbox
+    # (TEXT, JSON [x0,y0,x1,y1]). Marker block-anchored chunks carry their
+    # page index + union bbox so the Citation Canvas can draw a GEOMETRIC
+    # highlight. NULL for non-Marker (LaTeX / PyMuPDF) chunks — unchanged.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(chunks)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "page" not in cols:
+        await conn.execute("ALTER TABLE chunks ADD COLUMN page INTEGER")
+        await conn.commit()
+    if "bbox" not in cols:
+        await conn.execute("ALTER TABLE chunks ADD COLUMN bbox TEXT")
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
+    # F2.1 A3: Idempotent column-add for paper_content.layout_json (TEXT, JSON
+    # list of {kind,label,caption,page,chunk_id}). A per-paper index of figures
+    # + tables so the paper_qa subagent can later fetch a floated/mis-filed
+    # layout object by its label. Populated by the Marker upgrade path; NULL for
+    # non-Marker (LaTeX / PyMuPDF) rows — unchanged.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "layout_json" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN layout_json TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
+    # decks + deck_slides (v2.18 / v2.21, Plan F): created by schema.sql's
+    # CREATE TABLE IF NOT EXISTS. deck_slides holds one row per final frame
+    # (frame_tex + opt-in note_text/note_language + PDF page span). Future
+    # column-adds go here, mirroring the chat_sessions.deleted_at pattern.
+    # -----------------------------------------------------------------------
 
     # -----------------------------------------------------------------------
     # Rebuild the FTS index from paper_content if the index is empty

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PaperHub · Plan F — Slides UI mockup</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --border:#2a2f3a;
+    --text:#e6e8ee; --muted:#8b93a3; --accent:#6ea8fe; --accent2:#3b82f6;
+    --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+    --slide-bg:#fbfbfd; --slide-ink:#1a1f2b; --slide-accent:#eb5e28;
+    --radius:12px; --font:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);height:100vh;overflow:hidden}
+  .app{display:grid;grid-template-columns:1fr 560px;height:100vh;transition:grid-template-columns .2s}
+  /* ----------------- left: chat ----------------- */
+  .chat{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}
+  .chat-head{padding:14px 18px;border-bottom:1px solid var(--border);font-weight:600;display:flex;gap:8px;align-items:center}
+  .chip-badge{font-size:11px;color:var(--muted);font-weight:500;border:1px solid var(--border);border-radius:999px;padding:2px 8px}
+  .thread{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:16px}
+  .msg{max-width:90%;display:flex;flex-direction:column;gap:6px}
+  .msg.user{align-self:flex-end;align-items:flex-end}
+  .bubble{padding:10px 14px;border-radius:14px;line-height:1.5;font-size:14px}
+  .msg.user .bubble{background:var(--accent2);color:#fff;border-bottom-right-radius:4px}
+  .msg.bot .bubble{background:var(--panel2);border:1px solid var(--border);border-bottom-left-radius:4px}
+  .routing{font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  .pill{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:1px 8px}
+  .pill.intent{color:var(--accent)}
+  /* deck chip */
+  .deck-chip{display:flex;gap:12px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;width:380px;cursor:pointer;transition:border-color .15s}
+  .deck-chip:hover{border-color:var(--accent)}
+  .deck-thumb{width:120px;aspect-ratio:16/10;border-radius:8px;overflow:hidden;flex:none;border:1px solid var(--border)}
+  .deck-meta{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .deck-title{font-weight:600;font-size:14px}
+  .deck-sub{font-size:12px;color:var(--muted)}
+  .deck-actions{display:flex;gap:6px;margin-top:auto;flex-wrap:wrap}
+  .btn{font-size:12px;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:8px;padding:5px 10px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+  .progress{font-size:12px;color:var(--muted);font-family:ui-monospace,monospace;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:8px 10px;white-space:pre-line}
+  .composer{border-top:1px solid var(--border);padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+  .view-hint{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .view-hint b{color:var(--accent)}
+  .composer-row{display:flex;gap:8px}
+  .composer input{flex:1;background:var(--panel2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 12px;font-size:14px}
+  /* ----------------- right: slides panel ----------------- */
+  .slides{display:flex;flex-direction:column;min-width:0;background:var(--panel)}
+  .sl-head{padding:11px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .sl-title{font-weight:600;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sl-status{font-size:11px;color:var(--ok);display:flex;gap:4px;align-items:center;flex:none}
+  .sl-actions{margin-left:auto;display:flex;gap:6px;flex:none}
+  .iconbtn{width:30px;height:30px;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:8px;cursor:pointer;display:grid;place-items:center;font-size:14px}
+  .iconbtn:hover{border-color:var(--accent)}
+  .iconbtn.present{background:var(--slide-accent);border-color:var(--slide-accent);color:#fff;width:auto;padding:0 12px;gap:6px;font-size:12px;font-weight:600}
+  .sl-body{flex:1;display:grid;grid-template-columns:84px 1fr;min-height:0}
+  .filmstrip{border-right:1px solid var(--border);overflow:auto;padding:10px 8px;display:flex;flex-direction:column;gap:8px}
+  .thumb{border:2px solid transparent;border-radius:6px;overflow:hidden;cursor:pointer;position:relative;background:var(--slide-bg)}
+  .thumb .n{position:absolute;top:2px;left:4px;font-size:9px;color:var(--muted)}
+  .thumb.active{border-color:var(--accent)}
+  .stage{display:flex;flex-direction:column;min-height:0}
+  .slide-wrap{flex:1;display:grid;place-items:center;padding:16px;min-height:0}
+  .nav{display:flex;align-items:center;justify-content:center;gap:14px;padding:6px;color:var(--muted);font-size:13px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+  .nav button{background:none;border:none;color:var(--text);cursor:pointer;font-size:18px}
+  .notes{padding:12px 14px;border-top:0;max-height:34%;overflow:auto;background:var(--panel2)}
+  .notes-head{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  .notes-head .edit{margin-left:auto;cursor:pointer;color:var(--accent)}
+  .notes p{margin:0;font-size:13px;line-height:1.55;color:#cfd4de}
+  .nextprev{font-size:10px;color:var(--muted);padding:0 14px 8px;display:flex;gap:6px;align-items:center}
+  .nextprev .mini{width:56px;aspect-ratio:16/10;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+  /* ----------------- slide rendering (faux metropolis) ----------------- */
+  .slide{width:100%;max-width:520px;aspect-ratio:16/10;background:var(--slide-bg);color:var(--slide-ink);border-radius:6px;
+         box-shadow:0 8px 30px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Fira Sans',var(--font)}
+  .slide .bar{height:5px;background:var(--slide-accent)}
+  .slide .body{flex:1;padding:7% 8% 5%;display:flex;flex-direction:column}
+  .slide h1{font-size:clamp(14px,3.4cqw,26px);margin:0 0 .5em;font-weight:700}
+  .slide h2{font-size:clamp(12px,2.6cqw,18px);margin:0 0 .6em;font-weight:600;color:#222}
+  .slide ul{margin:.2em 0;padding-left:1.1em;font-size:clamp(9px,1.9cqw,13px);line-height:1.7;color:#2c3340}
+  .slide .math{font-family:'Cambria Math','Times New Roman',serif;font-style:italic;background:#f1f3f7;border-radius:5px;padding:.5em .7em;font-size:clamp(9px,2cqw,14px);margin:.4em 0;text-align:center}
+  .slide .fig{flex:1;display:grid;place-items:center;color:#9aa;border:1px dashed #c7ccd6;border-radius:6px;margin-top:.5em;font-size:11px}
+  .slide .foot{font-size:8px;color:#aab;display:flex;justify-content:space-between;padding-top:.4em}
+  .slide.title-slide{justify-content:center}
+  .slide.title-slide .body{justify-content:center;text-align:center;align-items:center}
+  .slide.title-slide h1{font-size:clamp(16px,4cqw,30px)}
+  .slide.title-slide .auth{font-size:clamp(9px,2cqw,13px);color:#566}
+  .container-cq{container-type:inline-size;width:100%;max-width:520px}
+  .thumb .slide{box-shadow:none;border-radius:0;max-width:none}
+  .thumb .container-cq{max-width:none}
+  /* ----------------- audience overlay ----------------- */
+  .audience{position:fixed;inset:0;background:#000;display:none;place-items:center;z-index:50}
+  .audience.show{display:grid}
+  .audience .screen-label{position:absolute;top:14px;left:16px;color:#444;font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+  .audience .close{position:absolute;top:14px;right:16px;color:#666;cursor:pointer;font-size:13px;border:1px solid #333;border-radius:8px;padding:4px 10px}
+  .audience .container-cq{max-width:min(90vw,1400px)}
+  .audience .slide{max-width:none;aspect-ratio:16/10;box-shadow:0 0 60px rgba(255,255,255,.06)}
+  .syncdot{font-size:11px;color:var(--muted);display:inline-flex;gap:5px;align-items:center}
+  .syncdot::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .legend{position:fixed;bottom:10px;left:10px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-width:340px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ CHAT ============ -->
+  <section class="chat">
+    <div class="chat-head">PaperHub <span class="chip-badge">session · 3 references enabled</span></div>
+    <div class="thread">
+      <div class="msg user"><div class="bubble">Make slides comparing these references on MoE routing.</div></div>
+
+      <div class="msg bot">
+        <div class="routing"><span class="pill intent">slides</span><span class="pill">flagship</span><span class="pill">96%</span></div>
+        <div class="progress">Planning outline (7 sections)…
+Generating section 4/7…
+Compiling deck (attempt 1) ✓</div>
+        <div class="bubble">Generated a 14-slide deck synthesizing the three enabled papers — motivation, the two routing approaches head-to-head, results, and takeaways.</div>
+        <!-- DECK CHIP -->
+        <div class="deck-chip" onclick="openPanel()">
+          <div class="deck-thumb"><div class="container-cq" id="chipThumb"></div></div>
+          <div class="deck-meta">
+            <div class="deck-title">MoE Routing: A Comparison</div>
+            <div class="deck-sub">14 slides · compiled ✓ · 3 papers</div>
+            <div class="deck-actions">
+              <button class="btn primary">▦ Open</button>
+              <button class="btn">▶ Present</button>
+              <button class="btn">⤓ .pdf / .tex</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg user"><div class="bubble">make the equation on this slide bigger</div></div>
+      <div class="msg bot">
+        <div class="routing"><span class="pill intent">slides · edit</span><span class="pill">page 2</span></div>
+        <div class="bubble">Updated slide 2 — enlarged the routing-softmax equation. Recompiled ✓ (a new version was snapshotted; revert from History if needed).</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="view-hint">▦ Slides panel open — viewing <b>slide 2 of 14</b>. The agent uses this as context to decide whether an edit targets this slide or the deck.</div>
+      <div class="composer-row">
+        <input placeholder="Ask, edit the deck, or answer an audience question…" />
+        <button class="btn primary">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDES PANEL (presenter side) ============ -->
+  <section class="slides">
+    <div class="sl-head">
+      <div class="sl-title">MoE Routing: A Comparison</div>
+      <div class="sl-status">● compiled</div>
+      <div class="sl-actions">
+        <button class="iconbtn" title="Download">⤓</button>
+        <button class="iconbtn" title="Version history — restore">⟳</button>
+        <button class="iconbtn present" onclick="present()">▶ Present</button>
+      </div>
+    </div>
+    <div class="sl-body">
+      <div class="filmstrip" id="filmstrip"></div>
+      <div class="stage">
+        <div class="slide-wrap"><div class="container-cq" id="mainSlide"></div></div>
+        <div class="nav">
+          <button onclick="go(cur-1)">‹</button>
+          <span id="pageLabel">2 / 14</span>
+          <button onclick="go(cur+1)">›</button>
+          <span style="margin-left:14px" class="syncdot" id="syncBadge" hidden>presenting · synced</span>
+        </div>
+        <div class="nextprev">
+          next ▸ <div class="mini"><div class="container-cq" id="nextMini"></div></div>
+          <span style="margin-left:auto">⏱ 04:12</span>
+        </div>
+        <div class="notes">
+          <div class="notes-head">Speaker note — slide <span id="noteNum">2</span> <span class="edit">✎ edit</span></div>
+          <p id="noteText"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ============ AUDIENCE WINDOW (second screen) — slide ONLY, fullscreen ============ -->
+<div class="audience" id="audience">
+  <div class="screen-label">Audience display · second screen</div>
+  <div class="close" onclick="document.getElementById('audience').classList.remove('show')">✕ exit (Esc)</div>
+  <div class="container-cq" id="audienceSlide"></div>
+</div>
+
+<div class="legend">
+  <b>Mockup</b> — click filmstrip / ‹ › to change the current slide. Hit <b>▶ Present</b> to open the audience view (here as an overlay; in the app it's a separate window/tab). Changing slides updates both, live, via <code>BroadcastChannel</code>. The audience screen is slide-only; notes/next/timer stay presenter-side.
+</div>
+
+<script>
+  // --- faux deck content (stand-in for compiled Beamer PDF pages) ---
+  const slides = [
+    {type:'title', t:'MoE Routing: A Comparison', a:'Synthesizing Shazeer ’17 · Fedus ’21 · Zhou ’22 — generated by PaperHub'},
+    {h:'Motivation', bullets:['Scaling dense transformers is compute-bound','Mixture-of-Experts activates a sparse subset per token','Routing decides which experts fire — the crux'], math:'y = Σ_i  g_i(x) · E_i(x),   g = softmax(W_r x)'},
+    {h:'Approach A — Top-k gating (Shazeer ’17)', bullets:['Noisy top-k softmax gate','Load-balancing auxiliary loss','k=2 experts per token'], math:'g(x) = softmax( top_k( W_r x + ε ) )'},
+    {h:'Approach B — Switch routing (Fedus ’21)', bullets:['Route to a single expert (k=1)','Simpler, lower comm. cost','Capacity factor controls drop'], fig:'Figure 2 — Switch layer (from paper)'},
+    {h:'Head-to-head', bullets:['Top-k: better quality, higher comm','Switch: faster, simpler, scales to 1.6T','Expert-choice (Zhou ’22) flips the routing direction'], fig:'Comparison table'},
+    {h:'Results', bullets:['Switch: 7× pre-training speedup','Expert-choice: better load balance','Quality gap narrows at scale'], fig:'Figure 4 — speedup curves'},
+    {h:'Takeaways', bullets:['Routing granularity is the key design axis','k=1 vs k=2 trades comm for quality','Open: stability + balance at scale']},
+  ];
+  // pad to 14 to match the "14 slides" label
+  while(slides.length<14){const s=slides[(slides.length%6)+1]; slides.push({...s, h:(s.h||'Detail')+' (cont.)'});}
+  const notes = [
+    'Title slide. Open with the one-sentence framing: routing is what makes MoE work or fail.',
+    'Motivate why we care: dense scaling is compute-bound; MoE buys capacity without proportional FLOPs. The softmax gate is the object of study for the whole talk.',
+    'Walk through noisy top-k gating; emphasize the auxiliary load-balancing loss as the practical trick that keeps experts from collapsing.',
+    'Contrast Switch: a single-expert route. Point at the figure; note the capacity factor and token-dropping behavior.',
+    'This is the comparison slide — slow down. Top-k vs Switch vs Expert-choice along quality / comm-cost / balance.',
+  ];
+  function renderSlide(s){
+    if(s.type==='title') return `<div class="slide title-slide"><div class="bar"></div><div class="body"><h1>${s.t}</h1><div class="auth">${s.a}</div></div></div>`;
+    const ul = s.bullets? `<ul>${s.bullets.map(b=>`<li>${b}</li>`).join('')}</ul>`:'';
+    const math = s.math? `<div class="math">${s.math}</div>`:'';
+    const fig = s.fig? `<div class="fig">🖼 ${s.fig}</div>`:'';
+    return `<div class="slide"><div class="bar"></div><div class="body"><h2>${s.h}</h2>${ul}${math}${fig}<div class="foot"><span>PaperHub</span><span>MoE Routing</span></div></div></div>`;
+  }
+  let cur=1; // 0-indexed -> showing slide "2"
+  const channel = ('BroadcastChannel' in window) ? new BroadcastChannel('paperhub-present-demo') : null;
+
+  function paint(){
+    const n=slides.length;
+    document.getElementById('mainSlide').innerHTML = renderSlide(slides[cur]);
+    document.getElementById('nextMini').innerHTML = renderSlide(slides[Math.min(cur+1,n-1)]);
+    document.getElementById('pageLabel').textContent = `${cur+1} / ${n}`;
+    document.getElementById('noteNum').textContent = cur+1;
+    document.getElementById('noteText').textContent = notes[cur] || '(no speaker note for this slide yet — click ✎ edit to add one)';
+    // audience overlay (and, in the real app, the BroadcastChannel-driven window)
+    document.getElementById('audienceSlide').innerHTML = renderSlide(slides[cur]);
+    if(channel) channel.postMessage({page:cur});
+    // filmstrip active state
+    [...document.querySelectorAll('.thumb')].forEach((el,i)=>el.classList.toggle('active',i===cur));
+  }
+  function go(i){ cur=Math.max(0,Math.min(slides.length-1,i)); paint(); }
+  function present(){
+    document.getElementById('audience').classList.add('show');
+    document.getElementById('syncBadge').hidden=false;
+  }
+  function openPanel(){ /* panel already open in mockup */ }
+
+  // build filmstrip
+  const fs=document.getElementById('filmstrip');
+  fs.innerHTML = slides.map((s,i)=>`<div class="thumb" onclick="go(${i})"><span class="n">${i+1}</span><div class="container-cq">${renderSlide(s)}</div></div>`).join('');
+  document.getElementById('chipThumb').innerHTML = renderSlide(slides[0]);
+
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight') go(cur+1);
+    if(e.key==='ArrowLeft') go(cur-1);
+    if(e.key==='Escape') document.getElementById('audience').classList.remove('show');
+  });
+  paint();
+</script>
+</body>
+</html>

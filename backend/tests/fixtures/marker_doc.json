@@ -1,0 +1,200 @@
+{
+  "blocks": [
+    {
+      "block_type": "SectionHeader",
+      "html": "<h1>Attention Is All You Need</h1>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/0/SectionHeader/2"
+      },
+      "images": {},
+      "bbox": [
+        210.375,
+        148.5,
+        399.893310546875,
+        166.04522705078125
+      ],
+      "page": 0,
+      "block_id": "/page/0/SectionHeader/2"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h2>Abstract</h2>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/0/SectionHeader/2",
+        "2": "/page/0/SectionHeader/11"
+      },
+      "images": {},
+      "bbox": [
+        283.587890625,
+        385.55859375,
+        328.412109375,
+        397.56036376953125
+      ],
+      "page": 0,
+      "block_id": "/page/0/SectionHeader/11"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h1>1 Introduction</h1>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/0"
+      },
+      "images": {},
+      "bbox": [
+        107.876953125,
+        72.31640625,
+        190.8136749267578,
+        84.7423095703125
+      ],
+      "page": 1,
+      "block_id": "/page/1/SectionHeader/0"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h1>2 Background</h1>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5"
+      },
+      "images": {},
+      "bbox": [
+        107.99999237060547,
+        362.7421875,
+        188.8291015625,
+        375.05535888671875
+      ],
+      "page": 1,
+      "block_id": "/page/1/SectionHeader/5"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h2>3 Model Architecture</h2>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5",
+        "2": "/page/1/SectionHeader/10"
+      },
+      "images": {},
+      "bbox": [
+        108.0,
+        642.33984375,
+        226.212890625,
+        654.4593505859375
+      ],
+      "page": 1,
+      "block_id": "/page/1/SectionHeader/10"
+    },
+    {
+      "block_type": "Figure",
+      "html": "",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5",
+        "2": "/page/1/SectionHeader/10"
+      },
+      "images": {
+        "/page/2/Figure/0": "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP////////////////////////////////////////////////////////////////////////////////2wBDAf////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKp//2Q=="
+      },
+      "bbox": [
+        189.52734375,
+        63.03515625,
+        422.47265625,
+        404.12109375
+      ],
+      "page": 2,
+      "block_id": "/page/2/Figure/0",
+      "caption": "Figure 1: The Transformer - model architecture."
+    },
+    {
+      "block_type": "Caption",
+      "html": "<p>Figure 1: The Transformer - model architecture.</p>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5",
+        "2": "/page/1/SectionHeader/10"
+      },
+      "images": {},
+      "bbox": [
+        208.58203125,
+        404.12109375,
+        401.9903564453125,
+        414.70806884765625
+      ],
+      "page": 2,
+      "block_id": "/page/2/Caption/1"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h4>3.1 Encoder and Decoder Stacks</h4>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5",
+        "2": "/page/1/SectionHeader/10",
+        "4": "/page/2/SectionHeader/3"
+      },
+      "images": {},
+      "bbox": [
+        107.578125,
+        481.46484375,
+        253.40625,
+        492.9541320800781
+      ],
+      "page": 2,
+      "block_id": "/page/2/SectionHeader/3"
+    },
+    {
+      "block_type": "SectionHeader",
+      "html": "<h3>3.2 Attention</h3>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/1/SectionHeader/5",
+        "2": "/page/1/SectionHeader/10",
+        "3": "/page/2/SectionHeader/6"
+      },
+      "images": {},
+      "bbox": [
+        106.98046875,
+        679.46484375,
+        170.81419372558594,
+        691.4291000366211
+      ],
+      "page": 2,
+      "block_id": "/page/2/SectionHeader/6"
+    },
+    {
+      "block_type": "Text",
+      "html": "<p block-type=\"Text\">Provided proper attribution is provided, Google hereby grants permission to reproduce the tables and figures in this paper solely for use in journalistic or scholarly works.</p>",
+      "latex": null,
+      "section_hierarchy": {},
+      "images": {},
+      "bbox": [
+        124.3125,
+        71.9296875,
+        487.89453125,
+        112.7464599609375
+      ],
+      "page": 0,
+      "block_id": "/page/0/Text/1"
+    },
+    {
+      "block_type": "Text",
+      "html": "<p block-type=\"Text\">Ashish Vaswani<sup>\udce2\udc88\udc97</sup> Google Brain avaswani@google.com</p>",
+      "latex": null,
+      "section_hierarchy": {
+        "1": "/page/0/SectionHeader/2"
+      },
+      "images": {},
+      "bbox": [
+        116.244140625,
+        233.53936767578125,
+        215.86865234375,
+        267.1680908203125
+      ],
+      "page": 0,
+      "block_id": "/page/0/Text/3"
+    }
+  ]
+}

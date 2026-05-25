@@ -1,0 +1,47 @@
+name: paperhub
+services:
+  marker:
+    build: ./marker_service
+    ports: ["8002:8002"]
+    # GEMINI_API_KEY turns ON Marker's use_llm accuracy pass (better
+    # tables/math/captions via Gemini). The backend's .env is the project key
+    # store, so the marker container reads the key from there directly — set
+    # GEMINI_API_KEY (or GOOGLE_API_KEY) in backend/.env and it's picked up on
+    # `docker compose up`. Keyless (key absent/blank) runs without the LLM pass.
+    # env_file values do NOT override the `environment:` block below, so the
+    # batch-size caps still win; the key lives only in env_file (no empty
+    # `environment` GEMINI entry to clobber it).
+    env_file:
+      - ./backend/.env
+    environment:
+      # Surya batch sizes are the dominant Marker VRAM knob. Each is read from
+      # the environment by surya/settings.py; the upstream GPU DEFAULTS are huge
+      # (DETECTOR=36 ~16GB, RECOGNITION=256/512 ~12-26GB, LAYOUT=32 ~7GB,
+      # TABLE_REC=64 ~10GB), which OOM-crashes a dense page on a 6 GB GPU.
+      # These conservative caps bound peak VRAM so a dense two-column page
+      # completes instead of crashing. Override per-host via host env / .env for
+      # bigger GPUs (e.g. RECOGNITION_BATCH_SIZE=64). VRAM-per-item (surya docs):
+      # detector ~440MB, recognition ~40-50MB, layout ~220MB, table_rec ~150MB.
+      - DETECTOR_BATCH_SIZE=${DETECTOR_BATCH_SIZE:-4}
+      - RECOGNITION_BATCH_SIZE=${RECOGNITION_BATCH_SIZE:-8}
+      - LAYOUT_BATCH_SIZE=${LAYOUT_BATCH_SIZE:-4}
+      - TABLE_REC_BATCH_SIZE=${TABLE_REC_BATCH_SIZE:-4}
+    volumes:
+      # Surya/marker model weights download ONCE into this named volume on the
+      # first /extract and persist across restarts AND image rebuilds, so the
+      # build never re-downloads them. HF_HOME/TORCH_HOME point at /models.
+      - marker-models:/models
+    # GPU: requires nvidia-container-toolkit on the host. Marker falls back to
+    # CPU automatically if this block is commented out or no GPU is visible.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+  # NOTE: backend + modelserver services will join here as the project goes full-Docker.
+
+volumes:
+  marker-models:

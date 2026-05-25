@@ -33,6 +33,10 @@ Copy-Item $chroma $chromaBak -Recurse
 # and the CLI silently reports "0 paper(s)" while the live DB is untouched.
 $env:PAPERHUB_WORKSPACE = $workspace
 
+# Clear stale VIRTUAL_ENV so uv's mismatch WARNING (stderr) isn't promoted to a
+# terminating NativeCommandError under ErrorActionPreference='Stop'.
+$env:VIRTUAL_ENV = $null
+
 Write-Host "Running paperhub-reingest $args (PAPERHUB_WORKSPACE=$workspace) ..."
 # Use --project to anchor uv on the backend's pyproject.toml regardless of
 # the invoker's cwd. Without this, uv may pick a different (or root) project

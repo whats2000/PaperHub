@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
+import { useSlidesStore } from "@/store/slides";
 import { API_BASE_URL } from "@/lib/api";
 import { chitchatHappyPath } from "../stubs/sse";
 
@@ -15,6 +16,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   server.resetHandlers(chitchatHappyPath);
   useChatStore.getState().reset();
+  useSlidesStore.setState({ open: false, deckBySession: {}, currentPageBySession: {} });
 });
 
 const enc = new TextEncoder();
@@ -267,6 +269,81 @@ describe("useChatStream", () => {
     // backend_session_id must stay 42 (idempotent — not overwritten on second turn)
     const finalSession = useChatStore.getState().sessions.find((s) => s.id === sessionId);
     expect(finalSession?.backend_session_id).toBe(42);
+  });
+
+  it("dispatches deck SSE event into chat store and slides store", async () => {
+    const deckPayload = {
+      deck_id: 5,
+      session_id: 11,
+      page_count: 8,
+      title: "My Deck",
+      status: "ok" as const,
+      contributing_papers: [{ id: 1, title: "Paper A" }],
+      has_notes: true,
+    };
+    server.resetHandlers(
+      http.post(`${API_BASE_URL}/chat`, () => {
+        const enc2 = new TextEncoder();
+        function sseChunk(event: string, data: unknown): Uint8Array {
+          return enc2.encode(
+            `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+          );
+        }
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              sseChunk("session", { run_id: 1, session_id: 11 }),
+            );
+            controller.enqueue(
+              sseChunk("routing_decision", {
+                run_id: 1, branch: "",
+                decision: {
+                  intent: "slides", model_tier: "flagship",
+                  confidence: 0.95, reasoning: "generate slides",
+                },
+              }),
+            );
+            controller.enqueue(sseChunk("deck", deckPayload));
+            controller.enqueue(
+              sseChunk("final", {
+                run_id: 1, branch: "", message_id: 1,
+                content: "Your slides are ready.",
+              }),
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const sessionId = useChatStore.getState().newSession();
+    const { result } = renderHook(() => useChatStream());
+
+    await act(async () => {
+      await result.current.send(sessionId, "generate slides");
+    });
+
+    await waitFor(() => {
+      // Chat store: the assistant message should have deck attached
+      const session = useChatStore
+        .getState()
+        .sessions.find((s) => s.id === sessionId);
+      const assistant = session!.messages.find((m) => m.role === "assistant")!;
+      expect(assistant.status).toBe("ok");
+      expect(assistant.deck).toBeDefined();
+      expect(assistant.deck!.deck_id).toBe(5);
+      expect(assistant.deck!.page_count).toBe(8);
+      expect(assistant.deck!.title).toBe("My Deck");
+
+      // Slides store: deckBySession and currentPageBySession updated
+      const slidesState = useSlidesStore.getState();
+      expect(slidesState.deckBySession[11]).toBeDefined();
+      expect(slidesState.deckBySession[11]!.deck_id).toBe(5);
+      expect(slidesState.currentPageBySession[11]).toBe(1);
+    });
   });
 
   it("dispatches search_results SSE event into the chat store", async () => {

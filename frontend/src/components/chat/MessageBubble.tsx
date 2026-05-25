@@ -13,6 +13,7 @@ import type { ChatMessage } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
+import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
 
@@ -26,6 +27,12 @@ interface Props {
    * doesn't see two loading affordances at once.
    */
   researching?: boolean;
+  /**
+   * Sends a chat message through the normal chat-send path (threaded down from
+   * ChatThread). Forwarded to the DeckChip so its Generate/Edit affordances
+   * send a turn through the same streaming/trace path as the composer.
+   */
+  onSendTurn?: (message: string) => void;
 }
 
 export function MessageBubble({
@@ -33,6 +40,7 @@ export function MessageBubble({
   onRetry,
   backendSessionId,
   researching = false,
+  onSendTurn,
 }: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -130,6 +138,12 @@ export function MessageBubble({
             candidates={message.search_results!}
             sessionId={backendSessionId ?? null}
           />
+        )}
+
+        {/* Deck chip — rendered when a slide deck has been generated for this
+            turn (deck SSE event). Shows below search results if both exist. */}
+        {isAssistant && message.deck !== undefined && (
+          <DeckChip deck={message.deck} onSend={onSendTurn} />
         )}
 
         {/* Copy button — hover-revealed on completed assistant messages */}

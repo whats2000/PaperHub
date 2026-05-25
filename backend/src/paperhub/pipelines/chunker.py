@@ -34,6 +34,14 @@ class Chunk:
     char_end: int
     text: str
     dom_id: str | None = None
+    match_text: str | None = None
+    page: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    # Transient layout-index tags (F2.1 A3) — NOT persisted as chunk columns.
+    # Set only for an atomic table/figure chunk; consumed by build_layout_index.
+    layout_kind: str | None = None  # "table" | "figure"
+    layout_label: str | None = None  # normalized "Table N" / "Figure N"
+    layout_caption: str | None = None  # the caption text
 
 
 def strip_latex_comments(text: str) -> str:

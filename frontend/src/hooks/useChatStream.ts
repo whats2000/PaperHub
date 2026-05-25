@@ -3,10 +3,12 @@ import type {
   RoutingDecision,
   SearchResultCandidate,
   ToolCallRecord,
+  DeckEventData,
 } from "@/types/domain";
 import { streamChat } from "@/lib/sse";
 import { listSessionReferences } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useSlidesStore } from "@/store/slides";
 
 interface SessionData { run_id: number; session_id: number; }
 interface ToolStepData { record: ToolCallRecord; }
@@ -49,9 +51,23 @@ export function useChatStream() {
     // catch checks this to decide whether to re-throw to ChatPage's toast.
     let handledInline = false;
 
+    // When this session has a deck open, tell the backend which slide is on
+    // screen so the Report Agent's deck-command classifier can resolve
+    // "edit this slide" to the visible page.
+    const slides = useSlidesStore.getState();
+    const currentViewPage =
+      backendSessionId !== null && slides.deckBySession[backendSessionId]
+        ? (slides.currentPageBySession[backendSessionId] ?? 1)
+        : undefined;
+
     try {
       await streamChat(
-        { session_id: backendSessionId, user_message: userMessage, history },
+        {
+          session_id: backendSessionId,
+          user_message: userMessage,
+          history,
+          ...(currentViewPage !== undefined ? { current_view_page: currentViewPage } : {}),
+        },
         {
           onEvent: (event, data) => {
             if (event === "session") {
@@ -106,6 +122,16 @@ export function useChatStream() {
                     )
                     .catch(() => undefined);
                 }
+              }
+            } else if (event === "deck") {
+              const d = data as DeckEventData;
+              store.getState().setDeckOnMessage(sessionId, d);
+              const slidesStore = useSlidesStore.getState();
+              slidesStore.setDeck(d.session_id, d);
+              // Only reset to page 1 for a NEW deck — an edit/notes follow-up
+              // must not jump the panel back to the first page.
+              if (slidesStore.currentPageBySession[d.session_id] === undefined) {
+                slidesStore.setCurrentPage(d.session_id, 1);
               }
             } else if (event === "final") {
               const f = data as FinalData;

@@ -72,6 +72,88 @@ class ToolCallRecord(BaseModel):
     error: str | None
 
 
+class PlannedSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    intent: str
+    paper_content_ids: list[int]
+
+
+class SlidePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    sections: list[PlannedSection]
+
+
+class PaperBrief(BaseModel):
+    """Per-paper understanding produced by the F3 'understand' stage.
+    Carries the contribution, method, key results, figure keys, and
+    equations that the PhD-grade slide agent uses when drafting slides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: int
+    contribution: str
+    method: str
+    key_results: list[str]
+    key_figure_keys: list[str]
+    key_equations: list[str]
+
+
+class OutlineSlide(BaseModel):
+    """One slide entry in a TalkOutline — title, narrative goal, key points,
+    and optional pointers to a figure, equation, chunks, and papers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    goal: str
+    key_points: list[str]
+    figure_key: str | None = None
+    equation: str | None = None
+    chunk_ids: list[int] = []
+    paper_ids: list[int] = []
+
+
+class TalkOutline(BaseModel):
+    """Structured talk outline produced by the F3 'narrate' stage — a title
+    and an ordered list of OutlineSlide entries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    slides: list[OutlineSlide]
+
+
+class FrameDraft(BaseModel):
+    """A single CONCISE Beamer frame, produced by the F4 frame-only draft
+    stage. Speaker notes are authored separately by the opt-in NOTES flow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frame: str
+
+
+class SlideBudget(BaseModel):
+    """Deck length budget (F4 — SRS v2.21). Default 20 min ≈ 15 slides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_slide_count: int = 15
+    depth: str = "standard"  # 'overview' | 'standard' | 'deep'
+
+
+class DeckCommand(BaseModel):
+    """How to interpret a slides turn when a deck already exists (F4, v2.21)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["generate_notes", "edit_notes", "edit_slides", "regenerate"]
+    target_scope: Literal["current", "page", "all"] = "all"
+    target_page: int | None = None
+    note_language: str | None = None  # for generate_notes / edit_notes
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
@@ -123,3 +205,11 @@ class AgentState(TypedDict, total=False):
     #     rather than analyst-prose summaries.
     pq_papers: list[tuple[int, str]]
     pq_per_paper_picks: list[Any]  # list[PerPaperPicks]
+    # ------------------------------------------------------------------
+    # Report (slides) subgraph fields (Plan F v2.18):
+    # ------------------------------------------------------------------
+    current_view_page: int       # v2.18: slide on screen (frontend-supplied; Phase 2 uses it)
+    report_deck_id: int          # v2.18: set by sl_emit
+    report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
+    report_budget: SlideBudget   # v2.21 (F4): GENERATE length budget
+    report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action

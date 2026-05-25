@@ -87,6 +87,18 @@ def _build_pdf_with_page1_title(
     return out
 
 
+@pytest.fixture(autouse=True)
+def _mock_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F2.1: PDF ingest no longer calls Marker synchronously — it extracts with
+    PyMuPDF and probes ``marker_available()`` to record ``asset_status``. Patch
+    the probe to ``False`` so these endpoint tests are deterministic and never
+    open a real socket to a Marker service."""
+    monkeypatch.setattr(
+        "paperhub.pipelines.paper_pipeline.marker_available",
+        lambda: False,
+    )
+
+
 async def _seed_session(conn: aiosqlite.Connection) -> int:
     await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
     await conn.commit()
