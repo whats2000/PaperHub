@@ -221,6 +221,58 @@ async def test_finalize_notes_single_page_verbatim_no_llm(fake_tracer: Tracer) -
 
 
 @pytest.mark.asyncio
+async def test_finalize_notes_fallback_on_split_error(fake_tracer: Tracer) -> None:
+    """Regression: if the note-split adapter call raises (any exception), finalize_notes
+    must NOT propagate the error. Instead it falls back to _deterministic_split so
+    the deck is still delivered with real per-page speech (never '(continued)')."""
+    final_tex = (
+        "\\maketitle\n"
+        "\\begin{frame}{Method}\ncontent one\n\\end{frame}\n"
+        "\\begin{frame}{Method}\ncontent two\n\\end{frame}\n"
+    )
+    # Two sentences so the deterministic splitter can assign one per page.
+    d = SlideDraft(
+        frame="f",
+        note="First sentence covers the setup. Second sentence covers the result.",
+    )
+
+    class _SplitErrorAdapter:
+        """Returns normally for all calls EXCEPT the note-split slot (NoteSegments),
+        which raises RuntimeError — simulating the pre-fix KeyError crash."""
+
+        async def structured(self, **kw: Any) -> Any:
+            if kw.get("response_model") is NoteSegments:
+                raise RuntimeError("simulated note-split failure")
+            raise AssertionError(f"unexpected structured call: {kw}")
+
+        def stream(self, **kw: Any):  # type: ignore[no-untyped-def]
+            raise AssertionError("stream must not be called")
+
+    notes = await finalize_notes(
+        drafts=[d],
+        final_tex=final_tex,
+        page_count=3,
+        adapter=_SplitErrorAdapter(),
+        tracer=fake_tracer,
+        model="m",
+        response_language="English",
+    )
+    # All three pages must be present.
+    assert set(notes.keys()) == {"1", "2", "3"}
+    # Title page (1) must not be "(continued)".
+    assert notes["1"] != "(continued)"
+    # The two content pages must be non-empty, non-"(continued)", and distinct
+    # (the two sentences land on different pages).
+    assert notes["2"] and notes["2"] != "(continued)"
+    assert notes["3"] and notes["3"] != "(continued)"
+    assert notes["2"] != notes["3"]
+    _no_continued(notes)
+    # Tracing must still have fired despite the error.
+    tools = await _step_tools(fake_tracer)
+    assert "report:notes_finalize" in tools
+
+
+@pytest.mark.asyncio
 async def test_finalize_notes_degrades_more_pages_than_drafts(
     fake_tracer: Tracer,
 ) -> None:

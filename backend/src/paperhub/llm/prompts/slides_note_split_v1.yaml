@@ -13,5 +13,5 @@ user: |
   ORIGINAL SPEAKER NOTE:
   {full_note}
 
-  Output ONLY the JSON {"segments": [...]} with exactly {page_count} segments,
-  in {response_language}.
+  Output ONLY the JSON object described above, with exactly {page_count}
+  segments, in {response_language}.

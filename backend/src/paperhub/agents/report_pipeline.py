@@ -300,6 +300,19 @@ def _coerce_segments(segments: list[str], k: int, fallback: str) -> list[str]:
     return [(s.strip() or fallback or " ") for s in out]
 
 
+def _deterministic_split(note: str, k: int) -> list[str]:
+    """Split ``note`` into ``k`` contiguous sentence-grouped segments — the
+    LLM-free fallback when the note-split call fails, so a split frame still
+    gets real per-page speech (never ``"(continued)"``)."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", note.strip()) if s.strip()]
+    if not sentences:
+        return [note for _ in range(k)]
+    per = max(1, len(sentences) // k)
+    segs = [" ".join(sentences[i * per : (i + 1) * per]) for i in range(k - 1)]
+    segs.append(" ".join(sentences[(k - 1) * per :]))  # last takes the remainder
+    return segs
+
+
 async def finalize_notes(
     *,
     drafts: list[SlideDraft],
@@ -339,18 +352,24 @@ async def finalize_notes(
     # Concurrently split every multi-page content group; map single-page groups
     # (and degraded/unmapped pages) deterministically with no LLM call.
     async def _split(group: list[int], draft_note: str, title: str) -> list[str]:
-        result = await adapter.structured(
-            slot="slides_note_split/v1",
-            variables={
-                "slide_title": title,
-                "page_count": len(group),
-                "full_note": draft_note,
-                "response_language": response_language or "the user's language",
-            },
-            response_model=NoteSegments,
-            model=model,
-        )
-        return _coerce_segments(result.segments, len(group), draft_note)
+        try:
+            result = await adapter.structured(
+                slot="slides_note_split/v1",
+                variables={
+                    "slide_title": title,
+                    "page_count": len(group),
+                    "full_note": draft_note,
+                    "response_language": response_language or "the user's language",
+                },
+                response_model=NoteSegments,
+                model=model,
+            )
+            return _coerce_segments(result.segments, len(group), draft_note)
+        except Exception:  # noqa: BLE001 — never let a note-split failure drop the deck
+            # Deterministic sentence-split fallback: real per-page speech, no LLM.
+            return _coerce_segments(
+                _deterministic_split(draft_note, len(group)), len(group), draft_note,
+            )
 
     split_count = 0
     coroutines: list[Coroutine[Any, Any, list[str]]] = []
