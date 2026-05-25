@@ -237,8 +237,13 @@ async def _process_search_results(
                 # pipeline skips the arXiv metadata API round-trip (M2 fix).
                 # ss: and library: prefixes are left as None — the dispatcher
                 # handles them without a caller-supplied override.
+                # UNVERIFIED candidates carry only the Discoverer's hint title
+                # (SS missed + arXiv verify was inconclusive, e.g. a transient
+                # 429). Passing that as an override would PERSIST the unverified
+                # title and skip the arXiv metadata fetch. Leave it None so the
+                # pipeline downloads + adopts the AUTHORITATIVE arXiv title.
                 md: ArxivMetadata | None = None
-                if c.paper_id.startswith("arxiv:"):
+                if c.paper_id.startswith("arxiv:") and c.verified:
                     md = ArxivMetadata(
                         title=c.title,
                         abstract=c.abstract or "",

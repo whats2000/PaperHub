@@ -328,6 +328,11 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                         # already-in-session checks happen in
                         # api.chat._process_search_results.
                         finalize=True,
+                        # An unverified-emitted candidate (SS miss + arXiv
+                        # verify inconclusive) carries only the Discoverer's
+                        # hint title; flag it so the chat layer fetches the
+                        # authoritative title at download instead of trusting it.
+                        verified=bool(meta.get("verified", True)),
                     ),
                 )
             writer({"event": "search_results", "candidates": candidates})

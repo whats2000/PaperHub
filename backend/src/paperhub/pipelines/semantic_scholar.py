@@ -14,14 +14,94 @@ This module is the v2.4 primary external-search layer. It exposes:
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import random
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Literal
 
 import httpx
 
 API_BASE = "https://api.semanticscholar.org/graph/v1"
 _TIMEOUT = httpx.Timeout(10.0)
+
+# Rate-limit resilience (observed in prod traces — paper_suggest fans out 4
+# resolves concurrently and the free tier, even WITH an api-key, throttles
+# to ~1 req/s → HTTP 429 → the resolver dropped real papers as "not found").
+# Two levers, both tunable via env:
+#   1. PACING — every SS request serializes through `_pace_lock` and is spaced
+#      at least `_MIN_INTERVAL_S` apart, so concurrent callers queue instead of
+#      bursting. This is the "schedule parallel search with delay" lever.
+#   2. RETRY — a 429 is retried up to `_MAX_ATTEMPTS` times with exponential
+#      backoff (honouring `Retry-After` when present). Only a 429 that survives
+#      every attempt raises SemanticScholarRateLimitError.
+_MIN_INTERVAL_S = float(os.environ.get("PAPERHUB_SS_MIN_INTERVAL_S", "1.1"))
+_MAX_ATTEMPTS = int(os.environ.get("PAPERHUB_SS_MAX_ATTEMPTS", "4"))
+_RETRY_BASE_S = float(os.environ.get("PAPERHUB_SS_RETRY_BASE_S", "1.0"))
+# Module-level so pacing is shared across ALL concurrent SS calls in the
+# worker (in-process MCP runs in the same event loop). Created without a
+# running loop — fine on 3.10+ (binds lazily).
+_pace_lock = asyncio.Lock()
+_last_request_ts = 0.0
+# Indirection so tests can monkeypatch sleep without touching global asyncio.
+_sleep = asyncio.sleep
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a ``Retry-After`` header (integer seconds OR HTTP-date) into a
+    wait in seconds. Returns None when absent / unparseable."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    delta = (when - datetime.now(UTC)).total_seconds()
+    return max(delta, 0.0)
+
+
+async def _get_with_retry(
+    url: str, params: dict[str, str], headers: dict[str, str],
+    timeout_cfg: httpx.Timeout,
+) -> httpx.Response:
+    """GET ``url`` through the shared pacing lock, retrying on HTTP 429.
+
+    Returns the final response (which may itself be a 429 after attempts are
+    exhausted — the caller raises SemanticScholarRateLimitError on that).
+    Spacing + the request happen inside ``_pace_lock`` so concurrent callers
+    are serialized to ~1 req/s; the backoff sleep is OUTSIDE the lock so a
+    retrying caller doesn't block others.
+    """
+    global _last_request_ts
+    resp: httpx.Response | None = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        async with _pace_lock:
+            wait = _MIN_INTERVAL_S - (time.monotonic() - _last_request_ts)
+            if wait > 0:
+                await _sleep(wait)
+            async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+                resp = await client.get(url, params=params, headers=headers)
+            _last_request_ts = time.monotonic()
+        if resp.status_code != 429 or attempt == _MAX_ATTEMPTS:
+            return resp
+        retry_after = _parse_retry_after(resp.headers.get("retry-after"))
+        backoff = (
+            retry_after if retry_after is not None
+            else _RETRY_BASE_S * (2 ** (attempt - 1))
+        )
+        backoff += random.uniform(0, 0.3)
+        await _sleep(backoff)
+    assert resp is not None  # loop runs ≥1 time (_MAX_ATTEMPTS ≥ 1)
+    return resp
 # arXiv asks for a contactable User-Agent per their Terms of Use; Semantic Scholar
 # is more permissive but we send the same UA for operator visibility.
 _USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
@@ -149,8 +229,7 @@ async def find_related(
         sub_key = None  # similar endpoint returns paper objects directly
 
     params = {"limit": str(max_results), "fields": _FIELDS}
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(url, params=params, headers=_headers())
+    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
     if resp.status_code == 429:
         raise SemanticScholarRateLimitError(
             f"Semantic Scholar rate-limited find_related({mode}) for {arxiv_id}",
@@ -173,8 +252,7 @@ async def search_papers(
     """
     url = f"{API_BASE}/paper/search"
     params = {"query": query, "limit": str(max_results), "fields": _SEARCH_FIELDS}
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(url, params=params, headers=_headers())
+    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
     if resp.status_code == 429:
         raise SemanticScholarRateLimitError(
             f"Semantic Scholar rate-limited search_papers({query!r})",
@@ -190,8 +268,7 @@ async def fetch_paper_metadata(paper_id: str) -> SemanticScholarMetadata:
     """
     url = f"{API_BASE}/paper/{paper_id}"
     params = {"fields": _SEARCH_FIELDS}
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(url, params=params, headers=_headers())
+    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
     if resp.status_code == 429:
         raise SemanticScholarRateLimitError(
             f"Semantic Scholar rate-limited fetch_paper_metadata({paper_id!r})",

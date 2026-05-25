@@ -26,6 +26,8 @@ class SearchCandidateModel(BaseModel):
     papers_id: int | None
     error: str | None
     already_in_session: bool
+    # Default True so replay of cards persisted before this field still loads.
+    verified: bool = True
 
 
 class SearchResultsEvent(BaseModel):
