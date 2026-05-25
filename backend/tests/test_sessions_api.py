@@ -296,6 +296,103 @@ async def test_get_session_messages_replays_search_result_cards(
     assert cards[0]["auto_added"] is True
 
 
+async def test_get_session_messages_replays_deck(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A slide deck persisted for a run replays on the run's assistant message,
+    so the in-chat deck chip survives a refresh (BUG2). The replayed `deck`
+    payload matches the SSE `deck` event shape (frontend reuses DeckEventData)."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (1, 1, 'ok')",
+        )
+        await conn.execute(
+            "INSERT INTO decks (session_id, run_id, tex_path, pdf_path, "
+            "speaker_notes_json, plan_json, page_count, theme, "
+            "contributing_paper_ids_json, status) "
+            "VALUES (1, 1, '/x.tex', '/x.pdf', "
+            "'{\"1\": \"intro notes\"}', "
+            "'{\"title\": \"Flow Matching, Explained\"}', "
+            "5, 'metropolis', '[3, 7]', 'ok')",
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'user', 'make slides', 1), "
+            "(1, 'assistant', 'Generated a 5-slide deck.', 1)",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/messages")
+    assert resp.status_code == 200
+    msgs = resp.json()
+    # User turn carries no deck; assistant turn replays it.
+    assert msgs[0]["deck"] is None
+    deck = msgs[1]["deck"]
+    assert deck is not None
+    assert deck["deck_id"] == 1
+    assert deck["session_id"] == 1
+    assert deck["page_count"] == 5
+    assert deck["title"] == "Flow Matching, Explained"
+    assert deck["status"] == "ok"
+    assert deck["has_notes"] is True
+    assert deck["contributing_papers"] == [{"id": 3}, {"id": 7}]
+
+
+async def test_get_session_messages_no_deck_is_null(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A run that produced no deck → the message's `deck` is null."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (1, 1, 'ok')",
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'assistant', 'just chatting', 1)",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/messages")
+    assert resp.status_code == 200
+    assert resp.json()[0]["deck"] is None
+
+
+async def test_get_session_messages_deck_default_title(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A deck whose plan has no title falls back to 'Slides'; empty notes →
+    has_notes False; missing contributing ids → []."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (1, 1, 'ok')",
+        )
+        await conn.execute(
+            "INSERT INTO decks (session_id, run_id, tex_path, pdf_path, "
+            "speaker_notes_json, plan_json, page_count, theme, "
+            "contributing_paper_ids_json, status) "
+            "VALUES (1, 1, '/x.tex', NULL, '{}', '{}', 3, 'metropolis', "
+            "'[]', 'ok')",
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'assistant', 'deck', 1)",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/messages")
+    deck = resp.json()[0]["deck"]
+    assert deck is not None
+    assert deck["title"] == "Slides"
+    assert deck["has_notes"] is False
+    assert deck["contributing_papers"] == []
+
+
 async def test_get_session_messages_404_for_missing(
     sessions_client: AsyncClient,
 ) -> None:
