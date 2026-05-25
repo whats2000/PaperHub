@@ -92,6 +92,7 @@ workspace*/
 
 # temporary files
 tmp*/
+_tmp*
 
 # git worktrees (e.g. subagent-driven-development scratch checkouts)
 .worktrees/
