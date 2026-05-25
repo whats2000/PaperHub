@@ -61,4 +61,42 @@ describe("normalizeMath", () => {
     const text = "Use `\\begin{equation}` to start an equation.";
     expect(normalizeMath(text)).toBe(text);
   });
+
+  it("lifts a chunk citation out of a $$ display block", () => {
+    const out = normalizeMath("$$E = mc^2 [chunk:78081]$$");
+    // The marker is gone from inside the fences and re-emitted after them.
+    expect(out).toMatch(/\$\$[\s\S]*?\$\$\s*\[chunk:78081\]/);
+    // The math body between the fences no longer carries the marker.
+    const body = out.slice(out.indexOf("$$") + 2, out.lastIndexOf("$$"));
+    expect(body).not.toContain("[chunk:");
+  });
+
+  it("lifts a chunk citation out of an equation environment", () => {
+    const out = normalizeMath(
+      "\\begin{equation}\nE = mc^2 [chunk:78081]\n\\end{equation}",
+    );
+    expect(out).toContain("[chunk:78081]");
+    // The marker sits after \end{equation}, not before it.
+    expect(out.indexOf("[chunk:78081]")).toBeGreaterThan(out.indexOf("\\end{equation}"));
+  });
+
+  it("lifts a chunk citation out of inline $ math", () => {
+    const out = normalizeMath("the bound $f(x) [chunk:5]$ holds");
+    expect(out).toContain("[chunk:5]");
+    // Marker is outside the inline pair, not between the single $ delimiters.
+    expect(out).not.toMatch(/\$[^$]*\[chunk:5\][^$]*\$/);
+  });
+
+  it("preserves a multi-id chunk marker when lifting it", () => {
+    const out = normalizeMath("$$x = y [chunk:1, 2]$$");
+    expect(out).toMatch(/\$\$[\s\S]*?\$\$\s*\[chunk:1, 2\]/);
+  });
+
+  it("drops empty math when a citation was its only content", () => {
+    const out = normalizeMath("see $[chunk:9]$ here");
+    expect(out).toContain("[chunk:9]");
+    // No stray empty math fences left behind.
+    expect(out).not.toContain("$$");
+    expect(out).not.toMatch(/\$\s*\$/);
+  });
 });
