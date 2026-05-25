@@ -35,6 +35,8 @@ def build_deck_slides(final_tex: str, page_count: int) -> list[DeckSlideInput]:
         The final compiled Beamer LaTeX source (post Overfull-fix loop).
     page_count:
         Number of pages in the compiled PDF (used only by the fallback path).
+        On an unexpected frame/page-count mismatch, falls back to one sequential
+        page per frame (page_count=0 is treated as 1).
     """
     # Drop synthetic \maketitle tuples — they are title-page markers, not
     # real content frames, and they would throw off the 1:1 zip with groups.
@@ -47,29 +49,36 @@ def build_deck_slides(final_tex: str, page_count: int) -> list[DeckSlideInput]:
 
     groups = group_logical_slides(map_pages_to_slides(final_tex))  # [[page,...]]
 
-    # Tail-anchor: a leading \maketitle page (is_title group) leaves one extra
-    # leading group relative to the real-frame count; align the LAST len(frames)
-    # groups to the frames.
-    if len(groups) >= len(frames) and frames:
-        aligned = groups[len(groups) - len(frames):]
-    else:
-        aligned = groups
+    if not frames:
+        return []
 
-    rows: list[DeckSlideInput] = []
-    if len(aligned) == len(frames) and frames:
-        for idx, ((_num, content, _s, _e), grp) in enumerate(zip(frames, aligned, strict=True)):
-            rows.append(
-                DeckSlideInput(
-                    slide_index=idx,
-                    frame_tex=content,
-                    page_start=min(grp),
-                    page_end=max(grp),
-                )
+    # Align page groups to frames. Both are in document order, so they zip
+    # 1:1 — EXCEPT a bare \maketitle title page adds exactly one extra leading
+    # group with no frame block (extract_frames synthesises a "\maketitle"
+    # tuple only when \maketitle precedes \begin{frame}; we filter those above,
+    # so that page reappears here as one unmatched leading group). Absorb that
+    # single offset; route any other count mismatch to the fallback.
+    if len(groups) == len(frames):
+        aligned: list[list[int]] | None = groups
+    elif len(groups) == len(frames) + 1:
+        aligned = groups[1:]
+    else:
+        aligned = None
+
+    if aligned is not None:
+        return [
+            DeckSlideInput(
+                slide_index=idx,
+                frame_tex=content,
+                page_start=min(grp),
+                page_end=max(grp),
             )
-        return rows
+            for idx, ((_num, content, _s, _e), grp) in enumerate(zip(frames, aligned, strict=True))
+        ]
 
     # Fallback: page-count mismatch (unexpected — \pause is forbidden in drafts).
     # Assign each frame one sequential page; clamp to page_count.
+    rows: list[DeckSlideInput] = []
     for idx, (_num, content, _s, _e) in enumerate(frames):
         page = min(idx + 1, max(page_count, 1))
         rows.append(
