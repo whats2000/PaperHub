@@ -199,6 +199,81 @@ async def test_create_deck_happy_path(  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.asyncio
+async def test_per_stage_tool_step_events_stream_before_deck(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """The graph must emit multiple ``tool_step`` custom events DURING the
+    run (one per traced stage) BEFORE the final ``deck`` event — proving the
+    trace panel streams live, not just the deck at the end."""
+    monkeypatch.setattr(
+        "paperhub.agents.report_graph._pdflatex_available", lambda: True
+    )
+    source_dir = tmp_path / "cacheS" / "source"
+    _seed_asset(source_dir)
+    await migrated_db.execute(
+        "INSERT INTO paper_content (content_key, kind, arxiv_id, title, abstract, "
+        "source_path, source_dir_path, html_path) "
+        "VALUES ('arxiv:1', 'arxiv', '2403.01', 'Paper A', 'An abstract.', 'p', ?, 'h')",
+        (str(source_dir),),
+    )
+    await migrated_db.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, 1, 1)"
+    )
+    await migrated_db.commit()
+
+    from paperhub.pipelines.slide_pipeline import compile as compile_mod
+
+    async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, tex, "", 2)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_compile)
+
+    class _Retr:
+        def retrieve(self, q, *, enabled_paper_content_ids, corpus_size, top_k=10):  # type: ignore[no-untyped-def]
+            return []
+
+    deps = _make_deps(_Adapter(), fake_tracer, migrated_db, _Retr(), tmp_path)
+    graph = build_report_subgraph(deps)
+    state = _state()
+    state["run_id"] = fake_tracer.run_id
+
+    # Record the ORDER custom events arrive so we can assert tool_step before deck.
+    order: list[str] = []
+    tool_steps: list[dict[str, Any]] = []
+    async for mode, payload in graph.astream(state, stream_mode=["custom", "values"]):
+        if mode != "custom":
+            continue
+        evt = payload.get("event")
+        order.append(evt)
+        if evt == "tool_step":
+            tool_steps.append(payload["record"])
+
+    # At least 3 tool_step events streamed during the run.
+    assert len(tool_steps) >= 3, f"expected >=3 tool_step events, got {len(tool_steps)}"
+
+    # The first deck event arrives AFTER at least 3 tool_step events.
+    assert "deck" in order, "no deck event emitted"
+    deck_pos = order.index("deck")
+    steps_before_deck = sum(1 for e in order[:deck_pos] if e == "tool_step")
+    assert steps_before_deck >= 3, (
+        f"expected >=3 tool_step events before deck, got {steps_before_deck}"
+    )
+
+    # The per-stage stages are represented (understand/narrate/draft tool names).
+    tool_names = {r["tool"] for r in tool_steps}
+    assert {"report:understand", "report:narrate", "report:draft"} & tool_names, (
+        f"expected per-stage tool names, got {tool_names}"
+    )
+
+    # No record is emitted twice (dedupe by step_index).
+    step_indices = [r["step_index"] for r in tool_steps]
+    assert len(step_indices) == len(set(step_indices)), "duplicate tool_step emitted"
+
+
+@pytest.mark.asyncio
 async def test_no_hallucination_unknown_figure_neutralized(  # type: ignore[no-untyped-def]
     fake_tracer, migrated_db, tmp_path, monkeypatch
 ) -> None:

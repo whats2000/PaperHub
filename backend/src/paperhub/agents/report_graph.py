@@ -37,6 +37,7 @@ from paperhub.agents.report_pipeline import (
 )
 from paperhub.agents.state import response_language
 from paperhub.db.decks import get_deck, upsert_deck
+from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import AgentState, OutlineSlide, PaperBrief, SlideDraft
 from paperhub.pipelines.paper_asset import read_paper_asset
@@ -173,7 +174,31 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         return {**state, "final_response": _NO_LATEX_MSG}
 
     async def _generate(state: AgentState) -> AgentState:
-        writer = get_stream_writer()
+        # get_stream_writer() returns a no-op outside an ``astream`` context
+        # (e.g. ``.ainvoke`` in tests); if it raises, fall back to a no-op so
+        # the non-streaming path still runs and produces the deck.
+        writer: Any
+        try:
+            writer = get_stream_writer()
+        except Exception:
+            writer = None
+
+        run_id = state.get("run_id")
+        last_emitted = -1
+
+        async def _flush_steps() -> None:
+            """Emit each newly-written tool_calls row as a ``tool_step`` custom
+            event so the Trace panel streams live (per-stage), not just at the
+            end. The Tracer commits each row before its ``step`` block exits, so
+            the row is readable here. No-op when there's no stream writer."""
+            nonlocal last_emitted
+            if writer is None or run_id is None:
+                return
+            recs = await drain_tool_calls_since(deps.conn, run_id, last_emitted)
+            for rec in recs:
+                writer({"event": "tool_step", "record": rec})
+                last_emitted = rec["step_index"]
+
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = response_language(state)
         mem = ""
@@ -209,6 +234,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 ]
             )
         )
+        await _flush_steps()
 
         # ---- sl_narrate: one cross-paper TalkOutline ----
         outline = await narrate_talk(
@@ -226,6 +252,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             if s.figure_key and s.figure_key not in inv_keys:
                 s = s.model_copy(update={"figure_key": None})
             slides.append(s)
+        await _flush_steps()
 
         # ---- sl_draft: per-slide frame+note pairs (fan-out, IN ORDER) ----
         retr = deps.retriever
@@ -270,6 +297,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 ]
             )
         )
+        await _flush_steps()
 
         # ---- sl_coherence: smooth all frames together ----
         frames = await coherence_pass(
@@ -279,6 +307,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             model=deps.section_model,
             response_language=lang,
         )
+        await _flush_steps()
 
         slides_dir = (
             deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
@@ -332,6 +361,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     "macro_blocks": len(macros),
                 }
             )
+        await _flush_steps()
 
         # ---- sl_verify_figures: deterministic no-hallucination guard ----
         async with deps.tracer.step(
@@ -340,6 +370,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             vstep.record_args({"allowed_keys": sorted(inv_keys)})
             tex, rejected = verify_and_fix_graphics(tex, allowed_keys=inv_keys)
             vstep.record_result({"rejected": rejected})
+        await _flush_steps()
 
         # ---- sl_compile: Overfull-aware revise loop ----
         async def _revise(log: str, cur_tex: str) -> str:
@@ -372,6 +403,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             )
             if not result.ok:
                 cstep.mark_error("deck failed to compile after retries")
+        # The compile loop may emit several report:revise rows; flush them all.
+        await _flush_steps()
 
         # ---- sl_notes_finalize: layout-aware per-page notes (F3 T9) ----
         # Maps each PDF page to its logical slide (from the FINAL compiled tex)
@@ -390,6 +423,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             if result.ok
             else {}
         )
+        await _flush_steps()
 
         # persist notes file + version snapshot (blocking IO off the loop).
         def _persist() -> None:
@@ -428,23 +462,26 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             estep.record_result(
                 {"page_count": deck.page_count, "status": deck.status}
             )
+        # Stream the emit row too so the Trace panel shows every stage before
+        # the deck chip lands (chat.py's outer drain dedupes any straggler).
+        await _flush_steps()
 
-        writer(
-            {
-                "event": "deck",
-                "deck": {
-                    "deck_id": deck.id,
-                    "session_id": deck.session_id,
-                    "page_count": deck.page_count,
-                    "title": outline.title,
-                    "status": deck.status,
-                    "contributing_papers": [
-                        {"id": p["id"], "title": p["title"]} for p in papers
-                    ],
-                    "has_notes": bool(notes),
-                },
-            }
-        )
+        deck_event = {
+            "event": "deck",
+            "deck": {
+                "deck_id": deck.id,
+                "session_id": deck.session_id,
+                "page_count": deck.page_count,
+                "title": outline.title,
+                "status": deck.status,
+                "contributing_papers": [
+                    {"id": p["id"], "title": p["title"]} for p in papers
+                ],
+                "has_notes": bool(notes),
+            },
+        }
+        if writer is not None:
+            writer(deck_event)
 
         final = (
             f'Generated a {deck.page_count}-slide deck — "{outline.title}".'
