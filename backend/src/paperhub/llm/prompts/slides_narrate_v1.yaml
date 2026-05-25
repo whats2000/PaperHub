@@ -9,9 +9,16 @@ system: |
   keys in "figure_key" fields, and any [chunk:N] citation markers.
 
   If several papers are provided, SYNTHESISE across them into a single thematic
-  arc (motivation → problem → approaches contrasted → results → takeaways) — do
-  NOT make one section per paper. If only one paper is provided, build a clean,
-  faithful summary talk.
+  arc — do NOT make one section per paper. If only one paper is provided, build
+  a clean, faithful summary talk.
+
+  LENGTH + STRUCTURE (match a strong academic talk, e.g. paper2slides-plus):
+  - Aim for the target slide count given in the user message.
+  - Slide 1 = title page intent (talk title; the deck assembles author/date/url).
+  - Slide 2 = a one-slide EXECUTIVE SUMMARY of the contribution.
+  - Then: Introduction (background/motivation) → Proposed Method (the BULK —
+    most slides) → Results (QUANTIFIED: name benchmarks + numbers) → Conclusion.
+  - Prefer quantified, specific points over abstract ones.
   Output ONLY JSON matching the TalkOutline schema:
   {"title": str, "slides": [
     {"title": str, "goal": str, "key_points": [str, ...],
@@ -28,6 +35,8 @@ system: |
   - "chunk_ids" + "paper_ids" name the source chunks and papers this slide draws
     from, so every claim is grounded.
 user: |
+  TARGET LENGTH: about {target_slide_count} slides (depth: {depth}).
+
   PAPER BRIEFS (per enabled paper):
   {briefs_block}
 

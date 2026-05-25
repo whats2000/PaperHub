@@ -20,6 +20,7 @@ from paperhub.models.domain import (
     FrameDraft,
     OutlineSlide,
     PaperBrief,
+    SlideBudget,
     SlideDraft,
     TalkOutline,
 )
@@ -45,6 +46,27 @@ _FRAME_RE = re.compile(r"\\begin\{frame\}.*?\\end\{frame\}", re.DOTALL)
 # Strip a leading/trailing markdown code fence (```latex ... ```), tolerating an
 # optional language tag on the opening fence.
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|\n?```$")
+
+# Budget extraction patterns (F4 — SRS v2.21).
+_SLIDE_RE = re.compile(r"(\d+)\s*(?:slides?|頁|張|投影片)", re.IGNORECASE)
+_MIN_RE = re.compile(r"(\d+)[- ]?(?:min(?:ute)?s?|分鐘|分)", re.IGNORECASE)
+
+
+def parse_slide_budget(text: str) -> SlideBudget:
+    """Extract a slide-count budget from the user's request. Explicit slide
+    count wins; else minutes × 0.75; else default 15. Clamped to [8, 30]."""
+    count: int | None = None
+    m = _SLIDE_RE.search(text)
+    if m:
+        count = int(m.group(1))
+    else:
+        mm = _MIN_RE.search(text)
+        if mm:
+            count = round(int(mm.group(1)) * 0.75)
+    if count is None:
+        count = 15
+    count = max(8, min(30, count))
+    return SlideBudget(target_slide_count=count, depth="standard")
 
 
 # --------------------------------------------------------------------------
@@ -116,6 +138,8 @@ async def narrate_talk(
     model: str,
     response_language: str,
     memory_context: str = "",
+    target_slide_count: int = 15,
+    depth: str = "standard",
     **kw: object,
 ) -> TalkOutline:
     """Compose a cross-paper :class:`TalkOutline` from the per-paper briefs.
@@ -137,6 +161,8 @@ async def narrate_talk(
                 "figure_inventory": figure_inventory,
                 "response_language": response_language or "the user's language",
                 "memory_context": memory_context,
+                "target_slide_count": target_slide_count,
+                "depth": depth,
             },
             response_model=TalkOutline,
             model=model,

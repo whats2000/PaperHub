@@ -144,6 +144,15 @@ class FrameDraft(BaseModel):
     frame: str
 
 
+class SlideBudget(BaseModel):
+    """Deck length budget (F4 — SRS v2.21). Default 20 min ≈ 15 slides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_slide_count: int = 15
+    depth: str = "standard"  # 'overview' | 'standard' | 'deep'
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
