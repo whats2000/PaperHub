@@ -31,7 +31,7 @@ _FRAME_RE = re.compile(r"\\begin\{frame\}.*?\\end\{frame\}", re.DOTALL)
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|\n?```$")
 
 # Budget extraction patterns (F4 — SRS v2.21).
-_SLIDE_RE = re.compile(r"(\d+)\s*(?:slides?|頁|張|投影片)", re.IGNORECASE)
+_SLIDE_RE = re.compile(r"(\d+)[-\s]*(?:slides?|頁|張|投影片)", re.IGNORECASE)
 _MIN_RE = re.compile(r"(\d+)[- ]?(?:min(?:ute)?s?|分鐘|分)", re.IGNORECASE)
 
 
