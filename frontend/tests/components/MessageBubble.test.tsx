@@ -176,6 +176,27 @@ describe("MessageBubble", () => {
     expect(article?.textContent).not.toContain("$E = mc^2$");
   });
 
+  it("renders a bare \\begin{equation} environment as KaTeX", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "The loss:\n\n\\begin{equation}\nE = mc^2\n\\end{equation}\n\nDone.",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // remark-math only sees math after normalizeMath wraps the env in $$;
+    // a successful KaTeX render (display mode) proves the pipeline consumed it
+    // rather than passing it through as raw text.
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+    const article = container.querySelector("article");
+    // The injected $$ fences must not survive (KaTeX keeps the LaTeX source in
+    // a MathML annotation, so we check the delimiters, not the env name).
+    expect(article?.textContent).not.toContain("$$");
+  });
+
   it("renders block LaTeX math ($$...$$) as KaTeX", () => {
     const { container } = render(
       <MessageBubble
