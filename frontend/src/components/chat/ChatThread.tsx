@@ -108,11 +108,17 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
                   <RoutingBadge decision={msg.routing_decision} />
                 </div>
               )}
-              {msg.role === "assistant" && msg.trace && msg.trace.length > 0 && (
-                <div className="pl-1">
-                  <TraceInline trace={msg.trace} />
-                </div>
-              )}
+              {msg.role === "assistant" &&
+                msg.run_id !== null &&
+                session.backend_session_id !== null && (
+                  <div className="pl-1">
+                    <TraceInline
+                      trace={msg.trace ?? []}
+                      sessionId={session.backend_session_id}
+                      runId={msg.run_id}
+                    />
+                  </div>
+                )}
             </div>
           );
         })}
