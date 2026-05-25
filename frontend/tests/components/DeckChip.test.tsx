@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,5 +76,34 @@ describe("DeckChip", () => {
   it("shows singular 'slide' for a single-page deck", () => {
     render(<DeckChip deck={{ ...deck, page_count: 1 }} />);
     expect(screen.getByText("1 slide")).toBeInTheDocument();
+  });
+
+  it("shows 'Generate notes' when has_notes is false and sends a turn", () => {
+    const onSend = vi.fn();
+    render(<DeckChip deck={{ ...deck, has_notes: false }} onSend={onSend} />);
+    fireEvent.click(screen.getByRole("button", { name: /generate.*notes/i }));
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringMatching(/speaker notes/i),
+    );
+  });
+
+  it("shows 'Edit notes' when has_notes is true", () => {
+    const onSend = vi.fn();
+    render(<DeckChip deck={{ ...deck, has_notes: true }} onSend={onSend} />);
+    expect(
+      screen.getByRole("button", { name: /edit notes/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("Edit button sends an edit-slide turn", () => {
+    const onSend = vi.fn();
+    render(<DeckChip deck={deck} onSend={onSend} />);
+    fireEvent.click(screen.getByRole("button", { name: /edit slide/i }));
+    expect(onSend).toHaveBeenCalledWith(expect.stringMatching(/edit this slide/i));
+  });
+
+  it("does not render send affordances without onSend", () => {
+    render(<DeckChip deck={deck} />);
+    expect(screen.queryByRole("button", { name: /edit slide/i })).toBeNull();
   });
 });

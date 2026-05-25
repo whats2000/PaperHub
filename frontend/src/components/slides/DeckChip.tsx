@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 
 interface Props {
   deck: DeckEventData;
+  /**
+   * Sends a chat message through the normal chat-send path. When provided (and
+   * the deck is ready), the chip exposes Generate/Edit-notes + Edit-slide
+   * affordances that simply SEND a turn — the backend's deck-command classifier
+   * handles the rest. No new REST surface.
+   */
+  onSend?: (message: string) => void;
 }
 
 /**
@@ -16,7 +23,7 @@ interface Props {
  * Styled to match SearchResultList rows: same card background, border, and
  * spacing.
  */
-export function DeckChip({ deck }: Props) {
+export function DeckChip({ deck, onSend }: Props) {
   const openPanel = useSlidesStore((s) => s.openPanel);
   const setCurrentPage = useSlidesStore((s) => s.setCurrentPage);
 
@@ -71,6 +78,36 @@ export function DeckChip({ deck }: Props) {
           >
             <Download className="h-3 w-3" />
           </a>
+          {deck.status === "ok" && onSend && (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() =>
+                  onSend(
+                    deck.has_notes
+                      ? "Edit the speaker notes for this deck"
+                      : "Generate speaker notes for this deck",
+                  )
+                }
+                aria-label={deck.has_notes ? "Edit notes" : "Generate notes"}
+              >
+                {deck.has_notes ? "Edit notes" : "Generate notes"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => onSend("Edit this slide")}
+                aria-label="Edit slide"
+              >
+                Edit
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>

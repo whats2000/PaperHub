@@ -92,6 +92,7 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
                 onRetry={retryHandler}
                 backendSessionId={session.backend_session_id}
                 researching={showResearchCard}
+                onSendTurn={(text) => void send(session.id, text)}
               />
               {msg.role === "assistant" && msg.routing_decision && (
                 <div className="flex justify-start pl-1">
