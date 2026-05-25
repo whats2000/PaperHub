@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS decks (
     UNIQUE (session_id)
 );
 
+CREATE TABLE IF NOT EXISTS deck_slides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+    slide_index INTEGER NOT NULL,            -- logical frame order (0-based)
+    frame_tex TEXT NOT NULL,                 -- the \begin{frame}…\end{frame} block
+    note_text TEXT,                          -- NULL until the NOTES flow runs (opt-in)
+    note_language TEXT,                      -- independent of the deck/slide language
+    page_start INTEGER NOT NULL,             -- 1-based PDF page this frame starts on
+    page_end INTEGER NOT NULL,               -- 1-based PDF page this frame ends on
+    UNIQUE (deck_id, slide_index)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content,
     content='memories',

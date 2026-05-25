@@ -260,8 +260,10 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
-    # decks (v2.18, Plan F): created by schema.sql's CREATE TABLE IF NOT EXISTS.
-    # Future column-adds go here, mirroring the chat_sessions.deleted_at pattern.
+    # decks + deck_slides (v2.18 / v2.21, Plan F): created by schema.sql's
+    # CREATE TABLE IF NOT EXISTS. deck_slides holds one row per final frame
+    # (frame_tex + opt-in note_text/note_language + PDF page span). Future
+    # column-adds go here, mirroring the chat_sessions.deleted_at pattern.
     # -----------------------------------------------------------------------
 
     # -----------------------------------------------------------------------
