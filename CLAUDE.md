@@ -85,7 +85,7 @@ uv run ruff check src tests
 uv run mypy src           # --strict via pyproject
 ```
 
-**pytest measures SYNTAX + MECHANISM, NOT process correctness.** A stubbed-adapter test proves the wiring compiles and the control flow runs — it does NOT prove the real LLM obeys a prompt (language adherence, figure grounding, citation discipline), that the SSE stream emits, or that state persists/replays. **The actual correctness test is a live user-simulation + reading the recorded trace, and it is MANDATORY once a plan (or any agent-flow change) is fully done — not optional, not deferrable.** Treat "pytest green" as necessary-but-insufficient; a feature is not "verified" until a real `:8000` run confirms it.
+**pytest measures SYNTAX + MECHANISM, NOT process correctness.** A stubbed-adapter test proves the wiring compiles and the control flow runs — it does NOT prove the real LLM obeys a prompt (language adherence, figure grounding, citation discipline), that the SSE stream emits, or that state persists/replays. **The actual correctness test is a live user-simulation + reading the recorded trace. Run it ONCE when a whole PLAN PHASE is fully done — NOT after each individual task / functional point** (per-task verification stays pytest/ruff/mypy only; don't interrupt the user for a real-API run mid-plan). Treat "pytest green" as necessary-but-insufficient; a plan is not "verified" until a real `:8000` run confirms it at the end.
 
 ### Real-API test process (run against the user's live backend on `:8000`)
 
@@ -96,7 +96,7 @@ Do NOT write a committed script for this, and do NOT boot your own backend — u
 3. **Verify the recorded trace** for that run from SQLite (the agent-flow record principle): `uv run paperhub-replay --run-id <N>` or `SELECT step_index, tool, status, result_summary_json FROM tool_calls WHERE run_id = ?` — confirm the right stages fired, `status=ok`, and the recorded state matches the answer/deck (right figures cited, language honored, no hallucinated keys, …).
 4. **When the API checks pass, ASK the user to open the frontend and confirm the result visually** (the chat card, the deck/Slides panel, the citation highlight, the streamed trace) — the final human-in-the-loop sign-off. Note any change that needs a `:8000` restart (backend code) or a frontend rebuild to be visible.
 
-This catches the class of bug unit tests miss (a prompt the model ignores, an SSE stage that emits nothing, a card that doesn't replay). It is a required gate for any agent-flow change, alongside pytest.
+This catches the class of bug unit tests miss (a prompt the model ignores, an SSE stage that emits nothing, a card that doesn't replay). It is a required gate at **plan-phase completion** (not per task).
 
 Replay any past run from SQLite:
 
