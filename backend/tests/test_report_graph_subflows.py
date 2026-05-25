@@ -376,3 +376,148 @@ async def test_edit_slides_page_rewrites_one_frame_and_recompiles(  # type: igno
     assert any(d.startswith("Edited deck") for d in descs), (
         f"an edit version snapshot must be written; got {descs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Titlepage-style deck (NO \maketitle — first frame carries \titlepage).
+#
+# slide_index→page mapping for _TITLEPAGE_TEX (3 real frames, 3 pages):
+#   extract_frames_from_beamer: no bare \maketitle before frames → no synthetic
+#   tuple → 3 real frames numbered 1, 2, 3.
+#   map_pages_to_slides: frame 1 has \titlepage → is_title page 1;
+#   frame 2 (Intro) → page 2; frame 3 (Method) → page 3.
+#   build_deck_slides: 3 frames, 3 groups, direct zip (len(groups)==len(frames)):
+#     slide_index 0 = titlepage frame, page 1
+#     slide_index 1 = Intro frame,     page 2
+#     slide_index 2 = Method frame,    page 3
+#   _real_frame_number: no synthetic to skip → slide_index N → frame_number N+1.
+# ---------------------------------------------------------------------------
+
+_TITLEPAGE_TEX = (
+    "\\documentclass{beamer}\n\\begin{document}\n"
+    "\\begin{frame}\\titlepage\\end{frame}\n"
+    "\\begin{frame}{Intro}\\begin{itemize}\\item Original intro content."
+    "\\end{itemize}\\end{frame}\n"
+    "\\begin{frame}{Method}\\begin{itemize}\\item Original method content."
+    "\\end{itemize}\\end{frame}\n"
+    "\\end{document}\n"
+)
+
+
+class _TitlepageEditAdapter:
+    """Stub adapter for edit_slides on the titlepage-style deck.
+
+    stream() yields a recognisably-changed Intro frame so the test can verify
+    only the targeted frame (slide_index=1, page 2) was replaced.
+    """
+
+    def __init__(self, command: DeckCommand) -> None:
+        self.command = command
+        self.edit_frame_calls = 0
+
+    async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
+        if response_model is DeckCommand:
+            return self.command
+        raise AssertionError(f"unexpected response_model {response_model!r}")
+
+    def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]
+        adapter = self
+
+        async def g():  # type: ignore[no-untyped-def]
+            if slot == "slides_edit_frame/v1":
+                adapter.edit_frame_calls += 1
+                yield (
+                    "\\begin{frame}{Intro}"
+                    "\\begin{itemize}\\item EDITED intro content."
+                    "\\end{itemize}\\end{frame}"
+                )
+
+        return g()
+
+
+async def _seed_titlepage_deck(fake_tracer, migrated_db, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Seed a titlepage-style deck (NO \\maketitle) via the GENERATE path."""
+    monkeypatch.setattr(
+        "paperhub.agents.report_graph._pdflatex_available", lambda: True
+    )
+    await _seed_paper(migrated_db, tmp_path, "cacheTitlepage")
+
+    async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(_TITLEPAGE_TEX)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, _TITLEPAGE_TEX, "", 3)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_compile)
+
+    deps = _make_deps(_CreateAdapter(), fake_tracer, migrated_db, _Retr(), tmp_path)
+    graph = build_report_subgraph(deps)
+    state = _state("make slides")
+    state["run_id"] = fake_tracer.run_id
+    async for _m, _p in graph.astream(state, stream_mode=["custom", "values"]):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_edit_slides_titlepage_deck_correct_frame_mapping(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """Editing page 2 on a titlepage-style deck (no \\maketitle offset) must
+    rewrite exactly the Intro frame (slide_index=1, frame_number=2) and leave
+    the titlepage frame (slide_index=0) and Method frame (slide_index=2) byte-
+    identical.  This guards _real_frame_number for the NO-maketitle branch."""
+    await _seed_titlepage_deck(fake_tracer, migrated_db, tmp_path, monkeypatch)
+    deck = await get_deck(migrated_db, session_id=1)
+    assert deck is not None
+
+    pre = await get_deck_slides(migrated_db, deck_id=deck.id)
+    # Verify the seeded mapping matches our analysis (titlepage at page 1, etc.)
+    page_map = {r.page_start: r.slide_index for r in pre}
+    assert page_map.get(1) == 0, f"page 1 must be slide_index 0 (titlepage); got {page_map}"
+    assert page_map.get(2) == 1, f"page 2 must be slide_index 1 (Intro); got {page_map}"
+    assert page_map.get(3) == 2, f"page 3 must be slide_index 2 (Method); got {page_map}"
+
+    frames_before = {r.slide_index: r.frame_tex for r in pre}
+
+    edited_tex_holder: dict[str, str] = {}
+
+    async def fake_edit_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        edited_tex_holder["tex"] = tex
+        return compile_mod.CompileResult(True, 1, tex, "", 3)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_edit_compile)
+
+    # Edit page 2 = slide_index 1 = the Intro frame (no \maketitle offset →
+    # frame_number 2, not 3 as it would be in a \maketitle deck).
+    adapter = _TitlepageEditAdapter(
+        DeckCommand(action="edit_slides", target_scope="page", target_page=2)
+    )
+    deps = _make_deps(adapter, fake_tracer, migrated_db, _Retr(), tmp_path)
+    graph = build_report_subgraph(deps)
+    state = _state("make the intro slide say EDITED")
+    state["run_id"] = fake_tracer.run_id
+    async for _m, _p in graph.astream(state, stream_mode=["custom", "values"]):
+        pass
+
+    assert adapter.edit_frame_calls == 1, "exactly one frame must be edited"
+
+    tex = edited_tex_holder["tex"]
+    assert "EDITED intro content" in tex, "targeted Intro frame must be rewritten"
+    assert "Original method content" in tex, "untargeted Method frame must be unchanged"
+    # The titlepage frame has no \frametitle so check its \titlepage marker.
+    assert "\\titlepage" in tex, "titlepage frame must be preserved"
+    assert "Original intro content" not in tex, "old Intro content must be replaced"
+
+    post = await get_deck_slides(migrated_db, deck_id=deck.id)
+    # Untargeted frames (slide_index 0 and 2) must be byte-identical to before.
+    for r in post:
+        if r.slide_index in (0, 2):
+            assert r.frame_tex == frames_before[r.slide_index], (
+                f"slide_index {r.slide_index} must be unchanged"
+            )
+    assert any("EDITED" in r.frame_tex for r in post if r.slide_index == 1), (
+        "targeted frame (slide_index=1) must show EDITED content in DB"
+    )
