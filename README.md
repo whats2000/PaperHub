@@ -4,7 +4,7 @@
 
 **A paper-aware chat client where every cited sentence traces back to its source.**
 
-Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retrieval · a Citation Canvas that links every `[chunk]` back to the exact passage in the paper.
+Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retrieval · a Citation Canvas that links every `[chunk]` back to the exact passage in the paper · a conference-grade Beamer slide pipeline with decoupled, editable speaker notes.
 
 ![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-React%2019-3178C6?logo=typescript&logoColor=white)
@@ -12,8 +12,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-602%20backend%20%2B%20217%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/Plan%20E-merged%20(SRS%20v2.17)-success)
+![Tests](https://img.shields.io/badge/tests-773%20backend%20%2B%20263%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/Plan%20F-merged%20(SRS%20v2.21)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 </div>
@@ -31,7 +31,8 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 - **🧠 Session + global memory.** Tell it to remember a fact or preference and it persists — **session-scoped** (this chat) or **global** (everywhere). A rule-based safety gate refuses secrets, an LLM detects conflicts and **supersedes** the stale note (active/superseded history kept), and only *active* memories are recalled into answers. A Memory Manager panel lets you view, edit, (de)activate, and delete entries — even in an empty chat (global only).
 - **🧭 Visible routing + tracing.** A routing badge shows which agent + model handled each turn; an expandable trace panel lists every model/MCP/pipeline step with latency and status. The full DAG replays from SQLite.
 - **🌐 Discovery via web + Semantic Scholar.** `paper_search` decomposes into Parser → Discover (no-key multi-engine web search) → Resolve (Semantic Scholar) → Synthesize, so even vague references ("that diffusion paper everyone cites") resolve to a citable hit.
-- **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant.
+- **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant. PDF uploads return instantly on a PyMuPDF baseline, then a background **Marker** worker upgrades them to real figures + captions + equations→LaTeX.
+- **🖼️ Conference-grade slides — decoupled.** "Make a talk from these papers" generates a **Beamer deck** (a PhD-style agent: understand → narrate → draft → coherence → real-figure verification → Overfull-aware compile), grounded so it **never cites a figure that doesn't exist**. Slides come **without notes** by default; speaker notes are an **opt-in** follow-up authored in **any language** ("把講稿變成繁體中文" re-languages the notes *without* regenerating the slides), and you can **diff-edit a single slide or note** by chat ("make slide 3 more concise") — never a full regen. Set the length too ("a 20-minute talk").
 - **➗ Math renders.** LaTeX in answers (`$…$`, `$$…$$`) renders as real equations via KaTeX.
 - **💾 Pick up on any device.** Sessions and their full chat record live in the backend, not the browser — open the app anywhere and your conversations, paper-search cards, and references are all there. Deleting a chat removes it everywhere (with Undo); empty scratch chats are cleaned up automatically.
 - **🔌 MCP-native.** The agent's own tools are served over MCP (in-process FastMCP at `/mcp`); external clients (Claude Desktop, Cursor) can reach the same surface.
@@ -45,6 +46,7 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 | **Backend** | Python 3.11 · FastAPI · LangGraph · LiteLLM · SQLite (`aiosqlite`) · Pydantic v2 |
 | **Frontend** | TypeScript · React 19 · Vite · Tailwind · Zustand · `react-markdown` + KaTeX |
 | **RAG** | Chroma · `BAAI/bge-small-en-v1.5` embedder · `ms-marco-MiniLM` cross-encoder (hosted in a sibling model-server process) |
+| **Slides** | Beamer + `pdflatex` (`metropolis` theme) · `datalab-to/marker` PDF ingestion as a docker-compose service (optional, GPU-aware) |
 | **LLM** | Gemini by default (any LiteLLM provider — small-tier subagents, flagship finalizer) |
 | **Tooling** | `uv` · `pytest` · `ruff` · `mypy --strict` · Vitest · ESLint · Conventional Commits |
 
@@ -54,7 +56,7 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 
 ## 🚀 Quick start
 
-**Prerequisites:** Python 3.11 + [`uv`](https://docs.astral.sh/uv/), Node 18+, and an LLM API key (Gemini by default).
+**Prerequisites:** Python 3.11 + [`uv`](https://docs.astral.sh/uv/), Node 18+, and an LLM API key (Gemini by default). **Slide generation** additionally needs a LaTeX distribution on `PATH` (`pdflatex` — e.g. `winget install MiKTeX.MiKTeX`); without it, only the `slides` intent is affected (it returns an "install a LaTeX distribution" message). PDF figure/equation extraction can optionally use the Dockerized `marker` service (`docker compose up -d marker`).
 
 ```bash
 git clone https://github.com/whats2000/PaperHub.git
@@ -184,7 +186,8 @@ Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-
 | **C** | Paper Pipeline + Research Agent (ingest, RAG, paper_search, agentic paper_qa, MCP layer, model-server, PDF upload) | ✅ complete — merged (SRS v2.10) |
 | **D** | Search results + Reference Sources + Citation Canvas (HTML + PDF passage highlighting) | ✅ complete — merged (SRS v2.13) |
 | **E** | SQL Agent + `library_stats` (sqlite MCP) + session/global memory governance (gate, conflict-supersede, Memory Manager UI) | ✅ complete — merged (SRS v2.17) |
-| **F** | Slide Pipeline + Report Agent | 🔜 planned |
+| **F** | Slide Pipeline + Report Agent — Marker ingestion (F2/F2.1), PhD-grade slide agent (F3), decoupled opt-in notes + diff-editing + length budget (F4) | ✅ complete — merged (SRS v2.21) |
+| **F5** | Slide presentation mode (fullscreen window + `BroadcastChannel` sync + presenter controls) + Q&A-during-talk + version-history UI | 🔜 planned |
 | **G** | Compare view + filesystem / `paperhub.*` MCP | 🔜 planned |
 
 Each plan ships working, testable software on its own. Plans live under [`docs/superpowers/plans/`](docs/superpowers/plans/).
@@ -198,7 +201,7 @@ PaperHub is built spec → plan → TDD, with subagent-driven implementation and
 **Backend gates** (from `backend/`):
 
 ```bash
-uv run pytest          # 602 tests, hermetic
+uv run pytest          # 773 tests, hermetic
 uv run ruff check src tests
 uv run mypy src        # --strict
 ```
@@ -206,7 +209,7 @@ uv run mypy src        # --strict
 **Frontend gates** (from `frontend/`):
 
 ```bash
-npm test               # Vitest + RTL + MSW (217 tests)
+npm test               # Vitest + RTL + MSW (263 tests)
 npm run typecheck      # tsc --strict
 npm run lint           # ESLint flat config
 npm run build          # Vite production build
@@ -229,7 +232,7 @@ uv run paperhub-replay --run-id 1
 .
 ├── backend/
 │   ├── src/paperhub/         # FastAPI app · agents · pipelines · rag · mcp · modelserver · tracer
-│   ├── tests/                # pytest suite (602 tests, hermetic)
+│   ├── tests/                # pytest suite (773 tests, hermetic)
 │   └── pyproject.toml        # uv project · mypy --strict · ruff
 ├── frontend/                 # React 19 + Vite + Tailwind + Zustand
 ├── docs/superpowers/
@@ -246,7 +249,7 @@ uv run paperhub-replay --run-id 1
 
 ## 📖 Documentation
 
-- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.17**).
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.21**).
 - **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
 - **[Backend developer docs](backend/README.md)** — backend-specific notes.
 
