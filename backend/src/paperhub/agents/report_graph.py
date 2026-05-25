@@ -660,6 +660,15 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             rows, cmd, current_view_page=state.get("current_view_page", 1)
         )
 
+        if not targets:
+            return {
+                **state,
+                "final_response": (
+                    "I couldn't find that slide page in the deck. "
+                    "Tell me a page number that exists."
+                ),
+            }
+
         for r in targets:
             note = await author_note(
                 adapter=deps.adapter,
@@ -729,6 +738,15 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         slides_dir = (
             deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
         )
+        if not Path(deck.tex_path).exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
+            return {
+                **state,
+                "final_response": (
+                    "I couldn't find the deck source to edit — "
+                    "generate the deck again first."
+                ),
+                "report_deck_id": deck.id,
+            }
         full_tex = await asyncio.to_thread(
             Path(deck.tex_path).read_text, encoding="utf-8"
         )
@@ -751,6 +769,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
         new_tex = full_tex
         lang = response_language(state)
+        # edit_frame returns exactly one frame per call (its prompt forbids
+        # splitting), so slide_index→frame_number stays stable across the loop.
         for r in targets:
             new_frame = await edit_frame(
                 adapter=deps.adapter,
