@@ -39,6 +39,55 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 
 ---
 
+## 📸 Screenshots
+
+**Grounded answers — every claim traces back to the source.**
+
+| Citation Canvas → rendered HTML | Citation Canvas → source PDF |
+| :---: | :---: |
+| [![Citation Canvas highlighting a cited chunk in the rendered paper HTML](docs/screenshots/04-citation-canvas-html.png)](docs/screenshots/04-citation-canvas-html.png) | [![Same citation highlighted in the source PDF via a geometry overlay](docs/screenshots/05-citation-canvas-pdf.png)](docs/screenshots/05-citation-canvas-pdf.png) |
+| Click any `[chunk]` → scroll to + highlight the exact passage in the LaTeX-rendered HTML. | …and the same passage in the original PDF. No ungrounded claims. |
+
+**Conference-grade slides — decoupled, opt-in notes.**
+
+| Generate (slides only) | Speaker notes added on request |
+| :---: | :---: |
+| [![Deck chip with a Generate-notes button and the Slides panel open](docs/screenshots/11-slides-generate.png)](docs/screenshots/11-slides-generate.png) | [![Slides panel with the speaker-note pane filled in](docs/screenshots/12-slides-notes-added.png)](docs/screenshots/12-slides-notes-added.png) |
+| A Beamer deck with real figures (no hallucinated graphics) — slides first, no notes. | Notes are an opt-in follow-up, authored separately (and in any language). |
+
+**Library intelligence + memory.**
+
+| NL→SQL library stats | Session + global memory |
+| :---: | :---: |
+| [![A stats answer showing the numbers and the read-only SQL it ran](docs/screenshots/09-library-stats-sql.png)](docs/screenshots/09-library-stats-sql.png) | [![Memory Manager with session/global groups and supersede badges](docs/screenshots/10-memory-manager.png)](docs/screenshots/10-memory-manager.png) |
+| "How many papers do I have?" → answered with the numbers **and** the exact SQL. | Remembered facts/preferences with a safety gate + conflict-supersede history. |
+
+**Routing + observability.**
+
+| Routing badge | Trace panel (replayable DAG) |
+| :---: | :---: |
+| [![A chat turn tagged with the routing badge showing intent and model](docs/screenshots/02-routing-badge.png)](docs/screenshots/02-routing-badge.png) | [![Expanded trace panel listing each step with latency and status](docs/screenshots/03-trace-panel.png)](docs/screenshots/03-trace-panel.png) |
+| Every turn shows which agent + model handled it. | Each model/MCP/pipeline step is an audit row — the full DAG replays from SQLite. |
+
+**Discovery + bringing your own papers.**
+
+| Paper search cards | Reference Sources drawer |
+| :---: | :---: |
+| [![Paper-search result cards with Add-as-reference buttons](docs/screenshots/07-paper-search-cards.png)](docs/screenshots/07-paper-search-cards.png) | [![Reference Sources drawer listing the session's enabled papers](docs/screenshots/08-reference-sources.png)](docs/screenshots/08-reference-sources.png) |
+| Discovery via web + Semantic Scholar; the agent auto-adds its best picks. | Session-scoped reference set with per-paper enable/remove. |
+
+<details>
+<summary>More — app overview &amp; answering in your language</summary>
+
+| The shell | Answers in your language |
+| :---: | :---: |
+| [![Full PaperHub window: sidebar, chat, composer](docs/screenshots/01-app-overview.png)](docs/screenshots/01-app-overview.png) | [![A Chinese question answered in Chinese with citation markers preserved](docs/screenshots/06-language-adherence.png)](docs/screenshots/06-language-adherence.png) |
+| One chat shell; every turn routed to a specialist agent. | Ask in any language — the answer follows, citations preserved. |
+
+</details>
+
+---
+
 ## 🧱 Tech stack
 
 | Area | Choice |
