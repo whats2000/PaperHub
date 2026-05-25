@@ -8,25 +8,23 @@ import type { DeckEventData } from "@/types/domain";
  * Top-level effect that hydrates the active session's deck from the backend
  * whenever the session's `backend_session_id` changes (mount, switch, reload).
  *
- * The `deck` SSE event populates BOTH the slides store (`deckBySession`, drives
- * the Slides panel) AND the chat message (`message.deck`, drives the in-chat
- * DeckChip). But on refresh / re-activation those are transient: the slides
- * store does not persist deck data, and `hydrateSessionMessages` (re-syncing
- * the chat record from the DB) drops `message.deck`. So the DeckChip vanished
- * after a reload even though the backend persisted the deck (`decks` table,
- * served at GET /sessions/{id}/deck).
+ * The `deck` SSE event populates the slides store (`deckBySession`, drives the
+ * Slides panel) AND the chat message (`message.deck`, drives the in-chat
+ * DeckChip). The DeckChip is now restored from the **message replay**
+ * (`hydrateSessionMessages` carries `message.deck` straight from
+ * GET /sessions/{id}/messages) — the robust, race-free source of truth — so
+ * this hook NO LONGER patches the chat message.
  *
- * This hook re-fetches that endpoint and restores BOTH surfaces — mirroring how
- * paper-search cards persist + replay. It is the deck half of the "hydrate this
- * session from the DB on activation" step:
- *  - deck present  → set the slides store + re-attach `message.deck` so the chip
- *    re-appears and the panel can open to it.
- *  - 404 / error   → clear both for this session, so switching to a deckless
- *    session never shows a stale deck.
+ * Its sole remaining job is hydrating the slides store so the **Slides panel**
+ * can open to the active session's deck on mount / switch / reload (the slides
+ * store does not persist deck data):
+ *  - deck present  → set the slides store for this session.
+ *  - 404 / error   → clear the slides store for this session, so switching to a
+ *    deckless session never opens to a stale deck.
  *
  * The streaming guard mirrors useSessionsSync's message re-sync: a live slide
- * generation in flight already drives both surfaces via the SSE event, so we
- * skip the fetch to avoid clobbering it (the DB row may lag the live state).
+ * generation in flight already drives the store via the SSE event, so we skip
+ * the fetch to avoid clobbering it (the DB row may lag the live state).
  */
 export function useDeckSync(): void {
   const backendSessionId = useChatStore((s) => {
@@ -38,22 +36,17 @@ export function useDeckSync(): void {
   });
   const setDeck = useSlidesStore((s) => s.setDeck);
   const clearDeck = useSlidesStore((s) => s.clearDeck);
-  const setDeckOnMessage = useChatStore((s) => s.setDeckOnMessage);
 
   useEffect(() => {
     if (backendSessionId === null) return;
 
-    // The slides store is keyed by BACKEND session id (`deckBySession`,
-    // matching the SSE event's `session_id`); the chat message lives under the
-    // LOCAL session id. Resolve the local id for the message patch.
+    // Skip while a turn is streaming — the SSE `deck` event is the source of
+    // truth mid-generation; the persisted row may not exist yet.
     const activeSessionId = useChatStore.getState().activeSessionId;
     if (activeSessionId === null) return;
     const sess = useChatStore
       .getState()
       .sessions.find((x) => x.id === activeSessionId);
-
-    // Skip while a turn is streaming — the SSE `deck` event is the source of
-    // truth mid-generation; the persisted row may not exist yet.
     if (sess?.messages.some((m) => m.status === "streaming")) return;
 
     let cancelled = false;
@@ -70,18 +63,15 @@ export function useDeckSync(): void {
           has_notes: Object.keys(d.speaker_notes).length > 0,
         };
         setDeck(backendSessionId, event);
-        // Re-attach to the chat message so the DeckChip survives a refresh.
-        setDeckOnMessage(activeSessionId, event);
       })
       .catch(() => {
-        // 404 (no deck for this session) or transient error → clear both so a
-        // deckless session never inherits the previously-active deck.
+        // 404 (no deck for this session) or transient error → clear the slides
+        // store so a deckless session never inherits the previous deck.
         if (cancelled) return;
         clearDeck(backendSessionId);
-        setDeckOnMessage(activeSessionId, null);
       });
     return () => {
       cancelled = true;
     };
-  }, [backendSessionId, setDeck, clearDeck, setDeckOnMessage]);
+  }, [backendSessionId, setDeck, clearDeck]);
 }

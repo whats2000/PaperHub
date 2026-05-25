@@ -504,6 +504,10 @@ export const useChatStore = create<ChatState>()(
                 ...(m.search_results
                   ? { search_results: m.search_results }
                   : {}),
+                // Carry the replayed deck so the in-chat DeckChip survives a
+                // refresh — the message record is the robust source of truth
+                // (no race with a separate deck fetch).
+                ...(m.deck ? { deck: m.deck } : {}),
               }));
             return { ...sess, messages: mapped };
           }),
