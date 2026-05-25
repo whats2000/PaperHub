@@ -85,6 +85,13 @@ uv run ruff check src tests
 uv run mypy src           # --strict via pyproject
 ```
 
+**After the unit gates pass, ALSO run a live user-simulation against the running backend on `:8000` — do NOT write a committed script for it.** Tests with stubbed adapters prove the *mechanism*; they cannot prove the real LLM *obeys* a prompt (language adherence, figure grounding, etc.) or that the SSE/persistence path works end-to-end. So simulate a real user by calling the backend HTTP API directly (the same calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc, not a saved script):
+
+1. `POST /chat` with a real `user_message` (and the right `session_id`; create one via `POST /sessions` + add a paper via `POST /papers` for paper/slide flows) → read the streamed SSE result.
+2. **Verify the recorded trace** for that run from SQLite (the agent-flow record principle): `uv run paperhub-replay --run-id <N>` or `SELECT step_index, tool, status, result_summary_json FROM tool_calls WHERE run_id = ?` — confirm the right stages fired, status=ok, and the recorded state matches what the answer/deck shows.
+
+This catches the class of bug unit tests miss (e.g. a prompt that *contains* a language instruction the model ignores; an SSE stage that emits no events; a card that doesn't replay). Treat it as a required gate for any agent-flow change, alongside pytest.
+
 End-to-end smoke (mocked LLM, no API key needed):
 
 ```powershell
