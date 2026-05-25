@@ -344,3 +344,30 @@ async def test_overfull_vbox_triggers_revise(tmp_path, monkeypatch) -> None:
 - **Type consistency:** `InventoryFigure.key` ↔ `OutlineSlide.figure_key` ↔ `verify_and_fix_graphics(allowed_keys)` ↔ the staged filename stem all use the same deck-unique key. `SlideDraft.{frame,note}` flows draft→coherence→assemble→notes_finalize.
 - **Reused, not rebuilt:** decks/REST/panel/deck-event/compile threading. Frame-edit (`beamer_helpers.replace_frame_in_beamer`) is F4's concern, not F3.
 - **Known follow-up:** `sl_verify_figures` neutralizes unknown keys (hard guarantee) but v1 does not re-draft the frame; if real runs show frequent neutralizations, add a bounded re-draft loop (note in T6). The narrate prompt grounding should make rejects rare.
+
+---
+
+## Addendum T9 — layout-aware speaker notes (split frames get real per-page notes, not "(continued)")
+
+**Why (live deck, run 186):** the F3 ethos is "one rich note per slide", but the Overfull-aware compile loop SPLITS an overflowing logical slide into K consecutive frames (same `\frametitle`), and metropolis adds a `\titlepage`. So a 9-slide outline compiled to 13 PDF pages, and the deterministic `finalize_notes` padded pages 10-13 with **"(continued)"** — useless for a presenter. The reference (`paper2slides-plus/src/beamer_utils.py`: `annotate_overlay_frames` + `extract_frames_from_beamer`) handles its (overlay-driven) multi-page frames by hinting the LLM to write one note PER PDF PAGE. We adapt that to our (revise-split-driven) case: finalize notes AFTER the layout is final, mapping each PDF page to its logical slide and splitting that slide's note into coherent per-page segments.
+
+### T9-T1: PDF-page → logical-slide mapping
+**Files:** `pipelines/slide_pipeline/frame_map.py` (new; copy+adapt the reference's `extract_frames_from_beamer` + a `_count_frame_pages` — but our frames have NO overlays so each `\begin{frame}` = 1 page; `\maketitle`/`\titlepage` = page 1), tests.
+- [ ] `map_pages_to_slides(final_tex: str) -> list[PageSlide]` where `PageSlide{page:int, frametitle:str|None, is_title:bool}`. Title/structural page → `is_title=True, frametitle=None`. Each `\begin{frame}` → one page (count overlay pages if any, defensively, via the reference's `_count_frame_pages`).
+- [ ] `group_logical_slides(pages: list[PageSlide]) -> list[list[int]]`: group CONSECUTIVE content pages sharing the same (normalized) `frametitle` into one logical slide → list of page-number groups (title page is its own group, flagged). Test: a tex with `\titlepage` + frame A + frame A (split) + frame B → groups `[[1(title)], [2,3], [4]]`.
+
+### T9-T2: note-split prompt + layout-aware finalize_notes
+**Files:** `slides_note_split_v1.yaml` (new), `agents/report_pipeline.py` (`finalize_notes` → async, layout-aware), tests.
+- [ ] `slides_note_split_v1.yaml` — user `{slide_title}`, `{page_count}` (K), `{full_note}`, `{response_language}`. System: "A slide was split across K PDF pages for layout. Rewrite its speaker note as EXACTLY K coherent segments (JSON list of K strings), one per page, IN ORDER, covering the same material — each segment is what the presenter SAYS while that page is shown. Do not add '(continued)'; each segment stands as natural continuous speech."
+- [ ] `finalize_notes(*, drafts: list[SlideDraft], final_tex: str, page_count: int, adapter, tracer, model, response_language, **kw) -> dict[str,str]` (async, traced `report:notes_finalize`):
+  - `groups = group_logical_slides(map_pages_to_slides(final_tex))`.
+  - Map the **non-title** groups to `drafts` IN ORDER (Nth logical group ↔ Nth draft). Title/structural pages → a short opener note for page 1 (or "") — never "(continued)".
+  - For a group of K==1 → that page = the draft's note. K>1 → call the note-split LLM → K segments mapped to the group's pages. If the split returns ≠K, pad/truncate the segments (deterministic safety).
+  - If group count ≠ draft count (coherence merged/added a frame), fall back gracefully: extra groups reuse the nearest draft note (split if needed); missing → short fallback. Always return EXACTLY `{str(p): note}` for `p in 1..page_count`.
+- [ ] Tests (stub adapter): a 2-page logical slide → 2 DISTINCT segments (neither is "(continued)"); title page → opener/empty, not "(continued)"; total keys == page_count; group-count≠draft-count degrades without crashing.
+
+### T9-T3: wire into the graph + re-verify
+**Files:** `agents/report_graph.py` (sl_notes_finalize passes `final_tex` from the compile result + drafts + adapter/model), `tests/test_report_graph.py`.
+- [ ] `sl_notes_finalize` calls the async layout-aware `finalize_notes(final_tex=compile_result.tex, drafts=..., page_count=..., adapter=..., model=...)`. Record the page→logical-slide mapping in the trace.
+- [ ] Graph happy-path test: a draft that the (stubbed) compile/tex shows as a 2-page split → both pages get non-"(continued)" notes.
+- [ ] Live re-verify: regenerate the session-108 deck; assert NO page note equals "(continued)"; split-frame pages read as natural continued speech.
