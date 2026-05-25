@@ -307,6 +307,7 @@ async def test_ingest_arxiv_renders_from_flattened_source(
 
     def _capture_render(
         *, source: Path, kind: str, out_path: Path, resource_dir: Path | None = None,
+        macros: dict[str, object] | None = None,
     ) -> Path:
         captured["source"] = source
         if resource_dir is not None:
@@ -738,6 +739,7 @@ async def test_latex_ingest_persists_dom_ids(
 
     def _stub_render_html(
         *, source: Path, kind: str, out_path: Path, resource_dir: Path | None = None,
+        macros: dict[str, object] | None = None,
     ) -> Path:
         """Write the marked source text verbatim as the HTML — sentinels survive."""
         content = source.read_text(encoding="utf-8")
