@@ -569,3 +569,77 @@ async def test_purge_deleted_sessions_removes_old_tombstones(tmp_path: Path) -> 
             old_msgs = await cur.fetchone()
     assert ids == {2, 3}, "only the old tombstone should be purged"
     assert old_msgs is not None and old_msgs[0] == 0, "purge must cascade messages"
+
+
+# --- Lazy-loaded run trace: GET /sessions/{id}/runs/{run_id}/trace ---
+
+
+async def test_get_run_trace_returns_tool_calls(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """The trace endpoint returns a run's tool_calls in step order, with the
+    JSON fields parsed back to objects — the same shape the live tool_step SSE
+    emits and TraceInline renders."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (5, 1, 'ok')",
+        )
+        await conn.executemany(
+            "INSERT INTO tool_calls (run_id, branch, step_index, parent_step, "
+            "agent, tool, model, args_redacted_json, result_summary_json, "
+            "latency_ms, token_in, token_out, status, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (5, "", 0, None, "router", "router:classify", "m",
+                 '{"q": 1}', '{"intent": "chitchat"}', 12, None, None, "ok", None),
+                (5, "", 1, None, "chitchat", "chitchat:reply", "m",
+                 "{}", '{"text": "hi"}', 30, None, None, "ok", None),
+            ],
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/runs/5/trace")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [s["step_index"] for s in body] == [0, 1]
+    assert body[0]["tool"] == "router:classify"
+    # JSON fields parsed back to dicts (not raw strings).
+    assert body[0]["args_redacted_json"] == {"q": 1}
+    assert body[1]["result_summary_json"] == {"text": "hi"}
+
+
+async def test_get_run_trace_404_when_run_not_in_session(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A run belonging to a different session must not be readable through
+    another session's path."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1), (2)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (5, 1, 'ok')",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/2/runs/5/trace")
+    assert resp.status_code == 404
+
+
+async def test_get_run_trace_empty_when_no_steps(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A run with no tool_calls returns [] (not 404) so the panel can show a
+    'no steps recorded' state."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES (5, 1, 'ok')",
+        )
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/runs/5/trace")
+    assert resp.status_code == 200
+    assert resp.json() == []
