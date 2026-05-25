@@ -35,6 +35,13 @@ interface ChatState {
     run_id: number,
     record: ToolCallRecord,
   ) => void;
+  /** Replace a message's trace wholesale — used to cache a lazily-fetched
+   *  trace onto a replayed assistant message (see GET …/runs/{id}/trace). */
+  setMessageTrace: (
+    sessionId: number,
+    run_id: number,
+    trace: ToolCallRecord[],
+  ) => void;
   finaliseMessage: (
     sessionId: number,
     run_id: number,
@@ -186,6 +193,11 @@ export const useChatStore = create<ChatState>()(
             }),
           };
         }),
+
+      setMessageTrace: (sessionId, run_id, trace) =>
+        set((s) => ({
+          sessions: patchMessageByRunId(s.sessions, sessionId, run_id, { trace }),
+        })),
 
       finaliseMessage: (sessionId, run_id, content) =>
         set((s) => ({

@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.db.tool_calls import drain_tool_calls_since
+from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import SearchCandidateModel
 
 router = APIRouter()
@@ -210,6 +212,34 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
             )
         )
     return out
+
+
+@router.get(
+    "/sessions/{session_id}/runs/{run_id}/trace",
+    response_model=list[ToolCallRecord],
+)
+async def get_run_trace(session_id: int, run_id: int) -> list[ToolCallRecord]:
+    """Lazily fetch a run's recorded tool_calls (the agent trace).
+
+    The trace streams over `tool_step` SSE during a turn and is NOT replayed by
+    GET /sessions/{id}/messages, so it vanishes on refresh. This reconstructs it
+    on demand from `tool_calls` so the Trace panel can hydrate on click.
+    Authorized by the run→session FK — a run is only readable through the
+    session that owns it (else 404).
+    """
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        async with conn.execute(
+            "SELECT 1 FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ) as cur:
+            if await cur.fetchone() is None:
+                raise HTTPException(
+                    404, f"run {run_id} not found in session {session_id}"
+                )
+        # after_step=-1 so step_index 0 (the first step) is included.
+        rows = await drain_tool_calls_since(conn, run_id, -1)
+    return [ToolCallRecord(**row) for row in rows]
 
 
 def _build_deck_out(
