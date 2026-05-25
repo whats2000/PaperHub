@@ -150,8 +150,11 @@ def _select_rows(
     - ``all``     → every row.
     - ``current`` → the single row whose [page_start, page_end] contains the
       page on screen (fallback: the first row).
-    - ``page``    → the row containing ``cmd.target_page`` (empty list if none —
-      the caller surfaces a "page not found" message).
+    - ``page``    → the row containing ``cmd.target_page``; if the classifier
+      chose page-scope but couldn't extract an explicit number (e.g. the
+      Chinese ordinal "第三頁"), fall back to the on-screen page. Empty list
+      only if neither resolves to a real row (the caller surfaces "page not
+      found").
     Pure: ``current_view_page`` is passed in, not read from state."""
     if cmd.target_scope == "all":
         return list(rows)
@@ -160,11 +163,11 @@ def _select_rows(
             if r.page_start <= current_view_page <= r.page_end:
                 return [r]
         return rows[:1]
-    # page
-    if cmd.target_page is not None:
-        for r in rows:
-            if r.page_start <= cmd.target_page <= r.page_end:
-                return [r]
+    # page — explicit target_page, else fall back to the on-screen page.
+    page = cmd.target_page if cmd.target_page is not None else current_view_page
+    for r in rows:
+        if r.page_start <= page <= r.page_end:
+            return [r]
     return []
 
 

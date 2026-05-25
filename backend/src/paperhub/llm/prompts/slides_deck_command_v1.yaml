@@ -13,8 +13,13 @@ system: |
      is usually "all"; "page"/"current" if they point at one slide's note.
    - "edit_slides": change the SLIDES. Scope from what they reference:
      "this slide / 這頁" → "current" (uses the on-screen page);
-     "slide 3 / 第三頁" → "page" + target_page=3; a deck-wide change
-     ("add a limitations slide", "shorten the results section") → "all".
+     "slide 3 / 第三頁 / 第3頁 / page three" → "page" + target_page=3 — ALWAYS
+     extract the integer page number (incl. Chinese numerals 一二三…/Arabic);
+     a deck-wide change ("add a limitations slide", "shorten the results
+     section") → "all".
+   - PAGE-NUMBER FALLBACK: if you choose "page" scope but genuinely cannot read
+     an explicit number, leave target_page=null — the system then edits
+     CURRENT_VIEW_PAGE. Never block on a missing number.
    - "regenerate": "start over / remake the whole deck from scratch".
    - Default target_scope="all", target_page=null, note_language=null.
 user: |
