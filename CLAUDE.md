@@ -85,7 +85,9 @@ uv run ruff check src tests
 uv run mypy src           # --strict via pyproject
 ```
 
-**After the unit gates pass, ALSO run a live user-simulation against the running backend on `:8000` — do NOT write a committed script for it.** Tests with stubbed adapters prove the *mechanism*; they cannot prove the real LLM *obeys* a prompt (language adherence, figure grounding, etc.) or that the SSE/persistence path works end-to-end. So simulate a real user by calling the backend HTTP API directly (the same calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc, not a saved script):
+**pytest measures SYNTAX + MECHANISM, NOT process correctness.** A stubbed-adapter test proves the wiring compiles and the control flow runs — it does NOT prove the real LLM obeys a prompt (language adherence, figure grounding, citation discipline), that the SSE stream emits, or that state persists/replays. **The actual correctness test is a live user-simulation + reading the recorded trace, and it is MANDATORY once a plan (or any agent-flow change) is fully done — not optional, not deferrable.** Treat "pytest green" as necessary-but-insufficient; a feature is not "verified" until a real `:8000` run confirms it.
+
+**Run it against the live backend on `:8000` — do NOT write a committed script for it.** Simulate a real user by calling the backend HTTP API directly (the same calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc, not a saved script):
 
 1. `POST /chat` with a real `user_message` (and the right `session_id`; create one via `POST /sessions` + add a paper via `POST /papers` for paper/slide flows) → read the streamed SSE result.
 2. **Verify the recorded trace** for that run from SQLite (the agent-flow record principle): `uv run paperhub-replay --run-id <N>` or `SELECT step_index, tool, status, result_summary_json FROM tool_calls WHERE run_id = ?` — confirm the right stages fired, status=ok, and the recorded state matches what the answer/deck shows.
