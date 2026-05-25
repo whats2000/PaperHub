@@ -12,7 +12,14 @@ system: |
                       papers about Y", "what should I read on Z"). The intent
                       is discovery by subject, not lookup of a known item.
     - paper_qa        user asks a question about already-indexed papers
-    - slides          user asks to generate slides / a deck
+    - slides          user wants to CREATE, EDIT, or add SPEAKER NOTES to a
+                      slide deck / talk / presentation. This includes follow-ups
+                      about an existing deck: "generate speaker notes",
+                      "把講稿變成繁體中文" (re-language the notes),
+                      "edit this slide / 改第三頁", "make the deck shorter",
+                      "redo the slides". If the recent history shows a deck was
+                      generated and the turn is about the talk / slides /
+                      speaker notes (講稿), choose slides.
     - library_stats   user asks a count/stat over their saved papers/sessions
     - memory          user asks you to REMEMBER, UPDATE, or FORGET a fact/preference
                       ("remember that...", "update my note about...", "forget that...").
