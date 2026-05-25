@@ -524,3 +524,81 @@ async def classify_deck_command(
         )
         step.record_result(dec.model_dump())
     return dec
+
+
+# --------------------------------------------------------------------------
+# F4: Note-author + frame-edit streaming functions (SRS v2.21, Task 8).
+# --------------------------------------------------------------------------
+
+async def author_note(
+    *,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    frame_tex: str,
+    existing_note: str | None,
+    instruction: str | None,
+    note_language: str,
+) -> str:
+    """Write (or rewrite) the SPEAKER NOTE for one Beamer frame.
+
+    When ``existing_note`` is supplied the model translates / rewrites it per
+    ``instruction``; otherwise it authors a fresh note from the frame content.
+    Slot ``slides_note_author/v1``.  Streams the note token-by-token; traced as
+    ``report:note_author``.
+    """
+    async with tracer.step(agent="report", tool="report:note_author", model=model) as step:
+        step.record_args(
+            {"note_language": note_language, "has_existing": existing_note is not None}
+        )
+        toks: list[str] = []
+        async for t in adapter.stream(
+            slot="slides_note_author/v1",
+            variables={
+                "frame_tex": frame_tex,
+                "existing_note": existing_note or "(none — author fresh)",
+                "instruction": instruction or "(none)",
+                "note_language": note_language or "the user's language",
+            },
+            model=model,
+        ):
+            toks.append(t)
+        out = "".join(toks).strip()
+        step.record_result({"note": out})
+    return out
+
+
+async def edit_frame(
+    *,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    frame_tex: str,
+    instruction: str,
+    response_language: str,
+) -> str:
+    """Rewrite ONE Beamer frame per the user's instruction.
+
+    The model returns only the ``\\begin{frame}...\\end{frame}`` block; any
+    stray markdown fences are stripped.  Falls back to the original ``frame_tex``
+    if the model returns nothing usable.  Slot ``slides_edit_frame/v1``; traced
+    as ``report:edit_frame``.
+    """
+    async with tracer.step(agent="report", tool="report:edit_frame", model=model) as step:
+        step.record_args({"old_frame": frame_tex, "instruction": instruction})
+        toks: list[str] = []
+        async for t in adapter.stream(
+            slot="slides_edit_frame/v1",
+            variables={
+                "frame_tex": frame_tex,
+                "instruction": instruction,
+                "response_language": response_language or "the user's language",
+            },
+            model=model,
+        ):
+            toks.append(t)
+        out = "".join(toks).strip()
+        if out.startswith("```"):
+            out = out.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        step.record_result({"new_frame": out})
+    return out or frame_tex
