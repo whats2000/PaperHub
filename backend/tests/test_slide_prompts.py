@@ -22,6 +22,8 @@ def test_narrate_slot_loads_and_formats() -> None:
         figure_inventory="model\nattn",
         response_language="Traditional Chinese",
         memory_context="MEM",
+        target_slide_count=15,
+        depth="standard",
     )
     assert "BRIEFS" in rendered
     assert "model" in rendered

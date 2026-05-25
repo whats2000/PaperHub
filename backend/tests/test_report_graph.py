@@ -5,12 +5,13 @@ import pytest
 
 from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
 from paperhub.agents.report_pipeline import NoteSegments
+from paperhub.db.deck_slides import get_deck_slides
 from paperhub.db.decks import get_deck
 from paperhub.models.domain import (
+    FrameDraft,
     OutlineSlide,
     PaperBrief,
     RoutingDecision,
-    SlideDraft,
     TalkOutline,
 )
 from paperhub.pipelines.paper_asset import (
@@ -45,10 +46,11 @@ def _seed_asset(source_dir: Path) -> None:
 
 
 class _Adapter:
-    """Stub adapter for the F3 PhD flow.
+    """Stub adapter for the F3/F4 PhD flow.
 
     structured() dispatches on response_model: a PaperBrief for understand,
-    a 2-slide TalkOutline for narrate, a SlideDraft for each draft.
+    a 2-slide TalkOutline for narrate, a FrameDraft for each draft (F4:
+    frame-only, no note).
     The first draft references the staged inventory figure ("p0-fig-000");
     the second draft references a non-inventory key ("ghost") to drive the
     deterministic no-hallucination guard.
@@ -87,19 +89,17 @@ class _Adapter:
                     ),
                 ],
             )
-        if response_model is SlideDraft:
+        if response_model is FrameDraft:
             self._draft_calls += 1
             if self._draft_calls == 1:
-                return SlideDraft(
+                return FrameDraft(
                     frame=(
                         "\\begin{frame}{Motivation}"
                         "\\includegraphics{p0-fig-000}\\end{frame}"
                     ),
-                    note="Explain the motivation in depth.",
                 )
-            return SlideDraft(
+            return FrameDraft(
                 frame="\\begin{frame}{Method}\\includegraphics{ghost}\\end{frame}",
-                note="Walk through the method.",
             )
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
@@ -183,9 +183,12 @@ async def test_create_deck_happy_path(  # type: ignore[no-untyped-def]
     state = _state()
     state["run_id"] = fake_tracer.run_id
     events: list[Any] = []
+    last_values: dict[str, Any] = {}
     async for mode, payload in graph.astream(state, stream_mode=["custom", "values"]):
         if mode == "custom":
             events.append(payload)
+        elif mode == "values" and isinstance(payload, dict):
+            last_values = payload
 
     deck = await get_deck(migrated_db, session_id=1)
     assert deck is not None
@@ -196,6 +199,18 @@ async def test_create_deck_happy_path(  # type: ignore[no-untyped-def]
     figures_dir = tmp_path / "chat_session" / "1" / "slides" / "figures"
     assert (figures_dir / "p0-fig-000.png").exists()
     assert (tmp_path / "chat_session" / "1" / "slides" / "deck.pdf").exists()
+    # F4: GENERATE produces slides-only — notes are opt-in, written by a later sub-flow.
+    assert deck.speaker_notes == {}, "GENERATE path must not write speaker notes"
+    rows = await get_deck_slides(migrated_db, deck_id=deck.id)
+    assert len(rows) == deck.page_count, "one deck_slides row per compiled page"
+    assert all(r.note_text is None for r in rows), "no notes in GENERATE path"
+    # The deck event must report has_notes=False.
+    deck_evt = next(e for e in events if e.get("event") == "deck")
+    assert deck_evt["deck"]["has_notes"] is False
+    # The finalize message mentions speaker notes (hint at the notes sub-flow).
+    final = last_values.get("final_response", "")
+    assert "Generated" in final
+    assert "speaker notes" in final.lower(), f"hint missing from: {final!r}"
 
 
 @pytest.mark.asyncio
@@ -393,13 +408,14 @@ async def test_missing_pdflatex_message(  # type: ignore[no-untyped-def]
 # as one multi-page content group and calls the split LLM with NoteSegments.
 # ---------------------------------------------------------------------------
 class _SplitAdapter:
-    """Stub adapter for the split-note integration test.
+    """Stub adapter for the split-frame integration test (F4: slides-only path).
 
     structured() dispatches on response_model:
       - PaperBrief   → a one-paper brief
       - TalkOutline  → one content slide titled "Method"
-      - SlideDraft   → one frame+note for "Method"
-      - NoteSegments → two distinct per-page segments for the split frame
+      - FrameDraft   → one frame-only draft for "Method" (no note field)
+
+    NoteSegments is no longer called by _generate (notes are opt-in / F4 sub-flow).
     """
 
     def __init__(self) -> None:
@@ -428,12 +444,12 @@ class _SplitAdapter:
                     ),
                 ],
             )
-        if response_model is SlideDraft:
-            return SlideDraft(
+        if response_model is FrameDraft:
+            return FrameDraft(
                 frame="\\begin{frame}{Method}\\includegraphics{p0-fig-000}\\end{frame}",
-                note="Full method note covering both pages.",
             )
         if response_model is NoteSegments:
+            # Should not be called by _generate in the F4 slides-only path.
             self.note_split_calls += 1
             return NoteSegments(segments=["page two note", "page three note"])
         raise AssertionError(f"unexpected response_model {response_model!r}")
@@ -464,12 +480,12 @@ Second continuation of the method slide.
 
 
 @pytest.mark.asyncio
-async def test_split_frame_gets_per_page_notes(  # type: ignore[no-untyped-def]
+async def test_split_frame_deck_slides_written(  # type: ignore[no-untyped-def]
     fake_tracer, migrated_db, tmp_path, monkeypatch
 ) -> None:
-    """Graph-level integration test: a compile result that splits one logical
-    slide across two frames (same \\frametitle{Method}) produces DISTINCT
-    per-page speaker notes — NOT '(continued)' — via the note-split LLM."""
+    """Graph-level integration test: a compile result with 3 pages produces
+    3 deck_slides rows with no notes (F4: slides-only path).
+    The note-split LLM (NoteSegments) is NOT called by _generate."""
     monkeypatch.setattr(
         "paperhub.agents.report_graph._pdflatex_available", lambda: True
     )
@@ -511,9 +527,9 @@ async def test_split_frame_gets_per_page_notes(  # type: ignore[no-untyped-def]
     async for _mode, _payload in graph.astream(state, stream_mode=["custom", "values"]):
         pass
 
-    # ---- verify the note-split LLM path was exercised ----
-    assert adapter.note_split_calls == 1, (
-        "expected exactly one slides_note_split/v1 call for the 2-page group"
+    # ---- note-split LLM must NOT be called in the slides-only GENERATE path ----
+    assert adapter.note_split_calls == 0, (
+        "slides_note_split/v1 must not be called by _generate (F4 decoupling)"
     )
 
     # ---- verify the deck row was written correctly ----
@@ -522,20 +538,11 @@ async def test_split_frame_gets_per_page_notes(  # type: ignore[no-untyped-def]
     assert deck.status == "ok"
     assert deck.page_count == 3
 
-    notes: dict[str, str] = deck.speaker_notes
+    # F4: notes are empty — opt-in sub-flow only.
+    assert deck.speaker_notes == {}, "GENERATE path must not write speaker notes"
 
-    # All three pages must be present.
-    assert set(notes.keys()) == {"1", "2", "3"}, f"unexpected note keys: {notes.keys()}"
-
-    # Page 1 is the title page — note is empty (never "(continued)").
-    assert notes["1"] != "(continued)", "title page must not be '(continued)'"
-
-    # Pages 2 and 3 must be the distinct segments returned by _SplitAdapter.
-    assert notes["2"] == "page two note", f"page 2 note: {notes['2']!r}"
-    assert notes["3"] == "page three note", f"page 3 note: {notes['3']!r}"
-
-    # Sanity: no note value equals "(continued)" anywhere.
-    for page_key, note_text in notes.items():
-        assert note_text != "(continued)", (
-            f"page {page_key} has '(continued)' — split path failed"
-        )
+    # One deck_slides row per frame block (2 \begin{frame} blocks in _SPLIT_TEX),
+    # not per page — page_count=3 includes the \maketitle title page.
+    rows = await get_deck_slides(migrated_db, deck_id=deck.id)
+    assert len(rows) == 2, f"expected 2 deck_slides rows (2 frame blocks), got {len(rows)}"
+    assert all(r.note_text is None for r in rows), "no notes in GENERATE path"

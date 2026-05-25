@@ -29,20 +29,21 @@ from langgraph.graph import END, START, StateGraph
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.report_pipeline import (
     coherence_pass,
-    draft_slide,
-    finalize_notes,
+    draft_frame,
     narrate_talk,
     revise_tex,
     understand_paper,
 )
 from paperhub.agents.state import response_language
+from paperhub.db.deck_slides import replace_deck_slides
 from paperhub.db.decks import get_deck, upsert_deck
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
-from paperhub.models.domain import AgentState, OutlineSlide, PaperBrief, SlideDraft
+from paperhub.models.domain import AgentState, FrameDraft, OutlineSlide, PaperBrief, SlideBudget
 from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.assemble import AssembleInput, assemble_deck
+from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
     InventoryFigure,
     build_inventory,
@@ -199,6 +200,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 writer({"event": "tool_step", "record": rec})
                 last_emitted = rec["step_index"]
 
+        budget: SlideBudget = state.get("report_budget") or SlideBudget()  # type: ignore[assignment]
+
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = response_language(state)
         mem = ""
@@ -245,6 +248,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             model=deps.plan_model,
             response_language=lang,
             memory_context=mem,
+            target_slide_count=budget.target_slide_count,
+            depth=budget.depth,
         )
         # Defensively drop any figure_key not in the deck inventory.
         slides: list[OutlineSlide] = []
@@ -254,7 +259,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             slides.append(s)
         await _flush_steps()
 
-        # ---- sl_draft: per-slide frame+note pairs (fan-out, IN ORDER) ----
+        # ---- sl_draft: per-slide frame-only drafts (fan-out, IN ORDER) ----
         retr = deps.retriever
 
         def _chunks_block(chunk_ids: list[int]) -> str:
@@ -278,10 +283,10 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 return f"{f.key}: {f.caption}"
             return None
 
-        drafts: list[SlideDraft] = list(
+        drafts: list[FrameDraft] = list(
             await asyncio.gather(
                 *[
-                    draft_slide(
+                    draft_frame(
                         deck_title=outline.title,
                         slide=s,
                         assigned_figure=_assigned_figure(s.figure_key),
@@ -406,34 +411,18 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         # The compile loop may emit several report:revise rows; flush them all.
         await _flush_steps()
 
-        # ---- sl_notes_finalize: layout-aware per-page notes (F3 T9) ----
-        # Maps each PDF page to its logical slide (from the FINAL compiled tex)
-        # and splits a frame's note into K coherent segments when the compile
-        # loop spread it across K pages. Self-traced as report:notes_finalize.
-        notes = (
-            await finalize_notes(
-                drafts=drafts,
-                final_tex=result.tex,
-                page_count=result.page_count,
-                adapter=deps.adapter,
-                tracer=deps.tracer,
-                model=deps.notes_model,
-                response_language=lang,
-            )
-            if result.ok
-            else {}
-        )
-        await _flush_steps()
+        # F4: notes are opt-in, authored by a later sub-flow — not produced here.
+        notes: dict[str, str] = {}
 
         # persist notes file + version snapshot (blocking IO off the loop).
         def _persist() -> None:
             slides_dir.mkdir(parents=True, exist_ok=True)
             (slides_dir / "speaker_notes.json").write_text(
-                json.dumps(notes, ensure_ascii=False), encoding="utf-8"
+                json.dumps({}, ensure_ascii=False), encoding="utf-8"
             )
             if result.ok:
                 VersionHistory(str(slides_dir)).save_version(
-                    result.tex, "Generated deck", notes
+                    result.tex, "Generated deck (slides only)", {}
                 )
 
         await asyncio.to_thread(_persist)
@@ -453,6 +442,14 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         )
         deck = await get_deck(deps.conn, session_id=state["session_id"])
         assert deck is not None
+
+        # ---- write per-frame deck_slides rows (F4) ----
+        if result.ok:
+            await replace_deck_slides(
+                deps.conn,
+                deck_id=deck.id,
+                slides=build_deck_slides(result.tex, result.page_count),
+            )
 
         # ---- sl_emit: deck event + row (UNCHANGED shape from F1) ----
         async with deps.tracer.step(
@@ -484,12 +481,13 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             writer(deck_event)
 
         final = (
-            f'Generated a {deck.page_count}-slide deck — "{outline.title}".'
+            f'Generated a {deck.page_count}-slide deck — "{outline.title}". '
+            "Want speaker notes? Say \"generate speaker notes\" (you can pick a "
+            "language). I can also edit any slide — just tell me the page."
             if result.ok
             else (
                 "I generated the deck but it failed to compile after retries — "
-                "showing the last attempt. "
-                "Check the Trace panel for the LaTeX error."
+                "showing the last attempt. Check the Trace panel for the LaTeX error."
             )
         )
         return {**state, "final_response": final, "report_deck_id": deck.id}
