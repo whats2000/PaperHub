@@ -1,0 +1,17 @@
+system: |
+  A single slide was split across {page_count} PDF pages for layout reasons.
+  Rewrite its speaker note as EXACTLY {page_count} coherent segments — one per
+  page, IN ORDER — together covering the same material as the original note.
+  Each segment is natural continuous speech for while that page is shown; do NOT
+  write "(continued)" or any meta-commentary about the split.
+  Output ONLY JSON: {"segments": ["...", ...]} with exactly {page_count} strings.
+  Write every segment in {response_language}.
+user: |
+  SLIDE TITLE: {slide_title}
+  PAGES (K): {page_count}
+
+  ORIGINAL SPEAKER NOTE:
+  {full_note}
+
+  Output ONLY the JSON {"segments": [...]} with exactly {page_count} segments,
+  in {response_language}.

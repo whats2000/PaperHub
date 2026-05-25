@@ -8,7 +8,12 @@ alone.
 """
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import Coroutine
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import (
@@ -17,7 +22,21 @@ from paperhub.models.domain import (
     SlideDraft,
     TalkOutline,
 )
+from paperhub.pipelines.slide_pipeline.frame_map import (
+    group_logical_slides,
+    map_pages_to_slides,
+)
 from paperhub.tracing.tracer import Tracer
+
+
+class NoteSegments(BaseModel):
+    """K per-page speaker-note segments for one logical slide that the compile
+    loop split across K consecutive PDF pages (F3 T9). Produced by the
+    ``slides_note_split/v1`` slot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    segments: list[str]
 
 # Matches one ``\begin{frame}...\end{frame}`` block (non-greedy, dotall) so the
 # coherence pass can split a re-emitted multi-frame document back into frames.
@@ -261,17 +280,125 @@ async def revise_tex(
     return revised
 
 
-def finalize_notes(drafts: list[SlideDraft], page_count: int) -> dict[str, str]:
-    """Map drafted speaker notes to PDF page numbers (deterministic, no LLM).
+def _frametitle_for_group(pages_map: dict[int, str | None], group: list[int]) -> str:
+    """Best-effort frametitle for a content group (for the split prompt)."""
+    for p in group:
+        title = pages_map.get(p)
+        if title:
+            return title
+    return ""
 
-    Pages are ``"1".."page_count"``.  If there are fewer drafted notes than
-    pages, gap pages get a short fallback note; if more, the surplus is dropped.
+
+def _coerce_segments(segments: list[str], k: int, fallback: str) -> list[str]:
+    """Make exactly ``k`` non-empty segments, padding (repeat last / fallback)
+    or truncating as needed. Never yields ``"(continued)"``."""
+    out = [s for s in segments]
+    if len(out) > k:
+        out = out[:k]
+    while len(out) < k:
+        out.append(out[-1] if out else fallback)
+    return [(s.strip() or fallback or " ") for s in out]
+
+
+async def finalize_notes(
+    *,
+    drafts: list[SlideDraft],
+    final_tex: str,
+    page_count: int,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    response_language: str = "the user's language",
+    **kw: object,
+) -> dict[str, str]:
+    """Map drafted speaker notes onto the FINAL compiled PDF's pages, splitting
+    any logical slide the compile loop spread across K frames into K coherent
+    per-page note segments (F3 T9).
+
+    - ``group_logical_slides(map_pages_to_slides(final_tex))`` yields, in
+      document order, the page groups: each title/structural page alone, each
+      run of same-frametitle content pages together.
+    - CONTENT groups map to ``drafts`` IN ORDER (Nth content group ↔ drafts[N]).
+      A single-page content group gets the draft's note verbatim (no LLM). A
+      K>1 group calls the note-split LLM and maps the K segments to the pages.
+    - TITLE / structural pages get an empty note (never ``"(continued)"``).
+    - Degrades gracefully when the group/draft counts disagree (coherence merged
+      or added frames): zip by the shorter, reuse the nearest draft note for any
+      unmapped content page. Always returns EXACTLY ``{str(p): note}`` for every
+      page ``1..page_count``.
     """
-    notes: dict[str, str] = {}
-    for page in range(1, max(page_count, 0) + 1):
-        idx = page - 1
-        if idx < len(drafts) and drafts[idx].note.strip():
-            notes[str(page)] = drafts[idx].note
+    page_count = max(page_count, 0)
+    pages = map_pages_to_slides(final_tex)
+    pages_map: dict[int, str | None] = {ps.page: ps.frametitle for ps in pages}
+    title_pages = {ps.page for ps in pages if ps.is_title}
+    groups = group_logical_slides(pages)
+    content_groups = [g for g in groups if g and g[0] not in title_pages]
+
+    notes: dict[str, str] = {str(p): "" for p in range(1, page_count + 1)}
+
+    # Concurrently split every multi-page content group; map single-page groups
+    # (and degraded/unmapped pages) deterministically with no LLM call.
+    async def _split(group: list[int], draft_note: str, title: str) -> list[str]:
+        result = await adapter.structured(
+            slot="slides_note_split/v1",
+            variables={
+                "slide_title": title,
+                "page_count": len(group),
+                "full_note": draft_note,
+                "response_language": response_language or "the user's language",
+            },
+            response_model=NoteSegments,
+            model=model,
+        )
+        return _coerce_segments(result.segments, len(group), draft_note)
+
+    split_count = 0
+    coroutines: list[Coroutine[Any, Any, list[str]]] = []
+    coro_targets: list[list[int]] = []  # the page group each coroutine fills
+
+    n = min(len(content_groups), len(drafts))
+    for i in range(n):
+        group = content_groups[i]
+        note = drafts[i].note.strip()
+        if len(group) == 1:
+            notes[str(group[0])] = note
         else:
-            notes[str(page)] = "(continued)"
+            split_count += 1
+            coroutines.append(
+                _split(group, note, _frametitle_for_group(pages_map, group))
+            )
+            coro_targets.append(group)
+
+    # Degradation: more content groups than drafts → reuse the nearest (last)
+    # draft note for the surplus pages so no content page is left blank.
+    if drafts and len(content_groups) > len(drafts):
+        fallback_note = drafts[-1].note.strip()
+        for group in content_groups[len(drafts):]:
+            for p in group:
+                notes[str(p)] = fallback_note
+
+    async with tracer.step(
+        agent="report", tool="report:notes_finalize", model=model
+    ) as step:
+        step.record_args(
+            {
+                "draft_count": len(drafts),
+                "page_count": page_count,
+                "group_sizes": [len(g) for g in groups],
+                "content_group_sizes": [len(g) for g in content_groups],
+                "title_pages": sorted(title_pages),
+            }
+        )
+        if coroutines:
+            results = await asyncio.gather(*coroutines)
+            for group, segments in zip(coro_targets, results, strict=True):
+                for p, seg in zip(group, segments, strict=True):
+                    notes[str(p)] = seg
+        step.record_result(
+            {
+                "llm_split_count": split_count,
+                "final_page_count": page_count,
+                "note_pages": sorted(notes.keys()),
+            }
+        )
     return notes
