@@ -37,6 +37,23 @@ class RoutingDecisionOut(BaseModel):
     reasoning: str
 
 
+class ContributingPaperOut(BaseModel):
+    id: int
+
+
+class DeckOut(BaseModel):
+    """Replayed slide-deck payload. Matches the SSE `deck` event shape so the
+    frontend reuses its `DeckEventData` type (BUG2 — deck chip survives
+    refresh)."""
+    deck_id: int
+    session_id: int
+    page_count: int
+    title: str
+    status: str
+    contributing_papers: list[ContributingPaperOut] = []
+    has_notes: bool = False
+
+
 class MessageOut(BaseModel):
     role: str
     content: str
@@ -44,6 +61,7 @@ class MessageOut(BaseModel):
     created_at: str
     routing_decision: RoutingDecisionOut | None = None
     search_results: list[SearchCandidateModel] | None = None
+    deck: DeckOut | None = None
 
 
 @router.post("/sessions", response_model=CreateSessionResponse, status_code=201)
@@ -126,9 +144,12 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
         async with conn.execute(
             """
             SELECT m.role, m.content, m.run_id, m.created_at,
-                   r.routing_decision_json, r.search_results_json
+                   r.routing_decision_json, r.search_results_json,
+                   d.id, d.page_count, d.plan_json, d.status,
+                   d.speaker_notes_json, d.contributing_paper_ids_json
             FROM messages m
             LEFT JOIN runs r ON r.id = m.run_id
+            LEFT JOIN decks d ON d.run_id = m.run_id
             WHERE m.session_id = ?
             ORDER BY m.id ASC
             """,
@@ -137,9 +158,23 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
             rows = await cur.fetchall()
 
     out: list[MessageOut] = []
-    for role, content, run_id, created_at, routing_json, cards_json in rows:
+    for (
+        role,
+        content,
+        run_id,
+        created_at,
+        routing_json,
+        cards_json,
+        deck_id,
+        deck_page_count,
+        deck_plan_json,
+        deck_status,
+        deck_notes_json,
+        deck_paper_ids_json,
+    ) in rows:
         decision: RoutingDecisionOut | None = None
         cards: list[SearchCandidateModel] | None = None
+        deck: DeckOut | None = None
         if role == "assistant":
             if routing_json:
                 try:
@@ -153,6 +188,16 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                     ]
                 except (json.JSONDecodeError, TypeError, ValueError):
                     cards = None
+            if deck_id is not None:
+                deck = _build_deck_out(
+                    deck_id=int(deck_id),
+                    session_id=session_id,
+                    page_count=int(deck_page_count or 0),
+                    plan_json=deck_plan_json,
+                    status=str(deck_status),
+                    notes_json=deck_notes_json,
+                    paper_ids_json=deck_paper_ids_json,
+                )
         out.append(
             MessageOut(
                 role=str(role),
@@ -161,9 +206,57 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                 created_at=str(created_at),
                 routing_decision=decision,
                 search_results=cards,
+                deck=deck,
             )
         )
     return out
+
+
+def _build_deck_out(
+    *,
+    deck_id: int,
+    session_id: int,
+    page_count: int,
+    plan_json: str | None,
+    status: str,
+    notes_json: str | None,
+    paper_ids_json: str | None,
+) -> DeckOut:
+    """Assemble a DeckOut from the joined `decks` columns, matching the SSE
+    `deck` event shape. `title` comes from the plan (default 'Slides'),
+    `has_notes` from non-empty speaker notes, `contributing_papers` from the
+    persisted id list."""
+    try:
+        plan = json.loads(plan_json) if plan_json else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        plan = {}
+    title = str(plan.get("title") or "Slides") if isinstance(plan, dict) else "Slides"
+
+    try:
+        notes = json.loads(notes_json) if notes_json else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        notes = {}
+    has_notes = bool(notes)
+
+    try:
+        paper_ids = json.loads(paper_ids_json) if paper_ids_json else []
+    except (json.JSONDecodeError, TypeError, ValueError):
+        paper_ids = []
+    contributing = [
+        ContributingPaperOut(id=int(pid))
+        for pid in paper_ids
+        if isinstance(pid, int)
+    ]
+
+    return DeckOut(
+        deck_id=deck_id,
+        session_id=session_id,
+        page_count=page_count,
+        title=title,
+        status=status,
+        contributing_papers=contributing,
+        has_notes=has_notes,
+    )
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
