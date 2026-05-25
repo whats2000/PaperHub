@@ -210,3 +210,4 @@ class AgentState(TypedDict, total=False):
     current_view_page: int       # v2.18: slide on screen (frontend-supplied; Phase 2 uses it)
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
+    report_budget: SlideBudget   # v2.21 (F4): GENERATE length budget
