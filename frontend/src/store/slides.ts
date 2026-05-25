@@ -20,6 +20,7 @@ interface SlidesState {
   /** Draggable speaker-note pane height (px). Persisted. */
   noteHeight: number;
   setDeck: (sid: number, deck: DeckEventData) => void;
+  clearDeck: (sid: number) => void;
   setCurrentPage: (sid: number, page: number) => void;
   toggleOpen: () => void;
   openPanel: () => void;
@@ -38,6 +39,13 @@ export const useSlidesStore = create<SlidesState>()(
       noteHeight: NOTE_DEFAULT_HEIGHT,
       setDeck: (sid, deck) =>
         set((s) => ({ deckBySession: { ...s.deckBySession, [sid]: deck } })),
+      clearDeck: (sid) =>
+        set((s) => {
+          if (s.deckBySession[sid] === undefined) return s;
+          const next = { ...s.deckBySession };
+          delete next[sid];
+          return { deckBySession: next };
+        }),
       setCurrentPage: (sid, page) =>
         set((s) => ({
           currentPageBySession: { ...s.currentPageBySession, [sid]: page },
