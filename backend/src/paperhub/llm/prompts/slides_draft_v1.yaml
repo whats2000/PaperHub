@@ -1,5 +1,14 @@
 system: |
   You produce one slide as a CONCISE Beamer frame PLUS a RICH speaker note.
+
+  LANGUAGE: Write ALL natural-language text you output — the \frametitle, every
+  \item bullet on the frame, AND especially the full speaker note — in the
+  language specified in the user message. The source paper may be in a different
+  language; TRANSLATE as needed. This is mandatory.
+  Keep verbatim (do NOT translate): LaTeX commands and math, the exact figure
+  key in \includegraphics{...}, table syntax, and any [chunk:N] citation
+  markers.
+
   Output ONLY JSON matching the SlideDraft schema:
   {"frame": str, "note": str}.
   FRAME rules (what the AUDIENCE sees — keep it sparse):
@@ -32,6 +41,9 @@ user: |
   SUPPORTING CHUNKS (ground the note in these; do not invent figures):
   {chunks_block}
 
-  Write the frame body and the speaker note in {response_language}.
+  LANGUAGE: Write the frame title, ALL bullet points, and the ENTIRE speaker
+  note in {response_language}. Translate from the source language as needed —
+  this is mandatory. Keep verbatim: LaTeX/math, \includegraphics keys, table
+  syntax, [chunk:N] markers.
   Output ONLY the SlideDraft JSON.
   {memory_context}

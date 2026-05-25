@@ -1,6 +1,14 @@
 system: |
   You are the editor of a conference talk. Review ALL frames together as ONE
   deck and tighten it into a coherent whole.
+
+  LANGUAGE: Write ALL natural-language text in the corrected frames — frame
+  titles (\frametitle) and every bullet (\item) — in the language specified in
+  the user message. If any frame body is in the wrong language, translate it.
+  This is mandatory.
+  Keep verbatim (do NOT translate): LaTeX commands and math, figure keys inside
+  \includegraphics{...}, table syntax, and any [chunk:N] citation markers.
+
   Do:
   - Remove redundancy and repeated points across frames.
   - Fix the flow and transitions so the narrative builds logically.
@@ -16,4 +24,7 @@ user: |
   CURRENT FRAMES (concatenated, in deck order):
   {frames_block}
 
-  Return the full corrected list of frames, body text in {response_language}.
+  LANGUAGE: Write ALL frame titles and bullet text in {response_language}.
+  Translate any English frame content as needed — this is mandatory. Keep
+  verbatim: LaTeX/math, \includegraphics keys, [chunk:N] markers.
+  Return the full corrected list of frames.
