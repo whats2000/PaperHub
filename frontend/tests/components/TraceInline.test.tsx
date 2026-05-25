@@ -1,9 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TraceInline } from "@/components/chat/TraceInline";
+import { fetchRunTrace } from "@/lib/api";
 import type { ToolCallRecord } from "@/types/domain";
+
+// TraceInline lazily fetches a replayed turn's trace on first expand. Partial
+// mock — keep the real module (the chat store imports createBackendSession from
+// it) and override only fetchRunTrace.
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  fetchRunTrace: vi.fn(),
+}));
 
 const sampleTrace: ToolCallRecord[] = [
   {
@@ -22,41 +31,98 @@ const sampleTrace: ToolCallRecord[] = [
   },
 ];
 
+// Helper: render with the (now-required) sessionId/runId props.
+const renderTrace = (trace: ToolCallRecord[]) =>
+  render(<TraceInline trace={trace} sessionId={7} runId={1} />);
+
+beforeEach(() => {
+  vi.mocked(fetchRunTrace).mockReset();
+});
+
 // ---------------------------------------------------------------------------
-// Existing tests (preserved)
+// Rendering a populated trace (live-streamed turn) — no fetch
 // ---------------------------------------------------------------------------
-describe("TraceInline", () => {
+describe("TraceInline — populated trace", () => {
   it("starts collapsed with a step count", () => {
-    render(<TraceInline trace={sampleTrace} />);
+    renderTrace(sampleTrace);
     expect(screen.getByRole("button", { name: /2 steps/i })).toBeInTheDocument();
     expect(screen.queryByText(/router · classify/i)).not.toBeInTheDocument();
   });
 
   it("expands to show all steps", async () => {
-    render(<TraceInline trace={sampleTrace} />);
+    renderTrace(sampleTrace);
     await userEvent.click(screen.getByRole("button", { name: /2 steps/i }));
     expect(screen.getByText(/router · classify/i)).toBeInTheDocument();
     expect(screen.getByText(/chitchat · generate/i)).toBeInTheDocument();
+  });
+
+  it("does not fetch when the turn already carries a trace", async () => {
+    renderTrace(sampleTrace);
+    await userEvent.click(screen.getByRole("button", { name: /2 steps/i }));
+    expect(fetchRunTrace).not.toHaveBeenCalled();
   });
 
   it("flags an error step with data-status=\"error\"", async () => {
     const errorTrace: ToolCallRecord[] = [
       { ...sampleTrace[0]!, status: "error", error: "boom" },
     ];
-    const { container } = render(<TraceInline trace={errorTrace} />);
-    await userEvent.click(screen.getByRole("button"));
+    const { container } = renderTrace(errorTrace);
+    await userEvent.click(screen.getByRole("button", { name: /step/i }));
     expect(container.querySelector('[data-status="error"]')).not.toBeNull();
   });
+});
 
-  it("renders nothing for empty trace", () => {
-    const { container } = render(<TraceInline trace={[]} />);
-    expect(container.firstChild).toBeNull();
+// ---------------------------------------------------------------------------
+// Lazy fetch on a replayed (empty) trace
+// ---------------------------------------------------------------------------
+describe("TraceInline — lazy fetch", () => {
+  it("shows a Trace toggle even with an empty trace (replayed turn)", () => {
+    renderTrace([]);
+    expect(screen.getByRole("button", { name: /trace/i })).toBeInTheDocument();
   });
 
-  // ---------------------------------------------------------------------------
-  // New tests — Task v2.4-3
-  // ---------------------------------------------------------------------------
+  it("fetches and renders steps on first expand", async () => {
+    vi.mocked(fetchRunTrace).mockResolvedValue([sampleTrace[0]!]);
+    renderTrace([]);
+    await userEvent.click(screen.getByRole("button", { name: /trace/i }));
+    expect(fetchRunTrace).toHaveBeenCalledWith(7, 1);
+    expect(await screen.findByText(/router · classify/i)).toBeInTheDocument();
+  });
 
+  it("does not refetch on a second expand (cached)", async () => {
+    vi.mocked(fetchRunTrace).mockResolvedValue([sampleTrace[0]!]);
+    renderTrace([]);
+    const toggle = screen.getByRole("button", { name: /trace/i });
+    await userEvent.click(toggle); // open → fetch
+    await screen.findByText(/router · classify/i);
+    await userEvent.click(toggle); // collapse
+    await userEvent.click(toggle); // re-open
+    expect(fetchRunTrace).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows 'No steps recorded' when the fetched trace is empty", async () => {
+    vi.mocked(fetchRunTrace).mockResolvedValue([]);
+    renderTrace([]);
+    await userEvent.click(screen.getByRole("button", { name: /trace/i }));
+    expect(await screen.findByText(/no steps recorded/i)).toBeInTheDocument();
+  });
+
+  it("shows an error with retry when the fetch fails, then recovers", async () => {
+    vi.mocked(fetchRunTrace)
+      .mockRejectedValueOnce(new Error("API 500: boom"))
+      .mockResolvedValueOnce([sampleTrace[0]!]);
+    renderTrace([]);
+    await userEvent.click(screen.getByRole("button", { name: /trace/i }));
+    expect(await screen.findByText(/API 500: boom/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText(/router · classify/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Detail rendering (args/result) — preserved from the original suite
+// ---------------------------------------------------------------------------
+describe("TraceInline — step detail", () => {
   it("test_expand_reveals_reason_prominently", async () => {
     const trace: ToolCallRecord[] = [
       {
@@ -71,13 +137,10 @@ describe("TraceInline", () => {
         status: "ok", error: null,
       },
     ];
-    render(<TraceInline trace={trace} />);
-    // Open outer list
+    renderTrace(trace);
     await userEvent.click(screen.getByRole("button", { name: /1 step/i }));
-    // Open row
     const rowButton = screen.getByRole("button", { name: /paper_search/i });
     await userEvent.click(rowButton);
-    // "Why:" label and reason text must both be present
     expect(screen.getByText(/Why:/i)).toBeInTheDocument();
     expect(screen.getByText(/match the user's query/i)).toBeInTheDocument();
   });
@@ -93,12 +156,11 @@ describe("TraceInline", () => {
         status: "ok", error: null,
       },
     ];
-    render(<TraceInline trace={trace} />);
+    renderTrace(trace);
     await userEvent.click(screen.getByRole("button", { name: /1 step/i }));
     const rowButton = screen.getByRole("button", { name: /search_arxiv/i });
     await userEvent.click(rowButton);
     expect(screen.getByText(/transformer/i)).toBeInTheDocument();
-    // Match "count: 5" — use a container query to avoid collision with "500ms"
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
@@ -116,10 +178,8 @@ describe("TraceInline", () => {
         status: "ok", error: null,
       },
     ];
-    render(<TraceInline trace={trace} />);
-    // Open outer list but do NOT click the row
+    renderTrace(trace);
     await userEvent.click(screen.getByRole("button", { name: /1 step/i }));
-    // Args/result detail must not be in DOM
     expect(screen.queryByText(/Why:/i)).toBeNull();
     expect(screen.queryByText(/answer the user question/i)).toBeNull();
     expect(screen.queryByText(/deep learning survey/i)).toBeNull();
@@ -134,15 +194,11 @@ describe("TraceInline", () => {
         result_summary_json: { error: "connection timeout" },
       },
     ];
-    const { container } = render(<TraceInline trace={errorTrace} />);
-    // Open outer list
+    const { container } = renderTrace(errorTrace);
     await userEvent.click(screen.getByRole("button", { name: /1 step/i }));
-    // The li should have error styling
     expect(container.querySelector('[data-status="error"]')).not.toBeNull();
-    // Open row to see result detail
     const rowButton = screen.getByRole("button", { name: /classify/i });
     await userEvent.click(rowButton);
-    // Error text in red via text-destructive class
     const errorEl = container.querySelector(".text-destructive");
     expect(errorEl).not.toBeNull();
     expect(errorEl!.textContent).toContain("connection timeout");
@@ -159,16 +215,12 @@ describe("TraceInline", () => {
         status: "ok", error: null,
       },
     ];
-    render(<TraceInline trace={trace} />);
-    // Open outer list
+    renderTrace(trace);
     await userEvent.click(screen.getByRole("button", { name: /1 step/i }));
-    // The per-row button starts collapsed (aria-expanded=false)
     const rowButton = screen.getByRole("button", { name: /paper_search/i });
     expect(rowButton).toHaveAttribute("aria-expanded", "false");
-    // Click to expand
     await userEvent.click(rowButton);
     expect(rowButton).toHaveAttribute("aria-expanded", "true");
-    // Click again to collapse
     await userEvent.click(rowButton);
     expect(rowButton).toHaveAttribute("aria-expanded", "false");
   });

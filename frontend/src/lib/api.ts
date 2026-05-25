@@ -10,6 +10,7 @@ import type {
   MemoryStatus,
   MemoryScope,
   DeckMeta,
+  ToolCallRecord,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -382,4 +383,16 @@ export async function fetchDeckPdfData(sessionId: number): Promise<Uint8Array> {
 /** Build the URL for downloading the session's deck LaTeX source. */
 export function deckTexUrl(sessionId: number): string {
   return `${API_BASE_URL}/sessions/${sessionId}/deck/tex`;
+}
+
+/** Fetch a run's recorded agent trace (tool_calls), lazily, after a refresh
+ * has dropped the streamed trace. Returns the same shape the Trace panel
+ * renders. Throws on non-2xx (e.g. 404 when the run isn't in the session). */
+export async function fetchRunTrace(
+  sessionId: number,
+  runId: number,
+): Promise<ToolCallRecord[]> {
+  return apiFetch<ToolCallRecord[]>(
+    `/sessions/${sessionId}/runs/${runId}/trace`,
+  );
 }
