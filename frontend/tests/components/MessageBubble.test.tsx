@@ -197,6 +197,27 @@ describe("MessageBubble", () => {
     expect(article?.textContent).not.toContain("$$");
   });
 
+  it("renders \\mathbbm (bbm package) via the KaTeX macro mapping", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "The indicator $\\mathbbm{1}[x>0]$ and the reals $\\mathbbm{R}$.",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // A successful render proves \mathbbm expanded; an unmapped command would
+    // surface as a rehype-katex error node, not a .katex span.
+    expect(container.querySelector(".katex")).not.toBeNull();
+    const article = container.querySelector("article");
+    // The raw command must not leak as visible text, and KaTeX must not have
+    // emitted its red parse-error markup.
+    expect(article?.querySelector(".katex-error")).toBeNull();
+    expect(article?.textContent).not.toContain("$\\mathbbm");
+  });
+
   it("renders block LaTeX math ($$...$$) as KaTeX", () => {
     const { container } = render(
       <MessageBubble
