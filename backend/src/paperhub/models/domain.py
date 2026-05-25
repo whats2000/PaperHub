@@ -222,3 +222,4 @@ class AgentState(TypedDict, total=False):
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
     report_budget: SlideBudget   # v2.21 (F4): GENERATE length budget
+    report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action
