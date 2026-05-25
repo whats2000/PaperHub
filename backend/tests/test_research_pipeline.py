@@ -641,29 +641,40 @@ async def test_resolver_verifies_arxiv_id_when_ss_misses(
     assert out.meta["has_open_pdf"] is True
 
 
-async def test_resolver_drops_unverifiable_arxiv_id(
+async def test_resolver_emits_unverified_arxiv_id_for_download_gate(
     fake_tracer: Tracer,
 ) -> None:
-    """If the LLM-claimed arxiv_id doesn't resolve against arXiv, it's
-    bogus/hallucinated (the 2604.26951 case). The Resolver drops it
-    (returns None → NotFound) instead of synthesising a paper labelled
-    with the LLM's invented title."""
+    """When SS misses AND arXiv can't confirm the id, verification is
+    INCONCLUSIVE — overwhelmingly a transient 429/503 against
+    export.arxiv.org, NOT proof the paper is nonexistent. Per
+    'unverified ≠ nonexistent', the Resolver must NOT drop it: it emits
+    the candidate (built from the Discoverer hint + claimed arxiv_id) and
+    lets the auto-attach DOWNLOAD be the real validity gate. A genuinely
+    bogus id simply fails to download and never lands; a real-but-unindexed
+    paper gets through. Ingest replaces the hint title with arXiv's
+    authoritative one, so any paraphrase is only ever transient."""
     reg = _StubRegistry(ss_hits=[])  # SS misses
     identity = CanonicalIdentity(
-        title="Distilled Diffusion Language Models",  # LLM invention
-        author_surname=None, year=None, confidence="high",
-        arxiv_id="2604.26951",  # does not exist on arXiv
+        title="Load Balancing MoE with Similarity Preserving Routers",
+        author_surname="Omi", year=2025, confidence="high",
+        arxiv_id="2506.14038",  # real, but SS unindexed + arXiv throttled
     )
 
     async def fake_lookup(arxiv_id: str) -> ArxivResult | None:
-        return None  # arXiv has no such paper
+        return None  # arXiv couldn't confirm (e.g. 429) — inconclusive
 
     out = await resolve_via_ss(
-        ParsedRequest(hint="distilled diffusion", kind="natural_language"),
+        ParsedRequest(hint="load balancing moe", kind="natural_language"),
         identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
         arxiv_lookup=fake_lookup,
     )
-    assert out is None, "unverifiable arxiv_id must be dropped, not synthesised"
+    assert out is not None, "unverified-but-plausible id must be EMITTED, not dropped"
+    assert out.paper_id == "arxiv:2506.14038"
+    assert out.meta["arxiv_id"] == "2506.14038"
+    assert out.meta["verified"] is False
+    # The hint title is carried through (ingest will overwrite with the
+    # authoritative arXiv title once the download lands).
+    assert out.meta["title"] == identity.title
 
 
 async def test_resolver_extracts_arxiv_id_from_evidence_safety_net(

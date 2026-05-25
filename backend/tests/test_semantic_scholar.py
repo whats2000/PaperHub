@@ -5,6 +5,7 @@ import httpx
 import pytest
 import respx
 
+from paperhub.pipelines import semantic_scholar as ss
 from paperhub.pipelines.semantic_scholar import (
     API_BASE,
     SemanticScholarRateLimitError,
@@ -14,6 +15,20 @@ from paperhub.pipelines.semantic_scholar import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _fast_ss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the rate-limiter instant in tests: no pacing delay, no real
+    backoff sleeps. Records sleep durations on a list for pacing assertions."""
+    monkeypatch.setattr(ss, "_MIN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(ss, "_RETRY_BASE_S", 0.0)
+    monkeypatch.setattr(ss, "_last_request_ts", 0.0)
+
+    async def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ss, "_sleep", _no_sleep)
 
 
 _PAPER_WITH_ARXIV = {
@@ -185,3 +200,60 @@ async def test_fetch_paper_metadata_handles_429() -> None:
     )
     with pytest.raises(SemanticScholarRateLimitError):
         await fetch_paper_metadata("abcd")
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit resilience: retry-on-429 + paced concurrency
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_search_papers_retries_transient_429_then_succeeds() -> None:
+    """A 429 that clears on a later attempt must NOT surface as an error —
+    the client retries (with backoff) and returns the eventual 200 payload.
+    This is the fix for the prod 'rate-limited → all results not found' bug."""
+    route = respx.get(f"{API_BASE}/paper/search")
+    route.side_effect = [
+        httpx.Response(429, json={"message": "rate limited"}),
+        httpx.Response(429, json={"message": "rate limited"}),
+        httpx.Response(200, json={"data": [_SS_PAPER_WITH_ARXIV]}),
+    ]
+    hits = await search_papers("mamba", max_results=5)
+    assert len(hits) == 1
+    assert hits[0].arxiv_id == "2312.00752"
+    assert route.call_count == 3  # two 429s retried, third succeeded
+
+
+@respx.mock
+async def test_search_papers_raises_only_after_exhausting_retries() -> None:
+    """A 429 on EVERY attempt still raises — but only after _MAX_ATTEMPTS."""
+    route = respx.get(f"{API_BASE}/paper/search").mock(
+        return_value=httpx.Response(429, json={"message": "rate limited"}),
+    )
+    with pytest.raises(SemanticScholarRateLimitError):
+        await search_papers("q")
+    assert route.call_count == ss._MAX_ATTEMPTS
+
+
+@respx.mock
+async def test_concurrent_calls_are_paced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent SS callers must be spaced ≥ _MIN_INTERVAL_S apart (the
+    'schedule parallel search with delay' lever) so a fan-out of resolves
+    doesn't burst-trip the rate limit. We assert the second call sleeps for
+    the remaining interval using a controlled clock + recorded sleeps."""
+    monkeypatch.setattr(ss, "_MIN_INTERVAL_S", 1.0)
+    monkeypatch.setattr(ss, "_last_request_ts", 100.0)
+    # Fake clock: 0.2s have elapsed since the last request → 0.8s still owed.
+    monkeypatch.setattr(ss.time, "monotonic", lambda: 100.2)
+    slept: list[float] = []
+
+    async def _rec(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(ss, "_sleep", _rec)
+    respx.get(f"{API_BASE}/paper/search").mock(
+        return_value=httpx.Response(200, json={"data": []}),
+    )
+    await search_papers("q")
+    assert slept, "expected a pacing sleep before issuing the request"
+    assert abs(slept[0] - 0.8) < 1e-6

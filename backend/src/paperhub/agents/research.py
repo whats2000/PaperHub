@@ -62,6 +62,12 @@ class SearchCandidate:
     papers_id: int | None = None
     error: str | None = None
     already_in_session: bool = False
+    # False when the candidate was emitted WITHOUT confirming its metadata
+    # against a source (SS miss + arXiv verify inconclusive). Its title is the
+    # Discoverer's unverified hint, so the chat layer must NOT pass it as an
+    # ingest metadata_override — the download must fetch the authoritative
+    # title instead. See research_pipeline.resolve_via_ss + chat._process_search_results.
+    verified: bool = True
 
 
 @dataclass(frozen=True)

@@ -681,30 +681,71 @@ async def resolve_via_ss(
             except (MCPUnavailableError, MCPToolError) as exc:
                 step.mark_error(str(exc))
                 hits = []
-            if isinstance(hits, list) and hits:
-                top = hits[0]
-                pid = top.get("paper_id")
-                if isinstance(pid, str):
-                    step.record_result(
-                        {"hits": len(hits), "picked": pid, "top": hits[:5], "source": "ss_by_arxiv_id"},
-                    )
-                    return ResolvedPaper(
-                        request=request, identity=identity, paper_id=pid, meta=top,
-                    )
+            # SS's `arXiv:<id>` query hits the FREE-TEXT /paper/search endpoint,
+            # which keyword-matches "arXiv" and returns junk first hits (e.g. a
+            # paper literally titled "arXiv") — NOT an exact id lookup. So we
+            # accept a hit ONLY when its arxiv_id actually equals the claimed
+            # id (version suffix ignored); otherwise treat it as an SS miss and
+            # fall through to the authoritative arXiv-API verification below.
+            def _aid(v: object) -> str:
+                return str(v or "").split("v")[0].strip().lower()
+
+            want = _aid(identity.arxiv_id)
+            matched = next(
+                (
+                    h for h in hits
+                    if isinstance(h, dict)
+                    and _aid(h.get("arxiv_id")) == want
+                    and isinstance(h.get("paper_id"), str)
+                ),
+                None,
+            ) if isinstance(hits, list) else None
+            if matched is not None:
+                pid = str(matched["paper_id"])
+                step.record_result(
+                    {"hits": len(hits), "picked": pid, "top": hits[:5], "source": "ss_by_arxiv_id"},
+                )
+                return ResolvedPaper(
+                    request=request, identity=identity, paper_id=pid, meta=matched,
+                )
             # SS missed — verify the id against arXiv and adopt arXiv's
-            # AUTHORITATIVE metadata. We never store the LLM's guessed
-            # title (it paraphrases), and we drop ids arXiv can't confirm.
+            # AUTHORITATIVE metadata when it confirms (the LLM's guessed
+            # title paraphrases, so a CONFIRMED id always wins the title).
             verified = await arxiv_lookup(identity.arxiv_id)
             if verified is None:
+                # Verification was INCONCLUSIVE — SS missed AND arXiv couldn't
+                # confirm the id. In prod this is overwhelmingly a transient
+                # 429/503 against export.arxiv.org, NOT proof the paper is
+                # nonexistent. Per "unverified ≠ nonexistent": do NOT drop.
+                # Emit the candidate from the Discoverer's hint + claimed
+                # arxiv_id with finalize=True and let the auto-attach DOWNLOAD
+                # be the real validity gate (it has its own export→arxiv.org
+                # fallback + retry). A genuinely-bogus id simply fails to
+                # download and never lands; a real-but-unindexed paper gets
+                # through. Ingest replaces the hint title with arXiv's
+                # authoritative one, so the paraphrase is only ever transient.
+                unverified_meta: dict[str, Any] = {
+                    "title": identity.title or "",
+                    "arxiv_id": identity.arxiv_id,
+                    "year": identity.year,
+                    "authors": [],
+                    "abstract": None,
+                    "has_open_pdf": True,  # a real arxiv id resolves to a PDF
+                    "verified": False,
+                }
                 step.record_result(
                     {
                         "hits": 0,
                         "top": [],
-                        "source": "arxiv_id_unverified",
+                        "source": "arxiv_id_unverified_emitted",
                         "unverified_arxiv_id": identity.arxiv_id,
+                        "llm_hint_title": identity.title,
                     },
                 )
-                return None
+                return ResolvedPaper(
+                    request=request, identity=identity,
+                    paper_id=f"arxiv:{identity.arxiv_id}", meta=unverified_meta,
+                )
             verified_pid = f"arxiv:{verified.arxiv_id}"
             verified_meta: dict[str, Any] = {
                 "title": verified.title,
