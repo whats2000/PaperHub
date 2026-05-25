@@ -63,3 +63,21 @@ def test_revise_slot_loads_and_formats() -> None:
     )
     assert "LOG" in rendered
     assert "TEXSOURCE" in rendered
+
+
+def test_note_split_slot_loads_and_formats() -> None:
+    """Regression for the brace-escaping bug: the user_template must not
+    contain a literal ``{segments}`` replacement field (pre-fix it raised
+    ``KeyError('segments')`` here)."""
+    reg = PromptRegistry()
+    slot = reg.get("slides_note_split/v1")
+    rendered = slot.user_template.format(
+        slide_title="TITLE",
+        page_count=3,
+        full_note="The full speaker note for the slide.",
+        response_language="English",
+    )
+    assert "TITLE" in rendered
+    assert "3" in rendered
+    assert "The full speaker note" in rendered
+    assert "English" in rendered
