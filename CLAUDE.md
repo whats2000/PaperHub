@@ -52,7 +52,7 @@ async with tracer.step(agent="research", tool="paper_qa:subagent", model=model) 
     # step.mark_error("reason")    # optional: force status='error' without raising
 ```
 
-The tracer auto-captures `step_index`, `latency_ms`, `status`/`error`, redaction of args+result (keys + `$HOME`), and survives `CancelledError` — don't duplicate those. Name tools `<agent>:<stage>` (the Trace panel + smoke scripts assert on the names). What to put in `record_result`: the IDs of every resource the step touched (chunks read/cited, sections listed, papers dispatched, tool args + results) and the step's final output — enough that the trace answers "what did this stage see and decide?" without re-running.
+The tracer auto-captures `step_index`, `latency_ms`, `status`/`error`, redaction of args+result (keys + `$HOME`), and survives `CancelledError` — don't duplicate those. Name tools `<agent>:<stage>` (the Trace panel asserts on the names). What to put in `record_result`: the IDs of every resource the step touched (chunks read/cited, sections listed, papers dispatched, tool args + results) and the step's final output — enough that the trace answers "what did this stage see and decide?" without re-running.
 
 ### Tracing back a chat session (any agent flow)
 
@@ -94,27 +94,6 @@ uv run mypy src           # --strict via pyproject
 
 This catches the class of bug unit tests miss (e.g. a prompt that *contains* a language instruction the model ignores; an SSE stage that emits no events; a card that doesn't replay). Treat it as a required gate for any agent-flow change, alongside pytest.
 
-End-to-end smoke (mocked LLM, no API key needed):
-
-```powershell
-.\scripts\smoke_chat.ps1
-```
-
-End-to-end smoke (real LLM, requires `backend/.env` with provider key — see `.env.example`):
-
-```powershell
-.\scripts\smoke_chat_real.ps1
-```
-
-`smoke_chat_real.ps1` runs two sub-tests: a chitchat turn (legacy) AND a paper_search turn that asserts the MCP dispatch path. The paper_search sub-test auto-detects whether `open-websearch serve` is reachable on `:3000` — daemon UP asserts the v2 `web.search` → `papers.search_semantic_scholar` chain; daemon DOWN asserts the v1 papers-only fallback (zero `web.*` tool_calls rows).
-
-MCP-surface smokes (added in Plan C v2.5/v2.6):
-
-```powershell
-.\scripts\smoke_mcp_papers.ps1    # always runnable — boots its own backend on :8770 and exercises the in-process FastMCP `papers` server via the MCP wire protocol
-.\scripts\smoke_mcp_web.ps1       # requires `open-websearch serve` running on :3000; exits 1 with a "start the daemon" hint when down
-```
-
 Replay any past run from SQLite:
 
 ```powershell
@@ -132,11 +111,6 @@ npm run lint      # ESLint flat config
 npm run build     # Vite production build
 ```
 
-End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
-
-```powershell
-.\scripts\smoke_e2e.ps1
-```
 
 ## Dev-environment caveats
 
@@ -181,7 +155,7 @@ End-to-end smoke (backend + frontend together, mocked LLM, from repo root):
 - `backend/src/paperhub/` — application code (db, models, tracing, llm, agents, api, cli)
 - `backend/src/paperhub/modelserver/` — separate FastAPI app hosting embedder + reranker (v2.8)
 - `backend/tests/` — pytest suite; fixtures under `tests/fixtures/`
-- `backend/scripts/` — operator-facing smoke scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + modelserver + backend)
+- `backend/scripts/` — operator-facing scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + modelserver + backend)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, future `papers_cache/`, future `chroma/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
 - `docs/superpowers/specs/` — SRS (**v2.15 current**)
