@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from paperhub.agents.report_pipeline import (
+    NoteSegments,
     coherence_pass,
     draft_slide,
     finalize_notes,
@@ -157,21 +158,88 @@ async def test_revise_tex_strips_fences(fake_tracer: Tracer) -> None:
     assert "report:revise" in tools
 
 
+# --------------------------------------------------------------------------
+# F3 T9 — layout-aware speaker notes (split a frame's note per PDF page).
+# --------------------------------------------------------------------------
+def _no_continued(notes: dict[str, str]) -> None:
+    assert all(v != "(continued)" for v in notes.values())
+
+
 @pytest.mark.asyncio
-async def test_finalize_notes_pads_short() -> None:
-    d1 = SlideDraft(frame="f1", note="note one")
-    d2 = SlideDraft(frame="f2", note="note two")
-    notes = finalize_notes([d1, d2], page_count=3)
+async def test_finalize_notes_splits_two_page_slide(fake_tracer: Tracer) -> None:
+    # \maketitle (page 1, title) + two frames sharing the frametitle "Method"
+    # → group_logical_slides = [[1 title], [2, 3]]. One draft → the 2-page group.
+    final_tex = (
+        "\\maketitle\n"
+        "\\begin{frame}{Method}\ncontent one\n\\end{frame}\n"
+        "\\begin{frame}{Method}\ncontent two\n\\end{frame}\n"
+    )
+    d = SlideDraft(frame="f", note="The full method note covering both pages.")
+    notes = await finalize_notes(
+        drafts=[d],
+        final_tex=final_tex,
+        page_count=3,
+        adapter=_StructAdapter(obj=NoteSegments(segments=["seg A", "seg B"])),
+        tracer=fake_tracer,
+        model="m",
+        response_language="English",
+    )
     assert set(notes.keys()) == {"1", "2", "3"}
-    assert notes["1"] == "note one"
-    assert notes["2"] == "note two"
-    assert notes["3"]  # padded, non-empty
+    assert notes["2"] == "seg A"
+    assert notes["3"] == "seg B"
+    assert notes["2"] != notes["3"]
+    # The title page (1) is NOT "(continued)" — empty or a short opener.
+    assert notes["1"] != "(continued)"
+    _no_continued(notes)
+    tools = await _step_tools(fake_tracer)
+    assert "report:notes_finalize" in tools
 
 
 @pytest.mark.asyncio
-async def test_finalize_notes_truncates_long() -> None:
-    drafts = [SlideDraft(frame=f"f{i}", note=f"n{i}") for i in range(5)]
-    notes = finalize_notes(drafts, page_count=2)
-    assert set(notes.keys()) == {"1", "2"}
-    assert notes["1"] == "n0"
-    assert notes["2"] == "n1"
+async def test_finalize_notes_single_page_verbatim_no_llm(fake_tracer: Tracer) -> None:
+    final_tex = "\\begin{frame}{Method}\ncontent\n\\end{frame}\n"
+    d = SlideDraft(frame="f", note="note one")
+
+    class _Boom:
+        async def structured(self, **kw: Any) -> Any:
+            raise AssertionError("must not call the LLM for a single-page slide")
+
+        def stream(self, **kw: Any):  # type: ignore[no-untyped-def]
+            raise AssertionError("must not stream")
+
+    notes = await finalize_notes(
+        drafts=[d],
+        final_tex=final_tex,
+        page_count=1,
+        adapter=_Boom(),
+        tracer=fake_tracer,
+        model="m",
+        response_language="English",
+    )
+    assert notes == {"1": "note one"}
+    _no_continued(notes)
+
+
+@pytest.mark.asyncio
+async def test_finalize_notes_degrades_more_pages_than_drafts(
+    fake_tracer: Tracer,
+) -> None:
+    # Three distinct content frames but only one draft → degrade, no crash.
+    final_tex = (
+        "\\begin{frame}{A}\na\n\\end{frame}\n"
+        "\\begin{frame}{B}\nb\n\\end{frame}\n"
+        "\\begin{frame}{C}\nc\n\\end{frame}\n"
+    )
+    d = SlideDraft(frame="f", note="only note")
+    notes = await finalize_notes(
+        drafts=[d],
+        final_tex=final_tex,
+        page_count=3,
+        adapter=_StructAdapter(obj=NoteSegments(segments=["x"])),
+        tracer=fake_tracer,
+        model="m",
+        response_language="English",
+    )
+    assert set(notes.keys()) == {"1", "2", "3"}
+    _no_continued(notes)
+    assert all(notes[k] for k in notes)  # every page non-empty

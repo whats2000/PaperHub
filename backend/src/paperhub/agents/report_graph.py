@@ -373,17 +373,23 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             if not result.ok:
                 cstep.mark_error("deck failed to compile after retries")
 
-        # ---- sl_notes_finalize: map drafted notes → PDF pages (deterministic) ----
-        async with deps.tracer.step(
-            agent="report", tool="report:notes_finalize", model=None
-        ) as nstep:
-            nstep.record_args(
-                {"draft_count": len(drafts), "page_count": result.page_count}
+        # ---- sl_notes_finalize: layout-aware per-page notes (F3 T9) ----
+        # Maps each PDF page to its logical slide (from the FINAL compiled tex)
+        # and splits a frame's note into K coherent segments when the compile
+        # loop spread it across K pages. Self-traced as report:notes_finalize.
+        notes = (
+            await finalize_notes(
+                drafts=drafts,
+                final_tex=result.tex,
+                page_count=result.page_count,
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.notes_model,
+                response_language=lang,
             )
-            notes = (
-                finalize_notes(drafts, result.page_count) if result.ok else {}
-            )
-            nstep.record_result({"note_pages": sorted(notes.keys())})
+            if result.ok
+            else {}
+        )
 
         # persist notes file + version snapshot (blocking IO off the loop).
         def _persist() -> None:
