@@ -55,6 +55,7 @@ async def replace_deck_slides(
 async def get_deck_slides(
     conn: aiosqlite.Connection, *, deck_id: int
 ) -> list[DeckSlideRow]:
+    """Return all frames for `deck_id`, ordered by `slide_index`."""
     async with conn.execute(
         "SELECT id, deck_id, slide_index, frame_tex, note_text, note_language, "
         "page_start, page_end FROM deck_slides WHERE deck_id = ? ORDER BY slide_index",
@@ -74,21 +75,29 @@ async def update_slide_note(
     conn: aiosqlite.Connection, *, deck_id: int, slide_index: int,
     note_text: str, note_language: str,
 ) -> None:
-    await conn.execute(
+    cur = await conn.execute(
         "UPDATE deck_slides SET note_text = ?, note_language = ? "
         "WHERE deck_id = ? AND slide_index = ?",
         (note_text, note_language, deck_id, slide_index),
     )
+    if cur.rowcount == 0:
+        raise ValueError(
+            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+        )
     await conn.commit()
 
 
 async def update_slide_frame(
     conn: aiosqlite.Connection, *, deck_id: int, slide_index: int, frame_tex: str
 ) -> None:
-    await conn.execute(
+    cur = await conn.execute(
         "UPDATE deck_slides SET frame_tex = ? WHERE deck_id = ? AND slide_index = ?",
         (frame_tex, deck_id, slide_index),
     )
+    if cur.rowcount == 0:
+        raise ValueError(
+            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+        )
     await conn.commit()
 
 

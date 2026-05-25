@@ -55,6 +55,7 @@ async def test_note_update_and_rebuild_notes_json(tmp_path) -> None:
         notes = await rebuild_speaker_notes_json(conn, deck_id=deck_id)
         # slide 0 spans pages 1-2: page 1 gets the note, page 2 "(continued)".
         assert notes == {"1": "hello", "2": "(continued)"}
+        assert "3" not in notes  # slide 1 (page 3) has no note → absent, not "None"
         deck = await get_deck(conn, session_id=1)
         assert deck.speaker_notes == {"1": "hello", "2": "(continued)"}
 
@@ -70,3 +71,18 @@ async def test_frame_update(tmp_path) -> None:
         await update_slide_frame(conn, deck_id=deck_id, slide_index=0, frame_tex="new")
         rows = await get_deck_slides(conn, deck_id=deck_id)
         assert rows[0].frame_tex == "new"
+
+
+@pytest.mark.asyncio
+async def test_update_missing_slide_raises(tmp_path) -> None:
+    async with open_db(str(tmp_path / "t.db")) as conn:
+        await apply_schema(conn)
+        deck_id = await _seed_deck(conn)
+        await replace_deck_slides(conn, deck_id=deck_id, slides=[
+            DeckSlideInput(slide_index=0, frame_tex="f0", page_start=1, page_end=1),
+        ])
+        with pytest.raises(ValueError):
+            await update_slide_note(conn, deck_id=deck_id, slide_index=9,
+                                    note_text="x", note_language="English")
+        with pytest.raises(ValueError):
+            await update_slide_frame(conn, deck_id=deck_id, slide_index=9, frame_tex="x")
