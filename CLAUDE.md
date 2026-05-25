@@ -87,12 +87,16 @@ uv run mypy src           # --strict via pyproject
 
 **pytest measures SYNTAX + MECHANISM, NOT process correctness.** A stubbed-adapter test proves the wiring compiles and the control flow runs — it does NOT prove the real LLM obeys a prompt (language adherence, figure grounding, citation discipline), that the SSE stream emits, or that state persists/replays. **The actual correctness test is a live user-simulation + reading the recorded trace, and it is MANDATORY once a plan (or any agent-flow change) is fully done — not optional, not deferrable.** Treat "pytest green" as necessary-but-insufficient; a feature is not "verified" until a real `:8000` run confirms it.
 
-**Run it against the live backend on `:8000` — do NOT write a committed script for it.** Simulate a real user by calling the backend HTTP API directly (the same calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc, not a saved script):
+### Real-API test process (run against the user's live backend on `:8000`)
 
-1. `POST /chat` with a real `user_message` (and the right `session_id`; create one via `POST /sessions` + add a paper via `POST /papers` for paper/slide flows) → read the streamed SSE result.
-2. **Verify the recorded trace** for that run from SQLite (the agent-flow record principle): `uv run paperhub-replay --run-id <N>` or `SELECT step_index, tool, status, result_summary_json FROM tool_calls WHERE run_id = ?` — confirm the right stages fired, status=ok, and the recorded state matches what the answer/deck shows.
+Do NOT write a committed script for this, and do NOT boot your own backend — use the one the user runs (frontend + modelserver + MCP wired). The procedure:
 
-This catches the class of bug unit tests miss (e.g. a prompt that *contains* a language instruction the model ignores; an SSE stage that emits no events; a card that doesn't replay). Treat it as a required gate for any agent-flow change, alongside pytest.
+1. **Check `:8000` is live** — `curl -s -m 3 http://127.0.0.1:8000/health`. **If it is NOT reachable, STOP and ASK the user to start the backend** (e.g. `scripts/start.ps1`); do not spin up your own instance to work around it (a separate instance has stale code / wrong wiring and races the user's DB).
+2. **Call the API as a user would** (the same HTTP calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc): `POST /sessions` → `POST /papers` (add a paper for paper/slide flows) → `POST /chat` with a real `user_message`; read the streamed SSE result. Use the actual scenario under test (e.g. the user's exact wording, the target language).
+3. **Verify the recorded trace** for that run from SQLite (the agent-flow record principle): `uv run paperhub-replay --run-id <N>` or `SELECT step_index, tool, status, result_summary_json FROM tool_calls WHERE run_id = ?` — confirm the right stages fired, `status=ok`, and the recorded state matches the answer/deck (right figures cited, language honored, no hallucinated keys, …).
+4. **When the API checks pass, ASK the user to open the frontend and confirm the result visually** (the chat card, the deck/Slides panel, the citation highlight, the streamed trace) — the final human-in-the-loop sign-off. Note any change that needs a `:8000` restart (backend code) or a frontend rebuild to be visible.
+
+This catches the class of bug unit tests miss (a prompt the model ignores, an SSE stage that emits nothing, a card that doesn't replay). It is a required gate for any agent-flow change, alongside pytest.
 
 Replay any past run from SQLite:
 
