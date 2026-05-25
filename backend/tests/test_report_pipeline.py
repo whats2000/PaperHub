@@ -5,6 +5,7 @@ import pytest
 from paperhub.agents.report_pipeline import (
     NoteSegments,
     coherence_pass,
+    draft_frame,
     draft_slide,
     finalize_notes,
     narrate_talk,
@@ -12,6 +13,7 @@ from paperhub.agents.report_pipeline import (
     understand_paper,
 )
 from paperhub.models.domain import (
+    FrameDraft,
     OutlineSlide,
     PaperBrief,
     SlideDraft,
@@ -295,3 +297,35 @@ async def test_finalize_notes_degrades_more_pages_than_drafts(
     assert set(notes.keys()) == {"1", "2", "3"}
     _no_continued(notes)
     assert all(notes[k] for k in notes)  # every page non-empty
+
+
+# --------------------------------------------------------------------------
+# F4: frame-only draft
+# --------------------------------------------------------------------------
+class _StructFrameA:
+    def __init__(self, obj: Any) -> None:
+        self._o = obj
+
+    async def structured(self, **kw: Any) -> Any:
+        return self._o
+
+    def stream(self, **kw: Any):  # type: ignore[no-untyped-def]
+        ...
+
+
+@pytest.mark.asyncio
+async def test_draft_frame_returns_frame_only(fake_tracer: Tracer) -> None:
+    fd = FrameDraft(frame="\\begin{frame}{A}\\end{frame}")
+    out = await draft_frame(
+        deck_title="T",
+        slide=OutlineSlide(title="A", goal="g", key_points=["k"]),
+        assigned_figure=None,
+        assigned_equation=None,
+        chunks_block="(none)",
+        adapter=_StructFrameA(fd),
+        tracer=fake_tracer,
+        model="m",
+        response_language="English",
+    )
+    assert out.frame == "\\begin{frame}{A}\\end{frame}"
+    assert not hasattr(out, "note")

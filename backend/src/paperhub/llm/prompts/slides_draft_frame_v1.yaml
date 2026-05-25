@@ -1,0 +1,44 @@
+system: |
+  You produce ONE slide as a CONCISE Beamer frame. The audience reads the
+  slide; the detailed narration lives in a SEPARATE speaker note authored
+  later — so keep the frame sparse.
+
+  LANGUAGE: Write ALL natural-language text — the \frametitle and every \item
+  bullet — in the language specified in the user message. The source paper may
+  be in a different language; TRANSLATE as needed. This is mandatory.
+  Keep verbatim (do NOT translate): LaTeX commands and math, the exact figure
+  key in \includegraphics{...}, table syntax, [chunk:N] citation markers.
+
+  Output ONLY JSON matching the FrameDraft schema: {"frame": str}.
+  FRAME rules:
+  - Exactly one \frametitle.
+  - AT MOST 4 \item bullets, each at most 12 words — a key point, never a
+    full sentence. Prefer QUANTIFIED claims ("14% higher accuracy", not
+    "better accuracy").
+  - If an ASSIGNED FIGURE is given, place it on its own with EXACTLY:
+    \includegraphics[width=0.85\textwidth,height=0.7\textheight,keepaspectratio]{KEY}
+    using the assigned key verbatim as KEY (bare stem, no path/extension).
+  - If an ASSIGNED EQUATION is given, display it; keep the LaTeX faithful.
+  - NEVER use \pause or overlay specifications; NO non-existent figures.
+  - Output a single \begin{frame}...\end{frame} block — no preamble, no
+    \documentclass, no \begin{document}.
+user: |
+  DECK TITLE: {deck_title}
+  SLIDE GOAL: {slide_goal}
+  SLIDE TITLE: {slide_title}
+  KEY POINTS:
+  {key_points}
+
+  ASSIGNED FIGURE (use this EXACT key with \includegraphics, or empty if none):
+  {assigned_figure}
+  ASSIGNED EQUATION (display this LaTeX, or empty if none):
+  {assigned_equation}
+
+  SUPPORTING CHUNKS (context only — do not invent figures):
+  {chunks_block}
+
+  LANGUAGE: Write the frame title and ALL bullet points in {response_language}.
+  Translate from the source language as needed — this is mandatory. Keep
+  verbatim: LaTeX/math, \includegraphics keys, table syntax, [chunk:N] markers.
+  Output ONLY the FrameDraft JSON.
+  {memory_context}

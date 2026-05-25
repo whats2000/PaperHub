@@ -135,6 +135,15 @@ class SlideDraft(BaseModel):
     note: str
 
 
+class FrameDraft(BaseModel):
+    """A single CONCISE Beamer frame, produced by the F4 frame-only draft
+    stage. Speaker notes are authored separately by the opt-in NOTES flow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frame: str
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
