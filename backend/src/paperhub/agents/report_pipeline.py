@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import (
+    FrameDraft,
     OutlineSlide,
     PaperBrief,
     SlideDraft,
@@ -211,6 +212,54 @@ async def draft_slide(
                 "note_len": len(draft.note),
             }
         )
+    return draft
+
+
+async def draft_frame(
+    *,
+    deck_title: str,
+    slide: OutlineSlide,
+    assigned_figure: str | None,
+    assigned_equation: str | None,
+    chunks_block: str,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    response_language: str,
+    memory_context: str = "",
+    **kw: object,
+) -> FrameDraft:
+    """Draft one CONCISE Beamer frame (no speaker note) for an outline slide.
+
+    Slot ``slides_draft_frame/v1``.  Traced as ``report:draft``; records the
+    slide title, figure/equation pointers, and the frame length. Speaker notes
+    are authored separately by the F4 NOTES flow.
+    """
+    async with tracer.step(agent="report", tool="report:draft", model=model) as step:
+        step.record_args(
+            {
+                "slide_title": slide.title,
+                "figure_key": slide.figure_key,
+                "chunk_ids": slide.chunk_ids,
+            }
+        )
+        draft = await adapter.structured(
+            slot="slides_draft_frame/v1",
+            variables={
+                "deck_title": deck_title,
+                "slide_goal": slide.goal,
+                "slide_title": slide.title,
+                "key_points": "\n".join(f"- {p}" for p in slide.key_points),
+                "assigned_figure": assigned_figure or "",
+                "assigned_equation": assigned_equation or "",
+                "chunks_block": chunks_block,
+                "response_language": response_language or "the user's language",
+                "memory_context": memory_context,
+            },
+            response_model=FrameDraft,
+            model=model,
+        )
+        step.record_result({"frame": draft.frame})
     return draft
 
 
