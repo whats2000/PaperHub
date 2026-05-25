@@ -153,6 +153,17 @@ class SlideBudget(BaseModel):
     depth: str = "standard"  # 'overview' | 'standard' | 'deep'
 
 
+class DeckCommand(BaseModel):
+    """How to interpret a slides turn when a deck already exists (F4, v2.21)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["generate_notes", "edit_notes", "edit_slides", "regenerate"]
+    target_scope: Literal["current", "page", "all"] = "all"
+    target_page: int | None = None
+    note_language: str | None = None  # for generate_notes / edit_notes
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch

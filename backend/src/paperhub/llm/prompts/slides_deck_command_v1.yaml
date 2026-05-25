@@ -1,0 +1,26 @@
+system: |
+  A slide deck already exists for this session. Classify the user's follow-up
+  into ONE action. Output ONLY JSON matching the DeckCommand schema:
+  {"action": "generate_notes"|"edit_notes"|"edit_slides"|"regenerate",
+   "target_scope": "current"|"page"|"all", "target_page": int|null,
+   "note_language": str|null}.
+  Rules:
+   - "generate_notes": the user wants speaker notes created (none yet, or
+     wants them regenerated). If they name a language ("講稿用英文"), set
+     note_language to that language name; else null.
+   - "edit_notes": change EXISTING notes — re-language ("把講稿變成繁體中文"
+     → note_language="Traditional Chinese"), shorten, rephrase. target_scope
+     is usually "all"; "page"/"current" if they point at one slide's note.
+   - "edit_slides": change the SLIDES. Scope from what they reference:
+     "this slide / 這頁" → "current" (uses the on-screen page);
+     "slide 3 / 第三頁" → "page" + target_page=3; a deck-wide change
+     ("add a limitations slide", "shorten the results section") → "all".
+   - "regenerate": "start over / remake the whole deck from scratch".
+   - Default target_scope="all", target_page=null, note_language=null.
+user: |
+  CURRENT_VIEW_PAGE: {current_view_page}
+  DECK OUTLINE (page · title):
+  {deck_outline}
+
+  USER INSTRUCTION: {instruction}
+  Output ONLY the DeckCommand JSON.
