@@ -171,6 +171,44 @@ def test_render_latex_pandoc_uses_mathjax_and_resource_path_not_embed(tmp_path: 
     assert "--embed-resources" not in argv  # external MathJax, fast ingest
 
 
+def test_inject_mathjax_macros_inserts_config_before_loader(tmp_path: Path) -> None:
+    """The window.MathJax config must land BEFORE pandoc's MathJax loader script
+    so it is in place when MathJax initializes."""
+    from paperhub.pipelines.renderer import _inject_mathjax_macros
+
+    out = tmp_path / "out.html"
+    out.write_text(
+        "<head>\n"
+        '  <script src="https://polyfill.io/v3/polyfill.min.js"></script>\n'
+        "  <script\n"
+        '  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"\n'
+        '  type="text/javascript"></script>\n'
+        "</head><body>x</body>",
+        encoding="utf-8",
+    )
+    _inject_mathjax_macros(out, {"Ls": r"\mathcal{L}"})
+    html = out.read_text(encoding="utf-8")
+    cfg = html.index("window.MathJax")
+    loader = html.index("tex-chtml-full.js")
+    assert cfg < loader, "config must precede the MathJax loader"
+    # Author macro + curated package macro both present.
+    assert r"\mathcal{L}" in html
+    assert "mathbbm" in html
+    # The polyfill script (also a <script>) must not be the injection target.
+    assert html.index("polyfill") < cfg
+
+
+def test_inject_mathjax_macros_noop_without_loader(tmp_path: Path) -> None:
+    """A render with no MathJax loader (e.g. a fallback path) is left untouched."""
+    from paperhub.pipelines.renderer import _inject_mathjax_macros
+
+    out = tmp_path / "out.html"
+    original = "<head></head><body><pre>raw latex</pre></body>"
+    out.write_text(original, encoding="utf-8")
+    _inject_mathjax_macros(out, {"Ls": r"\mathcal{L}"})
+    assert out.read_text(encoding="utf-8") == original
+
+
 _TINY_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
     "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="

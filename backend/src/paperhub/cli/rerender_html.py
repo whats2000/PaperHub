@@ -27,7 +27,9 @@ import aiosqlite
 
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import map_stripped_offsets_to_original
+from paperhub.pipelines.extract import extract_latex
 from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 
@@ -105,12 +107,22 @@ async def _rerender_one(
         encoding="utf-8",
     )
 
+    # Recover author macros from the original source tree (the body-only
+    # flattened .tex doesn't carry the preamble) so \vx, \Ls, … render. Best
+    # effort: a failure still gets curated package macros via render_html.
+    macros: dict[str, MacroValue] | None = None
+    try:  # noqa: ASYNC240 — sequential CLI; sync extract is fine
+        macros = extract_macros(extract_latex(resource_dir).preamble)
+    except Exception:  # noqa: BLE001 — never block a re-render on macro recovery
+        _LOG.debug("pcid=%d: preamble macro recovery failed", pcid, exc_info=True)
+
     html_path = source_dir / "source.html"
     render_html(
         source=render_source,
         kind="latex",
         out_path=html_path,
         resource_dir=resource_dir,
+        macros=macros,
     )
 
     raw_html = html_path.read_text(encoding="utf-8")  # noqa: ASYNC240
