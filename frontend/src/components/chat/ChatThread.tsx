@@ -11,6 +11,8 @@ import { useChatStream } from "@/hooks/useChatStream";
 
 export function ChatThread({ session }: { session: ChatSession | null }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
+  const messageCount = session?.messages.length ?? 0;
   const lastMessage = session?.messages[session.messages.length - 1];
   const { send } = useChatStream();
 
@@ -19,10 +21,17 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A new message arriving is a discrete event → animate smoothly. But while
+    // a streaming message's content grows token-by-token (same count, just a
+    // longer last message), a smooth scroll restarts on every token against a
+    // moving target and visibly oscillates ("shakes"). Jump instantly instead
+    // so the view stays pinned to the bottom without animation churn.
+    const isNewMessage = messageCount !== prevCountRef.current;
+    prevCountRef.current = messageCount;
     endRef.current.scrollIntoView({
-      behavior: prefersReducedMotion ? "auto" : "smooth",
+      behavior: prefersReducedMotion || !isNewMessage ? "auto" : "smooth",
     });
-  }, [session?.messages.length, lastMessage?.content]);
+  }, [messageCount, lastMessage?.content]);
 
   const retryFrom = useCallback(
     (errorIndex: number, userContent: string) => {
