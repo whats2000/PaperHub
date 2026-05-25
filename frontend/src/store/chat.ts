@@ -68,7 +68,7 @@ interface ChatState {
     runId: number,
     candidates: SearchResultCandidate[],
   ) => void;
-  setDeckOnMessage: (sessionId: number, deck: DeckEventData) => void;
+  setDeckOnMessage: (sessionId: number, deck: DeckEventData | null) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
   // Cross-device sync (backend is source of truth)
   reconcileBackendSessions: (summaries: SessionSummary[]) => void;
@@ -363,6 +363,10 @@ export const useChatStore = create<ChatState>()(
           // attach the deck. We use run_id if available (same pattern as
           // setSearchResults but the run_id comes from the deck's session_id,
           // not a run_id field). Fall back to patching the last assistant msg.
+          // A null `deck` CLEARS the chip (deck deleted upstream / 404 on
+          // re-hydration) — we patch `deck: undefined` so MessageBubble's
+          // `message.deck !== undefined` guard stops rendering it.
+          const patchValue = deck ?? undefined;
           const sess = s.sessions.find((x) => x.id === sessionId);
           if (!sess) return s;
           // Find the last assistant message (streaming or most-recent ok)
@@ -377,7 +381,7 @@ export const useChatStore = create<ChatState>()(
                 const msgs = [...se.messages];
                 const idx = msgs.map((m) => m.role).lastIndexOf("assistant");
                 if (idx < 0) return se;
-                msgs[idx] = { ...msgs[idx]!, deck };
+                msgs[idx] = { ...msgs[idx]!, deck: patchValue };
                 return { ...se, messages: msgs };
               }),
             };
@@ -387,7 +391,7 @@ export const useChatStore = create<ChatState>()(
               s.sessions,
               sessionId,
               lastAssistantMsg.run_id,
-              { deck },
+              { deck: patchValue },
             ),
           };
         }),
