@@ -273,7 +273,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             tracer=deps.tracer,
             model=deps.resolve_model,
             instruction=instruction,
-            current_view_page=state.get("current_view_page", 1),
+            current_view_page=state.get("current_view_page") or 1,
             deck_outline=outline,
         )
         out["report_command"] = cmd
@@ -657,7 +657,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         rows = await get_deck_slides(deps.conn, deck_id=deck.id)
         lang = cmd.note_language or response_language(state)
         targets = _select_rows(
-            rows, cmd, current_view_page=state.get("current_view_page", 1)
+            rows, cmd, current_view_page=state.get("current_view_page") or 1
         )
 
         if not targets:
@@ -751,7 +751,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             Path(deck.tex_path).read_text, encoding="utf-8"
         )
         targets = _select_rows(
-            rows, cmd, current_view_page=state.get("current_view_page", 1)
+            rows, cmd, current_view_page=state.get("current_view_page") or 1
         )
         if not targets:
             _emit_deck(

@@ -126,8 +126,13 @@ export function useChatStream() {
             } else if (event === "deck") {
               const d = data as DeckEventData;
               store.getState().setDeckOnMessage(sessionId, d);
-              useSlidesStore.getState().setDeck(d.session_id, d);
-              useSlidesStore.getState().setCurrentPage(d.session_id, 1);
+              const slidesStore = useSlidesStore.getState();
+              slidesStore.setDeck(d.session_id, d);
+              // Only reset to page 1 for a NEW deck — an edit/notes follow-up
+              // must not jump the panel back to the first page.
+              if (slidesStore.currentPageBySession[d.session_id] === undefined) {
+                slidesStore.setCurrentPage(d.session_id, 1);
+              }
             } else if (event === "final") {
               const f = data as FinalData;
               store.getState().finaliseMessage(sessionId, f.run_id, f.content);

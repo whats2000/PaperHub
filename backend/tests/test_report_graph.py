@@ -4,7 +4,6 @@ from typing import Any
 import pytest
 
 from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
-from paperhub.agents.report_pipeline import NoteSegments
 from paperhub.db.deck_slides import get_deck_slides
 from paperhub.db.decks import get_deck
 from paperhub.models.domain import (
@@ -398,14 +397,12 @@ async def test_missing_pdflatex_message(  # type: ignore[no-untyped-def]
 
 
 # ---------------------------------------------------------------------------
-# _SplitAdapter — a minimal variant of _Adapter that also handles
-# NoteSegments for the slides_note_split/v1 slot (F3 T9 split-frame path).
+# _SplitAdapter — a minimal variant of _Adapter for the split-frame path.
 #
-# The outline returns ONE content slide ("Method") so there is exactly one
-# SlideDraft.  The stub compile tex contains \maketitle + two frames that
-# share the same \frametitle{Method} (a logical split across 2 PDF pages).
-# With page_count=3 (title + 2 split pages) finalize_notes groups pages [2,3]
-# as one multi-page content group and calls the split LLM with NoteSegments.
+# The outline returns ONE content slide ("Method"). The stub compile tex
+# contains \maketitle + two frames that share the same \frametitle{Method}
+# (a logical split across 2 PDF pages, page_count=3). The GENERATE path does
+# NOT author speaker notes (notes are an opt-in F4 sub-flow).
 # ---------------------------------------------------------------------------
 class _SplitAdapter:
     """Stub adapter for the split-frame integration test (F4: slides-only path).
@@ -414,12 +411,7 @@ class _SplitAdapter:
       - PaperBrief   → a one-paper brief
       - TalkOutline  → one content slide titled "Method"
       - FrameDraft   → one frame-only draft for "Method" (no note field)
-
-    NoteSegments is no longer called by _generate (notes are opt-in / F4 sub-flow).
     """
-
-    def __init__(self) -> None:
-        self.note_split_calls: int = 0
 
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         if response_model is PaperBrief:
@@ -448,10 +440,6 @@ class _SplitAdapter:
             return FrameDraft(
                 frame="\\begin{frame}{Method}\\includegraphics{p0-fig-000}\\end{frame}",
             )
-        if response_model is NoteSegments:
-            # Should not be called by _generate in the F4 slides-only path.
-            self.note_split_calls += 1
-            return NoteSegments(segments=["page two note", "page three note"])
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]
@@ -464,9 +452,7 @@ class _SplitAdapter:
 
 # Tex returned by the stub compile: \maketitle (page 1) + two consecutive
 # \begin{frame}{Method}...\end{frame} blocks (pages 2 and 3 — a logical
-# split slide).  finalize_notes sees groups [[1], [2, 3]] where group [1]
-# is a title page and group [2, 3] is the split content group → triggers
-# the slides_note_split/v1 LLM call.
+# split slide across same-frametitle content pages).
 _SPLIT_TEX = r"""\documentclass{beamer}
 \begin{document}
 \maketitle
@@ -484,8 +470,7 @@ async def test_split_frame_deck_slides_written(  # type: ignore[no-untyped-def]
     fake_tracer, migrated_db, tmp_path, monkeypatch
 ) -> None:
     """Graph-level integration test: a compile result with 3 pages produces
-    3 deck_slides rows with no notes (F4: slides-only path).
-    The note-split LLM (NoteSegments) is NOT called by _generate."""
+    deck_slides rows with no notes (F4: slides-only path — notes are opt-in)."""
     monkeypatch.setattr(
         "paperhub.agents.report_graph._pdflatex_available", lambda: True
     )
@@ -526,11 +511,6 @@ async def test_split_frame_deck_slides_written(  # type: ignore[no-untyped-def]
 
     async for _mode, _payload in graph.astream(state, stream_mode=["custom", "values"]):
         pass
-
-    # ---- note-split LLM must NOT be called in the slides-only GENERATE path ----
-    assert adapter.note_split_calls == 0, (
-        "slides_note_split/v1 must not be called by _generate (F4 decoupling)"
-    )
 
     # ---- verify the deck row was written correctly ----
     deck = await get_deck(migrated_db, session_id=1)

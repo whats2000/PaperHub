@@ -32,26 +32,6 @@ def test_narrate_slot_loads_and_formats() -> None:
     assert "LANGUAGE" in rendered
 
 
-def test_draft_slot_loads_and_formats() -> None:
-    reg = PromptRegistry()
-    slot = reg.get("slides_draft/v1")
-    rendered = slot.user_template.format(
-        deck_title="DECK",
-        slide_goal="GOAL",
-        slide_title="TITLE",
-        key_points="KP",
-        assigned_figure="model",
-        assigned_equation="E=mc^2",
-        chunks_block="CHUNKS",
-        response_language="Traditional Chinese",
-        memory_context="MEM",
-    )
-    for needle in ("DECK", "GOAL", "TITLE", "KP", "model", "E=mc^2", "CHUNKS", "Traditional Chinese", "MEM"):
-        assert needle in rendered
-    # LANGUAGE enforcement must be present and prominent in the user block
-    assert "LANGUAGE" in rendered
-
-
 def test_coherence_slot_loads_and_formats() -> None:
     reg = PromptRegistry()
     slot = reg.get("slides_coherence/v1")
@@ -71,24 +51,3 @@ def test_revise_slot_loads_and_formats() -> None:
     )
     assert "LOG" in rendered
     assert "TEXSOURCE" in rendered
-
-
-def test_note_split_slot_loads_and_formats() -> None:
-    """Regression for the brace-escaping bug: the user_template must not
-    contain a literal ``{segments}`` replacement field (pre-fix it raised
-    ``KeyError('segments')`` here).
-    Also verifies LANGUAGE enforcement is present and the substituted language
-    value appears in the rendered user block."""
-    reg = PromptRegistry()
-    slot = reg.get("slides_note_split/v1")
-    rendered = slot.user_template.format(
-        slide_title="TITLE",
-        page_count=3,
-        full_note="The full speaker note for the slide.",
-        response_language="Traditional Chinese",
-    )
-    assert "TITLE" in rendered
-    assert "3" in rendered
-    assert "The full speaker note" in rendered
-    assert "Traditional Chinese" in rendered
-    assert "LANGUAGE" in rendered

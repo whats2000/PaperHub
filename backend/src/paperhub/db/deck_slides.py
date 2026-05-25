@@ -106,7 +106,7 @@ async def rebuild_speaker_notes_json(
 ) -> dict[str, str]:
     """Expand per-slide notes into a {page: note} map and write it onto the
     deck row. A slide spanning pages p..q puts its note on page p and
-    "(continued)" on p+1..q (matches the F3 finalize_notes gap behaviour).
+    "(continued)" on p+1..q (the pages a slide spans beyond its first).
     Returns the rebuilt map."""
     rows = await get_deck_slides(conn, deck_id=deck_id)
     notes: dict[str, str] = {}

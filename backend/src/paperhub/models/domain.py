@@ -125,16 +125,6 @@ class TalkOutline(BaseModel):
     slides: list[OutlineSlide]
 
 
-class SlideDraft(BaseModel):
-    """A single compiled Beamer frame + its speaker note, produced by the
-    F3 'draft' stage for each OutlineSlide."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    frame: str
-    note: str
-
-
 class FrameDraft(BaseModel):
     """A single CONCISE Beamer frame, produced by the F4 frame-only draft
     stage. Speaker notes are authored separately by the opt-in NOTES flow."""

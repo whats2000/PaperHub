@@ -20,7 +20,6 @@ def test_phd_models_parse() -> None:
     from paperhub.models.domain import (  # noqa: F401
         OutlineSlide,
         PaperBrief,
-        SlideDraft,
         TalkOutline,
     )
 
@@ -53,11 +52,6 @@ def test_phd_models_parse() -> None:
         }
     )
     assert outline.slides[0].figure_key == "p0-fig-000"
-
-    draft = SlideDraft.model_validate(
-        {"frame": r"\begin{frame}{X}\end{frame}", "note": "say this"}
-    )
-    assert "frame" in draft.frame
 
 
 def test_paper_brief_extra_forbidden() -> None:
@@ -98,14 +92,3 @@ def test_talk_outline_extra_forbidden() -> None:
 
     with pytest.raises(ValidationError):
         TalkOutline.model_validate({"title": "T", "slides": [], "extra": "bad"})
-
-
-def test_slide_draft_extra_forbidden() -> None:
-    from pydantic import ValidationError
-
-    from paperhub.models.domain import SlideDraft
-
-    with pytest.raises(ValidationError):
-        SlideDraft.model_validate(
-            {"frame": r"\begin{frame}{}\end{frame}", "note": "n", "bad": True}
-        )
