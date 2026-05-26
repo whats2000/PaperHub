@@ -174,7 +174,11 @@ export function buildTargets(needle: string): string[] {
  * node's parent element (robust across node boundaries without fragile Range
  * surgery).
  */
-export function findAndHighlight(doc: Document, needle: string): boolean {
+export function findAndHighlight(
+  doc: Document,
+  needle: string,
+  behavior: ScrollBehavior = "smooth",
+): boolean {
   const targets = buildTargets(needle);
   if (targets.length === 0) return false;
 
@@ -214,7 +218,7 @@ export function findAndHighlight(doc: Document, needle: string): boolean {
     ensureHighlightStyle(doc);
     el.classList.add(HIGHLIGHT_CLASS);
     if (typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.scrollIntoView({ behavior, block: "center" });
     }
     const win = doc.defaultView;
     const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
@@ -246,7 +250,11 @@ function clearHighlight(doc: Document): void {
  * `findAndHighlight` when there's no `dom_id` or the anchor is absent (e.g. a
  * chunk whose sentinel landed in math and was skipped at ingest).
  */
-export function highlightChunkRange(doc: Document, domId: string): boolean {
+export function highlightChunkRange(
+  doc: Document,
+  domId: string,
+  behavior: ScrollBehavior = "smooth",
+): boolean {
   const start = doc.getElementById(domId);
   if (!start) return false;
   clearHighlight(doc);
@@ -278,7 +286,7 @@ export function highlightChunkRange(doc: Document, domId: string): boolean {
 
   const anchor = wrappers[0] ?? start;
   if (typeof anchor.scrollIntoView === "function") {
-    anchor.scrollIntoView({ behavior: "smooth", block: "center" });
+    anchor.scrollIntoView({ behavior, block: "center" });
   }
   scheduleClear(doc, () => clearHighlight(doc));
   return true;
@@ -291,7 +299,11 @@ export function highlightChunkRange(doc: Document, domId: string): boolean {
  * citation always lands at least at the right section instead of dead-ending.
  * Returns whether a matching heading was found.
  */
-export function scrollToSection(doc: Document, sectionTitle: string): boolean {
+export function scrollToSection(
+  doc: Document,
+  sectionTitle: string,
+  behavior: ScrollBehavior = "smooth",
+): boolean {
   const target = normalize(sectionTitle);
   if (!target) return false;
   const headings = doc.querySelectorAll("h1,h2,h3,h4,h5,h6");
@@ -304,7 +316,7 @@ export function scrollToSection(doc: Document, sectionTitle: string): boolean {
       const el = h as HTMLElement;
       el.classList.add(HIGHLIGHT_CLASS);
       if (typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ behavior, block: "center" });
       }
       const win = doc.defaultView;
       const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;

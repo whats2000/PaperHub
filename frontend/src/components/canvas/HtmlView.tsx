@@ -24,6 +24,11 @@ interface Props {
   /** Bumped per resolved citation so re-clicking the SAME chunk re-fires the
    *  highlight + scroll even though the target values are unchanged. */
   nonce: number;
+  /** How the scroll-to-passage moves. "smooth" (animate) when the canvas was
+   *  already open — the glide shows the passage's relative position; "instant"
+   *  when this click also opened the canvas (layout isn't settled, so animating
+   *  would track a shifting target). */
+  scrollBehavior?: ScrollBehavior;
 }
 
 /**
@@ -41,6 +46,7 @@ export function HtmlView({
   sectionTitle,
   onHighlightMiss,
   nonce,
+  scrollBehavior = "smooth",
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
 
@@ -52,9 +58,12 @@ export function HtmlView({
     // Resolution order, best → last-resort: deterministic anchor → text-search
     // → section heading (so a citation always lands somewhere useful).
     const found =
-      (highlightDomId !== null && highlightChunkRange(doc, highlightDomId)) ||
-      (highlightText !== null && findAndHighlight(doc, highlightText)) ||
-      (sectionTitle !== null && scrollToSection(doc, sectionTitle));
+      (highlightDomId !== null &&
+        highlightChunkRange(doc, highlightDomId, scrollBehavior)) ||
+      (highlightText !== null &&
+        findAndHighlight(doc, highlightText, scrollBehavior)) ||
+      (sectionTitle !== null &&
+        scrollToSection(doc, sectionTitle, scrollBehavior));
     if (!found) onHighlightMiss?.();
   };
 

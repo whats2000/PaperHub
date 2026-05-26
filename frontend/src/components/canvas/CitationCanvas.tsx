@@ -42,6 +42,7 @@ export function CitationCanvas() {
   const open = useCanvasStore((s) => s.open);
   const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
   const requestNonce = useCanvasStore((s) => s.requestNonce);
+  const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
 
@@ -66,6 +67,9 @@ export function CitationCanvas() {
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
+  // Whether the active citation's scroll should animate (smooth) — only when the
+  // canvas was already open at click time (see canvas store `requestAnimateScroll`).
+  const [scrollAnimate, setScrollAnimate] = useState(false);
   const [stale, setStale] = useState(false);
   // Bumped on every resolved citation so re-clicking the SAME chunk re-fires
   // the highlight + scroll (the view keys on chunk values, which don't change).
@@ -104,8 +108,16 @@ export function CitationCanvas() {
     getChunk(requestedChunkId)
       .then((c) => {
         if (cancelled) return;
+        // Animate only when NO fresh layout happens: the canvas was already open
+        // AND the cited chunk lives in the paper already on screen. A paper
+        // switch (or a panel open) reveals a mounted-but-hidden iframe that lays
+        // out for the first time, so a smooth glide would track a shifting target
+        // and land wrong — jump instantly in that case. `effectivePaperId` here
+        // is the paper shown BEFORE this resolution switches it.
+        const samePaper = c.paper_content_id === effectivePaperId;
         setActiveChunk(c);
         setDisplayedPaperId(c.paper_content_id);
+        setScrollAnimate(requestAnimateScroll && samePaper);
         setStale(false);
         setHighlightNonce((n) => n + 1);
       })
@@ -306,6 +318,7 @@ export function CitationCanvas() {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
+                scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
                   isActive && activeChunk?.paper_content_id === pid
                     ? highlightNonce

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   findAndHighlight,
   highlightChunkRange,
@@ -78,6 +78,52 @@ describe("highlightChunkRange — full chunk between sentinels", () => {
       .join("|");
     expect(text).toContain("Chunk zero body.");
     expect(text).not.toContain("Chunk two body.");
+  });
+});
+
+describe("scroll behavior threading", () => {
+  // jsdom doesn't implement scrollIntoView, so install a mock on the prototype
+  // for these tests (the resolvers feature-detect it; without this it's a no-op).
+  let spy: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    spy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: spy,
+      configurable: true,
+      writable: true,
+    });
+  });
+  afterEach(() => {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
+
+  // The canvas passes "instant" when the click also opened it (layout unsettled)
+  // and "smooth" when it was already open (the glide shows relative position).
+  // Verify each resolver forwards the requested behavior to scrollIntoView.
+  it("defaults to a smooth scroll", () => {
+    const doc = docFrom(
+      '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
+    );
+    highlightChunkRange(doc, "phchunk-0");
+    expect(spy).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  });
+
+  it("forwards an instant scroll to all three resolvers", () => {
+    const anchorDoc = docFrom(
+      '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
+    );
+    highlightChunkRange(anchorDoc, "phchunk-0", "instant");
+
+    const textDoc = docFrom("<p>Expert collapse is mitigated by balancing.</p>");
+    findAndHighlight(textDoc, "Expert collapse is mitigated", "instant");
+
+    const headingDoc = docFrom("<h2>3.2 Expert Routing</h2><p>body</p>");
+    scrollToSection(headingDoc, "Expert Routing", "instant");
+
+    expect(spy).toHaveBeenCalledTimes(3);
+    for (const call of spy.mock.calls) {
+      expect(call[0]).toEqual({ behavior: "instant", block: "center" });
+    }
   });
 });
 
