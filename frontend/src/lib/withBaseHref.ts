@@ -29,6 +29,34 @@ export function stripDeadCdnScripts(html: string): string {
   );
 }
 
+/**
+ * Inject a `content-visibility: auto` hint on the paper's top-level blocks.
+ *
+ * Why: the Citation Canvas embeds a full paper via an iframe `srcdoc`. When the
+ * canvas is revealed (`display:none → block`), the browser lays out the ENTIRE
+ * document at once — for a long, equation-heavy paper that's a multi-second
+ * main-thread freeze, and it recurs on every open/close toggle. `content-
+ * visibility: auto` lets the browser skip layout + paint for off-screen blocks,
+ * so a reveal only lays out the visible screenful; the rest renders lazily as it
+ * scrolls into view. `contain-intrinsic-size` supplies a placeholder size so the
+ * scroll height stays stable for not-yet-rendered blocks.
+ *
+ * Injected into the HTML string (so it's in the `srcdoc` from parse time, before
+ * the first layout) rather than via JS after load, which would be too late.
+ */
+const PERF_STYLE =
+  "<style>body > * { content-visibility: auto; contain-intrinsic-size: auto 600px; }</style>";
+
+export function injectPerfStyle(html: string): string {
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${PERF_STYLE}`);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${PERF_STYLE}</head>`);
+  }
+  return `${PERF_STYLE}${html}`;
+}
+
 export function withBaseHref(html: string, baseHref: string): string {
   const baseTag = `<base href="${baseHref}">`;
   if (/<head[^>]*>/i.test(html)) {
