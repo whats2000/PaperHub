@@ -1,21 +1,27 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { fetchRunTrace } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import type { ToolCallRecord } from "@/types/domain";
+import { JsonTree } from "./JsonTree";
 
 // ---------------------------------------------------------------------------
-// Safe string rendering for unknown values — avoids [object Object] output.
+// Render a known-key value: scalars inline, objects/arrays as a JsonTree so
+// nested payloads stay readable instead of escaping into `\"`/`\n` blobs.
 // ---------------------------------------------------------------------------
-function renderVal(v: unknown): string {
+function renderVal(v: unknown): ReactNode {
   if (v === null || v === undefined) return "";
-  if (typeof v === "string") return v;
+  if (typeof v === "string") {
+    // A scalar string may still be embedded JSON (e.g. a serialized list) —
+    // hand it to JsonTree, which deep-parses and renders raw text otherwise.
+    return <JsonTree value={v} />;
+  }
   if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") {
     return String(v);
   }
-  // object, symbol, or anything else — JSON fallback
-  return JSON.stringify(v) ?? "";
+  // object / array — structural render
+  return <JsonTree value={v} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,12 +64,13 @@ export function TraceArgs({
   const parsed = parseJsonField(args);
   if (parsed === null) return null;
 
-  // Render as plain pre if we couldn't parse it into an object
+  // Couldn't parse into an object — still deep-render via JsonTree (handles
+  // embedded JSON strings + raw prose without escaping).
   if (typeof parsed === "string") {
     return (
-      <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">
-        {parsed}
-      </pre>
+      <div className="text-[11px] text-muted-foreground">
+        <JsonTree value={parsed} />
+      </div>
     );
   }
 
@@ -93,9 +100,9 @@ export function TraceArgs({
         );
       })}
       {unknownEntries.length > 0 && (
-        <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">
-          {JSON.stringify(Object.fromEntries(unknownEntries), null, 2)}
-        </pre>
+        <div className="text-[11px] text-muted-foreground">
+          <JsonTree value={Object.fromEntries(unknownEntries)} />
+        </div>
       )}
     </div>
   );
@@ -120,12 +127,12 @@ export function TraceResult({
   const parsed = parseJsonField(result);
   if (parsed === null) return null;
 
-  // Render as plain pre if we couldn't parse it into an object
+  // Couldn't parse into an object — deep-render via JsonTree.
   if (typeof parsed === "string") {
     return (
-      <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">
-        {parsed}
-      </pre>
+      <div className="text-[11px] text-muted-foreground">
+        <JsonTree value={parsed} />
+      </div>
     );
   }
 
@@ -165,9 +172,9 @@ export function TraceResult({
         );
       })}
       {unknownEntries.length > 0 && (
-        <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">
-          {JSON.stringify(Object.fromEntries(unknownEntries), null, 2)}
-        </pre>
+        <div className="text-[11px] text-muted-foreground">
+          <JsonTree value={Object.fromEntries(unknownEntries)} />
+        </div>
       )}
     </div>
   );
