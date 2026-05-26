@@ -1,0 +1,12 @@
+{
+  "name": "paperhub-presentation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PaperHub 專案介紹簡報 — 17-slide Swiss modernist deck built with pptxgenjs",
+  "scripts": {
+    "build": "node build_deck.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0"
+  }
+}
