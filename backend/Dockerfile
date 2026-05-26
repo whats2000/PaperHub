@@ -49,9 +49,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     texlive-fonts-extra \
     texlive-lang-all \
     texlive-science \
+    texlive-xetex \
     latexmk \
     chktex \
     fonts-firacode \
+    fonts-noto-cjk \
     pandoc \
     poppler-utils \
     libgomp1
