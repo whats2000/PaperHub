@@ -1,0 +1,106 @@
+name: Release
+
+# Fires on a version tag (e.g. v2.21). Builds + pushes the three buildable
+# images to GHCR, then cuts a GitHub Release with auto-generated notes.
+#
+# NOTE: GitHub Actions reads this file from the TAGGED commit's tree, so the
+# tag must point at a commit that contains this workflow. (open-websearch uses
+# stock node:20-slim — nothing to build.)
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push images to GHCR
+
+jobs:
+  images:
+    name: Build & push ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CPU/portable images. GPU users build locally with the
+          # docker-compose.gpu.yml override (TORCH_EXTRA=cuXXX).
+          - image: backend
+            context: ./backend
+          - image: frontend
+            context: ./frontend
+            build-args: |
+              VITE_API_BASE_URL=
+          - image: marker
+            context: ./marker_service
+    steps:
+      - uses: actions/checkout@v4
+
+      # backend (TeX Live + torch) and marker (torch + Surya) are large builds;
+      # reclaim the runner's preinstalled toolchains so they don't run out of disk.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Derive version (strip leading v)
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/paperhub-${{ matrix.image }}
+          # The tag is vMAJOR.MINOR (e.g. v2.21); tag the image with the bare
+          # version + latest. (Computed explicitly to avoid semver-parse quirks
+          # on a 2-part version.)
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          build-args: ${{ matrix.build-args }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Registry-backed layer cache (GHCR), not GHA cache — the torch/TeX
+          # layers are far larger than the 10 GB Actions-cache quota.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/paperhub-${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/paperhub-${{ matrix.image }}:buildcache,mode=max
+
+  release:
+    name: GitHub Release
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Derive version (strip leading v)
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## PaperHub ${{ github.ref_name }}
+
+            Container images on GHCR (also tagged `latest`):
+
+            ```
+            ghcr.io/${{ github.repository_owner }}/paperhub-backend:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/paperhub-frontend:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/paperhub-marker:${{ steps.ver.outputs.version }}
+            ```
