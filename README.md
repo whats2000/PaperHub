@@ -24,18 +24,18 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 
 ## ✨ What it does
 
-- **🔎 Agentic paper retrieval.** Ask a question across your enabled papers and a per-paper subagent *navigates each paper by its section table-of-contents* (`list_sections` → `read_section`) rather than blind cosine-similarity top-k, then a flagship model synthesises across papers over the raw cited chunks.
-- **🧷 Citation Canvas.** Inline `[chunk:N]` markers in every answer link back to the exact passage — click to open a side-by-side reading panel that scrolls to and highlights the cited chunk, in both the LaTeX-rendered HTML *and* the source PDF. Multi-chunk markers (`[chunk:a, b]`) are each clickable. No ungrounded claims.
-- **🌍 Answers in your language.** The router detects the language of your question, so asking in Chinese is answered in Chinese — citation markers and paper titles preserved. A remembered "always reply in X" preference overrides per-turn detection across every agent.
-- **📊 Ask stats about your library.** "How many papers do I have?", "list my sessions" → a `library_stats` agent translates the question to **read-only** SQL over a deterministic table allowlist (a separate in-process sqlite MCP server), self-repairs a failed query, and answers with the numbers + the exact SQL it ran.
-- **🧠 Session + global memory.** Tell it to remember a fact or preference and it persists — **session-scoped** (this chat) or **global** (everywhere). A rule-based safety gate refuses secrets, an LLM detects conflicts and **supersedes** the stale note (active/superseded history kept), and only *active* memories are recalled into answers. A Memory Manager panel lets you view, edit, (de)activate, and delete entries — even in an empty chat (global only).
-- **🧭 Visible routing + tracing.** A routing badge shows which agent + model handled each turn; an expandable trace panel lists every model/MCP/pipeline step with latency and status. The full DAG replays from SQLite.
-- **🌐 Discovery via web + Semantic Scholar.** `paper_search` decomposes into Parser → Discover (no-key multi-engine web search) → Resolve (Semantic Scholar) → Synthesize, so even vague references ("that diffusion paper everyone cites") resolve to a citable hit.
-- **📎 Bring your own papers.** Attach by arXiv ID, paste a URL, or upload a PDF. Content is deduplicated and cached — re-importing the same paper into another session is instant. PDF uploads return instantly on a PyMuPDF baseline, then a background **Marker** worker upgrades them to real figures + captions + equations→LaTeX.
-- **🖼️ Conference-grade slides — decoupled.** "Make a talk from these papers" generates a **Beamer deck** (a PhD-style agent: understand → narrate → draft → coherence → real-figure verification → Overfull-aware compile), grounded so it **never cites a figure that doesn't exist**. Slides come **without notes** by default; speaker notes are an **opt-in** follow-up authored in **any language** ("把講稿變成繁體中文" re-languages the notes *without* regenerating the slides), and you can **diff-edit a single slide or note** by chat ("make slide 3 more concise") — never a full regen. Set the length too ("a 20-minute talk").
+- **🔎 Agentic paper retrieval.** A per-paper subagent navigates each paper by its section table-of-contents (not blind top-k); a flagship model synthesises across papers over the raw cited chunks.
+- **🧷 Citation Canvas.** Inline `[chunk:N]` markers link back to the exact passage — click to highlight it in both the rendered HTML *and* the source PDF. No ungrounded claims.
+- **🌍 Answers in your language.** Ask in Chinese, get Chinese — citations preserved. A remembered "always reply in X" preference overrides per-turn detection.
+- **📊 Library stats in plain language.** "How many papers do I have?" → a `library_stats` agent runs **read-only** SQL over a table allowlist, self-repairs, and answers with the numbers *and* the SQL it ran.
+- **🧠 Session + global memory.** Remembered facts/preferences persist per-chat or everywhere — with a safety gate (refuses secrets), LLM conflict-**supersede**, and a Memory Manager panel to view/edit/(de)activate.
+- **🧭 Visible routing + tracing.** A badge shows which agent + model handled each turn; an expandable trace panel replays every model/MCP/pipeline step from SQLite.
+- **🌐 Discovery via web + Semantic Scholar.** `paper_search` resolves even vague references ("that diffusion paper everyone cites") to a citable hit.
+- **📎 Bring your own papers.** Attach by arXiv ID, URL, or PDF upload — deduplicated + cached; a background **Marker** worker upgrades PDFs to real figures + captions + equations→LaTeX.
+- **🖼️ Conference-grade slides.** Generate a grounded **Beamer deck** that **never cites a figure that doesn't exist**. Speaker notes are an **opt-in**, any-language follow-up; **diff-edit a single slide** by chat ("make slide 3 more concise") — never a full regen.
 - **➗ Math renders.** LaTeX in answers (`$…$`, `$$…$$`) renders as real equations via KaTeX.
-- **💾 Pick up on any device.** Sessions and their full chat record live in the backend, not the browser — open the app anywhere and your conversations, paper-search cards, and references are all there. Deleting a chat removes it everywhere (with Undo); empty scratch chats are cleaned up automatically.
-- **🔌 MCP-native.** The agent's own tools are served over MCP (in-process FastMCP at `/mcp`); external clients (Claude Desktop, Cursor) can reach the same surface.
+- **💾 Pick up on any device.** Sessions and their full chat record live in the backend, not the browser — open the app anywhere. Deleting a chat removes it everywhere (with Undo).
+- **🔌 MCP-native.** The agent's own tools are served over MCP (`/mcp`); external clients (Claude Desktop, Cursor) reach the same surface.
 
 ---
 
@@ -105,6 +105,31 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 
 ## 🚀 Quick start
 
+### 🐳 Run with Docker (recommended — just use the app)
+
+If you want to *run* PaperHub rather than develop it, the whole stack runs in containers — **no Python, Node, or LaTeX to install**. You only need [Docker](https://docs.docker.com/get-docker/) and an LLM key. One `docker compose up` brings up all five services (backend, model-server, Marker PDF ingestion, web-search, and the web UI), so slides (incl. **Chinese/CJK**), RAG, and web discovery all work out of the box.
+
+```bash
+git clone https://github.com/whats2000/PaperHub.git
+cd PaperHub
+cp backend/.env.example backend/.env   # then fill in GEMINI_API_KEY (or your provider's key)
+
+docker compose up -d --build           # CPU; first build downloads TeX Live + torch (a few GB, once)
+```
+
+Open **http://localhost:8080**.
+
+> **GPU (optional, NVIDIA + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)):** faster Marker ingestion + local embedding/rerank. Layer the GPU override:
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+> ```
+
+Data persists in named volumes (`paperhub-workspace` = DB + caches, model weights, Marker weights). `docker compose down` stops it; add `-v` to wipe the data too.
+
+---
+
+### 🛠️ Run from source (for development)
+
 **Prerequisites:** Python 3.11 + [`uv`](https://docs.astral.sh/uv/), Node 18+, and an LLM API key (Gemini by default). **Slide generation** additionally needs a LaTeX distribution on `PATH` (`pdflatex` — e.g. `winget install MiKTeX.MiKTeX`); without it, only the `slides` intent is affected (it returns an "install a LaTeX distribution" message). PDF figure/equation extraction can optionally use the Dockerized `marker` service (`docker compose up -d marker`).
 
 ```bash
@@ -123,7 +148,7 @@ cd backend
 cp .env.example .env           # then fill in GEMINI_API_KEY (or your provider's key)
 ```
 
-### Run the dev stack
+#### Run the dev stack
 
 **Recommended (Windows, one command):** `scripts/start.ps1` orchestrates all
 the sibling processes — it brings up the external MCP daemons (open-websearch)
