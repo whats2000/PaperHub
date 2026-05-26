@@ -72,6 +72,27 @@ Cached keys attach via the dedup cache (`library:<pc_id>`, no re-ingest);
 uncached `arxiv:` keys ingest on attach; uncached `sha256:` uploads error
 (an upload can't be reconstructed from its hash — pre-cache it).
 
+## LLM-as-Judge (automated 0/1 scoring)
+
+The deterministic checks catch obvious failures; the **correctness + grounding**
+call can be automated with an LLM judge. The judge sees only what a reviewer
+sees — prompt, rubric, answer, and the *actual cited chunk text* — and returns a
+structured `{score, confidence, rationale}`. It scores an existing results
+`.json` (no backend calls), so it's cheap to re-run and can use a stronger model
+than the agents under test. It is strict on grounding: a factually-true claim
+that isn't supported by the *cited* chunks scores 0.
+
+```powershell
+# judge a fresh sweep inline:
+scripts/run-benchmark.ps1 -Judge
+# or judge an existing result file:
+cd backend
+uv run python -m benchmark.judge --results benchmark/results/<name>.json --config benchmark/cases.example.toml
+```
+
+The judge needs an LLM API key; it loads `backend/.env` (override with `--env`).
+Verdicts are written back into the `.json` and the `.md` Score column is filled.
+
 ## How a case is scored
 
 The runner records, per case:
