@@ -1,7 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { withBaseHref, stripDeadCdnScripts } from "@/lib/withBaseHref";
+import {
+  withBaseHref,
+  stripDeadCdnScripts,
+  injectPerfStyle,
+} from "@/lib/withBaseHref";
 
 const BASE = "http://localhost:8000/papers/content/7/";
+
+describe("injectPerfStyle", () => {
+  it("injects content-visibility into an existing <head>", () => {
+    const out = injectPerfStyle(
+      "<!DOCTYPE html><html><head><title>x</title></head><body><p>hi</p></body></html>",
+    );
+    expect(out).toContain("content-visibility: auto");
+    expect(out).toContain("contain-intrinsic-size");
+    // Inside <head>, before the body content.
+    expect(out.indexOf("content-visibility")).toBeLessThan(out.indexOf("<body"));
+  });
+
+  it("creates a <head> when the markup lacks one", () => {
+    const out = injectPerfStyle("<html><body><p>hi</p></body></html>");
+    expect(out).toContain("content-visibility: auto");
+    expect(out).toContain("<head>");
+  });
+
+  it("falls back to prepending when there is no <html>", () => {
+    const out = injectPerfStyle("<p>bare fragment</p>");
+    expect(out.startsWith("<style>")).toBe(true);
+    expect(out).toContain("bare fragment");
+  });
+});
 
 describe("withBaseHref", () => {
   it("inserts <base> right after an existing <head>", () => {

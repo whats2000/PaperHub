@@ -12,7 +12,11 @@ import {
   fetchPaperPdfData,
   API_BASE_URL,
 } from "@/lib/api";
-import { withBaseHref, stripDeadCdnScripts } from "@/lib/withBaseHref";
+import {
+  withBaseHref,
+  stripDeadCdnScripts,
+  injectPerfStyle,
+} from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
 import { Button } from "@/components/ui/button";
 import {
@@ -148,11 +152,13 @@ export function CitationCanvas() {
                   mode,
                   status: "ready",
                   // Strip the dead polyfill.io/html5shiv scripts (they stall
-                  // the load), then inject <base> so the paper's relative asset
-                  // URLs (`asset/...`, served by the backend) resolve to the
-                  // backend, not the app origin (srcdoc's default base).
+                  // the load), inject a content-visibility hint (so revealing
+                  // the canvas doesn't lay out the whole paper at once — the
+                  // multi-second open/close freeze), then inject <base> so the
+                  // paper's relative asset URLs (`asset/...`, served by the
+                  // backend) resolve to the backend, not the app origin.
                   html: withBaseHref(
-                    stripDeadCdnScripts(await fetchPaperHtml(pid)),
+                    injectPerfStyle(stripDeadCdnScripts(await fetchPaperHtml(pid))),
                     `${API_BASE_URL}/papers/content/${pid}/`,
                   ),
                 };

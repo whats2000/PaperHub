@@ -15,6 +15,7 @@ import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
+import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
 
 interface Props {
@@ -99,7 +100,7 @@ export function MessageBubble({
             // we want for arbitrary tool-result strings flowing into assistant content.
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex, rehypeChunkCitations]}
+              rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }], rehypeChunkCitations]}
               components={{
                 "chunk-cite": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as {
@@ -115,7 +116,7 @@ export function MessageBubble({
                 },
               } as Components}
             >
-              {message.content || " "}
+              {normalizeMath(message.content) || " "}
             </ReactMarkdown>
           )}
           {isStreamingWithContent && (
