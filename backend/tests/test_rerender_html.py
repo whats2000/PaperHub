@@ -130,6 +130,7 @@ async def test_rerender_sets_dom_ids_and_writes_html(
         kind: Literal["latex", "pdf"],
         out_path: Path,
         resource_dir: Path | None = None,
+        macros: dict[str, object] | None = None,
     ) -> Path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")

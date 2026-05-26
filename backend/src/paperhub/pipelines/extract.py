@@ -47,6 +47,10 @@ _WHITESPACE_RUN = re.compile(r"\s+")
 class LatexExtract:
     main_path: Path
     flattened_text: str
+    # Everything before \begin{document} (with \input chains already inlined) —
+    # the macro definitions the body strips out. Fed to the Citation Canvas
+    # renderer so author macros (\vx, \Ls, …) reach MathJax defined.
+    preamble: str = ""
 
 
 def _find_main_tex(source_dir: Path) -> Path:
@@ -95,14 +99,18 @@ def extract_latex(source_dir: Path) -> LatexExtract:
     main = _find_main_tex(source_dir)
     raw = main.read_text(encoding="utf-8", errors="ignore")
     flat = _inline_recursive(raw, source_dir, seen={main.resolve()})
-    # Strip preamble (everything up to and including \\begin{document}).
+    # Strip preamble (everything up to and including \\begin{document}) — but
+    # keep it: the macro definitions there are needed by the Canvas renderer.
     begin_m = _BEGIN_DOC.search(flat)
+    preamble = flat[: begin_m.start()] if begin_m else ""
     if begin_m:
         flat = flat[begin_m.end():]
     end_m = _END_DOC.search(flat)
     if end_m:
         flat = flat[: end_m.start()]
-    return LatexExtract(main_path=main, flattened_text=flat.strip())
+    return LatexExtract(
+        main_path=main, flattened_text=flat.strip(), preamble=preamble,
+    )
 
 
 def extract_pdf(pdf_path: Path) -> str:

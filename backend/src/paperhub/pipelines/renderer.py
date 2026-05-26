@@ -18,7 +18,18 @@ from typing import Literal
 import pymupdf
 from pylatexenc.latex2text import LatexNodes2Text
 
+from paperhub.pipelines.mathjax_macros import (
+    MacroValue,
+    build_mathjax_config_script,
+)
+
 logger = logging.getLogger(__name__)
+
+# pandoc --mathjax injects a bare MathJax loader <script> with no inline config.
+# We splice our window.MathJax config in just before it. Matches the opening
+# <script ...> whose attributes (which may span newlines, hence [^>]) reference
+# mathjax — the loader tag, not the polyfill above it.
+_MATHJAX_SCRIPT_RE = re.compile(r"<script\b(?=[^>]*?mathjax)")
 
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
 # Inline base64 <img> emitted by PyMuPDF's get_text("html") for PDF pages.
@@ -57,6 +68,7 @@ def render_html(
     kind: Literal["latex", "pdf"],
     out_path: Path,
     resource_dir: Path | None = None,
+    macros: dict[str, MacroValue] | None = None,
 ) -> Path:
     """Render ``source`` to an HTML artefact at ``out_path``.
 
@@ -81,6 +93,9 @@ def render_html(
                 _render_latex_pandoc(source, out_path, resource_dir=resource_dir)
                 if resource_dir is not None:
                     _externalize_local_images(out_path, resource_dir)
+                # Feed MathJax the paper's macro definitions + curated package
+                # macros so \vx, \Ls, \mathbbm, … render instead of leaking raw.
+                _inject_mathjax_macros(out_path, macros)
                 return out_path
             except subprocess.CalledProcessError as exc:
                 # Idiosyncratic LaTeX commonly trips pandoc with non-zero exit.
@@ -168,6 +183,25 @@ def _render_latex_pandoc(
         cwd=tex_path.parent,
         timeout=_PANDOC_TIMEOUT_SECONDS,
     )
+
+
+def _inject_mathjax_macros(
+    html_path: Path, macros: dict[str, MacroValue] | None,
+) -> None:
+    """Splice a ``window.MathJax`` macro config into the rendered HTML, just
+    before pandoc's MathJax loader ``<script>``.
+
+    Always injects the curated package macros (so ``\\mathbbm`` etc. render even
+    for papers with no custom preamble); ``macros`` adds the paper's own author
+    macros on top. No-op when the HTML has no MathJax loader (e.g. a render with
+    no math, or a non-pandoc fallback path)."""
+    html = html_path.read_text(encoding="utf-8")
+    m = _MATHJAX_SCRIPT_RE.search(html)
+    if m is None:
+        return
+    config = build_mathjax_config_script(macros)
+    new_html = html[: m.start()] + config + "\n  " + html[m.start() :]
+    html_path.write_text(new_html, encoding="utf-8")
 
 
 def _externalize_local_images(html_path: Path, resource_dir: Path) -> None:

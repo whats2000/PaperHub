@@ -176,6 +176,66 @@ describe("MessageBubble", () => {
     expect(article?.textContent).not.toContain("$E = mc^2$");
   });
 
+  it("renders a bare \\begin{equation} environment as KaTeX", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "The loss:\n\n\\begin{equation}\nE = mc^2\n\\end{equation}\n\nDone.",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // remark-math only sees math after normalizeMath wraps the env in $$;
+    // a successful KaTeX render (display mode) proves the pipeline consumed it
+    // rather than passing it through as raw text.
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+    const article = container.querySelector("article");
+    // The injected $$ fences must not survive (KaTeX keeps the LaTeX source in
+    // a MathML annotation, so we check the delimiters, not the env name).
+    expect(article?.textContent).not.toContain("$$");
+  });
+
+  it("renders a chunk citation emitted inside an equation as a clickable marker", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "\\begin{equation}\nE = mc^2 [chunk:78081]\n\\end{equation}",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // The equation still renders as KaTeX (the marker didn't pollute the math).
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+    // The lifted citation became a clickable superscript marker, not raw text.
+    expect(screen.getByRole("button", { name: /citation/i })).toBeInTheDocument();
+    expect(container.querySelector("article")?.textContent).not.toContain("[chunk:78081]");
+  });
+
+  it("renders \\mathbbm (bbm package) via the KaTeX macro mapping", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "The indicator $\\mathbbm{1}[x>0]$ and the reals $\\mathbbm{R}$.",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // A successful render proves \mathbbm expanded; an unmapped command would
+    // surface as a rehype-katex error node, not a .katex span.
+    expect(container.querySelector(".katex")).not.toBeNull();
+    const article = container.querySelector("article");
+    // The raw command must not leak as visible text, and KaTeX must not have
+    // emitted its red parse-error markup.
+    expect(article?.querySelector(".katex-error")).toBeNull();
+    expect(article?.textContent).not.toContain("$\\mathbbm");
+  });
+
   it("renders block LaTeX math ($$...$$) as KaTeX", () => {
     const { container } = render(
       <MessageBubble
