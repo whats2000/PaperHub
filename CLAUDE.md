@@ -168,6 +168,7 @@ npm run build     # Vite production build
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
 - `docs/superpowers/specs/` — SRS (**v2.21 current**)
 - `docs/superpowers/plans/` — implementation plans
+- `docs/presentation/` — **project introduction deck** build script (`build_deck.js` via `pptxgenjs`) + README. A 17-slide Swiss-modernist deck (Traditional Chinese content) in cobalt + Arial Black + Microsoft JhengHei. Run `cd docs/presentation && npm install && node build_deck.js` to output `PaperHub_專案介紹.pptx` at the repo root (`*.pptx` is gitignored). Screenshots are embedded directly from `docs/screenshots/`. To rework the layout / change colors / change the slide count, edit `build_deck.js` and re-run.
 
 ## Plan A known follow-ups
 
