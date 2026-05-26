@@ -1,0 +1,45 @@
+# PaperHub MCP registry — DOCKER COMPOSE variant.
+#
+# Mounted into the backend container at /app/mcp_servers.toml and selected via
+# PAPERHUB_MCP_CONFIG (see docker-compose.yml). Differences from the host
+# `mcp_servers.toml`:
+#
+#   - The in-process servers (papers / sql / memory) are mounted on the
+#     backend's OWN FastAPI app, so they stay at http://localhost:8000 — that
+#     loopback resolves to the backend container itself.
+#   - `web` (open-websearch) runs as its OWN compose service, reachable on the
+#     compose network at http://open-websearch:3000. There is NO `launch` block
+#     here — the daemon is managed by Docker, not auto-spawned by the backend
+#     (the python image has no Node/npx). If the service is down the registry
+#     just skips it (non-fatal → papers-only discovery).
+#
+# See backend/mcp_servers.toml.example for the full field reference.
+
+[[server]]
+name = "papers"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp"
+expose = ["search_library", "search_semantic_scholar", "find_related_papers"]
+timeout_seconds = 8.0
+
+[[server]]
+name = "web"
+transport = "streamable_http"
+url = "http://open-websearch:3000/mcp"
+expose = ["search", "fetchWebContent"]
+aliases = { "fetchWebContent" = "fetch" }
+timeout_seconds = 8.0
+
+[[server]]
+name = "sql"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp-sql"
+expose = ["list_tables", "describe", "query"]
+timeout_seconds = 8.0
+
+[[server]]
+name = "memory"
+transport = "streamable_http"
+url = "http://localhost:8000/mcp-memory"
+expose = ["recall", "add", "edit", "forget"]
+timeout_seconds = 8.0

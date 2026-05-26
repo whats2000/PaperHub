@@ -1,0 +1,53 @@
+name: paperhub
+
+# GPU override — layer on top of the base file:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Requires the NVIDIA Container Toolkit on the host (and WSL2 + the NVIDIA
+# driver on Windows). It does two things per GPU service:
+#   1. build the CUDA torch wheel via the TORCH_EXTRA build arg (cu126 by
+#      default — change to cu124/cu130 to match your driver/toolkit), and
+#   2. reserve an NVIDIA GPU and flip PAPERHUB_DEVICE to cuda at runtime.
+#
+# Services not listed here (frontend, open-websearch) are unaffected.
+
+services:
+  backend:
+    build:
+      args:
+        TORCH_EXTRA: cu126
+    environment:
+      - PAPERHUB_DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  modelserver:
+    build:
+      args:
+        TORCH_EXTRA: cu126
+    environment:
+      - PAPERHUB_DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  marker:
+    # Marker's image already bundles CUDA torch (PyPI wheel); just grant it a
+    # GPU. It falls back to CPU automatically if none is visible.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
