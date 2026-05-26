@@ -49,6 +49,11 @@ export function HtmlView({
   scrollBehavior = "smooth",
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
+  // Whether the iframe's srcdoc has finished loading. The highlight effect can
+  // fire between mount and load (e.g. a freshly-fetched paper opened by a
+  // citation) when the document is still empty `about:blank` — a "not found"
+  // there is spurious, since onLoad re-runs apply() once the content is parsed.
+  const loadedRef = useRef(false);
 
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
@@ -64,7 +69,13 @@ export function HtmlView({
         findAndHighlight(doc, highlightText, scrollBehavior)) ||
       (sectionTitle !== null &&
         scrollToSection(doc, sectionTitle, scrollBehavior));
-    if (!found) onHighlightMiss?.();
+    // Only report a real miss once the document is loaded (see loadedRef).
+    if (!found && loadedRef.current) onHighlightMiss?.();
+  };
+
+  const handleLoad = (): void => {
+    loadedRef.current = true;
+    apply();
   };
 
   // Re-apply when the theme toggles or the target changes (the iframe is
@@ -79,7 +90,7 @@ export function HtmlView({
       ref={ref}
       title="Citation Canvas"
       srcDoc={html}
-      onLoad={apply}
+      onLoad={handleLoad}
       sandbox="allow-scripts allow-same-origin"
       className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
     />
