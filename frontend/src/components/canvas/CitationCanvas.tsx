@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 
@@ -10,6 +10,7 @@ import {
   getDocumentMode,
   fetchPaperHtml,
   fetchPaperPdfData,
+  toggleReference,
   API_BASE_URL,
 } from "@/lib/api";
 import {
@@ -42,6 +43,7 @@ export function CitationCanvas() {
   const open = useCanvasStore((s) => s.open);
   const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
   const requestNonce = useCanvasStore((s) => s.requestNonce);
+  const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
 
@@ -49,6 +51,7 @@ export function CitationCanvas() {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const sessions = useChatStore((s) => s.sessions);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
+  const patchReferenceEnabled = useChatStore((s) => s.patchReferenceEnabled);
 
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -66,6 +69,9 @@ export function CitationCanvas() {
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
+  // Whether the active citation's scroll should animate (smooth) — only when the
+  // canvas was already open at click time (see canvas store `requestAnimateScroll`).
+  const [scrollAnimate, setScrollAnimate] = useState(false);
   const [stale, setStale] = useState(false);
   // Bumped on every resolved citation so re-clicking the SAME chunk re-fires
   // the highlight + scroll (the view keys on chunk values, which don't change).
@@ -78,22 +84,74 @@ export function CitationCanvas() {
   // Papers we've already kicked off a fetch for (prefetch dedupe).
   const fetchedDocs = useRef<Set<number>>(new Set());
 
+  // Fetch one paper's document (mode + content) once, populating docByPaper.
+  // Used by the background prefetch (enabled refs) AND on-demand when a citation
+  // resolves to a toggled-off paper that was never prefetched. Deduped on
+  // `fetchedDocs`, so calling it for an already-loaded paper is a no-op.
+  const ensureDoc = useCallback((pid: number) => {
+    if (fetchedDocs.current.has(pid)) return;
+    fetchedDocs.current.add(pid);
+    void (async () => {
+      try {
+        const mode = await getDocumentMode(pid);
+        const entry: DocEntry =
+          mode === "pdf"
+            ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
+            : {
+                mode,
+                status: "ready",
+                // Strip the dead polyfill.io/html5shiv scripts (they stall the
+                // load), inject a content-visibility hint (so revealing the
+                // canvas doesn't lay out the whole paper at once — the
+                // multi-second open/close freeze), then inject <base> so the
+                // paper's relative asset URLs (`asset/...`, served by the
+                // backend) resolve to the backend, not the app origin.
+                html: withBaseHref(
+                  injectPerfStyle(stripDeadCdnScripts(await fetchPaperHtml(pid))),
+                  `${API_BASE_URL}/papers/content/${pid}/`,
+                ),
+              };
+        setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
+      } catch {
+        setDocByPaper((prev) => ({
+          ...prev,
+          [pid]: { mode: "html", status: "error" },
+        }));
+        fetchedDocs.current.delete(pid); // allow a retry on a later pass
+      }
+    })();
+  }, []);
+
   const refIds = refs.map((r) => r.paper_content_id);
   const refIdsKey = refIds.join(",");
+  // All of THIS session's papers, enabled or not. Used for displayed-paper
+  // validity (a citation to a toggled-off paper is still viewable) — distinct
+  // from `refIds`, which is the enabled set that drives the persistent tabs.
+  const allRefIds = allRefs.map((r) => r.paper_content_id);
 
   const firstEnabledRef = refs.length > 0 ? refs[0] : null;
-  // Ignore a `displayedPaperId` that isn't among THIS session's references —
-  // the canvas stays mounted across session switches (W4b), so a leftover
-  // selection from a previous session would otherwise show the wrong paper.
-  // Falling back to the current session's first reference fixes that.
+  // Ignore a `displayedPaperId` that isn't among THIS session's papers — the
+  // canvas stays mounted across session switches (W4b), so a leftover selection
+  // from a previous session would otherwise show the wrong paper. We validate
+  // against ALL session papers (not just enabled) so clicking a citation whose
+  // source is toggled off can still display that paper (view-only).
   const validDisplayedId =
-    displayedPaperId !== null && refIds.includes(displayedPaperId)
+    displayedPaperId !== null && allRefIds.includes(displayedPaperId)
       ? displayedPaperId
       : null;
   const effectivePaperId =
     validDisplayedId ?? firstEnabledRef?.paper_content_id ?? null;
   const activeDoc =
     effectivePaperId != null ? (docByPaper[effectivePaperId] ?? null) : null;
+
+  // The displayed paper when it is NOT an enabled reference — reached by
+  // clicking a citation whose source the user toggled off. Shown view-only via
+  // a transient tab; the reference's enabled state is left untouched (the
+  // citation is historical evidence, separate from future agent context).
+  const transientRef =
+    effectivePaperId !== null && !refIds.includes(effectivePaperId)
+      ? (allRefs.find((r) => r.paper_content_id === effectivePaperId) ?? null)
+      : null;
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
   // requestNonce so the same chunk re-clicked re-resolves; consumes the request
@@ -104,8 +162,19 @@ export function CitationCanvas() {
     getChunk(requestedChunkId)
       .then((c) => {
         if (cancelled) return;
+        // Animate only when NO fresh layout happens: the canvas was already open
+        // AND the cited chunk lives in the paper already on screen. A paper
+        // switch (or a panel open) reveals a mounted-but-hidden iframe that lays
+        // out for the first time, so a smooth glide would track a shifting target
+        // and land wrong — jump instantly in that case. `effectivePaperId` here
+        // is the paper shown BEFORE this resolution switches it.
+        const samePaper = c.paper_content_id === effectivePaperId;
+        // The cited paper may be a toggled-off reference the prefetch skipped —
+        // fetch it on demand so it can be displayed view-only (no-op if cached).
+        ensureDoc(c.paper_content_id);
         setActiveChunk(c);
         setDisplayedPaperId(c.paper_content_id);
+        setScrollAnimate(requestAnimateScroll && samePaper);
         setStale(false);
         setHighlightNonce((n) => n + 1);
       })
@@ -128,50 +197,12 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
-  // Background prefetch: fetch the document (mode + content) for EVERY enabled
-  // reference when the session's reference set changes, so each paper is ready
-  // before the user opens it. `fetchedDocs` dedupes so each paper loads once.
-  //
-  // NOTE: deliberately NO per-effect `cancelled` flag. Under React StrictMode
-  // the effect runs setup→cleanup→setup on the same instance; a `cancelled`
-  // guard from the first setup would discard the in-flight fetch's result while
-  // the dedup ref blocks the second setup from re-fetching — leaving the paper
-  // stuck "Loading…". Letting `setDocByPaper` always run (a no-op if unmounted
-  // in React 18+) + deduping on the ref is StrictMode-safe.
+  // Background prefetch: fetch every enabled reference's document when the
+  // session's reference set changes, so each paper is ready before the user
+  // opens it. `ensureDoc` dedupes so each paper loads once. (Toggled-off papers
+  // are NOT prefetched — they load on demand when a citation targets them.)
   useEffect(() => {
-    for (const pid of refIds) {
-      if (fetchedDocs.current.has(pid)) continue;
-      fetchedDocs.current.add(pid);
-      void (async () => {
-        try {
-          const mode = await getDocumentMode(pid);
-          const entry: DocEntry =
-            mode === "pdf"
-              ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
-              : {
-                  mode,
-                  status: "ready",
-                  // Strip the dead polyfill.io/html5shiv scripts (they stall
-                  // the load), inject a content-visibility hint (so revealing
-                  // the canvas doesn't lay out the whole paper at once — the
-                  // multi-second open/close freeze), then inject <base> so the
-                  // paper's relative asset URLs (`asset/...`, served by the
-                  // backend) resolve to the backend, not the app origin.
-                  html: withBaseHref(
-                    injectPerfStyle(stripDeadCdnScripts(await fetchPaperHtml(pid))),
-                    `${API_BASE_URL}/papers/content/${pid}/`,
-                  ),
-                };
-          setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
-        } catch {
-          setDocByPaper((prev) => ({
-            ...prev,
-            [pid]: { mode: "html", status: "error" },
-          }));
-          fetchedDocs.current.delete(pid); // allow a retry on a later pass
-        }
-      })();
-    }
+    for (const pid of refIds) ensureDoc(pid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refIdsKey]);
 
@@ -185,6 +216,22 @@ export function CitationCanvas() {
     setOverflowOpen(false);
   };
 
+  // Promote the view-only transient paper into an enabled reference (the user
+  // opted in via the "+ Add" affordance). Optimistic, with rollback on failure —
+  // mirrors ReferenceSourcesPanel's toggle. The paper is already displayed +
+  // cached, so it simply gains a persistent tab (transientRef → null).
+  const enableReference = async (): Promise<void> => {
+    if (transientRef === null || backendSessionId === null) return;
+    const papersId = transientRef.papers_id;
+    patchReferenceEnabled(backendSessionId, papersId, true);
+    try {
+      await toggleReference(papersId, true);
+    } catch {
+      patchReferenceEnabled(backendSessionId, papersId, false);
+      toast.error("Couldn't add this paper to references");
+    }
+  };
+
   // Stay mounted while there are references to prefetch (even when closed) so
   // their content loads + caches for the session; render nothing only when
   // closed AND there's nothing to prefetch.
@@ -195,8 +242,13 @@ export function CitationCanvas() {
   const hasOverflow = overflowTabs.length > 0;
 
   // HTML papers stay mounted (hidden) for instant switching; PDF papers render
-  // only when active (react-pdf is heavy). Content is cached either way.
-  const htmlPapers = refIds.filter((pid) => docByPaper[pid]?.mode === "html");
+  // only when active (react-pdf is heavy). Content is cached either way. Include
+  // the view-only transient paper so a citation to a toggled-off source renders.
+  const renderableIds =
+    transientRef !== null ? [...refIds, transientRef.paper_content_id] : refIds;
+  const htmlPapers = renderableIds.filter(
+    (pid) => docByPaper[pid]?.mode === "html",
+  );
 
   return (
     <aside
@@ -259,6 +311,29 @@ export function CitationCanvas() {
               </PopoverContent>
             </Popover>
           )}
+
+          {/* View-only tab for a citation whose source reference is toggled off.
+              Distinct dashed style + an "add" affordance; viewing it does NOT
+              change the reference's enabled state (agent context is untouched). */}
+          {transientRef !== null && (
+            <span className="flex shrink-0 items-center gap-1 rounded border border-dashed border-border bg-muted/40 pl-2 text-xs">
+              <span
+                className="max-w-[9rem] truncate italic text-muted-foreground"
+                title={`${transientRef.title} — viewing (not an active reference)`}
+              >
+                {transientRef.title}
+              </span>
+              <button
+                type="button"
+                onClick={() => void enableReference()}
+                className="flex items-center gap-0.5 rounded px-1.5 py-1 font-medium text-primary hover:bg-primary/10"
+                title="Add to references (include in future answers)"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </span>
+          )}
         </div>
 
         <Button
@@ -306,6 +381,7 @@ export function CitationCanvas() {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
+                scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
                   isActive && activeChunk?.paper_content_id === pid
                     ? highlightNonce

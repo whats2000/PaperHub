@@ -13,6 +13,13 @@ interface CanvasState {
   /** Bumped on every openCitation so clicking the SAME chunk twice re-triggers
    *  resolution in the component (which keys an effect on this). */
   requestNonce: number;
+  /** Whether the citation scroll should animate. FALSE when the click also
+   *  OPENED the canvas (the iframe lays out for the first time while the panel
+   *  animates open + content-visibility blocks render, so a smooth glide would
+   *  track a shifting target and land wrong — an instant jump is acceptable).
+   *  TRUE when the canvas was already open: the glide shows the reader where the
+   *  passage sits relative to the current view. */
+  requestAnimateScroll: boolean;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number) => void;
@@ -32,9 +39,12 @@ export const useCanvasStore = create<CanvasState>()(
       open: false,
       requestedChunkId: null,
       requestNonce: 0,
+      requestAnimateScroll: false,
       width: CANVAS_DEFAULT_WIDTH,
       openCitation: (chunkId) =>
         set((s) => ({
+          // Animate only when the canvas was ALREADY open (see the field doc).
+          requestAnimateScroll: s.open,
           open: true,
           requestedChunkId: chunkId,
           requestNonce: s.requestNonce + 1,

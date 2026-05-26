@@ -24,6 +24,11 @@ interface Props {
   /** Bumped per resolved citation so re-clicking the SAME chunk re-fires the
    *  highlight + scroll even though the target values are unchanged. */
   nonce: number;
+  /** How the scroll-to-passage moves. "smooth" (animate) when the canvas was
+   *  already open — the glide shows the passage's relative position; "instant"
+   *  when this click also opened the canvas (layout isn't settled, so animating
+   *  would track a shifting target). */
+  scrollBehavior?: ScrollBehavior;
 }
 
 /**
@@ -41,8 +46,14 @@ export function HtmlView({
   sectionTitle,
   onHighlightMiss,
   nonce,
+  scrollBehavior = "smooth",
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
+  // Whether the iframe's srcdoc has finished loading. The highlight effect can
+  // fire between mount and load (e.g. a freshly-fetched paper opened by a
+  // citation) when the document is still empty `about:blank` — a "not found"
+  // there is spurious, since onLoad re-runs apply() once the content is parsed.
+  const loadedRef = useRef(false);
 
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
@@ -52,10 +63,19 @@ export function HtmlView({
     // Resolution order, best → last-resort: deterministic anchor → text-search
     // → section heading (so a citation always lands somewhere useful).
     const found =
-      (highlightDomId !== null && highlightChunkRange(doc, highlightDomId)) ||
-      (highlightText !== null && findAndHighlight(doc, highlightText)) ||
-      (sectionTitle !== null && scrollToSection(doc, sectionTitle));
-    if (!found) onHighlightMiss?.();
+      (highlightDomId !== null &&
+        highlightChunkRange(doc, highlightDomId, scrollBehavior)) ||
+      (highlightText !== null &&
+        findAndHighlight(doc, highlightText, scrollBehavior)) ||
+      (sectionTitle !== null &&
+        scrollToSection(doc, sectionTitle, scrollBehavior));
+    // Only report a real miss once the document is loaded (see loadedRef).
+    if (!found && loadedRef.current) onHighlightMiss?.();
+  };
+
+  const handleLoad = (): void => {
+    loadedRef.current = true;
+    apply();
   };
 
   // Re-apply when the theme toggles or the target changes (the iframe is
@@ -70,7 +90,7 @@ export function HtmlView({
       ref={ref}
       title="Citation Canvas"
       srcDoc={html}
-      onLoad={apply}
+      onLoad={handleLoad}
       sandbox="allow-scripts allow-same-origin"
       className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
     />

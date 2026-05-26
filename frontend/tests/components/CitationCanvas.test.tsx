@@ -194,6 +194,58 @@ describe("CitationCanvas reading panel", () => {
     );
   });
 
+  it("views a toggled-off reference's cited paper view-only (Add affordance, enabled untouched)", async () => {
+    // Paper A (7) — the cited chunk's source — is toggled OFF; only Paper B is
+    // an active reference. Clicking the citation must still SHOW Paper A.
+    useChatStore.getState().setReferences(99, [
+      ref({ papers_id: 1, paper_content_id: 7, title: "Paper A", enabled: false }),
+      ref({ papers_id: 2, paper_content_id: 8, title: "Paper B", enabled: true }),
+    ]);
+    const { container } = render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+
+    // The disabled paper is fetched on demand and displayed.
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper A body",
+      ),
+    );
+    // A view-only "Add" affordance is offered...
+    expect(screen.getByRole("button", { name: /Add/ })).toBeInTheDocument();
+    // ...and the reference's enabled state was NOT changed by merely viewing it.
+    const refs = useChatStore.getState().referencesBySession[99] ?? [];
+    expect(refs.find((r) => r.papers_id === 1)?.enabled).toBe(false);
+  });
+
+  it("Add promotes the view-only paper to an enabled reference", async () => {
+    let patched: { enabled: boolean } | null = null;
+    server.use(
+      http.patch(`${API_BASE_URL}/papers/1`, async ({ request }) => {
+        patched = (await request.json()) as { enabled: boolean };
+        return HttpResponse.json({ enabled: true });
+      }),
+    );
+    useChatStore.getState().setReferences(99, [
+      ref({ papers_id: 1, paper_content_id: 7, title: "Paper A", enabled: false }),
+      ref({ papers_id: 2, paper_content_id: 8, title: "Paper B", enabled: true }),
+    ]);
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openCitation(42));
+
+    const addBtn = await screen.findByRole("button", { name: /Add/ });
+    await userEvent.click(addBtn);
+
+    // Backend told to enable, and the store now has Paper A enabled → the
+    // transient "Add" affordance is gone (it became a normal reference tab).
+    await waitFor(() => expect(patched).toEqual({ enabled: true }));
+    expect(
+      (useChatStore.getState().referencesBySession[99] ?? []).find(
+        (r) => r.papers_id === 1,
+      )?.enabled,
+    ).toBe(true);
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+  });
+
   it("shows a stale notice when getChunk 404s, no toast.error", async () => {
     server.use(
       http.get(`${API_BASE_URL}/chunks/42`, () =>
