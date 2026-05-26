@@ -100,3 +100,8 @@ _tmp*
 # Marker service local test artifacts
 marker_service/sample.pdf
 marker_service/*.local.*
+
+# deck artifacts
+.deck*
+*.pptx
+*.ppt
