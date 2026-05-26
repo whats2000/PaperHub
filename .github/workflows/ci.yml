@@ -17,8 +17,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect which top-level folder changed, so each gate runs only when its own
+  # tree (or this workflow) is touched. GitHub Actions has no native per-job
+  # `paths`, so we compute it once and gate the jobs below via `needs` + `if`.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: Backend (pytest · ruff · mypy)
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,6 +85,8 @@ jobs:
 
   frontend:
     name: Frontend (vitest · typecheck · lint · build)
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
