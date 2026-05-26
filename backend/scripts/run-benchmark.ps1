@@ -36,7 +36,9 @@ param(
     [string]$Config = "benchmark/cases.example.toml",
     [string]$Out = "benchmark/results",
     [string]$Only = "",
-    [string]$Resume = ""
+    [string]$Resume = "",
+    [switch]$Judge,
+    [string]$JudgeModel = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +74,8 @@ try {
         }
         $runnerArgs += @("--resume", $resumePath)
     }
+    if ($Judge) { $runnerArgs += "--judge" }
+    if ($JudgeModel) { $runnerArgs += @("--judge-model", $JudgeModel) }
     & uv @runnerArgs
     $code = $LASTEXITCODE
 } finally {

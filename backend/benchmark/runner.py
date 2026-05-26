@@ -121,10 +121,21 @@ def _case_done(d: dict[str, Any]) -> bool:
 
 
 def _md_report(cfg: BenchmarkConfig, results: list[dict[str, Any]]) -> str:
+    def _score_cell(d: dict[str, Any]) -> str:
+        j = d.get("judge")
+        if not j or j.get("score") is None:
+            return "_TBD_"
+        return f"**{j['score']}**"
+
     lines: list[str] = [f"# Benchmark: {cfg.name}", ""]
     lines.append(f"- Backend: `{cfg.base_url}`")
     lines.append(f"- Cases: {len(results)}")
     lines.append(f"- Generated: {datetime.now().isoformat(timespec='seconds')}")
+    judged = [d for d in results if (d.get("judge") or {}).get("score") is not None]
+    if judged:
+        total = sum((d["judge"]["score"] or 0) for d in judged)
+        jmodel = judged[0]["judge"].get("model", "?")
+        lines.append(f"- **LLM-judge score: {total}/{len(judged)}** (model: `{jmodel}`)")
     lines.append("")
     # summary table
     lines.append("| Case | Intent (exp/act) | Auto-checks | Run | Time | Score |")
@@ -136,7 +147,7 @@ def _md_report(cfg: BenchmarkConfig, results: list[dict[str, Any]]) -> str:
         intent = f"{d.get('expect_intent') or '-'}/{d.get('actual_intent') or '-'}"
         lines.append(
             f"| {d['id']} | {intent} | {checks} | {d.get('run_id') or '-'} "
-            f"| {d.get('elapsed_s', 0):.0f}s | _TBD_ |"
+            f"| {d.get('elapsed_s', 0):.0f}s | {_score_cell(d)} |"
         )
     lines.append("")
     # per-case detail
@@ -156,6 +167,12 @@ def _md_report(cfg: BenchmarkConfig, results: list[dict[str, Any]]) -> str:
             lines.append(f"**ERROR:** {d['error']}")
         if d.get("notes"):
             lines.append(f"**Notes:** {'; '.join(d['notes'])}")
+        j = d.get("judge")
+        if j and j.get("score") is not None:
+            lines.append(
+                f"**LLM-judge: {j['score']}** (conf {j.get('confidence')}, "
+                f"`{j.get('model')}`) — {j.get('rationale', '')}"
+            )
         lines.append("")
         if d.get("deck"):
             deck = d["deck"]
@@ -197,6 +214,13 @@ def main() -> None:
         "completed (no error) and re-runs only failed/missing ones into one "
         "merged report.",
     )
+    ap.add_argument(
+        "--judge",
+        action="store_true",
+        help="after the sweep, LLM-as-Judge each case 0/1 (needs an LLM API key "
+        "in backend/.env).",
+    )
+    ap.add_argument("--judge-model", default="", help="override the judge model")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -269,6 +293,20 @@ def main() -> None:
         # Write incrementally so a long sweep (slides cases take minutes) never
         # loses completed cases if a later one hangs or the process is killed.
         _flush()
+
+    if args.judge:
+        import asyncio
+
+        from benchmark.judge import DEFAULT_JUDGE_MODEL, judge_results, load_env
+
+        load_env(".env")
+        jmodel = args.judge_model or DEFAULT_JUDGE_MODEL
+        print(f"\nLLM-judging {len(results)} case(s) with {jmodel} ...", flush=True)
+        results = asyncio.run(judge_results(results, model=jmodel))
+        _flush()
+        judged = [d for d in results if (d.get("judge") or {}).get("score") is not None]
+        total = sum((d["judge"]["score"] or 0) for d in judged)
+        print(f"LLM-judge score: {total}/{len(judged)}", flush=True)
 
     print(f"\nWrote {json_path}\nWrote {md_path}")
 
