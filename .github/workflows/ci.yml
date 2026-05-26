@@ -1,0 +1,81 @@
+name: CI
+
+# Quality gates on every push / PR to main — mirrors the local gates in
+# CLAUDE.md (backend: pytest · ruff · mypy; frontend: vitest · typecheck ·
+# lint · build). These run on Linux; the Docker release (release.yml) only
+# fires on a version tag once these are green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Supersede in-flight runs for the same ref (a force-push / new commit).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest · ruff · mypy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # Cache Hugging Face weights: a test that exercises the in-process
+      # embedder/reranker (conftest sets PAPERHUB_INPROCESS_MODELS=1) downloads
+      # the SentenceTransformer/CrossEncoder once — cache it across runs.
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: hf-${{ runner.os }}-
+
+      # Optional pipeline tools (cheap): pandoc (LaTeX→HTML fallback path) and
+      # poppler-utils (PDF tooling). NOT TeX Live — unit tests stub compilation.
+      - name: System deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pandoc poppler-utils
+
+      - name: Sync dependencies (incl. dev group)
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: uv run ruff check src tests
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Pytest
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend (vitest · typecheck · lint · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
