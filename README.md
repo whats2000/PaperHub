@@ -1,6 +1,8 @@
 <div align="center">
 
-# 📚 PaperHub
+<img src="frontend/public/favicon.svg" alt="PaperHub logo" width="72" height="72" />
+
+# PaperHub
 
 **A paper-aware chat client where every cited sentence traces back to its source.**
 
