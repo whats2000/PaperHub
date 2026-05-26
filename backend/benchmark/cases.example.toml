@@ -1,0 +1,192 @@
+# PaperHub benchmark — example config.
+#
+# Edit this file (or copy it) to define your own test cases. Every paper key
+# below must already be in your cache (paper_content.content_key) — list yours
+# with:  uv run python -m benchmark.list_papers
+# arxiv: keys not yet cached are ingested on attach; sha256: uploads must be
+# pre-cached (an upload can't be reconstructed from its hash).
+#
+# Run (from backend/):  scripts/run-benchmark.ps1 -Config benchmark/cases.example.toml
+
+[benchmark]
+name = "paperhub-rag-qa"
+base_url = "http://127.0.0.1:8000"
+db_path = "workspace/paperhub.db"
+
+# Reusable reference sets. A case names one with `paperset = "..."` (all are
+# attached + enabled), or lists papers inline with `papers = [...]`.
+[papersets]
+transformers = [
+  "arxiv:1706.03762",   # Attention Is All You Need
+  "arxiv:2202.09368",   # Expert Choice Routing (MoE)
+  "arxiv:2408.15664",   # Auxiliary-Loss-Free Load Balancing
+  "arxiv:2412.14711",   # ReMoE: ReLU Routing
+]
+vla = [
+  "arxiv:2503.14734",   # GR00T N1
+  "arxiv:2510.10274",   # X-VLA
+  "arxiv:2605.02881",   # MolmoAct2
+  "arxiv:2402.02385",   # Survey: Robotics with Foundation Models
+]
+ssl = [
+  "arxiv:2301.08243",   # I-JEPA
+  "arxiv:2404.08471",   # V-JEPA
+  "arxiv:2506.09985",   # V-JEPA 2
+  "arxiv:2102.05918",   # ALIGN
+]
+diffusion = [
+  "arxiv:2407.15595",   # Discrete Flow Matching
+  "arxiv:2410.12557",   # One Step Diffusion via Shortcut Models
+]
+uploads = [
+  "sha256:a461808d21b1715a74306506433662b1ad275f07340db54348138810c341a832",  # AI model collapse
+  "sha256:ade2a8b1d411f0fd0f98e33e582591df4ac9e62f37abadd823858a8071a2f8b4",  # LIVECell
+]
+
+# ---------------------------------------------------------------------------
+# RAG-QA cases (16) — expect_intent = "paper_qa"
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "qa-01-mha"
+paperset = "transformers"
+expect_intent = "paper_qa"
+prompt = "What is multi-head attention in the Transformer, and why is it used instead of a single attention function?"
+rubric = "Explains parallel attention heads on projected subspaces (jointly attend to info from different representation subspaces); cited chunks must be from Attention Is All You Need and actually describe MHA."
+
+[[cases]]
+id = "qa-02-posenc"
+paperset = "transformers"
+expect_intent = "paper_qa"
+prompt = "How does the Transformer represent the position of tokens? Give the positional encoding formula."
+rubric = "Sinusoidal positional encodings (sin/cos of position over 10000^(2i/d)); cited chunk shows the formula."
+
+[[cases]]
+id = "qa-03-auxloss-free"
+paperset = "transformers"
+expect_intent = "paper_qa"
+prompt = "How does the auxiliary-loss-free load balancing strategy work for Mixture-of-Experts?"
+rubric = "Per-expert bias added to routing scores, adjusted up/down by load (no gradient/aux-loss); grounded in 2408.15664."
+
+[[cases]]
+id = "qa-04-remoe-routing"
+paperset = "transformers"
+expect_intent = "paper_qa"
+prompt = "What routing function does ReMoE use, and how does it differ from standard TopK routing?"
+rubric = "ReLU routing (fully differentiable, sparsity via ReLU gates) vs discrete TopK; grounded in 2412.14711."
+
+[[cases]]
+id = "qa-05-moe-compare"
+paperset = "transformers"
+expect_intent = "paper_qa"
+prompt = "Compare how Expert Choice routing and the auxiliary-loss-free strategy each address MoE load balancing."
+rubric = "Multi-paper: Expert Choice = experts pick tokens (balanced by construction); aux-loss-free = bias-adjusted token-choice. Citations span BOTH papers."
+
+[[cases]]
+id = "qa-06-groot-arch"
+paperset = "vla"
+expect_intent = "paper_qa"
+prompt = "What is the architecture of GR00T N1? Describe its dual-system design."
+rubric = "System 2 (VLM, slow reasoning) + System 1 (diffusion-transformer action module, fast); grounded in 2503.14734."
+
+[[cases]]
+id = "qa-07-xvla-softprompt"
+paperset = "vla"
+expect_intent = "paper_qa"
+prompt = "What is the soft prompt in X-VLA and what problem does it solve?"
+rubric = "Learnable embodiment-specific soft prompt enabling one model across embodiments; grounded in 2510.10274."
+
+[[cases]]
+id = "qa-08-vla-crossembodiment"
+paperset = "vla"
+expect_intent = "paper_qa"
+prompt = "How do GR00T N1 and X-VLA each achieve cross-embodiment generalization?"
+rubric = "Multi-paper contrast; citations from both GR00T and X-VLA, each claim grounded."
+
+[[cases]]
+id = "qa-09-ijepa-space"
+paperset = "ssl"
+expect_intent = "paper_qa"
+prompt = "In I-JEPA, what is predicted and in what space is the prediction made?"
+rubric = "Predicts representations of target blocks in latent/representation space (not pixels); grounded in 2301.08243."
+
+[[cases]]
+id = "qa-10-vjepa2-planning"
+paperset = "ssl"
+expect_intent = "paper_qa"
+prompt = "How does V-JEPA 2 support planning and prediction for robot control?"
+rubric = "Action-conditioned world model / energy-based planning on learned video representations; grounded in 2506.09985."
+
+[[cases]]
+id = "qa-11-align-scale"
+paperset = "ssl"
+expect_intent = "paper_qa"
+prompt = "What is the scale of the training data in ALIGN and what is its training objective?"
+rubric = "~1B+ noisy image-alt-text pairs; contrastive image-text alignment objective; grounded in 2102.05918."
+
+[[cases]]
+id = "qa-12-discrete-flow-matching"
+paperset = "diffusion"
+expect_intent = "paper_qa"
+prompt = "What is Discrete Flow Matching and how does it relate to diffusion models?"
+rubric = "Flow matching over discrete data via probability paths/velocities; generalizes/parallels diffusion; grounded in 2407.15595."
+
+[[cases]]
+id = "qa-13-shortcut-models"
+paperset = "diffusion"
+expect_intent = "paper_qa"
+prompt = "What is the key idea behind shortcut models for one-step diffusion generation?"
+rubric = "Condition the network on step size so it can take large/one-step jumps; self-consistency training; grounded in 2410.12557."
+
+[[cases]]
+id = "qa-14-model-collapse"
+paperset = "uploads"
+expect_intent = "paper_qa"
+prompt = "What is model collapse and what causes it, according to the paper?"
+rubric = "Degradation from training on recursively generated data; loss of distribution tails; grounded in the AI-model-collapse PDF."
+
+[[cases]]
+id = "qa-15-livecell"
+paperset = "uploads"
+expect_intent = "paper_qa"
+prompt = "What is the LIVECell dataset and what is its scale?"
+rubric = "Large-scale label-free live-cell segmentation dataset; ~1.6M cells / annotated count from the paper; grounded in the LIVECell PDF."
+
+[[cases]]
+id = "qa-16-honesty-negative"
+papers = ["arxiv:1706.03762"]
+expect_intent = "paper_qa"
+prompt = "What top-1 accuracy did this paper report on ImageNet image classification?"
+rubric = "HONESTY/grounding test: Attention Is All You Need is about machine translation (BLEU), NOT ImageNet. A correct answer says the paper doesn't cover ImageNet/classification rather than fabricating a number. Score 0 if it hallucinates an accuracy."
+
+# ---------------------------------------------------------------------------
+# Report / slides cases (4) — expect_intent = "slides" (slow: LaTeX compile)
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "rpt-01-transformer"
+papers = ["arxiv:1706.03762"]
+expect_intent = "slides"
+prompt = "Make a 10-slide presentation summarizing 'Attention Is All You Need'."
+rubric = "Deck generated, page_count ~10, title sensible, no hallucinated figures (verify_figures step ok)."
+
+[[cases]]
+id = "rpt-02-groot"
+papers = ["arxiv:2503.14734"]
+expect_intent = "slides"
+prompt = "Create a 12-slide deck presenting GR00T N1 for a lab meeting."
+rubric = "Deck generated, ~12 pages, covers architecture/results, figures real."
+
+[[cases]]
+id = "rpt-03-budget-minutes"
+papers = ["arxiv:2412.14711"]
+expect_intent = "slides"
+prompt = "Prepare a 5 minute talk on ReMoE."
+rubric = "Budget parsed from minutes (5 min x 0.75 ~ 8 slides, clamped to >=8); deck generated."
+
+[[cases]]
+id = "rpt-04-ssl-compare"
+papers = ["arxiv:2301.08243", "arxiv:2404.08471"]
+expect_intent = "slides"
+prompt = "Build a presentation comparing I-JEPA and V-JEPA."
+rubric = "Multi-paper deck; both papers contribute (contributing_papers has 2); figures real."
