@@ -32,7 +32,16 @@ WORKDIR /app
 #   - pandoc: optional LaTeX→HTML for the Citation Canvas (else pylatexenc).
 #   - poppler-utils: PDF tooling used by the pipeline.
 #   - libgomp1: OpenMP runtime the torch CPU wheel links against.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# BuildKit cache mounts keep downloaded .deb files + apt indices across builds,
+# so a retry after a dropped connection only fetches what's still missing
+# (TeX Live is hundreds of MB). `keep-downloaded-packages` stops the base
+# image's docker-clean from deleting the cached debs; we therefore do NOT
+# `rm -rf` the lists (the cache mount owns them).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-latex-extra \
@@ -45,8 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-firacode \
     pandoc \
     poppler-utils \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+    libgomp1
 
 # uv binary from its official distroless image (no pip-install-uv step).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
