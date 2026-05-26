@@ -39,7 +39,7 @@ const pres = new pptxgen();
 pres.layout = "LAYOUT_WIDE";
 const W = 13.333, H = 7.5;
 pres.author = "whats2000";
-pres.title = "PaperHub — 帶溯源的論文研究 AI 工作站";
+pres.title = "PaperHub — 專案介紹";
 const TOTAL = 17;
 
 // ---------- Helpers ----------
@@ -1168,9 +1168,9 @@ function pageFooter(slide, pageNum, opts = {}) {
 
   // Three oversized Arial Black numbers
   const nums = [
-    { n: "30",     lab: "真實論文已 ingest",    sub: "26 ARXIV  ·  4 PDF UPLOAD" },
-    { n: "19/20",  lab: "Benchmark 答題正確",  sub: "20 CASES  ·  MANUAL SCORED" },
-    { n: "200ms",  lab: "Citation Canvas 延遲", sub: "SRS ACCEPTANCE CRITERION" },
+    { n: "30",     lab: "真實論文已 ingest",   sub: "26 ARXIV  ·  4 PDF UPLOAD" },
+    { n: "19/20",  lab: "Benchmark 答題正確", sub: "20 CASES  ·  MANUAL SCORED" },
+    { n: "1,036",  lab: "後端 + 前端測試數",  sub: "PYTEST + VITEST  ·  EACH PR" },
   ];
   const nw = (W - 1.2) / 3;
   for (let i = 0; i < nums.length; i++) {
@@ -1231,7 +1231,7 @@ function pageFooter(slide, pageNum, opts = {}) {
   }
 
   pageFooter(s, 14);
-  s.addNotes("Modernist 數字頁：80pt Arial Black 數字並排 + 三欄列表。\n\n三大數字皆為真實量測：\n- 30 篇真實論文 ingest（26 arxiv + 4 PDF），ls backend/workspace/papers_cache/ 可驗\n- 20-case benchmark 人工 19/20 (95%)、LLM-judge 17/20 (85%)，結果在 backend/benchmark/results/\n- ≤200ms Citation Canvas 延遲對應 SRS I-8 #2\n\n誠實列限制是 A-rank 要求 — 三條都是真實的操作 / 設計限制，不是空頭未實作清單。");
+  s.addNotes("Modernist 數字頁：80pt Arial Black 數字並排 + 三欄列表。\n\n三大數字皆為真實可驗：\n- 30 篇真實論文 ingest（26 arxiv + 4 PDF）— ls backend/workspace/papers_cache/ 可驗\n- 20-case benchmark 人工 19/20 (95%)、LLM-judge 17/20 (85%)— 結果在 backend/benchmark/results/\n- 1,036 測試（後端 pytest + 前端 vitest）— 每次 PR 都跑\n\n誠實列限制是 A-rank 要求 — 三條都是真實的操作 / 設計限制，不是空頭未實作清單。");
 }
 
 // ============================================================================

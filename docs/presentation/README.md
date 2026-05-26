@@ -39,7 +39,7 @@ Wrote: D:\GitHub\PaperHub\PaperHub_專案介紹.pptx
 | 11 | **AI Tech Depth — 4 個關鍵技術決策**        | AI 技術應用深度                     |
 | 12 | Trust（黑底）— 為什麼可信                   | 信任設計理念                        |
 | 13 | Real-world Fit — 落地場景 + Docker 部署     | 落地場景與部署                      |
-| 14 | Metrics — 真實量測（30 篇 / 19-20 / 200ms） | 成效與量測數據                      |
+| 14 | Metrics — 真實量測（30 篇 / 19-20 / 1,036） | 成效與量測數據                      |
 | 15 | Summary — 三句話總結                        | 總結                                |
 | 16 | Team — 六人團隊 / 四角色                    | 團隊分工                            |
 | 17 | Q&A（黑底）                                 | 收尾與提問                          |
@@ -59,8 +59,10 @@ Wrote: D:\GitHub\PaperHub\PaperHub_專案介紹.pptx
     Black 80–200pt；技術細節用 Consolas mono ALL CAPS。
 - **架構圖（S5）：** vector box-and-arrows，非文字 stack。USER → UI →
   Orchestrator（內含 ROUTER 與 6 agents）↔ SQLite，下游 LLM / RAG / MCP。
-- **資料源：** S14 三大數字（30 篇 / 19-20 / 200ms）來自真實量測 —
-  `backend/workspace/papers_cache/` 與 `backend/benchmark/results/`。
+- **資料源：** S14 三大數字皆來自真實可驗 — `30 篇` 從
+  `backend/workspace/papers_cache/{arxiv,upload}/` 計數；`19/20` benchmark
+  結果在 `backend/benchmark/results/SCORED-REPORT.md`；`1,036` 測試數
+  `uv run pytest --collect-only` + `npm test -- --run` 可數。
 
 ## 修改
 
