@@ -1,0 +1,17 @@
+# Keep the build context small + reproducible. Source + dep manifests only.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Runtime data — must NOT be baked into the image (lives in a named volume).
+workspace/
+workspace_apitest/
+workspace_verify_F/
+# Operator-local config + secrets (mounted/passed at run time, not built in).
+.env
+mcp_servers.toml
+.mcp_daemon_ports
+tests/

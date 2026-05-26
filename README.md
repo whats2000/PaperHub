@@ -271,6 +271,14 @@ cd backend
 uv run paperhub-replay --run-id 1
 ```
 
+**End-to-end benchmark** — `pytest` proves the wiring; the [`backend/benchmark/`](backend/benchmark/) harness proves the *behaviour*. It drives the **live** backend as a simulated user (attach cached papers → route prompts through `/chat`), collects grounding evidence (cited chunk text + agent trace), and scores each case **0/1** on correctness + grounding — by hand or via an **LLM-as-Judge** (fixed temperature, strict grounding). Cases are config-driven (TOML), so you can write your own:
+
+```bash
+# with the backend running (scripts/start.ps1), from backend/:
+scripts/run-benchmark.ps1 -Judge            # 20-case eval (16 paper_qa + 4 slides) + LLM judge
+scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after a drop
+```
+
 > Contributing AI agents: read [CLAUDE.md](CLAUDE.md) first — it carries the conventions, the fix-now policy, and the agent-flow observability rules.
 
 ---
@@ -282,6 +290,7 @@ uv run paperhub-replay --run-id 1
 ├── backend/
 │   ├── src/paperhub/         # FastAPI app · agents · pipelines · rag · mcp · modelserver · tracer
 │   ├── tests/                # pytest suite (773 tests, hermetic)
+│   ├── benchmark/            # config-driven real-API e2e benchmark + LLM-as-Judge
 │   └── pyproject.toml        # uv project · mypy --strict · ruff
 ├── frontend/                 # React 19 + Vite + Tailwind + Zustand
 ├── docs/superpowers/

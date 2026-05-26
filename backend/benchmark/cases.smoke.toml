@@ -1,0 +1,51 @@
+# Smoke-coverage config — one case per remaining router intent, so the
+# benchmark/ module exercises every chat path the old smoke_*.ps1 covered
+# (chitchat, paper_search, library_stats, memory) in addition to the
+# paper_qa + slides cases in cases.example.toml.
+#
+# Unlike the old mocked smoke scripts, these run against REAL models (the
+# live backend) — they verify the path end-to-end, not just the wiring.
+#
+# Run (from backend/):  scripts/run-benchmark.ps1 -Config benchmark/cases.smoke.toml
+
+[benchmark]
+name = "paperhub-smoke"
+base_url = "http://127.0.0.1:8000"
+db_path = "workspace/paperhub.db"
+
+[[cases]]
+id = "smoke-chitchat"
+expect_intent = "chitchat"
+prompt = "Hi! What can you help me do in this app?"
+rubric = "Routes to chitchat; friendly, on-topic answer; no pipeline steps errored."
+
+[[cases]]
+id = "smoke-paper-search"
+expect_intent = "paper_search"
+prompt = "Find the paper 'Attention Is All You Need' and add it."
+rubric = "Routes to paper_search; exercises web + papers MCP dispatch; returns >=1 candidate (the Transformer paper); auto-attaches it."
+
+[[cases]]
+id = "smoke-paper-suggest"
+expect_intent = "paper_suggest"
+prompt = "Recommend a few recent papers on Mixture-of-Experts routing."
+rubric = "Routes to paper_suggest; returns topic-relevant MoE candidates."
+
+[[cases]]
+id = "smoke-library-stats"
+expect_intent = "library_stats"
+prompt = "How many papers are in my library, and how many are arXiv vs PDF uploads?"
+rubric = "Routes to library_stats; SQL agent answers with counts + the SELECT it ran; queries paper_content; no rejected/errored steps."
+
+[[cases]]
+id = "smoke-memory"
+expect_intent = "memory"
+prompt = "Please remember that I prefer answers in Traditional Chinese."
+rubric = "Routes to memory; adds a global memory; safety gate passes; confirms the preference was stored."
+
+[[cases]]
+id = "smoke-slides-guard-or-deck"
+papers = ["arxiv:1706.03762"]
+expect_intent = "slides"
+prompt = "Make a short slide deck about the Transformer paper."
+rubric = "Routes to slides; with pdflatex present a deck is generated, otherwise a graceful 'install LaTeX' message. Either is a pass for the path."

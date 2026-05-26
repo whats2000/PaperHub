@@ -1,7 +1,76 @@
 name: paperhub
+
+# Full-stack PaperHub deployment. This base file is CPU-ONLY and portable —
+# `docker compose up --build` runs the whole stack on any host with Docker.
+#
+# To use NVIDIA GPUs (faster Marker ingestion + local embedding/rerank), layer
+# the GPU override, which adds device reservations and builds the CUDA torch
+# wheel:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Secrets/keys (GEMINI_API_KEY, OPENAI_API_KEY, …) come from backend/.env.
+
 services:
+  # ── Backend API ───────────────────────────────────────────────────────────
+  # FastAPI app on :8000. Also hosts the in-process MCP servers (/mcp,
+  # /mcp-sql, /mcp-memory) — no extra processes for those.
+  backend:
+    build:
+      context: ./backend
+      args:
+        # CPU torch wheel by default; the GPU override sets this to a cuXXX
+        # extra to bake in the matching CUDA wheel.
+        TORCH_EXTRA: ""
+    image: paperhub-backend
+    ports: ["8000:8000"]
+    env_file:
+      - ./backend/.env
+    environment:
+      # Runtime data (SQLite DB, papers_cache, chroma) lives on a named volume.
+      - PAPERHUB_WORKSPACE=/app/workspace
+      # Reach the sibling services by their compose-network names.
+      - PAPERHUB_MODEL_SERVER_HOST=modelserver
+      - PAPERHUB_MODEL_SERVER_PORT=8001
+      - PAPERHUB_MARKER_URL=http://marker:8002
+      # Docker-specific MCP registry (web → open-websearch service; no spawn).
+      - PAPERHUB_MCP_CONFIG=/app/mcp_servers.toml
+      # Models live in the modelserver process, not the worker.
+      - PAPERHUB_INPROCESS_MODELS=0
+      - PAPERHUB_DEVICE=cpu
+    volumes:
+      - paperhub-workspace:/app/workspace
+      # Docker MCP config (service-name URLs, no daemon auto-spawn).
+      - ./backend/mcp_servers.docker.toml:/app/mcp_servers.toml:ro
+    depends_on:
+      - modelserver
+      - marker
+      - open-websearch
+    restart: unless-stopped
+
+  # ── Model server ──────────────────────────────────────────────────────────
+  # Same image as backend, different command: hosts the embedder + reranker on
+  # :8001 so they survive backend restarts. Weights cache to a named volume.
+  modelserver:
+    image: paperhub-backend
+    build:
+      context: ./backend
+      args:
+        TORCH_EXTRA: ""
+    command: ["paperhub-modelserver"]
+    environment:
+      # Bind on all interfaces so the backend container can reach it.
+      - PAPERHUB_MODEL_SERVER_HOST=0.0.0.0
+      - PAPERHUB_MODEL_SERVER_PORT=8001
+      - PAPERHUB_DEVICE=cpu
+    volumes:
+      - paperhub-models:/models
+    restart: unless-stopped
+
+  # ── Marker PDF ingestion ──────────────────────────────────────────────────
   marker:
     build: ./marker_service
+    image: paperhub-marker
     ports: ["8002:8002"]
     # GEMINI_API_KEY turns ON Marker's use_llm accuracy pass (better
     # tables/math/captions via Gemini). The backend's .env is the project key
@@ -31,17 +100,36 @@ services:
       # first /extract and persist across restarts AND image rebuilds, so the
       # build never re-downloads them. HF_HOME/TORCH_HOME point at /models.
       - marker-models:/models
-    # GPU: requires nvidia-container-toolkit on the host. Marker falls back to
-    # CPU automatically if this block is commented out or no GPU is visible.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
-  # NOTE: backend + modelserver services will join here as the project goes full-Docker.
+
+  # ── Web search MCP (open-websearch) ─────────────────────────────────────────
+  # No-key multi-engine search MCP daemon on :3000. The backend's `web` MCP
+  # entry points here. Bing is excluded (its cn.bing.com endpoint 301s most
+  # traffic → 0 results); duckduckgo is the default.
+  open-websearch:
+    image: node:20-slim
+    command: ["npx", "-y", "open-websearch@latest"]
+    environment:
+      - PORT=3000
+      - MODE=http
+      - ALLOWED_SEARCH_ENGINES=duckduckgo,brave,startpage
+      - DEFAULT_SEARCH_ENGINE=duckduckgo
+    restart: unless-stopped
+
+  # ── Frontend (nginx-served SPA + API reverse-proxy) ─────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Empty = relative same-origin API calls, proxied by nginx → backend.
+        VITE_API_BASE_URL: ""
+    image: paperhub-frontend
+    ports: ["8080:80"]
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
+  paperhub-workspace:
+  paperhub-models:
   marker-models:

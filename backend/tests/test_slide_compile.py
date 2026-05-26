@@ -6,6 +6,8 @@ from paperhub.pipelines.slide_pipeline.compile import (
     CompileResult,
     _has_overfull_vbox,
     compile_with_revise,
+    ensure_cjk_font,
+    select_engine,
 )
 
 
@@ -162,6 +164,71 @@ async def test_overfull_vbox_triggers_revise(tmp_path: Path, monkeypatch) -> Non
     assert revised["n"] == 1          # Overfull run was revised exactly once
     assert calls["n"] == 2            # two pdflatex invocations total
     assert "% tightened" in res.tex   # revised source was used
+
+
+# ---------------------------------------------------------------------------
+# select_engine — xelatex when the deck needs it (CJK), pdflatex otherwise
+# ---------------------------------------------------------------------------
+
+def test_select_engine_plain_deck_uses_pdflatex() -> None:
+    tex = "\\documentclass{beamer}\n\\begin{document}\\end{document}"
+    engine = select_engine(tex).lower()
+    assert "pdflatex" in engine and "xelatex" not in engine
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        "\\usepackage{xeCJK}",
+        "\\usepackage{fontspec}",
+        "\\usepackage{ctex}",
+        "% !TeX program = xelatex",
+    ],
+)
+def test_select_engine_unicode_deck_uses_xelatex_when_present(trigger, monkeypatch) -> None:
+    # Pretend xelatex is installed regardless of the host.
+    monkeypatch.setattr(
+        "paperhub.pipelines.slide_pipeline.compile.shutil.which",
+        lambda name: "/usr/bin/xelatex" if name == "xelatex" else None,
+    )
+    tex = f"\\documentclass{{beamer}}\n{trigger}\n\\begin{{document}}\\end{{document}}"
+    assert select_engine(tex) == "/usr/bin/xelatex"
+
+
+def test_select_engine_falls_back_to_pdflatex_when_xelatex_missing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "paperhub.pipelines.slide_pipeline.compile.shutil.which",
+        lambda name: None,  # nothing installed
+    )
+    tex = "\\documentclass{beamer}\n\\usepackage{xeCJK}\n\\begin{document}\\end{document}"
+    # No xelatex → degrade to the module-level PDFLATEX constant.
+    assert "xelatex" not in select_engine(tex)
+
+
+# ---------------------------------------------------------------------------
+# ensure_cjk_font — inject a default CJK font for a bare xeCJK preamble
+# ---------------------------------------------------------------------------
+
+def test_ensure_cjk_font_injects_when_xecjk_unset() -> None:
+    tex = "\\documentclass{beamer}\n\\usepackage{xeCJK}\n\\begin{document}\\end{document}"
+    out = ensure_cjk_font(tex)
+    assert "\\setCJKmainfont{Noto Serif CJK SC}" in out
+    # Inserted immediately after the xeCJK package line.
+    assert out.index("\\setCJKmainfont") > out.index("\\usepackage{xeCJK}")
+
+
+def test_ensure_cjk_font_noop_without_xecjk() -> None:
+    tex = "\\documentclass{beamer}\n\\begin{document}\\end{document}"
+    assert ensure_cjk_font(tex) == tex
+
+
+def test_ensure_cjk_font_noop_when_font_already_set() -> None:
+    tex = (
+        "\\documentclass{beamer}\n\\usepackage{xeCJK}\n"
+        "\\setCJKmainfont{Fandol Song}\n\\begin{document}\\end{document}"
+    )
+    assert ensure_cjk_font(tex) == tex
+    assert "Noto Serif CJK SC" not in ensure_cjk_font(tex)
 
 
 @pytest.mark.asyncio
