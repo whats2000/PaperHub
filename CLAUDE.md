@@ -90,7 +90,9 @@ uv run mypy src           # --strict via pyproject
 
 ### Real-API test process (run against the user's live backend on `:8000`)
 
-Do NOT write a committed script for this, and do NOT boot your own backend — use the one the user runs (frontend + modelserver + MCP wired). The procedure:
+This is now codified by the **`backend/benchmark/` harness** (config-driven, committed) — prefer it over ad-hoc one-off scripts. It drives the user's live backend as a simulated user (attach cached papers → route prompts through `/chat`), collects grounding evidence (cited chunk text + agent trace) into a JSON + Markdown report, and scores each case **0/1** on correctness + grounding — by hand or via the built-in **LLM-as-Judge** (`benchmark/judge.py`, fixed temperature 0, strict grounding). Cases live in TOML (`cases.example.toml` = 20-case eval; `cases.smoke.toml` = one per intent). Run from `backend/`: `scripts/run-benchmark.ps1 [-Judge] [-Only ids] [-Resume prior.json]`. It supersedes the old `smoke_*.ps1` scripts (removed). See [`backend/benchmark/README.md`](backend/benchmark/README.md).
+
+Still do NOT boot your own backend — use the one the user runs (frontend + modelserver + MCP wired); a separate instance has stale code / wrong wiring and races the user's DB. The underlying procedure (what the harness automates, or to do by hand):
 
 1. **Check `:8000` is live** — `curl -s -m 3 http://127.0.0.1:8000/health`. **If it is NOT reachable, STOP and ASK the user to start the backend** (e.g. `scripts/start.ps1`); do not spin up your own instance to work around it (a separate instance has stale code / wrong wiring and races the user's DB).
 2. **Call the API as a user would** (the same HTTP calls the frontend makes — `curl`/`Invoke-RestMethod`, ad-hoc): `POST /sessions` → `POST /papers` (add a paper for paper/slide flows) → `POST /chat` with a real `user_message`; read the streamed SSE result. Use the actual scenario under test (e.g. the user's exact wording, the target language).
@@ -160,7 +162,8 @@ npm run build     # Vite production build
 - `backend/src/paperhub/` — application code (db, models, tracing, llm, agents, api, cli)
 - `backend/src/paperhub/modelserver/` — separate FastAPI app hosting embedder + reranker (v2.8)
 - `backend/tests/` — pytest suite; fixtures under `tests/fixtures/`
-- `backend/scripts/` — operator-facing scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + modelserver + backend)
+- `backend/benchmark/` — config-driven real-API e2e benchmark harness (driver/config/resolve/scorer/runner + `judge.py` LLM-as-Judge); TOML cases; `results/` gitignored. The committed real-API behaviour gate (supersedes `smoke_*.ps1`).
+- `backend/scripts/` — operator-facing scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + modelserver + backend) + `run-benchmark.ps1` (benchmark launcher)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, future `papers_cache/`, future `chroma/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
 - `docs/superpowers/specs/` — SRS (**v2.21 current**)
