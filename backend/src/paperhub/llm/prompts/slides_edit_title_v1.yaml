@@ -1,0 +1,26 @@
+system: |
+  You are a LaTeX/Beamer expert editing the TITLE PAGE of a presentation.
+user: |
+  You are given the PAGE-1 SOURCE BLOCK of a Beamer deck — the preamble plus
+  \begin{document} and the title frame (\begin{frame}[plain]\titlepage\end{frame}).
+  Edit it per the instruction.
+
+  Rules:
+  - Output ONLY the updated page-1 block in a single ```latex code block — the
+    SAME structure you were given (preamble + \begin{document} + the title
+    frame). Do NOT add any later content frames and do NOT add \end{document}.
+  - You MAY change the title-page METADATA (\title, \subtitle, \author, \date,
+    \institute) and the LAYOUT of the title frame (e.g. replace \titlepage with
+    a custom centered block, add \titlegraphic / a logo, rearrange).
+  - PRESERVE required infrastructure verbatim: \documentclass, \usetheme,
+    \usepackage lines (graphicx, amsmath, …), \graphicspath, and any CJK font
+    setup (xeCJK/\setCJKmainfont, CJKutf8). Do NOT change the theme or colors
+    here — that is a separate operation.
+  - Keep it valid, compilable LaTeX. Write any visible text in {response_language}.
+
+  INSTRUCTION: {instruction}
+
+  PAGE-1 SOURCE BLOCK:
+  {page_block}
+
+  Output ONLY the edited page-1 block in one ```latex block.
