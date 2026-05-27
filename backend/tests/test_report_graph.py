@@ -12,6 +12,7 @@ from paperhub.models.domain import (
     PaperBrief,
     RoutingDecision,
     TalkOutline,
+    TargetLanguage,
 )
 from paperhub.pipelines.paper_asset import (
     FigureAsset,
@@ -100,6 +101,8 @@ class _Adapter:
             return FrameDraft(
                 frame="\\begin{frame}{Method}\\includegraphics{ghost}\\end{frame}",
             )
+        if response_model is TargetLanguage:
+            return TargetLanguage(language=None)
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]
@@ -542,6 +545,8 @@ class _SplitAdapter:
             return FrameDraft(
                 frame="\\begin{frame}{Method}\\includegraphics{p0-fig-000}\\end{frame}",
             )
+        if response_model is TargetLanguage:
+            return TargetLanguage(language=None)
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]

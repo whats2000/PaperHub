@@ -1,0 +1,21 @@
+system: |
+  You decide what language the user wants the SLIDE CONTENT (the deck's frames)
+  written in. Output ONLY JSON matching the TargetLanguage schema:
+  {"language": str|null}.
+
+  Set "language" to the language NAME (e.g. "English", "Traditional Chinese",
+  "Japanese", "French") ONLY when the user EXPLICITLY asks for the slides /
+  presentation / deck in a specific language — to translate, convert, render,
+  or write them in that language. Examples that DO set a language:
+   - "把簡報換成英文" / "把投影片翻成日文" → the named language
+   - "make the slides in English" / "translate the deck to French"
+   - "用中文做這份簡報" → "Chinese" (or "Traditional Chinese" if so specified)
+
+  Set "language" to null when the user does NOT name a target language for the
+  slides. CRUCIALLY: do NOT infer a language merely from the language the user
+  is TYPING in — a request written in Chinese with no explicit language ask
+  ("幫我做一份關於X的簡報", "make slides about X") → null. The reply language is
+  handled elsewhere; you only capture an explicit slide-content language request.
+user: |
+  USER INSTRUCTION: {instruction}
+  Output ONLY the TargetLanguage JSON.

@@ -20,6 +20,7 @@ from paperhub.models.domain import (
     PaperBrief,
     SlideBudget,
     TalkOutline,
+    TargetLanguage,
 )
 from paperhub.tracing.tracer import Tracer
 
@@ -308,6 +309,28 @@ async def classify_deck_command(
         )
         step.record_result(dec.model_dump())
     return dec
+
+
+async def detect_slide_language(
+    *, adapter: LlmAdapter, tracer: Tracer, model: str, instruction: str,
+) -> str | None:
+    """Detect the language the user EXPLICITLY asked the SLIDE CONTENT to be in
+    (e.g. "把簡報換成英文" → "English"), independent of the chat-reply language.
+    Returns the language name, or ``None`` when none was named (caller falls
+    back to ``response_language``). Slot ``slides_target_language/v1``; traced as
+    ``report:detect_language``."""
+    async with tracer.step(
+        agent="report", tool="report:detect_language", model=model
+    ) as step:
+        step.record_args({"instruction": instruction})
+        out = await adapter.structured(
+            slot="slides_target_language/v1",
+            variables={"instruction": instruction},
+            response_model=TargetLanguage,
+            model=model,
+        )
+        step.record_result(out.model_dump())
+    return out.language
 
 
 # --------------------------------------------------------------------------

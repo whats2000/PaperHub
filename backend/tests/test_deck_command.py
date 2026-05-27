@@ -2,8 +2,11 @@ from typing import Any
 
 import pytest
 
-from paperhub.agents.report_pipeline import classify_deck_command
-from paperhub.models.domain import DeckCommand
+from paperhub.agents.report_pipeline import (
+    classify_deck_command,
+    detect_slide_language,
+)
+from paperhub.models.domain import DeckCommand, TargetLanguage
 
 
 class _A:
@@ -31,3 +34,23 @@ async def test_edit_current_page(fake_tracer) -> None:
         deck_outline="1. Intro\n3. Method",
     )
     assert out.action == "edit_slides" and out.target_scope == "current"
+
+
+@pytest.mark.asyncio
+async def test_detect_slide_language_explicit(fake_tracer) -> None:
+    lang = await detect_slide_language(
+        adapter=_A(TargetLanguage(language="English")), tracer=fake_tracer,
+        model="m", instruction="能幫我把簡報換成英文嗎",
+    )
+    assert lang == "English"
+
+
+@pytest.mark.asyncio
+async def test_detect_slide_language_none_when_unspecified(fake_tracer) -> None:
+    # No explicit deck-language request → None → caller falls back to
+    # response_language (the chat language).
+    lang = await detect_slide_language(
+        adapter=_A(TargetLanguage(language=None)), tracer=fake_tracer,
+        model="m", instruction="幫我做一份關於這篇論文的簡報",
+    )
+    assert lang is None

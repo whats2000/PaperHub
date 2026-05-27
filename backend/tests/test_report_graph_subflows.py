@@ -19,6 +19,7 @@ from paperhub.models.domain import (
     PaperBrief,
     RoutingDecision,
     TalkOutline,
+    TargetLanguage,
 )
 from paperhub.pipelines.paper_asset import (
     FigureAsset,
@@ -106,6 +107,8 @@ class _CreateAdapter:
             return FrameDraft(
                 frame="\\begin{frame}{Method}Original method content.\\end{frame}"
             )
+        if response_model is TargetLanguage:
+            return TargetLanguage(language=getattr(self, "slide_language", None))
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]
@@ -132,6 +135,8 @@ class _SubflowAdapter:
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         if response_model is DeckCommand:
             return self.command
+        if response_model is TargetLanguage:
+            return TargetLanguage(language=getattr(self, "slide_language", None))
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]
@@ -144,6 +149,7 @@ class _SubflowAdapter:
                 yield f"note in {lang}"
             elif slot == "slides_edit_frame/v1":
                 adapter.edit_frame_calls += 1
+                adapter.edit_frame_lang = kw["variables"]["response_language"]
                 yield "\\begin{frame}{Method}EDITED method content.\\end{frame}"
 
         return g()
@@ -378,6 +384,44 @@ async def test_edit_slides_page_rewrites_one_frame_and_recompiles(  # type: igno
     )
 
 
+@pytest.mark.asyncio
+async def test_edit_slides_uses_detected_task_language_over_chat_language(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """The frame edit must be written in the TASK language the user asked for
+    (detect_slide_language), NOT the router's chat-reply language. Regression:
+    "把簡報換成英文" (typed in Chinese) was keeping the slides in Chinese because
+    edit_frame received response_language instead of the requested target."""
+    await _seed_deck(fake_tracer, migrated_db, tmp_path, monkeypatch)
+
+    async def fake_edit_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, tex, "", 3)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_edit_compile)
+
+    adapter = _SubflowAdapter(
+        DeckCommand(action="edit_slides", target_scope="all")
+    )
+    # The detector resolved an explicit target language for the SLIDES.
+    adapter.slide_language = "English"
+    deps = _make_deps(adapter, fake_tracer, migrated_db, _Retr(), tmp_path)
+    graph = build_report_subgraph(deps)
+    # User typed in Chinese → router response_language is Traditional Chinese.
+    state = _state("能幫我把簡報換成英文嗎", response_language="Traditional Chinese")
+    state["run_id"] = fake_tracer.run_id
+    async for _m, _p in graph.astream(state, stream_mode=["custom", "values"]):
+        pass
+
+    assert adapter.edit_frame_calls >= 1, "edit_slides must edit at least one frame"
+    assert adapter.edit_frame_lang == "English", (
+        "edit_frame must receive the detected TASK language (English), not the "
+        f"chat-reply language; got {adapter.edit_frame_lang!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Titlepage-style deck (NO \maketitle — first frame carries \titlepage).
 #
@@ -418,6 +462,8 @@ class _TitlepageEditAdapter:
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         if response_model is DeckCommand:
             return self.command
+        if response_model is TargetLanguage:
+            return TargetLanguage(language=getattr(self, "slide_language", None))
         raise AssertionError(f"unexpected response_model {response_model!r}")
 
     def stream(self, *, slot, **kw):  # type: ignore[no-untyped-def]

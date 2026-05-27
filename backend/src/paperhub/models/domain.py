@@ -154,6 +154,17 @@ class DeckCommand(BaseModel):
     note_language: str | None = None  # for generate_notes / edit_notes
 
 
+class TargetLanguage(BaseModel):
+    """The language the user EXPLICITLY asked the slide CONTENT to be written in
+    (v2.22). ``None`` when no language was named — callers fall back to the
+    router's ``response_language``. Distinct from the chat-reply language: the
+    user may write in Chinese yet ask for an English deck ("把簡報換成英文")."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    language: str | None = None
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch
@@ -213,3 +224,8 @@ class AgentState(TypedDict, total=False):
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
     report_budget: SlideBudget   # v2.21 (F4): GENERATE length budget
     report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action
+    # v2.22: TASK target language for the SLIDE CONTENT, detected from the
+    # instruction (e.g. "把簡報換成英文" → "English"), independent of the
+    # router's response_language (which is the chat-REPLY language). Empty/unset
+    # → fall back to response_language. Consumed by _generate + _edit_slides.
+    report_slide_language: str

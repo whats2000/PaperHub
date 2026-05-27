@@ -34,6 +34,7 @@ from paperhub.agents.report_pipeline import (
     author_note,
     classify_deck_command,
     coherence_pass,
+    detect_slide_language,
     draft_frame,
     edit_frame,
     narrate_talk,
@@ -140,6 +141,14 @@ def _real_frame_number(full_tex: str, slide_index: int) -> int | None:
             return num
         real += 1
     return None
+
+
+def _slide_language(state: AgentState) -> str:
+    """Language for the SLIDE CONTENT: an explicit task request
+    (``report_slide_language``, set by ``detect_slide_language``) wins, else the
+    chat-reply language. So "把簡報換成英文" yields an English deck even though the
+    user typed in Chinese, while a bare request stays in the user's language."""
+    return state.get("report_slide_language") or response_language(state)
 
 
 def _select_rows(
@@ -264,6 +273,16 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         instruction = effective_query(state) or state.get("user_message", "")
         deck = await get_deck(deps.conn, session_id=state["session_id"])
         if deck is None:
+            # GENERATE: detect an explicit slide-content language (else fall
+            # back to response_language downstream) + the length budget.
+            lang = await detect_slide_language(
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.resolve_model,
+                instruction=instruction,
+            )
+            if lang:
+                out["report_slide_language"] = lang
             out["report_budget"] = parse_slide_budget(instruction)
             return out
 
@@ -271,15 +290,27 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         outline = "\n".join(
             f"{r.page_start}. {_frame_title(r.frame_tex)}" for r in rows
         ) or "(no slides)"
-        cmd = await classify_deck_command(
-            adapter=deps.adapter,
-            tracer=deps.tracer,
-            model=deps.resolve_model,
-            instruction=instruction,
-            current_view_page=state.get("current_view_page") or 1,
-            deck_outline=outline,
+        # Deck-scoped follow-up: classify the action AND detect a slide-content
+        # language request concurrently (both read only the instruction).
+        cmd, lang = await asyncio.gather(
+            classify_deck_command(
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.resolve_model,
+                instruction=instruction,
+                current_view_page=state.get("current_view_page") or 1,
+                deck_outline=outline,
+            ),
+            detect_slide_language(
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.resolve_model,
+                instruction=instruction,
+            ),
         )
         out["report_command"] = cmd
+        if lang:
+            out["report_slide_language"] = lang
         return out
 
     def _route(state: AgentState) -> str:
@@ -385,7 +416,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         budget: SlideBudget = state.get("report_budget") or SlideBudget()
 
         papers: list[dict[str, Any]] = state["report_papers"]
-        lang = response_language(state)
+        lang = _slide_language(state)
         mem = ""
         if deps.recall_enabled:
             mem = await build_active_memory_block(
@@ -793,7 +824,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             }
 
         new_tex = full_tex
-        lang = response_language(state)
+        lang = _slide_language(state)
         # edit_frame returns exactly one frame per call (its prompt forbids
         # splitting), so slide_index→frame_number stays stable across the loop.
         for r in targets:
