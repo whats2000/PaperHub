@@ -77,6 +77,7 @@ from paperhub.pipelines.slide_pipeline.figure_inventory import (
     verify_and_fix_graphics,
 )
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
+from paperhub.pipelines.slide_pipeline.title_meta import build_title_metadata
 from paperhub.tracing.tracer import Tracer
 
 # Find the figures actually referenced across the drafted frames (mirrors the
@@ -559,21 +560,32 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             )
             macros = await asyncio.to_thread(_read_macros)
             await asyncio.to_thread(stage_inventory, used, figures_dir)
+            title_meta = build_title_metadata(papers, talk_title=outline.title)
+            # Single-paper decks show the paper's own title; surface the talk
+            # framing as the subtitle so the narrative isn't lost. Multi-paper
+            # decks already use the talk title, so no subtitle.
+            subtitle = outline.title if len(papers) == 1 else ""
             tex = assemble_deck(
                 AssembleInput(
-                    title=outline.title,
+                    title=title_meta.title,
                     theme=_THEME,
                     additional_tex_macros=macros,
                     # The staged figures dir is the single graphicspath root;
                     # \includegraphics{<key>} resolves to figures/<key>.<ext>.
                     cache_source_dirs=[figures_dir.as_posix()],
                     frames=frames,
+                    author=title_meta.author,
+                    date=title_meta.date,
+                    subtitle=subtitle,
                 )
             )
             astep.record_result(
                 {
                     "staged_keys": [f.key for f in used],
                     "macro_blocks": len(macros),
+                    "title": title_meta.title,
+                    "author": title_meta.author,
+                    "date": title_meta.date,
                 }
             )
         await _flush_steps()
