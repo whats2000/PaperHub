@@ -51,6 +51,9 @@
     --animate-research-beam: research-beam 2s ease-in-out infinite;
     --animate-research-line: research-line 1.8s ease-in-out infinite;
     --animate-research-shimmer: research-shimmer 1.8s linear infinite;
+    /* Slide-build card motion (see SlideProgressCard). */
+    --animate-slide-build-beam: slide-build-beam 2.2s ease-in-out infinite;
+    --animate-slide-build-line: slide-build-line 1.8s ease-in-out infinite;
 }
 
 @keyframes research-beam {
@@ -68,6 +71,18 @@
 @keyframes research-shimmer {
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+}
+
+@keyframes slide-build-beam {
+    0%   { transform: translateX(-120%); opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { transform: translateX(420%); opacity: 0; }
+}
+
+@keyframes slide-build-line {
+    0%, 100% { opacity: 0.3; }
+    50%      { opacity: 0.9; }
 }
 
 :root {

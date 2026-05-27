@@ -4,6 +4,7 @@ import type { ChatSession } from "@/types/domain";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { RoutingBadge } from "@/components/chat/RoutingBadge";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
+import { SlideProgressCard } from "@/components/chat/SlideProgressCard";
 import { TraceInline } from "@/components/chat/TraceInline";
 import { EmptyState } from "@/components/states/EmptyState";
 import { useChatStore } from "@/store/chat";
@@ -89,6 +90,15 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
             !hasResults &&
             (intent === "paper_search" || intent === "paper_suggest");
 
+          // The slide card owns the waiting state for a `slides` GENERATE turn
+          // until the `deck` event lands (message.deck set). Edit/notes
+          // follow-ups already have a deck attached, so the card stays hidden.
+          const showSlideCard =
+            msg.role === "assistant" &&
+            msg.status === "streaming" &&
+            intent === "slides" &&
+            !msg.deck;
+
           return (
             <div key={`${msg.run_id ?? "user"}-${i}`} className="space-y-1">
               {showResearchCard && (
@@ -96,11 +106,16 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
                   <ResearchProgressCard intent={intent} trace={msg.trace} />
                 </div>
               )}
+              {showSlideCard && (
+                <div className="pl-1">
+                  <SlideProgressCard trace={msg.trace} />
+                </div>
+              )}
               <MessageBubble
                 message={msg}
                 onRetry={retryHandler}
                 backendSessionId={session.backend_session_id}
-                researching={showResearchCard}
+                researching={showResearchCard || showSlideCard}
                 onSendTurn={(text) => void send(session.id, text)}
               />
               {msg.role === "assistant" && msg.routing_decision && (
