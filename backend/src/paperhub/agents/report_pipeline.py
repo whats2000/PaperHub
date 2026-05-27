@@ -67,7 +67,7 @@ def _split_frames(tex: str) -> list[str]:
     return [m.group(0).strip() for m in _FRAME_RE.finditer(tex)]
 
 
-def _strip_fences(text: str) -> str:
+def _strip_code_fences(text: str) -> str:
     """Remove a wrapping markdown code fence from an LLM stream, if present."""
     out = text.strip()
     if out.startswith("```"):
@@ -277,7 +277,7 @@ async def revise_tex(
             model=model,
         ):
             tokens.append(tok)
-        revised = _strip_fences("".join(tokens))
+        revised = _strip_code_fences("".join(tokens))
         if not revised:
             revised = tex
         step.record_result({"log_len": len(pdflatex_log), "changed": revised != tex})
@@ -404,8 +404,95 @@ async def edit_frame(
             model=model,
         ):
             toks.append(t)
-        out = "".join(toks).strip()
-        if out.startswith("```"):
-            out = out.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        out = _strip_code_fences("".join(toks))
         step.record_result({"new_frame": out})
     return out or frame_tex
+
+
+# --------------------------------------------------------------------------
+# F4.2: Preamble/title-block editing functions (SRS v2.21, Task B5).
+# --------------------------------------------------------------------------
+
+async def _edit_page_block(
+    *,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    slot: str,
+    tool: str,
+    page_block: str,
+    instruction: str,
+    response_language: str,
+) -> str:
+    """Shared implementation for :func:`edit_title_block` and
+    :func:`edit_preamble_block`.  Streams an LLM rewrite of the deck's
+    page-1 source block (preamble + title frame), strips code fences, and
+    traces the step."""
+    async with tracer.step(agent="report", tool=tool, model=model) as step:
+        step.record_args({"instruction": instruction, "block_len": len(page_block)})
+        toks: list[str] = []
+        async for t in adapter.stream(
+            slot=slot,
+            variables={
+                "page_block": page_block,
+                "instruction": instruction,
+                "response_language": response_language or "the user's language",
+            },
+            model=model,
+        ):
+            toks.append(t)
+        out = _strip_code_fences("".join(toks)).strip()
+        result = out or page_block  # fall back to the original on empty output
+        step.record_result({"new_block_len": len(result)})
+    return result
+
+
+async def edit_title_block(
+    *,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    page_block: str,
+    instruction: str,
+    response_language: str,
+) -> str:
+    """Rewrite the title page's metadata + title-frame layout (F4.2).
+
+    Slot ``slides_edit_title/v1``; traced as ``report:edit_title``.
+    """
+    return await _edit_page_block(
+        adapter=adapter,
+        tracer=tracer,
+        model=model,
+        slot="slides_edit_title/v1",
+        tool="report:edit_title",
+        page_block=page_block,
+        instruction=instruction,
+        response_language=response_language,
+    )
+
+
+async def edit_preamble_block(
+    *,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    model: str,
+    page_block: str,
+    instruction: str,
+    response_language: str,
+) -> str:
+    """Restyle the whole deck via its preamble (theme/colors/fonts/header-footer)
+    (F4.2).
+
+    Slot ``slides_edit_preamble/v1``; traced as ``report:edit_preamble``.
+    """
+    return await _edit_page_block(
+        adapter=adapter,
+        tracer=tracer,
+        model=model,
+        slot="slides_edit_preamble/v1",
+        tool="report:edit_preamble",
+        page_block=page_block,
+        instruction=instruction,
+        response_language=response_language,
+    )
