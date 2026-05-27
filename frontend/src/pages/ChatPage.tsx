@@ -14,7 +14,7 @@ import { useSessionsSync } from "@/hooks/useSessionsSync";
 import { useDeckSync } from "@/hooks/useDeckSync";
 import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
 import { useCanvasResize } from "@/hooks/useCanvasResize";
-import { getDeck } from "@/lib/api";
+import { getDeck, updateDeckNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const CitationCanvas = lazy(() =>
@@ -153,6 +153,21 @@ export function ChatPage() {
     };
   }, [slidesOpen, backendSessionId, deckBusy, deckRevision]);
 
+  // Persist a manual speaker-note edit, then refresh the local notes map from
+  // the backend's rebuilt response so the pane shows the saved text.
+  const handleSaveNote = async (page: number, text: string): Promise<void> => {
+    if (backendSessionId === null) return;
+    try {
+      const res = await updateDeckNote(backendSessionId, page, text);
+      setSpeakerNotes(res.speaker_notes);
+    } catch (err: unknown) {
+      toast.error("Couldn't save the speaker note", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  };
+
   const handleSubmit = (text: string): void => {
     const sessionId = activeSessionId ?? newSession();
     send(sessionId, text).catch((err: unknown) => {
@@ -282,6 +297,7 @@ export function ChatPage() {
                     speakerNotes={speakerNotes}
                     busy={deckBusy}
                     stage={deckStage}
+                    onSaveNote={handleSaveNote}
                   />
                 </Suspense>
               </div>

@@ -366,6 +366,20 @@ export async function getDeck(sessionId: number): Promise<DeckMeta> {
   return apiFetch<DeckMeta>(`/sessions/${sessionId}/deck`);
 }
 
+/** Manually set the speaker note for the slide occupying `page`. Returns the
+ *  rebuilt page→note map (the backend resolves a continuation page to its
+ *  owning slide). */
+export async function updateDeckNote(
+  sessionId: number,
+  page: number,
+  text: string,
+): Promise<{ speaker_notes: Record<string, string>; has_notes: boolean }> {
+  return apiFetch<{ speaker_notes: Record<string, string>; has_notes: boolean }>(
+    `/sessions/${sessionId}/deck/notes/${page}`,
+    { method: "PATCH", body: JSON.stringify({ text }) },
+  );
+}
+
 /** Build the URL for streaming the session's compiled deck PDF directly from
  * the backend. Use `fetchDeckPdfData` to load the bytes for react-pdf. */
 export function deckPdfUrl(sessionId: number): string {

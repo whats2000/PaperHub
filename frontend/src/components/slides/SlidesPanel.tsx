@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, Pencil } from "lucide-react";
 
 import {
   useSlidesStore,
@@ -31,7 +31,14 @@ interface Props {
   busy?: boolean;
   /** Present-tense status shown on the mask (live slide-agent stage). */
   stage?: string;
+  /** Persist a manual speaker-note edit for `page`. When omitted the note pane
+   *  stays read-only (no Edit affordance). */
+  onSaveNote?: (page: number, text: string) => Promise<void>;
 }
+
+/** Sentinel the backend writes on pages a multi-page slide spills onto; its
+ *  real note lives on the slide's first page, so we don't offer to edit it. */
+const CONTINUED_NOTE = "(continued)";
 
 /**
  * SlidesPanel — renders the compiled deck PDF with:
@@ -42,7 +49,13 @@ interface Props {
  * - A resizable speaker note pane below the slide (draggable horizontal divider).
  * - Keyboard navigation: ArrowLeft/ArrowRight change page.
  */
-export function SlidesPanel({ sessionId, speakerNotes, busy = false, stage }: Props) {
+export function SlidesPanel({
+  sessionId,
+  speakerNotes,
+  busy = false,
+  stage,
+  onSaveNote,
+}: Props) {
   const deck = useSlidesStore((s) => s.deckBySession[sessionId]);
   const revision = useSlidesStore((s) => s.deckRevisionBySession[sessionId] ?? 0);
   const currentPage = useSlidesStore(
@@ -233,6 +246,34 @@ export function SlidesPanel({ sessionId, speakerNotes, busy = false, stage }: Pr
 
   const speakerNote = speakerNotes[String(currentPage)];
 
+  // --- manual speaker-note editing ---
+  // Track WHICH page is being edited (not a bare bool) so navigating to another
+  // page auto-exits edit mode by derivation — no setState-in-effect needed.
+  const [editingPage, setEditingPage] = useState<number | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const editingNote = editingPage === currentPage;
+  // A continuation page ("(continued)") and an in-flight deck edit both block
+  // editing; the real note lives on the owning slide's first page.
+  const noteEditable =
+    !!onSaveNote && !busy && speakerNote !== CONTINUED_NOTE;
+
+  const beginEditNote = () => {
+    setNoteDraft(speakerNote && speakerNote !== CONTINUED_NOTE ? speakerNote : "");
+    setEditingPage(currentPage);
+  };
+  const cancelEditNote = () => setEditingPage(null);
+  const saveNote = async () => {
+    if (!onSaveNote) return;
+    setSavingNote(true);
+    try {
+      await onSaveNote(currentPage, noteDraft);
+      setEditingPage(null);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   return (
     <div
       ref={panelRef}
@@ -403,11 +444,59 @@ export function SlidesPanel({ sessionId, speakerNotes, busy = false, stage }: Pr
         className="shrink-0 overflow-y-auto border-t border-border bg-muted/20 px-3 py-2"
         style={{ height: noteHeight }}
       >
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-          Speaker note
-        </p>
-        {speakerNote ? (
-          <p className="text-xs leading-relaxed">{speakerNote}</p>
+        <div className="mb-1 flex items-center gap-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Speaker note
+          </p>
+          {!editingNote && noteEditable && (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label="edit speaker note"
+              className="ml-auto"
+              onClick={beginEditNote}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+
+        {editingNote ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              aria-label="speaker note"
+              className="w-full resize-none rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
+              rows={Math.max(3, Math.round((noteHeight - 56) / 18))}
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              disabled={savingNote}
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={cancelEditNote}
+                disabled={savingNote}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => void saveNote()}
+                disabled={savingNote}
+              >
+                {savingNote ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        ) : speakerNote ? (
+          <p className="text-xs leading-relaxed whitespace-pre-wrap">{speakerNote}</p>
         ) : (
           <p className="text-xs text-muted-foreground italic">
             No speaker note for this slide

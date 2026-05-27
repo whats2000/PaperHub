@@ -83,6 +83,54 @@ describe("SlidesPanel", () => {
     expect(api.fetchDeckPdfData).not.toHaveBeenCalled();
   });
 
+  it("lets the user edit a speaker note and saves it", async () => {
+    const onSaveNote = vi.fn(() => Promise.resolve());
+    render(
+      <SlidesPanel
+        sessionId={7}
+        speakerNotes={{ "1": "Original note" }}
+        onSaveNote={onSaveNote}
+      />,
+    );
+    await screen.findByText("Original note");
+    await userEvent.click(screen.getByRole("button", { name: /edit speaker note/i }));
+    const box = screen.getByRole("textbox", { name: /speaker note/i });
+    expect(box).toHaveValue("Original note");
+    await userEvent.clear(box);
+    await userEvent.type(box, "My revised note");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSaveNote).toHaveBeenCalledWith(1, "My revised note");
+  });
+
+  it("offers no note Edit affordance while a deck edit is in flight", () => {
+    render(
+      <SlidesPanel
+        sessionId={7}
+        speakerNotes={{ "1": "Original note" }}
+        onSaveNote={vi.fn()}
+        busy
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /edit speaker note/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not offer to edit a '(continued)' continuation page", () => {
+    useSlidesStore.setState({ currentPageBySession: { 7: 3 } });
+    render(
+      <SlidesPanel
+        sessionId={7}
+        speakerNotes={{ "2": "Real note", "3": "(continued)" }}
+        onSaveNote={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("(continued)")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /edit speaker note/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("reloads the deck (cache-busted by revision) when the edit completes", async () => {
     useSlidesStore.setState({ deckRevisionBySession: { 7: 4 } });
     const { rerender } = render(

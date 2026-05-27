@@ -16,10 +16,22 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.db.deck_slides import (
+    get_deck_slides,
+    rebuild_speaker_notes_json,
+    update_slide_note,
+)
 from paperhub.db.decks import get_deck
+
+
+class NoteEdit(BaseModel):
+    """Body for a manual speaker-note edit."""
+
+    text: str
 
 router = APIRouter(tags=["decks"])
 
@@ -102,6 +114,41 @@ async def get_deck_tex(session_id: int) -> FileResponse:
         media_type="text/plain",
         filename=_download_name(deck, "tex"),
     )
+
+
+@router.patch("/sessions/{session_id}/deck/notes/{page}")
+async def edit_deck_note(
+    session_id: int, page: int, body: NoteEdit
+) -> dict[str, Any]:
+    """Manually set the speaker note for the slide occupying ``page``.
+
+    Resolves ``page`` to the slide whose [page_start, page_end] contains it (so
+    editing a continuation page updates that slide's single note), preserves the
+    slide's existing note_language, rebuilds the page→note cache, and returns it.
+    404 if there is no deck or no slide covering the page.
+    """
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        deck = await get_deck(conn, session_id=session_id)
+        if deck is None:
+            raise HTTPException(status_code=404, detail="no deck for this session")
+        rows = await get_deck_slides(conn, deck_id=deck.id)
+        target = next(
+            (r for r in rows if r.page_start <= page <= r.page_end), None
+        )
+        if target is None:
+            raise HTTPException(
+                status_code=404, detail=f"no slide covering page {page}"
+            )
+        await update_slide_note(
+            conn,
+            deck_id=deck.id,
+            slide_index=target.slide_index,
+            note_text=body.text,
+            note_language=target.note_language or "",
+        )
+        notes = await rebuild_speaker_notes_json(conn, deck_id=deck.id)
+    return {"speaker_notes": notes, "has_notes": bool(notes)}
 
 
 __all__ = ["router"]
