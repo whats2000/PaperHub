@@ -306,6 +306,17 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 instruction=instruction,
             ),
         )
+        # Page 1 is the title page (no content slide row). An edit_slides command
+        # that resolves to page 1 is really a title-page edit (F4.2).
+        if cmd.action == "edit_slides":
+            cvp = state.get("current_view_page") or 1
+            tgt = cmd.target_page if cmd.target_scope == "page" else (
+                cvp if cmd.target_scope == "current" else None
+            )
+            content_rows = [r for r in rows if not is_title_frame(r.frame_tex)]
+            first_content_page = min((r.page_start for r in content_rows), default=2)
+            if tgt is not None and tgt < first_content_page:
+                cmd = cmd.model_copy(update={"action": "edit_title"})
         out["report_command"] = cmd
         if lang:
             out["report_slide_language"] = lang
@@ -323,6 +334,10 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             return "create"
         if cmd.action in ("generate_notes", "edit_notes"):
             return "notes"
+        if cmd.action == "edit_title":
+            return "edit_title"
+        if cmd.action == "edit_preamble":
+            return "edit_preamble"
         return "edit_slides"
 
     async def _empty(state: AgentState) -> AgentState:
@@ -1085,6 +1100,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             "create": "sl_generate",
             "notes": "sl_notes",
             "edit_slides": "sl_edit_slides",
+            "edit_title": "sl_edit_title",
+            "edit_preamble": "sl_edit_preamble",
         },
     )
     g.add_edge("sl_empty", END)

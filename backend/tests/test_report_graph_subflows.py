@@ -123,7 +123,7 @@ class _SubflowAdapter:
     """Stub adapter for a follow-up turn on an existing deck.
 
     structured() returns the configured DeckCommand for slides_deck_command/v1.
-    stream() serves note-author + edit-frame slots.
+    stream() serves note-author + edit-frame + edit-title + edit-preamble slots.
     """
 
     def __init__(self, command: DeckCommand) -> None:
@@ -131,6 +131,7 @@ class _SubflowAdapter:
         self.note_author_calls = 0
         self.edit_frame_calls = 0
         self.note_split_calls = 0
+        self.last_edit_slot: str | None = None
 
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         if response_model is DeckCommand:
@@ -143,6 +144,8 @@ class _SubflowAdapter:
         adapter = self
 
         async def g():  # type: ignore[no-untyped-def]
+            if slot in ("slides_edit_title/v1", "slides_edit_preamble/v1", "slides_edit_frame/v1"):
+                adapter.last_edit_slot = slot
             if slot == "slides_note_author/v1":
                 adapter.note_author_calls += 1
                 lang = kw["variables"]["note_language"]
@@ -151,6 +154,8 @@ class _SubflowAdapter:
                 adapter.edit_frame_calls += 1
                 adapter.edit_frame_lang = kw["variables"]["response_language"]
                 yield "\\begin{frame}{Method}EDITED method content.\\end{frame}"
+            elif slot in ("slides_edit_title/v1", "slides_edit_preamble/v1"):
+                yield kw["variables"]["page_block"]
 
         return g()
 
@@ -573,3 +578,81 @@ async def test_edit_slides_titlepage_deck_correct_frame_mapping(  # type: ignore
     assert any("EDITED" in r.frame_tex for r in post if r.slide_index == 0), (
         "targeted frame (slide_index=0) must show EDITED content in DB"
     )
+
+
+# ---------------------------------------------------------------------------
+# B7 — edit_title / edit_preamble routing + page-1 → title fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_edit_title_routes_and_rewrites_preamble_keeps_frames(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """edit_title action must route to sl_edit_title (slot slides_edit_title/v1),
+    must NOT invoke edit_frame, and must leave the content frames byte-identical."""
+    await _seed_deck(fake_tracer, migrated_db, tmp_path, monkeypatch)
+    deck = await get_deck(migrated_db, session_id=1)
+    assert deck is not None
+    pre = await get_deck_slides(migrated_db, deck_id=deck.id)
+    frames_before = {r.slide_index: r.frame_tex for r in pre}
+
+    async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, tex, "", 3)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_compile)
+
+    adapter = _SubflowAdapter(DeckCommand(action="edit_title", target_scope="all"))
+    graph = build_report_subgraph(_make_deps(adapter, fake_tracer, migrated_db, _Retr(), tmp_path))
+    state = _state("rename the title to FOO")
+    state["run_id"] = fake_tracer.run_id
+    async for _m, _p in graph.astream(state, stream_mode=["custom", "values"]):
+        pass
+
+    assert adapter.last_edit_slot == "slides_edit_title/v1", (
+        f"must route to the title edit; got {adapter.last_edit_slot!r}"
+    )
+    assert adapter.edit_frame_calls == 0, "title flow must NOT edit a content frame"
+    post = await get_deck_slides(migrated_db, deck_id=deck.id)
+    assert {r.slide_index: r.frame_tex for r in post} == frames_before, (
+        "content frames must be unchanged by edit_title"
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_slides_on_page_one_falls_back_to_title(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """An edit_slides command targeting page 1 (the \\maketitle title page, which
+    has no content row in deck_slides) must be transparently redirected to the
+    title-edit flow (sl_edit_title / slides_edit_title/v1) by the page-1 fallback
+    in _resolve, and must NOT invoke edit_frame."""
+    # _seed_deck uses _DECK_TEX: \maketitle on page 1, content frames on pages 2+.
+    await _seed_deck(fake_tracer, migrated_db, tmp_path, monkeypatch)
+
+    async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, tex, "", 3)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_compile)
+
+    # Classifier says edit_slides on page 1 (the title page — no content row).
+    adapter = _SubflowAdapter(
+        DeckCommand(action="edit_slides", target_scope="page", target_page=1)
+    )
+    graph = build_report_subgraph(_make_deps(adapter, fake_tracer, migrated_db, _Retr(), tmp_path))
+    state = _state("edit this slide", current_view_page=1)
+    state["run_id"] = fake_tracer.run_id
+    async for _m, _p in graph.astream(state, stream_mode=["custom", "values"]):
+        pass
+
+    # Page 1 is the title page → redirected to the title-edit flow.
+    assert adapter.last_edit_slot == "slides_edit_title/v1", (
+        f"page-1 edit_slides must fall back to title edit; got {adapter.last_edit_slot!r}"
+    )
+    assert adapter.edit_frame_calls == 0, "page-1 fallback must NOT edit a content frame"
