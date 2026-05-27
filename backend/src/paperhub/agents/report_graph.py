@@ -202,22 +202,26 @@ async def _enabled_papers(
     conn: aiosqlite.Connection, session_id: int
 ) -> list[dict[str, Any]]:
     async with conn.execute(
-        "SELECT pc.id, pc.title, pc.abstract, pc.sections_json, pc.source_dir_path "
+        "SELECT pc.id, pc.title, pc.abstract, pc.sections_json, pc.source_dir_path, "
+        "pc.authors_json, pc.year, pc.arxiv_id, pc.kind "
         "FROM papers p JOIN paper_content pc ON pc.id = p.paper_content_id "
         "WHERE p.session_id = ? AND p.enabled = 1 ORDER BY p.added_at",
         (session_id,),
     ) as cur:
         rows = await cur.fetchall()
-    return [
-        {
-            "id": r[0],
-            "title": r[1],
-            "abstract": r[2],
-            "sections_json": r[3],
-            "source_dir": r[4],
-        }
-        for r in rows
-    ]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            authors = list(json.loads(r[5] or "[]"))
+        except (ValueError, TypeError):
+            authors = []
+        out.append({
+            "id": r[0], "title": r[1], "abstract": r[2],
+            "sections_json": r[3], "source_dir": r[4],
+            "authors": [str(a) for a in authors],
+            "year": r[6], "arxiv_id": r[7], "kind": r[8],
+        })
+    return out
 
 
 def _inventory_lines(figs: list[InventoryFigure]) -> str:
