@@ -66,6 +66,7 @@ from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.assemble import AssembleInput, assemble_deck
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
+    is_title_frame,
     replace_frame_in_beamer,
 )
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
@@ -100,9 +101,6 @@ def _pdflatex_available() -> bool:
 
 _FRAMETITLE_RE = re.compile(r"\\frametitle\{([^}]*)\}")
 _BEGINFRAME_TITLE_RE = re.compile(r"\\begin\{frame\}\s*\{([^}]*)\}")
-# The synthetic \maketitle tuple emitted by extract_frames_from_beamer when
-# \maketitle precedes the first real frame (mirrors deck_slides_map).
-_SYNTHETIC_MAKETITLE = r"\maketitle"
 
 
 def _frame_title(frame_tex: str) -> str:
@@ -117,23 +115,14 @@ def _frame_title(frame_tex: str) -> str:
 
 
 def _real_frame_number(full_tex: str, slide_index: int) -> int | None:
-    """Map a 0-based ``deck_slides.slide_index`` to the 1-based frame number
-    that ``replace_frame_in_beamer`` expects.
-
-    ``build_deck_slides`` drops the synthetic ``\\maketitle`` tuple, so
-    ``slide_index`` enumerates only the real ``\\begin{frame}`` blocks in
-    document order. ``extract_frames_from_beamer`` numbers ALL frames including
-    that synthetic ``\\maketitle`` (frame 1 when it precedes the first frame),
-    so for a ``\\maketitle`` deck the first real frame is frame number 2, not 1.
-    Walk the extracted frames, skipping synthetic ``\\maketitle`` tuples, and
-    return the ``frame_number`` of the Nth real frame (N = ``slide_index``)."""
+    """Map a 0-based content ``slide_index`` to the 1-based frame number
+    ``replace_frame_in_beamer`` expects, skipping a leading title frame
+    (synthetic ``\\maketitle`` or a real ``\\titlepage`` frame)."""
     real = 0
     seen: set[int] = set()
-    for num, content, _s, _e in extract_frames_from_beamer(full_tex):
-        if content.strip() == _SYNTHETIC_MAKETITLE:
+    for i, (num, content, _s, _e) in enumerate(extract_frames_from_beamer(full_tex)):
+        if i == 0 and is_title_frame(content):
             continue
-        # extract_frames_from_beamer duplicates a frame tuple per overlay page;
-        # count each distinct frame_number once.
         if num in seen:
             continue
         seen.add(num)

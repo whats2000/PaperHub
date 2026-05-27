@@ -425,16 +425,17 @@ async def test_edit_slides_uses_detected_task_language_over_chat_language(  # ty
 # ---------------------------------------------------------------------------
 # Titlepage-style deck (NO \maketitle — first frame carries \titlepage).
 #
-# slide_index→page mapping for _TITLEPAGE_TEX (3 real frames, 3 pages):
+# slide_index→page mapping for _TITLEPAGE_TEX (3 PDF pages, 2 content slides):
 #   extract_frames_from_beamer: no bare \maketitle before frames → no synthetic
 #   tuple → 3 real frames numbered 1, 2, 3.
 #   map_pages_to_slides: frame 1 has \titlepage → is_title page 1;
 #   frame 2 (Intro) → page 2; frame 3 (Method) → page 3.
-#   build_deck_slides: 3 frames, 3 groups, direct zip (len(groups)==len(frames)):
-#     slide_index 0 = titlepage frame, page 1
-#     slide_index 1 = Intro frame,     page 2
-#     slide_index 2 = Method frame,    page 3
-#   _real_frame_number: no synthetic to skip → slide_index N → frame_number N+1.
+#   build_deck_slides: leading title frame dropped by is_title_frame → 2 content
+#   frames; groups=[1,2,3] (3), frames=2 → len(groups)==len(frames)+1 → groups[1:]:
+#     slide_index 0 = Intro frame,  page 2
+#     slide_index 1 = Method frame, page 3
+#   _real_frame_number: i=0 title frame skipped; slide_index 0 → frame_number 2;
+#   slide_index 1 → frame_number 3.
 # ---------------------------------------------------------------------------
 
 _TITLEPAGE_TEX = (
@@ -452,7 +453,7 @@ class _TitlepageEditAdapter:
     """Stub adapter for edit_slides on the titlepage-style deck.
 
     stream() yields a recognisably-changed Intro frame so the test can verify
-    only the targeted frame (slide_index=1, page 2) was replaced.
+    only the targeted frame (slide_index=0, page 2) was replaced.
     """
 
     def __init__(self, command: DeckCommand) -> None:
@@ -508,20 +509,23 @@ async def _seed_titlepage_deck(fake_tracer, migrated_db, tmp_path, monkeypatch) 
 async def test_edit_slides_titlepage_deck_correct_frame_mapping(  # type: ignore[no-untyped-def]
     fake_tracer, migrated_db, tmp_path, monkeypatch
 ) -> None:
-    """Editing page 2 on a titlepage-style deck (no \\maketitle offset) must
-    rewrite exactly the Intro frame (slide_index=1, frame_number=2) and leave
-    the titlepage frame (slide_index=0) and Method frame (slide_index=2) byte-
-    identical.  This guards _real_frame_number for the NO-maketitle branch."""
+    """Editing page 2 on a titlepage-style deck must rewrite exactly the Intro
+    frame (slide_index=0, frame_number=2) and leave the Method frame
+    (slide_index=1) byte-identical.  The leading titlepage frame is NOT a
+    content slide and must NOT appear in deck_slides.  This guards both
+    build_deck_slides (title-frame exclusion) and _real_frame_number
+    (is_title_frame skip at i=0)."""
     await _seed_titlepage_deck(fake_tracer, migrated_db, tmp_path, monkeypatch)
     deck = await get_deck(migrated_db, session_id=1)
     assert deck is not None
 
     pre = await get_deck_slides(migrated_db, deck_id=deck.id)
-    # Verify the seeded mapping matches our analysis (titlepage at page 1, etc.)
+    # The titlepage frame (page 1) is NOT in deck_slides; only 2 content rows.
+    assert len(pre) == 2, f"expected 2 content slides (no title), got {len(pre)}"
     page_map = {r.page_start: r.slide_index for r in pre}
-    assert page_map.get(1) == 0, f"page 1 must be slide_index 0 (titlepage); got {page_map}"
-    assert page_map.get(2) == 1, f"page 2 must be slide_index 1 (Intro); got {page_map}"
-    assert page_map.get(3) == 2, f"page 3 must be slide_index 2 (Method); got {page_map}"
+    assert page_map.get(1) is None, f"page 1 (titlepage) must NOT be in deck_slides; got {page_map}"
+    assert page_map.get(2) == 0, f"page 2 must be slide_index 0 (Intro); got {page_map}"
+    assert page_map.get(3) == 1, f"page 3 must be slide_index 1 (Method); got {page_map}"
 
     frames_before = {r.slide_index: r.frame_tex for r in pre}
 
@@ -536,8 +540,10 @@ async def test_edit_slides_titlepage_deck_correct_frame_mapping(  # type: ignore
 
     monkeypatch.setattr(compile_mod, "compile_with_revise", fake_edit_compile)
 
-    # Edit page 2 = slide_index 1 = the Intro frame (no \maketitle offset →
-    # frame_number 2, not 3 as it would be in a \maketitle deck).
+    # Edit page 2 = slide_index 0 = the Intro frame.  _real_frame_number skips
+    # the leading titlepage frame (i=0, is_title_frame→True) and returns
+    # frame_number 2 (not 1), so replace_frame_in_beamer targets the Intro, not
+    # the titlepage.
     adapter = _TitlepageEditAdapter(
         DeckCommand(action="edit_slides", target_scope="page", target_page=2)
     )
@@ -558,12 +564,12 @@ async def test_edit_slides_titlepage_deck_correct_frame_mapping(  # type: ignore
     assert "Original intro content" not in tex, "old Intro content must be replaced"
 
     post = await get_deck_slides(migrated_db, deck_id=deck.id)
-    # Untargeted frames (slide_index 0 and 2) must be byte-identical to before.
+    # Untargeted frame (slide_index 1 = Method) must be byte-identical to before.
     for r in post:
-        if r.slide_index in (0, 2):
+        if r.slide_index == 1:
             assert r.frame_tex == frames_before[r.slide_index], (
                 f"slide_index {r.slide_index} must be unchanged"
             )
-    assert any("EDITED" in r.frame_tex for r in post if r.slide_index == 1), (
-        "targeted frame (slide_index=1) must show EDITED content in DB"
+    assert any("EDITED" in r.frame_tex for r in post if r.slide_index == 0), (
+        "targeted frame (slide_index=0) must show EDITED content in DB"
     )
