@@ -1,0 +1,61 @@
+name: 💡 Feature request
+description: Suggest an idea or enhancement for PaperHub
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! For anything non-trivial, opening an issue
+        first lets us agree on the approach before code is written.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I searched [existing issues](https://github.com/whats2000/PaperHub/issues) and didn't find a duplicate.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? Who benefits, and when?
+      placeholder: I'm frustrated when ... / It would help researchers to ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about and why you set them aside.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend (API / agents)
+        - Frontend (UI)
+        - Paper pipeline / ingestion
+        - Slide pipeline (Beamer)
+        - Citation Canvas
+        - SQL / Memory
+        - Build / tooling / CI
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, links, references to the SRS/plans, or anything else that helps.
+    validations:
+      required: false

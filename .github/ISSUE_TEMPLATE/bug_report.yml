@@ -1,0 +1,92 @@
+name: 🐛 Bug report
+description: Report something that isn't working as expected
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please fill out the
+        sections below so we can reproduce and fix the issue quickly.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I searched [existing issues](https://github.com/whats2000/PaperHub/issues) and didn't find a duplicate.
+          required: true
+        - label: This is a bug, not a question or feature request.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: When I ..., I expected ..., but instead ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, ordered steps. Include the exact prompt/command where relevant.
+      placeholder: |
+        1. Start the backend with `scripts/start.ps1`
+        2. POST /sessions, then POST /chat with "..."
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of PaperHub does this affect?
+      options:
+        - Backend (API / agents)
+        - Frontend (UI)
+        - Paper pipeline / ingestion
+        - Slide pipeline (Beamer)
+        - Citation Canvas
+        - SQL / Memory
+        - Build / tooling / CI
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: run-id
+    attributes:
+      label: Run ID (agent-flow bugs)
+      description: >
+        For paper-search / paper-qa / slides / SQL bugs, the run is fully
+        reconstructible from SQLite. Paste the run_id, or the output of
+        `uv run paperhub-replay --run-id <N>`.
+      placeholder: e.g. 142
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Node versions, GPU/CPU, and whether optional binaries (pdflatex, pandoc, marker) are installed.
+      placeholder: |
+        - OS: Windows 11 / macOS 14 / Ubuntu 24.04
+        - Python: 3.11.x (uv x.y)
+        - Node: 20.x
+        - GPU: none / CUDA 12.6
+        - pdflatex: installed (MiKTeX) / not installed
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Relevant backend logs, browser console output, or screenshots. Please redact secrets.
+      render: shell
+    validations:
+      required: false
