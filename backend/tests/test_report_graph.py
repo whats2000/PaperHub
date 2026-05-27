@@ -287,6 +287,108 @@ async def test_per_stage_tool_step_events_stream_before_deck(  # type: ignore[no
     assert len(step_indices) == len(set(step_indices)), "duplicate tool_step emitted"
 
 
+class _GatedDraftAdapter(_Adapter):
+    """Like ``_Adapter`` but the SECOND ``draft_frame`` call blocks on an
+    ``asyncio.Event`` until the test releases it. This lets the test prove a
+    COMPLETED draft's ``tool_step`` streams live while a SIBLING draft in the
+    same ``asyncio.gather`` is still in flight — the timing the burst-at-gather
+    bug breaks (all draft steps surface only after the whole gather resolves)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = __import__("asyncio").Event()
+
+    async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
+        if response_model is FrameDraft:
+            self._draft_calls += 1
+            if self._draft_calls == 1:
+                return FrameDraft(
+                    frame=(
+                        "\\begin{frame}{Motivation}"
+                        "\\includegraphics{p0-fig-000}\\end{frame}"
+                    ),
+                )
+            # Second+ draft blocks until the test sees the first draft stream.
+            await self.release.wait()
+            return FrameDraft(
+                frame="\\begin{frame}{Method}\\includegraphics{ghost}\\end{frame}",
+            )
+        return await super().structured(response_model=response_model, **kw)
+
+
+@pytest.mark.asyncio
+async def test_draft_tool_step_streams_before_sibling_completes(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """A draft's ``tool_step`` must stream the instant THAT draft completes —
+    not batched until the whole ``sl_draft`` fan-out resolves.
+
+    The gated adapter blocks the second draft on an event that the consumer
+    sets only upon receiving the first ``report:draft`` tool_step. With the
+    burst-at-gather bug, no draft step is emitted until BOTH drafts finish, so
+    the second draft blocks forever and the run deadlocks (caught by the
+    ``wait_for`` timeout). With per-task streaming the first step arrives, the
+    event is set, the second draft proceeds, and the run completes."""
+    import asyncio
+
+    monkeypatch.setattr(
+        "paperhub.agents.report_graph._pdflatex_available", lambda: True
+    )
+    source_dir = tmp_path / "cacheG" / "source"
+    _seed_asset(source_dir)
+    await migrated_db.execute(
+        "INSERT INTO paper_content (content_key, kind, arxiv_id, title, abstract, "
+        "source_path, source_dir_path, html_path) "
+        "VALUES ('arxiv:1', 'arxiv', '2403.01', 'Paper A', 'An abstract.', 'p', ?, 'h')",
+        (str(source_dir),),
+    )
+    await migrated_db.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, 1, 1)"
+    )
+    await migrated_db.commit()
+
+    from paperhub.pipelines.slide_pipeline import compile as compile_mod
+
+    async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
+        Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+        (Path(workdir) / "deck.tex").write_text(tex)  # noqa: ASYNC240
+        (Path(workdir) / "deck.pdf").write_bytes(b"%PDF-1.4")  # noqa: ASYNC240
+        return compile_mod.CompileResult(True, 1, tex, "", 2)
+
+    monkeypatch.setattr(compile_mod, "compile_with_revise", fake_compile)
+
+    class _Retr:
+        def retrieve(self, q, *, enabled_paper_content_ids, corpus_size, top_k=10):  # type: ignore[no-untyped-def]
+            return []
+
+    adapter = _GatedDraftAdapter()
+    deps = _make_deps(adapter, fake_tracer, migrated_db, _Retr(), tmp_path)
+    graph = build_report_subgraph(deps)
+    state = _state()
+    state["run_id"] = fake_tracer.run_id
+
+    saw_draft_step = False
+
+    async def _consume() -> None:
+        nonlocal saw_draft_step
+        async for mode, payload in graph.astream(
+            state, stream_mode=["custom", "values"]
+        ):
+            if mode != "custom" or payload.get("event") != "tool_step":
+                continue
+            if payload["record"]["tool"] == "report:draft" and not saw_draft_step:
+                saw_draft_step = True
+                # Release the blocked sibling draft; if the bug batches steps
+                # at the gather boundary, this line is never reached → timeout.
+                adapter.release.set()
+
+    await asyncio.wait_for(_consume(), timeout=10)
+
+    assert saw_draft_step, "no report:draft tool_step streamed during the run"
+    deck = await get_deck(migrated_db, session_id=1)
+    assert deck is not None and deck.status == "ok"
+
+
 @pytest.mark.asyncio
 async def test_no_hallucination_unknown_figure_neutralized(  # type: ignore[no-untyped-def]
     fake_tracer, migrated_db, tmp_path, monkeypatch

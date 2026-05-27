@@ -313,16 +313,26 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         except Exception:
             writer = None
         run_id = state.get("run_id")
-        last_emitted = -1
+        # Set-based dedup (NOT a monotonic watermark): the tracer assigns
+        # step_index at OPEN time but commits at CLOSE time, so a fan-out task
+        # that opened first (low index) can commit AFTER a sibling's higher
+        # index. A monotonic watermark would advance past the low index before
+        # it was read, permanently dropping that row from the stream. The set +
+        # lock is robust against any commit-order interleaving and against
+        # concurrent _flush_steps calls from sibling gather tasks. Same fix as
+        # research_graph's ``_ps_process._emit_progress``.
+        emitted_indices: set[int] = set()
+        drain_lock = asyncio.Lock()
 
         async def _flush_steps() -> None:
-            nonlocal last_emitted
             if writer is None or run_id is None:
                 return
-            recs = await drain_tool_calls_since(deps.conn, run_id, last_emitted)
-            for rec in recs:
-                writer({"event": "tool_step", "record": rec})
-                last_emitted = rec["step_index"]
+            async with drain_lock:
+                recs = await drain_tool_calls_since(deps.conn, run_id, -1)
+                for rec in recs:
+                    if rec["step_index"] not in emitted_indices:
+                        writer({"event": "tool_step", "record": rec})
+                        emitted_indices.add(rec["step_index"])
 
         return writer, _flush_steps
 
@@ -364,6 +374,14 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
     async def _generate(state: AgentState) -> AgentState:
         writer, _flush_steps = _streaming(state)
 
+        async def _then_flush(coro: Any) -> Any:
+            """Await one fan-out task, then drain+stream its tool_step the
+            instant it closes — so a finished brief/draft surfaces live rather
+            than being batched until the whole ``gather`` resolves."""
+            result = await coro
+            await _flush_steps()
+            return result
+
         budget: SlideBudget = state.get("report_budget") or SlideBudget()
 
         papers: list[dict[str, Any]] = state["report_papers"]
@@ -390,12 +408,14 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         briefs: list[PaperBrief] = list(
             await asyncio.gather(
                 *[
-                    understand_paper(
-                        paper_block=_paper_block(p, per_paper_figs.get(idx, [])),
-                        adapter=deps.adapter,
-                        tracer=deps.tracer,
-                        model=deps.notes_model,
-                        response_language=lang,
+                    _then_flush(
+                        understand_paper(
+                            paper_block=_paper_block(p, per_paper_figs.get(idx, [])),
+                            adapter=deps.adapter,
+                            tracer=deps.tracer,
+                            model=deps.notes_model,
+                            response_language=lang,
+                        )
                     )
                     for idx, p in enumerate(papers)
                 ]
@@ -450,17 +470,19 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         drafts: list[FrameDraft] = list(
             await asyncio.gather(
                 *[
-                    draft_frame(
-                        deck_title=outline.title,
-                        slide=s,
-                        assigned_figure=_assigned_figure(s.figure_key),
-                        assigned_equation=s.equation,
-                        chunks_block=_chunks_block(s.chunk_ids),
-                        adapter=deps.adapter,
-                        tracer=deps.tracer,
-                        model=deps.section_model,
-                        response_language=lang,
-                        memory_context=mem,
+                    _then_flush(
+                        draft_frame(
+                            deck_title=outline.title,
+                            slide=s,
+                            assigned_figure=_assigned_figure(s.figure_key),
+                            assigned_equation=s.equation,
+                            chunks_block=_chunks_block(s.chunk_ids),
+                            adapter=deps.adapter,
+                            tracer=deps.tracer,
+                            model=deps.section_model,
+                            response_language=lang,
+                            memory_context=mem,
+                        )
                     )
                     for s in slides
                 ]
