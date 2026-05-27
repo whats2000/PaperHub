@@ -16,6 +16,9 @@ class AssembleInput:
     additional_tex_macros: list[str]
     cache_source_dirs: list[str]
     frames: list[str]
+    author: str = ""
+    date: str = ""
+    subtitle: str = ""
 
 
 def build_additional_block(macros: list[str]) -> str:
@@ -34,7 +37,7 @@ def build_graphicspath(cache_source_dirs: list[str]) -> str:
 
 
 def assemble_deck(inp: AssembleInput) -> str:
-    parts: list[str] = [
+    preamble: list[str] = [
         "\\documentclass{beamer}",
         f"\\usetheme{{{inp.theme}}}",
         "\\usepackage{graphicx}",
@@ -43,8 +46,19 @@ def assemble_deck(inp: AssembleInput) -> str:
         build_graphicspath(inp.cache_source_dirs),
         build_additional_block(inp.additional_tex_macros),
         f"\\title{{{inp.title}}}",
+    ]
+    if inp.subtitle:
+        preamble.append(f"\\subtitle{{{inp.subtitle}}}")
+    if inp.author:
+        preamble.append(f"\\author{{{inp.author}}}")
+    if inp.date:
+        preamble.append(f"\\date{{{inp.date}}}")
+    parts: list[str] = [
+        *preamble,
         "\\begin{document}",
-        "\\maketitle",
+        # Real, editable title frame (not bare \maketitle) so its layout can be
+        # customized via the edit_title sub-flow (F4.2).
+        "\\begin{frame}[plain]\n\\titlepage\n\\end{frame}",
         *inp.frames,
         "\\end{document}",
     ]

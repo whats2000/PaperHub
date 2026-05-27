@@ -165,6 +165,17 @@ def get_frame_by_number(beamer_code: str, frame_number: int) -> str | None:
     return None
 
 
+def is_title_frame(frame_content: str) -> bool:
+    """True for the deck's title page: the synthetic ``\\maketitle`` marker, or a
+    real frame whose body is essentially ``\\titlepage`` (no content bullets). It
+    is excluded from content slide indexing and edited via the title/preamble
+    sub-flows, never as a content frame."""
+    s = frame_content.strip()
+    if s == r"\maketitle":
+        return True
+    return "\\titlepage" in s and "\\itemize" not in s and "\\includegraphics" not in s
+
+
 def _page_one_end(beamer_code: str) -> int | None:
     """
     Return the cut position that ends PDF page 1 in the source.
