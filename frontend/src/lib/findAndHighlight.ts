@@ -227,7 +227,7 @@ export function findAndHighlight(
   return true;
 }
 
-function clearHighlight(doc: Document): void {
+export function clearHighlight(doc: Document): void {
   // Unwrap chunk-range wrappers (restore the original text nodes).
   doc.querySelectorAll(`[${WRAP_ATTR}]`).forEach((span) => {
     const parent = span.parentNode;

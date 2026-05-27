@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
 import {
+  clearHighlight,
   findAndHighlight,
   highlightChunkRange,
   scrollToSection,
@@ -54,23 +55,46 @@ export function HtmlView({
   // citation) when the document is still empty `about:blank` — a "not found"
   // there is spurious, since onLoad re-runs apply() once the content is parsed.
   const loadedRef = useRef(false);
+  // Cancels a still-queued deferred highlight (see apply): set when one is
+  // scheduled, called to drop it before scheduling another or on unmount.
+  const cancelPending = useRef<(() => void) | null>(null);
 
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
     if (!doc?.body) return;
     applyIframeTheme(doc, isDark);
     if (!highlightDomId && !highlightText && !sectionTitle) return;
-    // Resolution order, best → last-resort: deterministic anchor → text-search
-    // → section heading (so a citation always lands somewhere useful).
-    const found =
-      (highlightDomId !== null &&
-        highlightChunkRange(doc, highlightDomId, scrollBehavior)) ||
-      (highlightText !== null &&
-        findAndHighlight(doc, highlightText, scrollBehavior)) ||
-      (sectionTitle !== null &&
-        scrollToSection(doc, sectionTitle, scrollBehavior));
-    // Only report a real miss once the document is loaded (see loadedRef).
-    if (!found && loadedRef.current) onHighlightMiss?.();
+
+    // Unwrap the PREVIOUS highlight NOW, but defer wrapping + scrolling to the
+    // NEW target to a later macrotask. Doing both in one synchronous click
+    // flush mutates a (figure) subtree and scrolls it out of view at the same
+    // time; under the injected `content-visibility: auto`, that locks/unlocks a
+    // heavyweight image block mid-mutation and trips Chromium's display-lock
+    // CHECK (STATUS_BREAKPOINT) — reliably when both the old and new targets
+    // are figures. Splitting them across a task boundary (as DeferredRemount
+    // does for the PDF swap) lets the figure's layout settle before the next
+    // scroll moves it.
+    clearHighlight(doc);
+    cancelPending.current?.();
+
+    const win = doc.defaultView ?? window;
+    const id = win.setTimeout(() => {
+      cancelPending.current = null;
+      const live = ref.current?.contentDocument;
+      if (!live?.body) return;
+      // Resolution order, best → last-resort: deterministic anchor → text-
+      // search → section heading (so a citation always lands somewhere useful).
+      const found =
+        (highlightDomId !== null &&
+          highlightChunkRange(live, highlightDomId, scrollBehavior)) ||
+        (highlightText !== null &&
+          findAndHighlight(live, highlightText, scrollBehavior)) ||
+        (sectionTitle !== null &&
+          scrollToSection(live, sectionTitle, scrollBehavior));
+      // Only report a real miss once the document is loaded (see loadedRef).
+      if (!found && loadedRef.current) onHighlightMiss?.();
+    }, 0);
+    cancelPending.current = () => win.clearTimeout(id);
   };
 
   const handleLoad = (): void => {
@@ -82,6 +106,7 @@ export function HtmlView({
   // already loaded in those cases, so onLoad won't fire again).
   useEffect(() => {
     apply();
+    return () => cancelPending.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDark, highlightDomId, highlightText, sectionTitle, nonce]);
 
