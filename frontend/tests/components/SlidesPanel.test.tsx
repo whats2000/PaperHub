@@ -98,7 +98,7 @@ describe("SlidesPanel", () => {
     expect(box).toHaveValue("Original note");
     await userEvent.clear(box);
     await userEvent.type(box, "My revised note");
-    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save speaker note/i }));
     expect(onSaveNote).toHaveBeenCalledWith(1, "My revised note");
   });
 

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { ChevronLeft, ChevronRight, Download, Loader2, Pencil } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Loader2,
+  Pencil,
+  X,
+} from "lucide-react";
 
 import {
   useSlidesStore,
@@ -444,57 +452,66 @@ export function SlidesPanel({
         className="shrink-0 overflow-y-auto border-t border-border bg-muted/20 px-3 py-2"
         style={{ height: noteHeight }}
       >
-        <div className="mb-1 flex items-center gap-2">
+        <div className="mb-1 flex items-center gap-1">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             Speaker note
           </p>
-          {!editingNote && noteEditable && (
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label="edit speaker note"
-              className="ml-auto"
-              onClick={beginEditNote}
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
+          {/* Edit / Save+Cancel controls live in the header (always visible) so
+              a tall note textarea never pushes them out of the scroll area. */}
+          {editingNote ? (
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="cancel note edit"
+                onClick={cancelEditNote}
+                disabled={savingNote}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="save speaker note"
+                className="text-primary"
+                onClick={() => void saveNote()}
+                disabled={savingNote}
+              >
+                {savingNote ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Check className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+          ) : (
+            noteEditable && (
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="edit speaker note"
+                className="ml-auto"
+                onClick={beginEditNote}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )
           )}
         </div>
 
         {editingNote ? (
-          <div className="flex flex-col gap-2">
-            <textarea
-              aria-label="speaker note"
-              className="w-full resize-none rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
-              rows={Math.max(3, Math.round((noteHeight - 56) / 18))}
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              disabled={savingNote}
-              autoFocus
-            />
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs"
-                onClick={cancelEditNote}
-                disabled={savingNote}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => void saveNote()}
-                disabled={savingNote}
-              >
-                {savingNote ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </div>
+          <textarea
+            aria-label="speaker note"
+            className="w-full resize-none rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
+            rows={Math.max(3, Math.round((noteHeight - 56) / 18))}
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            disabled={savingNote}
+            autoFocus
+          />
         ) : speakerNote ? (
           <p className="text-xs leading-relaxed whitespace-pre-wrap">{speakerNote}</p>
         ) : (
