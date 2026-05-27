@@ -12,6 +12,14 @@ describe("chat store", () => {
     expect(useChatStore.getState().activeSessionId).toBeNull();
   });
 
+  it("requestComposerText prefills the draft and bumps the focus signal", () => {
+    const before = useChatStore.getState().composerFocusSeq;
+    useChatStore.getState().requestComposerText("Edit this slide: ");
+    const s = useChatStore.getState();
+    expect(s.composerDraft).toBe("Edit this slide: ");
+    expect(s.composerFocusSeq).toBe(before + 1);
+  });
+
   it("creates a new session and selects it", () => {
     const id = useChatStore.getState().newSession();
     expect(id).toBeGreaterThan(0);

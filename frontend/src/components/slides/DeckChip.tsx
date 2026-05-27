@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 interface Props {
   deck: DeckEventData;
   /**
-   * Sends a chat message through the normal chat-send path. When provided (and
-   * the deck is ready), the chip exposes Generate/Edit-notes + Edit-slide
-   * affordances that simply SEND a turn — the backend's deck-command classifier
-   * handles the rest. No new REST surface.
+   * Prefill the composer with an editable prompt (does NOT send). When provided
+   * (and the deck is ready), the chip exposes Generate/Edit-notes + Edit-slide
+   * affordances that drop a starter prompt into the input so the user can say
+   * WHAT to change before sending — a bare "Edit this slide" is useless.
    */
-  onSend?: (message: string) => void;
+  onPrefill?: (message: string) => void;
 }
 
 /**
@@ -23,7 +23,7 @@ interface Props {
  * Styled to match SearchResultList rows: same card background, border, and
  * spacing.
  */
-export function DeckChip({ deck, onSend }: Props) {
+export function DeckChip({ deck, onPrefill }: Props) {
   const openPanel = useSlidesStore((s) => s.openPanel);
   const setCurrentPage = useSlidesStore((s) => s.setCurrentPage);
 
@@ -78,7 +78,7 @@ export function DeckChip({ deck, onSend }: Props) {
           >
             <Download className="h-3 w-3" />
           </a>
-          {deck.status === "ok" && onSend && (
+          {deck.status === "ok" && onPrefill && (
             <>
               <Button
                 type="button"
@@ -86,9 +86,9 @@ export function DeckChip({ deck, onSend }: Props) {
                 variant="ghost"
                 className="h-7 px-2 text-xs"
                 onClick={() =>
-                  onSend(
+                  onPrefill(
                     deck.has_notes
-                      ? "Edit the speaker notes for this deck"
+                      ? "Edit the speaker notes for this deck: "
                       : "Generate speaker notes for this deck",
                   )
                 }
@@ -101,7 +101,7 @@ export function DeckChip({ deck, onSend }: Props) {
                 size="sm"
                 variant="ghost"
                 className="h-7 px-2 text-xs"
-                onClick={() => onSend("Edit this slide")}
+                onClick={() => onPrefill("Edit this slide: ")}
                 aria-label="Edit slide"
               >
                 Edit
