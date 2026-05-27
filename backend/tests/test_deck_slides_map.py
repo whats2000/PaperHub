@@ -10,10 +10,12 @@ _DECK = (
 
 
 def test_one_to_one_pages() -> None:
+    # The leading \titlepage frame is a title page, not a content slide; it is
+    # excluded from deck_slides.  Content slides start at page 2.
     rows = build_deck_slides(_DECK, page_count=3)
-    assert [r.slide_index for r in rows] == [0, 1, 2]
-    assert [(r.page_start, r.page_end) for r in rows] == [(1, 1), (2, 2), (3, 3)]
-    assert "Intro" in rows[1].frame_tex
+    assert [r.slide_index for r in rows] == [0, 1]
+    assert [(r.page_start, r.page_end) for r in rows] == [(2, 2), (3, 3)]
+    assert "Intro" in rows[0].frame_tex
 
 
 def test_leading_maketitle_offsets_pages() -> None:
@@ -49,3 +51,18 @@ def test_fallback_page_count_zero_clamps_to_one(monkeypatch) -> None:
     monkeypatch.setattr(mod, "group_logical_slides", lambda pages: [])
     rows = mod.build_deck_slides("ignored", page_count=0)
     assert [(r.page_start, r.page_end) for r in rows] == [(1, 1), (1, 1)]
+
+
+_TITLEFRAME_DECK = (
+    "\\documentclass{beamer}\n\\title{T}\n\\begin{document}\n"
+    "\\begin{frame}[plain]\n\\titlepage\n\\end{frame}\n"
+    "\\begin{frame}{One}a\\end{frame}\n"
+    "\\begin{frame}{Two}b\\end{frame}\n\\end{document}\n"
+)
+
+
+def test_titlepage_frame_not_a_content_slide():
+    rows = build_deck_slides(_TITLEFRAME_DECK, page_count=3)
+    assert [r.slide_index for r in rows] == [0, 1]
+    assert "One" in rows[0].frame_tex and "Two" in rows[1].frame_tex
+    assert rows[0].page_start == 2 and rows[1].page_start == 3

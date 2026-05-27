@@ -2,27 +2,22 @@
 PDF page span each frame occupies (Plan F4 — SRS v2.21).
 
 Frames and page groups are both walked in document order, so they zip 1:1. A
-leading \\maketitle page has no \\begin{frame} block, so when there is one more
-page group than frame, the groups are tail-anchored to the frames.
-
-``extract_frames_from_beamer`` also emits a synthetic ``r"\\maketitle"`` tuple
-when \\maketitle appears immediately before the first frame; that tuple is
-filtered out here (it corresponds to a title page, not a content frame).
+leading title page (synthetic ``\\maketitle`` or a real ``\\titlepage`` frame)
+adds exactly one extra leading page group with no content frame, so when there
+is one more page group than content frame the groups are tail-anchored to the
+frames.
 """
 from __future__ import annotations
 
 from paperhub.db.deck_slides import DeckSlideInput
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
+    is_title_frame,
 )
 from paperhub.pipelines.slide_pipeline.frame_map import (
     group_logical_slides,
     map_pages_to_slides,
 )
-
-# The synthetic entry emitted by extract_frames_from_beamer for a bare \maketitle
-# before the first frame has this exact frame_content value.
-_SYNTHETIC_MAKETITLE = r"\maketitle"
 
 
 def build_deck_slides(final_tex: str, page_count: int) -> list[DeckSlideInput]:
@@ -38,14 +33,13 @@ def build_deck_slides(final_tex: str, page_count: int) -> list[DeckSlideInput]:
         On an unexpected frame/page-count mismatch, falls back to one sequential
         page per frame (page_count=0 is treated as 1).
     """
-    # Drop synthetic \maketitle tuples — they are title-page markers, not
-    # real content frames, and they would throw off the 1:1 zip with groups.
     raw_frames = extract_frames_from_beamer(final_tex)
-    frames = [
-        (num, content, s, e)
-        for num, content, s, e in raw_frames
-        if content.strip() != _SYNTHETIC_MAKETITLE
-    ]
+    # Drop a LEADING title frame (synthetic \maketitle OR a real \titlepage
+    # frame) — it is the title page, not a content frame, and would otherwise
+    # throw off the 1:1 zip with page groups.
+    frames = list(raw_frames)
+    if frames and is_title_frame(frames[0][1]):
+        frames = frames[1:]
 
     groups = group_logical_slides(map_pages_to_slides(final_tex))  # [[page,...]]
 
