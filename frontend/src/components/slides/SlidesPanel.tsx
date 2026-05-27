@@ -447,12 +447,16 @@ export function SlidesPanel({
         className="h-1.5 cursor-row-resize bg-border hover:bg-primary/40 transition-colors shrink-0"
       />
 
-      {/* Speaker note pane (outside Document — no pdfjs dependency) */}
+      {/* Speaker note pane (outside Document — no pdfjs dependency). Fixed-height
+          flex column: the header stays put and the body (text or textarea) fills
+          the rest and scrolls internally, so entering edit mode never grows the
+          pane (a flex item's min-height:auto would otherwise stretch it to the
+          textarea's intrinsic row height). */}
       <div
-        className="shrink-0 overflow-y-auto border-t border-border bg-muted/20 px-3 py-2"
+        className="shrink-0 flex flex-col min-h-0 border-t border-border bg-muted/20 px-3 py-2"
         style={{ height: noteHeight }}
       >
-        <div className="mb-1 flex items-center gap-1">
+        <div className="mb-1 flex items-center gap-1 shrink-0">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             Speaker note
           </p>
@@ -505,17 +509,18 @@ export function SlidesPanel({
         {editingNote ? (
           <textarea
             aria-label="speaker note"
-            className="w-full resize-none rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
-            rows={Math.max(3, Math.round((noteHeight - 56) / 18))}
+            className="flex-1 min-h-0 w-full resize-none rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
             disabled={savingNote}
             autoFocus
           />
         ) : speakerNote ? (
-          <p className="text-xs leading-relaxed whitespace-pre-wrap">{speakerNote}</p>
+          <p className="flex-1 min-h-0 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap">
+            {speakerNote}
+          </p>
         ) : (
-          <p className="text-xs text-muted-foreground italic">
+          <p className="flex-1 min-h-0 text-xs text-muted-foreground italic">
             No speaker note for this slide
           </p>
         )}
