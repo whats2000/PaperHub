@@ -17,6 +17,18 @@ system: |
      extract the integer page number (incl. Chinese numerals 一二三…/Arabic);
      a deck-wide change ("add a limitations slide", "shorten the results
      section") → "all".
+     RE-LANGUAGING THE SLIDES: a request to translate/convert the SLIDES (not
+     the speaker notes) to another language is edit_slides. Scope by what is
+     translated: the WHOLE deck ("把簡報/投影片/整份換成繁體中文", "translate the
+     slides/deck to English") → target_scope="all"; only the on-screen slide
+     ("把這頁/這張投影片換成英文", "translate this slide") → "current".
+     IMPORTANT — "目前的簡報" / "目前簡報" / "the current presentation" / "the
+     current deck" / "the current slides" refers to the WHOLE existing deck →
+     target_scope="all". The word 目前/current here means "the deck that exists
+     now", NOT the on-screen page. Only an explicit single-slide pointer
+     (這一頁 / 這張 / 目前這頁 / this page / this slide / the page I'm on) →
+     "current". When unsure between all vs current for a translate request,
+     prefer "all" (translating the whole deck is the common intent).
    - PAGE-NUMBER FALLBACK: if you choose "page" scope but genuinely cannot read
      an explicit number, leave target_page=null — the system then edits
      CURRENT_VIEW_PAGE. Never block on a missing number.
