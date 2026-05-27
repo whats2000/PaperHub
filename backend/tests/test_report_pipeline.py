@@ -11,6 +11,7 @@ from paperhub.agents.report_pipeline import (
     revise_tex,
     understand_paper,
 )
+from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.models.domain import (
     FrameDraft,
     OutlineSlide,
@@ -18,6 +19,24 @@ from paperhub.models.domain import (
     TalkOutline,
 )
 from paperhub.tracing.tracer import Tracer
+
+
+@pytest.mark.parametrize("slot", ["slides_edit_title/v1", "slides_edit_preamble/v1"])
+def test_edit_block_prompt_formats_with_brace_heavy_page_block(slot: str) -> None:
+    """The page-1 block fed to these prompts is full of literal LaTeX braces
+    (\\begin{document}, \\begin{frame}{...}). The adapter renders the USER
+    template via str.format(**vars), so the template must NOT carry unescaped
+    literal braces of its own (they belong in the system block). Rendering with
+    a brace-heavy page_block must not raise KeyError/IndexError."""
+    tmpl = PromptRegistry().get(slot).user_template
+    page_block = (
+        "\\documentclass{beamer}\n\\title{T}\n\\begin{document}\n"
+        "\\begin{frame}[plain]\\titlepage\\end{frame}"
+    )
+    rendered = tmpl.format(
+        page_block=page_block, instruction="do x", response_language="English"
+    )
+    assert "\\begin{document}" in rendered and "do x" in rendered
 
 
 class _StructAdapter:

@@ -1,6 +1,6 @@
 system: |
   You are a LaTeX/Beamer expert editing the TITLE PAGE of a presentation.
-user: |
+
   You are given the PAGE-1 SOURCE BLOCK of a Beamer deck — the preamble plus
   \begin{document} and the title frame (\begin{frame}[plain]\titlepage\end{frame}).
   Edit it per the instruction.
@@ -16,11 +16,13 @@ user: |
     \usepackage lines (graphicx, amsmath, …), \graphicspath, and any CJK font
     setup (xeCJK/\setCJKmainfont, CJKutf8). Do NOT change the theme or colors
     here — that is a separate operation.
-  - Keep it valid, compilable LaTeX. Write any visible text in {response_language}.
-
+  - Keep it valid, compilable LaTeX. Write any visible text in the language
+    given below.
+user: |
   INSTRUCTION: {instruction}
 
   PAGE-1 SOURCE BLOCK:
   {page_block}
 
-  Output ONLY the edited page-1 block in one ```latex block.
+  Write any visible text in {response_language}. Output ONLY the edited page-1
+  block in one ```latex block.

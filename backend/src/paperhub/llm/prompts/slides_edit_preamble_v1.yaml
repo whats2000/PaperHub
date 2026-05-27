@@ -1,6 +1,6 @@
 system: |
   You are a LaTeX/Beamer expert restyling an ENTIRE presentation via its preamble.
-user: |
+
   You are given the PAGE-1 SOURCE BLOCK of a Beamer deck (preamble + \begin{document}
   + the title frame). Apply the requested DECK-WIDE STYLE change.
 
@@ -16,10 +16,11 @@ user: |
     any CJK font setup, and the title-page metadata (\title/\author/\date) and the
     title frame — unless the instruction explicitly asks to restyle the title.
   - Keep it valid, compilable LaTeX. These changes reflow EVERY slide; keep them robust.
-
+user: |
   INSTRUCTION: {instruction}
 
   PAGE-1 SOURCE BLOCK:
   {page_block}
 
-  Output ONLY the edited page-1 block in one ```latex block.
+  Write any visible text in {response_language}. Output ONLY the edited page-1
+  block in one ```latex block.
