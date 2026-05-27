@@ -14,6 +14,10 @@ export const NOTE_DEFAULT_HEIGHT = 160;
 interface SlidesState {
   open: boolean;
   deckBySession: Record<number, DeckEventData | undefined>;
+  /** Monotonic counter bumped on every `setDeck` (i.e. every `deck` SSE event /
+   *  recompile). The Slides panel keys its PDF fetch on this so a completed
+   *  edit forces a cache-busted refetch of the freshly compiled deck. */
+  deckRevisionBySession: Record<number, number>;
   currentPageBySession: Record<number, number>;
   /** Draggable filmstrip rail width (px). Persisted. */
   filmstripWidth: number;
@@ -34,11 +38,18 @@ export const useSlidesStore = create<SlidesState>()(
     (set) => ({
       open: false,
       deckBySession: {},
+      deckRevisionBySession: {},
       currentPageBySession: {},
       filmstripWidth: FILMSTRIP_DEFAULT_WIDTH,
       noteHeight: NOTE_DEFAULT_HEIGHT,
       setDeck: (sid, deck) =>
-        set((s) => ({ deckBySession: { ...s.deckBySession, [sid]: deck } })),
+        set((s) => ({
+          deckBySession: { ...s.deckBySession, [sid]: deck },
+          deckRevisionBySession: {
+            ...s.deckRevisionBySession,
+            [sid]: (s.deckRevisionBySession[sid] ?? 0) + 1,
+          },
+        })),
       clearDeck: (sid) =>
         set((s) => {
           if (s.deckBySession[sid] === undefined) return s;

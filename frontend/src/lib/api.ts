@@ -373,9 +373,19 @@ export function deckPdfUrl(sessionId: number): string {
 }
 
 /** Fetch a session's compiled deck PDF bytes. Passed to react-pdf as
- * `{ data }` so it renders inline — no cross-origin iframe needed. */
-export async function fetchDeckPdfData(sessionId: number): Promise<Uint8Array> {
-  const res = await fetch(deckPdfUrl(sessionId));
+ * `{ data }` so it renders inline — no cross-origin iframe needed.
+ *
+ * `version` is an optional cache-bust token: the deck URL is stable across
+ * recompiles (one deck per session), so an edit produces new bytes at the same
+ * URL. Bumping `?v=` forces the browser past its HTTP cache to the freshly
+ * compiled PDF. */
+export async function fetchDeckPdfData(
+  sessionId: number,
+  version?: number,
+): Promise<Uint8Array> {
+  const base = deckPdfUrl(sessionId);
+  const url = version === undefined ? base : `${base}?v=${version}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`API ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 }

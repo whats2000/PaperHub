@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 
 import {
   useSlidesStore,
@@ -25,6 +25,12 @@ const FILMSTRIP_THUMB_INSET = 16;
 interface Props {
   sessionId: number;
   speakerNotes: Record<string, string>;
+  /** A slides generate/edit turn is in flight for this session. While true the
+   *  canvas is masked and the PDF is NOT refetched (the recompile isn't ready);
+   *  on completion the revision bump triggers a cache-busted reload. */
+  busy?: boolean;
+  /** Present-tense status shown on the mask (live slide-agent stage). */
+  stage?: string;
 }
 
 /**
@@ -36,8 +42,9 @@ interface Props {
  * - A resizable speaker note pane below the slide (draggable horizontal divider).
  * - Keyboard navigation: ArrowLeft/ArrowRight change page.
  */
-export function SlidesPanel({ sessionId, speakerNotes }: Props) {
+export function SlidesPanel({ sessionId, speakerNotes, busy = false, stage }: Props) {
   const deck = useSlidesStore((s) => s.deckBySession[sessionId]);
+  const revision = useSlidesStore((s) => s.deckRevisionBySession[sessionId] ?? 0);
   const currentPage = useSlidesStore(
     (s) => s.currentPageBySession[sessionId] ?? 1,
   );
@@ -49,8 +56,12 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
   const filmstripWidth = useSlidesStore((s) => s.filmstripWidth);
   const setFilmstripWidth = useSlidesStore((s) => s.setFilmstripWidth);
 
-  // PDF bytes cache: keyed by sessionId so re-renders don't refetch.
-  const [pdfCache, setPdfCache] = useState<Record<number, Uint8Array>>({});
+  // Currently-loaded PDF bytes + the (session, revision) they belong to. We
+  // keep the last good bytes on screen while a newer revision of the SAME
+  // session is fetching so an edit-complete reload swaps in under the mask
+  // rather than flashing blank.
+  const [bytes, setBytes] = useState<Uint8Array | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [mainWidth, setMainWidth] = useState(0);
   // Measured thumbnail render width — derived from the rail's actual inner
@@ -105,28 +116,50 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
     [],
   );
 
-  // Fetch PDF bytes on mount / sessionId change; cache by sessionId.
+  // Identity of the bytes currently loaded, parsed from loadedKey.
+  const [loadedSid, loadedRev] = loadedKey
+    ? loadedKey.split(":").map(Number)
+    : [null, null];
+
+  // Fetch PDF bytes for the current (session, revision). Gated on !busy: while a
+  // generate/edit turn is streaming the recompiled PDF isn't ready, so we hold
+  // the current bytes under the mask and don't refetch. When the turn finishes
+  // the revision has bumped (setDeck) and busy clears → this refetches the fresh
+  // deck (cache-busted by revision). State is set only in the async callback, so
+  // the effect never updates state synchronously.
+  const fetchKey = `${sessionId}:${revision}`;
   useEffect(() => {
-    if (pdfCache[sessionId]) return; // already cached
+    if (busy) return; // mid-edit: keep current bytes, mask covers the panel
+    if (loadedKey === fetchKey) return; // already showing this revision
     let cancelled = false;
-    void fetchDeckPdfData(sessionId).then((bytes) => {
-      if (!cancelled) {
-        setPdfCache((prev) => ({ ...prev, [sessionId]: bytes }));
-      }
-    });
+    fetchDeckPdfData(sessionId, revision)
+      .then((b) => {
+        if (cancelled) return;
+        setBytes(b);
+        setLoadedKey(fetchKey);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [sessionId, pdfCache]);
+  }, [sessionId, revision, busy, fetchKey, loadedKey]);
 
   // pdfjs TRANSFERS (detaches) the ArrayBuffer it's given to its worker, so
-  // pass a fresh COPY each time (same pattern as PdfView.tsx). Memoize so the
-  // Document doesn't reload on unrelated re-renders.
-  const rawBytes = pdfCache[sessionId];
+  // pass a fresh COPY each time (same pattern as PdfView.tsx). Only render the
+  // bytes if they belong to THIS session (on a session switch the old session's
+  // bytes are ignored until the new ones load). Memoized so the Document
+  // doesn't reload on unrelated re-renders.
   const file = useMemo(
-    () => (rawBytes ? { data: rawBytes.slice() } : null),
-    [rawBytes],
+    () => (bytes && loadedSid === sessionId ? { data: bytes.slice() } : null),
+    [bytes, loadedSid, sessionId],
   );
+
+  // Mask the canvas while a turn is in flight, OR while a completed edit's fresh
+  // deck is still loading (same session, newer revision than what's on screen).
+  // Derived — no extra state — so the effect stays setState-free.
+  const reloading =
+    !busy && bytes !== null && loadedSid === sessionId && loadedRev !== revision;
+  const masked = busy || reloading;
 
   // Keyboard navigation.
   useEffect(() => {
@@ -268,7 +301,9 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
           react-pdf shares one parsed PDF across all child <Page> components via
           context — two Documents would transfer (detach) the ArrayBuffer to the
           pdfjs worker on the first mount, leaving the second with a zero-length
-          buffer and a blank render. */}
+          buffer and a blank render. Wrapped in a relative container so the
+          editing mask can overlay the whole slide region. */}
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
       {file ? (
         <Document
           file={file}
@@ -332,6 +367,28 @@ export function SlidesPanel({ sessionId, speakerNotes }: Props) {
       ) : (
         <div className="flex flex-1 min-h-0 overflow-hidden" />
       )}
+
+        {/* Editing mask — covers the slide region while a generate/edit turn is
+            in flight or the post-edit reload is fetching. The current deck stays
+            underneath (non-interactive) so the swap-in is seamless. */}
+        {masked && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-card/70 backdrop-blur-sm"
+          >
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">
+              Updating slides…
+            </span>
+            {stage && (
+              <span className="px-4 text-center text-xs text-muted-foreground">
+                {stage}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Draggable divider (outside Document — no pdfjs dependency) */}
       <div

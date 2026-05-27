@@ -2,28 +2,7 @@ import { useMemo } from "react";
 import { Presentation } from "lucide-react";
 
 import type { ToolCallRecord } from "@/types/domain";
-
-/**
- * Maps the most-recent `report:*` trace step to a human, present-tense status
- * so the card reflects what the slide agent is doing right now — even during
- * the long, silent stretches (e.g. a multi-second pdflatex compile) where no
- * new step closes for a while. The backend streams each fan-out step live
- * (see report_graph `_then_flush`), so the tail advances as work progresses.
- */
-function stageLabel(trace: ToolCallRecord[] | undefined): string {
-  const last = trace && trace.length > 0 ? trace[trace.length - 1] : undefined;
-  if (!last) return "Warming up the slide agent…";
-  const t = last.tool.toLowerCase();
-  if (t.includes("resolve")) return "Gathering the papers…";
-  if (t.includes("understand")) return "Studying the papers…";
-  if (t.includes("narrate")) return "Outlining the talk…";
-  if (t.includes("draft")) return "Drafting slide frames…";
-  if (t.includes("coherence")) return "Smoothing the flow…";
-  if (t.includes("assemble") || t.includes("verify")) return "Placing figures…";
-  if (t.includes("compile")) return "Compiling the deck (LaTeX)…";
-  if (t.includes("notes")) return "Finalizing…";
-  return "Building the deck…";
-}
+import { slideStageLabel } from "@/lib/slideStage";
 
 /**
  * In-flight indicator for the `slides` intent. Renders between the routing
@@ -33,7 +12,7 @@ function stageLabel(trace: ToolCallRecord[] | undefined): string {
  * during a draft fan-out or a pdflatex compile doesn't read as a stall.
  */
 export function SlideProgressCard({ trace }: { trace?: ToolCallRecord[] }) {
-  const stage = useMemo(() => stageLabel(trace), [trace]);
+  const stage = useMemo(() => slideStageLabel(trace), [trace]);
   const steps = trace?.length ?? 0;
   // During the draft fan-out, count drafted frames — it's the most legible
   // progress signal (one step per slide). Otherwise show the total step count.

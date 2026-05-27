@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSlidesStore } from "@/store/slides";
 import { SlidesPanel } from "@/components/slides/SlidesPanel";
+import * as api from "@/lib/api";
 
 vi.mock("react-pdf", () => ({
   pdfjs: { GlobalWorkerOptions: { workerSrc: "" } },
@@ -28,6 +29,7 @@ vi.mock("@/lib/api", () => ({
 
 describe("SlidesPanel", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useSlidesStore.setState({
       open: true,
       deckBySession: {
@@ -41,6 +43,7 @@ describe("SlidesPanel", () => {
           has_notes: true,
         },
       },
+      deckRevisionBySession: { 7: 1 },
       currentPageBySession: { 7: 1 },
     });
   });
@@ -63,5 +66,37 @@ describe("SlidesPanel", () => {
       name: /resize filmstrip/i,
     });
     expect(divider).toHaveAttribute("aria-orientation", "vertical");
+  });
+
+  it("masks the canvas and does NOT refetch while a turn is in flight", () => {
+    render(
+      <SlidesPanel
+        sessionId={7}
+        speakerNotes={{}}
+        busy
+        stage="Compiling the deck (LaTeX)…"
+      />,
+    );
+    expect(screen.getByText(/updating slides/i)).toBeInTheDocument();
+    expect(screen.getByText(/compiling the deck/i)).toBeInTheDocument();
+    // The recompiled PDF isn't ready mid-edit — must not fetch.
+    expect(api.fetchDeckPdfData).not.toHaveBeenCalled();
+  });
+
+  it("reloads the deck (cache-busted by revision) when the edit completes", async () => {
+    useSlidesStore.setState({ deckRevisionBySession: { 7: 4 } });
+    const { rerender } = render(
+      <SlidesPanel sessionId={7} speakerNotes={{}} busy />,
+    );
+    expect(api.fetchDeckPdfData).not.toHaveBeenCalled();
+
+    // Edit completes: busy clears → fetch the freshly compiled PDF for rev 4.
+    rerender(<SlidesPanel sessionId={7} speakerNotes={{}} busy={false} />);
+    await waitFor(() =>
+      expect(api.fetchDeckPdfData).toHaveBeenCalledWith(7, 4),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/updating slides/i)).not.toBeInTheDocument(),
+    );
   });
 });

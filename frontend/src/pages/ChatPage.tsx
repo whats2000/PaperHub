@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
+import { slideStageLabel } from "@/lib/slideStage";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
@@ -111,6 +112,22 @@ export function ChatPage() {
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
 
+  // A slides generate/edit turn in flight for the active session: drives the
+  // Slides-panel editing mask (mask + hold the current deck) and the
+  // reload-on-complete. The streaming message's trace gives the live stage.
+  const slidesTurn = activeSession?.messages.find(
+    (m) => m.status === "streaming" && m.routing_decision?.intent === "slides",
+  );
+  const deckBusy = slidesTurn !== undefined;
+  const deckStage = deckBusy ? slideStageLabel(slidesTurn?.trace) : undefined;
+  // Revision for the active deck — bumps on each `deck` event so the notes
+  // refetch (below) and the panel's PDF refetch pick up a completed edit.
+  const deckRevision = useSlidesStore((s) =>
+    backendSessionId === null
+      ? 0
+      : (s.deckRevisionBySession[backendSessionId] ?? 0),
+  );
+
   // The right column is shared between the Citation Canvas, Memory Manager,
   // and Slides panel. Opening one closes the others; the column width + slide
   // animation is the same for all.
@@ -120,6 +137,9 @@ export function ChatPage() {
   // exists. Resets when the session changes.
   useEffect(() => {
     if (!slidesOpen || backendSessionId === null) return;
+    // While an edit is in flight, getDeck would return the pre-edit notes;
+    // hold until it completes. deckRevision bumps on completion → refetch.
+    if (deckBusy) return;
     let cancelled = false;
     getDeck(backendSessionId)
       .then((d) => {
@@ -131,7 +151,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [slidesOpen, backendSessionId]);
+  }, [slidesOpen, backendSessionId, deckBusy, deckRevision]);
 
   const handleSubmit = (text: string): void => {
     const sessionId = activeSessionId ?? newSession();
@@ -260,6 +280,8 @@ export function ChatPage() {
                   <SlidesPanel
                     sessionId={backendSessionId}
                     speakerNotes={speakerNotes}
+                    busy={deckBusy}
+                    stage={deckStage}
                   />
                 </Suspense>
               </div>
