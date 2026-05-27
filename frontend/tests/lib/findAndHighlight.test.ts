@@ -97,18 +97,18 @@ describe("scroll behavior threading", () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   });
 
-  // The canvas passes "instant" when the click also opened it (layout unsettled)
-  // and "smooth" when it was already open (the glide shows relative position).
-  // Verify each resolver forwards the requested behavior to scrollIntoView.
-  it("defaults to a smooth scroll", () => {
+  // Citation jumps are INSTANT (a smooth glide across lazily-rendering content
+  // fights the convergence re-centers and reads as a teleport). Each resolver
+  // scrolls its target to center with no animation behavior.
+  it("scrolls the chunk anchor to center (instant)", () => {
     const doc = docFrom(
       '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
     );
     highlightChunkRange(doc, "phchunk-0");
-    expect(spy).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    expect(spy).toHaveBeenCalledWith({ block: "center" });
   });
 
-  it("forwards an instant scroll to all three resolvers", () => {
+  it("scrolls to center in all three resolvers", () => {
     const anchorDoc = docFrom(
       '<p><span id="phchunk-0"></span>Expert collapse is mitigated.</p>',
     );
@@ -122,7 +122,7 @@ describe("scroll behavior threading", () => {
 
     expect(spy).toHaveBeenCalledTimes(3);
     for (const call of spy.mock.calls) {
-      expect(call[0]).toEqual({ behavior: "instant", block: "center" });
+      expect(call[0]).toEqual({ block: "center" });
     }
   });
 });

@@ -41,11 +41,24 @@ export function stripDeadCdnScripts(html: string): string {
  * scrolls into view. `contain-intrinsic-size` supplies a placeholder size so the
  * scroll height stays stable for not-yet-rendered blocks.
  *
+ * BUT a skipped block reports that 600px PLACEHOLDER instead of its real height,
+ * which throws off `scrollIntoView` offsets. We mitigate the worst case by
+ * EXCLUDING image-bearing blocks (`:not(:has(img))`) so figures — whose height
+ * deviates most from 600px — keep full layout; text/math blocks (the heavy,
+ * predictable-height ones the freeze was about) still render lazily. The
+ * residual drift from lazy blocks is handled at scroll time by the re-targeting
+ * glide in `findAndHighlight.scrollIntoViewStable`, which tracks the target as
+ * blocks render. `img { max-width:100%; height:auto }` keeps figures scaled to
+ * the iframe width.
+ *
  * Injected into the HTML string (so it's in the `srcdoc` from parse time, before
  * the first layout) rather than via JS after load, which would be too late.
  */
 const PERF_STYLE =
-  "<style>body > * { content-visibility: auto; contain-intrinsic-size: auto 600px; }</style>";
+  "<style>" +
+  "body > *:not(:has(img)) { content-visibility: auto; contain-intrinsic-size: auto 600px; }" +
+  "img { max-width: 100%; height: auto; }" +
+  "</style>";
 
 export function injectPerfStyle(html: string): string {
   if (/<head[^>]*>/i.test(html)) {

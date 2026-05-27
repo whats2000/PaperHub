@@ -23,6 +23,58 @@ function ensureHighlightStyle(doc: Document): void {
 // spans we injected (vs class-only highlights from the text/section fallbacks).
 const WRAP_ATTR = "data-ph-cite";
 
+// One in-flight glide per document, so a new citation cancels the previous one
+// instead of two rAF loops fighting over scrollTop.
+const activeGlide = new WeakMap<Document, number>();
+
+/**
+ * Smoothly scroll `el` to the vertical center, tracking it as the layout settles.
+ *
+ * The Citation-Canvas iframe lays out lazily (`content-visibility: auto`), so an
+ * off-screen block reports a placeholder height until it actually renders — the
+ * target's true position is unknown until you scroll near it. Native smooth
+ * `scrollIntoView` animates toward the GUESSED offset and then snaps when the
+ * in-between blocks render (the "teleport").
+ *
+ * So we drive the glide ourselves: each frame we re-measure the target and ease
+ * scrollTop a fraction of the REMAINING distance toward centering it. As the
+ * lazy blocks render and shift the target, the glide simply tracks the moving
+ * target and converges — one continuous smooth scroll that lands exactly, no
+ * snap. The fractional step is a natural ease-out; we stop within 1px or at a
+ * safety cap. `behavior` is accepted for call-site compatibility. Falls back to
+ * a single `scrollIntoView` under jsdom / detached documents (no window).
+ */
+export function scrollIntoViewStable(
+  el: Element,
+  _behavior: ScrollBehavior = "auto",
+): void {
+  if (typeof el.scrollIntoView !== "function") return;
+  const doc = el.ownerDocument;
+  const win = doc?.defaultView;
+  const scroller = doc?.scrollingElement;
+  if (!win?.requestAnimationFrame || !scroller) {
+    el.scrollIntoView({ block: "center" });
+    return;
+  }
+  const prev = activeGlide.get(doc);
+  if (prev != null) win.cancelAnimationFrame(prev);
+
+  let frames = 0;
+  const tick = (): void => {
+    const rect = el.getBoundingClientRect();
+    // Distance from the target's center to the viewport's center (>0 ⇒ below).
+    const delta = rect.top + rect.height / 2 - win.innerHeight / 2;
+    frames += 1;
+    if (Math.abs(delta) <= 1 || frames > 90) {
+      activeGlide.delete(doc);
+      return; // centered, or safety cap (~1.5s) so a never-settling page can't loop
+    }
+    scroller.scrollTop += delta * 0.2; // ease-out: close 20% of the gap per frame
+    activeGlide.set(doc, win.requestAnimationFrame(tick));
+  };
+  activeGlide.set(doc, win.requestAnimationFrame(tick));
+}
+
 function scheduleClear(doc: Document, fn: () => void): void {
   const win = doc.defaultView;
   const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
@@ -217,9 +269,7 @@ export function findAndHighlight(
   if (el) {
     ensureHighlightStyle(doc);
     el.classList.add(HIGHLIGHT_CLASS);
-    if (typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ behavior, block: "center" });
-    }
+    scrollIntoViewStable(el, behavior);
     const win = doc.defaultView;
     const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
     setTimeoutFn(() => el.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
@@ -285,9 +335,7 @@ export function highlightChunkRange(
   const wrappers = wrapTextNodes(doc, nodes);
 
   const anchor = wrappers[0] ?? start;
-  if (typeof anchor.scrollIntoView === "function") {
-    anchor.scrollIntoView({ behavior, block: "center" });
-  }
+  scrollIntoViewStable(anchor, behavior);
   scheduleClear(doc, () => clearHighlight(doc));
   return true;
 }
@@ -315,9 +363,7 @@ export function scrollToSection(
       ensureHighlightStyle(doc);
       const el = h as HTMLElement;
       el.classList.add(HIGHLIGHT_CLASS);
-      if (typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ behavior, block: "center" });
-      }
+      scrollIntoViewStable(el, behavior);
       const win = doc.defaultView;
       const setTimeoutFn = win?.setTimeout ?? globalThis.setTimeout;
       setTimeoutFn(() => el.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
