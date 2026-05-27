@@ -20,6 +20,10 @@ interface ChatState {
   sidebarCollapsed: boolean;
   sidebarTab: "chats" | "references";
   composerDraft: string;
+  /** Bumped each time something asks to prefill the composer (e.g. a deck-chip
+   *  button). The Composer watches it to focus + move the cursor to the end so
+   *  the dropped-in prompt is obviously editable. Not persisted. */
+  composerFocusSeq: number;
   referencesBySession: Record<number, ReferenceItem[]>;
   newSession: () => number;
   selectSession: (id: number) => void;
@@ -57,6 +61,9 @@ interface ChatState {
   toggleSidebar: () => void;
   setSidebarTab: (tab: "chats" | "references") => void;
   setComposerDraft: (text: string) => void;
+  /** Prefill the composer with an editable prompt + request focus (does NOT
+   *  send). Used by deck-chip Generate/Edit affordances. */
+  requestComposerText: (text: string) => void;
   reset: () => void;
   // References
   setReferences: (backendSessionId: number, refs: ReferenceItem[]) => void;
@@ -124,6 +131,7 @@ export const useChatStore = create<ChatState>()(
       sidebarCollapsed: false,
       sidebarTab: "chats",
       composerDraft: "",
+      composerFocusSeq: 0,
       referencesBySession: {},
 
       newSession: () => {
@@ -304,6 +312,12 @@ export const useChatStore = create<ChatState>()(
       setSidebarTab: (tab) => set({ sidebarTab: tab }),
 
       setComposerDraft: (text) => set({ composerDraft: text }),
+
+      requestComposerText: (text) =>
+        set((s) => ({
+          composerDraft: text,
+          composerFocusSeq: s.composerFocusSeq + 1,
+        })),
 
       reset: () =>
         set({

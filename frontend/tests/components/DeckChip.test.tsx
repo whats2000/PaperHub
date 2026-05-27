@@ -78,31 +78,31 @@ describe("DeckChip", () => {
     expect(screen.getByText("1 slide")).toBeInTheDocument();
   });
 
-  it("shows 'Generate notes' when has_notes is false and sends a turn", () => {
-    const onSend = vi.fn();
-    render(<DeckChip deck={{ ...deck, has_notes: false }} onSend={onSend} />);
+  it("shows 'Generate notes' when has_notes is false and prefills the composer", () => {
+    const onPrefill = vi.fn();
+    render(<DeckChip deck={{ ...deck, has_notes: false }} onPrefill={onPrefill} />);
     fireEvent.click(screen.getByRole("button", { name: /generate.*notes/i }));
-    expect(onSend).toHaveBeenCalledWith(
+    expect(onPrefill).toHaveBeenCalledWith(
       expect.stringMatching(/speaker notes/i),
     );
   });
 
   it("shows 'Edit notes' when has_notes is true", () => {
-    const onSend = vi.fn();
-    render(<DeckChip deck={{ ...deck, has_notes: true }} onSend={onSend} />);
+    const onPrefill = vi.fn();
+    render(<DeckChip deck={{ ...deck, has_notes: true }} onPrefill={onPrefill} />);
     expect(
       screen.getByRole("button", { name: /edit notes/i }),
     ).toBeInTheDocument();
   });
 
-  it("Edit button sends an edit-slide turn", () => {
-    const onSend = vi.fn();
-    render(<DeckChip deck={deck} onSend={onSend} />);
+  it("Edit button prefills an editable edit-slide prompt (does not send)", () => {
+    const onPrefill = vi.fn();
+    render(<DeckChip deck={deck} onPrefill={onPrefill} />);
     fireEvent.click(screen.getByRole("button", { name: /edit slide/i }));
-    expect(onSend).toHaveBeenCalledWith(expect.stringMatching(/edit this slide/i));
+    expect(onPrefill).toHaveBeenCalledWith(expect.stringMatching(/edit this slide/i));
   });
 
-  it("does not render send affordances without onSend", () => {
+  it("does not render prefill affordances without onPrefill", () => {
     render(<DeckChip deck={deck} />);
     expect(screen.queryByRole("button", { name: /edit slide/i })).toBeNull();
   });

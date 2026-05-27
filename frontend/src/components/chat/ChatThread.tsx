@@ -16,6 +16,7 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
   const messageCount = session?.messages.length ?? 0;
   const lastMessage = session?.messages[session.messages.length - 1];
   const { send } = useChatStream();
+  const requestComposerText = useChatStore((s) => s.requestComposerText);
 
   useEffect(() => {
     if (!endRef.current) return;
@@ -116,7 +117,7 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
                 onRetry={retryHandler}
                 backendSessionId={session.backend_session_id}
                 researching={showResearchCard || showSlideCard}
-                onSendTurn={(text) => void send(session.id, text)}
+                onPrefill={requestComposerText}
               />
               {msg.role === "assistant" && msg.routing_decision && (
                 <div className="flex justify-start pl-1">

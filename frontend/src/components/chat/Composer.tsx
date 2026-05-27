@@ -1,4 +1,4 @@
-import { KeyboardEvent, useRef } from "react";
+import { KeyboardEvent, useEffect, useRef } from "react";
 import {
   BookOpen,
   BrainCircuit,
@@ -64,6 +64,7 @@ export function Composer({
 }: Props) {
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
+  const focusSeq = useChatStore((s) => s.composerFocusSeq);
   const toggleCanvasStore = useCanvasStore((s) => s.toggleCanvas);
   const canvasOpenStore = useCanvasStore((s) => s.open);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -76,6 +77,18 @@ export function Composer({
 
   const value = draft;
   const setValue = setDraft;
+
+  // When something prefills the composer (deck-chip Generate/Edit), focus the
+  // textarea and drop the cursor at the end so the prompt is ready to complete.
+  // Skip the initial render (focusSeq starts at 0) to avoid stealing focus.
+  useEffect(() => {
+    if (focusSeq === 0) return;
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  }, [focusSeq]);
 
   const submit = () => {
     const trimmed = value.trim();
