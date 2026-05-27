@@ -148,7 +148,10 @@ class DeckCommand(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["generate_notes", "edit_notes", "edit_slides", "regenerate"]
+    action: Literal[
+        "generate_notes", "edit_notes", "edit_slides",
+        "edit_title", "edit_preamble", "regenerate",
+    ]
     target_scope: Literal["current", "page", "all"] = "all"
     target_page: int | None = None
     note_language: str | None = None  # for generate_notes / edit_notes

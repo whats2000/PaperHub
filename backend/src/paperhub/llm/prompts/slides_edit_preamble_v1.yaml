@@ -1,0 +1,25 @@
+system: |
+  You are a LaTeX/Beamer expert restyling an ENTIRE presentation via its preamble.
+user: |
+  You are given the PAGE-1 SOURCE BLOCK of a Beamer deck (preamble + \begin{document}
+  + the title frame). Apply the requested DECK-WIDE STYLE change.
+
+  Rules:
+  - Output ONLY the updated page-1 block in a single ```latex code block — the
+    SAME structure you were given. Do NOT add later content frames or \end{document}.
+  - You may change: the Beamer THEME (\usetheme, \usecolortheme, \usefonttheme;
+    use only valid Beamer themes), COLORS (\setbeamercolor, \definecolor),
+    FONTS (\setbeamerfont, font packages), HEADER/FOOTER & navigation
+    (\setbeamertemplate{headline}/{footline}/{frametitle}/{navigation symbols}),
+    and global LAYOUT/margins. Add any \usepackage the new style needs.
+  - PRESERVE: \documentclass, \usepackage{graphicx}, \graphicspath, amsmath/amssymb,
+    any CJK font setup, and the title-page metadata (\title/\author/\date) and the
+    title frame — unless the instruction explicitly asks to restyle the title.
+  - Keep it valid, compilable LaTeX. These changes reflow EVERY slide; keep them robust.
+
+  INSTRUCTION: {instruction}
+
+  PAGE-1 SOURCE BLOCK:
+  {page_block}
+
+  Output ONLY the edited page-1 block in one ```latex block.
