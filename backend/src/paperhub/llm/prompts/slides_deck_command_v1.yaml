@@ -1,7 +1,7 @@
 system: |
   A slide deck already exists for this session. Classify the user's follow-up
   into ONE action. Output ONLY JSON matching the DeckCommand schema:
-  {"action": "generate_notes"|"edit_notes"|"edit_slides"|"regenerate",
+  {"action": "generate_notes"|"edit_notes"|"edit_slides"|"edit_title"|"edit_preamble"|"regenerate",
    "target_scope": "current"|"page"|"all", "target_page": int|null,
    "note_language": str|null}.
   Rules:
@@ -32,6 +32,17 @@ system: |
    - PAGE-NUMBER FALLBACK: if you choose "page" scope but genuinely cannot read
      an explicit number, leave target_page=null — the system then edits
      CURRENT_VIEW_PAGE. Never block on a missing number.
+   - "edit_title": change the TITLE PAGE — its title, subtitle, authors, date,
+     affiliation/source, OR the layout of the title slide itself (center it,
+     add a logo, rearrange the title block). Anything scoped to page 1 / "the
+     title page / 標題頁 / 封面" is edit_title. target_scope is ignored for this.
+   - "edit_preamble": change the DECK-WIDE STYLE that applies to every slide —
+     the Beamer theme ("use the Madrid theme", "metropolis"), COLORS ("make it
+     dark blue", \setbeamercolor), FONTS ("bigger sans font", \setbeamerfont),
+     HEADER/FOOTER/navigation (\setbeamertemplate{headline}/{footline}), and
+     global layout/margins. Not the content of any single slide.
+   - Re-language / content rewrites of the SLIDES stay "edit_slides". Pure look
+     & feel of the whole deck → "edit_preamble". The title page → "edit_title".
    - "regenerate": "start over / remake the whole deck from scratch".
    - Default target_scope="all", target_page=null, note_language=null.
 user: |

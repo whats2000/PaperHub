@@ -54,3 +54,25 @@ async def test_detect_slide_language_none_when_unspecified(fake_tracer) -> None:
         model="m", instruction="幫我做一份關於這篇論文的簡報",
     )
     assert lang is None
+
+
+@pytest.mark.asyncio
+async def test_edit_title_action(fake_tracer) -> None:
+    dec = DeckCommand(action="edit_title", target_scope="all")
+    out = await classify_deck_command(
+        adapter=_A(dec), tracer=fake_tracer, model="m",
+        instruction="edit the title page authors", current_view_page=1,
+        deck_outline="1. Intro",
+    )
+    assert out.action == "edit_title"
+
+
+@pytest.mark.asyncio
+async def test_edit_preamble_action(fake_tracer) -> None:
+    dec = DeckCommand(action="edit_preamble", target_scope="all")
+    out = await classify_deck_command(
+        adapter=_A(dec), tracer=fake_tracer, model="m",
+        instruction="make the whole deck use a dark blue theme",
+        current_view_page=2, deck_outline="1. Intro\n2. Method",
+    )
+    assert out.action == "edit_preamble"
