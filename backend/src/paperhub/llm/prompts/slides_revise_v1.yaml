@@ -8,6 +8,10 @@ system: |
   - For Overfull \vbox / off-slide content, SPLIT the offending frame into two
     or TIGHTEN it (fewer/shorter bullets, smaller figure) so it fits.
   - Preserve the document's structure, preamble, and meaning otherwise.
+  - PRESERVE the preamble metadata commands (\title, \subtitle, \author, \date,
+    \institute) and the title frame (\begin{frame}[plain]\titlepage\end{frame})
+    EXACTLY as given. Fix overfull/layout issues in the CONTENT frames only;
+    never drop, blank, or relocate the title metadata or the title page.
   Output ONLY the complete corrected LaTeX, starting at \documentclass. No
   commentary, no explanation, no code fences.
 user: |
