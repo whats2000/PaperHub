@@ -10,6 +10,7 @@ connection via ``async with open_db(settings.db_path) as conn``.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,21 @@ from paperhub.db.connection import open_db
 from paperhub.db.decks import get_deck
 
 router = APIRouter(tags=["decks"])
+
+# Characters illegal in filenames across Windows/macOS/Linux, plus controls.
+_FILENAME_BANNED = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def _download_name(deck: Any, ext: str) -> str:
+    """Build a human, source-identifying download filename from the deck title
+    (e.g. "Transformer 拋棄遞迴與卷積的注意力架構.pdf") instead of a generic
+    ``deck.pdf``. Non-ASCII titles are preserved — Starlette emits them via the
+    RFC 5987 ``filename*`` form. Falls back to ``slides`` for an empty title."""
+    plan = deck.plan or {}
+    title = str(plan.get("title") or "").strip()
+    name = _FILENAME_BANNED.sub("", title)
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    return f"{(name or 'slides')[:80]}.{ext}"
 
 
 def _exists(path: str) -> bool:
@@ -64,7 +80,11 @@ async def get_deck_pdf(session_id: int) -> FileResponse:
         raise HTTPException(
             status_code=404, detail="no compiled PDF for this session"
         )
-    return FileResponse(deck.pdf_path, media_type="application/pdf", filename="deck.pdf")
+    return FileResponse(
+        deck.pdf_path,
+        media_type="application/pdf",
+        filename=_download_name(deck, "pdf"),
+    )
 
 
 @router.get("/sessions/{session_id}/deck/tex")
@@ -77,7 +97,11 @@ async def get_deck_tex(session_id: int) -> FileResponse:
         raise HTTPException(
             status_code=404, detail="no deck source for this session"
         )
-    return FileResponse(deck.tex_path, media_type="text/plain", filename="deck.tex")
+    return FileResponse(
+        deck.tex_path,
+        media_type="text/plain",
+        filename=_download_name(deck, "tex"),
+    )
 
 
 __all__ = ["router"]
