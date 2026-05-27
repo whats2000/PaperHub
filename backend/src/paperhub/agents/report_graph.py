@@ -37,6 +37,8 @@ from paperhub.agents.report_pipeline import (
     detect_slide_language,
     draft_frame,
     edit_frame,
+    edit_preamble_block,
+    edit_title_block,
     narrate_talk,
     parse_slide_budget,
     revise_tex,
@@ -66,8 +68,10 @@ from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.assemble import AssembleInput, assemble_deck
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
+    get_preamble,
     is_title_frame,
     replace_frame_in_beamer,
+    replace_preamble,
 )
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
@@ -781,6 +785,119 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             "report_deck_id": deck.id,
         }
 
+    async def _recompile_and_emit(
+        state: AgentState,
+        writer: Any,
+        _flush_steps: Any,
+        deck: Any,
+        papers: list[dict[str, Any]],
+        papers_meta: list[dict[str, Any]],
+        old_notes: dict[int, tuple[str | None, str | None]],
+        new_tex: str,
+        *,
+        description: str,
+    ) -> str:
+        """Verify graphics, recompile (Overfull-aware revise loop), snapshot the
+        version, persist the deck + rebuild deck_slides, restore notes by
+        slide_index, and emit the deck event. Returns the final-response text.
+        Shared by sl_edit_slides / sl_edit_title / sl_edit_preamble."""
+        slides_dir = (
+            deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
+        )
+
+        allowed = await _inventory_keys(papers)
+        tex2, _rej = verify_and_fix_graphics(new_tex, allowed_keys=allowed)
+
+        async def _revise(log: str, cur_tex: str) -> str:
+            return await revise_tex(
+                pdflatex_log=log,
+                tex=cur_tex,
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.section_model,
+            )
+
+        async with deps.tracer.step(
+            agent="report", tool="report:compile", model=None
+        ) as cstep:
+            cstep.record_args({"description": description})
+            result = await compile_mod.compile_with_revise(
+                tex=tex2,
+                workdir=slides_dir,
+                tex_name="deck.tex",
+                revise=_revise,
+                max_retries=2,
+            )
+            cstep.record_result(
+                {
+                    "ok": result.ok,
+                    "attempts": result.attempts,
+                    "page_count": result.page_count,
+                    "log_tail": result.log[-500:] if not result.ok else "",
+                }
+            )
+            if not result.ok:
+                cstep.mark_error(f"{description} — deck failed to compile after retries")
+        await _flush_steps()
+
+        # version snapshot (blocking IO off the loop) — only when it compiled.
+        def _persist() -> None:
+            if result.ok:
+                VersionHistory(str(slides_dir)).save_version(
+                    result.tex, description, {}
+                )
+
+        await asyncio.to_thread(_persist)
+
+        await upsert_deck(
+            deps.conn,
+            session_id=state["session_id"],
+            run_id=state.get("run_id"),
+            tex_path=str(slides_dir / "deck.tex"),
+            pdf_path=str(slides_dir / "deck.pdf") if result.ok else None,
+            speaker_notes=deck.speaker_notes,
+            plan=deck.plan,
+            page_count=result.page_count,
+            theme=deck.theme,
+            contributing_paper_ids=deck.contributing_paper_ids,
+            status="ok" if result.ok else "error",
+        )
+        fresh = await get_deck(deps.conn, session_id=state["session_id"])
+        assert fresh is not None
+
+        if result.ok:
+            await replace_deck_slides(
+                deps.conn,
+                deck_id=fresh.id,
+                slides=build_deck_slides(result.tex, result.page_count),
+            )
+            # restore notes onto the matching slide_index, then rebuild the map.
+            for r in await get_deck_slides(deps.conn, deck_id=fresh.id):
+                nt, nl = old_notes.get(r.slide_index, (None, None))
+                if nt is not None:
+                    await update_slide_note(
+                        deps.conn,
+                        deck_id=fresh.id,
+                        slide_index=r.slide_index,
+                        note_text=nt,
+                        note_language=nl or "",
+                    )
+            await rebuild_speaker_notes_json(deps.conn, deck_id=fresh.id)
+
+        fresh = await get_deck(deps.conn, session_id=state["session_id"])
+        assert fresh is not None
+        notes = fresh.speaker_notes
+        _emit_deck(
+            writer, fresh, _deck_title(fresh), papers_meta, has_notes=bool(notes)
+        )
+        await _flush_steps()
+
+        return (
+            f"{description} and recompiled."
+            if result.ok
+            else f"{description} but it failed to compile — showing the last attempt."
+        )
+
     async def _edit_slides(state: AgentState) -> AgentState:
         """edit_slides: rewrite the targeted frame(s), recompile (Overfull-aware),
         and PRESERVE speaker notes by slide_index across the rebuild."""
@@ -796,9 +913,6 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             r.slide_index: (r.note_text, r.note_language) for r in rows
         }
 
-        slides_dir = (
-            deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
-        )
         if not Path(deck.tex_path).exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
             return {
                 **state,
@@ -848,103 +962,109 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     new_tex = replaced
             await _flush_steps()
 
-        # ---- recompile (same verify + Overfull-aware revise as _generate) ----
-        allowed = await _inventory_keys(papers)
-        tex2, _rej = verify_and_fix_graphics(new_tex, allowed_keys=allowed)
-
-        async def _revise(log: str, cur_tex: str) -> str:
-            return await revise_tex(
-                pdflatex_log=log,
-                tex=cur_tex,
-                adapter=deps.adapter,
-                tracer=deps.tracer,
-                model=deps.section_model,
-            )
-
-        async with deps.tracer.step(
-            agent="report", tool="report:compile", model=None
-        ) as cstep:
-            cstep.record_args({"edited_slides": [r.slide_index for r in targets]})
-            result = await compile_mod.compile_with_revise(
-                tex=tex2,
-                workdir=slides_dir,
-                tex_name="deck.tex",
-                revise=_revise,
-                max_retries=2,
-            )
-            cstep.record_result(
-                {
-                    "ok": result.ok,
-                    "attempts": result.attempts,
-                    "page_count": result.page_count,
-                    "log_tail": result.log[-500:] if not result.ok else "",
-                }
-            )
-            if not result.ok:
-                cstep.mark_error("edited deck failed to compile after retries")
-        await _flush_steps()
-
-        # version snapshot (blocking IO off the loop) — only when it compiled.
-        def _persist() -> None:
-            if result.ok:
-                VersionHistory(str(slides_dir)).save_version(
-                    result.tex, "Edited deck", {}
-                )
-
-        await asyncio.to_thread(_persist)
-
-        await upsert_deck(
-            deps.conn,
-            session_id=state["session_id"],
-            run_id=state.get("run_id"),
-            tex_path=str(slides_dir / "deck.tex"),
-            pdf_path=str(slides_dir / "deck.pdf") if result.ok else None,
-            speaker_notes=deck.speaker_notes,
-            plan=deck.plan,
-            page_count=result.page_count,
-            theme=deck.theme,
-            contributing_paper_ids=deck.contributing_paper_ids,
-            status="ok" if result.ok else "error",
+        msg = await _recompile_and_emit(
+            state, writer, _flush_steps, deck, papers, papers_meta, old_notes,
+            new_tex, description="Edited deck",
         )
         fresh = await get_deck(deps.conn, session_id=state["session_id"])
         assert fresh is not None
-
-        if result.ok:
-            await replace_deck_slides(
-                deps.conn,
-                deck_id=fresh.id,
-                slides=build_deck_slides(result.tex, result.page_count),
-            )
-            # restore notes onto the matching slide_index, then rebuild the map.
-            for r in await get_deck_slides(deps.conn, deck_id=fresh.id):
-                nt, nl = old_notes.get(r.slide_index, (None, None))
-                if nt is not None:
-                    await update_slide_note(
-                        deps.conn,
-                        deck_id=fresh.id,
-                        slide_index=r.slide_index,
-                        note_text=nt,
-                        note_language=nl or "",
-                    )
-            await rebuild_speaker_notes_json(deps.conn, deck_id=fresh.id)
-
-        fresh = await get_deck(deps.conn, session_id=state["session_id"])
-        assert fresh is not None
-        notes = fresh.speaker_notes
-        _emit_deck(
-            writer, fresh, _deck_title(fresh), papers_meta, has_notes=bool(notes)
-        )
-        await _flush_steps()
-
-        msg = (
-            "Edited the deck and recompiled."
-            if result.ok
-            else (
-                "Edited the deck but it failed to compile — "
-                "showing the last attempt."
-            )
-        )
         return {**state, "final_response": msg, "report_deck_id": fresh.id}
+
+    async def _edit_title(state: AgentState) -> AgentState:
+        """edit_title: rewrite the deck's page-1 block (preamble + title frame),
+        recompile (Overfull-aware), and PRESERVE speaker notes by slide_index."""
+        writer, _flush_steps = _streaming(state)
+        deck = await get_deck(deps.conn, session_id=state["session_id"])
+        assert deck is not None
+        papers: list[dict[str, Any]] = state["report_papers"]
+        papers_meta = [{"id": p["id"], "title": p["title"]} for p in papers]
+        rows = await get_deck_slides(deps.conn, deck_id=deck.id)
+        old_notes = {r.slide_index: (r.note_text, r.note_language) for r in rows}
+        if not Path(deck.tex_path).exists():  # noqa: ASYNC240
+            return {
+                **state,
+                "final_response": (
+                    "I couldn't find the deck source to edit — "
+                    "generate it again first."
+                ),
+                "report_deck_id": deck.id,
+            }
+        full_tex = await asyncio.to_thread(Path(deck.tex_path).read_text, encoding="utf-8")
+        block = get_preamble(full_tex)
+        if block is None:
+            return {
+                **state,
+                "final_response": "I couldn't parse the deck's title page to edit it.",
+                "report_deck_id": deck.id,
+            }
+        new_block = await edit_title_block(
+            adapter=deps.adapter,
+            tracer=deps.tracer,
+            model=deps.section_model,
+            page_block=block,
+            instruction=state.get("user_message", ""),
+            response_language=_slide_language(state),
+        )
+        await _flush_steps()
+        new_tex = replace_preamble(full_tex, new_block) or full_tex
+        msg = await _recompile_and_emit(
+            state, writer, _flush_steps, deck, papers, papers_meta, old_notes,
+            new_tex, description="Edited the title page",
+        )
+        fresh = await get_deck(deps.conn, session_id=state["session_id"])
+        return {
+            **state,
+            "final_response": msg,
+            "report_deck_id": fresh.id if fresh else deck.id,
+        }
+
+    async def _edit_preamble(state: AgentState) -> AgentState:
+        """edit_preamble: restyle the deck via its preamble (theme/colors/fonts),
+        recompile (Overfull-aware), and PRESERVE speaker notes by slide_index."""
+        writer, _flush_steps = _streaming(state)
+        deck = await get_deck(deps.conn, session_id=state["session_id"])
+        assert deck is not None
+        papers: list[dict[str, Any]] = state["report_papers"]
+        papers_meta = [{"id": p["id"], "title": p["title"]} for p in papers]
+        rows = await get_deck_slides(deps.conn, deck_id=deck.id)
+        old_notes = {r.slide_index: (r.note_text, r.note_language) for r in rows}
+        if not Path(deck.tex_path).exists():  # noqa: ASYNC240
+            return {
+                **state,
+                "final_response": (
+                    "I couldn't find the deck source to edit — "
+                    "generate it again first."
+                ),
+                "report_deck_id": deck.id,
+            }
+        full_tex = await asyncio.to_thread(Path(deck.tex_path).read_text, encoding="utf-8")
+        block = get_preamble(full_tex)
+        if block is None:
+            return {
+                **state,
+                "final_response": "I couldn't parse the deck's title page to edit it.",
+                "report_deck_id": deck.id,
+            }
+        new_block = await edit_preamble_block(
+            adapter=deps.adapter,
+            tracer=deps.tracer,
+            model=deps.section_model,
+            page_block=block,
+            instruction=state.get("user_message", ""),
+            response_language=_slide_language(state),
+        )
+        await _flush_steps()
+        new_tex = replace_preamble(full_tex, new_block) or full_tex
+        msg = await _recompile_and_emit(
+            state, writer, _flush_steps, deck, papers, papers_meta, old_notes,
+            new_tex, description="Restyled the deck",
+        )
+        fresh = await get_deck(deps.conn, session_id=state["session_id"])
+        return {
+            **state,
+            "final_response": msg,
+            "report_deck_id": fresh.id if fresh else deck.id,
+        }
 
     g: StateGraph[AgentState, Any] = StateGraph(AgentState)
     g.add_node("sl_resolve", _resolve)
@@ -953,6 +1073,8 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
     g.add_node("sl_generate", _generate)
     g.add_node("sl_notes", _notes)
     g.add_node("sl_edit_slides", _edit_slides)
+    g.add_node("sl_edit_title", _edit_title)
+    g.add_node("sl_edit_preamble", _edit_preamble)
     g.add_edge(START, "sl_resolve")
     g.add_conditional_edges(
         "sl_resolve",
@@ -970,4 +1092,6 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
     g.add_edge("sl_generate", END)
     g.add_edge("sl_notes", END)
     g.add_edge("sl_edit_slides", END)
+    g.add_edge("sl_edit_title", END)
+    g.add_edge("sl_edit_preamble", END)
     return g.compile()
