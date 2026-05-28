@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import {
   Check,
@@ -85,6 +92,11 @@ export function SlidesPanel({
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [mainWidth, setMainWidth] = useState(0);
+  // Defer the width used for pdf.js rasterisation so a rapid resize-drag
+  // doesn't fire N renders per pixel across every mounted page. React holds
+  // the previous value during high-priority renders and settles to the
+  // latest when idle — single-pointer-event rasterise instead of per-pixel.
+  const renderWidth = useDeferredValue(mainWidth);
   // Measured thumbnail render width — derived from the rail's actual inner
   // width (excludes the scrollbar), NOT the style width, so a thumbnail never
   // overflows + gets clipped on the right when the rail scrolls.
@@ -401,16 +413,39 @@ export function SlidesPanel({
             className="w-1.5 cursor-col-resize bg-border hover:bg-primary/40 transition-colors shrink-0"
           />
 
-          {/* Main content column: current slide */}
+          {/* Main content column: ALL pages mounted, only the current one
+              visible (display:none on the rest). pdf.js rasterises each <Page>
+              exactly once on mount and keeps the rendered canvas in the DOM —
+              page-switching becomes a CSS class toggle, with zero re-render
+              (the live-preview snappiness this UX needs). Memory cost is
+              bounded by the deck budget (8–30 slides) at ~2 MB per rasterised
+              canvas. Width drives all pages, but is deferred (useDeferredValue)
+              so a resize-drag doesn't rasterise N pages per pixel. */}
           <div
             ref={measureMainArea}
             className="flex-1 min-h-0 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-2"
           >
-            <Page
-              pageNumber={currentPage}
-              width={mainWidth > 0 ? mainWidth : undefined}
-              className="mx-auto shadow"
-            />
+            {Array.from({ length: numPages }, (_, i) => {
+              const pageNum = i + 1;
+              const isActive = pageNum === currentPage;
+              return (
+                <div
+                  key={pageNum}
+                  // `hidden` (display:none) keeps the page in the DOM (canvas
+                  // stays rendered) but takes it out of the flow — no scroll,
+                  // no overlap, no interaction.
+                  hidden={!isActive}
+                  aria-hidden={!isActive}
+                  data-page={pageNum}
+                >
+                  <Page
+                    pageNumber={pageNum}
+                    width={renderWidth > 0 ? renderWidth : undefined}
+                    className="mx-auto shadow"
+                  />
+                </div>
+              );
+            })}
           </div>
         </Document>
       ) : (

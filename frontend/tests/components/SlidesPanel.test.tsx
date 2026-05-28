@@ -131,6 +131,36 @@ describe("SlidesPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("mounts every page once in the main viewer and toggles visibility on swap", async () => {
+    // Live-preview snappiness contract: clicking next must NOT re-rasterise.
+    // We mount one wrapper per page (data-page="N") and hide the inactive
+    // ones with `hidden`. Switching pages becomes a CSS toggle, not a fresh
+    // pdf.js render — that's the perf fix for the laggy page-swap.
+    const { container } = render(
+      <SlidesPanel sessionId={7} speakerNotes={{}} />,
+    );
+
+    // All 5 pages must be present in the DOM from the first render.
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-page]")).toHaveLength(5);
+    });
+
+    const wrap = (n: number) =>
+      container.querySelector<HTMLElement>(`[data-page="${n}"]`);
+
+    // Only the active page is visible.
+    expect(wrap(1)?.hidden).toBe(false);
+    expect(wrap(2)?.hidden).toBe(true);
+    expect(wrap(5)?.hidden).toBe(true);
+
+    // Swap → the previously active page MUST remain mounted (proving the
+    // rendered canvas survives the swap and isn't a re-render every click).
+    await userEvent.click(screen.getByRole("button", { name: /next slide/i }));
+    expect(wrap(1)).not.toBeNull();
+    expect(wrap(1)?.hidden).toBe(true);
+    expect(wrap(2)?.hidden).toBe(false);
+  });
+
   it("reloads the deck (cache-busted by revision) when the edit completes", async () => {
     useSlidesStore.setState({ deckRevisionBySession: { 7: 4 } });
     const { rerender } = render(
