@@ -124,6 +124,39 @@ def test_extract_pdf_with_headings_flat_font_returns_empty(tmp_path: Path) -> No
     assert headings == []
 
 
+def test_extract_latex_ignores_commented_begin_document(tmp_path: Path) -> None:
+    """Regression: arXiv:2503.07137 (MoE survey, IEEE class) shipped its
+    main.tex with a template stub ``%\\begin{document}`` *before* the real
+    ``\\begin{document}``. ``re.search`` is a substring match — it hit the
+    commented stub first, sliced the preamble at that point, and left the
+    REAL ``\\begin{document}`` in the flattened body. The matching real
+    ``\\end{document}`` was then stripped (only one of them in the source),
+    so pandoc saw a document that opens but never closes and exited with
+    ``unexpected end of input``. The renderer's pylatexenc fallback wraps
+    everything in ``<pre>`` — that's why the Citation Canvas showed plain
+    text. Skip comment-line matches: only the real markers should drive
+    the strip."""
+    (tmp_path / "main.tex").write_text(
+        "\\documentclass{IEEEtran}\n"
+        "% Example template the IEEEtran class ships with:\n"
+        "%\\begin{document}\n"
+        "% \\title{Example}\n"
+        "%\\end{document}\n"
+        "\n"
+        "\\begin{document}\n"
+        "The real body content.\n"
+        "\\end{document}\n",
+        encoding="utf-8",
+    )
+    out = extract_latex(tmp_path)
+    assert "\\begin{document}" not in out.flattened_text, (
+        f"real \\begin{{document}} leaked into the body: "
+        f"{out.flattened_text!r}"
+    )
+    assert "\\end{document}" not in out.flattened_text
+    assert "The real body content." in out.flattened_text
+
+
 def test_extract_latex_raises_on_empty_dir(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         extract_latex(tmp_path)
