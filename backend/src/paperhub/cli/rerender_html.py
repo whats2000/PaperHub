@@ -28,7 +28,10 @@ import aiosqlite
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import map_stripped_offsets_to_original
 from paperhub.pipelines.extract import extract_latex
-from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.figures import (
+    rasterize_and_normalize_figures,
+    strip_includegraphics_options,
+)
 from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
@@ -122,6 +125,10 @@ async def _rerender_one(
     marked = rasterize_tikz_figures(
         marked, preamble=preamble, out_dir=resource_dir,
     )
+    # Drop LaTeX width hints — pandoc would otherwise emit
+    # style="width:50.0%" on figures using \\includegraphics[width=...]
+    # and shrink them on the wide Citation Canvas.
+    marked = strip_includegraphics_options(marked)
 
     render_source = source_dir / "source.render.tex"
     render_source.write_text(  # noqa: ASYNC240

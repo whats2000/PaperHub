@@ -49,7 +49,10 @@ from paperhub.pipelines.extract import (
     extract_pdf_page1_text,
     extract_pdf_with_headings,
 )
-from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.figures import (
+    rasterize_and_normalize_figures,
+    strip_includegraphics_options,
+)
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
 from paperhub.pipelines.marker_blocks_to_chunks import (
     build_layout_index,
@@ -336,6 +339,10 @@ class PaperPipeline:
         marked = rasterize_tikz_figures(
             marked, preamble=ext.preamble, out_dir=source_path.parent,
         )
+        # Drop LaTeX column-width hints — pandoc would otherwise emit
+        # style="width:50.0%" on every <img> and shrink high-DPI figures
+        # to half-width on the wide Citation Canvas.
+        marked = strip_includegraphics_options(marked)
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
@@ -537,6 +544,7 @@ class PaperPipeline:
             marked = rasterize_tikz_figures(
                 marked, preamble=ext.preamble, out_dir=source_path.parent,
             )
+            marked = strip_includegraphics_options(marked)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
                 rasterize_and_normalize_figures(marked, source_path.parent),

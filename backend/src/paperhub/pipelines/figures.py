@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 # \includegraphics[opts]{path} — capture the {path} so we can rewrite it.
 _INCLUDEGRAPHICS_RE = re.compile(r"(\\includegraphics(?:\[[^\]]*\])?\s*\{)([^}]+)(\})")
+# Same command WITH its option bracket, for the strip helper below. Two
+# capture groups so the substitution can keep \includegraphics + the file
+# token while discarding only the options.
+_INCLUDEGRAPHICS_WITH_OPTS_RE = re.compile(
+    r"(\\includegraphics)\[[^\]]*\]\s*(\{[^}]+\})"
+)
 # Tried in order when a reference has no extension (LaTeX graphics resolution).
 _RESOLVE_EXTS = (".pdf", ".png", ".jpg", ".jpeg", ".eps")
 _RASTERIZE_DPI = 150
@@ -42,6 +48,26 @@ def _rasterize_pdf(pdf_path: Path, png_path: Path) -> None:
         page = doc.load_page(0)
         pix = page.get_pixmap(dpi=_RASTERIZE_DPI)
         pix.save(str(png_path))
+
+
+def strip_includegraphics_options(tex: str) -> str:
+    """Drop the ``[options]`` bracket from each ``\\includegraphics`` so the
+    rendered HTML ``<img>`` inherits its natural size.
+
+    LaTeX uses ``[width=0.5\\textwidth]`` to fit a figure into a narrow
+    print column. Pandoc faithfully translates that to
+    ``style="width:50.0%"`` on the ``<img>`` — which on a wide HTML canvas
+    shrinks the figure to half-width for no reason, undoing the
+    higher-DPI rasterisation we paid for. Stripping the bracket lets CSS
+    size the image to fit the container (or smaller, on a narrow viewport)
+    while keeping the underlying pixels crisp.
+
+    Other ``\\includegraphics`` options (``scale``, ``angle``, ``clip``,
+    ``keepaspectratio``) are stripped too — none of them translate
+    meaningfully to a same-origin HTML viewer, and keeping the helper
+    one-pass + intention-clear beats a per-option allowlist.
+    """
+    return _INCLUDEGRAPHICS_WITH_OPTS_RE.sub(r"\1\2", tex)
 
 
 def rasterize_and_normalize_figures(tex: str, resource_dir: Path) -> str:
