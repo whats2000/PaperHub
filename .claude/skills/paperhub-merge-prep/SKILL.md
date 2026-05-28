@@ -46,40 +46,60 @@ guess on minor or major — patch is the only safe default.
 recent run. Do NOT write counts to README before running the suites — a
 prior conversation's count is not authoritative.
 
-From the repo root:
+The repo uses `uv` exclusively for Python (per CLAUDE.md Conventions —
+never `pip`, never `python -m venv`, never system python). The full
+gate set:
 
-- Backend tests: `cd backend && uv run pytest` → record the `N passed`
-  count
-- Frontend tests: `cd frontend && npm test -- --run` → record the
-  `N passed` count
+- Backend tests: `cd backend && uv run pytest` → record `N passed`
+- Frontend tests: `cd frontend && npm test -- --run` → record `N passed`
 - Backend ruff: `cd backend && uv run ruff check src tests` → must say
   "All checks passed!"
 - Backend mypy: `cd backend && uv run mypy src` → must say
   "Success: no issues found"
-- If significant frontend changes are on this branch, also run
-  `cd frontend && npm run typecheck && npm run lint`
+- Frontend typecheck: `cd frontend && npm run typecheck` → tsc strict,
+  no errors
+- Frontend lint: `cd frontend && npm run lint` → ESLint, no errors
+- Frontend build (only if the branch changed build config or imports
+  that could break at production-bundle time): `cd frontend && npm run build`
 
 If any gate fails, STOP and surface the failure to the user. Do not
 attempt to fix it under the skill — that's a separate task.
 
-## 3 — Apply version bumps (five files)
+## 3 — Apply version bumps (version-locked files: every pyproject/json AND its lockfile)
 
-Edit the following, replacing the prior version with the chosen
-`X.Y.Z`:
+The repo has THREE coupled packages on the same version string —
+**bumping the manifest alone leaves a lockfile saying the package is
+still on the prior version** (the foot-gun that ships an inconsistent
+release if missed). For each package, edit the manifest THEN
+regenerate the lockfile:
 
-- `backend/pyproject.toml` — `version = "X.Y.Z"`
-- `frontend/package.json` — `"version": "X.Y.Z"`
-- `marker_service/pyproject.toml` — `version = "X.Y.Z"`
+| Package | Manifest | Lockfile | Regen command |
+| --- | --- | --- | --- |
+| `paperhub` (backend) | `backend/pyproject.toml` | `backend/uv.lock` | `cd backend && uv lock` |
+| `frontend` | `frontend/package.json` | `frontend/package-lock.json` | `cd frontend && npm install --package-lock-only` |
+| `paperhub-marker` | `marker_service/pyproject.toml` | `marker_service/uv.lock` | `cd marker_service && uv lock` |
+
+After bumping all three manifests + regenerating all three lockfiles,
+**verify every lock now shows the new version** (the version string
+appears multiple times in `frontend/package-lock.json` — root + a
+`packages."".version` entry — both must update):
+
+```
+grep -n '"version": "X.Y.Z"' frontend/package-lock.json   # expect ≥2 matches
+grep -n 'version = "X.Y.Z"'   backend/uv.lock              # expect 1 match for the paperhub row
+grep -n 'version = "X.Y.Z"'   marker_service/uv.lock       # expect 1 match for paperhub-marker
+```
+
+Then update the two doc files:
+
 - `README.md` — three changes:
   1. Tests badge: update both counts from step 2's fresh runs
   2. Status badge: `Plan%20F-merged%20(SRS%20vX.Y.Z)`
   3. The "currently **vX.Y.Z**" sentence in the docs/SRS pointer
 - `CLAUDE.md` — every literal `v(old)` reference to the SRS pointer
   (use `Edit` with `replace_all: true` after confirming via grep that
-  every match is intended)
-
-`backend/uv.lock` may shift its `paperhub` row when uv resyncs after
-the pyproject bump — include it in the commit if it does.
+  every match is intended — there are typically two: the spec link in
+  "What you're working on" and the "Where things live" SRS pointer)
 
 ## 4 — Update the SRS
 
@@ -109,7 +129,9 @@ Edit `docs/superpowers/specs/2026-05-17-paperhub-srs.md`:
 
 ## 5 — Commit as one release bump
 
-Stage every file from steps 3 and 4 (the seven files above) and commit:
+Stage every file changed in steps 3 and 4 — typically **nine files**:
+the three manifests, the three lockfiles, README, CLAUDE.md, and the
+SRS. Then commit:
 
 ```
 chore(release): vX.Y.Z
@@ -160,12 +182,36 @@ a separate downstream action with its own approval.
 
 - Bumping minor/major without explicit user approval when the
   branch's commit kinds are ambiguous → patch is default; ask first.
+- **Bumping a manifest without regenerating its lockfile** → produces
+  an inconsistent release where `pyproject.toml` says vN+1 but the
+  lock says vN. The CI / a fresh `uv sync` / `npm ci` will silently
+  install the wrong artifact. All three lock pairs must move together.
 - Writing test counts to README before running the suites → the
   README is a public artifact; stale counts are misinformation.
 - Skipping the SRS changelog row → the SRS is the authoritative
   changelog; commit messages alone are not.
-- Forcing through ruff/mypy failures with `--no-verify` or similar →
-  if a gate fails, surface it and stop.
+- Forcing through ruff/mypy/typecheck/lint failures with `--no-verify`
+  or skip-flags → if a gate fails, surface it and stop.
 - Auto-executing the merge / push / tag commands → restricted ops
   always need per-instance approval, even when the user has approved
   similar ops earlier in the same session.
+
+## Conventions reference (from CLAUDE.md)
+
+For consistency with the wider repo conventions the skill operates
+inside:
+
+- **Commits**: Conventional Commits — `action(scope): imperative
+  subject`. Use `chore(release): vX.Y.Z` for the release commit.
+- **Python tooling**: `uv` only — never `pip`, `python -m venv`, or
+  system python. All backend commands run as `uv run <cmd>` from
+  `backend/`.
+- **Shell**: PowerShell on Windows is the project default; Bash is
+  also fine. The commands above use POSIX path style; on PowerShell
+  swap `cd backend && uv run pytest` for
+  `cd backend; uv run pytest` (or `Set-Location backend`).
+- **Restricted operations** (from global CLAUDE.md): `git push`, any
+  merge / rebase / cherry-pick onto a shared branch, `gh pr create` /
+  `gh pr merge`, posting externally — all need explicit per-instance
+  approval each time. Approval earlier in the same session does NOT
+  carry forward to the merge.
