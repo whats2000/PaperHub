@@ -1381,7 +1381,7 @@ wheels = [
 
 [[package]]
 name = "paperhub-marker"
-version = "2.23.1"
+version = "2.23.2"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
