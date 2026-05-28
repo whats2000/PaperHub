@@ -1063,3 +1063,101 @@ Some body text here is present in the introduction section of this document.
     assert any("mc^2" in e.latex for e in asset.equations), (
         f"Expected equation with 'mc^2'; got {[e.latex for e in asset.equations]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Concurrent write-lock regression (v2.23.2 hotfix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_concurrent_writes_serialise_through_write_transaction(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    tmp_path: Path,
+) -> None:
+    """The two contending writes in the ingest path —
+    ``_persist_paper_content_and_chunks`` and ``_link_to_session`` — must
+    survive concurrent invocation without raising
+    ``sqlite3.OperationalError: database is locked``.
+
+    Reproduces the v2.23.1 deployment bug where rapid back-to-back
+    ``POST /papers`` requests crashed two of three ingests because the
+    persist transaction (~400 INSERTs per paper) and the post-persist link
+    INSERT raced on the SQLite write lock. The fix routes both through
+    ``write_transaction()`` in ``paperhub.db.connection``, which holds a
+    process-wide asyncio lock + uses ``BEGIN IMMEDIATE`` — so the database
+    file never sees more than one writer at a time from this process.
+
+    The test fires three full _persist+_link sequences in parallel and
+    asserts (1) all three return distinct paper_content ids, and (2) all
+    three are linked to the same session via distinct ``papers`` rows.
+    """
+    import asyncio
+
+    from paperhub.pipelines.chunker import Chunk
+
+    pipeline, conn, _cache_root = pipeline_env
+
+    # Seed a session so the FK to papers.session_id is satisfied.
+    await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await conn.commit()
+
+    def _make_chunks(prefix: str, count: int = 200) -> list[Chunk]:
+        # Mirror prod payload size — the bug only surfaces when the write
+        # transaction is long (hundreds of INSERTs), not on a 1-chunk paper.
+        return [
+            Chunk(
+                section="Intro",
+                char_start=i * 10,
+                char_end=i * 10 + 9,
+                text=f"{prefix} chunk {i}",
+                dom_id=None,
+                match_text=None,
+                page=None,
+                bbox=None,
+            )
+            for i in range(count)
+        ]
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src_path = src_dir / "paper.tex"
+    src_path.write_text("dummy")
+    html_path = src_dir / "paper.html"
+    html_path.write_text("<html></html>")
+
+    async def _full_attach(n: int) -> tuple[int, int]:
+        # Mirror _ingest_arxiv's ordering: persist first (long transaction),
+        # then link to session (short transaction). Both must be serialised.
+        pcid, _cids = await pipeline._persist_paper_content_and_chunks(
+            content_key=f"test:concurrent-{n}",
+            kind="arxiv",
+            arxiv_id=f"test-{n}",
+            sha256=None,
+            metadata={
+                "title": f"Concurrent paper {n}",
+                "authors": ["A"],
+                "year": 2026,
+                "abstract": "x",
+            },
+            source_path=src_path,
+            source_dir_path=src_dir,
+            html_path=html_path,
+            chunks=_make_chunks(f"p{n}"),
+            sections_json=None,
+            asset_status="latex",
+        )
+        papers_id = await pipeline._link_to_session(
+            session_id=1, paper_content_id=pcid,
+        )
+        return pcid, papers_id
+
+    results = await asyncio.gather(_full_attach(1), _full_attach(2), _full_attach(3))
+    pcids = [r[0] for r in results]
+    papers_ids = [r[1] for r in results]
+    assert len(set(pcids)) == 3, (
+        f"expected 3 distinct paper_content ids, got {pcids}"
+    )
+    assert len(set(papers_ids)) == 3, (
+        f"expected 3 distinct papers row ids, got {papers_ids}"
+    )
