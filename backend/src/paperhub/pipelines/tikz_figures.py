@@ -195,7 +195,7 @@ def rasterize_tikz_figures(
     *,
     preamble: str,
     out_dir: Path,
-    dpi: int = 200,
+    dpi: int = 300,
 ) -> str:
     """Replace each TikZ environment in ``tex`` with a ``\\includegraphics``
     pointing at a rendered PNG.
@@ -215,8 +215,11 @@ def rasterize_tikz_figures(
         so the subsequent ``figures.py`` pass picks them up by relative
         path.
     dpi:
-        Rasterisation resolution. 200 DPI matches the existing figure
-        rasteriser's quality for arXiv figures.
+        Rasterisation resolution. Default 300 DPI — TikZ figures lean
+        heavily on fine strokes (slashes in tree edges, small-font node
+        text) that alias noticeably below ~250; 300 keeps file sizes
+        reasonable (~1 MB for a survey roadmap) while staying crisp on
+        2x-density displays.
 
     Returns the rewritten ``tex``. Any block that fails to compile is
     left as-is (no exception propagated) — the caller's pipeline must
