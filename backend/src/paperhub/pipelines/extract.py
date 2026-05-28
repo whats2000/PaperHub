@@ -22,8 +22,24 @@ import pymupdf
 
 logger = logging.getLogger(__name__)
 
-_BEGIN_DOC = re.compile(r"\\begin\{document\}")
-_END_DOC = re.compile(r"\\end\{document\}")
+# Match the REAL \begin{document} / \end{document} markers — skip any
+# occurrence inside a LaTeX %-comment. Tripped by IEEE journal classes
+# (arXiv:2503.07137) that ship template stubs like:
+#     %\begin{document}
+#     % \title{Example}
+#     %\end{document}
+# in the preamble. The old substring regex hit the commented \begin first,
+# sliced the preamble at that point, and kept the real \begin{document} in
+# the body — pandoc then saw an opening with no closing match and the
+# renderer fell back to the pylatexenc <pre> view (plain-text appearance).
+#
+# Pattern: from start-of-line (re.M), allow any chars that are not an
+# unescaped %, then the literal command. The literal is captured as group 1
+# so callers can use ``m.start(1)`` / ``m.end(1)`` to slice exactly at the
+# command (NOT at the start of the line — that would swallow body content
+# when the document is on a single line).
+_BEGIN_DOC = re.compile(r"(?m)^(?:[^%\n]|\\%)*(\\begin\{document\})")
+_END_DOC = re.compile(r"(?m)^(?:[^%\n]|\\%)*(\\end\{document\})")
 _INPUT_INCLUDE = re.compile(r"\\(?:input|include)\{([^}]+)\}")
 
 # Stock placeholder titles emitted by Word, OpenOffice, InDesign etc. when the
@@ -101,13 +117,16 @@ def extract_latex(source_dir: Path) -> LatexExtract:
     flat = _inline_recursive(raw, source_dir, seen={main.resolve()})
     # Strip preamble (everything up to and including \\begin{document}) — but
     # keep it: the macro definitions there are needed by the Canvas renderer.
+    # Group 1 is the literal \\begin{document} / \\end{document}; group 0 also
+    # consumes the (comment-free) prefix on the same line, so we MUST slice
+    # against group 1 to avoid eating real content.
     begin_m = _BEGIN_DOC.search(flat)
-    preamble = flat[: begin_m.start()] if begin_m else ""
+    preamble = flat[: begin_m.start(1)] if begin_m else ""
     if begin_m:
-        flat = flat[begin_m.end():]
+        flat = flat[begin_m.end(1):]
     end_m = _END_DOC.search(flat)
     if end_m:
-        flat = flat[: end_m.start()]
+        flat = flat[: end_m.start(1)]
     return LatexExtract(
         main_path=main, flattened_text=flat.strip(), preamble=preamble,
     )

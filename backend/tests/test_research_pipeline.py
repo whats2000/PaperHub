@@ -274,6 +274,58 @@ async def test_parse_tolerates_prose_around_json(
     assert out[0].hint == "DDPM"
 
 
+async def test_parse_downgrades_bibtex_cite_key_to_natural_language(
+    fake_tracer: Tracer,
+) -> None:
+    """Regression: run 280 in session 158. The user pasted a LaTeX
+    bibliography snippet containing ``\\cite{pei2026actionaware}`` along
+    with two full titles. The LLM Parser classified ``pei2026actionaware``
+    as ``kind: quoted_title``. The Discoverer then SHORT-CIRCUITED web
+    search ("user-supplied id/title") and the Resolver queried Semantic
+    Scholar for a paper literally titled "pei2026actionaware" — 0 hits,
+    pipeline reported the paper as not found.
+
+    A BibTeX cite-key is NOT a title and MUST NOT short-circuit the web
+    Discoverer. Detect the cite-key shape deterministically (no spaces,
+    contains a 4-digit year, lowercase + digits only) and downgrade to
+    ``natural_language`` so the Discoverer can web-search for the actual
+    paper that key references."""
+    raw = (
+        '[{"hint": "pei2026actionaware", "kind": "quoted_title"}, '
+        '{"hint": "li2026optimusvla", "kind": "quoted_title"}, '
+        '{"hint": "Attention Is All You Need", "kind": "quoted_title"}]'
+    )
+    comp = _async_completion_mock([_msg(content=raw)])
+    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+        out = await parse_user_message(
+            r"\cite{pei2026actionaware} and \cite{li2026optimusvla} and the "
+            r"paper titled \"Attention Is All You Need\"",
+            tracer=fake_tracer, model="m",
+        )
+    by_hint = {r.hint: r.kind for r in out}
+    # Cite-key shaped hints → natural_language (web-Discoverer eligible).
+    assert by_hint["pei2026actionaware"] == "natural_language"
+    assert by_hint["li2026optimusvla"] == "natural_language"
+    # Real quoted titles must remain quoted_title (they're still trusted).
+    assert by_hint["Attention Is All You Need"] == "quoted_title"
+
+
+async def test_parse_does_not_downgrade_real_titles_just_because_year_appears() -> None:
+    """Guard against false positives: a real paper title that happens to
+    contain a year (``Mamba 2 (2024)``) must NOT be downgraded — the
+    cite-key regex requires NO spaces."""
+    from paperhub.agents.research_pipeline import _safe_parse_request_list
+
+    raw = (
+        '[{"hint": "Mamba 2 (2024)", "kind": "quoted_title"}, '
+        '{"hint": "Attention 2017", "kind": "quoted_title"}]'
+    )
+    out = _safe_parse_request_list(raw)
+    by_hint = {r.hint: r.kind for r in out}
+    assert by_hint["Mamba 2 (2024)"] == "quoted_title"
+    assert by_hint["Attention 2017"] == "quoted_title"
+
+
 # ─────────────────────────── Discoverer ─────────────────────────────
 
 
@@ -556,6 +608,94 @@ async def test_resolver_calls_ss_exactly_once(
     # Exactly one SS call — the structural invariant.
     ss_calls = [n for n, _ in reg.call_log if n == "papers.search_semantic_scholar"]
     assert len(ss_calls) == 1
+
+
+class _EnvelopeStubRegistry(_StubRegistry):
+    """Like ``_StubRegistry`` but returns the FastMCP envelope shape
+    (``{"result": [...]}``) that production ``MCPClient.call_tool``
+    actually surfaces for handlers declared as ``-> list[dict]``.
+
+    The bare-list ``_StubRegistry`` masks a real production bug: every
+    ``mcp_registry.call("papers.search_semantic_scholar", ...)`` returns
+    a dict in prod (FastMCP wraps list returns), and the resolver's
+    ``isinstance(hits, list)`` check evaluates False — silently dropping
+    every hit. The CLAUDE.md meta-in-payload convention now mandates
+    unwrap via ``normalize_mcp_result``; this stub exercises the
+    real-shape path so regressions can't sneak in again."""
+
+    async def call(self, name: str, args: dict[str, Any]) -> Any:
+        self.call_log.append((name, args))
+        if name == "web.search":
+            return {"result": list(self.web_hits)}
+        if name == "papers.search_semantic_scholar":
+            return {"result": list(self.ss_hits)}
+        raise RuntimeError(f"_EnvelopeStubRegistry: unknown tool {name!r}")
+
+
+async def test_resolver_title_only_unwraps_fastmcp_envelope(
+    fake_tracer: Tracer,
+) -> None:
+    """Regression for the silent-drop bug: a title-only SS path used to
+    return None for every hit because the resolver did
+    ``isinstance(hits, list)`` on FastMCP's ``{"result": [...]}`` wrapper.
+    With envelope unwrap, the same hits resolve correctly.
+
+    This is the bug that almost certainly caused 'Global Prior 0 hits' in
+    run 280 — SS may have returned hits but the resolver couldn't see them.
+    """
+    reg = _EnvelopeStubRegistry(ss_hits=[
+        {
+            "paper_id": "ss:abc1234",
+            "title": "Global Prior Meets Local Consistency: …",
+            "year": 2025,
+            "authors": ["Some Author"],
+            "arxiv_id": None,
+            "has_open_pdf": True,
+        },
+    ])
+    identity = CanonicalIdentity(
+        title="Global Prior Meets Local Consistency",
+        author_surname=None, year=2025, confidence="high",
+    )
+    out = await resolve_via_ss(
+        ParsedRequest(hint="global prior paper", kind="natural_language"),
+        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+    )
+    assert out is not None, (
+        "resolver must unwrap FastMCP's {\"result\": [...]} envelope; "
+        "got None which means the silent-drop bug is back"
+    )
+    assert out.paper_id == "ss:abc1234"
+
+
+async def test_resolver_arxiv_id_unwraps_fastmcp_envelope(
+    fake_tracer: Tracer,
+) -> None:
+    """Same regression on the arxiv-id branch: envelope-shaped SS hit
+    must match the claimed arxiv_id without falling through to the
+    arxiv-API verification path (which is a fallback, not the happy path
+    when SS actually returned the right paper)."""
+    reg = _EnvelopeStubRegistry(ss_hits=[
+        {"paper_id": "arxiv:2510.10274", "title": "X-VLA",
+         "year": 2025, "arxiv_id": "2510.10274"},
+    ])
+    identity = CanonicalIdentity(
+        title="X-VLA", author_surname="Zheng", year=2025, confidence="high",
+        arxiv_id="2510.10274",
+    )
+
+    async def _should_not_be_called(_aid: str) -> ArxivResult | None:
+        raise AssertionError(
+            "arxiv_lookup must not be called when SS already matched the id"
+        )
+
+    out = await resolve_via_ss(
+        ParsedRequest(hint="X-VLA", kind="natural_language"),
+        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        arxiv_lookup=_should_not_be_called,
+    )
+    assert out is not None
+    assert out.paper_id == "arxiv:2510.10274"
 
 
 async def test_resolver_returns_none_when_ss_empty(

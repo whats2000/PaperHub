@@ -27,6 +27,7 @@ import aiosqlite
 import httpx
 import tiktoken
 
+from paperhub.db.connection import write_transaction
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import SectionEntry
 from paperhub.pipelines.arxiv_client import (
@@ -48,7 +49,10 @@ from paperhub.pipelines.extract import (
     extract_pdf_page1_text,
     extract_pdf_with_headings,
 )
-from paperhub.pipelines.figures import rasterize_and_normalize_figures
+from paperhub.pipelines.figures import (
+    rasterize_and_normalize_figures,
+    strip_includegraphics_options,
+)
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
 from paperhub.pipelines.marker_blocks_to_chunks import (
     build_layout_index,
@@ -65,6 +69,7 @@ from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
 
@@ -211,11 +216,12 @@ class PaperPipeline:
 
     async def _link_to_session(self, session_id: int, paper_content_id: int) -> int:
         """Upsert a ``papers`` row for (session_id, paper_content_id), return its id."""
-        await self._conn.execute(
-            "INSERT OR IGNORE INTO papers (session_id, paper_content_id) VALUES (?, ?)",
-            (session_id, paper_content_id),
-        )
-        await self._conn.commit()
+        async with write_transaction(self._conn):
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO papers (session_id, paper_content_id) "
+                "VALUES (?, ?)",
+                (session_id, paper_content_id),
+            )
         async with self._conn.execute(
             "SELECT id FROM papers WHERE session_id = ? AND paper_content_id = ?",
             (session_id, paper_content_id),
@@ -325,6 +331,18 @@ class PaperPipeline:
             full_text, [c.char_start for c in chunks],
         )
         marked, _injected = inject_sentinels(full_text, starts)
+        # Pre-rasterise TikZ-drawn figures (forest/tikzpicture/etc.) to PNG
+        # before pandoc sees them — pandoc has no TikZ executor and would
+        # otherwise dump the raw source into the HTML (the survey taxonomy
+        # leak). Failures are graceful: an un-compilable block is left
+        # as-is and the rest of the document still renders.
+        marked = rasterize_tikz_figures(
+            marked, preamble=ext.preamble, out_dir=source_path.parent,
+        )
+        # Drop LaTeX column-width hints — pandoc would otherwise emit
+        # style="width:50.0%" on every <img> and shrink high-DPI figures
+        # to half-width on the wide Citation Canvas.
+        marked = strip_includegraphics_options(marked)
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
@@ -523,6 +541,10 @@ class PaperPipeline:
                 full_text, [c.char_start for c in chunks],
             )
             marked, _injected = inject_sentinels(full_text, starts)
+            marked = rasterize_tikz_figures(
+                marked, preamble=ext.preamble, out_dir=source_path.parent,
+            )
+            marked = strip_includegraphics_options(marked)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
                 rasterize_and_normalize_figures(marked, source_path.parent),
@@ -844,39 +866,45 @@ class PaperPipeline:
         embeddings = self._embedder.embed(texts)
         sections_json = self._build_sections_json(chunks)
 
-        # Destructive replace: delete old chunks + vectors, insert new.
-        await self._conn.execute(
-            "DELETE FROM chunks WHERE paper_content_id = ?", (paper_content_id,),
-        )
-        self._chroma.delete_paper(paper_content_id)
-        await self._conn.commit()
-
+        # Destructive replace: delete old chunks + vectors, insert new + flip
+        # asset_status — all in ONE serialised write transaction (v2.23.2) so
+        # the marker worker can't race a concurrent paper ingest on the SQLite
+        # write lock. Chroma's delete still happens inside the transaction
+        # because a partial state (DB rows gone but vectors retained) would be
+        # worse than the small risk of orphan vectors if the commit fails
+        # after this point (the next reingest cleans them up).
         new_ids: list[int] = []
-        for c in chunks:
-            async with self._conn.execute(
-                "INSERT INTO chunks "
-                "(paper_content_id, section, char_start, char_end, text, dom_id, "
-                "match_text, page, bbox) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-                (paper_content_id, c.section, c.char_start, c.char_end, c.text,
-                 c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
-            ) as cur:
-                r = await cur.fetchone()
-                assert r is not None
-                new_ids.append(int(r[0]))
+        async with write_transaction(self._conn):
+            await self._conn.execute(
+                "DELETE FROM chunks WHERE paper_content_id = ?",
+                (paper_content_id,),
+            )
+            self._chroma.delete_paper(paper_content_id)
 
-        # F2.1 A3: build the per-paper figure+table layout index from the
-        # freshly-inserted chunks zipped with their assigned ids, and persist it
-        # in the SAME transaction as sections_json/asset_status.
-        layout_json = json.dumps(
-            build_layout_index(list(zip(chunks, new_ids, strict=True)))
-        )
-        await self._conn.execute(
-            "UPDATE paper_content SET sections_json = ?, layout_json = ?, "
-            "asset_status = 'marker_ready' WHERE id = ?",
-            (sections_json, layout_json, paper_content_id),
-        )
-        await self._conn.commit()
+            for c in chunks:
+                async with self._conn.execute(
+                    "INSERT INTO chunks "
+                    "(paper_content_id, section, char_start, char_end, text, dom_id, "
+                    "match_text, page, bbox) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (paper_content_id, c.section, c.char_start, c.char_end, c.text,
+                     c.dom_id, c.match_text, c.page, _bbox_json(c.bbox)),
+                ) as cur:
+                    r = await cur.fetchone()
+                    assert r is not None
+                    new_ids.append(int(r[0]))
+
+            # F2.1 A3: build the per-paper figure+table layout index from the
+            # freshly-inserted chunks zipped with their assigned ids, and
+            # persist it in the SAME transaction as sections_json/asset_status.
+            layout_json = json.dumps(
+                build_layout_index(list(zip(chunks, new_ids, strict=True)))
+            )
+            await self._conn.execute(
+                "UPDATE paper_content SET sections_json = ?, layout_json = ?, "
+                "asset_status = 'marker_ready' WHERE id = ?",
+                (sections_json, layout_json, paper_content_id),
+            )
 
         self._chroma.add_chunks(
             paper_content_id=paper_content_id,
@@ -955,10 +983,16 @@ class PaperPipeline:
         """Persist paper_content + chunks in a single atomic transaction.
 
         Returns (paper_content_id, chunk_ids).  If anything raises, the
-        partial writes are rolled back automatically.
+        partial writes are rolled back automatically. Serialised
+        process-wide via ``write_transaction`` (v2.23.2 hotfix) so
+        concurrent ``POST /papers`` requests don't pile up on the SQLite
+        write lock — every write site that goes through
+        ``write_transaction`` queues on the same app-layer asyncio lock,
+        so the database file lock never sees more than one writer at a
+        time from this process.
         """
-        await self._conn.execute("BEGIN")
-        try:
+        chunk_ids: list[int] = []
+        async with write_transaction(self._conn):
             await self._conn.execute(
                 "INSERT INTO paper_content "
                 "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
@@ -986,7 +1020,6 @@ class PaperPipeline:
             assert row is not None
             paper_content_id = int(row[0])
 
-            chunk_ids: list[int] = []
             for c in chunks:
                 await self._conn.execute(
                     "INSERT INTO chunks "
@@ -1000,11 +1033,6 @@ class PaperPipeline:
                     cid_row = await cur.fetchone()
                 assert cid_row is not None
                 chunk_ids.append(int(cid_row[0]))
-
-            await self._conn.commit()
-        except Exception:
-            await self._conn.execute("ROLLBACK")
-            raise
         return paper_content_id, chunk_ids
 
     def _lookup_arxiv_metadata(self, arxiv_id: str) -> dict[str, object]:
