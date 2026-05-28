@@ -174,6 +174,14 @@ class ParsedRequest:
 
 _PARSER_RE_ARXIV = re.compile(r"\b(?:arxiv[:\s/]+)?(\d{4}\.\d{4,5})(?:v\d+)?\b", re.IGNORECASE)
 _PARSER_RE_DOI = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", re.IGNORECASE)
+# BibTeX cite-key shape (``pei2026actionaware``, ``fedus2022switch``,
+# ``vaswani2017attention``): two-or-more lowercase letters, a 4-digit year,
+# then a topic token. NO spaces — a real paper title always has them. Used
+# in _safe_parse_request_list to DOWNGRADE such hints from ``quoted_title``
+# to ``natural_language`` so the web Discoverer handles them (instead of
+# Semantic Scholar searching for a paper titled "pei2026actionaware" and
+# returning 0 hits, which is what the user's run 280 hit).
+_PARSER_RE_BIBTEX_CITE_KEY = re.compile(r"^[a-z]{2,}\d{4}[a-z][a-z0-9]{2,}$")
 
 
 def _scan_structured_ids(user_message: str) -> list[ParsedRequest]:
@@ -282,7 +290,19 @@ def _safe_parse_request_list(content: str) -> list[ParsedRequest]:
             resolved_kind = "doi"
         elif kind == "quoted_title":
             resolved_kind = "quoted_title"
-        out.append(ParsedRequest(hint=hint.strip(), kind=resolved_kind))
+        clean_hint = hint.strip()
+        # Deterministic downgrade: a "quoted_title" whose hint is a bare
+        # BibTeX cite-key (no spaces, contains a year) is NOT a real title
+        # — pasting \cite{pei2026actionaware} from a survey's bibliography
+        # is what surfaced this. Send it through the web Discoverer
+        # (natural_language path) instead of dead-ending at Semantic
+        # Scholar by-title with the cite-key as the query.
+        if (
+            resolved_kind == "quoted_title"
+            and _PARSER_RE_BIBTEX_CITE_KEY.match(clean_hint)
+        ):
+            resolved_kind = "natural_language"
+        out.append(ParsedRequest(hint=clean_hint, kind=resolved_kind))
     return out
 
 
