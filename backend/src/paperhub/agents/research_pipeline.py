@@ -30,6 +30,7 @@ from typing import Any, Literal
 
 import litellm
 
+from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.mcp.errors import MCPToolError, MCPUnavailableError
 from paperhub.mcp.registry import MCPRegistry
@@ -517,8 +518,10 @@ async def discover_canonical(
                             },
                         )
                         try:
-                            result = await mcp_registry.call(
-                                "web.search", {"query": safe_query},
+                            result = normalize_mcp_result(
+                                await mcp_registry.call(
+                                    "web.search", {"query": safe_query},
+                                )
                             )
                         except (MCPUnavailableError, MCPToolError) as exc:
                             result = {"error": str(exc), "tool": "web.search"}
@@ -694,9 +697,11 @@ async def resolve_via_ss(
                 {"query": query, "request_kind": request.kind, "identity": identity_snapshot},
             )
             try:
-                hits = await mcp_registry.call(
-                    "papers.search_semantic_scholar",
-                    {"query": query, "max_results": 5},
+                hits = normalize_mcp_result(
+                    await mcp_registry.call(
+                        "papers.search_semantic_scholar",
+                        {"query": query, "max_results": 5},
+                    )
                 )
             except (MCPUnavailableError, MCPToolError) as exc:
                 step.mark_error(str(exc))
@@ -802,9 +807,11 @@ async def resolve_via_ss(
             {"query": query, "request_kind": request.kind, "identity": identity_snapshot},
         )
         try:
-            hits = await mcp_registry.call(
-                "papers.search_semantic_scholar",
-                {"query": query, "max_results": 5},
+            hits = normalize_mcp_result(
+                await mcp_registry.call(
+                    "papers.search_semantic_scholar",
+                    {"query": query, "max_results": 5},
+                )
             )
         except (MCPUnavailableError, MCPToolError) as exc:
             step.mark_error(str(exc))
