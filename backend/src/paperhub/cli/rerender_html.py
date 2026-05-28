@@ -32,6 +32,7 @@ from paperhub.pipelines.figures import rasterize_and_normalize_figures
 from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 
 _LOG = logging.getLogger("paperhub.rerender_html")
 
@@ -101,20 +102,32 @@ async def _rerender_one(
     starts = map_stripped_offsets_to_original(full_text, stripped_starts)
     marked, _injected = inject_sentinels(full_text, starts)
 
+    # Recover author macros + paper preamble from the original source tree
+    # (the body-only flattened .tex doesn't carry the preamble) so \vx,
+    # \Ls, … render AND so rasterize_tikz_figures has the packages /
+    # tikz libraries to build each TikZ env as a standalone. Best effort:
+    # a failure still gets curated package macros via render_html and the
+    # TikZ pass falls back to leaving envs as-is.
+    macros: dict[str, MacroValue] | None = None
+    preamble = ""
+    try:  # noqa: ASYNC240 — sequential CLI; sync extract is fine
+        ext = extract_latex(resource_dir)
+        macros = extract_macros(ext.preamble)
+        preamble = ext.preamble
+    except Exception:  # noqa: BLE001 — never block a re-render on macro recovery
+        _LOG.debug("pcid=%d: preamble recovery failed", pcid, exc_info=True)
+
+    # Pre-rasterise TikZ-drawn figures so pandoc embeds them as <img>
+    # instead of dumping raw TikZ source (the survey taxonomy leak).
+    marked = rasterize_tikz_figures(
+        marked, preamble=preamble, out_dir=resource_dir,
+    )
+
     render_source = source_dir / "source.render.tex"
     render_source.write_text(  # noqa: ASYNC240
         rasterize_and_normalize_figures(marked, resource_dir),
         encoding="utf-8",
     )
-
-    # Recover author macros from the original source tree (the body-only
-    # flattened .tex doesn't carry the preamble) so \vx, \Ls, … render. Best
-    # effort: a failure still gets curated package macros via render_html.
-    macros: dict[str, MacroValue] | None = None
-    try:  # noqa: ASYNC240 — sequential CLI; sync extract is fine
-        macros = extract_macros(extract_latex(resource_dir).preamble)
-    except Exception:  # noqa: BLE001 — never block a re-render on macro recovery
-        _LOG.debug("pcid=%d: preamble macro recovery failed", pcid, exc_info=True)
 
     html_path = source_dir / "source.html"
     render_html(

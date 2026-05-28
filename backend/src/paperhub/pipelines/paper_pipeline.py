@@ -66,6 +66,7 @@ from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 from paperhub.pipelines.title_extract import llm_extract_title
 from paperhub.rag.chroma import ChromaStore
 
@@ -327,6 +328,14 @@ class PaperPipeline:
             full_text, [c.char_start for c in chunks],
         )
         marked, _injected = inject_sentinels(full_text, starts)
+        # Pre-rasterise TikZ-drawn figures (forest/tikzpicture/etc.) to PNG
+        # before pandoc sees them — pandoc has no TikZ executor and would
+        # otherwise dump the raw source into the HTML (the survey taxonomy
+        # leak). Failures are graceful: an un-compilable block is left
+        # as-is and the rest of the document still renders.
+        marked = rasterize_tikz_figures(
+            marked, preamble=ext.preamble, out_dir=source_path.parent,
+        )
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
@@ -525,6 +534,9 @@ class PaperPipeline:
                 full_text, [c.char_start for c in chunks],
             )
             marked, _injected = inject_sentinels(full_text, starts)
+            marked = rasterize_tikz_figures(
+                marked, preamble=ext.preamble, out_dir=source_path.parent,
+            )
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
                 rasterize_and_normalize_figures(marked, source_path.parent),
