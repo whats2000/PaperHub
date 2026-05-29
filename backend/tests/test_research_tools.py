@@ -298,6 +298,7 @@ async def test_add_paper_to_session_dispatch_ss_with_arxiv_prefers_arxiv_path(
             authors=["A"],
             arxiv_id="2401.99999",
             open_access_pdf_url="https://example.org/x.pdf",  # should NOT be used
+            doi=None,
         )
 
     monkeypatch.setattr(
@@ -347,6 +348,7 @@ async def test_add_paper_to_session_dispatch_ss_falls_back_to_pdf(
             authors=["B"],
             arxiv_id=None,
             open_access_pdf_url="https://example.org/x.pdf",
+            doi=None,
         )
 
     monkeypatch.setattr(
@@ -381,6 +383,7 @@ async def test_add_paper_to_session_dispatch_ss_raises_NoIngestibleSourceError_w
             authors=[],
             arxiv_id=None,
             open_access_pdf_url=None,
+            doi=None,
         )
 
     monkeypatch.setattr(

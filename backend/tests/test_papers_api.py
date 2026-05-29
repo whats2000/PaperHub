@@ -899,7 +899,7 @@ async def test_post_papers_accepts_paper_id_ss_prefix_resolves_to_arxiv_when_ext
 
         return SemanticScholarMetadata(
             paperId=paper_id, title="T", abstract="abs", year=2024, authors=[],
-            arxiv_id="2401.99999", open_access_pdf_url=None,
+            arxiv_id="2401.99999", open_access_pdf_url=None, doi=None,
         )
 
     async def _fake_ingest(self: Any, req: Any) -> IngestResult:
@@ -940,7 +940,7 @@ async def test_post_papers_returns_422_no_ingestible_source_when_ss_has_no_arxiv
 
         return SemanticScholarMetadata(
             paperId=paper_id, title="Closed access", abstract="abs",
-            year=2024, authors=[], arxiv_id=None, open_access_pdf_url=None,
+            year=2024, authors=[], arxiv_id=None, open_access_pdf_url=None, doi=None,
         )
 
     import paperhub.agents.research_tools as rt

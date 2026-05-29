@@ -20,6 +20,7 @@ imports it.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,7 @@ from paperhub.pipelines.semantic_scholar import (
     find_related,
     search_papers,
 )
+from paperhub.pipelines.unpaywall import find_oa_pdf_by_doi
 
 if TYPE_CHECKING:
     from paperhub.mcp.registry import MCPRegistry
@@ -462,6 +464,7 @@ async def add_paper_to_session_dispatch(
     conn: aiosqlite.Connection,
     session_id: int,
     metadata_override: ArxivMetadata | None = None,
+    unpaywall_email: str | None = None,  # NEW
 ) -> AddResult:
     """Resolve a prefixed paper_id and attach it to the session.
 
@@ -526,6 +529,21 @@ async def add_paper_to_session_dispatch(
             return await _attach_pdf(
                 meta, pipeline=pipeline, conn=conn, session_id=session_id,
             )
+        # F4.3: Unpaywall fallback. When SS has no openAccessPdf URL but
+        # we have a DOI AND the operator configured PAPERHUB_UNPAYWALL_EMAIL,
+        # query Unpaywall to find a free PDF on the publisher's site /
+        # preprint mirror. This is what closes the AlphaGenome-class gap
+        # (Nature paper not indexed by SS but freely available).
+        if meta.doi and unpaywall_email:
+            oa_url = await find_oa_pdf_by_doi(meta.doi, email=unpaywall_email)
+            if oa_url:
+                synthesized = dataclasses.replace(
+                    meta, open_access_pdf_url=oa_url,
+                )
+                return await _attach_pdf(
+                    synthesized, pipeline=pipeline, conn=conn,
+                    session_id=session_id,
+                )
         raise NoIngestibleSourceError(paper_id=paper_id, title=meta.title)
 
     raise ValueError(
