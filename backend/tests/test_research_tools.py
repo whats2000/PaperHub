@@ -726,3 +726,125 @@ async def test_dispatch_ss_no_unpaywall_email_skips_fallback(
     assert not unpaywall_route.called, "Unpaywall must NOT be called when unpaywall_email=None"
     assert exc_info.value.paper_id == "ss:abc"
     assert exc_info.value.title == "Nature Paper"
+
+
+_UNPAYWALL_PDF_URL_B = "https://example.org/test-secondary.pdf"
+
+
+@respx.mock
+async def test_dispatch_ss_unpaywall_first_url_403_second_succeeds(
+    migrated_db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the first OA URL raises httpx.HTTPStatusError (e.g. Cloudflare 403),
+    the dispatcher tries the next URL and succeeds."""
+    session_id = await _make_session(migrated_db)
+    pipeline = MagicMock(spec=PaperPipeline)
+
+    call_count = {"n": 0}
+
+    async def _fake_ingest_pdf(*, pdf_url: str, **_kwargs: object) -> IngestResult:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First URL is Cloudflare-gated.
+            raise httpx.HTTPStatusError(
+                "403 Forbidden",
+                request=httpx.Request("GET", pdf_url),
+                response=httpx.Response(403),
+            )
+        return IngestResult(
+            paper_content_id=102, papers_id=202, cache_hit=False, title="Nature Paper",
+        )
+
+    pipeline.ingest_pdf_from_url = AsyncMock(side_effect=_fake_ingest_pdf)
+
+    async def _fake_meta(paper_id: str) -> SemanticScholarMetadata:
+        return _ss_meta_doi_only(paper_id)
+
+    monkeypatch.setattr(
+        "paperhub.agents.research_tools.fetch_paper_metadata", _fake_meta,
+    )
+
+    # Unpaywall returns two URLs: first is Cloudflare-gated, second succeeds.
+    respx.get(_UNPAYWALL_ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "is_oa": True,
+                "best_oa_location": {"url_for_pdf": _UNPAYWALL_PDF_URL},
+                "oa_locations": [
+                    {"url_for_pdf": _UNPAYWALL_PDF_URL},       # dup — deduped
+                    {"url_for_pdf": _UNPAYWALL_PDF_URL_B},
+                ],
+            },
+        ),
+    )
+
+    result = await add_paper_to_session_dispatch(
+        "ss:abc",
+        pipeline=pipeline,
+        conn=migrated_db,
+        session_id=session_id,
+        unpaywall_email="ops@example.com",
+    )
+
+    assert call_count["n"] == 2, "ingest_pdf_from_url must be called twice (first 403, then success)"
+    assert result.paper_content_id == 102
+    assert result.title == "Nature Paper"
+
+
+@respx.mock
+async def test_dispatch_ss_unpaywall_all_urls_fail_raises_not_ingestible(
+    migrated_db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When EVERY OA URL raises httpx.HTTPStatusError (all Cloudflare-gated),
+    the dispatcher exhausts the list and raises NoIngestibleSourceError cleanly."""
+    session_id = await _make_session(migrated_db)
+    pipeline = MagicMock(spec=PaperPipeline)
+
+    call_count = {"n": 0}
+
+    async def _fake_ingest_pdf(*, pdf_url: str, **_kwargs: object) -> IngestResult:
+        call_count["n"] += 1
+        raise httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=httpx.Request("GET", pdf_url),
+            response=httpx.Response(403),
+        )
+
+    pipeline.ingest_pdf_from_url = AsyncMock(side_effect=_fake_ingest_pdf)
+
+    async def _fake_meta(paper_id: str) -> SemanticScholarMetadata:
+        return _ss_meta_doi_only(paper_id)
+
+    monkeypatch.setattr(
+        "paperhub.agents.research_tools.fetch_paper_metadata", _fake_meta,
+    )
+
+    # Unpaywall returns two URLs — both will fail.
+    respx.get(_UNPAYWALL_ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "is_oa": True,
+                "best_oa_location": {"url_for_pdf": _UNPAYWALL_PDF_URL},
+                "oa_locations": [
+                    {"url_for_pdf": _UNPAYWALL_PDF_URL_B},
+                ],
+            },
+        ),
+    )
+
+    with pytest.raises(NoIngestibleSourceError) as exc_info:
+        await add_paper_to_session_dispatch(
+            "ss:abc",
+            pipeline=pipeline,
+            conn=migrated_db,
+            session_id=session_id,
+            unpaywall_email="ops@example.com",
+        )
+
+    assert call_count["n"] == 2, "Both URLs must be attempted before giving up"
+    assert exc_info.value.paper_id == "ss:abc"
+    assert exc_info.value.title == "Nature Paper"
