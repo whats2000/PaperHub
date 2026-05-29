@@ -262,9 +262,14 @@ async def _process_search_results(
                 enriched.append(
                     replace(c, auto_added=True, papers_id=result.papers_id),
                 )
-            except NoIngestibleSourceError:
+            except NoIngestibleSourceError as exc:
                 enriched.append(
-                    replace(c, auto_added=False, error="no_ingestible_source"),
+                    replace(
+                        c,
+                        auto_added=False,
+                        error="no_ingestible_source",
+                        tried_urls=exc.tried_urls,
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001 — defensive, redacted before emit
                 enriched.append(

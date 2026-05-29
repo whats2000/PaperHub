@@ -961,6 +961,48 @@ async def test_post_papers_returns_422_no_ingestible_source_when_ss_has_no_arxiv
     assert detail["detail"] == "no_ingestible_source"
     assert detail["title"] == "Closed access"
     assert detail["paper_id"] == "ss:closed"
+    # No DOI on the fake meta → no URLs attempted → tried_urls is empty list.
+    assert detail["tried_urls"] == []
+
+
+async def test_post_papers_422_includes_tried_urls_when_all_oa_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /papers → 422 detail carries tried_urls when Unpaywall URLs were
+    all attempted but failed (F4.3 manual-download UX)."""
+    await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await apply_schema(conn)
+        await _seed_session(conn)
+
+    # Simulate the dispatcher raising with two tried URLs (all-fail scenario).
+    _tried = ["https://example.org/A.pdf", "https://example.org/B.pdf"]
+
+    import paperhub.api.papers as papers_mod
+    from paperhub.agents.research_tools import NoIngestibleSourceError
+
+    async def _fake_dispatch(*_args: object, **_kwargs: object) -> object:
+        raise NoIngestibleSourceError(
+            paper_id="ss:allfail",
+            title="Cloudflare Paper",
+            tried_urls=_tried,
+        )
+
+    monkeypatch.setattr(papers_mod, "add_paper_to_session_dispatch", _fake_dispatch)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.post(
+            "/papers",
+            json={"session_id": 1, "paper_id": "ss:allfail"},
+        )
+
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["detail"] == "no_ingestible_source"
+    assert detail["tried_urls"] == _tried
 
 
 async def test_post_papers_rejects_both_paper_id_and_arxiv_id(
