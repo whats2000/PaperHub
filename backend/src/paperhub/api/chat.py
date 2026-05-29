@@ -222,6 +222,7 @@ async def _process_search_results(
     pipeline: PaperPipeline,
     conn: aiosqlite.Connection,
     session_id: int,
+    unpaywall_email: str | None = None,
 ) -> list[SearchCandidate]:
     """Enforce finalize cap, mark already_in_session, then auto-attach
     ``finalize=True`` picks. Returns the enriched candidate list ready
@@ -256,6 +257,7 @@ async def _process_search_results(
                     conn=conn,
                     session_id=session_id,
                     metadata_override=md,
+                    unpaywall_email=unpaywall_email,
                 )
                 enriched.append(
                     replace(c, auto_added=True, papers_id=result.papers_id),
@@ -624,6 +626,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                 pipeline=pipeline,
                                 conn=conn,
                                 session_id=session_id,
+                                unpaywall_email=settings.unpaywall_email,
                             )
                             sr_evt = SearchResultsEvent(
                                 run_id=run_id,
