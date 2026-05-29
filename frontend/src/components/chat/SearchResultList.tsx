@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 import type {
   ReferenceItem,
   SearchResultCandidate,
 } from "@/types/domain";
-import { ingestPaper, listSessionReferences } from "@/lib/api";
+import { ingestPaper, listSessionReferences, uploadPdf } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,100 @@ function findMatchingRef(
     return refs.find((r) => r.arxiv_id === candidate.arxiv_id);
   }
   return undefined;
+}
+
+interface ManualDownloadFallbackProps {
+  triedUrls: string[];
+  sessionId: number | null;
+  candidate: SearchResultCandidate;
+  /** Called after a successful PDF upload so the caller can refresh refs. */
+  onAdded: () => void;
+}
+
+/** Inline card section rendered when all OA URLs failed (e.g. Cloudflare-blocked
+ *  bioRxiv). Shows a friendly message, the tried links, and an "Upload PDF"
+ *  button that mirrors AttachPaperMenu's PDF-upload flow. */
+function ManualDownloadFallback({
+  triedUrls,
+  sessionId,
+  candidate,
+  onAdded,
+}: ManualDownloadFallbackProps) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const appendReferenceLocal = useChatStore((s) => s.appendReferenceLocal);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || sessionId === null) return;
+    setUploading(true);
+    try {
+      const result = await uploadPdf(sessionId, file);
+      appendReferenceLocal(sessionId, {
+        papers_id: result.papers_id,
+        paper_content_id: result.paper_content_id,
+        enabled: true,
+        added_at: new Date().toISOString(),
+        arxiv_id: candidate.arxiv_id,
+        title: result.title,
+        year: candidate.year,
+        kind: "pdf_upload",
+      });
+      toast.success(result.cache_hit ? "Re-attached" : "Added", {
+        description: result.title,
+      });
+      onAdded();
+    } catch (err) {
+      toast.error("Upload failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 space-y-1.5 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs dark:border-amber-800 dark:bg-amber-950/30">
+      <p className="text-muted-foreground">
+        Couldn't auto-fetch — the source blocks automated downloads. Download
+        the PDF manually and upload it:
+      </p>
+      <ul className="space-y-0.5">
+        {triedUrls.map((url) => (
+          <li key={url}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {url}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {/* Hidden file input wired to the Upload PDF button below */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        aria-label="Upload PDF for this paper"
+        className="sr-only"
+        onChange={(e) => void handleFileChange(e)}
+        disabled={uploading || sessionId === null}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={uploading || sessionId === null}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        {uploading ? "Uploading…" : "Upload PDF"}
+      </Button>
+    </div>
+  );
 }
 
 interface AddButtonProps {
@@ -91,6 +186,16 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
   }
 
   if (candidate.error === "no_ingestible_source") {
+    // When tried_urls is non-empty, the detailed fallback is rendered
+    // below the title row (in SearchResultList). Show a compact badge here
+    // so the action slot stays tidy.
+    if ((candidate.tried_urls ?? []).length > 0) {
+      return (
+        <Badge variant="outline" className="whitespace-nowrap text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700">
+          Manual download
+        </Badge>
+      );
+    }
     return (
       <Button
         size="sm"
@@ -247,6 +352,29 @@ export function SearchResultList({ candidates, sessionId }: Props) {
               <span className="not-italic font-medium">Why:</span> {c.reason}
             </p>
           )}
+
+          {/* Manual-download fallback: rendered below the body text when all
+              OA URLs failed. Shown only when tried_urls is non-empty so that
+              legacy cards (no tried_urls field) and no-DOI ss: cards are
+              unaffected. */}
+          {c.error === "no_ingestible_source" &&
+            (c.tried_urls ?? []).length > 0 && (
+              <ManualDownloadFallback
+                triedUrls={c.tried_urls!}
+                sessionId={sessionId}
+                candidate={c}
+                onAdded={() => {
+                  if (sessionId === null) return;
+                  listSessionReferences(sessionId)
+                    .then((refs) =>
+                      useChatStore.getState().setReferences(sessionId, refs),
+                    )
+                    .catch(() => {
+                      /* best-effort refresh */
+                    });
+                }}
+              />
+            )}
         </article>
       ))}
     </section>

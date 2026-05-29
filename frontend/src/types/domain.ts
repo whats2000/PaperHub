@@ -51,6 +51,10 @@ export interface SearchResultCandidate {
   auto_added: boolean; // v2.4-5: chat endpoint auto-attached this
   papers_id: number | null; // v2.4-5: populated when auto_added=true
   error: string | null; // v2.4-5: "no_ingestible_source" etc.
+  /** OA URLs that were tried but all failed (e.g. Cloudflare-blocked bioRxiv).
+   *  Present only when error="no_ingestible_source" and Unpaywall was attempted.
+   *  Optional so legacy persisted cards without this field still parse cleanly. */
+  tried_urls?: string[];
   already_in_session: boolean; // v2.4-5: set by chat layer
 }
 

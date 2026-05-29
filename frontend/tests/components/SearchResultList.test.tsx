@@ -2,13 +2,23 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 
 import { SearchResultList } from "@/components/chat/SearchResultList";
 import { useChatStore } from "@/store/chat";
 import { API_BASE_URL } from "@/lib/api";
 import type { ReferenceItem, SearchResultCandidate } from "@/types/domain";
+
+// Sonner toast — no-op stubs so components that call toast.success/error
+// don't throw in jsdom where the <Toaster> provider isn't mounted.
+const { toastSuccess, toastError } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}));
+vi.mock("sonner", () => ({
+  toast: { success: toastSuccess, error: toastError, info: vi.fn() },
+}));
 
 function makeCandidate(
   overrides: Partial<SearchResultCandidate> = {},
@@ -26,6 +36,7 @@ function makeCandidate(
     auto_added: false,
     papers_id: null,
     error: null,
+    tried_urls: undefined,
     already_in_session: false,
     ...overrides,
   };
@@ -67,6 +78,8 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 beforeEach(() => {
   server.resetHandlers();
+  toastSuccess.mockReset();
+  toastError.mockReset();
   useChatStore.getState().reset();
 });
 
@@ -176,15 +189,118 @@ describe("SearchResultList", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows 'Source unavailable' disabled button when error=no_ingestible_source", () => {
+  it("shows 'Source unavailable' disabled button when error=no_ingestible_source and no tried_urls", () => {
     render(
       <SearchResultList
-        candidates={[makeCandidate({ error: "no_ingestible_source" })]}
+        candidates={[makeCandidate({ error: "no_ingestible_source", tried_urls: [] })]}
         sessionId={1}
       />,
     );
     const btn = screen.getByRole("button", { name: /source unavailable/i });
     expect(btn).toBeDisabled();
+  });
+
+  it("shows 'Source unavailable' disabled button when tried_urls field is absent (legacy card)", () => {
+    render(
+      <SearchResultList
+        candidates={[makeCandidate({ error: "no_ingestible_source", tried_urls: undefined })]}
+        sessionId={1}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /source unavailable/i });
+    expect(btn).toBeDisabled();
+    // No manual-download section should appear
+    expect(screen.queryByText(/couldn't auto-fetch/i)).toBeNull();
+  });
+
+  it("renders manual-download fallback with friendly message, link, and Upload PDF button when tried_urls is non-empty", () => {
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            error: "no_ingestible_source",
+            tried_urls: ["https://www.biorxiv.org/content/10.1101/2025.01.01.000001v1.full.pdf"],
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+
+    // Friendly message
+    expect(screen.getByText(/couldn't auto-fetch/i)).toBeInTheDocument();
+
+    // Clickable link with correct href and security attributes
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute(
+      "href",
+      "https://www.biorxiv.org/content/10.1101/2025.01.01.000001v1.full.pdf",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+
+    // Upload PDF button is present
+    expect(screen.getByRole("button", { name: /upload pdf/i })).toBeInTheDocument();
+
+    // The old disabled "Source unavailable" button should NOT appear
+    expect(screen.queryByRole("button", { name: /source unavailable/i })).toBeNull();
+  });
+
+  it("Upload PDF button triggers file input and calls POST /papers/upload on file select", async () => {
+    const uploadResponse = {
+      paper_content_id: 10,
+      papers_id: 10,
+      cache_hit: false,
+      title: "AlphaGenome",
+    };
+    // Also stub GET /papers so the post-upload listSessionReferences refresh
+    // returns a list that includes our newly uploaded paper, preventing the
+    // refresh from overwriting the optimistic insert with stale mock data.
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(uploadResponse, { status: 200 }),
+      ),
+      http.get(`${API_BASE_URL}/papers`, () =>
+        HttpResponse.json([
+          makeRef({ papers_id: 10, paper_content_id: 10, arxiv_id: null, kind: "pdf_upload" }),
+        ]),
+      ),
+    );
+
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            error: "no_ingestible_source",
+            tried_urls: ["https://example.org/paper.pdf"],
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+
+    // Upload PDF button is present
+    expect(screen.getByRole("button", { name: /upload pdf/i })).toBeInTheDocument();
+
+    // The Upload PDF button itself just triggers a click on the hidden file input.
+    // Directly interact with the file input via aria-label to simulate a file pick.
+    const fileInput = screen.getByLabelText(/upload pdf for this paper/i);
+    expect(fileInput).toBeInTheDocument();
+
+    const file = new File(["dummy pdf bytes"], "paper.pdf", {
+      type: "application/pdf",
+    });
+    await userEvent.upload(fileInput, file);
+
+    // After successful upload, toast.success is called and the ref appears in the store
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Added",
+        expect.objectContaining({ description: "AlphaGenome" }),
+      );
+    });
+
+    const refs = useChatStore.getState().referencesBySession[1] ?? [];
+    expect(refs.some((r) => r.papers_id === uploadResponse.papers_id)).toBe(true);
   });
 
   it("calls POST /papers and shows 'Added' badge derived from optimistic ref insert", async () => {
