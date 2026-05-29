@@ -19,11 +19,13 @@ _TIMEOUT_S = 8.0
 _LOG = logging.getLogger(__name__)
 
 
-async def find_oa_pdf_by_doi(doi: str, *, email: str) -> str | None:
-    """Return the best open-access PDF URL Unpaywall knows for `doi`, or
-    None if no OA version is available / Unpaywall is down / the DOI is
-    unknown. Never raises — the dispatcher uses None to mean
-    'no URL; fall through to NoIngestibleSourceError'."""
+async def find_oa_pdf_urls_by_doi(doi: str, *, email: str) -> list[str]:
+    """Return ordered list of OA PDF/landing URLs Unpaywall knows for `doi`,
+    or empty list if no OA / Unpaywall is down / DOI unknown.
+
+    Order: best_oa_location first, then any other oa_locations in Unpaywall
+    order, deduped. Per location, prefer url_for_pdf, fall back to url.
+    Never raises (Unpaywall outages return [], not exception)."""
     url = f"{UNPAYWALL_BASE}/{doi}"
     params = {"email": email}
     try:
@@ -31,7 +33,7 @@ async def find_oa_pdf_by_doi(doi: str, *, email: str) -> str | None:
             resp = await client.get(url, params=params)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         _LOG.info("unpaywall transport error doi=%s err=%s", doi, exc)
-        return None
+        return []
     if resp.status_code != 200:
         log_level = (
             logging.WARNING
@@ -42,14 +44,28 @@ async def find_oa_pdf_by_doi(doi: str, *, email: str) -> str | None:
             log_level,
             "unpaywall non-200 doi=%s status=%d", doi, resp.status_code,
         )
-        return None
+        return []
     try:
         data: dict[str, Any] = resp.json()
     except ValueError:
-        return None
+        return []
     if not data.get("is_oa"):
-        return None
-    loc = data.get("best_oa_location") or {}
-    if not isinstance(loc, dict):
-        return None
-    return loc.get("url_for_pdf") or loc.get("url") or None
+        return []
+
+    # Collect URLs in priority order: best_oa_location first, then oa_locations
+    candidates: list[dict[str, Any]] = []
+    best = data.get("best_oa_location")
+    if isinstance(best, dict):
+        candidates.append(best)
+    for loc in data.get("oa_locations") or []:
+        if isinstance(loc, dict):
+            candidates.append(loc)
+
+    seen: set[str] = set()
+    urls: list[str] = []
+    for loc in candidates:
+        u = loc.get("url_for_pdf") or loc.get("url")
+        if u and u not in seen:
+            seen.add(u)
+            urls.append(u)
+    return urls

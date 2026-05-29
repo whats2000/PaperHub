@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+import httpx
 
 from paperhub.pipelines.arxiv_client import search_arxiv as _search_arxiv_sync
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, IngestRequest, PaperPipeline
@@ -35,10 +37,12 @@ from paperhub.pipelines.semantic_scholar import (
     find_related,
     search_papers,
 )
-from paperhub.pipelines.unpaywall import find_oa_pdf_by_doi
+from paperhub.pipelines.unpaywall import find_oa_pdf_urls_by_doi
 
 if TYPE_CHECKING:
     from paperhub.mcp.registry import MCPRegistry
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "AddResult",
@@ -532,19 +536,28 @@ async def add_paper_to_session_dispatch(
             )
         # F4.3: Unpaywall fallback. When SS has no openAccessPdf URL but
         # we have a DOI AND the operator configured PAPERHUB_UNPAYWALL_EMAIL,
-        # query Unpaywall to find a free PDF on the publisher's site /
-        # preprint mirror. This is what closes the AlphaGenome-class gap
-        # (Nature paper not indexed by SS but freely available).
+        # query Unpaywall for all OA locations and try each in order.
+        # This closes the AlphaGenome-class gap (Nature paper not indexed by
+        # SS but freely available) and handles Cloudflare-gated first URLs by
+        # falling through to secondary locations instead of failing immediately.
         if meta.doi and unpaywall_email:
-            oa_url = await find_oa_pdf_by_doi(meta.doi, email=unpaywall_email)
-            if oa_url:
+            oa_urls = await find_oa_pdf_urls_by_doi(meta.doi, email=unpaywall_email)
+            for oa_url in oa_urls:
                 synthesized = dataclasses.replace(
                     meta, open_access_pdf_url=oa_url,
                 )
-                return await _attach_pdf(
-                    synthesized, pipeline=pipeline, conn=conn,
-                    session_id=session_id,
-                )
+                try:
+                    return await _attach_pdf(
+                        synthesized, pipeline=pipeline, conn=conn,
+                        session_id=session_id,
+                    )
+                except httpx.HTTPError as exc:
+                    _LOG.info(
+                        "unpaywall url failed doi=%s url=%s err=%s — trying next",
+                        meta.doi, oa_url, exc,
+                    )
+                    continue
+            # All URLs exhausted (or list was empty) — fall through to raise below
         raise NoIngestibleSourceError(paper_id=paper_id, title=meta.title)
 
     raise ValueError(
