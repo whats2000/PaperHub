@@ -464,7 +464,7 @@ async def add_paper_to_session_dispatch(
     conn: aiosqlite.Connection,
     session_id: int,
     metadata_override: ArxivMetadata | None = None,
-    unpaywall_email: str | None = None,  # NEW
+    unpaywall_email: str | None = None,
 ) -> AddResult:
     """Resolve a prefixed paper_id and attach it to the session.
 
@@ -485,7 +485,8 @@ async def add_paper_to_session_dispatch(
       - ``library:<paper_content_id>`` — cache-hit insert papers row
       - ``arxiv:<arxiv_id>`` — full PaperPipeline ingest
       - ``ss:<paperId>`` — SS metadata → arxiv path if externalIds.ArXiv,
-        else openAccessPdf.url PDF, else raises NoIngestibleSourceError
+        else openAccessPdf.url PDF, else (F4.3) Unpaywall by DOI when
+        ``unpaywall_email`` is set, else raises NoIngestibleSourceError
     """
     if paper_id.startswith("library:"):
         return await _attach_library(
