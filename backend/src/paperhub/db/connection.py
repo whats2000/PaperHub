@@ -18,6 +18,23 @@ import aiosqlite
 _DB_WRITE_LOCK = asyncio.Lock()
 
 
+def norm_for_match(s: str | None) -> str:
+    """Normalize a string for forgiving substring search.
+
+    Lowercase (Unicode-aware via ``str.lower``) and drop every
+    non-alphanumeric character. So ``X-VLA: Soft-Prompted`` →
+    ``xvlasoftprompted`` — a user typing ``xvla`` now matches the
+    hyphen-and-colon-broken title via substring. The Python UDF is
+    registered into every connection by :func:`configure_connection`
+    so SQL can call it as ``paperhub_norm(col)``. Used by the
+    /papers/library Add-from-Library picker; the LLM-driven
+    ``search_library_dispatch`` path keeps its own FTS5 query.
+    """
+    if not s:
+        return ""
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
 async def configure_connection(conn: aiosqlite.Connection) -> None:
     """Apply the standard PRAGMAs every PaperHub connection needs.
 
@@ -28,10 +45,16 @@ async def configure_connection(conn: aiosqlite.Connection) -> None:
     protection is the process-wide ``_DB_WRITE_LOCK`` acquired by
     ``write_transaction()``; the timeout covers any straggling caller
     that hasn't been migrated to the managed path yet.
+
+    Also registers the ``paperhub_norm`` UDF used by the Add-from-Library
+    substring search (see :func:`norm_for_match`). Registration is
+    per-connection because aiosqlite opens one connection per call site —
+    the cost is a single function-pointer bind, microseconds.
     """
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.execute("PRAGMA journal_mode = WAL")
     await conn.execute("PRAGMA busy_timeout = 30000")
+    await conn.create_function("paperhub_norm", 1, norm_for_match)
 
 
 @asynccontextmanager
