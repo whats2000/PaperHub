@@ -158,8 +158,10 @@ async def test_search_papers_extracts_externalIds_arxiv() -> None:
     assert hits[0].arxiv_id == "2312.00752"
     assert hits[0].open_access_pdf_url == "https://arxiv.org/pdf/2312.00752"
     assert hits[0].authors == ["Alice", "Bob"]
+    assert hits[0].doi == "10.x/y"
     assert hits[1].arxiv_id is None
     assert hits[1].open_access_pdf_url == "https://example.org/x.pdf"
+    assert hits[1].doi == "10.x/z"
 
 
 @respx.mock
@@ -182,6 +184,27 @@ async def test_fetch_paper_metadata_no_source() -> None:
     meta = await fetch_paper_metadata("ijkl9012")
     assert meta.arxiv_id is None
     assert meta.open_access_pdf_url is None
+
+
+@respx.mock
+async def test_fetch_paper_metadata_no_doi() -> None:
+    """A paper whose externalIds has no DOI key must yield meta.doi is None."""
+    respx.get(f"{API_BASE}/paper/arxiv-only").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "paperId": "arxiv-only",
+                "title": "ArXiv-only Paper",
+                "abstract": "no doi here",
+                "year": 2025,
+                "authors": [{"name": "Dave"}],
+                "externalIds": {"ArXiv": "2501.00001"},
+                "openAccessPdf": None,
+            },
+        ),
+    )
+    meta = await fetch_paper_metadata("arxiv-only")
+    assert meta.doi is None
 
 
 @respx.mock
