@@ -29,11 +29,17 @@ async def find_oa_pdf_by_doi(doi: str, *, email: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             resp = await client.get(url, params=params)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         _LOG.info("unpaywall transport error doi=%s err=%s", doi, exc)
         return None
     if resp.status_code != 200:
-        _LOG.info(
+        log_level = (
+            logging.WARNING
+            if resp.status_code == 429 or resp.status_code >= 500
+            else logging.INFO
+        )
+        _LOG.log(
+            log_level,
             "unpaywall non-200 doi=%s status=%d", doi, resp.status_code,
         )
         return None
