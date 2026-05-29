@@ -143,6 +143,7 @@ class SemanticScholarHit:
     authors: list[str]
     arxiv_id: str | None  # extracted from externalIds.ArXiv
     open_access_pdf_url: str | None  # from openAccessPdf.url
+    doi: str | None  # extracted from externalIds.DOI when present
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ class SemanticScholarMetadata:
     authors: list[str]
     arxiv_id: str | None
     open_access_pdf_url: str | None
+    doi: str | None  # extracted from externalIds.DOI when present
 
 
 def _headers() -> dict[str, str]:
@@ -179,14 +181,16 @@ def _coerce(item: dict[str, Any]) -> RelatedPaper:
 
 def _coerce_hit(item: dict[str, Any]) -> SemanticScholarHit:
     open_pdf = item.get("openAccessPdf") or {}
+    external_ids = item.get("externalIds") or {}
     return SemanticScholarHit(
         paperId=str(item.get("paperId") or ""),
         title=item.get("title") or "",
         abstract=item.get("abstract"),
         year=item.get("year"),
         authors=[a["name"] for a in item.get("authors") or [] if a.get("name")],
-        arxiv_id=(item.get("externalIds") or {}).get("ArXiv"),
+        arxiv_id=external_ids.get("ArXiv"),
         open_access_pdf_url=open_pdf.get("url") if isinstance(open_pdf, dict) else None,
+        doi=external_ids.get("DOI"),
     )
 
 
@@ -200,6 +204,7 @@ def _coerce_metadata(item: dict[str, Any]) -> SemanticScholarMetadata:
         authors=hit.authors,
         arxiv_id=hit.arxiv_id,
         open_access_pdf_url=hit.open_access_pdf_url,
+        doi=hit.doi,
     )
 
 
