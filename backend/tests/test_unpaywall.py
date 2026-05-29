@@ -33,7 +33,7 @@ _ENDPOINT = f"{UNPAYWALL_BASE}/{_DOI}"
 @respx.mock
 async def test_happy_path_url_for_pdf_returned() -> None:
     """200 + is_oa=true + best_oa_location.url_for_pdf → that URL exactly."""
-    respx.get(_ENDPOINT).mock(
+    route = respx.get(_ENDPOINT).mock(
         return_value=httpx.Response(
             200,
             json={
@@ -46,13 +46,14 @@ async def test_happy_path_url_for_pdf_returned() -> None:
         ),
     )
     result = await find_oa_pdf_by_doi(_DOI, email=_EMAIL)
+    assert route.called
     assert result == _PDF_URL
 
 
 @respx.mock
 async def test_happy_path_fallback_to_url_when_no_pdf() -> None:
     """200 + is_oa=true + url_for_pdf=None + url set → landing-page url."""
-    respx.get(_ENDPOINT).mock(
+    route = respx.get(_ENDPOINT).mock(
         return_value=httpx.Response(
             200,
             json={
@@ -65,12 +66,32 @@ async def test_happy_path_fallback_to_url_when_no_pdf() -> None:
         ),
     )
     result = await find_oa_pdf_by_doi(_DOI, email=_EMAIL)
+    assert route.called
     assert result == _LANDING_URL
 
 
 # ---------------------------------------------------------------------------
 # Miss paths → None (Step 2)
 # ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_returns_none_when_both_pdf_and_landing_url_missing() -> None:
+    """is_oa=true with best_oa_location set but BOTH url_for_pdf and url
+    are None — a well-formed but unusable Unpaywall response. Must
+    return None, not '' or False, so the dispatcher falls through to
+    NoIngestibleSourceError cleanly."""
+    respx.get(_ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "is_oa": True,
+                "best_oa_location": {"url_for_pdf": None, "url": None},
+            },
+        ),
+    )
+    result = await find_oa_pdf_by_doi(_DOI, email=_EMAIL)
+    assert result is None
 
 
 @respx.mock
@@ -168,5 +189,5 @@ async def test_email_query_param_is_sent() -> None:
     )
     await find_oa_pdf_by_doi(_DOI, email=_EMAIL)
     assert route.called
-    sent_url = str(route.calls[0].request.url)
-    assert f"email={_EMAIL}" in sent_url
+    sent_url = httpx.URL(str(route.calls[0].request.url))
+    assert sent_url.params["email"] == _EMAIL
