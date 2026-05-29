@@ -205,6 +205,7 @@ async def test_fetch_paper_metadata_no_doi() -> None:
     )
     meta = await fetch_paper_metadata("arxiv-only")
     assert meta.doi is None
+    assert meta.arxiv_id == "2501.00001"  # coerce path completed, ArXiv still extracted
 
 
 @respx.mock
