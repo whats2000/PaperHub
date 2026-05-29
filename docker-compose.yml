@@ -98,7 +98,9 @@ services:
     volumes:
       # Surya/marker model weights download ONCE into this named volume on the
       # first /extract and persist across restarts AND image rebuilds, so the
-      # build never re-downloads them. HF_HOME/TORCH_HOME point at /models.
+      # build never re-downloads them. The datalab S3 weights (the bulk, ~2 GB)
+      # cache to MODEL_CACHE_DIR=/models/datalab; HF_HOME=/models +
+      # TORCH_HOME=/models/torch cover the rest — all inside this volume.
       - marker-models:/models
     restart: unless-stopped
 
