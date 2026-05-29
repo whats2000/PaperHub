@@ -725,3 +725,4 @@ async def test_dispatch_ss_no_unpaywall_email_skips_fallback(
 
     assert not unpaywall_route.called, "Unpaywall must NOT be called when unpaywall_email=None"
     assert exc_info.value.paper_id == "ss:abc"
+    assert exc_info.value.title == "Nature Paper"
