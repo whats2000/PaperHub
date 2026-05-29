@@ -402,6 +402,8 @@ async def test_add_paper_to_session_dispatch_ss_raises_NoIngestibleSourceError_w
         )
     assert exc_info.value.paper_id == "ss:nosrc"
     assert exc_info.value.title == "No Source"
+    # No DOI → no URLs attempted.
+    assert exc_info.value.tried_urls == []
 
 
 # ---------------------------------------------------------------------------
@@ -690,6 +692,8 @@ async def test_dispatch_ss_unpaywall_no_oa_url_raises_not_ingestible(
         )
     assert exc_info.value.paper_id == "ss:abc"
     assert exc_info.value.title == "Nature Paper"
+    # Unpaywall returned nothing (is_oa=false) → no URLs attempted.
+    assert exc_info.value.tried_urls == []
 
 
 @respx.mock
@@ -726,6 +730,8 @@ async def test_dispatch_ss_no_unpaywall_email_skips_fallback(
     assert not unpaywall_route.called, "Unpaywall must NOT be called when unpaywall_email=None"
     assert exc_info.value.paper_id == "ss:abc"
     assert exc_info.value.title == "Nature Paper"
+    # No email → Unpaywall not queried → no URLs attempted.
+    assert exc_info.value.tried_urls == []
 
 
 _UNPAYWALL_PDF_URL_B = "https://example.org/test-secondary.pdf"
@@ -848,3 +854,6 @@ async def test_dispatch_ss_unpaywall_all_urls_fail_raises_not_ingestible(
     assert call_count["n"] == 2, "Both URLs must be attempted before giving up"
     assert exc_info.value.paper_id == "ss:abc"
     assert exc_info.value.title == "Nature Paper"
+    # Both URLs were tried — they must be preserved in tried_urls so the
+    # card can surface manual-download links for the user.
+    assert set(exc_info.value.tried_urls) == {_UNPAYWALL_PDF_URL, _UNPAYWALL_PDF_URL_B}

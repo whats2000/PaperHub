@@ -68,6 +68,11 @@ class SearchCandidate:
     # ingest metadata_override — the download must fetch the authoritative
     # title instead. See research_pipeline.resolve_via_ss + chat._process_search_results.
     verified: bool = True
+    # F4.3: OA URLs attempted (and failed) before raising NoIngestibleSourceError.
+    # Non-empty only when Unpaywall was queried and every URL was Cloudflare-gated
+    # or otherwise unreachable. The frontend renders these as manual-download links
+    # so the user can fetch the PDF themselves and upload via /papers/upload.
+    tried_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
