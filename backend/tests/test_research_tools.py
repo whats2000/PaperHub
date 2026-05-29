@@ -6,7 +6,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import aiosqlite
+import httpx
 import pytest
+import respx
 
 from paperhub.agents.research_tools import (
     _BASE_PAPER_TOOL_SCHEMAS,
@@ -23,6 +25,7 @@ from paperhub.pipelines.paper_pipeline import (
     PaperPipeline,
 )
 from paperhub.pipelines.semantic_scholar import SemanticScholarMetadata
+from paperhub.pipelines.unpaywall import UNPAYWALL_BASE
 
 # Note: pyproject sets ``asyncio_mode = "auto"`` — async test functions are
 # auto-marked, so no module-level ``pytestmark`` is needed. Applying one would
@@ -577,3 +580,148 @@ async def test_search_library_handles_reserved_keyword_queries(
         session_id=session_id,
     )
     assert isinstance(hits, list)
+
+
+# ---------------------------------------------------------------------------
+# F4.3: Unpaywall dispatch branch — ss: with no arxiv, no openAccessPdf, has DOI
+# ---------------------------------------------------------------------------
+
+_SS_DOI = "10.1038/test"
+_UNPAYWALL_PDF_URL = "https://example.org/test.pdf"
+_UNPAYWALL_ENDPOINT = f"{UNPAYWALL_BASE}/{_SS_DOI}"
+
+
+def _ss_meta_doi_only(paper_id: str) -> SemanticScholarMetadata:
+    """SS metadata with DOI but no arxiv_id and no openAccessPdf."""
+    return SemanticScholarMetadata(
+        paperId=paper_id,
+        title="Nature Paper",
+        abstract="A paper published only on Nature.",
+        year=2025,
+        authors=["Alice", "Bob"],
+        arxiv_id=None,
+        open_access_pdf_url=None,
+        doi=_SS_DOI,
+    )
+
+
+@respx.mock
+async def test_dispatch_ss_unpaywall_happy_path(
+    migrated_db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ss: + no arxiv, no openAccessPdf, has DOI + Unpaywall returns PDF URL
+    → ingest_pdf_from_url is called with the Unpaywall URL."""
+    session_id = await _make_session(migrated_db)
+    pipeline = MagicMock(spec=PaperPipeline)
+    pipeline.ingest_pdf_from_url = AsyncMock(
+        return_value=IngestResult(
+            paper_content_id=101, papers_id=201, cache_hit=False, title="Nature Paper",
+        ),
+    )
+
+    async def _fake_meta(paper_id: str) -> SemanticScholarMetadata:
+        return _ss_meta_doi_only(paper_id)
+
+    monkeypatch.setattr(
+        "paperhub.agents.research_tools.fetch_paper_metadata", _fake_meta,
+    )
+
+    respx.get(_UNPAYWALL_ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "is_oa": True,
+                "best_oa_location": {
+                    "url_for_pdf": _UNPAYWALL_PDF_URL,
+                    "url": "https://example.org/test",
+                },
+            },
+        ),
+    )
+
+    result = await add_paper_to_session_dispatch(
+        "ss:abc",
+        pipeline=pipeline,
+        conn=migrated_db,
+        session_id=session_id,
+        unpaywall_email="ops@example.com",
+    )
+
+    pipeline.ingest_pdf_from_url.assert_awaited_once()
+    call_kwargs = pipeline.ingest_pdf_from_url.await_args
+    assert call_kwargs is not None
+    assert call_kwargs.kwargs["pdf_url"] == _UNPAYWALL_PDF_URL
+    assert result.paper_content_id == 101
+    assert result.title == "Nature Paper"
+
+
+@respx.mock
+async def test_dispatch_ss_unpaywall_no_oa_url_raises_not_ingestible(
+    migrated_db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ss: + no arxiv, no openAccessPdf, has DOI + Unpaywall returns is_oa=false
+    → NoIngestibleSourceError raised (same as F4.2 behaviour)."""
+    session_id = await _make_session(migrated_db)
+    pipeline = MagicMock(spec=PaperPipeline)
+
+    async def _fake_meta(paper_id: str) -> SemanticScholarMetadata:
+        return _ss_meta_doi_only(paper_id)
+
+    monkeypatch.setattr(
+        "paperhub.agents.research_tools.fetch_paper_metadata", _fake_meta,
+    )
+
+    respx.get(_UNPAYWALL_ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            json={"is_oa": False},
+        ),
+    )
+
+    with pytest.raises(NoIngestibleSourceError) as exc_info:
+        await add_paper_to_session_dispatch(
+            "ss:abc",
+            pipeline=pipeline,
+            conn=migrated_db,
+            session_id=session_id,
+            unpaywall_email="ops@example.com",
+        )
+    assert exc_info.value.paper_id == "ss:abc"
+    assert exc_info.value.title == "Nature Paper"
+
+
+@respx.mock
+async def test_dispatch_ss_no_unpaywall_email_skips_fallback(
+    migrated_db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ss: + no arxiv, no openAccessPdf, has DOI + unpaywall_email=None
+    → Unpaywall endpoint NEVER called, NoIngestibleSourceError raised.
+    This is the graceful-degradation guarantee: no env var, no fallback."""
+    session_id = await _make_session(migrated_db)
+    pipeline = MagicMock(spec=PaperPipeline)
+
+    async def _fake_meta(paper_id: str) -> SemanticScholarMetadata:
+        return _ss_meta_doi_only(paper_id)
+
+    monkeypatch.setattr(
+        "paperhub.agents.research_tools.fetch_paper_metadata", _fake_meta,
+    )
+
+    unpaywall_route = respx.get(_UNPAYWALL_ENDPOINT).mock(
+        return_value=httpx.Response(200, json={"is_oa": True}),
+    )
+
+    with pytest.raises(NoIngestibleSourceError) as exc_info:
+        await add_paper_to_session_dispatch(
+            "ss:abc",
+            pipeline=pipeline,
+            conn=migrated_db,
+            session_id=session_id,
+            unpaywall_email=None,
+        )
+
+    assert not unpaywall_route.called, "Unpaywall must NOT be called when unpaywall_email=None"
+    assert exc_info.value.paper_id == "ss:abc"
