@@ -423,6 +423,270 @@ async def test_get_library_q_filter_handles_multi_word(
     assert len(items) >= 1
 
 
+async def test_get_library_q_supports_substring_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user-facing 'Add from Library' search must match substrings
+    *inside* tokens, not just whole tokens. Typing ``imus`` should find
+    ``OptimusVLA``; typing ``prior`` should find ``priors``. The previous
+    FTS5-MATCH path required whole-token matches and silently missed both."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn,
+            content_key="arxiv:2602.20200",
+            title="Global Prior Meets Local Consistency",
+            arxiv_id="2602.20200",
+            abstract="OptimusVLA dual-memory framework with priors and posteriors",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Mid-token: 'imus' is inside 'OptimusVLA' (abstract).
+        r1 = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "imus"},
+        )
+        # Token-suffix: 'priors' would NOT match the bare token 'prior' under
+        # FTS5; under substring it matches 'priors' in the abstract.
+        r2 = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "priors"},
+        )
+
+    assert r1.status_code == 200, r1.text
+    assert len(r1.json()) == 1, "mid-token substring must match"
+    assert r2.status_code == 200
+    assert len(r2.json()) == 1, "token-suffix substring must match"
+
+
+async def test_get_library_q_is_case_insensitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The search must be case-insensitive across both title and abstract.
+    User-typed ``PRIO`` and ``prio`` must both find ``Prior`` / ``priors``."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn,
+            content_key="arxiv:2602.20200",
+            title="Global Prior Meets Local Consistency",
+            arxiv_id="2602.20200",
+            abstract="dual-memory with global priors",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r_lower = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "prio"},
+        )
+        r_upper = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "PRIO"},
+        )
+        r_mixed = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "Prio"},
+        )
+
+    assert len(r_lower.json()) == 1
+    assert len(r_upper.json()) == 1
+    assert len(r_mixed.json()) == 1
+
+
+async def test_get_library_q_substring_multi_word_is_and(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-word queries AND each token's substring across title+abstract.
+    'global prior' must match a paper containing BOTH substrings somewhere;
+    a paper containing only one must NOT match."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn, content_key="arxiv:2602.20200",
+            title="Global Prior Meets Local Consistency",
+            arxiv_id="2602.20200", abstract="dual-memory VLA",
+        )
+        await _seed_paper_content(
+            conn, content_key="arxiv:2401.99999",
+            title="Local Methods Only", arxiv_id="2401.99999",
+            abstract="no relevant terms here",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "global prior"},
+        )
+
+    assert r.status_code == 200
+    items = r.json()
+    titles = [it["title"] for it in items]
+    assert "Global Prior Meets Local Consistency" in titles
+    assert "Local Methods Only" not in titles
+
+
+async def test_get_library_q_strips_separators_for_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Forgiving search: hyphens, colons, and other non-alphanumeric chars
+    in titles must not block a substring match. User types ``xvla`` →
+    finds ``X-VLA: Soft-Prompted Transformer…``; types ``mamba`` → finds
+    ``Mamba: Linear-Time…``; types ``simtoreal`` → finds ``Sim-to-Real``.
+    The normalization strips on BOTH sides so the corpus's punctuation
+    quirks don't matter to the user typing in the search box."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn, content_key="arxiv:2510.10274",
+            title="X-VLA: Soft-Prompted Transformer as Scalable Vision-Language-Action Model",
+            arxiv_id="2510.10274", abstract="cross-embodiment robot learning",
+        )
+        await _seed_paper_content(
+            conn, content_key="arxiv:2312.00752",
+            title="Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+            arxiv_id="2312.00752", abstract="state-space model for sequence tasks",
+        )
+        await _seed_paper_content(
+            conn, content_key="arxiv:2401.99999",
+            title="Sim-to-Real Transfer for Manipulation",
+            arxiv_id="2401.99999", abstract="domain randomization techniques",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Hyphen-stripped: 'xvla' finds 'X-VLA'.
+        r_xvla = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "xvla"},
+        )
+        # Colon-and-space stripped: 'mambalinear' finds 'Mamba: Linear-Time'.
+        r_mamba = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "mambalinear"},
+        )
+        # Multi-hyphen stripped: 'simtoreal' finds 'Sim-to-Real'.
+        r_sim = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "simtoreal"},
+        )
+        # Original-form still works: typing 'X-VLA' finds 'X-VLA' (normalized
+        # both sides to xvla, so the dashes drop and substring matches).
+        r_dashed = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "X-VLA"},
+        )
+
+    assert [it["arxiv_id"] for it in r_xvla.json()] == ["2510.10274"]
+    assert [it["arxiv_id"] for it in r_mamba.json()] == ["2312.00752"]
+    assert [it["arxiv_id"] for it in r_sim.json()] == ["2401.99999"]
+    assert [it["arxiv_id"] for it in r_dashed.json()] == ["2510.10274"]
+
+
+async def test_get_library_q_normalizes_non_ascii(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normalization is Unicode-aware: a Greek letter in the title and in
+    the query both lowercase + survive the strip, so the substring still
+    matches. (Python's ``str.lower`` handles Unicode where SQLite's ASCII
+    LOWER would not.)"""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn, content_key="arxiv:9999.00001",
+            title="Α-Geometry: A Greek-Lettered Method",
+            arxiv_id="9999.00001", abstract="capital Alpha in title",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Lowercase Greek alpha 'α' typed by user must match capital 'Α' in title.
+        r = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "αgeometry"},
+        )
+
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+
+
+async def test_get_library_q_punctuation_only_token_is_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A token that's pure punctuation (after normalization, empty) must
+    be skipped — NOT degenerate to ``%%`` which would match everything."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn, content_key="arxiv:1234.56789", title="Anything",
+            arxiv_id="1234.56789", abstract="anything",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 'foo ---' → tokens 'foo' (norm 'foo') + '---' (norm ''). Only the
+        # 'foo' token filters; the punctuation-only token is skipped. Since
+        # the seeded paper doesn't contain 'foo', no rows match — not 'all
+        # rows matched because the second token went degenerate'.
+        r = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "foo ---"},
+        )
+
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_get_library_q_escapes_like_wildcards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A literal '%' or '_' typed in the search box must be matched as a
+    literal character, not as a SQL LIKE wildcard. Else 'a' would match
+    every paper (because '%a%' wraps the input)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        # Paper whose title contains a literal '%'.
+        await _seed_paper_content(
+            conn, content_key="arxiv:1111.11111", title="Accuracy 90% on benchmark",
+            arxiv_id="1111.11111", abstract="results table",
+        )
+        # Paper without '%'.
+        await _seed_paper_content(
+            conn, content_key="arxiv:2222.22222", title="Plain Title",
+            arxiv_id="2222.22222", abstract="nothing fancy",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(
+            "/papers/library", params={"session_id": session_id, "q": "90%"},
+        )
+
+    assert r.status_code == 200
+    titles = [it["title"] for it in r.json()]
+    assert "Accuracy 90% on benchmark" in titles
+    # The literal '%' must NOT match the title without '%'.
+    assert "Plain Title" not in titles
+
+
 async def test_get_library_handles_reserved_keyword_q(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

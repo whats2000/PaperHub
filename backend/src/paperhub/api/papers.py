@@ -15,7 +15,6 @@ from pydantic import BaseModel, model_validator
 
 from paperhub.agents.research_tools import (
     NoIngestibleSourceError,
-    _to_fts5_query,
     add_paper_to_session_dispatch,
 )
 from paperhub.api.deps import get_chroma, get_llm
@@ -286,19 +285,37 @@ async def list_library(
 ) -> list[LibraryItem]:
     """Indexed paper_content rows NOT already in `session_id`.
 
-    Optional `q` filters on title and abstract using FTS5 MATCH — supports
-    multi-word queries with Google-style AND semantics.
+    Optional `q` filters on title and abstract using **normalized
+    case-insensitive substring match**: both sides are run through
+    ``paperhub_norm`` (lowercase + drop non-alphanumerics) before the
+    LIKE. So ``imus`` finds ``OptimusVLA``, ``prio`` finds ``Prior``,
+    AND ``xvla`` finds ``X-VLA: Soft-Prompted Transformer…`` (the
+    hyphen+colon would have blocked the substring otherwise). Tokens
+    are whitespace-split and AND-joined across title+abstract. The
+    LLM-driven path (``search_library_dispatch``) keeps FTS5 keyword
+    semantics; this endpoint is human-facing, where forgiving substring
+    is expected.
     """
     where = ["pc.id NOT IN (SELECT paper_content_id FROM papers WHERE session_id = ?)"]
     args: list[int | str] = [session_id]
     if q:
-        fts_query = _to_fts5_query(q)
-        if fts_query:
+        from paperhub.db.connection import norm_for_match
+
+        for tok in q.split():
+            normalized = norm_for_match(tok)
+            if not normalized:
+                # User typed only punctuation in this token (e.g. '-' or
+                # '%') — skip rather than match-everything via '%%'.
+                continue
+            pattern = f"%{normalized}%"
+            # paperhub_norm() runs on each row in title/abstract for this
+            # filter. At the library's expected scale (≪10k papers) the
+            # per-row Python callback is well under a millisecond total.
             where.append(
-                "EXISTS (SELECT 1 FROM paper_content_fts fts "
-                "WHERE fts.rowid = pc.id AND paper_content_fts MATCH ?)"
+                "(paperhub_norm(pc.title) LIKE ? "
+                "OR paperhub_norm(pc.abstract) LIKE ?)"
             )
-            args.append(fts_query)
+            args.extend([pattern, pattern])
     sql = (
         "SELECT pc.id, pc.arxiv_id, pc.title, pc.abstract, pc.year "
         f"FROM paper_content pc WHERE {' AND '.join(where)} "
