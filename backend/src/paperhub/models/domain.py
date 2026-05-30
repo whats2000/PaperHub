@@ -241,7 +241,9 @@ class PlannedSlide(BaseModel):
 
     Note: ``title`` may be an empty string for ``title`` and ``takeaway_closer``
     patterns whose layouts do not use a ``\\frametitle``. Every other pattern
-    must carry a non-empty title; the planner prompt enforces this.
+    must carry a non-empty title; the planner prompt instructs this and
+    :func:`paperhub.agents.sl_plan_deck._validate_attributions` rejects empty
+    title on content patterns (raises ``plan_validation_failed``).
     """
 
     model_config = ConfigDict(extra="forbid")

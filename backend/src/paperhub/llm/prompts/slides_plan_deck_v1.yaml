@@ -91,6 +91,15 @@ system: |
 
   **UNIVERSAL DESIGN PRINCIPLES — load-bearing**
 
+  - **Every content slide MUST have a non-empty ``title``.** The ONLY
+    patterns allowed to have ``title=""`` are ``title`` and
+    ``takeaway_closer`` (which use ``\titlepage`` / ``\rule`` framing
+    instead of ``\frametitle``). For every other pattern
+    (``references``, ``motivation_figure``, ``bottlenecks_table``,
+    ``concept_2col``, ``math_stack``, ``results_table``,
+    ``proposed_direction_placeholder``, ``plan_numbered``), ``title``
+    must be a meaningful 2-6-word frame title — not "Method" generic,
+    but "ADP: Pruning via Trajectory Phase" specific.
   - **Each slide is ONE idea.** If you reach for 5+ ``key_points``, split
     into two slides.
   - **Concept slides have at most 4 ``key_points``, each <= 15 words.**
