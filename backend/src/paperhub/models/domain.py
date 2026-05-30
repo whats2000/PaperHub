@@ -293,6 +293,32 @@ class DeckOutline(BaseModel):
     style_profile_name: str = "default"
 
 
+class RenderedSlide(BaseModel):
+    """One rendered Beamer frame produced by ``sl_render_slide`` (F4.4 T3).
+
+    Consumes a single :class:`PlannedSlide` (+ the relevant
+    :class:`PaperTalkBrief`) and emits exactly one ``\\begin{frame}...
+    \\end{frame}`` block. The renderer does NOT emit a preamble or
+    ``\\documentclass`` — assemble (T4) concatenates these frames into the
+    final deck. ``figure_keys_used`` lets the existing ``sl_verify_figures``
+    step trust each frame is internally consistent before concatenation;
+    ``callback_reads`` records which bounded ``read_section`` /
+    ``read_figure_block`` calls the renderer made when the brief's
+    pre-extracted summary was insufficient (per the agent-flow observability
+    iron rule — every step records enough state to reconstruct the loop from
+    the DB alone).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slide_index: int
+    pattern_kind: PatternKind
+    paper_id: int | None = None
+    frame_tex: str
+    figure_keys_used: list[str] = []
+    callback_reads: list[dict[str, str]] = []
+
+
 class OutlineSlide(BaseModel):
     """One slide entry in a TalkOutline — title, narrative goal, key points,
     and optional pointers to a figure, equation, chunks, and papers."""
