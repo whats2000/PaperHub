@@ -25,29 +25,65 @@ def _conn() -> sqlite3.Connection:
 
 
 def fetch_deck_artifacts(session_id: int) -> dict[str, Any]:
-    """Pull the latest deck for a session: tex + pdf path + speaker_notes_json + page_count."""
+    """Pull the latest deck for a session.
+
+    `decks` stores slides + pdf as filesystem paths (`tex_path`, `pdf_path`),
+    not blobs. We read the .tex from disk so the round dir gets a full copy.
+    """
     con = _conn()
     try:
         row = con.execute(
-            "SELECT id, slides_tex, pdf_path, speaker_notes_json, page_count, title, "
-            "contributing_papers, has_notes "
+            "SELECT id, run_id, tex_path, pdf_path, speaker_notes_json, "
+            "page_count, theme, contributing_paper_ids_json, status "
             "FROM decks WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             (session_id,),
         ).fetchone()
+        # Per-frame note text lives in deck_slides — pull those too for the harness.
+        if row:
+            frames = con.execute(
+                "SELECT slide_index, frame_tex, note_text, note_language, "
+                "page_start, page_end "
+                "FROM deck_slides WHERE deck_id = ? ORDER BY slide_index",
+                (row[0],),
+            ).fetchall()
+        else:
+            frames = []
     finally:
         con.close()
     if not row:
         return {}
-    deck_id, tex, pdf_path, notes_json, page_count, title, contributing, has_notes = row
+    deck_id, run_id, tex_path, pdf_path, notes_json, page_count, theme, contributing, status = row
+    slides_tex = ""
+    if tex_path:
+        p = Path(tex_path)
+        if p.is_absolute() and p.exists():
+            slides_tex = p.read_text(encoding="utf-8", errors="ignore")
+        elif p.exists():
+            slides_tex = p.read_text(encoding="utf-8", errors="ignore")
+        else:
+            print(f"[helpers] WARN deck.tex_path not readable: {tex_path}")
     return {
         "deck_id": deck_id,
-        "slides_tex": tex or "",
+        "run_id": run_id,
+        "slides_tex": slides_tex,
+        "tex_path": tex_path,
         "pdf_path": pdf_path,
         "speaker_notes_json": json.loads(notes_json) if notes_json else {},
         "page_count": page_count,
-        "title": title,
-        "contributing_papers": json.loads(contributing) if contributing else [],
-        "has_notes": bool(has_notes),
+        "theme": theme,
+        "contributing_paper_ids": json.loads(contributing) if contributing else [],
+        "status": status,
+        "frames": [
+            {
+                "slide_index": f[0],
+                "frame_tex": f[1],
+                "note_text": f[2],
+                "note_language": f[3],
+                "page_start": f[4],
+                "page_end": f[5],
+            }
+            for f in frames
+        ],
     }
 
 
@@ -130,14 +166,18 @@ def run_and_dump(
         (out / "slides.tex").write_text(deck["slides_tex"], encoding="utf-8")
     if deck.get("pdf_path"):
         pdf_src = Path(deck["pdf_path"])
-        if pdf_src.is_absolute() and pdf_src.exists():
-            pdf_dst = out / "slides.pdf"
-            pdf_dst.write_bytes(pdf_src.read_bytes())
+        if pdf_src.exists():
+            (out / "slides.pdf").write_bytes(pdf_src.read_bytes())
         else:
             print(f"[run] WARN deck.pdf_path not readable: {pdf_src}")
     if deck.get("speaker_notes_json"):
         (out / "speaker_notes.json").write_text(
             json.dumps(deck["speaker_notes_json"], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    if deck.get("frames"):
+        (out / "deck_slides.json").write_text(
+            json.dumps(deck["frames"], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     if trace:
@@ -149,6 +189,6 @@ def run_and_dump(
     print(
         f"[run] run_id={res.run_id} intent={res.intent} "
         f"deck_id={deck.get('deck_id')} pages={deck.get('page_count')} "
-        f"has_notes={deck.get('has_notes')}"
+        f"theme={deck.get('theme')} status={deck.get('status')}"
     )
     return {"chat": res, "deck": deck, "trace": trace}

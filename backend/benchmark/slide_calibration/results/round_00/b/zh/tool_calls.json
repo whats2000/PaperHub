@@ -1,0 +1,540 @@
+[
+  {
+    "step_index": 0,
+    "agent": "router",
+    "tool": "classify",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 2906,
+    "args_redacted_json": {
+      "user_message": "請為這三篇論文做一份 12 分鐘的會議簡報，重點放在它們之間的連結與你提出的方向。",
+      "enabled_refs_count": 3
+    },
+    "result_summary_json": {
+      "intent": "slides",
+      "model_tier": "flagship",
+      "confidence": 1.0,
+      "reasoning": "User requested a conference presentation based on three enabled papers.",
+      "resolved_query": "請為這三篇啟用的論文製作一份 12 分鐘的會議簡報，重點放在它們之間的連結以及我提出的未來研究方向。",
+      "response_language": "Traditional Chinese"
+    },
+    "error": null
+  },
+  {
+    "step_index": 1,
+    "agent": "report",
+    "tool": "report:detect_language",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 625,
+    "args_redacted_json": {
+      "instruction": "請為這三篇啟用的論文製作一份 12 分鐘的會議簡報，重點放在它們之間的連結以及我提出的未來研究方向。"
+    },
+    "result_summary_json": {
+      "language": null
+    },
+    "error": null
+  },
+  {
+    "step_index": 2,
+    "agent": "report",
+    "tool": "report:understand",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 23171,
+    "args_redacted_json": {
+      "paper_block_len": 4084
+    },
+    "result_summary_json": {
+      "paper_id": 1,
+      "contribution": "提出 FASTer 框架，將可學習的神經動作分詞器（FASTerVQ）與具備區塊自迴歸解碼的視覺-語言-動作模型（FASTerVLA）結合，有效解決機器人操作中動作重建保真度與推論效率之間的權衡問題。",
+      "method": "該框架包含兩個核心模組：FASTerVQ 將連續動作片段編碼為單通道影像並進行分塊（patchification），運用離散餘弦轉換（DCT）與 L1 重建損失進行殘差向量量化（RVQ），以高壓縮率捕捉全域時空依賴性；FASTerVLA 則在視覺語言模型基礎上附加輕量級動作專家模組，採用區塊自迴歸（Block-wise Autoregressive, BAR）解碼機制平行生成多個離散動作標記，最後由解碼器還原為連續動作序列。",
+      "key_results": [
+        "FASTerVQ 在動作重建品質與標記利用率上優於現有基線模型，並展現出卓越的跨任務與跨實體（cross-embodiment）泛化能力。",
+        "藉由區塊自迴歸解碼機制，FASTerVLA 顯著提升了推論速度，達成更高效的實時控制。",
+        "在多個模擬（如 LIBERO）與真實世界基準測試中，FASTer 系統的整體任務成功率超越了先前的最先進 VLA 模型。"
+      ],
+      "key_figure_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-003",
+        "p0-fig-004"
+      ],
+      "key_equations": [
+        "\\mathcal L=\\left\\Vert\\bm{a}_{t:t+H}-\\hat{\\bm{a}}_{t:t+H}\\right\\Vert_1 + \\left\\Vert\\text{DCT}(\\bm{a}_{t:t+H})-\\text{DCT}(\\hat{\\bm{a}}_{t:t+H})\\right\\Vert_1+\\lambda\\cdot \\left\\Vert\\bm z-\\text{sg}(\\bm z_q)\\right\\Vert^2_2",
+        "\\mathcal{L}_{\\text{BAR}} = - \\sum\\nolimits_{j=1}^{J} \\sum\\nolimits_{i=1}^{B} \\log p_\\theta\\!\\big(c_{j,i} \\,\\big|\\, C_{<j}, I_t, s_t, x\\big)"
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 3,
+    "agent": "report",
+    "tool": "report:understand",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 22905,
+    "args_redacted_json": {
+      "paper_block_len": 7311
+    },
+    "result_summary_json": {
+      "paper_id": 1,
+      "contribution": "提出了 OptimusVLA，一種增強了雙記憶體架構的視覺-語言-動作 (VLA) 模型，透過結合全域先驗記憶體 (GPM) 和局部一致性記憶體 (LCM)，顯著提升了機器人操作任務中的推論效率與時間一致性的強健性。",
+      "method": "OptimusVLA 使用視覺-語言骨幹網路提取多模態特徵。全域先驗記憶體 (GPM) 從語義相似的歷史軌跡中檢索任務級別的動作先驗，以取代標準的高斯雜訊，從而縮短生成路徑並減少函數評估次數 (NFE)。同時，局部一致性記憶體 (LCM) 動態編碼歷史執行的動作序列以注入一致性約束，確保軌跡的時間平滑性與對任務進度的感知。這兩個記憶模組最終整合至連續流匹配 (CFM) 框架中以進行動作生成。",
+      "key_results": [
+        "在 LIBERO 基準測試中達到 98.6% 的平均成功率，並在 RoboTwin 2.0 Hard 取得 38% 的平均成功率。",
+        "在 CALVIN 基準測試中的表現超越了強大的基準模型 pi_0 達 13.5%。",
+        "在真實世界評估中展現顯著優勢，於泛化任務 (Generalization) 和長程任務 (Long-horizon) 測試中分別超越 pi_0 達 42.9% 和 52.4%。",
+        "與標準 VLA 基準模型相比，推論速度提升了 2.9 倍，這主要歸功於 GPM 對 NFE（函數評估次數）的自適應縮減。"
+      ],
+      "key_figure_keys": [
+        "p1-fig-001",
+        "p1-fig-002",
+        "p1-fig-005"
+      ],
+      "key_equations": [
+        "\\mathbf{\\hat{X}}_{t}=\\mu+\\lambda\\,\\big(\\epsilon\\odot\\sqrt{\\mathrm{Var}}\\big), \\qquad \\epsilon\\sim\\mathcal{N}(0,I),",
+        "\\mathbf{B}_{t} \\gets \\texttt{LCM} ( \\mathbf{A}_{t-1} )",
+        "\\mathbf{X}_{t} = \\mathbf{\\hat{X}}_{t} + \\mathbf{B}_{t}"
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 4,
+    "agent": "report",
+    "tool": "report:understand",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 24984,
+    "args_redacted_json": {
+      "paper_block_len": 6624
+    },
+    "result_summary_json": {
+      "paper_id": 1,
+      "contribution": "提出了一種名為動作感知動態剪枝（ADP）的多模態剪枝框架，該框架結合了文本驅動的標記選擇與動作感知軌跡門控，能根據機器人操作階段動態調整視覺標記的保留率，在提升推理效率的同時維持或提升操作成功率。",
+      "method": "ADP 透過近期末端執行器的動作軌跡計算累積移動距離，並引入門控機制來評估當前的操作狀態。在動作幅度較大的粗略移動階段，系統會依據文本對視覺標記的交叉注意力分數進行前瞻性剪枝，過濾掉冗餘的視覺資訊；而在需要高精度的微調階段，則保留所有視覺標記以確保感知精度，以此在計算效率與感知精確度之間取得平衡。",
+      "key_results": [
+        "在 LIBERO 基準測試與多樣的真實世界情境中，顯著降低了 FLOPs 與動作推理延遲（例如在 OpenVLA-OFT 上實現了 1.35 倍的加速）。",
+        "相較於基線模型，在大幅提升推理速度的同時，仍維持極具競爭力的成功率（例如在 OpenVLA 上成功率相對提升了 25.8%）。"
+      ],
+      "key_figure_keys": [
+        "p2-fig-001",
+        "p2-fig-002",
+        "p2-fig-004"
+      ],
+      "key_equations": [
+        "\\Phi^{(l)}(v) = \\frac{1}{N^h \\cdot L_{\\text{txt}}} \\sum_{h=1}^{N^h} \\sum_{t=1}^{L_{\\text{txt}}} \\mathbf{A}^{(l)}_{h,t,v}",
+        "\\delta_i=\\sum_{t=b_i}^{e_i-1}\\lVert \\mathbf{p}_{t+1}-\\mathbf{p}_t\\rVert_2",
+        "s_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\ 0, & \\delta_i \\le V^{(i)}, \\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases}"
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 5,
+    "agent": "report",
+    "tool": "report:narrate",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 51250,
+    "args_redacted_json": {
+      "briefs_block_len": 2751,
+      "figure_inventory": "p0-fig-001: FASTer combines a learnable action tokenizer (FASTerVQ) and an autoregressive VLA model (FASTerVLA), achieving efficient compression, fast control, and strong performance across eight real and simulated embodiments.\np0-fig-002: FASTerVQ. (a) The raw action sequence is patchified into compact tokens based on their embodied configuration. (b) FASTerVQ applies DCT and L1 reconstruction losses and adopts RVQ, encoding actions into $N_c$ code levels; each level can be reshaped into a $C_h C_a$ tensor.\np0-fig-003: FASTerVLA. (a) The model takes RGB images, proprioceptive states, and a language instruction as inputs to a transformer–based VLM. An Action Expert autoregressively generates discrete action tokens, which a VQ decoder maps into the final continuous action sequence. (b) Codes are generated codebook–w\np0-fig-004: Model Performance Comparison\np0-fig-005: Comparison of FASTer, its non-BAR variant, and FAST across backbones on the Libero benchmark.\np0-fig-006: Evaluation results of generalization ability on VLABench. The evaluation dimensions cover generalization of language, vision, and goal and knowledge transfer.\np0-fig-007: Comparison of zero-shot performance between FASTer and baselines on Droid and Bridge datasets.\np0-fig-008: Experiment setups. Diverse embodiments, scenes, and tasks for assessing multiple capability dimensions (marked by emojis).\np0-fig-009: Different BAR block sizes, including irregular granularity, and their performance on the LIBERO environment.\np0-fig-010: Different BAR block sizes, including irregular granularity, and their performance on the LIBERO environment.\np0-fig-011: Heatmap for detailed VRR of different tokenizers across ID and OOD datasets.\np0-fig-012: Visualization of action reconstruction results from MiniVLA, VQ-VLA, Fast+, and FasterVQ on representative trajectories from the Libero, Bridge, XArm, and Widow datasets.\np0-fig-013: Visualization of our evaluation tasks.\np1-fig-001: Top: Comparison between the standard VLA architecture (left) and our proposed OptimusVLA (right). (ii) Poor robustness to temporal dependence. Middle: Illustration of how GPM (myblue{blue}) and LCM (mygreen{green}) address two key limitations of existing VLA models: (i) Low inference efficiency due \np1-fig-002: Overview of OptimusVLA framework. Given a task and the current observation, the Vision–Language backbone first encodes the inputs into a multimodal representation. GPM then retrieves a task-level prior based on this representation, while LBM dynamically encodes the historical action sequence to prod\np1-fig-003: Real-world task setup and evaluation results. We evaluate the performance of OptimusVLA against OpenVLA kim2024openvla, OpenVLA-OFT kim2025openvla-oft, $ _{0}$ black2024pi0, and $ _{0.5}$ intelligence2025pi05 on the Generalization Tasks and Long-horizon Tasks suites.\np1-fig-004: LIBERO-Spatial\np1-fig-005: Inference efficiency comparison on LIBERO and Real-World. OptimusVLA attains strong performance with substantially fewer inference time and NFEs.\np1-fig-006: Qualitative results of OptimusVLA on simulation task and Real-World task. Top: On simulation task, we visualize the retrieval similarity $ s$, adaptive noise scales $ $, and NFEs $N$ of key frames. Bottom: On Real-World task, we demonstrate the role of LCM in modeling temporal dependencies, whereas \np1-fig-007: Qualitative results of OptimusVLA on Real-World. From top to bottom, we illustrate four Generalization Tasks: Place one fruit on plate, Place plate on tablecloth, Stand bottle upright, and Place cup on tablecloth. Here, third denotes third-person view images, while wrist denotes images captured from\np1-fig-008: Qualitative results of OptimusVLA on Real-World. From top to bottom, we illustrate four Long-horizon Tasks: Place all fruits on plate, Place one fruit on tablecloth, then place another fruit into bowl, Place cup and apple on plate, and Place 3 blocks on tablecloth. Here, third denotes third-person v\np2-fig-001: Action-aware dynamic pruning vs.\\ static pruning. We visualize five past observation windows as cases from a manipulation episode that condition the current anticipatory window. $p_1$, $p_3$ and $p_5$ reflect coarse phases, prompting the gate to enable pruning to suppress redundant tokens, whereas $\np2-fig-002: Overview of our proposed Action-aware Dynamic Pruning (ADP) for Vision-Language-Action models. (a.) Action-aware gating: the pruning function adaptively determines whether to prune based on recent end-effector trajectories ($ x, y, z, , , , g$) , enabling dynamic pruning. (b.) Anticipatory pruning: \np2-fig-003: \np2-fig-004: Real world experiments. We conduct the experiments on Jaco2 Real-world Platform.\np2-fig-005: Original Attention Maps\np2-fig-006: $PR$ across layers\np2-fig-007: ADP vs. Random Pruning."
+    },
+    "result_summary_json": {
+      "title": "提升視覺-語言-動作模型的推論效率與操作精準度",
+      "slides": [
+        {
+          "title": "提升視覺-語言-動作模型的推論效率與操作精準度",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "執行摘要：突破 VLA 模型的效能瓶頸",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "背景與動機：VLA 模型的雙重挑戰",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "方法一：FASTer 框架與區塊自迴歸解碼",
+          "figure_key": null,
+          "equation": "\\mathcal{L}_{\\text{BAR}} = - \\sum\\nolimits_{j=1}^{J} \\sum\\nolimits_{i=1}^{B} \\log p_\\theta\\!\\big(c_{j,i} \\,\\big|\\, C_{<j}, I_t, s_t, x\\big)",
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "方法二：OptimusVLA 雙記憶體架構",
+          "figure_key": "p1-fig-002",
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "方法三：動作感知動態剪枝 (ADP)",
+          "figure_key": null,
+          "equation": "s_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\ 0, & \\delta_i \\le V^{(i)}, \\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases}",
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "實驗結果：推論效率的顯著提升",
+          "figure_key": "p1-fig-005",
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "實驗結果：卓越的任務成功率與泛化能力",
+          "figure_key": "p1-fig-003",
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "結論與未來展望",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [],
+          "paper_ids": [
+            1
+          ]
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 6,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 15171,
+    "args_redacted_json": {
+      "slide_title": "提升視覺-語言-動作模型的推論效率與操作精準度",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame} \\frametitle{提升視覺-語言-動作模型的推論效率與操作精準度} \\begin{itemize} \\item 解決高維連續動作的延遲與保真度權衡 \\item 引入高效動作分詞提升推論速度 \\item 結合雙記憶體架構強化操作精準度 \\item 應用動態視覺剪枝減少運算負擔 \\end{itemize} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 7,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 12155,
+    "args_redacted_json": {
+      "slide_title": "執行摘要：突破 VLA 模型的效能瓶頸",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{執行摘要：突破 VLA 模型的效能瓶頸}\n\\begin{itemize}\n  \\item FASTer：區塊自迴歸解碼兼顧推論速度與動作保真度。\n  \\item OptimusVLA：全域先驗與記憶體機制減少函數評估次數。\n  \\item 動態剪枝：依操作階段調節視覺標記，降低運算延遲。\n  \\item 綜合效益：維持任務成功率，顯著提升效率與一致性。\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 8,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 12062,
+    "args_redacted_json": {
+      "slide_title": "背景與動機：VLA 模型的雙重挑戰",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{背景與動機：VLA 模型的雙重挑戰} \\begin{itemize} \\item 機器人操作面臨推論延遲與時間一致性不足。 \\item 高維動作生成需龐大計算資源與多次 NFE。 \\item 冗餘視覺標記與複雜注意力大幅增加 FLOPs。 \\item 急需創新架構與記憶機制實現高效實時控制。 \\end{itemize} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 9,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 10437,
+    "args_redacted_json": {
+      "slide_title": "方法一：FASTer 框架與區塊自迴歸解碼",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{方法一：FASTer 框架與區塊自迴歸解碼}\n\\begin{itemize}\n    \\item FASTerVQ 透過 DCT 與 RVQ 實現高壓縮率時空建模。\n    \\item 動作專家模組採用區塊自迴歸平行生成動作標記。\n    \\item 維持高保真重建同時，大幅縮短推論時間。\n    \\item 解碼器無縫將離散標記還原為連續動作序列。\n\\end{itemize}\n\\begin{equation*}\n\\mathcal{L}_{\\text{BAR}} = - \\sum\\nolimits_{j=1}^{J} \\sum\\nolimits_{i=1}^{B} \\log p_\\theta\\!\\big(c_{j,i} \\,\\big|\\, C_{<j}, I_t, s_t, x\\big)\n\\end{equation*}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 10,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 14984,
+    "args_redacted_json": {
+      "slide_title": "方法二：OptimusVLA 雙記憶體架構",
+      "figure_key": "p1-fig-002",
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{方法二：OptimusVLA 雙記憶體架構}\n\\begin{columns}\n\\begin{column}{0.48\\textwidth}\n\\begin{itemize}\n\\item GPM 檢索任務動作先驗，取代標準高斯雜訊。\n\\item 縮短動作生成路徑，大幅減少函數評估次數。\n\\item LCM 動態編碼近期動作，確保軌跡平滑性。\n\\item 結合 CFM，提升模型對時間依賴之強健度。\n\\end{itemize}\n\\end{column}\n\\begin{column}{0.48\\textwidth}\n\\centering\n\\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p1-fig-002}\n\\end{column}\n\\end{columns}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 11,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 24234,
+    "args_redacted_json": {
+      "slide_title": "方法三：動作感知動態剪枝 (ADP)",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame} \\frametitle{方法三：動作感知動態剪枝 (ADP)} \\begin{itemize} \\item 結合文本與動作軌跡，動態調整標記保留率。 \\item 依末端累積移動距離，判斷粗略或微調階段。 \\item 粗略移動：過濾冗餘標記，大幅減少計算量。 \\item 微調階段：保留全數標記，確保操作精準度。 \\end{itemize} \\[ s_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\\\\\ 0, & \\delta_i \\le V^{(i)}, \\\\\\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases} \\] \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 12,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 10062,
+    "args_redacted_json": {
+      "slide_title": "實驗結果：推論效率的顯著提升",
+      "figure_key": "p1-fig-005",
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{實驗結果：推論效率的顯著提升}\n\\begin{itemize}\n  \\item FASTer 區塊解碼速度超越傳統基準。\n  \\item OptimusVLA 提升 2.9 倍推論速度。\n  \\item ADP 框架實現 1.35 倍加速與低延遲。\n  \\item 加速成果證實實時控制的可行性。\n\\end{itemize}\n\\begin{center}\n  \\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p1-fig-005}\n\\end{center}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 13,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 26250,
+    "args_redacted_json": {
+      "slide_title": "實驗結果：卓越的任務成功率與泛化能力",
+      "figure_key": "p1-fig-003",
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{實驗結果：卓越的任務成功率與泛化能力}\n\\begin{itemize}\n\\item OptimusVLA 於 LIBERO 測試達 98.6\\% 成功率。\n\\item ADP 使 OpenVLA 成功率相對提升 25.8\\%。\n\\item FASTer 優化標記利用，展現跨任務泛化力。\n\\end{itemize}\n\\centering\n\\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p1-fig-003}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 14,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 10016,
+    "args_redacted_json": {
+      "slide_title": "結論與未來展望",
+      "figure_key": null,
+      "chunk_ids": []
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{結論與未來展望}\n  \\begin{itemize}\n    \\item 提出分詞、生成與視覺感知的三維度 VLA 優化策略。\n    \\item FASTer 與 OptimusVLA 兼顧高推論速度與連續動作平滑性。\n    \\item ADP 證實物理動作軌跡可有效引導動態計算資源分配。\n    \\item 為資源受限且需即時反應的真實機器人應用奠定基礎。\n  \\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 15,
+    "agent": "report",
+    "tool": "report:coherence",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 31671,
+    "args_redacted_json": {
+      "in_frame_count": 9
+    },
+    "result_summary_json": {
+      "in_frame_count": 9,
+      "out_frame_count": 7
+    },
+    "error": null
+  },
+  {
+    "step_index": 16,
+    "agent": "report",
+    "tool": "report:assemble",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "frame_count": 7,
+      "referenced_keys": [
+        "p1-fig-002",
+        "p1-fig-003",
+        "p1-fig-005"
+      ]
+    },
+    "result_summary_json": {
+      "staged_keys": [
+        "p1-fig-002",
+        "p1-fig-003",
+        "p1-fig-005"
+      ],
+      "macro_blocks": 0,
+      "title": "提升視覺-語言-動作模型的推論效率與操作精準度",
+      "author": "Liu et al., Li et al., Pei et al.",
+      "date": ""
+    },
+    "error": null
+  },
+  {
+    "step_index": 17,
+    "agent": "report",
+    "tool": "report:verify_figures",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "allowed_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-003",
+        "p0-fig-004",
+        "p0-fig-005",
+        "p0-fig-006",
+        "p0-fig-007",
+        "p0-fig-008",
+        "p0-fig-009",
+        "p0-fig-010",
+        "p0-fig-011",
+        "p0-fig-012",
+        "p0-fig-013",
+        "p1-fig-001",
+        "p1-fig-002",
+        "p1-fig-003",
+        "p1-fig-004",
+        "p1-fig-005",
+        "p1-fig-006",
+        "p1-fig-007",
+        "p1-fig-008",
+        "p2-fig-001",
+        "p2-fig-002",
+        "p2-fig-003",
+        "p2-fig-004",
+        "p2-fig-005",
+        "p2-fig-006",
+        "p2-fig-007"
+      ]
+    },
+    "result_summary_json": {
+      "rejected": []
+    },
+    "error": null
+  },
+  {
+    "step_index": 18,
+    "agent": "report",
+    "tool": "report:compile",
+    "model": null,
+    "status": "error",
+    "latency_ms": 179641,
+    "args_redacted_json": {
+      "frame_count": 7
+    },
+    "result_summary_json": {
+      "ok": false,
+      "attempts": 3,
+      "page_count": 0,
+      "log_tail": "\\vbox (15.63992pt too high) detected at line 14\n[1{d:/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}] [2{d:/texlive\n/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}])\nRunaway argument?\n\\frametitle {方法一：FASTer 框架與區塊自迴歸解碼} \\begin \\ETC.\n! File ended while scanning use of \\frame.\n<inserted text> \n                \\par \n<*> deck.tex\n            \n! Emergency stop.\n<*> deck.tex\n            \n!  ==> Fatal error occurred, no output PDF file produced!\nTranscript written on deck.log.\n\n"
+    },
+    "error": "deck failed to compile after retries"
+  },
+  {
+    "step_index": 19,
+    "agent": "report",
+    "tool": "report:revise",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 87906,
+    "args_redacted_json": {
+      "log_len": 4000
+    },
+    "result_summary_json": {
+      "log_len": 4000,
+      "changed": true
+    },
+    "error": null
+  },
+  {
+    "step_index": 20,
+    "agent": "report",
+    "tool": "report:revise",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 86438,
+    "args_redacted_json": {
+      "log_len": 4000
+    },
+    "result_summary_json": {
+      "log_len": 4000,
+      "changed": true
+    },
+    "error": null
+  },
+  {
+    "step_index": 21,
+    "agent": "report",
+    "tool": "report:emit",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "deck_id": 30
+    },
+    "result_summary_json": {
+      "page_count": 0,
+      "status": "error"
+    },
+    "error": null
+  }
+]

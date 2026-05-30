@@ -1,0 +1,27 @@
+\documentclass{beamer}
+\usetheme{metropolis}
+\usepackage{CJKutf8}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\graphicspath{ {D:/GitHub/PaperHub/backend/workspace/chat_session/175/slides/figures/} }
+\title{提升視覺-語言-動作模型的推論效率與操作精準度}
+\author{Liu et al., Li et al., Pei et al.}
+\begin{document}
+\begin{CJK*}{UTF8}{bsmi}
+\begin{frame}[plain]
+\titlepage
+\end{frame}
+\begin{frame}
+\frametitle{背景與動機：VLA 模型的雙重挑戰}
+\begin{itemize}
+  \item 機器人操作面臨推論延遲與動作保真度的嚴峻權衡。
+  \item 高維連續動作與冗餘視覺標記大幅增加運算負擔。
+  \item 缺乏高效記憶與生成機制，導致軌跡時間一致性不足。
+  \item 目標：透過動作分詞、記憶體架構與動態剪枝突破瓶頸。
+\end{itemize}
+\end{frame}
+\begin{frame}
+\frametitle{方法一：FASTer 框架與區塊自迴歸解碼}
+\begin{itemize}
+  \item 透過離散餘弦轉換與殘差量化實現高壓縮率時空建模

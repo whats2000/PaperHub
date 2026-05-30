@@ -1,1 +1,13 @@
 results/
+
+# F4.4 slide_calibration round artifacts — commit the small text artifacts so
+# rounds are reproducible + comparable from git history; exclude PDFs (4-5 MB
+# each) and the seeded-session-ids cache (per-developer local state).
+!slide_calibration/results/
+!slide_calibration/results/round_*/
+!slide_calibration/results/round_*/**/
+# Re-exclude what shouldn't be committed (the `**/` rule above re-includes
+# every file in the round tree; these lines knock the binary + local-state
+# files back out):
+slide_calibration/results/_sessions.json
+slide_calibration/results/round_*/**/*.pdf

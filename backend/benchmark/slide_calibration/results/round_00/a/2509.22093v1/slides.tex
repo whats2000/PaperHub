@@ -1,0 +1,116 @@
+\documentclass{beamer}
+\usetheme{metropolis}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{CJKutf8}
+\graphicspath{ {D:/GitHub/PaperHub/backend/workspace/chat_session/172/slides/figures/} }
+\title{Action-aware Dynamic Pruning for Efficient Vision-Language-Action Manipulation}
+\subtitle{針對視覺-語言-動作模型之動作感知動態剪枝技術}
+\author{Pei, Chen, Xu, et al.}
+\date{arXiv:2509.22093v1 (2025)}
+\begin{document}
+\begin{CJK*}{UTF8}{bsmi}
+\begin{frame}[plain]
+\titlepage
+\end{frame}
+\begin{frame}
+\frametitle{Executive Summary}
+\begin{itemize}
+    \item Proposes Action-aware Dynamic Pruning (ADP) for Vision-Language-Action (VLA) models.
+    \item Toggles visual token pruning based on end-effector trajectories.
+    \item Prunes during coarse movements and retains context for fine manipulations.
+    \item Achieves 1.35x speedup and 25.8\% higher task success rate.
+\end{itemize}
+\end{frame}
+\begin{frame}
+\frametitle{Computational Bottlenecks in VLA Models}
+\begin{itemize}
+    \item High-resolution visual inputs generate massive token sequences.
+    \item Excessive FLOPs cause severe inference latency.
+    \item Closed-loop robotic control requires high-frequency responses.
+    \item Static pruning models fail strict latency and accuracy constraints.
+\end{itemize}
+\end{frame}
+\begin{frame}
+\frametitle{Phased Characteristics and Visual Redundancy}
+\begin{itemize}
+    \item Manipulation tasks divide into coarse and fine-grained phases.
+    \item Coarse movements exhibit high visual redundancy and fault tolerance.
+    \item Fine-grained operations require precise visual details for success.
+    \item Aggressive static pruning destroys context during fine manipulation.
+\end{itemize}
+\begin{center}
+    \includegraphics[width=0.85\textwidth,height=0.35\textheight,keepaspectratio]{p0-fig-001}
+\end{center}
+\end{frame}
+\begin{frame}
+\frametitle{Overview of Action-Aware Dynamic Pruning (ADP)}
+\begin{itemize}
+    \item Features Action-aware Gating and Anticipatory Pruning mechanisms.
+    \item Dynamically triggers pruning based on recent end-effector trajectories.
+    \item Filters task-relevant visual features using text-to-vision cross-attention.
+\end{itemize}
+\begin{center}
+    \includegraphics[width=0.85\textwidth,height=0.4\textheight,keepaspectratio]{p0-fig-002}
+\end{center}
+\end{frame}
+\begin{frame}
+\frametitle{Attention-Based Visual Token Selection}
+\begin{itemize}
+    \item Assesses visual relevance via the VLA cross-attention mechanism.
+    \item Scores identify critical regions for executing current instructions.
+    \item Ranks and retains top $K$ tokens to discard background redundancy.
+\end{itemize}
+\[
+\Phi^{(l)}(v) = \frac{1}{N^h \cdot L_{\text{txt}}} \sum_{h=1}^{N^h} \sum_{t=1}^{L_{\text{txt}}} \mathbf{A}^{(l)}_{h,t,v}
+\]
+\begin{equation*}
+\mathbf{X}_{\text{keep}} = \operatorname{Top-K}\big(\Phi^{(l)}, \lfloor \rho \cdot L^{\text{vis}} \rfloor\big)
+\end{equation*}
+\end{frame}
+\begin{frame}
+\frametitle{Action-Aware Gating Mechanism}
+\begin{itemize}
+    \item Computes cumulative trajectory distance $\delta_i$ in observation windows.
+    \item High distance denotes fast movement, triggering aggressive visual pruning.
+    \item Dual thresholds establish hysteresis to prevent unstable state toggling.
+\end{itemize}
+\begin{equation*}
+\delta_i=\sum_{t=b_i}^{e_i-1}\lVert \mathbf{p}_{t+1}-\mathbf{p}_t\rVert_2
+\end{equation*}
+\begin{equation*}
+s_{i+1} = \begin{cases} 1, & \delta_i \ge U^{(i)}, \\ 0, & \delta_i \le V^{(i)}, \\ s_i, & V^{(i)} < \delta_i < U^{(i)}. \end{cases}
+\end{equation*}
+\end{frame}
+\begin{frame}
+\frametitle{Experimental Results: Simulation Performance}
+\begin{itemize}
+    \item Evaluated ADP against baselines on the LIBERO simulation suite.
+    \item Overcomes real-time bottlenecks, achieving a 1.35x overall speedup.
+    \item Filters visual noise effectively during early movement phases.
+    \item Achieved up to 25.8\% higher success rate over the OpenVLA baseline.
+\end{itemize}
+\end{frame}
+\begin{frame}
+\frametitle{Experimental Results: Real-World Deployment}
+\begin{itemize}
+    \item Deployed ADP on Jaco2 hardware for diverse grasping tasks.
+    \item Highly robust against complex lighting and dynamic disturbances.
+    \item Low-latency inference crucially improves overall robot control smoothness.
+\end{itemize}
+\begin{center}
+    \includegraphics[width=0.85\textwidth,height=0.45\textheight,keepaspectratio]{p0-fig-004}
+\end{center}
+\end{frame}
+\begin{frame}
+\frametitle{Conclusion and Future Work}
+\begin{itemize}
+    \item ADP effectively balances computational efficiency and manipulation accuracy.
+    \item Successfully integrates visual attention mechanisms with robot kinematics.
+    \item Solves real-time constraints in VLA models without hardware modifications.
+    \item Future work will explore multimodal dynamic fusion using tactile feedback.
+\end{itemize}
+\end{frame}
+\end{CJK*}
+\end{document}

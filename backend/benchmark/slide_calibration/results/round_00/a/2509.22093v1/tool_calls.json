@@ -1,0 +1,671 @@
+[
+  {
+    "step_index": 0,
+    "agent": "router",
+    "tool": "classify",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 1032,
+    "args_redacted_json": {
+      "user_message": "Please prepare ~15 Beamer slides covering this paper for an ML research audience.",
+      "enabled_refs_count": 1
+    },
+    "result_summary_json": {
+      "intent": "slides",
+      "model_tier": "flagship",
+      "confidence": 1.0,
+      "reasoning": "The user is requesting the generation of slides for a paper currently in context.",
+      "resolved_query": "Prepare approximately 15 Beamer slides covering the referenced paper for an ML research audience.",
+      "response_language": "English"
+    },
+    "error": null
+  },
+  {
+    "step_index": 1,
+    "agent": "report",
+    "tool": "report:detect_language",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 594,
+    "args_redacted_json": {
+      "instruction": "Prepare approximately 15 Beamer slides covering the referenced paper for an ML research audience."
+    },
+    "result_summary_json": {
+      "language": null
+    },
+    "error": null
+  },
+  {
+    "step_index": 2,
+    "agent": "report",
+    "tool": "report:understand",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 25156,
+    "args_redacted_json": {
+      "paper_block_len": 6624
+    },
+    "result_summary_json": {
+      "paper_id": 1,
+      "contribution": "Introduces Action-aware Dynamic Pruning (ADP) for Vision-Language-Action models, a framework that dynamically toggles visual token pruning based on the robot's recent action trajectory, thereby accelerating inference while maintaining or improving manipulation success rates.",
+      "method": "ADP utilizes text-to-vision attention scores to rank and select the top-K most relevant visual tokens. It introduces a gating mechanism that computes the cumulative arc distance of the end-effector's recent trajectory to distinguish between coarse and fine-grained manipulation phases. Pruning is adaptively applied only during coarse, high-velocity phases where visual redundancy is high, preserving full visual context during precise, fine-grained operations.",
+      "key_results": [
+        "Significantly reduces FLOPs and action inference latency, demonstrating a 1.35x speedup on OpenVLA-OFT.",
+        "Yields up to a 25.8% improvement in manipulation success rates with OpenVLA on the LIBERO simulation suites compared to baselines.",
+        "Demonstrates robustness and efficiency in diverse real-world scenarios on the Jaco2 hardware platform."
+      ],
+      "key_figure_keys": [
+        "p0-fig-001",
+        "p0-fig-002"
+      ],
+      "key_equations": [
+        "\\Phi^{(l)}(v) = \\frac{1}{N^h \\cdot L_{\\text{txt}}} \\sum_{h=1}^{N^h} \\sum_{t=1}^{L_{\\text{txt}}} \\mathbf{A}^{(l)}_{h,t,v}",
+        "\\mathbf{X}_{\\text{keep}} = \\operatorname{Top-K}\\big(\\Phi^{(l)}, k\\big), \\quad k = \\lfloor \\rho \\cdot L^{\\text{vis}} \\rfloor",
+        "\\delta_i=\\sum_{t=b_i}^{e_i-1}\\lVert \\mathbf{p}_{t+1}-\\mathbf{p}_t\\rVert_2",
+        "s_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\ 0, & \\delta_i \\le V^{(i)}, \\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases}"
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 3,
+    "agent": "report",
+    "tool": "report:narrate",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 53811,
+    "args_redacted_json": {
+      "briefs_block_len": 1643,
+      "figure_inventory": "p0-fig-001: Action-aware dynamic pruning vs.\\ static pruning. We visualize five past observation windows as cases from a manipulation episode that condition the current anticipatory window. $p_1$, $p_3$ and $p_5$ reflect coarse phases, prompting the gate to enable pruning to suppress redundant tokens, whereas $\np0-fig-002: Overview of our proposed Action-aware Dynamic Pruning (ADP) for Vision-Language-Action models. (a.) Action-aware gating: the pruning function adaptively determines whether to prune based on recent end-effector trajectories ($ x, y, z, , , , g$) , enabling dynamic pruning. (b.) Anticipatory pruning: \np0-fig-003: \np0-fig-004: Real world experiments. We conduct the experiments on Jaco2 Real-world Platform.\np0-fig-005: Original Attention Maps\np0-fig-006: $PR$ across layers\np0-fig-007: ADP vs. Random Pruning."
+    },
+    "result_summary_json": {
+      "title": "針對視覺-語言-動作模型之動作感知動態剪枝技術",
+      "slides": [
+        {
+          "title": "針對視覺-語言-動作模型之動作感知動態剪枝技術",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "執行摘要",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "視覺-語言-動作 (VLA) 模型的計算瓶頸",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "機器人操作過程中的階段性與視覺冗餘",
+          "figure_key": "p0-fig-001",
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "傳統靜態剪枝的侷限性",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "動作感知動態剪枝 (ADP) 框架總覽",
+          "figure_key": "p0-fig-002",
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "基於注意力的視覺標記重要性評估",
+          "figure_key": null,
+          "equation": "\\Phi^{(l)}(v) = \\frac{1}{N^h \\cdot L_{\\text{txt}}} \\sum_{h=1}^{N^h} \\sum_{t=1}^{L_{\\text{txt}}} \\mathbf{A}^{(l)}_{h,t,v}",
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "視覺標記的 Top-K 篩選機制",
+          "figure_key": null,
+          "equation": "\\mathbf{X}_{\\text{keep}} = \\operatorname{Top-K}\\big(\\Phi^{(l)}, k\\big), \\quad k = \\lfloor \\rho \\cdot L^{\\text{vis}} \\rfloor",
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "動作感知閘門：軌跡距離計算",
+          "figure_key": null,
+          "equation": "\\delta_i=\\sum_{t=b_i}^{e_i-1}\\lVert \\mathbf{p}_{t+1}-\\mathbf{p}_t\\rVert_2",
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "動作感知閘門：動態觸發機制",
+          "figure_key": null,
+          "equation": "s_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\ 0, & \\delta_i \\le V^{(i)}, \\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases}",
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "結合動作感知與注意力剪枝之優勢",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "實驗結果：推論加速與運算量降低",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "實驗結果：LIBERO 模擬環境操作成功率",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "實驗結果：真實世界場景部署",
+          "figure_key": "p0-fig-004",
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        },
+        {
+          "title": "結論與未來展望",
+          "figure_key": null,
+          "equation": null,
+          "chunk_ids": [
+            1
+          ],
+          "paper_ids": [
+            1
+          ]
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 4,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 7062,
+    "args_redacted_json": {
+      "slide_title": "針對視覺-語言-動作模型之動作感知動態剪枝技術",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Action-Aware Dynamic Pruning for VLA Models}\n\\begin{itemize}\n    \\item Boost VLA model inference via Action-Aware Dynamic Pruning (ADP).\n    \\item Resolve computational bottlenecks in real-time robotic control.\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 5,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 14827,
+    "args_redacted_json": {
+      "slide_title": "執行摘要",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{Executive Summary}\\n  \\begin{itemize}\\n    \\item Proposed Action-aware Dynamic Pruning (ADP) framework for VLA models.\\n    \\item Toggles visual token pruning based on end-effector trajectories.\\n    \\item Prunes during coarse movements; retains context for fine manipulations.\\n    \\item Achieved 1.35x speedup and 25.8\\% higher task success rate.\\n  \\end{itemize}\\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 6,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 13514,
+    "args_redacted_json": {
+      "slide_title": "視覺-語言-動作 (VLA) 模型的計算瓶頸",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame} \\frametitle{Computational Bottlenecks in VLA Models} \\begin{itemize} \\item Massive visual tokens from high-resolution inputs \\item Severe inference latency from excessive FLOPs \\item High-frequency response needed for closed-loop control \\item Static models fail strict latency constraints \\end{itemize} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 7,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 17218,
+    "args_redacted_json": {
+      "slide_title": "機器人操作過程中的階段性與視覺冗餘",
+      "figure_key": "p0-fig-001",
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{Phased Characteristics and Visual Redundancy} \\begin{itemize} \\item Tasks divide into Coarse and Fine-grained manipulation phases. \\item Coarse movements exhibit high visual redundancy and fault tolerance. \\item Fine-grained operations require precise visual details for success. \\end{itemize} \\begin{center} \\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p0-fig-001} \\end{center} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 8,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 8968,
+    "args_redacted_json": {
+      "slide_title": "傳統靜態剪枝的侷限性",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Limitations of Static Pruning}\n\\begin{itemize}\n    \\item Fixed pruning ratios completely ignore dynamic task stages.\n    \\item Aggressive pruning during fine manipulation causes critical spatial information loss.\n    \\item Action-aware dynamic mechanisms are essential for adaptive token reduction.\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 9,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 9625,
+    "args_redacted_json": {
+      "slide_title": "動作感知動態剪枝 (ADP) 框架總覽",
+      "figure_key": "p0-fig-002",
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Overview of Action-aware Dynamic Pruning (ADP)}\n\\begin{itemize}\n    \\item Features Action-aware Gating and Anticipatory Pruning mechanisms.\n    \\item Dynamically triggers pruning based on recent end-effector trajectories.\n    \\item Filters task-relevant visual features using text-to-vision cross-attention.\n\\end{itemize}\n\\begin{center}\n    \\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p0-fig-002}\n\\end{center}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 10,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 17516,
+    "args_redacted_json": {
+      "slide_title": "基於注意力的視覺標記重要性評估",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\\n\\frametitle{Attention-Based Visual Token Importance}\\n\\begin{itemize}\\n\\item Assess visual relevance via VLA cross-attention mechanism.\\n\\item Aggregate weights across attention heads and text length.\\n\\item Scores identify critical regions for executing current instructions.\\n\\end{itemize}\\n\\[\\n\\Phi^{(l)}(v) = \\frac{1}{N^h \\cdot L_{\\text{txt}}} \\sum_{h=1}^{N^h} \\sum_{t=1}^{L_{\\text{txt}}} \\mathbf{A}^{(l)}_{h,t,v}\\n\\]\\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 11,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 18938,
+    "args_redacted_json": {
+      "slide_title": "視覺標記的 Top-K 篩選機制",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{Top-K Selection for Visual Tokens} \\begin{itemize} \\item Rank visual tokens by computed attention scores. \\item Retain top $K$ tokens via retention ratio $\\rho$. \\end{itemize} \\begin{equation*} \\mathbf{X}_{\\text{keep}} = \\operatorname{Top-K}\\big(\\Phi^{(l)}, k\\big), \\quad k = \\lfloor \\rho \\cdot L^{\\text{vis}} \\rfloor \\end{equation*} \\begin{itemize} \\item Discard background redundancy to significantly reduce computation. \\end{itemize} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 12,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 14063,
+    "args_redacted_json": {
+      "slide_title": "動作感知閘門：軌跡距離計算",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Action-Aware Gating: Trajectory Distance Calculation}\n\\begin{itemize}\n\\item Compute cumulative arc-length distance in observation windows.\n\\item Sum Euclidean distances between consecutive position vectors.\n\\end{itemize}\n\\begin{equation*}\n\\delta_i=\\sum_{t=b_i}^{e_i-1}\\lVert \\mathbf{p}_{t+1}-\\mathbf{p}_t\\rVert_2\n\\end{equation*}\n\\begin{itemize}\n\\item High distance denotes fast movement, enabling aggressive visual pruning.\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 13,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 23907,
+    "args_redacted_json": {
+      "slide_title": "動作感知閘門：動態觸發機制",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Action-Aware Gating: Dynamic Trigger Mechanism}\n\\begin{itemize}\n\\item Dual thresholds establish hysteresis, preventing unstable pruning state toggling.\n\\item Distance $\\ge U^{(i)}$ triggers rough phase, enabling token pruning.\n\\item Distance $\\le V^{(i)}$ triggers fine phase, retaining all visual tokens.\n\\end{itemize}\n\\begin{equation*}\ns_{i+1} = \\begin{cases} 1, & \\delta_i \\ge U^{(i)}, \\\\\\\\ 0, & \\delta_i \\le V^{(i)}, \\\\\\\\ s_i, & V^{(i)} < \\delta_i < U^{(i)}. \\end{cases}\n\\end{equation*}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 14,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 12594,
+    "args_redacted_json": {
+      "slide_title": "結合動作感知與注意力剪枝之優勢",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Synergy of Action-Awareness and Attention Pruning}\n\\begin{itemize}\n    \\item Action-aware gating allocates computational resources dynamically across task stages.\n    \\item Attention pruning provides semantic-aware visual feature compression when activated.\n    \\item Synergy ensures ultra-fast coarse inference and highly accurate fine control.\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 15,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 11891,
+    "args_redacted_json": {
+      "slide_title": "實驗結果：推論加速與運算量降低",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\\frametitle{Experimental Results: Inference Speedup \\& Computation Reduction}\\begin{itemize}\\item Significant FLOPs reduction achieved on the OpenVLA-OFT model.\\item Action inference latency drops, achieving a 1.35x overall speedup.\\item Overcomes real-time VLA bottlenecks without hardware modifications.\\end{itemize}\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 16,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 14141,
+    "args_redacted_json": {
+      "slide_title": "實驗結果：LIBERO 模擬環境操作成功率",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame} \\frametitle{Experimental Results: LIBERO Simulation Success Rate} \\begin{itemize} \\item Rigorously compared ADP against baselines on LIBERO simulation suite. \\item Achieved up to 25.8\\% higher success rate over OpenVLA baseline. \\item Filters visual noise effectively during early movement phases. \\item Retains crucial detailed features during critical manipulation stages. \\end{itemize} \\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 17,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 10078,
+    "args_redacted_json": {
+      "slide_title": "實驗結果：真實世界場景部署",
+      "figure_key": "p0-fig-004",
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}{Experimental Results: Real-World Deployment}\n  \\begin{itemize}\n    \\item Deployed ADP on Jaco2 hardware for diverse grasping tasks.\n    \\item Highly robust against complex lighting and dynamic real-world disturbances.\n    \\item Low-latency inference crucially improves overall robot control smoothness.\n  \\end{itemize}\n  \\begin{center}\n    \\includegraphics[width=0.85\\textwidth,height=0.7\\textheight,keepaspectratio]{p0-fig-004}\n  \\end{center}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 18,
+    "agent": "report",
+    "tool": "report:draft",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 10733,
+    "args_redacted_json": {
+      "slide_title": "結論與未來展望",
+      "figure_key": null,
+      "chunk_ids": [
+        1
+      ]
+    },
+    "result_summary_json": {
+      "frame": "\\begin{frame}\n\\frametitle{Conclusion and Future Work}\n\\begin{itemize}\n    \\item Proposed Action-aware Dynamic Pruning (ADP) framework for VLA models.\n    \\item Achieved 1.35x inference speedup and 25.8\\% higher task success rate.\n    \\item Successfully integrated visual attention mechanisms with robot end-effector kinematics.\n    \\item Future work explores multimodal dynamic fusion using tactile feedback.\n\\end{itemize}\n\\end{frame}"
+    },
+    "error": null
+  },
+  {
+    "step_index": 19,
+    "agent": "report",
+    "tool": "report:coherence",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 27858,
+    "args_redacted_json": {
+      "in_frame_count": 15
+    },
+    "result_summary_json": {
+      "in_frame_count": 15,
+      "out_frame_count": 9
+    },
+    "error": null
+  },
+  {
+    "step_index": 20,
+    "agent": "report",
+    "tool": "report:assemble",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "frame_count": 9,
+      "referenced_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-004"
+      ]
+    },
+    "result_summary_json": {
+      "staged_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-004"
+      ],
+      "macro_blocks": 0,
+      "title": "Action-aware Dynamic Pruning for Efficient Vision-Language-Action Manipulation",
+      "author": "Pei, Chen, Xu, et al.",
+      "date": "arXiv:2509.22093v1 (2025)"
+    },
+    "error": null
+  },
+  {
+    "step_index": 21,
+    "agent": "report",
+    "tool": "report:verify_figures",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "allowed_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-003",
+        "p0-fig-004",
+        "p0-fig-005",
+        "p0-fig-006",
+        "p0-fig-007"
+      ]
+    },
+    "result_summary_json": {
+      "rejected": []
+    },
+    "error": null
+  },
+  {
+    "step_index": 22,
+    "agent": "report",
+    "tool": "report:compile",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 83953,
+    "args_redacted_json": {
+      "frame_count": 9
+    },
+    "result_summary_json": {
+      "ok": true,
+      "attempts": 3,
+      "page_count": 10,
+      "log_tail": ""
+    },
+    "error": null
+  },
+  {
+    "step_index": 23,
+    "agent": "report",
+    "tool": "report:revise",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 50906,
+    "args_redacted_json": {
+      "log_len": 4000
+    },
+    "result_summary_json": {
+      "log_len": 4000,
+      "changed": true
+    },
+    "error": null
+  },
+  {
+    "step_index": 24,
+    "agent": "report",
+    "tool": "report:revise",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 23483,
+    "args_redacted_json": {
+      "log_len": 4000
+    },
+    "result_summary_json": {
+      "log_len": 4000,
+      "changed": true
+    },
+    "error": null
+  },
+  {
+    "step_index": 25,
+    "agent": "report",
+    "tool": "report:emit",
+    "model": null,
+    "status": "ok",
+    "latency_ms": 0,
+    "args_redacted_json": {
+      "deck_id": 28
+    },
+    "result_summary_json": {
+      "page_count": 10,
+      "status": "ok"
+    },
+    "error": null
+  }
+]

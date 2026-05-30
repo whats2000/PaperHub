@@ -1,0 +1,90 @@
+[
+  {
+    "slide_index": 0,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Executive Summary: OptimusVLA}\n\\begin{itemize}\n\\item Novel dual-memory architecture replaces inefficient iterative denoising.\n\\item Global and local memories stabilize execution and ensure temporal coherence.\n\\item Delivers 2.9x inference speedup with reduced computational steps.\n\\item Achieves a 98.6\\% average success rate on the LIBERO benchmark.\n\\end{itemize}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 2,
+    "page_end": 2
+  },
+  {
+    "slide_index": 1,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Background \\& Motivation}\n\\begin{itemize}\n\\item Standard Vision-Language-Action models map inputs to continuous actions via generative policies.\n\\item Iterative denoising from pure isotropic noise causes high latency and overhead.\n\\item Independent step-wise generation ignores history, leading to jittery execution.\n\\item Real-time control requires a mechanism to bypass pure noise and bridge temporal gaps.\n\\end{itemize}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 3,
+    "page_end": 3
+  },
+  {
+    "slide_index": 2,
+    "frame_tex": "\\begin{frame}\n\\frametitle{OptimusVLA: Framework Overview}\n\\begin{columns}\n\\begin{column}{0.48\\textwidth}\n\\begin{itemize}\n\\item Vision-Language backbone extracts multimodal representations.\n\\item Global Prior Memory (GPM) retrieves semantic task priors.\n\\item Local Consistency Memory (LCM) models historical action sequences.\n\\item Memories initialize generation, successfully bypassing isotropic noise.\n\\end{itemize}\n\\end{column}\n\\begin{column}{0.48\\textwidth}\n\\centering\n\\includegraphics[width=\\textwidth,height=0.6\\textheight,keepaspectratio]{p0-fig-002}\n\\end{column}\n\\end{columns}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 4,
+    "page_end": 4
+  },
+  {
+    "slide_index": 3,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Global Prior Memory: Generative Initialization}\n\\begin{itemize}\n\\item Retrieves and aggregates semantically similar task trajectories.\n\\item Calculates weighted mean and variance to construct target prior states.\n\\item Provides strong anchor states, drastically narrowing distribution gaps.\n\\end{itemize}\n\\begin{align*}\n\\mu &= \\sum_{i=1}^{k}\\alpha_i C_i,\\qquad \\mathrm{Var}=\\sum_{i=1}^{k}\\alpha_i\\, (C_i-\\mu)^{\\odot 2} \\\\\n\\mathbf{\\hat{X}}_{t} &= \\mu+\\lambda\\,\\big(\\epsilon\\odot\\sqrt{\\mathrm{Var}}\\big), \\qquad \\epsilon\\sim\\mathcal{N}(0,I)\n\\end{align*}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 5,
+    "page_end": 5
+  },
+  {
+    "slide_index": 4,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Dynamic Adaptation via Semantic Similarity}\n\\begin{itemize}\n\\item Dynamically adjusts noise ratio and denoising steps during inference.\n\\item High-confidence semantic priors significantly reduce required steps.\n\\item Balances efficiency on known tasks with flexibility for unseen ones.\n\\end{itemize}\n\\begin{align*}\n\\lambda &= \\lambda_{\\max}-\\tfrac{\\bar s+1}{2}\\,(\\lambda_{\\max}-\\lambda_{\\min}) \\\\\nN &= N_{\\min}+\\big(1-\\tfrac{\\bar s+1}{2} \\big)\\,(N_{\\max}-N_{\\min})\n\\end{align*}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 6,
+    "page_end": 6
+  },
+  {
+    "slide_index": 5,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Local Consistency Memory \\& Action Fusion}\n\\begin{itemize}\n\\item LCM encodes recent executed actions for smooth temporal transitions.\n\\item Combines GPM task prior with LCM offset for final action generation.\n\\item Mitigates jittery movements common in standard VLA predictions.\n\\item Yields high execution stability with a reduced evaluation budget.\n\\end{itemize}\n\\begin{equation*}\n\\mathbf{X}_{t} = \\mathbf{\\hat{X}}_{t} + \\mathbf{B}_{t}\n\\end{equation*}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 7,
+    "page_end": 7
+  },
+  {
+    "slide_index": 6,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Experimental Setup \\& Benchmarks}\n\\begin{itemize}\n\\item Evaluated across LIBERO, CALVIN, and RoboTwin 2.0 Hard simulations.\n\\item Real-world tests cover extensive generalization and long-horizon tasks.\n\\item Baselines include state-of-the-art OpenVLA, OpenVLA-OFT, and $\\pi_0$.\n\\item Primary metrics focus on task success rate and inference efficiency.\n\\end{itemize}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 8,
+    "page_end": 8
+  },
+  {
+    "slide_index": 7,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Results: Superior Simulation Performance}\n\\begin{itemize}\n\\item Achieves 98.6\\% average success rate on the LIBERO benchmark.\n\\item Outperforms the $\\pi_0$ baseline by 13.5\\% on CALVIN.\n\\item Reaches 38\\% average success rate on complex RoboTwin 2.0 Hard tasks.\n\\item Demonstrates robust dual-memory priors across diverse physics engines.\n\\end{itemize}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 9,
+    "page_end": 9
+  },
+  {
+    "slide_index": 8,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Results: Real-World Generalization}\n\\begin{columns}\n\\begin{column}{0.48\\textwidth}\n\\begin{itemize}\n\\item Surpasses $\\pi_0$ baseline by 42.9\\% on generalization tasks.\n\\item Outperforms standard models by 52.4\\% in long-horizon execution.\n\\item Local Consistency Memory effectively prevents long-sequence error accumulation.\n\\end{itemize}\n\\end{column}\n\\begin{column}{0.48\\textwidth}\n\\centering\n\\includegraphics[width=\\textwidth,height=0.6\\textheight,keepaspectratio]{p0-fig-003}\n\\end{column}\n\\end{columns}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 10,
+    "page_end": 10
+  },
+  {
+    "slide_index": 9,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Achieving Real-Time Inference Efficiency}\n\\begin{columns}\n\\begin{column}{0.48\\textwidth}\n\\begin{itemize}\n\\item Delivers a 2.9x inference speedup compared to standard generative VLAs.\n\\item Adaptive retrieval prior safely replaces exhaustive iterative denoising.\n\\item Maintains state-of-the-art accuracy with significantly less computation.\n\\end{itemize}\n\\end{column}\n\\begin{column}{0.48\\textwidth}\n\\centering\n\\includegraphics[width=\\textwidth,height=0.6\\textheight,keepaspectratio]{p0-fig-005}\n\\end{column}\n\\end{columns}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 11,
+    "page_end": 11
+  },
+  {
+    "slide_index": 10,
+    "frame_tex": "\\begin{frame}\n\\frametitle{Conclusion}\n\\begin{itemize}\n\\item Dual-memory architecture fundamentally improves robotic manipulation.\n\\item GPM provides accurate global priors, bypassing purely isotropic noise.\n\\item LCM guarantees local temporal consistency for smooth, reliable execution.\n\\item Achieves 2.9x faster inference while setting new benchmark records.\n\\end{itemize}\n\\end{frame}",
+    "note_text": null,
+    "note_language": null,
+    "page_start": 12,
+    "page_end": 12
+  }
+]

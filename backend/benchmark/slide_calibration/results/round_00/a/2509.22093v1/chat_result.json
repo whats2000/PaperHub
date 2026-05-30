@@ -1,0 +1,61 @@
+{
+  "run_id": 291,
+  "intent": "slides",
+  "routing": {
+    "intent": "slides",
+    "model_tier": "flagship",
+    "confidence": 1.0,
+    "reasoning": "The user is requesting the generation of slides for a paper currently in context.",
+    "resolved_query": "Prepare approximately 15 Beamer slides covering the referenced paper for an ML research audience.",
+    "response_language": "English"
+  },
+  "final_first_500": "Generated a 10-slide deck — \"針對視覺-語言-動作模型之動作感知動態剪枝技術\". Want speaker notes? Say \"generate speaker notes\" (you can pick a language). I can also edit any slide — just tell me the page.",
+  "deck_event": {
+    "deck_id": 28,
+    "session_id": 172,
+    "page_count": 10,
+    "title": "針對視覺-語言-動作模型之動作感知動態剪枝技術",
+    "status": "ok",
+    "contributing_papers": [
+      {
+        "id": 67,
+        "title": "Action-aware Dynamic Pruning for Efficient Vision-Language-Action Manipulation"
+      }
+    ],
+    "has_notes": false
+  },
+  "error": null,
+  "events": [
+    "session",
+    "tool_step",
+    "routing_decision",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "deck",
+    "final"
+  ]
+}

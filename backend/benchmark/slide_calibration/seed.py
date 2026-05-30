@@ -20,26 +20,26 @@ from benchmark.driver import create_session
 
 from ._common import (
     DEV_PAPERS,
-    add_paper_by_arxiv,
+    add_dev_paper,
     load_sessions,
     save_sessions,
 )
 
 
-def seed_scenario_a(arxiv_id: str) -> int:
-    if arxiv_id not in DEV_PAPERS:
-        raise SystemExit(f"unknown dev paper: {arxiv_id} (allowed: {DEV_PAPERS})")
+def seed_scenario_a(dev_key: str) -> int:
+    if dev_key not in DEV_PAPERS:
+        raise SystemExit(f"unknown dev paper: {dev_key} (allowed: {list(DEV_PAPERS)})")
     sid = create_session()
-    info = add_paper_by_arxiv(sid, arxiv_id)
-    print(f"[seed-a] session={sid} paper={arxiv_id} title={info.get('title')!r}")
+    info = add_dev_paper(sid, dev_key)
+    print(f"[seed-a] session={sid} paper={dev_key} title={info.get('title')!r}")
     return sid
 
 
 def seed_scenario_b() -> int:
     sid = create_session()
-    for arxiv_id in DEV_PAPERS:
-        info = add_paper_by_arxiv(sid, arxiv_id)
-        print(f"[seed-b] session={sid} paper={arxiv_id} title={info.get('title')!r}")
+    for dev_key in DEV_PAPERS:
+        info = add_dev_paper(sid, dev_key)
+        print(f"[seed-b] session={sid} paper={dev_key} title={info.get('title')!r}")
     return sid
 
 
@@ -48,7 +48,7 @@ def main() -> int:
     ap.add_argument("--scenario", choices=["a", "b"], required=True)
     ap.add_argument(
         "--paper",
-        help="(scenario a only) arXiv id; one of " + ", ".join(DEV_PAPERS),
+        help="(scenario a only) dev-set key; one of " + ", ".join(DEV_PAPERS),
     )
     args = ap.parse_args()
 

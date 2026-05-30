@@ -1,0 +1,84 @@
+[
+  {
+    "step_index": 0,
+    "agent": "router",
+    "tool": "classify",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 1811,
+    "args_redacted_json": {
+      "user_message": "Please prepare ~15 Beamer slides covering this paper for an ML research audience.",
+      "enabled_refs_count": 1
+    },
+    "result_summary_json": {
+      "intent": "slides",
+      "model_tier": "flagship",
+      "confidence": 1.0,
+      "reasoning": "The user is requesting to create a slide deck based on an already referenced paper.",
+      "resolved_query": "Please prepare approximately 15 Beamer slides covering the referenced paper for an machine learning research audience.",
+      "response_language": "English"
+    },
+    "error": null
+  },
+  {
+    "step_index": 1,
+    "agent": "report",
+    "tool": "report:detect_language",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "status": "ok",
+    "latency_ms": 1000,
+    "args_redacted_json": {
+      "instruction": "Please prepare approximately 15 Beamer slides covering the referenced paper for an machine learning research audience."
+    },
+    "result_summary_json": {
+      "language": null
+    },
+    "error": null
+  },
+  {
+    "step_index": 2,
+    "agent": "report",
+    "tool": "report:understand",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "ok",
+    "latency_ms": 24875,
+    "args_redacted_json": {
+      "paper_block_len": 4084
+    },
+    "result_summary_json": {
+      "paper_id": 1,
+      "contribution": "Introduces FASTer, a unified autoregressive vision-language-action framework combining a high-compression learnable action tokenizer (FASTerVQ) with a block-wise decoding policy (FASTerVLA) to resolve the trade-off between reconstruction fidelity and inference efficiency.",
+      "method": "FASTerVQ models action chunks as single-channel images, applying DCT and L1 reconstruction losses alongside Residual Vector Quantization (RVQ) to compress actions globally. FASTerVLA uses a transformer-based VLM and a lightweight Action Expert to process multi-modal states and autoregressively generate discrete action tokens via block-wise decoding.",
+      "key_results": [
+        "FASTerVQ achieves superior action reconstruction quality and high token utilization, generalizing well across both in-distribution and out-of-distribution datasets.",
+        "FASTerVLA significantly accelerates inference speed using block-wise autoregressive decoding compared to standard token-by-token generation.",
+        "The unified FASTer framework outperforms state-of-the-art VLA models in overall task performance, exhibiting strong cross-embodiment and cross-task generalization capabilities."
+      ],
+      "key_figure_keys": [
+        "p0-fig-001",
+        "p0-fig-002",
+        "p0-fig-003",
+        "p0-fig-004"
+      ],
+      "key_equations": [
+        "\\mathcal L=\\left\\Vert\\bm{a}_{t:t+H}-\\hat{\\bm{a}}_{t:t+H}\\right\\Vert_1 + \\left\\Vert\\text{DCT}(\\bm{a}_{t:t+H})-\\text{DCT}(\\hat{\\bm{a}}_{t:t+H})\\right\\Vert_1+\\lambda\\cdot \\left\\Vert\\bm z-\\text{sg}(\\bm z_q)\\right\\Vert^2_2,",
+        "\\mathcal{L}_{\\text{BAR}} = - \\sum\\nolimits_{j=1}^{J} \\sum\\nolimits_{i=1}^{B} \\log p_\\theta\\!\\big(c_{j,i} \\,\\big|\\, C_{<j}, I_t, s_t, x\\big)."
+      ]
+    },
+    "error": null
+  },
+  {
+    "step_index": 3,
+    "agent": "report",
+    "tool": "report:narrate",
+    "model": "gemini/gemini-3.1-pro-preview",
+    "status": "error",
+    "latency_ms": 60157,
+    "args_redacted_json": {
+      "briefs_block_len": 1605,
+      "figure_inventory": "p0-fig-001: FASTer combines a learnable action tokenizer (FASTerVQ) and an autoregressive VLA model (FASTerVLA), achieving efficient compression, fast control, and strong performance across eight real and simulated embodiments.\np0-fig-002: FASTerVQ. (a) The raw action sequence is patchified into compact tokens based on their embodied configuration. (b) FASTerVQ applies DCT and L1 reconstruction losses and adopts RVQ, encoding actions into $N_c$ code levels; each level can be reshaped into a $C_h C_a$ tensor.\np0-fig-003: FASTerVLA. (a) The model takes RGB images, proprioceptive states, and a language instruction as inputs to a transformer–based VLM. An Action Expert autoregressively generates discrete action tokens, which a VQ decoder maps into the final continuous action sequence. (b) Codes are generated codebook–w\np0-fig-004: Model Performance Comparison\np0-fig-005: Comparison of FASTer, its non-BAR variant, and FAST across backbones on the Libero benchmark.\np0-fig-006: Evaluation results of generalization ability on VLABench. The evaluation dimensions cover generalization of language, vision, and goal and knowledge transfer.\np0-fig-007: Comparison of zero-shot performance between FASTer and baselines on Droid and Bridge datasets.\np0-fig-008: Experiment setups. Diverse embodiments, scenes, and tasks for assessing multiple capability dimensions (marked by emojis).\np0-fig-009: Different BAR block sizes, including irregular granularity, and their performance on the LIBERO environment.\np0-fig-010: Different BAR block sizes, including irregular granularity, and their performance on the LIBERO environment.\np0-fig-011: Heatmap for detailed VRR of different tokenizers across ID and OOD datasets.\np0-fig-012: Visualization of action reconstruction results from MiniVLA, VQ-VLA, Fast+, and FasterVQ on representative trajectories from the Libero, Bridge, XArm, and Widow datasets.\np0-fig-013: Visualization of our evaluation tasks."
+    },
+    "result_summary_json": null,
+    "error": "litellm.APIConnectionError: GeminiException - Server disconnected"
+  }
+]

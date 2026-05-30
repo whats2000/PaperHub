@@ -1,0 +1,24 @@
+{
+  "run_id": 294,
+  "intent": "slides",
+  "routing": {
+    "intent": "slides",
+    "model_tier": "flagship",
+    "confidence": 1.0,
+    "reasoning": "The user is requesting to create a slide deck based on an already referenced paper.",
+    "resolved_query": "Please prepare approximately 15 Beamer slides covering the referenced paper for an machine learning research audience.",
+    "response_language": "English"
+  },
+  "final_first_500": "",
+  "deck_event": null,
+  "error": "litellm.APIConnectionError: GeminiException - Server disconnected",
+  "events": [
+    "session",
+    "tool_step",
+    "routing_decision",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "error"
+  ]
+}

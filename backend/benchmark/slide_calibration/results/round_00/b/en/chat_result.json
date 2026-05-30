@@ -1,0 +1,26 @@
+{
+  "run_id": 295,
+  "intent": "slides",
+  "routing": {
+    "intent": "slides",
+    "model_tier": "flagship",
+    "confidence": 1.0,
+    "reasoning": "The user wants to generate a talk/presentation based on the currently enabled papers.",
+    "resolved_query": "Prepare a 12-minute conference talk covering the three currently enabled papers, focusing on the connections between them and proposing a future research direction.",
+    "response_language": "English"
+  },
+  "final_first_500": "",
+  "deck_event": null,
+  "error": "litellm.APIConnectionError: GeminiException - Server disconnected",
+  "events": [
+    "session",
+    "tool_step",
+    "routing_decision",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "error"
+  ]
+}

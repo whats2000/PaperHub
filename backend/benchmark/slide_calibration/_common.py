@@ -8,12 +8,18 @@ import httpx
 
 BASE = "http://127.0.0.1:8000"
 
-# The dev-set: same 3 arXiv papers as the D:\GitHub\Final_Report gold deck.
-DEV_PAPERS: list[str] = [
-    "2509.22093v1",  # ADP — vision token pruning
-    "2512.04952v2",  # FASTer — block-wise AR
-    "2602.20200v2",  # OptimusVLA — diffusion prior
-]
+# The dev-set: same 3 papers as the D:\GitHub\Final_Report gold deck.
+# Keyed by the gold deck's directory names (with v-suffix where the gold uses
+# one), but mapped to the EXACT paper_content rows already in the workspace
+# cache. Going via library:<pc_id> bypasses arXiv-version-suffix dispatcher
+# resolution + skips re-Marker on a paper already ingested. The underlying
+# paper text is the same whether the cached row is v1 vs v2 (papers don't
+# meaningfully change between minor arXiv revisions for slide-generation).
+DEV_PAPERS: dict[str, int] = {
+    "2509.22093v1": 67,  # ADP — vision token pruning (cached id=67)
+    "2512.04952v2": 62,  # FASTer — block-wise AR (cached id=62, no v-suffix)
+    "2602.20200v2": 63,  # OptimusVLA — diffusion prior (cached id=63, no v-suffix)
+}
 
 # Prompts the harness sends. Deterministic so cross-round diffs are meaningful.
 PROMPT_SINGLE_PAPER = (
@@ -33,17 +39,20 @@ RESULTS_DIR = Path(__file__).parent / "results"
 SESSIONS_FILE = RESULTS_DIR / "_sessions.json"
 
 
-def add_paper_by_arxiv(session_id: int, arxiv_id: str) -> dict:
-    """Attach an arXiv paper to a session via POST /papers.
+def add_dev_paper(session_id: int, dev_key: str) -> dict:
+    """Attach a dev-set paper to a session via POST /papers.
 
-    Goes through the same dispatch as the frontend's "add a paper" path —
-    ingests via the standard pipeline if not cached, dedup-hits otherwise.
-    Long timeout because cold ingestion of a long paper takes minutes.
+    Uses the library:<pc_id> form to attach the already-ingested cached row
+    (dedup-instant; no Marker, no embeddings, no chunk recompute). Falls back
+    to the dispatcher's arxiv:<id> resolution only if the dev_key isn't in the
+    static DEV_PAPERS map.
     """
+    pc_id = DEV_PAPERS.get(dev_key)
+    paper_id_payload = f"library:{pc_id}" if pc_id else f"arxiv:{dev_key}"
     r = httpx.post(
         f"{BASE}/papers",
-        json={"session_id": session_id, "paper_id": f"arxiv:{arxiv_id}"},
-        timeout=600,
+        json={"session_id": session_id, "paper_id": paper_id_payload},
+        timeout=1800,
     )
     r.raise_for_status()
     return r.json()

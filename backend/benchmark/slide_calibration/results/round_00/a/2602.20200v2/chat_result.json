@@ -1,0 +1,61 @@
+{
+  "run_id": 293,
+  "intent": "slides",
+  "routing": {
+    "intent": "slides",
+    "model_tier": "flagship",
+    "confidence": 1.0,
+    "reasoning": "The user wants to generate presentation slides for the paper currently in the active reference.",
+    "resolved_query": "Prepare approximately 15 Beamer slides covering the referenced paper for an ML research audience.",
+    "response_language": "English"
+  },
+  "final_first_500": "Generated a 12-slide deck — \"OptimusVLA: A Dual-Memory Vision-Language-Action Framework for Efficient Robotic Manipulation\". Want speaker notes? Say \"generate speaker notes\" (you can pick a language). I can also edit any slide — just tell me the page.",
+  "deck_event": {
+    "deck_id": 29,
+    "session_id": 174,
+    "page_count": 12,
+    "title": "OptimusVLA: A Dual-Memory Vision-Language-Action Framework for Efficient Robotic Manipulation",
+    "status": "ok",
+    "contributing_papers": [
+      {
+        "id": 63,
+        "title": "Global Prior Meets Local Consistency: Dual-Memory Augmented Vision-Language-Action Model for Efficient Robotic Manipulation"
+      }
+    ],
+    "has_notes": false
+  },
+  "error": null,
+  "events": [
+    "session",
+    "tool_step",
+    "routing_decision",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "tool_step",
+    "deck",
+    "final"
+  ]
+}
