@@ -11,12 +11,24 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 /**
+ * Normalise a paper title for fuzzy-free exact matching across sources that
+ * may differ in casing or whitespace (the ingest pipeline replaces the
+ * Semantic Scholar guessed title with the authoritative source title, so
+ * they will be equal modulo casing/spacing in the common case).
+ */
+function normalizeTitle(t: string): string {
+  return t.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
  * Find the reference row (if any) that corresponds to a search candidate.
  *
- * Match order: `papers_id` first (carried for agent-finalized + post-ingest
- * candidates), then `arxiv_id` as the bridging identity when papers_id
- * isn't known to the candidate (e.g. before the candidate has been patched
- * with the ingest response).
+ * Match order:
+ *   1. `papers_id` — fastest, exact numeric identity.
+ *   2. `arxiv_id` — bridges identity before papers_id is known on the candidate.
+ *   3. Normalised title — catches a PDF uploaded via the composer paperclip
+ *      (refs land with arxiv_id=null; title is the authoritative join key after
+ *      ingest replaces the guessed title with the source title).
  *
  * Returns ``undefined`` when nothing matches — the card should then render
  * as an "Add as reference" action. This is what makes the chat-side state
@@ -33,9 +45,13 @@ function findMatchingRef(
     if (byId) return byId;
   }
   if (candidate.arxiv_id !== null) {
-    return refs.find((r) => r.arxiv_id === candidate.arxiv_id);
+    const byArxiv = refs.find((r) => r.arxiv_id === candidate.arxiv_id);
+    if (byArxiv) return byArxiv;
   }
-  return undefined;
+  // Title fallback: covers composer-paperclip uploads where arxiv_id is null
+  // on the ref and papers_id isn't on the candidate.
+  const normCandidateTitle = normalizeTitle(candidate.title);
+  return refs.find((r) => normalizeTitle(r.title) === normCandidateTitle);
 }
 
 interface ManualDownloadFallbackProps {
@@ -298,6 +314,15 @@ interface Props {
 }
 
 export function SearchResultList({ candidates, sessionId }: Props) {
+  // Live references for this session — used to suppress the manual-download
+  // fallback once the paper has been successfully attached via any route
+  // (card Upload PDF button, composer paperclip, or a separate tab).
+  const refs = useChatStore((s) =>
+    sessionId !== null
+      ? (s.referencesBySession[sessionId] ?? EMPTY_REFS)
+      : EMPTY_REFS,
+  );
+
   if (candidates.length === 0) return null;
 
   return (
@@ -308,75 +333,83 @@ export function SearchResultList({ candidates, sessionId }: Props) {
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Found papers
       </p>
-      {candidates.map((c, i) => (
-        <article
-          key={`${c.paper_id}-${i}`}
-          className="rounded-lg border border-border bg-card p-3 space-y-1.5"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-medium leading-snug line-clamp-2">
-                {c.title}
-              </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {c.authors.slice(0, 3).join(", ")}
-                {c.authors.length > 3 && " et al."}
-                {c.year && (
-                  <span className="ml-1.5 tabular-nums">{c.year}</span>
+      {candidates.map((c, i) => {
+        // Whether this candidate has a live matching reference (by id, arxiv_id,
+        // or normalised title — see findMatchingRef for the match order).
+        const isReferenced = findMatchingRef(c, refs) !== undefined;
+
+        return (
+          <article
+            key={`${c.paper_id}-${i}`}
+            className="rounded-lg border border-border bg-card p-3 space-y-1.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-medium leading-snug line-clamp-2">
+                  {c.title}
+                </h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {c.authors.slice(0, 3).join(", ")}
+                  {c.authors.length > 3 && " et al."}
+                  {c.year && (
+                    <span className="ml-1.5 tabular-nums">{c.year}</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {c.arxiv_id && (
+                  <Badge variant="outline" className="text-xs">
+                    arXiv
+                  </Badge>
                 )}
+                {c.paper_id.startsWith("ss:") && !c.arxiv_id && (
+                  <Badge variant="outline" className="text-xs">
+                    S2
+                  </Badge>
+                )}
+                <AddButton candidate={c} sessionId={sessionId} />
+              </div>
+            </div>
+
+            {c.abstract && (
+              <p className="text-xs text-muted-foreground line-clamp-3">
+                {c.abstract}
               </p>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {c.arxiv_id && (
-                <Badge variant="outline" className="text-xs">
-                  arXiv
-                </Badge>
-              )}
-              {c.paper_id.startsWith("ss:") && !c.arxiv_id && (
-                <Badge variant="outline" className="text-xs">
-                  S2
-                </Badge>
-              )}
-              <AddButton candidate={c} sessionId={sessionId} />
-            </div>
-          </div>
-
-          {c.abstract && (
-            <p className="text-xs text-muted-foreground line-clamp-3">
-              {c.abstract}
-            </p>
-          )}
-
-          {c.reason && (
-            <p className="text-xs text-muted-foreground italic">
-              <span className="not-italic font-medium">Why:</span> {c.reason}
-            </p>
-          )}
-
-          {/* Manual-download fallback: rendered below the body text when all
-              OA URLs failed. Shown only when tried_urls is non-empty so that
-              legacy cards (no tried_urls field) and no-DOI ss: cards are
-              unaffected. */}
-          {c.error === "no_ingestible_source" &&
-            (c.tried_urls ?? []).length > 0 && (
-              <ManualDownloadFallback
-                triedUrls={c.tried_urls!}
-                sessionId={sessionId}
-                candidate={c}
-                onAdded={() => {
-                  if (sessionId === null) return;
-                  listSessionReferences(sessionId)
-                    .then((refs) =>
-                      useChatStore.getState().setReferences(sessionId, refs),
-                    )
-                    .catch(() => {
-                      /* best-effort refresh */
-                    });
-                }}
-              />
             )}
-        </article>
-      ))}
+
+            {c.reason && (
+              <p className="text-xs text-muted-foreground italic">
+                <span className="not-italic font-medium">Why:</span> {c.reason}
+              </p>
+            )}
+
+            {/* Manual-download fallback: rendered below the body text when all
+                OA URLs failed. Hidden once the paper appears in live session
+                references (matched by id, arxiv_id, or normalised title) so
+                that an upload via ANY route (card button, composer paperclip,
+                another tab) clears the amber warning automatically. */}
+            {!isReferenced &&
+              c.error === "no_ingestible_source" &&
+              (c.tried_urls ?? []).length > 0 && (
+                <ManualDownloadFallback
+                  triedUrls={c.tried_urls!}
+                  sessionId={sessionId}
+                  candidate={c}
+                  onAdded={() => {
+                    if (sessionId === null) return;
+                    listSessionReferences(sessionId)
+                      .then((refs) =>
+                        useChatStore.getState().setReferences(sessionId, refs),
+                      )
+                      .catch(() => {
+                        /* best-effort refresh */
+                      });
+                  }}
+                />
+              )}
+          </article>
+        );
+      })}
     </section>
   );
 }

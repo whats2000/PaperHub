@@ -343,6 +343,99 @@ describe("SearchResultList", () => {
     });
   });
 
+  // ── Manual-download fallback suppression after upload ────────────────────
+
+  it("hides amber fallback once the paper is referenced by papers_id (card-button upload path)", () => {
+    // Simulate the state after ManualDownloadFallback's appendReferenceLocal
+    // fires: the ref lands in the store with papers_id populated.
+    useChatStore.getState().setReferences(1, [
+      makeRef({ papers_id: 10, paper_content_id: 10, arxiv_id: null, kind: "pdf_upload", title: "AlphaGenome" }),
+    ]);
+
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            paper_id: "ss:abc123",
+            title: "AlphaGenome",
+            arxiv_id: null,
+            has_open_pdf: false,
+            error: "no_ingestible_source",
+            tried_urls: ["https://www.biorxiv.org/content/10.1101/2025.01.01.000001v1.full.pdf"],
+            papers_id: 10,
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+
+    // Amber fallback must be gone
+    expect(screen.queryByText(/couldn't auto-fetch/i)).toBeNull();
+    // Upload button must be gone
+    expect(screen.queryByRole("button", { name: /upload pdf/i })).toBeNull();
+    // Card shows the Added badge (handled by AddButton which also sees papers_id=10 in refs)
+    expect(screen.getByText(/^added$/i)).toBeInTheDocument();
+  });
+
+  it("hides amber fallback once the paper is referenced by normalised title (composer-paperclip path)", () => {
+    // Composer-paperclip upload: ref lands with arxiv_id=null, papers_id not
+    // on the candidate — only the title can bridge the identity.
+    useChatStore.getState().setReferences(1, [
+      makeRef({
+        papers_id: 20,
+        paper_content_id: 20,
+        arxiv_id: null,
+        kind: "pdf_upload",
+        title: "AlphaGenome: Predicting the Genome",
+      }),
+    ]);
+
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            paper_id: "ss:xyz789",
+            // title differs only in casing/extra whitespace vs. the ref
+            title: "AlphaGenome: Predicting the Genome",
+            arxiv_id: null,
+            has_open_pdf: false,
+            error: "no_ingestible_source",
+            tried_urls: ["https://www.biorxiv.org/content/10.1101/2025.01.01.000001v1.full.pdf"],
+            papers_id: null,
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+
+    expect(screen.queryByText(/couldn't auto-fetch/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /upload pdf/i })).toBeNull();
+  });
+
+  it("still shows amber fallback when no matching reference exists (regression guard)", () => {
+    // No refs in the store — fallback must remain visible.
+    useChatStore.getState().setReferences(1, []);
+
+    render(
+      <SearchResultList
+        candidates={[
+          makeCandidate({
+            paper_id: "ss:abc123",
+            title: "AlphaGenome",
+            arxiv_id: null,
+            has_open_pdf: false,
+            error: "no_ingestible_source",
+            tried_urls: ["https://www.biorxiv.org/content/10.1101/2025.01.01.000001v1.full.pdf"],
+          }),
+        ]}
+        sessionId={1}
+      />,
+    );
+
+    expect(screen.getByText(/couldn't auto-fetch/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload pdf/i })).toBeInTheDocument();
+  });
+
   it("sends candidate metadata in POST /papers body", async () => {
     // Intercept the POST and capture the parsed body.
     const capturedBodies: unknown[] = [];
