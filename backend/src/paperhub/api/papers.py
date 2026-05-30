@@ -160,6 +160,7 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
                 conn=conn,
                 session_id=body.session_id,
                 metadata_override=metadata_override,
+                unpaywall_email=settings.unpaywall_email,
             )
     except NoIngestibleSourceError as exc:
         raise HTTPException(
@@ -168,6 +169,7 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
                 "detail": "no_ingestible_source",
                 "title": exc.title,
                 "paper_id": exc.paper_id,
+                "tried_urls": exc.tried_urls,
             },
         ) from exc
     except ValueError as exc:

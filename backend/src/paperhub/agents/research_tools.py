@@ -20,10 +20,13 @@ imports it.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import logging
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+import httpx
 
 from paperhub.pipelines.arxiv_client import search_arxiv as _search_arxiv_sync
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, IngestRequest, PaperPipeline
@@ -34,9 +37,12 @@ from paperhub.pipelines.semantic_scholar import (
     find_related,
     search_papers,
 )
+from paperhub.pipelines.unpaywall import find_oa_pdf_urls_by_doi
 
 if TYPE_CHECKING:
     from paperhub.mcp.registry import MCPRegistry
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "AddResult",
@@ -100,14 +106,28 @@ class AddResult:
 
 
 class NoIngestibleSourceError(Exception):
-    """Raised when an ``ss:<paperId>`` has no ``externalIds.ArXiv`` and no
-    ``openAccessPdf.url``. POST /papers translates this to HTTP 422 so the
-    frontend can disable the Add button persistently."""
+    """Raised when an ``ss:<paperId>`` can't be fetched as a paper source.
 
-    def __init__(self, paper_id: str, title: str) -> None:
+    POST /papers translates this to HTTP 422 so the frontend can disable the
+    Add button persistently.
+
+    ``tried_urls`` (F4.3 extension) carries the OA URLs we attempted (e.g.
+    from Unpaywall) before giving up. The chat layer surfaces these in the
+    search-results card so the user can click through to a source page and
+    upload the PDF themselves when automated fetch is blocked (Cloudflare,
+    etc.). Empty list when no URLs were tried (e.g. no DOI / no email
+    configured / Unpaywall returned nothing)."""
+
+    def __init__(
+        self,
+        paper_id: str,
+        title: str,
+        tried_urls: list[str] | None = None,
+    ) -> None:
         super().__init__(f"no ingestible source for {paper_id}")
         self.paper_id = paper_id
         self.title = title
+        self.tried_urls: list[str] = list(tried_urls or [])
 
 
 # Canonical JSON-schemas the FastMCP ``papers`` server advertises.
@@ -462,6 +482,7 @@ async def add_paper_to_session_dispatch(
     conn: aiosqlite.Connection,
     session_id: int,
     metadata_override: ArxivMetadata | None = None,
+    unpaywall_email: str | None = None,
 ) -> AddResult:
     """Resolve a prefixed paper_id and attach it to the session.
 
@@ -482,7 +503,8 @@ async def add_paper_to_session_dispatch(
       - ``library:<paper_content_id>`` — cache-hit insert papers row
       - ``arxiv:<arxiv_id>`` — full PaperPipeline ingest
       - ``ss:<paperId>`` — SS metadata → arxiv path if externalIds.ArXiv,
-        else openAccessPdf.url PDF, else raises NoIngestibleSourceError
+        else openAccessPdf.url PDF, else (F4.3) Unpaywall by DOI when
+        ``unpaywall_email`` is set, else raises NoIngestibleSourceError
     """
     if paper_id.startswith("library:"):
         return await _attach_library(
@@ -526,6 +548,35 @@ async def add_paper_to_session_dispatch(
             return await _attach_pdf(
                 meta, pipeline=pipeline, conn=conn, session_id=session_id,
             )
+        # F4.3: Unpaywall fallback. When SS has no openAccessPdf URL but
+        # we have a DOI AND the operator configured PAPERHUB_UNPAYWALL_EMAIL,
+        # query Unpaywall for all OA locations and try each in order.
+        # This closes the AlphaGenome-class gap (Nature paper not indexed by
+        # SS but freely available) and handles Cloudflare-gated first URLs by
+        # falling through to secondary locations instead of failing immediately.
+        if meta.doi and unpaywall_email:
+            oa_urls = await find_oa_pdf_urls_by_doi(meta.doi, email=unpaywall_email)
+            for oa_url in oa_urls:
+                synthesized = dataclasses.replace(
+                    meta, open_access_pdf_url=oa_url,
+                )
+                try:
+                    return await _attach_pdf(
+                        synthesized, pipeline=pipeline, conn=conn,
+                        session_id=session_id,
+                    )
+                except httpx.HTTPError as exc:
+                    _LOG.info(
+                        "unpaywall url failed doi=%s url=%s err=%s — trying next",
+                        meta.doi, oa_url, exc,
+                    )
+                    continue
+            # All URLs exhausted (or Unpaywall returned nothing) — carry the
+            # attempted URL list so the card can surface manual-download links.
+            raise NoIngestibleSourceError(
+                paper_id=paper_id, title=meta.title, tried_urls=list(oa_urls),
+            )
+        # No DOI or no email configured — no URLs were attempted.
         raise NoIngestibleSourceError(paper_id=paper_id, title=meta.title)
 
     raise ValueError(

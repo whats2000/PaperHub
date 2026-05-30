@@ -85,6 +85,16 @@ class Settings:
     # bigger GPUs or sparse single-column papers.
     marker_max_pages: int
 
+    # ── 10. External lookup services (optional) ──────────────────────────
+    # Unpaywall fallback for the ss: dispatch — when SS has no
+    # openAccessPdf.url, we query Unpaywall by DOI to find a free PDF on
+    # the publisher's site / a preprint mirror. Unpaywall REQUIRES a
+    # contact email in the query string (for abuse-control logging — they
+    # don't spam). When None, the fallback is skipped and behaviour
+    # reverts to F4.2 (NoIngestibleSourceError for non-arXiv papers
+    # without an SS-indexed PDF URL).
+    unpaywall_email: str | None
+
 
 def load_settings() -> Settings:
     workspace = Path(os.environ.get("PAPERHUB_WORKSPACE", "./workspace")).resolve()
@@ -173,4 +183,7 @@ def load_settings() -> Settings:
         report_resolve_model=os.environ.get(
             "PAPERHUB_REPORT_RESOLVE_MODEL", "gemini/gemini-3.1-flash-lite",
         ),
+
+        # 10. External lookup services.
+        unpaywall_email=os.environ.get("PAPERHUB_UNPAYWALL_EMAIL") or None,
     )

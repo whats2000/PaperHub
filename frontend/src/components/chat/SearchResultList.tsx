@@ -1,21 +1,34 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 import type {
   ReferenceItem,
   SearchResultCandidate,
 } from "@/types/domain";
-import { ingestPaper, listSessionReferences } from "@/lib/api";
+import { ingestPaper, listSessionReferences, uploadPdf } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 /**
+ * Normalise a paper title for fuzzy-free exact matching across sources that
+ * may differ in casing or whitespace (the ingest pipeline replaces the
+ * Semantic Scholar guessed title with the authoritative source title, so
+ * they will be equal modulo casing/spacing in the common case).
+ */
+function normalizeTitle(t: string): string {
+  return t.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
  * Find the reference row (if any) that corresponds to a search candidate.
  *
- * Match order: `papers_id` first (carried for agent-finalized + post-ingest
- * candidates), then `arxiv_id` as the bridging identity when papers_id
- * isn't known to the candidate (e.g. before the candidate has been patched
- * with the ingest response).
+ * Match order:
+ *   1. `papers_id` — fastest, exact numeric identity.
+ *   2. `arxiv_id` — bridges identity before papers_id is known on the candidate.
+ *   3. Normalised title — catches a PDF uploaded via the composer paperclip
+ *      (refs land with arxiv_id=null; title is the authoritative join key after
+ *      ingest replaces the guessed title with the source title).
  *
  * Returns ``undefined`` when nothing matches — the card should then render
  * as an "Add as reference" action. This is what makes the chat-side state
@@ -32,9 +45,107 @@ function findMatchingRef(
     if (byId) return byId;
   }
   if (candidate.arxiv_id !== null) {
-    return refs.find((r) => r.arxiv_id === candidate.arxiv_id);
+    const byArxiv = refs.find((r) => r.arxiv_id === candidate.arxiv_id);
+    if (byArxiv) return byArxiv;
   }
-  return undefined;
+  // Title fallback: covers composer-paperclip uploads where arxiv_id is null
+  // on the ref and papers_id isn't on the candidate.
+  const normCandidateTitle = normalizeTitle(candidate.title);
+  return refs.find((r) => normalizeTitle(r.title) === normCandidateTitle);
+}
+
+interface ManualDownloadFallbackProps {
+  triedUrls: string[];
+  sessionId: number | null;
+  candidate: SearchResultCandidate;
+  /** Called after a successful PDF upload so the caller can refresh refs. */
+  onAdded: () => void;
+}
+
+/** Inline card section rendered when all OA URLs failed (e.g. Cloudflare-blocked
+ *  bioRxiv). Shows a friendly message, the tried links, and an "Upload PDF"
+ *  button that mirrors AttachPaperMenu's PDF-upload flow. */
+function ManualDownloadFallback({
+  triedUrls,
+  sessionId,
+  candidate,
+  onAdded,
+}: ManualDownloadFallbackProps) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const appendReferenceLocal = useChatStore((s) => s.appendReferenceLocal);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || sessionId === null) return;
+    setUploading(true);
+    try {
+      const result = await uploadPdf(sessionId, file);
+      appendReferenceLocal(sessionId, {
+        papers_id: result.papers_id,
+        paper_content_id: result.paper_content_id,
+        enabled: true,
+        added_at: new Date().toISOString(),
+        arxiv_id: candidate.arxiv_id,
+        title: result.title,
+        year: candidate.year,
+        kind: "pdf_upload",
+      });
+      toast.success(result.cache_hit ? "Re-attached" : "Added", {
+        description: result.title,
+      });
+      onAdded();
+    } catch (err) {
+      toast.error("Upload failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 space-y-1.5 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs dark:border-amber-800 dark:bg-amber-950/30">
+      <p className="text-muted-foreground">
+        Couldn't auto-fetch — the source blocks automated downloads. Download
+        the PDF manually and upload it:
+      </p>
+      <ul className="space-y-0.5">
+        {triedUrls.map((url) => (
+          <li key={url}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {url}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {/* Hidden file input wired to the Upload PDF button below */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        aria-label="Upload PDF for this paper"
+        className="sr-only"
+        onChange={(e) => void handleFileChange(e)}
+        disabled={uploading || sessionId === null}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={uploading || sessionId === null}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        {uploading ? "Uploading…" : "Upload PDF"}
+      </Button>
+    </div>
+  );
 }
 
 interface AddButtonProps {
@@ -91,6 +202,16 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
   }
 
   if (candidate.error === "no_ingestible_source") {
+    // When tried_urls is non-empty, the detailed fallback is rendered
+    // below the title row (in SearchResultList). Show a compact badge here
+    // so the action slot stays tidy.
+    if ((candidate.tried_urls ?? []).length > 0) {
+      return (
+        <Badge variant="outline" className="whitespace-nowrap text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700">
+          Manual download
+        </Badge>
+      );
+    }
     return (
       <Button
         size="sm"
@@ -193,6 +314,15 @@ interface Props {
 }
 
 export function SearchResultList({ candidates, sessionId }: Props) {
+  // Live references for this session — used to suppress the manual-download
+  // fallback once the paper has been successfully attached via any route
+  // (card Upload PDF button, composer paperclip, or a separate tab).
+  const refs = useChatStore((s) =>
+    sessionId !== null
+      ? (s.referencesBySession[sessionId] ?? EMPTY_REFS)
+      : EMPTY_REFS,
+  );
+
   if (candidates.length === 0) return null;
 
   return (
@@ -203,52 +333,83 @@ export function SearchResultList({ candidates, sessionId }: Props) {
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Found papers
       </p>
-      {candidates.map((c, i) => (
-        <article
-          key={`${c.paper_id}-${i}`}
-          className="rounded-lg border border-border bg-card p-3 space-y-1.5"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-medium leading-snug line-clamp-2">
-                {c.title}
-              </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {c.authors.slice(0, 3).join(", ")}
-                {c.authors.length > 3 && " et al."}
-                {c.year && (
-                  <span className="ml-1.5 tabular-nums">{c.year}</span>
+      {candidates.map((c, i) => {
+        // Whether this candidate has a live matching reference (by id, arxiv_id,
+        // or normalised title — see findMatchingRef for the match order).
+        const isReferenced = findMatchingRef(c, refs) !== undefined;
+
+        return (
+          <article
+            key={`${c.paper_id}-${i}`}
+            className="rounded-lg border border-border bg-card p-3 space-y-1.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-medium leading-snug line-clamp-2">
+                  {c.title}
+                </h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {c.authors.slice(0, 3).join(", ")}
+                  {c.authors.length > 3 && " et al."}
+                  {c.year && (
+                    <span className="ml-1.5 tabular-nums">{c.year}</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {c.arxiv_id && (
+                  <Badge variant="outline" className="text-xs">
+                    arXiv
+                  </Badge>
                 )}
+                {c.paper_id.startsWith("ss:") && !c.arxiv_id && (
+                  <Badge variant="outline" className="text-xs">
+                    S2
+                  </Badge>
+                )}
+                <AddButton candidate={c} sessionId={sessionId} />
+              </div>
+            </div>
+
+            {c.abstract && (
+              <p className="text-xs text-muted-foreground line-clamp-3">
+                {c.abstract}
               </p>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {c.arxiv_id && (
-                <Badge variant="outline" className="text-xs">
-                  arXiv
-                </Badge>
-              )}
-              {c.paper_id.startsWith("ss:") && !c.arxiv_id && (
-                <Badge variant="outline" className="text-xs">
-                  S2
-                </Badge>
-              )}
-              <AddButton candidate={c} sessionId={sessionId} />
-            </div>
-          </div>
+            )}
 
-          {c.abstract && (
-            <p className="text-xs text-muted-foreground line-clamp-3">
-              {c.abstract}
-            </p>
-          )}
+            {c.reason && (
+              <p className="text-xs text-muted-foreground italic">
+                <span className="not-italic font-medium">Why:</span> {c.reason}
+              </p>
+            )}
 
-          {c.reason && (
-            <p className="text-xs text-muted-foreground italic">
-              <span className="not-italic font-medium">Why:</span> {c.reason}
-            </p>
-          )}
-        </article>
-      ))}
+            {/* Manual-download fallback: rendered below the body text when all
+                OA URLs failed. Hidden once the paper appears in live session
+                references (matched by id, arxiv_id, or normalised title) so
+                that an upload via ANY route (card button, composer paperclip,
+                another tab) clears the amber warning automatically. */}
+            {!isReferenced &&
+              c.error === "no_ingestible_source" &&
+              (c.tried_urls ?? []).length > 0 && (
+                <ManualDownloadFallback
+                  triedUrls={c.tried_urls!}
+                  sessionId={sessionId}
+                  candidate={c}
+                  onAdded={() => {
+                    if (sessionId === null) return;
+                    listSessionReferences(sessionId)
+                      .then((refs) =>
+                        useChatStore.getState().setReferences(sessionId, refs),
+                      )
+                      .catch(() => {
+                        /* best-effort refresh */
+                      });
+                  }}
+                />
+              )}
+          </article>
+        );
+      })}
     </section>
   );
 }

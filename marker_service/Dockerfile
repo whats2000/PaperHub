@@ -9,10 +9,17 @@
 # are enabled; it falls back to CPU automatically otherwise.
 FROM python:3.11-slim
 
+# MODEL_CACHE_DIR is the one that matters for surya 1.x (marker-pdf 1.10.2):
+# its models come from datalab S3 (s3://...) via S3DownloaderMixin, which caches
+# into surya `settings.MODEL_CACHE_DIR` (default ~/.cache/datalab/models, NOT
+# HF_HOME). Point it inside /models so the marker-models volume persists the
+# ~2 GB of weights across container recreates — otherwise every rebuild/recreate
+# re-downloads them. HF_HOME/TORCH_HOME cover the few HF/torch-hosted artifacts.
 ENV PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     HF_HOME=/models \
-    TORCH_HOME=/models/torch
+    TORCH_HOME=/models/torch \
+    MODEL_CACHE_DIR=/models/datalab
 
 WORKDIR /app
 
@@ -36,6 +43,7 @@ COPY app.py .
 # Models are NOT baked into the image — they download ONCE into the /models
 # named volume (see docker-compose.yml) on first /extract and persist across
 # container restarts AND image rebuilds, so iterating on the image never
-# re-downloads the Surya/marker weights. (HF_HOME/TORCH_HOME point at /models.)
+# re-downloads the Surya/marker weights. (MODEL_CACHE_DIR=/models/datalab holds
+# the datalab S3 weights; HF_HOME/TORCH_HOME cover HF/torch-hosted artifacts.)
 EXPOSE 8002
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]
