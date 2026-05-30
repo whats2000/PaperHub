@@ -28,6 +28,9 @@ class SearchCandidateModel(BaseModel):
     already_in_session: bool
     # Default True so replay of cards persisted before this field still loads.
     verified: bool = True
+    # F4.3: OA URLs attempted before giving up — empty list when none were tried.
+    # Default empty so replay of cards persisted before F4.3 still loads.
+    tried_urls: list[str] = []
 
 
 class SearchResultsEvent(BaseModel):
