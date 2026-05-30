@@ -33,9 +33,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import aiosqlite
 import litellm
@@ -55,9 +54,6 @@ from paperhub.models.domain import (
 )
 from paperhub.pipelines.paper_asset import PaperAsset, read_paper_asset
 from paperhub.tracing.tracer import Tracer
-
-if TYPE_CHECKING:  # pragma: no cover - typing-only
-    pass
 
 __all__ = [
     "MAX_CALLBACK_CALLS",
@@ -390,7 +386,8 @@ def _parse_rendered_slide(raw: str) -> RenderedSlide:
     """Strip optional fence and validate against RenderedSlide."""
     cleaned = raw.strip()
     if cleaned.startswith("```"):
-        cleaned = _FENCE_RE.sub("", cleaned)
+        # The regex alternation matches both the opening fence (`^```\w*\n?`)
+        # and the closing fence (`\n?```$`), so one .sub() pass strips both.
         cleaned = _FENCE_RE.sub("", cleaned).strip()
     return RenderedSlide.model_validate_json(cleaned)
 
@@ -483,10 +480,6 @@ async def run_sl_render_slide(
     response_language: str = "the user's language",
     paper_asset: PaperAsset | None = None,
     conn: aiosqlite.Connection | None = None,
-    # ``chunk_loader`` mirrors T1's optional signature so the T5 wiring can
-    # supply it where useful (e.g. retrieval-augmented reads). Unused inside
-    # T3's bounded callback — the canonical readers live in sl_paper_brief.
-    chunk_loader: Callable[[int, str], Awaitable[list[Any]]] | None = None,
     max_callback_calls: int = MAX_CALLBACK_CALLS,
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
@@ -496,14 +489,19 @@ async def run_sl_render_slide(
     Cross-paper patterns (``planned_slide.paper_id is None``) bypass the
     callback wiring — the LLM gets a direct render call with no tools in
     scope.
+
+    ``planned_slide`` MUST be one of the slides in ``deck_outline.slides``
+    (identity-match preferred; equality on ``(pattern_kind, title, goal)``
+    is the soft-match fallback for callers that passed a copy). If neither
+    locates it, ``ValueError`` is raised — silently defaulting the
+    ``slide_index`` to 0 would mis-attribute the rendered frame in the
+    trace + downstream emit. This is a programmer bug (callers must pass a
+    slide that exists in the outline), not a runtime condition.
     """
     reg = registry or PromptRegistry()
     prompt = reg.get("slides_render_slide/v1")
 
     has_paper = planned_slide.paper_id is not None
-    # ``chunk_loader`` accepted for the T5 wiring signature; T3 itself uses
-    # the canonical readers from sl_paper_brief (no retrieval surface needed).
-    _ = chunk_loader
 
     # Locate index of this slide within the outline (the renderer's
     # ``slide_index`` is its 0-based position in DeckOutline.slides).
@@ -513,7 +511,7 @@ async def run_sl_render_slide(
         )
     except StopIteration:
         # Fallback: equality-by-attributes when the caller passed a copy.
-        slide_index = next(
+        soft_match = next(
             (
                 i
                 for i, s in enumerate(deck_outline.slides)
@@ -521,8 +519,18 @@ async def run_sl_render_slide(
                 and s.title == planned_slide.title
                 and s.goal == planned_slide.goal
             ),
-            0,
+            None,
         )
+        if soft_match is None:
+            raise ValueError(
+                f"sl_render_slide could not resolve slide_index for "
+                f"planned_slide pattern_kind={planned_slide.pattern_kind!r} "
+                f"title={planned_slide.title!r}; not present in "
+                "deck_outline.slides by identity or "
+                "(pattern_kind, title, goal) match. This is a programmer "
+                "bug — callers must pass a slide that exists in the outline."
+            ) from None
+        slide_index = soft_match
 
     pattern_template = PATTERN_TEMPLATES.get(
         planned_slide.pattern_kind,
@@ -614,187 +622,172 @@ async def run_sl_render_slide(
             }
         )
 
-        try:
-            for iteration in range(_MAX_TURNS):
-                acompletion_kwargs: dict[str, Any] = {
-                    "model": model,
-                    "messages": messages,
-                    **litellm_kwargs,
+        for iteration in range(_MAX_TURNS):
+            acompletion_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                **litellm_kwargs,
+            }
+            if tools_schema:
+                acompletion_kwargs["tools"] = tools_schema
+                acompletion_kwargs["tool_choice"] = "auto"
+
+            response = await litellm.acompletion(**acompletion_kwargs)
+            msg = response["choices"][0]["message"]
+            tool_calls = msg.get("tool_calls") or []
+            assistant_content = str(msg.get("content") or "")
+
+            llm_turn_log.append(
+                {
+                    "turn": iteration,
+                    "content_len": len(assistant_content),
+                    "content_preview": assistant_content[:200],
+                    "tool_calls": [
+                        {
+                            "name": tc["function"]["name"],
+                            "args": tc["function"]["arguments"],
+                        }
+                        for tc in tool_calls
+                    ],
                 }
-                if tools_schema:
-                    acompletion_kwargs["tools"] = tools_schema
-                    acompletion_kwargs["tool_choice"] = "auto"
+            )
 
-                response = await litellm.acompletion(**acompletion_kwargs)
-                msg = response["choices"][0]["message"]
-                tool_calls = msg.get("tool_calls") or []
-                assistant_content = str(msg.get("content") or "")
+            if not tool_calls:
+                final_text = assistant_content.strip()
+                break
 
-                llm_turn_log.append(
-                    {
-                        "turn": iteration,
-                        "content_len": len(assistant_content),
-                        "content_preview": assistant_content[:200],
-                        "tool_calls": [
-                            {
-                                "name": tc["function"]["name"],
-                                "args": tc["function"]["arguments"],
-                            }
-                            for tc in tool_calls
-                        ],
-                    }
-                )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": msg.get("content"),
+                    "tool_calls": tool_calls,
+                }
+            )
 
-                if not tool_calls:
-                    final_text = assistant_content.strip()
-                    break
+            for call in tool_calls:
+                name = call["function"]["name"]
+                try:
+                    raw_args = json.loads(call["function"]["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    raw_args = {}
 
+                if not has_paper:
+                    # The LLM somehow synthesised a callback name even
+                    # though no tool schema was wired (off-palette / OpenAI
+                    # SDK quirk). Surface a deterministic error so the
+                    # next turn can recover by emitting the final JSON.
+                    result_str = json.dumps(
+                        {
+                            "error": (
+                                f"tool {name!r} is not available on "
+                                "cross-paper slides (no paper_id in scope)."
+                            ),
+                        }
+                    )
+                elif callback_reads_used >= max_callback_calls:
+                    result_str = json.dumps(
+                        {
+                            "error": (
+                                f"callback budget exhausted "
+                                f"({max_callback_calls}). Stop calling "
+                                "read_section / read_figure_block and "
+                                "emit the final RenderedSlide JSON now."
+                            ),
+                        }
+                    )
+                elif name == "read_section" and conn is not None:
+                    section_name = str(raw_args.get("name", ""))
+                    assert planned_slide.paper_id is not None
+                    result_str, _cids = await _read_section(
+                        paper_content_id=planned_slide.paper_id,
+                        name=section_name,
+                        conn=conn,
+                    )
+                    callback_reads_used += 1
+                    callback_log.append(
+                        {
+                            "tool": "read_section",
+                            "args": json.dumps(raw_args, ensure_ascii=False),
+                            "result_excerpt": result_str[:200],
+                        }
+                    )
+                elif name == "read_figure_block" and conn is not None:
+                    figure_key = str(raw_args.get("figure_key", ""))
+                    assert planned_slide.paper_id is not None
+                    result_str = await _read_figure_block(
+                        paper_content_id=planned_slide.paper_id,
+                        figure_key=figure_key,
+                        asset=asset,
+                        paper_idx=paper_idx_in_briefs,
+                        conn=conn,
+                    )
+                    callback_reads_used += 1
+                    callback_log.append(
+                        {
+                            "tool": "read_figure_block",
+                            "args": json.dumps(raw_args, ensure_ascii=False),
+                            "result_excerpt": result_str[:200],
+                        }
+                    )
+                elif name in {"read_section", "read_figure_block"} and conn is None:
+                    # Per-paper pattern with callback tools advertised but
+                    # no DB connection wired — emit a clear remediation
+                    # marker so the LLM stops calling.
+                    result_str = json.dumps(
+                        {
+                            "error": (
+                                f"tool {name!r} requires a DB connection "
+                                "(none wired in this call); emit the "
+                                "final RenderedSlide JSON from the brief."
+                            ),
+                        }
+                    )
+                else:
+                    result_str = json.dumps(
+                        {
+                            "error": (
+                                f"unknown tool {name!r}. Use "
+                                "read_section or read_figure_block."
+                            ),
+                        }
+                    )
+
+                # For free reads (list_sections style) we'd also count
+                # nothing, but T3 deliberately omits list_sections — the
+                # brief already carried the TOC implicitly via
+                # key_figures + key_equations.
                 messages.append(
                     {
-                        "role": "assistant",
-                        "content": msg.get("content"),
-                        "tool_calls": tool_calls,
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "name": name,
+                        "content": result_str,
                     }
                 )
 
-                for call in tool_calls:
-                    name = call["function"]["name"]
-                    try:
-                        raw_args = json.loads(call["function"]["arguments"] or "{}")
-                    except json.JSONDecodeError:
-                        raw_args = {}
-
-                    if not has_paper:
-                        # The LLM somehow synthesised a callback name even
-                        # though no tool schema was wired (off-palette / OpenAI
-                        # SDK quirk). Surface a deterministic error so the
-                        # next turn can recover by emitting the final JSON.
-                        result_str = json.dumps(
-                            {
-                                "error": (
-                                    f"tool {name!r} is not available on "
-                                    "cross-paper slides (no paper_id in scope)."
-                                ),
-                            }
-                        )
-                    elif callback_reads_used >= max_callback_calls:
-                        result_str = json.dumps(
-                            {
-                                "error": (
-                                    f"callback budget exhausted "
-                                    f"({max_callback_calls}). Stop calling "
-                                    "read_section / read_figure_block and "
-                                    "emit the final RenderedSlide JSON now."
-                                ),
-                            }
-                        )
-                    elif name == "read_section" and conn is not None:
-                        section_name = str(raw_args.get("name", ""))
-                        assert planned_slide.paper_id is not None
-                        result_str, _cids = await _read_section(
-                            paper_content_id=planned_slide.paper_id,
-                            name=section_name,
-                            conn=conn,
-                        )
-                        callback_reads_used += 1
-                        callback_log.append(
-                            {
-                                "tool": "read_section",
-                                "args": json.dumps(raw_args, ensure_ascii=False),
-                                "result_excerpt": result_str[:200],
-                            }
-                        )
-                    elif name == "read_figure_block" and conn is not None:
-                        figure_key = str(raw_args.get("figure_key", ""))
-                        assert planned_slide.paper_id is not None
-                        result_str = await _read_figure_block(
-                            paper_content_id=planned_slide.paper_id,
-                            figure_key=figure_key,
-                            asset=asset,
-                            paper_idx=paper_idx_in_briefs,
-                            conn=conn,
-                        )
-                        callback_reads_used += 1
-                        callback_log.append(
-                            {
-                                "tool": "read_figure_block",
-                                "args": json.dumps(raw_args, ensure_ascii=False),
-                                "result_excerpt": result_str[:200],
-                            }
-                        )
-                    elif name in {"read_section", "read_figure_block"} and conn is None:
-                        # Per-paper pattern with callback tools advertised but
-                        # no DB connection wired — emit a clear remediation
-                        # marker so the LLM stops calling.
-                        result_str = json.dumps(
-                            {
-                                "error": (
-                                    f"tool {name!r} requires a DB connection "
-                                    "(none wired in this call); emit the "
-                                    "final RenderedSlide JSON from the brief."
-                                ),
-                            }
-                        )
-                    else:
-                        result_str = json.dumps(
-                            {
-                                "error": (
-                                    f"unknown tool {name!r}. Use "
-                                    "read_section or read_figure_block."
-                                ),
-                            }
-                        )
-
-                    # For free reads (list_sections style) we'd also count
-                    # nothing, but T3 deliberately omits list_sections — the
-                    # brief already carried the TOC implicitly via
-                    # key_figures + key_equations.
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call["id"],
-                            "name": name,
-                            "content": result_str,
-                        }
-                    )
-
-            # Parse the final JSON (no silent fallback — per the iron rule).
-            if final_text:
-                try:
-                    rendered = _parse_rendered_slide(final_text)
-                    # Echo-correctness: force the canonical values for
-                    # slide_index/pattern_kind/paper_id so a sloppy LLM echo
-                    # cannot break downstream attribution. (Wrong echo would
-                    # be a planner inconsistency, not a render bug; we still
-                    # validate the LATEX content the LLM produced.)
-                    rendered = rendered.model_copy(
-                        update={
-                            "slide_index": slide_index,
-                            "pattern_kind": planned_slide.pattern_kind,
-                            "paper_id": planned_slide.paper_id,
-                            "callback_reads": list(callback_log),
-                        }
-                    )
-                except (ValidationError, ValueError) as exc:
-                    parse_error = f"{type(exc).__name__}: {exc}"
-                    step.record_result(
-                        {
-                            "final_text": final_text,
-                            "final_text_len": len(final_text),
-                            "parse_error": parse_error,
-                            "callback_reads_count": callback_reads_used,
-                            "callback_reads_summary": callback_log,
-                            "llm_turns": llm_turn_log,
-                        }
-                    )
-                    step.mark_error("render_parse_failed")
-                    pending_exc = exc
-            else:
-                parse_error = "no final no-tool-calls response from LLM"
+        # Parse the final JSON (no silent fallback — per the iron rule).
+        if final_text:
+            try:
+                rendered = _parse_rendered_slide(final_text)
+                # Echo-correctness: force the canonical values for
+                # slide_index/pattern_kind/paper_id so a sloppy LLM echo
+                # cannot break downstream attribution. (Wrong echo would
+                # be a planner inconsistency, not a render bug; we still
+                # validate the LATEX content the LLM produced.)
+                rendered = rendered.model_copy(
+                    update={
+                        "slide_index": slide_index,
+                        "pattern_kind": planned_slide.pattern_kind,
+                        "paper_id": planned_slide.paper_id,
+                        "callback_reads": list(callback_log),
+                    }
+                )
+            except (ValidationError, ValueError) as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
                 step.record_result(
                     {
                         "final_text": final_text,
-                        "final_text_len": 0,
+                        "final_text_len": len(final_text),
                         "parse_error": parse_error,
                         "callback_reads_count": callback_reads_used,
                         "callback_reads_summary": callback_log,
@@ -802,45 +795,55 @@ async def run_sl_render_slide(
                     }
                 )
                 step.mark_error("render_parse_failed")
-                pending_exc = RuntimeError(parse_error)
+                pending_exc = exc
+        else:
+            parse_error = "no final no-tool-calls response from LLM"
+            step.record_result(
+                {
+                    "final_text": final_text,
+                    "final_text_len": 0,
+                    "parse_error": parse_error,
+                    "callback_reads_count": callback_reads_used,
+                    "callback_reads_summary": callback_log,
+                    "llm_turns": llm_turn_log,
+                }
+            )
+            step.mark_error("render_parse_failed")
+            pending_exc = RuntimeError(parse_error)
 
-            if rendered is not None:
-                try:
-                    _validate_rendered_slide(rendered)
-                except ValueError as exc:
-                    parse_error = f"{type(exc).__name__}: {exc}"
-                    step.record_result(
-                        {
-                            "final_text": final_text,
-                            "final_text_len": len(final_text),
-                            "frame_tex_first_200_chars": rendered.frame_tex[:200],
-                            "figure_keys_used": rendered.figure_keys_used,
-                            "validation_failed": True,
-                            "validation_error": parse_error,
-                            "callback_reads_count": callback_reads_used,
-                            "callback_reads_summary": callback_log,
-                            "llm_turns": llm_turn_log,
-                        }
-                    )
-                    step.mark_error("render_validation_failed")
-                    pending_exc = exc
-                    rendered = None
-
-            if rendered is not None:
+        if rendered is not None:
+            try:
+                _validate_rendered_slide(rendered)
+            except ValueError as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
                 step.record_result(
                     {
+                        "final_text": final_text,
+                        "final_text_len": len(final_text),
                         "frame_tex_first_200_chars": rendered.frame_tex[:200],
                         "figure_keys_used": rendered.figure_keys_used,
+                        "validation_failed": True,
+                        "validation_error": parse_error,
                         "callback_reads_count": callback_reads_used,
                         "callback_reads_summary": callback_log,
-                        "parse_status": "ok",
                         "llm_turns": llm_turn_log,
                     }
                 )
-        except Exception:
-            # The tracer's outer except will capture + re-raise; we rely on
-            # mark_error having stamped the canonical short marker first.
-            raise
+                step.mark_error("render_validation_failed")
+                pending_exc = exc
+                rendered = None
+
+        if rendered is not None:
+            step.record_result(
+                {
+                    "frame_tex_first_200_chars": rendered.frame_tex[:200],
+                    "figure_keys_used": rendered.figure_keys_used,
+                    "callback_reads_count": callback_reads_used,
+                    "callback_reads_summary": callback_log,
+                    "parse_status": "ok",
+                    "llm_turns": llm_turn_log,
+                }
+            )
 
     if pending_exc is not None:
         raise pending_exc

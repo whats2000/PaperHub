@@ -855,3 +855,51 @@ async def test_sl_render_slide_trace_captures_callback_state(
     assert result["figure_keys_used"] == ["p0-fig-001"]
     assert result["frame_tex_first_200_chars"].startswith("\\begin{frame}")
     assert result["parse_status"] == "ok"
+
+
+# ─────────────────────────── programmer-bug boundary ────────────────
+
+
+@pytest.mark.asyncio
+async def test_sl_render_slide_raises_when_planned_slide_not_in_outline(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Unresolvable ``planned_slide`` raises ``ValueError`` (not silent 0)."""
+    slide_a = _planned(
+        pattern_kind="title",
+        title="In outline",
+        goal="Goal A — open the talk.",
+    )
+    outline = _outline_with([slide_a])
+
+    # A NEW PlannedSlide B (not in the outline; different goal so the
+    # (pattern_kind, title, goal) soft-match also fails).
+    slide_b = _planned(
+        pattern_kind="title",
+        title="Not in outline",
+        goal="Goal B — totally different.",
+    )
+
+    mock_completion = AsyncMock()
+
+    from paperhub.agents.sl_render_slide import run_sl_render_slide
+
+    with (
+        patch(
+            "paperhub.agents.sl_render_slide.litellm.acompletion", new=mock_completion
+        ),
+        pytest.raises(ValueError, match="could not resolve slide_index"),
+    ):
+        await run_sl_render_slide(
+            planned_slide=slide_b,
+            deck_outline=outline,
+            paper_brief=None,
+            all_briefs=[],
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            response_language="English",
+        )
+
+    # The LLM was never even called — the boundary check raised first.
+    mock_completion.assert_not_called()
