@@ -95,6 +95,15 @@ class Settings:
     # without an SS-indexed PDF URL).
     unpaywall_email: str | None
 
+    # ── 11. Slide presentation (Beamer preamble profile) ───────────────
+    # F4.4 T7: default preamble profile for generated decks. ``"gold"``
+    # (the default) emits the Final_Report gold methodology — Berlin /
+    # dolphin / professionalfonts / 16:9 / 14pt + accent colors + custom
+    # footline + booktabs/mathtools/tikz. ``"metropolis"`` keeps the old
+    # minimal preamble (``\documentclass{beamer}`` + ``\usetheme{metropolis}``)
+    # for parity / debugging. Unknown values fall back to ``"gold"``.
+    slide_theme: str
+
 
 def load_settings() -> Settings:
     workspace = Path(os.environ.get("PAPERHUB_WORKSPACE", "./workspace")).resolve()
@@ -186,4 +195,7 @@ def load_settings() -> Settings:
 
         # 10. External lookup services.
         unpaywall_email=os.environ.get("PAPERHUB_UNPAYWALL_EMAIL") or None,
+
+        # 11. Slide presentation (Beamer preamble profile).
+        slide_theme=os.environ.get("PAPERHUB_SLIDE_THEME", "gold"),
     )

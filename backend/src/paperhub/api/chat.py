@@ -476,6 +476,7 @@ async def report_stream(
         notes_model=settings.report_notes_model,
         resolve_model=settings.report_resolve_model,
         recall_enabled=settings.memory_recall_enabled,
+        slide_theme=settings.slide_theme,
     )
     graph = build_report_subgraph(deps)
     final_text = ""

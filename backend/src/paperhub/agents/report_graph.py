@@ -111,7 +111,10 @@ from paperhub.tracing.tracer import Tracer
 # pattern figure_inventory uses) so only those are staged into the deck dir.
 _GRAPHICS_RE = re.compile(r"\\includegraphics(\[[^\]]*\])?\{([^}]+)\}")
 
-_THEME = "metropolis"
+# F4.4 T7: the active preamble profile now flows from ``ReportDeps.slide_theme``
+# (env-var ``PAPERHUB_SLIDE_THEME``) — see ``assemble_deck``. The legacy
+# module-level constant is gone so a stray reference can't silently pin the
+# deck to metropolis.
 _EMPTY_MSG = (
     "I couldn't find any enabled reference papers in this chat. "
     "Add and enable at least one reference, then ask me to make slides."
@@ -213,6 +216,14 @@ class ReportDeps:
     notes_model: str
     resolve_model: str
     recall_enabled: bool = field(default=True)
+    # F4.4 T7: Beamer preamble profile — ``"gold"`` (default; the
+    # Final_Report Berlin/dolphin/professionalfonts methodology) or
+    # ``"metropolis"`` (legacy minimal preamble for parity/debugging).
+    # Wired from ``Settings.slide_theme`` (env-var ``PAPERHUB_SLIDE_THEME``)
+    # by ``chat.py``; unknown values are normalised to ``"gold"`` inside
+    # ``assemble_deck``. Default ``"gold"`` here so test harnesses that
+    # don't set this field still exercise the new default path.
+    slide_theme: str = field(default="gold")
 
 
 async def _enabled_papers(
@@ -647,7 +658,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             tex = assemble_deck(
                 AssembleInput(
                     title=title_meta.title,
-                    theme=_THEME,
+                    theme=deps.slide_theme,
                     additional_tex_macros=macros,
                     # The staged figures dir is the single graphicspath root;
                     # \includegraphics{<key>} resolves to figures/<key>.<ext>.
@@ -748,7 +759,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             speaker_notes=notes,
             plan=outline.model_dump(),
             page_count=result.page_count,
-            theme=_THEME,
+            theme=deps.slide_theme,
             contributing_paper_ids=[p["id"] for p in papers],
             status="ok" if result.ok else "error",
         )
