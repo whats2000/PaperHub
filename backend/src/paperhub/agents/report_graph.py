@@ -29,6 +29,7 @@ import aiosqlite
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
+from paperhub.agents._newcommands import build_newcommands_block
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.report_pipeline import (
     author_note,
@@ -61,6 +62,7 @@ from paperhub.models.domain import (
     FrameDraft,
     OutlineSlide,
     PaperBrief,
+    PaperTalkBrief,
     SlideBudget,
 )
 from paperhub.pipelines.paper_asset import read_paper_asset
@@ -584,6 +586,15 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             # framing as the subtitle so the narrative isn't lost. Multi-paper
             # decks already use the talk title, so no subtitle.
             subtitle = outline.title if len(papers) == 1 else ""
+            # F4.4 T4: plumb each paper's own \newcommand block into the
+            # preamble. T5 will populate ``report_paper_briefs`` from
+            # ``sl_paper_brief``; until then briefs is empty and the helper
+            # emits a marker-only block with the "(no paper-defined macros
+            # to plumb)" note so the location stays consistent.
+            briefs_for_nc: list[PaperTalkBrief] = list(
+                state.get("report_paper_briefs", [])
+            )
+            nc_block, nc_summary = build_newcommands_block(briefs_for_nc)
             tex = assemble_deck(
                 AssembleInput(
                     title=title_meta.title,
@@ -596,6 +607,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     author=title_meta.author,
                     date=title_meta.date,
                     subtitle=subtitle,
+                    paper_newcommands_block=nc_block,
                 )
             )
             astep.record_result(
@@ -605,6 +617,15 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     "title": title_meta.title,
                     "author": title_meta.author,
                     "date": title_meta.date,
+                    # F4.4 T4: surface the newcommands plumbing in the trace so
+                    # "I emitted 7 macros from 3 papers, 1 collision rejected"
+                    # is reconstructable from SQLite alone.
+                    "newcommands_unique_count": nc_summary.unique_count,
+                    "newcommands_collisions": nc_summary.collisions,
+                    "newcommands_skipped_count": nc_summary.skipped_count,
+                    "newcommands_contributing_papers": (
+                        nc_summary.contributing_papers
+                    ),
                 }
             )
         await _flush_steps()

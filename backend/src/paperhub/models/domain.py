@@ -451,3 +451,9 @@ class AgentState(TypedDict, total=False):
     # router's response_language (which is the chat-REPLY language). Empty/unset
     # → fall back to response_language. Consumed by _generate + _edit_slides.
     report_slide_language: str
+    # F4.4 T4: list of PaperTalkBrief, one per enabled paper, populated by the
+    # future sl_paper_brief stage (T5 wires it). Consumed by sl_assemble to
+    # plumb each brief's ``paper_newcommands`` into the deck preamble between
+    # ``% BEGIN/END paperhub:paper_newcommands`` markers. Until T5 lands the
+    # list is empty and the assemble step emits the marker-only block.
+    report_paper_briefs: list[Any]  # list[PaperTalkBrief]
