@@ -100,6 +100,114 @@ class PaperBrief(BaseModel):
     key_equations: list[str]
 
 
+class KeyResult(BaseModel):
+    """A single quantified empirical result a talk should mention (F4.4 T1).
+
+    The pairing of ``number`` + ``benchmark`` is load-bearing: a talk that
+    says "better accuracy" is forgettable; "14% higher accuracy on LIBERO"
+    is the line the audience remembers. The Round-0 scorecards explicitly
+    called out un-quantified results as a recurring failure mode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    number: str
+    benchmark: str
+
+
+KeyFigureRole = Literal[
+    "motivation",
+    "overview",
+    "method_diagram",
+    "results_chart",
+    "qualitative_example",
+]
+
+
+class KeyFigure(BaseModel):
+    """A figure the talk should actually use (F4.4 T1).
+
+    ``key`` matches the F2 figure inventory key scheme (``p{idx}-{figure_id}``)
+    so the planner can reference real, ingested figures. ``role`` is what slot
+    the figure plays in the narrative; ``one_line_interpretation`` is what
+    the slide should say about it (audiences don't read figures on their own).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    role: KeyFigureRole
+    one_line_interpretation: str
+
+
+KeyEquationRole = Literal[
+    "objective",
+    "loss",
+    "update_rule",
+    "model_definition",
+    "auxiliary",
+]
+
+
+class KeyEquation(BaseModel):
+    """A central equation a talk should display verbatim (F4.4 T1).
+
+    The ``notation_explanation`` field is load-bearing — it closes the
+    equation-without-symbol-definition gap from the Round-0 scorecards.
+    Audiences cannot parse math on a slide unless every symbol used is
+    named on the same slide. Brief content, one symbol per phrase.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    latex: str
+    role: KeyEquationRole
+    notation_explanation: str
+
+
+TalkShapeHint = Literal[
+    "concept_only",
+    "concept+math",
+    "concept+math+results",
+    "deep_dive",
+]
+
+
+class PaperTalkBrief(BaseModel):
+    """Per-paper agentic brief produced by ``sl_paper_brief`` (F4.4 T1).
+
+    Replaces today's ``PaperBrief`` as input to the future ``sl_plan_deck``
+    stage (T2). The brief is a dense, structured summary of everything the
+    deck planner needs to allocate slides to this paper:
+
+    - ``contribution`` / ``method_core`` / ``key_results`` carry the
+      paper's narrative substance.
+    - ``key_figures`` names the 3-5 figures the talk should actually use,
+      with a one-line interpretation each so the slide rendering stage
+      doesn't have to re-invent what the figure means.
+    - ``key_equations`` carries up to 3 central equations paired with a
+      ``notation_explanation`` so the audience can parse them on a slide.
+    - ``paper_newcommands`` is the raw ``\\newcommand`` / ``\\renewcommand``
+      / ``\\DeclareMathOperator`` block from the paper's preamble, plumbed
+      into the deck preamble by a future ``sl_assemble`` change (T4) so
+      paper-specific math macros resolve in the slides.
+    - ``talk_shape_hint`` gives the planner a starting allocation
+      (1 / 2 / 3 / 4-5 slides) for this paper.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: int
+    contribution: str
+    method_core: str
+    key_results: list[KeyResult]
+    key_figures: list[KeyFigure]
+    key_equations: list[KeyEquation]
+    paper_newcommands: str = ""
+    talk_shape_hint: TalkShapeHint
+
+
 class OutlineSlide(BaseModel):
     """One slide entry in a TalkOutline — title, narrative goal, key points,
     and optional pointers to a figure, equation, chunks, and papers."""
