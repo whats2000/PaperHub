@@ -100,3 +100,4 @@ user: |
   LANGUAGE: Write every natural-language string in {response_language}. Keep
   verbatim: LaTeX/math, figure_key strings, table syntax. Output ONLY the
   RenderedSlide JSON.
+  {memory_context}

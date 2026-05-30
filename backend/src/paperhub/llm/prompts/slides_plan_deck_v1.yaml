@@ -177,3 +177,4 @@ user: |
   ``key_points`` entry) in {response_language}. Keep verbatim (do NOT
   translate): ``figure_key`` values, ``equation_index`` values, and
   ``paper_id`` values.
+  {memory_context}

@@ -478,6 +478,7 @@ async def run_sl_render_slide(
     tracer: Tracer,
     model: str,
     response_language: str = "the user's language",
+    memory_context: str = "",
     paper_asset: PaperAsset | None = None,
     conn: aiosqlite.Connection | None = None,
     max_callback_calls: int = MAX_CALLBACK_CALLS,
@@ -559,6 +560,7 @@ async def run_sl_render_slide(
             planned_slide, paper_brief
         ),
         response_language=response_language or "the user's language",
+        memory_context=memory_context,
     )
 
     messages: list[dict[str, Any]] = [

@@ -280,6 +280,7 @@ async def run_sl_plan_deck(
     model: str,
     deps: ReportDeps | None = None,
     response_language: str = "the user's language",
+    memory_context: str = "",
     registry: PromptRegistry | None = None,
     **litellm_kwargs: Any,
 ) -> DeckOutline:
@@ -303,6 +304,7 @@ async def run_sl_plan_deck(
         paper_count=len(briefs),
         briefs_block=_briefs_block(briefs),
         response_language=response_language or "the user's language",
+        memory_context=memory_context,
     )
 
     messages: list[dict[str, Any]] = [

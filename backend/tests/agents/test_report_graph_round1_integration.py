@@ -22,6 +22,7 @@ NOT need a real LLM. Asserts:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -365,6 +366,9 @@ def _install_stubs(monkeypatch: Any, briefs: list[PaperTalkBrief],
         captured["plan_deck_calls"].append({
             "brief_ids": [b.paper_id for b in briefs],
             "target_slide_count": target_slide_count,
+            # T5 review-fix (Fix 2): capture memory_context so the test can
+            # assert active-memory threading reaches the planner kwargs.
+            "memory_context": kw.get("memory_context", ""),
         })
         async with tracer.step(
             agent="report", tool="report:plan_deck", model=model,
@@ -385,6 +389,9 @@ def _install_stubs(monkeypatch: Any, briefs: list[PaperTalkBrief],
             "paper_id": planned_slide.paper_id,
             "has_paper_brief": paper_brief is not None,
             "all_briefs_count": len(all_briefs),
+            # T5 review-fix (Fix 2): capture memory_context so the test can
+            # assert active-memory threading reaches the renderer kwargs.
+            "memory_context": kw.get("memory_context", ""),
         })
         slide_idx = next(
             i for i, s in enumerate(deck_outline.slides) if s is planned_slide
@@ -526,17 +533,22 @@ async def test_round1_chain_end_to_end(  # type: ignore[no-untyped-def]
     # Per-paper macros plumbed through as \providecommand (A2 option 1 fix).
     assert r"\providecommand{\MacroOne}{\mathbb{R}^{1}}" in tex
     assert r"\providecommand{\MacroTwo}{\mathbb{R}^{2}}" in tex
-    # Per-slide frames appear IN ORDER.
+    # T5 review-fix (Fix 1): T3's ``title`` pattern template emits the SAME
+    # ``\begin{frame}[plain]\titlepage\end{frame}`` that assemble used to
+    # auto-inject. After the fix, ``_generate`` sets
+    # ``skip_title_injection=True`` when the outline's first slide is the
+    # ``title`` pattern (which the planner always emits), so the deck
+    # carries exactly ONE \titlepage — the caller's — and the previous
+    # duplicate title page is gone.
+    assert len(re.findall(r"\\titlepage", tex)) == 1, (
+        "deck must have exactly one \\titlepage (T5 fix — caller-supplied "
+        "title frame, no assemble auto-injection)"
+    )
+    # Per-slide frames appear IN ORDER, including the title frame (which is
+    # now the caller-supplied one — no longer a duplicate of an injection).
     frame_positions = []
     for s in outline.slides:
         snippet = _frame_tex_for(s)
-        # The first \begin{frame} of the deck is the assemble-injected
-        # \titlepage frame (T3 hand-render is identical to that), so the
-        # title-slide snippet may match the assemble injection. Use the
-        # frametitle (or \[ for math_stack, "Take-away" for closer) as a
-        # disambiguator instead.
-        if s.pattern_kind == "title":
-            continue  # assemble already prepends an identical title frame
         marker = (
             "\\frametitle{" + s.title + "}"
             if "\\frametitle" in snippet
@@ -650,3 +662,176 @@ async def test_round1_render_error_propagates(  # type: ignore[no-untyped-def]
         "a failed render must not produce a persisted deck row "
         "(no silent fallback)"
     )
+
+
+# ─────────────────── memory threading (Fix 2) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_round1_threads_active_memory_to_plan_and_render(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """T5 review-fix (Fix 2): an active memory ("user prefers Traditional
+    Chinese") MUST reach BOTH ``run_sl_plan_deck`` and every
+    ``run_sl_render_slide`` call via the ``memory_context`` kwarg, so the
+    planner's natural-language strings (talk_title / titles / goals /
+    key_points) AND the renderer's frame text (bullets / captions / block
+    titles) honour the directive — not just one of the two.
+
+    Without this fix ``_mem`` was computed in ``_generate`` but dropped on
+    the floor (T5's new T1/T2/T3 prompts had no ``{memory_context}`` slot)
+    and a user with a "always present in Traditional Chinese" memory would
+    silently get an English deck (SRS v2.17 contract regression).
+    """
+    monkeypatch.setattr(
+        "paperhub.agents.report_graph._pdflatex_available", lambda: True
+    )
+    await _seed_two_papers(migrated_db, tmp_path)
+    # Seed an ACTIVE global memory in the DB. recall_enabled must be True for
+    # this to surface (the happy-path harness sets it False to keep traces
+    # quiet; this test deliberately flips it on).
+    await migrated_db.execute(
+        "INSERT INTO memories (scope, session_id, content, status) "
+        "VALUES ('global', NULL, 'user prefers Traditional Chinese', 'active')"
+    )
+    await migrated_db.commit()
+
+    briefs = [_brief(paper_id=1), _brief(paper_id=2)]
+    outline = _outline(briefs)
+    stub_calls = _install_stubs(monkeypatch, briefs, outline)
+    _install_fake_compile(monkeypatch, page_count=7)
+
+    deps = _deps(_NullAdapter(), fake_tracer, migrated_db, tmp_path)
+    # Flip recall on (default in prod, off in the other harness tests).
+    deps = ReportDeps(
+        adapter=deps.adapter,
+        tracer=deps.tracer,
+        conn=deps.conn,
+        retriever=deps.retriever,
+        workspace=deps.workspace,
+        plan_model=deps.plan_model,
+        section_model=deps.section_model,
+        notes_model=deps.notes_model,
+        resolve_model=deps.resolve_model,
+        recall_enabled=True,
+    )
+    graph = build_report_subgraph(deps)
+    state = _state()
+    state["run_id"] = fake_tracer.run_id
+
+    async for _mode, _payload in graph.astream(
+        state, stream_mode=["custom", "values"]
+    ):
+        pass
+
+    # Memory MUST land on the plan_deck kwargs (Fix 2 — planner steers
+    # natural-language strings into the user-preferred language).
+    assert len(stub_calls["plan_deck_calls"]) == 1
+    plan_mem = stub_calls["plan_deck_calls"][0]["memory_context"]
+    assert plan_mem, (
+        "memory_context must reach run_sl_plan_deck — SRS v2.17 requires "
+        "active memories on every answering agent"
+    )
+    assert "Traditional Chinese" in plan_mem
+
+    # Memory MUST land on every render_slide call (Fix 2 — renderer steers
+    # frame-text bullets/captions in the user-preferred language too;
+    # planner strings alone don't cover the LaTeX content the user sees).
+    assert len(stub_calls["render_slide_calls"]) == len(outline.slides)
+    for call in stub_calls["render_slide_calls"]:
+        assert call["memory_context"], (
+            f"memory_context missing on render_slide for {call['pattern_kind']!r}"
+        )
+        assert "Traditional Chinese" in call["memory_context"]
+
+
+# ─────────────────── unknown paper_id (Fix 3) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_round1_planner_rejects_unknown_paper_id_loudly(  # type: ignore[no-untyped-def]
+    fake_tracer, migrated_db, tmp_path, monkeypatch
+) -> None:
+    """T5 review-fix (Fix 3): T2's ``_validate_attributions`` is the
+    canonical line of defense against a planner that attributes a slide
+    to a paper_id no brief carries. Without this validation a concept_2col
+    slide with ``paper_id=99`` would reach ``_render_one``, where
+    ``brief_by_paper_id.get(99)`` returns ``None`` and the renderer would
+    silently fall back to a cross-paper pattern — wrong attribution, no
+    error. Lock in that the planner raises ``ValueError`` (and the tracer
+    step is flipped to ``status='error'`` with the canonical
+    ``plan_validation_failed`` marker — no silent fallback).
+
+    This complements the focused unit test in test_sl_plan_deck.py; the
+    purpose here is to assert the validator is reached by the integration
+    flow's actual call site (a regression at T5/T6 that bypasses the
+    validator would slip past the unit test but break this one).
+    """
+    from paperhub.agents.sl_plan_deck import run_sl_plan_deck
+
+    briefs = [_brief(paper_id=1), _brief(paper_id=2)]
+    # Build an outline where one concept_2col attributes to paper_id=99 —
+    # not in either brief. The schema accepts it; only T2's
+    # ``_validate_attributions`` rejects it.
+    bad_outline = {
+        "talk_title": "Bad Talk",
+        "talk_subtitle": None,
+        "style_profile_name": "default",
+        "slides": [
+            {
+                "pattern_kind": "title",
+                "title": "",
+                "goal": "Open the talk.",
+                "paper_id": None,
+                "figure_key": None,
+                "equation_index": None,
+                "key_points": [],
+                "chunk_ids": [],
+            },
+            {
+                "pattern_kind": "concept_2col",
+                "title": "A concept",
+                "goal": "Pitch a thing.",
+                "paper_id": 99,  # hallucinated — no brief carries it
+                "figure_key": None,
+                "equation_index": None,
+                "key_points": ["k1"],
+                "chunk_ids": [],
+            },
+        ],
+    }
+    from unittest.mock import AsyncMock, patch
+
+    mock_completion = AsyncMock(
+        side_effect=[
+            {"choices": [{"message": {"role": "assistant",
+                                       "content": json.dumps(bad_outline)}}]}
+        ]
+    )
+
+    with (
+        patch("paperhub.agents.sl_plan_deck.litellm.acompletion", new=mock_completion),
+        pytest.raises(ValueError, match="hallucinated paper_id"),
+    ):
+        await run_sl_plan_deck(
+            briefs=briefs,
+            target_slide_count=5,
+            talk_title_hint=None,
+            tracer=fake_tracer,
+            model="m",
+            deps=None,
+            response_language="English",
+        )
+
+    # The tracer step must be flipped to ``status='error'`` with the
+    # canonical marker — no silent fallback that would let a misattributed
+    # slide reach the renderer.
+    async with migrated_db.execute(
+        "SELECT status, error FROM tool_calls "
+        "WHERE run_id = ? AND tool = 'report:plan_deck'",
+        (fake_tracer.run_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "error"
+    assert row[1] == "plan_validation_failed"

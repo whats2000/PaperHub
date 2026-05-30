@@ -466,11 +466,16 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = _slide_language(state)
-        # Active memory is recalled for parity with the deprecated chain;
-        # the new T1/T2/T3 nodes don't consume it directly yet (a later round
-        # is expected to thread it into the planner + renderer prompts), but
-        # the recall + tracer step shape is preserved so the cost + side
-        # effects of memory recall don't disappear from the trace.
+        # Active memory is recalled per the SRS v2.17 + CLAUDE.md contract
+        # ("every answering agent receives active memories via
+        # build_active_memory_block"). T5 review-fix threaded {memory_context}
+        # through ``slides_plan_deck_v1`` + ``slides_render_slide_v1`` so a
+        # remembered "always present in Traditional Chinese" steers BOTH the
+        # planner's natural-language strings (talk_title / titles / goals /
+        # key_points) AND the renderer's frame text (bullets / captions /
+        # block titles). Without this, a memory-set language was silently
+        # ignored on the T5 chain (the OLD chain wired it via
+        # slides_narrate_v1 + slides_draft_frame_v1 only).
         _mem = ""
         if deps.recall_enabled:
             _mem = await build_active_memory_block(
@@ -524,6 +529,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             model=deps.plan_model,
             deps=deps,
             response_language=lang,
+            memory_context=_mem,
         )
         # Defensively drop any figure_key the planner attributed but that is
         # not in the deck-wide inventory. (T2 already validates against each
@@ -559,6 +565,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 tracer=deps.tracer,
                 model=deps.section_model,
                 response_language=lang,
+                memory_context=_mem,
                 conn=deps.conn,
             )
 
@@ -626,6 +633,17 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             # observers; we use the in-scope list directly so a mid-flight
             # bug that fails to update state cannot silently empty the block.
             nc_block, nc_summary = build_newcommands_block(briefs)
+            # F4.4 T5 review-fix: T3's ``title`` pattern template emits a
+            # ``\begin{frame}[plain]\titlepage\end{frame}`` frame, and the T5
+            # planner ALWAYS emits a ``title`` PlannedSlide as slide #1, so
+            # the caller-supplied ``frames[0]`` is already a title frame.
+            # Tell assemble to skip its own injection or the deck has TWO
+            # leading title pages. Defensive guard: only set when the
+            # outline has at least one slide AND its first slide is the
+            # ``title`` pattern.
+            skip_title = bool(
+                outline.slides and outline.slides[0].pattern_kind == "title"
+            )
             tex = assemble_deck(
                 AssembleInput(
                     title=title_meta.title,
@@ -639,6 +657,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     date=title_meta.date,
                     subtitle=subtitle,
                     paper_newcommands_block=nc_block,
+                    skip_title_injection=skip_title,
                 )
             )
             astep.record_result(

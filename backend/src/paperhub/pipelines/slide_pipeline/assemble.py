@@ -26,6 +26,15 @@ class AssembleInput:
     # Inserted AFTER any ``ADDITIONAL.tex`` macros and BEFORE ``\title{}``
     # so paper-defined macros are visible everywhere in the deck.
     paper_newcommands_block: str = ""
+    # F4.4 T5 review-fix: when True, do NOT prepend the auto-injected
+    # ``\begin{frame}[plain]\titlepage\end{frame}`` — the caller has
+    # already supplied a title frame in ``frames``. T3's ``title``
+    # pattern template emits exactly that frame, and the T5 planner
+    # ALWAYS emits a ``title`` PlannedSlide as slide #1, so without this
+    # toggle the deck would have TWO leading identical title pages.
+    # Default ``False`` preserves the pre-T5 behaviour for callers that
+    # do not supply a title frame themselves.
+    skip_title_injection: bool = False
 
 
 def build_additional_block(macros: list[str]) -> str:
@@ -64,10 +73,13 @@ def assemble_deck(inp: AssembleInput) -> str:
     parts: list[str] = [
         *preamble,
         "\\begin{document}",
-        # Real, editable title frame (not bare \maketitle) so its layout can be
-        # customized via the edit_title sub-flow (F4.2).
-        "\\begin{frame}[plain]\n\\titlepage\n\\end{frame}",
-        *inp.frames,
-        "\\end{document}",
     ]
+    if not inp.skip_title_injection:
+        # Real, editable title frame (not bare \maketitle) so its layout can be
+        # customized via the edit_title sub-flow (F4.2). Skipped when the
+        # caller has already supplied a title frame in ``frames`` (F4.4 T5
+        # planner ALWAYS emits one); otherwise the deck would carry two.
+        parts.append("\\begin{frame}[plain]\n\\titlepage\n\\end{frame}")
+    parts.extend(inp.frames)
+    parts.append("\\end{document}")
     return "\n".join(p for p in parts if p) + "\n"
