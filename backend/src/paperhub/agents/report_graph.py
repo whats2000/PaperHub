@@ -1,19 +1,27 @@
 """Report Agent subgraph (Plan F3/F4 — PhD-grade slide topology, SRS v2.19+).
 
 GENERATE path (frame-only; F4 — speaker notes are opt-in, authored by a
-separate NOTES sub-flow):
+separate NOTES sub-flow). F4.4 Round 1 (T5) swapped the per-paper
+``understand → narrate → draft`` chain for an agentic-brief topology:
 
     sl_resolve → {empty | no_latex | create}; create runs:
 
-    sl_understand → sl_narrate → sl_draft → sl_coherence → sl_assemble
-    → sl_verify_figures → sl_compile → sl_emit → END
+    sl_paper_brief (fan-out per paper) → sl_plan_deck (one call) →
+    sl_render_slide (fan-out per planned slide, with bounded read-section /
+    read-figure-block callbacks) → sl_coherence → sl_assemble →
+    sl_verify_figures → sl_compile → sl_emit → END
 
 It consumes F2's ``PaperAsset`` (figures+captions, equations, sections) per
 enabled paper, builds a deck-wide collision-free figure inventory, drafts
-concise frames grounded in retrieved chunks, deterministically rejects any
-non-inventory figure (the hard no-hallucination guarantee), and compiles with
-an Overfull-aware revise loop. The ``deck`` SSE event + the ``decks`` row
-shape are unchanged from F1.
+concise frames grounded in each paper's brief (with optional callback reads
+when the brief is insufficient), deterministically rejects any non-inventory
+figure (the hard no-hallucination guarantee), and compiles with an
+Overfull-aware revise loop. The ``deck`` SSE event + the ``decks`` row shape
+are unchanged from F1.
+
+The OLD per-paper chain (``understand_paper`` / ``narrate_talk`` /
+``draft_frame``) is no longer wired in but the functions + their prompt YAMLs
+stay in the registry for one commit cycle so a later round can compare A/B.
 """
 from __future__ import annotations
 
@@ -36,15 +44,25 @@ from paperhub.agents.report_pipeline import (
     classify_deck_command,
     coherence_pass,
     detect_slide_language,
-    draft_frame,
+    # DEPRECATED (F4.4 Round 1, T5): draft_frame / narrate_talk /
+    # understand_paper are no longer wired into the GENERATE chain. Replaced
+    # by the agentic-brief topology (sl_paper_brief → sl_plan_deck →
+    # sl_render_slide). Imports kept so the module is still loadable from
+    # external callers (and so a later round can compare A/B); the prompt
+    # YAMLs (slides_understand_v1, slides_narrate_v1, slides_draft_frame_v1)
+    # also stay in the registry until a cleanup round retires them.
+    draft_frame,  # noqa: F401  — DEPRECATED, see comment above
     edit_frame,
     edit_preamble_block,
     edit_title_block,
-    narrate_talk,
+    narrate_talk,  # noqa: F401  — DEPRECATED, see comment above
     parse_slide_budget,
     revise_tex,
-    understand_paper,
+    understand_paper,  # noqa: F401  — DEPRECATED, see comment above
 )
+from paperhub.agents.sl_paper_brief import run_sl_paper_brief
+from paperhub.agents.sl_plan_deck import run_sl_plan_deck
+from paperhub.agents.sl_render_slide import run_sl_render_slide
 from paperhub.agents.state import effective_query, response_language
 from paperhub.db.deck_slides import (
     DeckSlideRow,
@@ -59,10 +77,13 @@ from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import (
     AgentState,
     DeckCommand,
-    FrameDraft,
-    OutlineSlide,
-    PaperBrief,
+    DeckOutline,
+    FrameDraft,  # noqa: F401  — DEPRECATED schema, see draft_frame comment
+    OutlineSlide,  # noqa: F401  — DEPRECATED schema, see narrate_talk comment
+    PaperBrief,  # noqa: F401  — DEPRECATED schema, see understand_paper comment
     PaperTalkBrief,
+    PlannedSlide,
+    RenderedSlide,
     SlideBudget,
 )
 from paperhub.pipelines.paper_asset import read_paper_asset
@@ -230,6 +251,10 @@ def _paper_block(paper: dict[str, Any], figs: list[InventoryFigure]) -> str:
 
     title + abstract (from paper_content) + section names + this paper's slice
     of the deck figure inventory (``key: caption``) + equations (LaTeX).
+
+    DEPRECATED (F4.4 Round 1, T5): consumed only by the now-retired
+    ``understand_paper`` call. Kept here for any external caller that
+    imports it; the GENERATE chain no longer invokes it.
     """
     source_dir = Path(str(paper["source_dir"])) if paper.get("source_dir") else None
     asset = read_paper_asset(source_dir) if source_dir else None
@@ -248,7 +273,11 @@ def _paper_block(paper: dict[str, Any], figs: list[InventoryFigure]) -> str:
 
 
 def _briefs_block(briefs: list[PaperBrief]) -> str:
-    """Render the per-paper briefs into the narrate prompt's briefs block."""
+    """Render the per-paper briefs into the narrate prompt's briefs block.
+
+    DEPRECATED (F4.4 Round 1, T5): consumed only by the now-retired
+    ``narrate_talk`` call. Kept for backward compatibility.
+    """
     parts: list[str] = []
     for b in briefs:
         parts.append(
@@ -413,16 +442,21 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         return {f.key for f in inv}
 
     def _deck_title(deck: Any) -> str:
-        """Best-effort deck title from the persisted plan (TalkOutline)."""
+        """Best-effort deck title from the persisted plan.
+
+        Handles both the OLD ``TalkOutline`` shape (``title``) and the new
+        ``DeckOutline`` shape (``talk_title``) so a deck generated by the
+        F4.4 Round 1 chain replays cleanly alongside any pre-existing one.
+        """
         plan = deck.plan or {}
-        return str(plan.get("title") or "Slides")
+        return str(plan.get("talk_title") or plan.get("title") or "Slides")
 
     async def _generate(state: AgentState) -> AgentState:
         writer, _flush_steps = _streaming(state)
 
         async def _then_flush(coro: Any) -> Any:
             """Await one fan-out task, then drain+stream its tool_step the
-            instant it closes — so a finished brief/draft surfaces live rather
+            instant it closes — so a finished brief/render surfaces live rather
             than being batched until the whole ``gather`` resolves."""
             result = await coro
             await _flush_steps()
@@ -432,34 +466,42 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = _slide_language(state)
-        mem = ""
+        # Active memory is recalled for parity with the deprecated chain;
+        # the new T1/T2/T3 nodes don't consume it directly yet (a later round
+        # is expected to thread it into the planner + renderer prompts), but
+        # the recall + tracer step shape is preserved so the cost + side
+        # effects of memory recall don't disappear from the trace.
+        _mem = ""
         if deps.recall_enabled:
-            mem = await build_active_memory_block(
+            _mem = await build_active_memory_block(
                 deps.conn, session_id=state.get("session_id")
             )
 
         # ---- deck-wide figure inventory (built ONCE, collision-free keys) ----
+        # The inventory drives sl_verify_figures' allowlist + the physical
+        # figure staging in sl_assemble. Per-paper slice → paper_idx mapping
+        # so each PaperTalkBrief / render call can be told which "p{idx}-"
+        # prefix is theirs.
         inv: list[InventoryFigure] = await asyncio.to_thread(build_inventory, papers)
         inv_keys = {f.key for f in inv}
-        inv_by_key = {f.key: f for f in inv}
-        # Per-paper inventory slices (paper enumeration index → "p{idx}-" prefix).
-        per_paper_figs: dict[int, list[InventoryFigure]] = {idx: [] for idx in range(len(papers))}
-        for f in inv:
-            for idx in range(len(papers)):
-                if f.key.startswith(f"p{idx}-"):
-                    per_paper_figs[idx].append(f)
-                    break
 
-        # ---- sl_understand: per-paper briefs (fan-out) ----
-        briefs: list[PaperBrief] = list(
+        # ---- sl_paper_brief: agentic per-paper read (fan-out) ----
+        # Each subagent navigates ONE paper via list_sections / read_section /
+        # read_figure_block / read_equations and emits a PaperTalkBrief. The
+        # bounded read budget (T1 constants) caps cost; the tracer records the
+        # full per-turn + per-tool-call log so the loop is reconstructable
+        # from the DB alone (agent-flow record principle).
+        briefs: list[PaperTalkBrief] = list(
             await asyncio.gather(
                 *[
                     _then_flush(
-                        understand_paper(
-                            paper_block=_paper_block(p, per_paper_figs.get(idx, [])),
-                            adapter=deps.adapter,
+                        run_sl_paper_brief(
+                            paper_content_id=p["id"],
+                            paper_idx=idx,
+                            title=p["title"],
                             tracer=deps.tracer,
                             model=deps.notes_model,
+                            conn=deps.conn,
                             response_language=lang,
                         )
                     )
@@ -469,76 +511,68 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         )
         await _flush_steps()
 
-        # ---- sl_narrate: one cross-paper TalkOutline ----
-        outline = await narrate_talk(
-            briefs_block=_briefs_block(briefs),
-            figure_inventory=_inventory_lines(inv),
-            adapter=deps.adapter,
+        # Make the briefs visible to assemble (paper_newcommands plumbing —
+        # T4) and to downstream observers via the state slot.
+        state = {**state, "report_paper_briefs": briefs}
+
+        # ---- sl_plan_deck: one cross-paper DeckOutline ----
+        outline: DeckOutline = await run_sl_plan_deck(
+            briefs=briefs,
+            target_slide_count=budget.target_slide_count,
+            talk_title_hint=None,
             tracer=deps.tracer,
             model=deps.plan_model,
+            deps=deps,
             response_language=lang,
-            memory_context=mem,
-            target_slide_count=budget.target_slide_count,
-            depth=budget.depth,
         )
-        # Defensively drop any figure_key not in the deck inventory.
-        slides: list[OutlineSlide] = []
+        # Defensively drop any figure_key the planner attributed but that is
+        # not in the deck-wide inventory. (T2 already validates against each
+        # brief's key_figures; this is the second-line guard against a brief
+        # claiming a key that did not survive ingest.)
+        sanitized_slides: list[PlannedSlide] = []
         for s in outline.slides:
             if s.figure_key and s.figure_key not in inv_keys:
-                s = s.model_copy(update={"figure_key": None})
-            slides.append(s)
+                sanitized_slides.append(s.model_copy(update={"figure_key": None}))
+            else:
+                sanitized_slides.append(s)
+        outline = outline.model_copy(update={"slides": sanitized_slides})
         await _flush_steps()
 
-        # ---- sl_draft: per-slide frame-only drafts (fan-out, IN ORDER) ----
-        retr = deps.retriever
+        # ---- sl_render_slide: per-slide frame render (fan-out, in order) ----
+        # Each call sees ONE PlannedSlide + the relevant brief (None for
+        # cross-paper patterns) + the full briefs list (so cross-paper
+        # patterns like references / bottlenecks_table have the data they
+        # need). Bounded callback budget (T3 constant) lets the renderer
+        # fetch one or two extra reads when the brief is insufficient.
+        brief_by_paper_id: dict[int, PaperTalkBrief] = {b.paper_id: b for b in briefs}
 
-        def _chunks_block(chunk_ids: list[int]) -> str:
-            if retr is None or not chunk_ids:
-                return "(no retrieved chunks; ground in the brief)"
-            chunks = retr.retrieve(
-                "",
-                enabled_paper_content_ids=[p["id"] for p in papers],
-                corpus_size=1000,
-                top_k=len(chunk_ids) or 6,
+        async def _render_one(planned: PlannedSlide) -> RenderedSlide:
+            return await run_sl_render_slide(
+                planned_slide=planned,
+                deck_outline=outline,
+                paper_brief=(
+                    brief_by_paper_id.get(planned.paper_id)
+                    if planned.paper_id is not None
+                    else None
+                ),
+                all_briefs=briefs,
+                tracer=deps.tracer,
+                model=deps.section_model,
+                response_language=lang,
+                conn=deps.conn,
             )
-            wanted = set(chunk_ids)
-            text = "\n\n".join(
-                c.text for c in chunks if getattr(c, "chunk_id", None) in wanted
-            )
-            return text or "(no retrieved chunks; ground in the brief)"
 
-        def _assigned_figure(key: str | None) -> str | None:
-            if key and key in inv_by_key:
-                f = inv_by_key[key]
-                return f"{f.key}: {f.caption}"
-            return None
-
-        drafts: list[FrameDraft] = list(
+        rendered: list[RenderedSlide] = list(
             await asyncio.gather(
-                *[
-                    _then_flush(
-                        draft_frame(
-                            deck_title=outline.title,
-                            slide=s,
-                            assigned_figure=_assigned_figure(s.figure_key),
-                            assigned_equation=s.equation,
-                            chunks_block=_chunks_block(s.chunk_ids),
-                            adapter=deps.adapter,
-                            tracer=deps.tracer,
-                            model=deps.section_model,
-                            response_language=lang,
-                            memory_context=mem,
-                        )
-                    )
-                    for s in slides
-                ]
+                *[_then_flush(_render_one(s)) for s in outline.slides]
             )
         )
         await _flush_steps()
+        state = {**state, "report_rendered_slides": rendered, "report_outline": outline}
 
         # ---- sl_coherence: smooth all frames together ----
         frames = await coherence_pass(
-            frames=[d.frame for d in drafts],
+            frames=[r.frame_tex for r in rendered],
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.section_model,
@@ -581,20 +615,17 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             )
             macros = await asyncio.to_thread(_read_macros)
             await asyncio.to_thread(stage_inventory, used, figures_dir)
-            title_meta = build_title_metadata(papers, talk_title=outline.title)
+            title_meta = build_title_metadata(papers, talk_title=outline.talk_title)
             # Single-paper decks show the paper's own title; surface the talk
             # framing as the subtitle so the narrative isn't lost. Multi-paper
             # decks already use the talk title, so no subtitle.
-            subtitle = outline.title if len(papers) == 1 else ""
-            # F4.4 T4: plumb each paper's own \newcommand block into the
-            # preamble. T5 will populate ``report_paper_briefs`` from
-            # ``sl_paper_brief``; until then briefs is empty and the helper
-            # emits a marker-only block with the "(no paper-defined macros
-            # to plumb)" note so the location stays consistent.
-            briefs_for_nc: list[PaperTalkBrief] = list(
-                state.get("report_paper_briefs", [])
-            )
-            nc_block, nc_summary = build_newcommands_block(briefs_for_nc)
+            subtitle = outline.talk_title if len(papers) == 1 else ""
+            # F4.4 T4/T5: plumb each paper's own \newcommand block into the
+            # preamble. ``briefs`` is populated by sl_paper_brief above (T5)
+            # and mirrored on ``state["report_paper_briefs"]`` for downstream
+            # observers; we use the in-scope list directly so a mid-flight
+            # bug that fails to update state cannot silently empty the block.
+            nc_block, nc_summary = build_newcommands_block(briefs)
             tex = assemble_deck(
                 AssembleInput(
                     title=title_meta.title,
@@ -728,13 +759,13 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         _emit_deck(
             writer,
             deck,
-            outline.title,
+            outline.talk_title,
             [{"id": p["id"], "title": p["title"]} for p in papers],
             has_notes=bool(notes),
         )
 
         final = (
-            f'Generated a {deck.page_count}-slide deck — "{outline.title}". '
+            f'Generated a {deck.page_count}-slide deck — "{outline.talk_title}". '
             "Want speaker notes? Say \"generate speaker notes\" (you can pick a "
             "language). I can also edit any slide — just tell me the page."
             if result.ok

@@ -9,14 +9,22 @@ from typing import Any
 
 import pytest
 
+import paperhub.agents.report_graph as rg
 from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
 from paperhub.db.deck_slides import get_deck_slides
 from paperhub.db.decks import get_deck
 from paperhub.models.domain import (
     DeckCommand,
+    DeckOutline,
     FrameDraft,
+    KeyEquation,
+    KeyFigure,
+    KeyResult,
     OutlineSlide,
     PaperBrief,
+    PaperTalkBrief,
+    PlannedSlide,
+    RenderedSlide,
     RoutingDecision,
     TalkOutline,
     TargetLanguage,
@@ -212,12 +220,123 @@ async def _seed_paper(migrated_db, tmp_path, cache: str) -> Path:  # type: ignor
     return source_dir
 
 
+def _install_t5_stubs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Patch the three T5 agentic nodes (sl_paper_brief / sl_plan_deck /
+    sl_render_slide) on ``report_graph`` so the seed-deck GENERATE chain
+    runs without a real LLM. The outline matches the OLD ``_CreateAdapter``
+    shape: a single paper with two content slides ('Motivation' + 'Method'),
+    one referencing the staged figure key. Frame text is provided by the
+    fake compile (``_DECK_TEX``) — the render stubs just need to return
+    schema-valid RenderedSlide rows so the chain reaches compile."""
+    brief = PaperTalkBrief(
+        paper_id=1,
+        contribution="A new mechanism.",
+        method_core="Scaled attention.",
+        key_results=[
+            KeyResult(description="SOTA", number="14%", benchmark="LIBERO"),
+        ],
+        key_figures=[
+            KeyFigure(
+                key="p0-fig-000", role="overview",
+                one_line_interpretation="shows the diagram",
+            ),
+        ],
+        key_equations=[
+            KeyEquation(
+                latex="E=mc^2", role="objective",
+                notation_explanation="E is energy",
+            ),
+        ],
+        paper_newcommands="",
+        talk_shape_hint="concept+math",
+    )
+    outline = DeckOutline(
+        talk_title="MoE",
+        slides=[
+            PlannedSlide(
+                pattern_kind="concept_2col",
+                title="Motivation", goal="why",
+                paper_id=1, figure_key="p0-fig-000",
+                key_points=["a"],
+            ),
+            PlannedSlide(
+                pattern_kind="concept_2col",
+                title="Method", goal="how",
+                paper_id=1, figure_key=None,
+                key_points=["b"],
+            ),
+        ],
+        style_profile_name="default",
+    )
+
+    async def fake_paper_brief(*, paper_content_id, paper_idx, title,
+                               tracer, model, conn, **kw):  # type: ignore[no-untyped-def]
+        async with tracer.step(
+            agent="report", tool="report:paper_brief", model=model,
+        ) as step:
+            step.record_args({"paper_content_id": paper_content_id})
+            step.record_result({"stubbed": True})
+        return brief
+
+    async def fake_plan_deck(*, briefs, target_slide_count, talk_title_hint,
+                             tracer, model, **kw):  # type: ignore[no-untyped-def]
+        async with tracer.step(
+            agent="report", tool="report:plan_deck", model=model,
+        ) as step:
+            step.record_args({"target": target_slide_count})
+            step.record_result({"stubbed": True})
+        return outline
+
+    async def fake_render_slide(*, planned_slide, deck_outline, paper_brief,
+                                all_briefs, tracer, model, **kw):  # type: ignore[no-untyped-def]
+        slide_idx = next(
+            i for i, s in enumerate(deck_outline.slides) if s is planned_slide
+        )
+        frame_tex = (
+            "\\begin{frame}{" + planned_slide.title + "}"
+            + (
+                "\\includegraphics{" + planned_slide.figure_key + "}"
+                if planned_slide.figure_key
+                else ""
+            )
+            + "\\end{frame}"
+        )
+        figure_keys = (
+            [planned_slide.figure_key] if planned_slide.figure_key else []
+        )
+        async with tracer.step(
+            agent="report", tool="report:render_slide", model=model,
+        ) as step:
+            step.record_args({
+                "slide_index": slide_idx,
+                "pattern_kind": planned_slide.pattern_kind,
+            })
+            step.record_result({"stubbed": True})
+        return RenderedSlide(
+            slide_index=slide_idx,
+            pattern_kind=planned_slide.pattern_kind,
+            paper_id=planned_slide.paper_id,
+            frame_tex=frame_tex,
+            figure_keys_used=figure_keys,
+            callback_reads=[],
+        )
+
+    monkeypatch.setattr(rg, "run_sl_paper_brief", fake_paper_brief)
+    monkeypatch.setattr(rg, "run_sl_plan_deck", fake_plan_deck)
+    monkeypatch.setattr(rg, "run_sl_render_slide", fake_render_slide)
+
+
 async def _seed_deck(fake_tracer, migrated_db, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Run the GENERATE path once to produce a 2-frame deck on disk + in DB."""
+    """Run the GENERATE path once to produce a 2-frame deck on disk + in DB.
+
+    F4.4 T5: the chain now runs the agentic-brief topology; we stub the three
+    new nodes so the seed-deck path doesn't need a real LLM. ``_CreateAdapter``
+    still serves the language-detection + coherence slots."""
     monkeypatch.setattr(
         "paperhub.agents.report_graph._pdflatex_available", lambda: True
     )
     await _seed_paper(migrated_db, tmp_path, "cacheGen")
+    _install_t5_stubs(monkeypatch)
 
     async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
         Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
@@ -488,11 +607,17 @@ class _TitlepageEditAdapter:
 
 
 async def _seed_titlepage_deck(fake_tracer, migrated_db, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Seed a titlepage-style deck (NO \\maketitle) via the GENERATE path."""
+    """Seed a titlepage-style deck (NO \\maketitle) via the GENERATE path.
+
+    F4.4 T5: stubs the new agentic-brief chain so the GENERATE path runs
+    without a real LLM. The fake compile substitutes ``_TITLEPAGE_TEX`` for
+    whatever the chain assembles, so the test is about the post-compile
+    deck_slides mapping + edit routing, not the rendered frame text."""
     monkeypatch.setattr(
         "paperhub.agents.report_graph._pdflatex_available", lambda: True
     )
     await _seed_paper(migrated_db, tmp_path, "cacheTitlepage")
+    _install_t5_stubs(monkeypatch)
 
     async def fake_compile(*, tex, workdir, tex_name, revise, max_retries=3):  # type: ignore[no-untyped-def]
         Path(workdir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240

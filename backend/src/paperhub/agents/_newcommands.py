@@ -21,6 +21,14 @@ Dedup contract (per the F4.4 T4 plan):
   differently — using paper N's version`` comment.
 - Stable order: paper 1's macros in original order, then paper 2's NEW
   (non-colliding) macros, etc.
+
+Coexistence with ``ADDITIONAL.tex`` (T5 close-out, A2 option 1): the
+emitted block is rewritten to use ``\\providecommand`` (one form covers
+``\\newcommand`` / ``\\renewcommand`` / ``\\DeclareMathOperator``).
+``\\providecommand`` silently no-ops when the macro is already defined —
+so an ``ADDITIONAL.tex`` sidecar (assembled BEFORE this block in
+``assemble_deck``) wins on overlap, the deck never hard-fails on
+redefinition, and non-overlapping brief macros still get plumbed.
 """
 from __future__ import annotations
 
@@ -66,6 +74,57 @@ def _extract_macro_name(line: str) -> str | None:
     return None
 
 
+# Rewrite patterns for the providecommand downgrade (T5 close-out, A2
+# option 1). Each replaces the leading control sequence with ``\providecommand``
+# while preserving the macro name + definition body verbatim. The order matches
+# the four ``_PATTERNS`` (``DeclareMathOperator*`` before ``DeclareMathOperator``
+# so the star variant wins).
+#
+# - ``\newcommand`` / ``\newcommand*`` / ``\renewcommand`` / ``\renewcommand*``
+#   → ``\providecommand`` (the optional ``*`` is dropped — ``\providecommand``
+#   has the same star-variant semantics by default, the difference is rarely
+#   load-bearing in slide preambles).
+# - ``\DeclareMathOperator{\X}{Y}`` → ``\providecommand{\X}{\operatorname{Y}}``
+#   so the upright operator look is preserved (otherwise ``\X`` would render
+#   as italic letters in math mode).
+# - ``\DeclareMathOperator*{\X}{Y}`` → ``\providecommand{\X}{\operatorname*{Y}}``
+#   to keep the displayed-limits behaviour of the star form.
+_NEWCMD_RE = re.compile(r"\\(?:newcommand|renewcommand)\*?")
+_DECLARE_OP_STAR_RE = re.compile(
+    r"\\DeclareMathOperator\*\s*\{?\\([A-Za-z@]+)\}?\s*\{((?:[^{}]|\{[^{}]*\})*)\}"
+)
+_DECLARE_OP_RE = re.compile(
+    r"\\DeclareMathOperator(?!\*)\s*\{?\\([A-Za-z@]+)\}?\s*\{((?:[^{}]|\{[^{}]*\})*)\}"
+)
+
+
+def _rewrite_to_providecommand(line: str) -> str:
+    """Downgrade the leading control sequence to ``\\providecommand`` so the
+    block silently no-ops when a name is already defined by ADDITIONAL.tex
+    (which ``assemble_deck`` emits BEFORE this block). Macro NAME + BODY
+    preserved verbatim. ``\\DeclareMathOperator[*]`` is rewritten to wrap the
+    body in ``\\operatorname[*]`` so the upright/limits semantics survive."""
+    # Star variant first so it doesn't get swallowed by the plain pattern.
+    m = _DECLARE_OP_STAR_RE.search(line)
+    if m:
+        name, body = m.group(1), m.group(2)
+        return _DECLARE_OP_STAR_RE.sub(
+            rf"\\providecommand{{\\{name}}}{{\\operatorname*{{{body}}}}}", line
+        )
+    m = _DECLARE_OP_RE.search(line)
+    if m:
+        name, body = m.group(1), m.group(2)
+        return _DECLARE_OP_RE.sub(
+            rf"\\providecommand{{\\{name}}}{{\\operatorname{{{body}}}}}", line
+        )
+    if _NEWCMD_RE.search(line):
+        return _NEWCMD_RE.sub(r"\\providecommand", line, count=1)
+    # No supported control word found → leave the line alone (the caller will
+    # SKIP it; this branch is only reached if a caller manually invokes the
+    # rewrite on a non-macro line).
+    return line
+
+
 def build_newcommands_block(
     briefs: list[PaperTalkBrief],
 ) -> tuple[str, NewcommandsSummary]:
@@ -107,9 +166,16 @@ def build_newcommands_block(
             if name is None:
                 skipped.append((paper_idx, line))
                 continue
+            # Downgrade to \providecommand BEFORE storing so the emitted block
+            # never carries \newcommand / \renewcommand / \DeclareMathOperator
+            # (any of which would hard-fail on overlap with ADDITIONAL.tex).
+            # Dedup compares the rewritten string: two papers emitting the
+            # identical \newcommand line yield the identical \providecommand
+            # line, so identical-definition dedup still works.
+            rewritten = _rewrite_to_providecommand(line)
             if name in by_name:
                 existing_line, existing_paper = by_name[name]
-                if existing_line == line:
+                if existing_line == rewritten:
                     # Identical re-emit — drop silently.
                     continue
                 # Same name, different definition → keep first, note divergence.
@@ -119,7 +185,7 @@ def build_newcommands_block(
                 )
                 collisions.append(name)
                 continue
-            by_name[name] = (line, paper_idx)
+            by_name[name] = (rewritten, paper_idx)
             order.append(name)
 
     body_lines: list[str] = []
