@@ -112,8 +112,12 @@ class KeyResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str
-    number: str
-    benchmark: str
+    # number + benchmark are load-bearing: the prompt mandates "Every
+    # key_result MUST include the benchmark name AND the number"; without
+    # min_length=1 a lazy LLM emit of "" would still validate and record a
+    # passing brief that silently drops the quantification at slide time.
+    number: str = Field(min_length=1)
+    benchmark: str = Field(min_length=1)
 
 
 KeyFigureRole = Literal[
@@ -163,7 +167,10 @@ class KeyEquation(BaseModel):
 
     latex: str
     role: KeyEquationRole
-    notation_explanation: str
+    # Load-bearing: enforced non-empty so the "every symbol named on the
+    # same slide" contract from the prompt can't be silently dropped by an
+    # empty LLM emit. Closes the equation-without-symbol-definition gap.
+    notation_explanation: str = Field(min_length=1)
 
 
 TalkShapeHint = Literal[

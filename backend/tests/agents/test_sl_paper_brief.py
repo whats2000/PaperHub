@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from paperhub.models.domain import PaperTalkBrief
 from paperhub.pipelines.paper_asset import (
+    EquationAsset,
     FigureAsset,
     PaperAsset,
     SectionAsset,
@@ -195,6 +196,32 @@ def test_paper_talk_brief_rejects_unknown_role() -> None:
     """An invalid key_figures[*].role enum value is rejected by the schema."""
     payload = _full_brief_payload(paper_id=1)
     payload["key_figures"][0]["role"] = "not_a_role"
+    with pytest.raises(ValidationError):
+        PaperTalkBrief.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        ("key_results", 0, "number"),
+        ("key_results", 0, "benchmark"),
+        ("key_equations", 0, "notation_explanation"),
+    ],
+)
+def test_paper_talk_brief_rejects_empty_load_bearing_fields(
+    field_path: tuple[str, int, str],
+) -> None:
+    """Empty values for KeyResult.number / .benchmark and
+    KeyEquation.notation_explanation are rejected by the schema.
+
+    The prompt mandates these fields be present and informative; without a
+    schema-level non-empty constraint a lazy LLM emit of ``""`` would still
+    validate, silently dropping the quantification (results) or the symbol
+    definitions (equations) the slide stage depends on.
+    """
+    payload = _full_brief_payload(paper_id=1)
+    parent_key, idx, field_name = field_path
+    payload[parent_key][idx][field_name] = ""
     with pytest.raises(ValidationError):
         PaperTalkBrief.model_validate(payload)
 
@@ -432,3 +459,177 @@ async def test_sl_paper_brief_caps_read_budget(
     assert len(budget_hits) == 1
 
 
+def _write_asset_with_equations(source_dir: Path) -> None:
+    """Write a PaperAsset with mixed-section equations.
+
+    Two equations in Methods (an equation env + an align* env, both LaTeX
+    bodies — the asset stores rendered LaTeX, not the wrapping env), one in
+    Results. _read_equations should filter to the Methods pair.
+    """
+    asset = PaperAsset(
+        figures=[
+            FigureAsset(
+                id="fig-001",
+                caption="dummy",
+                page=1,
+                section="Methods",
+                image_path="figures/fig-001.png",
+            ),
+        ],
+        equations=[
+            EquationAsset(
+                id="eq-001",
+                latex=r"\mathcal{L} = \mathbb{E}[\| v_\theta - (x_1 - x_0) \|^2]",
+                section="Methods",
+            ),
+            EquationAsset(
+                id="eq-002",
+                latex=r"x_t &= (1-t) x_0 + t x_1 \\ \dot x_t &= x_1 - x_0",
+                section="Methods",
+            ),
+            EquationAsset(
+                id="eq-003",
+                latex=r"\text{Acc}(M) = \frac{1}{N}\sum_i \mathbf{1}[\hat y_i = y_i]",
+                section="Results",
+            ),
+        ],
+        sections=[
+            SectionAsset(name="Methods", order=1),
+            SectionAsset(name="Results", order=2),
+        ],
+    )
+    write_paper_asset(asset, source_dir)
+
+
+@pytest.mark.asyncio
+async def test_sl_paper_brief_read_equations_filters_by_section(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+    tmp_path: Path,
+) -> None:
+    """read_equations(Methods) returns both Methods equations and excludes
+    the Results equation; the tracer step records the section name + the
+    budget counter increments by one.
+    """
+    src_dir = tmp_path / "paper-eq"
+    src_dir.mkdir()
+    _write_asset_with_equations(src_dir)
+
+    pcid = await _seed_paper(
+        migrated_db,
+        title="Equation-heavy paper",
+        sections=[
+            {"name": "Methods", "chunks": ["Methods text."]},
+            {"name": "Results", "chunks": ["Results text."]},
+        ],
+        source_dir=src_dir,
+    )
+
+    final_json = json.dumps(_full_brief_payload(paper_id=pcid))
+    responses = [
+        _msg(tool_calls=[_tool_call("c1", "list_sections", {})]),
+        _msg(tool_calls=[_tool_call("c2", "read_equations", {"section": "Methods"})]),
+        _msg(content=final_json),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.sl_paper_brief import run_sl_paper_brief
+
+    with patch("paperhub.agents.sl_paper_brief.litellm.acompletion", new=mock_completion):
+        await run_sl_paper_brief(
+            paper_content_id=pcid,
+            paper_idx=0,
+            title="Equation-heavy paper",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            response_language="English",
+        )
+
+    # Inspect the tool result the LLM saw on its final call.
+    final_call_msgs = mock_completion.call_args_list[-1].kwargs["messages"]
+    tool_results = [m for m in final_call_msgs if m.get("role") == "tool"]
+    eq_results = [t for t in tool_results if t["name"] == "read_equations"]
+    assert len(eq_results) == 1
+    body = eq_results[0]["content"]
+    assert r"\mathcal{L}" in body
+    assert r"x_t &= (1-t)" in body
+    # The Results-section equation must NOT leak into the Methods read.
+    assert r"\text{Acc}(M)" not in body
+
+    # Tracer records the section + budget counter.
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE tool = 'report:paper_brief'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    result = json.loads(row[0])
+    assert result["equations_read_sections"] == ["Methods"]
+    assert result["equation_reads_used"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sl_paper_brief_fallback_marks_step_error(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+    tmp_path: Path,
+) -> None:
+    """When the LLM emits non-JSON, the node returns an empty-but-valid brief
+    AND flips the tracer step to status='error' with the canonical
+    'brief_parse_failed' marker. Per the agent-flow observability iron rule:
+    a silent fallback emitting structurally-valid garbage downstream is
+    precisely the failure mode the rule was written to prevent.
+    """
+    src_dir = tmp_path / "paper-bad-json"
+    src_dir.mkdir()
+    _write_asset_with_figure(src_dir, fig_id="fig-001")
+
+    pcid = await _seed_paper(
+        migrated_db,
+        title="Recalcitrant paper",
+        sections=[
+            {"name": "Methods", "chunks": ["Methods text."]},
+        ],
+        source_dir=src_dir,
+    )
+
+    # Only one LLM turn: invalid JSON, no tool calls — node exits the loop
+    # and falls through to the parse-error branch.
+    responses = [
+        _msg(content="this is not valid JSON, sorry"),
+    ]
+    mock_completion = AsyncMock(side_effect=responses)
+
+    from paperhub.agents.sl_paper_brief import run_sl_paper_brief
+
+    with patch("paperhub.agents.sl_paper_brief.litellm.acompletion", new=mock_completion):
+        brief = await run_sl_paper_brief(
+            paper_content_id=pcid,
+            paper_idx=0,
+            title="Recalcitrant paper",
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            conn=migrated_db,
+            response_language="English",
+        )
+
+    # (a) graceful empty-but-valid brief
+    assert isinstance(brief, PaperTalkBrief)
+    assert brief.paper_id == pcid
+    assert brief.contribution == ""
+    assert brief.key_results == []
+    assert brief.talk_shape_hint == "concept_only"
+
+    # (b) recorded tool_calls row is status='error' with the canonical marker
+    async with migrated_db.execute(
+        "SELECT status, error, result_summary_json FROM tool_calls "
+        "WHERE tool = 'report:paper_brief'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    status, error, result_json = row
+    assert status == "error"
+    assert error == "brief_parse_failed"
+    # parse_error in the recorded payload pinpoints the failure for debug.
+    result = json.loads(result_json)
+    assert result["parse_error"]

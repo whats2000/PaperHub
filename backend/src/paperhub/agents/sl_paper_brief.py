@@ -58,16 +58,6 @@ MAX_EQUATION_READS: int = 2
 # for the final no-tool-calls turn.
 _MAX_TURNS: int = MAX_SECTION_READS + MAX_FIGURE_READS + MAX_EQUATION_READS + 3
 
-# Matches the equation / align / align* / multline / gather environments most
-# academic papers use to display centred math. Non-greedy so we capture each
-# block individually.
-_EQUATION_BLOCK_RE = re.compile(
-    r"\\begin\{(equation\*?|align\*?|multline\*?|gather\*?)\}"
-    r"(.*?)"
-    r"\\end\{\1\}",
-    re.DOTALL,
-)
-
 # Strip a wrapping markdown code fence (```json ... ```) so a fenced JSON
 # response still validates. Tolerates an optional language tag.
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|\n?```$")
@@ -310,25 +300,30 @@ async def _read_figure_block(
 
 async def _read_equations(
     *,
-    paper_content_id: int,
     section: str,
-    conn: aiosqlite.Connection,
+    asset: PaperAsset | None,
+    valid_section_names: list[str] | None,
 ) -> tuple[str, int]:
-    """Return every equation block found in ``section`` + the count.
+    """Return every equation in ``section`` (verbatim LaTeX) + the count.
 
-    Scans the section's chunk text for ``\\begin{equation}`` / ``\\begin{align}``
-    (etc.) environments via regex. PaperAsset's ``equations`` index lists
-    every equation in the paper but without a section attribution, so a
-    section-scoped read goes through the chunks for reliability.
+    Filters the PaperAsset's ``equations`` index directly by
+    ``EquationAsset.section`` — both ingestion paths (``latex_to_asset`` and
+    ``marker_to_asset``) populate this field, so the asset is the canonical
+    source. Aligning with how :func:`_read_figure_block` consumes structured
+    asset entries (rather than re-scanning chunks) avoids a divergence risk
+    between chunk text and asset LaTeX and removes a regex from the hot path.
+
+    ``valid_section_names`` (the most recent ``list_sections`` result, if
+    any) is used to disambiguate "unknown section" from "known section with
+    no equations" so the LLM gets a clear remediation hint.
     """
-    async with conn.execute(
-        "SELECT text FROM chunks "
-        "WHERE paper_content_id = ? AND section = ? "
-        "ORDER BY char_start",
-        (paper_content_id, section),
-    ) as cur:
-        rows = await cur.fetchall()
-    if not rows:
+    if asset is None or not asset.equations:
+        return (
+            json.dumps({"error": "this paper has no equation index in its PaperAsset"}),
+            0,
+        )
+
+    if valid_section_names is not None and section not in valid_section_names:
         return (
             json.dumps({
                 "error": f"unknown section: {section!r}. Call list_sections() first.",
@@ -336,18 +331,20 @@ async def _read_equations(
             0,
         )
 
-    found: list[str] = []
-    for (text,) in rows:
-        for m in _EQUATION_BLOCK_RE.finditer(str(text)):
-            block = m.group(0).strip()
-            if block and block not in found:
-                found.append(block)
-    if not found:
+    matched: list[str] = []
+    for eq in asset.equations:
+        if eq.section != section:
+            continue
+        latex = eq.latex.strip()
+        if latex and latex not in matched:
+            matched.append(latex)
+
+    if not matched:
         return (
-            json.dumps({"info": f"no equation environments found in {section!r}"}),
+            json.dumps({"info": f"no equations indexed in {section!r}"}),
             0,
         )
-    return (json.dumps({"equations": found}, ensure_ascii=False), len(found))
+    return (json.dumps({"equations": matched}, ensure_ascii=False), len(matched))
 
 
 # ──────────────────────── output parsing ────────────────────────────
@@ -580,9 +577,9 @@ async def run_sl_paper_brief(
                         tool_log_entry["error"] = "budget_exhausted"
                     else:
                         result_str, eq_count = await _read_equations(
-                            paper_content_id=paper_content_id,
                             section=section_name,
-                            conn=conn,
+                            asset=asset,
+                            valid_section_names=listed_sections,
                         )
                         # A successful section lookup (even one with zero
                         # equations) burns the budget — it's still a
@@ -610,7 +607,12 @@ async def run_sl_paper_brief(
                 })
 
         # Parse the final JSON, with a defensive fallback if the LLM never
-        # produced a clean schema-conformant response.
+        # produced a clean schema-conformant response. The fallback brief is
+        # still returned (so the deck pipeline degrades gracefully) but the
+        # tracer step is flipped to status='error' via mark_error — per the
+        # agent-flow observability iron rule, a silent fallback emitting
+        # structurally-valid garbage downstream is precisely the failure
+        # mode we refuse to swallow.
         brief: PaperTalkBrief
         if final_text:
             try:
@@ -621,9 +623,11 @@ async def run_sl_paper_brief(
             except (ValidationError, ValueError) as exc:
                 parse_error = f"{type(exc).__name__}: {exc}"
                 brief = _empty_brief(paper_content_id)
+                step.mark_error("brief_parse_failed")
         else:
             parse_error = "no final no-tool-calls response from LLM"
             brief = _empty_brief(paper_content_id)
+            step.mark_error("brief_parse_failed")
 
         step.record_result({
             "paper_id": brief.paper_id,
