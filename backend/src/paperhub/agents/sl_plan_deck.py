@@ -59,6 +59,18 @@ _CROSS_PAPER_PATTERNS: frozenset[str] = frozenset({
     "takeaway_closer",
 })
 
+# Patterns whose layouts do not use ``\frametitle`` (``title`` page uses
+# ``\titlepage``; the closer uses a ``\rule`` divider). Every OTHER pattern
+# is rendered as a content frame with ``\frametitle{<title>}`` — so an empty
+# ``title`` on those patterns would silently emit ``\frametitle{}``. The
+# schema must still accept ``title=""`` for the two legitimate cases, so the
+# rule is conditional and enforced here, NOT via a ``min_length=1`` field
+# constraint.
+_TITLE_OPTIONAL_PATTERNS: frozenset[str] = frozenset({
+    "title",
+    "takeaway_closer",
+})
+
 
 @dataclass(frozen=True)
 class _BriefSummary:
@@ -159,6 +171,23 @@ def _validate_attributions(
     paper_index: dict[int, PaperTalkBrief] = {b.paper_id: b for b in briefs}
 
     for slide_idx, slide in enumerate(outline.slides):
+        # Content patterns MUST carry a non-empty title — T3 will render
+        # them as ``\frametitle{<title>}``. Only ``title`` and
+        # ``takeaway_closer`` use alternative framing (``\titlepage`` /
+        # ``\rule``) so they may legitimately have ``title=""``. The
+        # schema cannot enforce this conditionally; this check closes
+        # the gap.
+        if (
+            slide.pattern_kind not in _TITLE_OPTIONAL_PATTERNS
+            and not slide.title.strip()
+        ):
+            raise ValueError(
+                f"planner emitted empty title for content pattern_kind="
+                f"{slide.pattern_kind!r} at slide_index={slide_idx}; "
+                "content patterns must carry a non-empty 2-6-word title "
+                f"(only {sorted(_TITLE_OPTIONAL_PATTERNS)} may have title='')."
+            )
+
         # Cross-paper patterns MUST have paper_id=null. A non-null
         # attribution on, e.g., the closer slide breaks T3's pattern
         # branching (the renderer would try to look up a paper-specific

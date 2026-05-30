@@ -497,6 +497,89 @@ async def test_sl_plan_deck_rejects_invalid_equation_index(
 
 
 @pytest.mark.asyncio
+async def test_sl_plan_deck_rejects_empty_title_on_content_pattern(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """An outline with title='' on a content pattern (concept_2col) must
+    raise ValueError + tracer step status='error' with
+    'plan_validation_failed'. Mirrors the existing hallucination-rejection
+    pattern: T3 would otherwise silently emit ``\\frametitle{}`` on the
+    rendered frame.
+    """
+    briefs = [_brief(paper_id=10 + i) for i in range(3)]
+    outline_dict = _multi_paper_outline_dict(briefs)
+    # Patch the first concept_2col slide (index 4 in the multi-paper
+    # skeleton) to clear its title — schema-valid but semantically broken
+    # for a content pattern.
+    outline_dict["slides"][4]["title"] = ""
+    mock_completion = AsyncMock(side_effect=[_msg(json.dumps(outline_dict))])
+
+    from paperhub.agents.sl_plan_deck import run_sl_plan_deck
+
+    with (
+        patch("paperhub.agents.sl_plan_deck.litellm.acompletion", new=mock_completion),
+        pytest.raises(ValueError, match="empty title|content pattern"),
+    ):
+        await run_sl_plan_deck(
+            briefs=briefs,
+            target_slide_count=12,
+            talk_title_hint=None,
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            deps=None,
+            response_language="English",
+        )
+
+    status, error, _args, result = await _read_step_row(migrated_db)
+    assert status == "error"
+    assert error == "plan_validation_failed"
+    assert result.get("validation_failed") is True
+    assert "empty title" in result.get("validation_error", "")
+
+
+@pytest.mark.asyncio
+async def test_sl_plan_deck_allows_empty_title_on_title_and_closer_patterns(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Positive control: title='' on the ``title`` and ``takeaway_closer``
+    patterns is intentional (those layouts use ``\\titlepage`` / ``\\rule``
+    instead of ``\\frametitle``) and MUST NOT raise. The multi-paper
+    fixture already sets title='' on both patterns; assert the planner
+    accepts it.
+    """
+    briefs = [_brief(paper_id=10 + i) for i in range(3)]
+    outline_dict = _multi_paper_outline_dict(briefs)
+    # Sanity-check: the fixture's slide 0 (title) and last slide
+    # (takeaway_closer) have empty titles — these are the legitimate cases.
+    assert outline_dict["slides"][0]["pattern_kind"] == "title"
+    assert outline_dict["slides"][0]["title"] == ""
+    assert outline_dict["slides"][-1]["pattern_kind"] == "takeaway_closer"
+    assert outline_dict["slides"][-1]["title"] == ""
+    mock_completion = AsyncMock(side_effect=[_msg(json.dumps(outline_dict))])
+
+    from paperhub.agents.sl_plan_deck import run_sl_plan_deck
+
+    with patch("paperhub.agents.sl_plan_deck.litellm.acompletion", new=mock_completion):
+        outline = await run_sl_plan_deck(
+            briefs=briefs,
+            target_slide_count=12,
+            talk_title_hint=None,
+            tracer=fake_tracer,
+            model="gemini/gemini-2.5-flash-lite",
+            deps=None,
+            response_language="English",
+        )
+
+    assert outline.slides[0].title == ""
+    assert outline.slides[-1].title == ""
+    status, error, _args, _result = await _read_step_row(migrated_db)
+    assert status == "ok"
+    assert error is None
+
+
+@pytest.mark.asyncio
 async def test_sl_plan_deck_marks_error_on_parse_failure(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Any,
