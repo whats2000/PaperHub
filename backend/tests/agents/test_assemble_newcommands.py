@@ -79,7 +79,12 @@ def test_build_block_inserts_block_with_markers() -> None:
     block, summary = build_newcommands_block(briefs)
     assert "% BEGIN paperhub:paper_newcommands" in block
     assert "% END paperhub:paper_newcommands" in block
-    assert r"\newcommand{\R}{\mathbb{R}}" in block
+    # T5 close-out (A2 option 1): the block is rewritten to \providecommand
+    # so an ADDITIONAL.tex sidecar redefining the same name wins on overlap
+    # (\newcommand hard-errors on redefinition; \providecommand silently
+    # no-ops). The macro name + body are preserved verbatim.
+    assert r"\providecommand{\R}{\mathbb{R}}" in block
+    assert r"\newcommand{\R}" not in block
     assert summary.unique_count == 1
     assert summary.collisions == []
 
@@ -96,12 +101,16 @@ def test_build_block_empty_emits_marker_only() -> None:
 
 def test_build_block_deduplicates_identical_definitions() -> None:
     line = r"\newcommand{\E}{\mathbb{E}}"
+    rewritten = r"\providecommand{\E}{\mathbb{E}}"
     briefs = [
         _brief(paper_id=1, newcommands=line),
         _brief(paper_id=2, newcommands=line),
     ]
     block, summary = build_newcommands_block(briefs)
-    assert block.count(line) == 1
+    # Both papers emitted the SAME \newcommand → after rewrite both yield the
+    # SAME \providecommand → dedup keeps one row.
+    assert block.count(rewritten) == 1
+    assert r"\newcommand" not in block
     assert summary.unique_count == 1
     assert summary.collisions == []
     assert summary.contributing_papers == 2
@@ -113,8 +122,10 @@ def test_build_block_handles_collision() -> None:
         _brief(paper_id=2, newcommands=r"\newcommand{\R}{\textsf{R}}"),
     ]
     block, summary = build_newcommands_block(briefs)
-    assert r"\newcommand{\R}{\mathbb{R}}" in block
-    assert r"\newcommand{\R}{\textsf{R}}" not in block
+    # Paper 1's definition wins, rewritten to \providecommand. Paper 2's
+    # diverging definition is dropped + a NOTE comment marks the divergence.
+    assert r"\providecommand{\R}{\mathbb{R}}" in block
+    assert r"\providecommand{\R}{\textsf{R}}" not in block
     assert "NOTE" in block and r"\R" in block
     assert "paper 2" in block and "paper 1" in block
     assert summary.collisions == ["R"]
@@ -142,9 +153,9 @@ def test_build_block_preserves_per_paper_order() -> None:
         ),
     ]
     block, summary = build_newcommands_block(briefs)
-    idx_one = block.find(r"\newcommand{\Mone}{1}")
-    idx_two = block.find(r"\newcommand{\Mtwo}{2}")
-    idx_three = block.find(r"\newcommand{\Mthree}{3}")
+    idx_one = block.find(r"\providecommand{\Mone}{1}")
+    idx_two = block.find(r"\providecommand{\Mtwo}{2}")
+    idx_three = block.find(r"\providecommand{\Mthree}{3}")
     assert -1 < idx_one < idx_two < idx_three
     assert summary.collisions == ["Mtwo"]
     assert summary.unique_count == 3
@@ -165,7 +176,7 @@ def test_build_block_skips_unrecognized_lines_with_comment() -> None:
         )
     ]
     block, summary = build_newcommands_block(briefs)
-    assert r"\newcommand{\R}{\mathbb{R}}" in block
+    assert r"\providecommand{\R}{\mathbb{R}}" in block
     assert "% SKIPPED" in block
     assert r"\usepackage{amsmath}" in block
     assert summary.skipped_count == 1
@@ -195,9 +206,20 @@ def test_build_block_handles_declare_math_operator() -> None:
     ]
     block, summary = build_newcommands_block(briefs)
     assert summary.unique_count == 3
-    assert block.count(r"\DeclareMathOperator{\KL}{KL}") == 1
-    assert r"\DeclareMathOperator*{\argmin}{arg\,min}" in block
-    assert r"\renewcommand{\vec}[1]{\mathbf{#1}}" in block
+    # \DeclareMathOperator → \providecommand wrapping \operatorname so the
+    # upright operator look survives the downgrade.
+    assert r"\providecommand{\KL}{\operatorname{KL}}" in block
+    # Star variant uses \operatorname* to keep displayed-limits behaviour.
+    assert r"\providecommand{\argmin}{\operatorname*{arg\,min}}" in block
+    # \renewcommand → \providecommand (a brief-block override of an
+    # ADDITIONAL.tex macro would re-introduce the hard-fail otherwise).
+    assert r"\providecommand{\vec}[1]{\mathbf{#1}}" in block
+    # No legacy control words leak through.
+    assert r"\DeclareMathOperator" not in block
+    assert r"\renewcommand" not in block
+    assert r"\newcommand" not in block
+    # Identical-definition dedup still works post-rewrite.
+    assert block.count(r"\providecommand{\KL}{\operatorname{KL}}") == 1
 
 
 # ──────────────── assemble_deck position tests ──────────────────────
@@ -216,7 +238,9 @@ def test_assemble_inserts_newcommands_block_at_correct_position() -> None:
     idx_begin_document = tex.find("\\begin{document}")
     assert -1 < idx_usepackage < idx_block_begin
     assert idx_block_begin < idx_block_end < idx_title < idx_begin_document
-    assert r"\newcommand{\R}{\mathbb{R}}" in tex
+    # Rewritten form lands in the deck (\newcommand would crash on overlap).
+    assert r"\providecommand{\R}{\mathbb{R}}" in tex
+    assert r"\newcommand" not in tex
 
 
 def test_assemble_empty_newcommands_emits_marker_only() -> None:

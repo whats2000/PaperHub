@@ -451,9 +451,19 @@ class AgentState(TypedDict, total=False):
     # router's response_language (which is the chat-REPLY language). Empty/unset
     # → fall back to response_language. Consumed by _generate + _edit_slides.
     report_slide_language: str
-    # F4.4 T4: list of PaperTalkBrief, one per enabled paper, populated by the
-    # future sl_paper_brief stage (T5 wires it). Consumed by sl_assemble to
-    # plumb each brief's ``paper_newcommands`` into the deck preamble between
-    # ``% BEGIN/END paperhub:paper_newcommands`` markers. Until T5 lands the
-    # list is empty and the assemble step emits the marker-only block.
-    report_paper_briefs: list[Any]  # list[PaperTalkBrief]
+    # F4.4 T4/T5: list of PaperTalkBrief, one per enabled paper, populated
+    # by sl_paper_brief (T5). Consumed by sl_assemble to plumb each brief's
+    # ``paper_newcommands`` into the deck preamble between
+    # ``% BEGIN/END paperhub:paper_newcommands`` markers. Empty list ⇒ the
+    # assemble step emits a marker-only block. (T4 typed this ``list[Any]``
+    # with a misleading "Pydantic cycle" comment; PaperTalkBrief lives in
+    # the same module so there is no cycle — T5 closed that follow-up.)
+    report_paper_briefs: list[PaperTalkBrief]
+    # F4.4 T5: cross-paper DeckOutline produced by sl_plan_deck. Each
+    # PlannedSlide names the pattern_kind + paper/figure/equation attribution
+    # the renderer (sl_render_slide) will materialise.
+    report_outline: DeckOutline
+    # F4.4 T5: per-slide rendered Beamer frames produced by sl_render_slide
+    # (one per PlannedSlide in report_outline.slides, in order). Consumed by
+    # sl_coherence + sl_assemble.
+    report_rendered_slides: list[RenderedSlide]
