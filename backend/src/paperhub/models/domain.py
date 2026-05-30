@@ -215,6 +215,82 @@ class PaperTalkBrief(BaseModel):
     talk_shape_hint: TalkShapeHint
 
 
+PatternKind = Literal[
+    "title",
+    "references",
+    "motivation_figure",
+    "bottlenecks_table",
+    "concept_2col",
+    "math_stack",
+    "results_table",
+    "proposed_direction_placeholder",
+    "plan_numbered",
+    "takeaway_closer",
+]
+
+
+class PlannedSlide(BaseModel):
+    """One planned slide in a :class:`DeckOutline` (F4.4 T2).
+
+    Names the layout ``pattern_kind`` the renderer (T3) will branch on and the
+    paper-/figure-/equation- attribution the planner chose. The validation pass
+    in :func:`paperhub.agents.sl_plan_deck.run_sl_plan_deck` rejects any planned
+    slide whose ``paper_id`` / ``figure_key`` / ``equation_index`` does not
+    correspond to an actual brief input — so the renderer can assume every
+    attribution on a PlannedSlide is internally consistent.
+
+    Note: ``title`` may be an empty string for ``title`` and ``takeaway_closer``
+    patterns whose layouts do not use a ``\\frametitle``. Every other pattern
+    must carry a non-empty title; the planner prompt enforces this.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pattern_kind: PatternKind
+    title: str
+    # ``goal`` is what the slide should land with the audience — T3 reads it
+    # to keep the rendered bullets / caption on-message. Non-empty mandatory.
+    goal: str = Field(min_length=1)
+    paper_id: int | None = None
+    figure_key: str | None = None
+    # Index into the assigned paper's ``key_equations`` (NOT the LaTeX itself,
+    # so T3 can pull the equation + its ``notation_explanation`` together).
+    equation_index: int | None = None
+    # 2-4 short hints for T3's renderer. NOT the final bullet text — T3 may
+    # rephrase to honor the density / specificity contracts.
+    key_points: list[str] = []
+    # Chunks the slide draws from (collected from the brief's underlying reads
+    # for traceability). May be empty for cross-paper slides.
+    chunk_ids: list[int] = []
+
+
+class DeckOutline(BaseModel):
+    """Cross-paper deck plan produced by ``sl_plan_deck`` (F4.4 T2).
+
+    Consumes N :class:`PaperTalkBrief` inputs and emits an ordered sequence of
+    :class:`PlannedSlide` entries naming the layout patterns the renderer (T3)
+    will materialise. Decoupled from rendering: the planner picks the talk
+    shape + per-slide attribution; T3 turns each plan into LaTeX.
+
+    For multi-paper (N>=2) the planner emits the academic-talk-deck skeleton
+    (title → references → motivation_figure → bottlenecks_table →
+    per-paper concept_2col + math_stack → proposed_direction_placeholder →
+    plan_numbered → takeaway_closer). For single-paper (N==1) it degenerates
+    to a focused skeleton (no bottlenecks_table, no references, no
+    proposed_direction_placeholder).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    talk_title: str = Field(min_length=1)
+    talk_subtitle: str | None = None
+    slides: list[PlannedSlide]
+    # Which :class:`SlideStyleProfile` was applied. Hardcoded ``"default"``
+    # for T2 (the gold methodology profile); the profile-lookup surface lands
+    # in a later round.
+    style_profile_name: str = "default"
+
+
 class OutlineSlide(BaseModel):
     """One slide entry in a TalkOutline — title, narrative goal, key points,
     and optional pointers to a figure, equation, chunks, and papers."""
