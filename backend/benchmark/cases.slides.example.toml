@@ -1,0 +1,72 @@
+# PaperHub slide-generation benchmark — example config.
+#
+# Five cases, each in its own session (no session_group set ⇒ runner creates a
+# fresh session per case). After running, open the frontend chat sidebar to
+# review the 5 sessions / generated decks visually.
+#
+# Run (from backend/):
+#   scripts/run-benchmark.ps1 -Config benchmark/cases.slides.example.toml
+#
+# Edit this file (or copy + rename) to add your own test cases — papers,
+# prompts, languages, audience hints. No code change required.
+#
+# All `arxiv:<id>` keys are ingested-on-attach if not already cached. List
+# what's cached with:  uv run python -m benchmark.list_papers
+
+[benchmark]
+name = "paperhub-slides"
+base_url = "http://127.0.0.1:8000"
+db_path = "workspace/paperhub.db"
+
+# Reusable paper set for the multi-paper conference-talk cases.
+[papersets]
+vla_efficiency = [
+  "arxiv:2509.22093v1",   # ADP — vision-token pruning
+  "arxiv:2512.04952",     # FASTer — block-wise autoregression
+  "arxiv:2602.20200",     # OptimusVLA — diffusion dual-memory
+]
+
+# ─────────────────────────── single-paper cases ───────────────────────
+# Each case attaches ONE paper and asks for a focused deck. No session_group ⇒
+# each runs in its own fresh session, so the frontend sidebar shows 5 distinct
+# chats after a full run.
+
+[[cases]]
+id = "slides-single-adp"
+papers = ["arxiv:2509.22093v1"]
+expect_intent = "slides"
+prompt = "Please prepare ~15 Beamer slides covering this paper for an ML research audience."
+rubric = "Conference-quality focused deck on Action-aware Dynamic Pruning (ADP). Reviewer reads the slides.tex / slides.pdf and judges presentability — no fixed dimension rubric."
+
+[[cases]]
+id = "slides-single-faster"
+papers = ["arxiv:2512.04952"]
+expect_intent = "slides"
+prompt = "Please prepare ~15 Beamer slides covering this paper for an ML research audience."
+rubric = "Conference-quality focused deck on FASTer (block-wise autoregressive VLA). Reviewer reads the artifacts and judges presentability."
+
+[[cases]]
+id = "slides-single-optimusvla"
+papers = ["arxiv:2602.20200"]
+expect_intent = "slides"
+prompt = "Please prepare ~15 Beamer slides covering this paper for an ML research audience."
+rubric = "Conference-quality focused deck on OptimusVLA (dual-memory augmented VLA). Reviewer reads the artifacts and judges presentability."
+
+# ─────────────────────────── multi-paper cases ────────────────────────
+# 12-minute conference talk over all three papers. EN and ZH each get their
+# own session (no shared session_group) so the frontend can show them
+# independently.
+
+[[cases]]
+id = "slides-multi-en"
+paperset = "vla_efficiency"
+expect_intent = "slides"
+prompt = "Please prepare a 12-minute conference talk covering these three papers, focused on the links between them and a proposed direction."
+rubric = "Multi-paper conference talk (English). Reviewer reads the deck for cross-paper synthesis + a clean structure."
+
+[[cases]]
+id = "slides-multi-zh"
+paperset = "vla_efficiency"
+expect_intent = "slides"
+prompt = "請為這三篇論文做一份 12 分鐘的會議簡報，重點放在它們之間的連結與你提出的方向。"
+rubric = "Multi-paper conference talk (Traditional Chinese). Reviewer reads the deck for cross-paper synthesis + correct Unicode rendering."
