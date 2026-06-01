@@ -92,8 +92,11 @@ async def promote_to_global(
     """Copy this session's override (if present) into a global slide_style_global
     memory row. Returns True iff promotion happened (no-op when no override exists).
 
-    Supersedes any prior slide_style_global row by flipping its status (mirrors the
-    v2.17 conflict-supersede pattern).
+    Mirrors the v2.17 conflict-supersede pattern (memory_tools.add_memory_with_supersede):
+      1. INSERT the new active row
+      2. Capture last_insert_rowid() as the new id
+      3. UPDATE any prior active slide_style_global rows to status='superseded' +
+         superseded_by=<new id>, so the chain is bidirectionally walkable
     """
     async with conn.execute(
         "SELECT preamble_tex FROM slide_style_overrides WHERE session_id = ?",
@@ -104,19 +107,6 @@ async def promote_to_global(
         return False
     preamble_tex = str(row[0])
 
-    # Supersede any prior global slide-style row.
-    await conn.execute(
-        """
-        UPDATE memories
-           SET status = 'superseded',
-               superseded_by = NULL,
-               updated_at = datetime('now')
-         WHERE scope = 'global'
-           AND status = 'active'
-           AND metadata IS NOT NULL
-           AND json_extract(metadata, '$.kind') = 'slide_style_global'
-        """
-    )
     metadata = json.dumps({"kind": "slide_style_global"})
     await conn.execute(
         """
@@ -124,6 +114,27 @@ async def promote_to_global(
         VALUES ('global', ?, datetime('now'), datetime('now'), 'active', ?)
         """,
         (preamble_tex, metadata),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        id_row = await cur.fetchone()
+    assert id_row is not None
+    new_id = int(id_row[0])
+
+    # Supersede any prior active slide_style_global rows; point them at the new one.
+    # The `id != ?` clause excludes the row we just inserted.
+    await conn.execute(
+        """
+        UPDATE memories
+           SET status = 'superseded',
+               superseded_by = ?,
+               updated_at = datetime('now')
+         WHERE scope = 'global'
+           AND status = 'active'
+           AND id != ?
+           AND metadata IS NOT NULL
+           AND json_extract(metadata, '$.kind') = 'slide_style_global'
+        """,
+        (new_id, new_id),
     )
     await conn.commit()
     return True

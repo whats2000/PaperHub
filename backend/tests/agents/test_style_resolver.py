@@ -111,3 +111,45 @@ async def test_promote_to_global_copies_session_override_to_memories(conn):
         row = await cur.fetchone()
     assert row is not None
     assert "\\usetheme{Madrid}" in row[0]
+
+
+@pytest.mark.asyncio
+async def test_promote_to_global_supersede_chain_is_bidirectional(conn):
+    """First promote: one active row. Second promote with a different style:
+    old row → status='superseded' AND superseded_by points at the new active row."""
+    # First promotion
+    await set_session_override(
+        session_id=1,
+        preamble_tex="\\usetheme{Madrid}",
+        source="user_request",
+        conn=conn,
+    )
+    await promote_to_global(session_id=1, conn=conn)
+
+    # Second promotion with a different style
+    await set_session_override(
+        session_id=1,
+        preamble_tex="\\usetheme{Warsaw}",
+        source="user_request",
+        conn=conn,
+    )
+    await promote_to_global(session_id=1, conn=conn)
+
+    # Now expect:
+    #   - 1 active row (Warsaw)
+    #   - 1 superseded row (Madrid) with superseded_by = <id of Warsaw row>
+    async with conn.execute(
+        "SELECT id, content, status, superseded_by FROM memories "
+        "WHERE scope='global' AND metadata IS NOT NULL "
+        "AND json_extract(metadata, '$.kind') = 'slide_style_global' "
+        "ORDER BY id"
+    ) as cur:
+        rows = await cur.fetchall()
+    assert len(rows) == 2
+    older = rows[0]
+    newer = rows[1]
+    assert older[2] == "superseded"
+    assert newer[2] == "active"
+    assert "Madrid" in older[1]
+    assert "Warsaw" in newer[1]
+    assert older[3] == newer[0]  # back-pointer chain
