@@ -32,6 +32,10 @@ from paperhub.agents.router import router_node
 from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
+from paperhub.agents.style_commands import (
+    classify_style_command,
+    handle_style_command,
+)
 from paperhub.api.deps import get_chroma
 from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
@@ -756,31 +760,59 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     yield {"event": "token",
                            "data": token_evt.model_dump_json(exclude={"type"})}
                 elif intent == "slides":
-                    slides_retriever = Retriever(chroma=get_chroma(request, settings))
-                    final_content = ""
-                    # report_stream is module-level so monkeypatch can swap it.
-                    async for rs_item in report_stream(
-                        state, adapter=adapter, tracer=tracer, conn=conn,
-                        retriever=slides_retriever, settings=settings,
-                    ):
-                        if isinstance(rs_item, ToolStepYield):
-                            yield {
-                                "event": "tool_step",
-                                "data": json.dumps(
-                                    {"record": rs_item.record},
-                                    separators=(',', ':'),
-                                ),
-                            }
-                            last_emitted_step = max(
-                                last_emitted_step, rs_item.record["step_index"],
-                            )
-                        elif isinstance(rs_item, DeckYield):
-                            yield {
-                                "event": "deck",
-                                "data": json.dumps(rs_item.deck, separators=(',', ':')),
-                            }
-                        elif isinstance(rs_item, FinalOnlyMessage):
-                            final_content = rs_item.content
+                    # F4.5 v2.25: deterministic style-command intercepts.
+                    #
+                    # Two commands short-circuit the LangGraph entirely:
+                    #   - "reset slide style" → DELETE slide_style_overrides
+                    #   - "remember this style for all future chats" → write/
+                    #     replace the slide_style_global memory row
+                    # Both emit a plain-text reply and do NOT invoke the slide
+                    # pipeline. Creative style mutations ("make it dark serif")
+                    # do not match here — they fall through to the slide
+                    # agent's replace_preamble tool.
+                    style_action = classify_style_command(req.user_message)
+                    if style_action is not None:
+                        intercept_reply = await handle_style_command(
+                            action=style_action,
+                            session_id=session_id,
+                            conn=conn,
+                        )
+                        final_content = intercept_reply
+                        token_evt = TokenEvent(
+                            run_id=run_id, branch="", text=final_content,
+                        )
+                        yield {
+                            "event": "token",
+                            "data": token_evt.model_dump_json(exclude={"type"}),
+                        }
+                        # Don't fall through to the LangGraph; final/drain
+                        # below in the shared epilogue still fires.
+                    else:
+                        slides_retriever = Retriever(chroma=get_chroma(request, settings))
+                        final_content = ""
+                        # report_stream is module-level so monkeypatch can swap it.
+                        async for rs_item in report_stream(
+                            state, adapter=adapter, tracer=tracer, conn=conn,
+                            retriever=slides_retriever, settings=settings,
+                        ):
+                            if isinstance(rs_item, ToolStepYield):
+                                yield {
+                                    "event": "tool_step",
+                                    "data": json.dumps(
+                                        {"record": rs_item.record},
+                                        separators=(',', ':'),
+                                    ),
+                                }
+                                last_emitted_step = max(
+                                    last_emitted_step, rs_item.record["step_index"],
+                                )
+                            elif isinstance(rs_item, DeckYield):
+                                yield {
+                                    "event": "deck",
+                                    "data": json.dumps(rs_item.deck, separators=(',', ':')),
+                                }
+                            elif isinstance(rs_item, FinalOnlyMessage):
+                                final_content = rs_item.content
                 else:
                     final_content = await stub_response(state, intent=intent)
 
