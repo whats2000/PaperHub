@@ -1,82 +1,73 @@
 # F4.4 slide calibration harness
 
-Developer-side scoring tool for F4.4 (slide quality refinement). See
-[`docs/superpowers/plans/2026-05-31-paperhub-F4.4-slide-quality-refinement.md`](../../../docs/superpowers/plans/2026-05-31-paperhub-F4.4-slide-quality-refinement.md)
-for full context.
+Developer-side tool for driving slide-generation runs against the live
+backend on `:8000` and dumping artifacts (slides.tex, slides.pdf,
+tool_calls.json) for **human review**.
 
-**Not a CI gate.** **Not a long-lived regression suite.** This harness
-exists so each Round N of F4.4 is comparable to Round N-1 — without a
-fixed scoring set, "did this round improve things" is unanswerable.
-Once F4.4 is done, the harness's job is done.
+**Not a scoring tool.** Style and presentability are human judgement
+calls, not pattern-matched against a fixed reference. The example deck
+at `D:\GitHub\Final_Report` is ONE illustration of professional output;
+the system's job is to be capable of professional output in general,
+not to reproduce that specific surface form. The harness drives the
+pipeline + dumps artifacts; the developer reads the PDFs.
 
 ## The dev-set papers
 
-Three arXiv papers used in `D:\GitHub\Final_Report`'s hand-built gold deck:
+Three arXiv papers used as a fixed scoring set so iterations are
+comparable to each other. Choice of papers is opportunistic — not
+load-bearing.
 
-| arxiv_id | Short title (gold deck) | Topic |
+| arxiv_id | Short title (informal) | Topic |
 | --- | --- | --- |
-| `2509.22093v1` | ADP — Action-aware Dynamic Pruning | VLA efficiency / vision token pruning |
-| `2512.04952v2` | FASTer — Block-wise AR VLA | VLA efficiency / autoregressive decoding |
-| `2602.20200v2` | OptimusVLA — Dual-Memory Augmented VLA | VLA efficiency / diffusion prior |
-
-Per-paper gold decks live under `D:\GitHub\Final_Report\<arxiv_id>\slides.pdf`;
-multi-paper gold lives at `D:\GitHub\Final_Report\slides.pdf`.
+| `2509.22093v1` | ADP | VLA efficiency / vision token pruning |
+| `2512.04952v2` | FASTer | VLA efficiency / autoregressive decoding |
+| `2602.20200v2` | OptimusVLA | VLA efficiency / diffusion prior |
 
 ## Two scenarios
 
-**Scenario A — single-paper contract fidelity** (run for EACH paper):
-ingest ONE paper, prompt ~15-slide academic deck. Compare against the
-paper's gold per-paper deck + (optionally) `reference/paper2slides-plus`
-output on the same paper.
+**Scenario A — single-paper:** ingest ONE paper, prompt a focused deck.
+**Scenario B — multi-paper:** ingest all 3, prompt a conference talk.
 
-**Scenario B — multi-paper conference deck:** ingest all 3, prompt
-12-minute conference talk. Compare against the multi-paper gold.
+Both scenarios run BOTH languages (EN + ZH) when comparing across
+generation runs is useful.
 
-Both scenarios run BOTH languages (EN + ZH) starting Round 1+.
-
-## How to run a round
+## How to run
 
 ```powershell
 # 1. Make sure backend is up (separate shell):
 scripts/start.ps1
 
-# 2. From backend/ — seed sessions (one Scenario A per paper + one Scenario B):
+# 2. From backend/ — seed sessions. RE-SEED EACH ROUND with fresh sessions
+#    so the deck_command classifier doesn't route "prepare slides" to
+#    NOTES generation when an existing deck is present.
 cd backend
 uv run python -m benchmark.slide_calibration.seed --scenario a --paper 2509.22093v1
 uv run python -m benchmark.slide_calibration.seed --scenario a --paper 2512.04952v2
 uv run python -m benchmark.slide_calibration.seed --scenario a --paper 2602.20200v2
 uv run python -m benchmark.slide_calibration.seed --scenario b
 
-# 3. Generate decks for the current round (uses the session ids from seed):
-uv run python -m benchmark.slide_calibration.run_single --session <id> --round <N> --paper 2509.22093v1
-uv run python -m benchmark.slide_calibration.run_single --session <id> --round <N> --paper 2512.04952v2
-uv run python -m benchmark.slide_calibration.run_single --session <id> --round <N> --paper 2602.20200v2
-uv run python -m benchmark.slide_calibration.run_multi  --session <id> --round <N> --lang en
-uv run python -m benchmark.slide_calibration.run_multi  --session <id> --round <N> --lang zh
+# 3. Generate decks for the current round:
+uv run python -m benchmark.slide_calibration.run_single --round <N> --paper 2509.22093v1
+uv run python -m benchmark.slide_calibration.run_single --round <N> --paper 2512.04952v2
+uv run python -m benchmark.slide_calibration.run_single --round <N> --paper 2602.20200v2
+uv run python -m benchmark.slide_calibration.run_multi  --round <N> --lang en
+uv run python -m benchmark.slide_calibration.run_multi  --round <N> --lang zh
 
-# 4. Compare & score:
+# 4. Dump objective metrics + open PDFs for review:
 uv run python -m benchmark.slide_calibration.compare --round <N>
-# Opens PaperHub PDFs side-by-side with gold; runs deterministic checks
-# (em-dash sweep, word count, figure-existence); creates blank scorecards.
-# Agent then fills the scorecards via direct PDF reading (see plan §self-judge).
+# Writes _checks.json (frame count, includegraphics count,
+# paper_newcommands marker, xelatex magic, theme line) and opens the
+# generated PDFs. No scoring. Open D:\GitHub\Final_Report\... manually
+# if you want a reference, but the harness does NOT compare for you.
 ```
 
-Artifacts land under `benchmark/slide_calibration/results/round_<N>/`.
-Each scenario writes `slides.tex` + `slides.pdf` + `tool_calls.json` +
-`speaker_notes_*.tex` (when produced).
+Artifacts land under `backend/benchmark/slide_calibration/results/round_<N>/`
+(gitignored — local-only).
 
-## Hard rule — no comparison-target leak
+## Hard rules
 
-`D:\GitHub\Final_Report\*.tex` and per-paper `<arxiv_id>/slides.tex` must
-NEVER be fed into a runtime LLM prompt. The harness COMPARES PaperHub
-output to them; the pipeline NEVER reads them. See the plan's
-"Boundary: methodology references vs comparison targets" section.
-
-## When to escalate to the user
-
-After scoring, agent self-judges via direct PDF comparison. If the
-agent's honest read says *"mine is still obviously weaker on dimension
-X"*, design Round N+1 — do not interrupt the user. Only when the agent's
-own comparison says *"mine is at-parity with the gold on both scenarios,
-notes pass read-aloud"* does the agent escalate for user verification +
-the production test on the user's own novel papers.
+- **No reference-deck content in runtime prompts.** `D:\GitHub\Final_Report\*.tex`
+  is the developer's reference, NOT the LLM's. Never inject its contents
+  into a prompt as a few-shot.
+- **No automated style scoring.** The harness dumps artifacts; the
+  developer judges style. Don't add 0/1 dimension rubrics back in.
