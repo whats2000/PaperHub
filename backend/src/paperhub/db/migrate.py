@@ -319,6 +319,18 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             await conn.execute("ROLLBACK")
             raise
 
+    # -----------------------------------------------------------------------
+    # F4.5: memories.metadata column — a JSON blob the style_resolver uses to
+    # tag the "remembered global slide style" memory row
+    # (``json_extract(metadata, '$.kind') = 'slide_style_global'``). Idempotent
+    # column-add; pre-existing DBs created before F4.5 won't have it.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(memories)") as cur:
+        mem_cols = {row[1] for row in await cur.fetchall()}
+    if "metadata" not in mem_cols:
+        await conn.execute("ALTER TABLE memories ADD COLUMN metadata TEXT")
+        await conn.commit()
+
     # Create slide_style_overrides if missing (pre-existing DBs created before
     # F4.5 won't have it; schema.sql will create it on fresh DBs but the
     # explicit guard keeps the migration safe for both paths).

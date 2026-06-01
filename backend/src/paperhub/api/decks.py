@@ -73,7 +73,7 @@ async def get_deck_meta(session_id: int) -> dict[str, Any]:
         "deck_id": deck.id,
         "session_id": deck.session_id,
         "page_count": deck.page_count,
-        "theme": deck.theme,
+        "current_version_id": deck.current_version_id,
         "status": deck.status,
         "plan": deck.plan,
         "speaker_notes": deck.speaker_notes,

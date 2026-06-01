@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS memories (
                     CHECK (status IN ('active', 'superseded')),
     supersedes      INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
     superseded_by   INTEGER NULL REFERENCES memories(id) ON DELETE SET NULL,
+    -- F4.5: JSON blob (e.g. ``{"kind": "slide_style_global"}``) so the
+    -- style_resolver can find the "remembered global slide style" row.
+    metadata        TEXT NULL,
     CHECK ((scope = 'global') = (session_id IS NULL))
 );
 
