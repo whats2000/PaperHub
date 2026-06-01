@@ -68,7 +68,13 @@ _STRIP_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 
 def count_body_tokens(frame_tex: str) -> int:
-    """Strip LaTeX from a frame body and count remaining whitespace-separated words."""
+    """Strip LaTeX from a frame body and count remaining whitespace-separated words.
+
+    NOTE: this is a raw word count, useful for diagnostics. The budget-comparison
+    path in ``detect_overflow`` uses :func:`_count_visual_tokens` instead, which
+    accounts for Beamer's actual line-wrap behavior (each ``\\item`` consumes a
+    whole visual line even when short; a long item wraps to multiple lines).
+    """
     body = frame_tex
     # Remove the title arg from \begin{frame}{Title} so it doesn't count as body.
     body = re.sub(r"\\begin\{frame\}(?:\[[^\]]*\])?\{[^}]*\}", "", body)
@@ -79,7 +85,11 @@ def count_body_tokens(frame_tex: str) -> int:
 
 
 def _count_visual_tokens(
-    frame_tex: str, *, layout: CanvasLayout, constants: CanvasConstants
+    frame_tex: str,
+    *,
+    layout: CanvasLayout,
+    constants: CanvasConstants,
+    script: Script,
 ) -> int:
     """Count tokens with bullet-aware visual-line accounting.
 
@@ -88,6 +98,11 @@ def _count_visual_tokens(
     full line. Non-bullet prose is counted as raw words. This matches how
     Beamer actually lays out a frame — a 28-word bullet on a 13-word-wide
     column eats 3 lines, not 28 words of column space.
+
+    The ``script`` argument selects the chars-per-cm density (en vs cjk) so
+    the per-line capacity matches the one used by :func:`compute_token_budget`
+    — without this, a CJK deck would compare CJK budgets against en-density
+    counts and produce wrong overflow signals.
     """
     # Detect explicit bullet structure.
     items = re.split(r"\\item\b", frame_tex)
@@ -102,9 +117,9 @@ def _count_visual_tokens(
         return intro_tokens + sum(count_body_tokens(it) for it in items[1:])
 
     # Tokens per visual line for this layout / script.
-    chars_per_cm_en = constants.chars_per_cm["en"]
+    chars_per_cm = constants.chars_per_cm[script]
     tokens_per_line = max(
-        1, int((width_cm * chars_per_cm_en) / constants.chars_per_word)
+        1, int((width_cm * chars_per_cm) / constants.chars_per_word)
     )
 
     total = intro_tokens
@@ -251,7 +266,10 @@ def detect_overflow(
         # whole lines even when short); surface the raw word count in the
         # recorded signal for diagnostics.
         body_tokens = _count_visual_tokens(
-            frame_tex, layout=layout, constants=canvas_budget.constants
+            frame_tex,
+            layout=layout,
+            constants=canvas_budget.constants,
+            script=script,
         )
         budget = compute_token_budget(layout, canvas_budget.constants, script=script)
         overage = max(0, body_tokens - budget)

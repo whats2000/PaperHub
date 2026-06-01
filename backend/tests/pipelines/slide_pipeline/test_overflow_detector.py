@@ -147,6 +147,74 @@ def test_detect_overflow_aspect_mismatch_flagged():
     assert signals[0].layout_aspect_mismatch is True
 
 
+def test_count_visual_tokens_short_bullet_clamps_to_one_line():
+    """A 3-word bullet on a wide column still counts as at least one visual line."""
+    from paperhub.agents._canvas_budget import load_canvas_budget
+    from paperhub.pipelines.slide_pipeline.overflow_detector import _count_visual_tokens
+
+    cb = load_canvas_budget()
+    text_only = next(layout for layout in cb.layouts if layout.name == "text_only")
+    # "Item one" = 2 words; one visual line on 12.8cm wide @ en density.
+    # Should NOT be 0; should be ~25 tokens-per-line worth of capacity used.
+    n = _count_visual_tokens(
+        frame_tex=r"\begin{frame}{X}\begin{itemize}\item Item one\end{itemize}\end{frame}",
+        layout=text_only,
+        constants=cb.constants,
+        script="en",
+    )
+    # One visual line at ~25 tokens/line = ~25.
+    assert n >= 20 and n <= 30
+
+
+def test_count_visual_tokens_long_bullet_rounds_up_to_multiple_lines():
+    """A 28-word bullet on a 6.8cm half-column wraps to ~3 visual lines."""
+    from paperhub.agents._canvas_budget import load_canvas_budget
+    from paperhub.pipelines.slide_pipeline.overflow_detector import _count_visual_tokens
+
+    cb = load_canvas_budget()
+    half = next(layout for layout in cb.layouts if layout.name == "figure_left_half_portrait")
+    # 6.8cm × 12 chars/cm / 6 chars/word ≈ 13 tokens per visual line.
+    # 28-word bullet → 28/13 = 2.15 → rounds UP to 3 visual lines = ~39 tokens.
+    long_bullet = " ".join(["word"] * 28)
+    n = _count_visual_tokens(
+        frame_tex=rf"\begin{{frame}}{{X}}\begin{{itemize}}\item {long_bullet}\end{{itemize}}\end{{frame}}",
+        layout=half,
+        constants=cb.constants,
+        script="en",
+    )
+    # 3 visual lines × ~13 tokens/line ≈ 39.
+    assert n >= 30 and n <= 50
+
+
+def test_count_visual_tokens_cjk_density_differs_from_en():
+    """The script param must actually feed the chars_per_cm lookup.
+
+    This is the bug-fix regression test: before threading ``script`` through,
+    ``_count_visual_tokens`` hardcoded ``chars_per_cm["en"]``, so en and cjk
+    returned IDENTICAL counts for the same bullet — even though the budget
+    side (``compute_token_budget``) used the script-correct density. That
+    asymmetry produced wrong overflow signals for CJK frames.
+
+    With the fix, cjk uses a smaller per-line capacity (8 chars/cm vs 12 for
+    en), so the wrap math differs and the totals diverge.
+    """
+    from paperhub.agents._canvas_budget import load_canvas_budget
+    from paperhub.pipelines.slide_pipeline.overflow_detector import _count_visual_tokens
+
+    cb = load_canvas_budget()
+    half = next(layout for layout in cb.layouts if layout.name == "figure_left_half_portrait")
+    long_bullet = " ".join(["word"] * 28)
+    frame = rf"\begin{{frame}}{{X}}\begin{{itemize}}\item {long_bullet}\end{{itemize}}\end{{frame}}"
+    en = _count_visual_tokens(frame_tex=frame, layout=half, constants=cb.constants, script="en")
+    cjk = _count_visual_tokens(frame_tex=frame, layout=half, constants=cb.constants, script="cjk")
+    # Pre-fix bug: both returned 39 because the hardcoded "en" density ignored
+    # the script argument. With the fix, the two must diverge.
+    assert en != cjk, (
+        f"script param did not affect the count: en={en}, cjk={cjk} — "
+        "the chars_per_cm lookup is still hardcoded to 'en'."
+    )
+
+
 def test_detect_overflow_parses_pdflatex_overfull_log():
     cb = load_canvas_budget()
     log = (
