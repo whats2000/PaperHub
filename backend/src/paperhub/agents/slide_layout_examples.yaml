@@ -1,0 +1,357 @@
+# PaperHub slide layout examples — F4.4 T10
+# ==========================================
+#
+# OPERATOR-FACING LAYOUT LIBRARY. Each entry is a DESIGN IDEA the slide
+# renderer can REASON ABOUT — a purpose, a when-to-use rationale, and an
+# illustrative LaTeX example. The renderer uses this library to INFORM
+# its design decisions; it does NOT enforce that the emitted slide must
+# match any example.
+#
+# The agent MAY:
+#   * pick an example whose `when_to_use` matches the slide's content,
+#     adapt it to the specific goal / figure / equation, and emit;
+#   * combine motifs from multiple examples;
+#   * design a FRESH layout if the slide's content needs something the
+#     library doesn't show. Either path is fine.
+#
+# To add a new layout idea, append an entry below. No code change
+# required. Operators / users edit this file freely.
+#
+# Schema:
+#   layouts:
+#     - id: <slug>
+#       purpose: <one-line summary of the design idea>
+#       when_to_use: |
+#         <reasoning about when this layout serves the content. The
+#         agent reads this to decide whether to apply.>
+#       example: |
+#         <a hand-authored LaTeX example illustrating the idea. NOT a
+#         template to fill; just an instance of the concept rendered.>
+
+version: 1
+
+layouts:
+  - id: title_simple
+    purpose: Open the talk with author/date/venue framing.
+    when_to_use: |
+      Almost every deck opens this way. A frame using \titlepage (or a
+      hand-laid title block calling \title / \author / \date directly)
+      is the canonical opener. Pick whichever shape fits the deck's
+      register — \titlepage is the minimal-effort choice, a hand-laid
+      block lets you add a venue subtitle or a one-liner author summary.
+    example: |
+      \begin{frame}[plain]
+        \titlepage
+      \end{frame}
+
+  - id: references_three_column
+    purpose: Show the papers being covered on a single overview slide.
+    when_to_use: |
+      Multi-paper talks where each paper is a self-contained entry the
+      audience scans during the talk. Three columns work for 2-4 papers;
+      stretch-minipage keeps column heights aligned even when titles or
+      author lists differ in length. For a single-paper talk this
+      layout is not needed — the title slide already names the paper.
+    example: |
+      \begin{frame}{Papers Covered}
+        \begin{columns}[T]
+          \begin{column}{0.32\textwidth}
+            \begin{minipage}[t][0.78\textheight][s]{\linewidth}
+              \textbf{[1] Short name}\\[0.25em]
+              {\scriptsize\itshape Full title here}\\[0.25em]
+              {\tiny Author A, Author B}\\[0.25em]
+              \textcolor{accent}{\textbf{ICLR 2026}}
+              \vfill
+              {\tiny\ttfamily https://arxiv.org/abs/XXXX.XXXXX}
+            \end{minipage}
+          \end{column}
+          \begin{column}{0.32\textwidth}
+            \begin{minipage}[t][0.78\textheight][s]{\linewidth}
+              \textbf{[2] Short name}\\[0.25em]
+              {\scriptsize\itshape Full title here}\\[0.25em]
+              {\tiny Author C, Author D}\\[0.25em]
+              \textcolor{accent}{\textbf{NeurIPS 2025}}
+              \vfill
+              {\tiny\ttfamily https://arxiv.org/abs/YYYY.YYYYY}
+            \end{minipage}
+          \end{column}
+          \begin{column}{0.32\textwidth}
+            \begin{minipage}[t][0.78\textheight][s]{\linewidth}
+              \textbf{[3] Short name}\\[0.25em]
+              {\scriptsize\itshape Full title here}\\[0.25em]
+              {\tiny Author E, Author F}\\[0.25em]
+              \textcolor{accent}{\textbf{CVPR 2025}}
+              \vfill
+              {\tiny\ttfamily https://arxiv.org/abs/ZZZZ.ZZZZZ}
+            \end{minipage}
+          \end{column}
+        \end{columns}
+      \end{frame}
+
+  - id: equation_with_notation_legend
+    purpose: Display a key equation and define every symbol that appears in it.
+    when_to_use: |
+      An equation that uses symbols the audience does not already know
+      (paper-specific notation, custom subscripts, an unusual operator).
+      Without a symbol-by-symbol legend the equation is unreadable
+      during a talk. The audience needs to ground each symbol before
+      they can follow what the equation says.
+    example: |
+      \begin{frame}{Update rule}
+        \textbf{Loss:}
+        \[
+          \mathcal{L}_{\text{total}} = \mathcal{L}_{\text{rec}} + \beta \cdot \mathcal{L}_{\text{KL}}
+        \]
+        \begin{itemize}\setlength\itemsep{0.2em}
+          \item $\mathcal{L}_{\text{rec}}$: reconstruction loss
+          \item $\mathcal{L}_{\text{KL}}$: KL divergence to the prior
+          \item $\beta$: trade-off coefficient (paper sets $\beta=0.5$)
+        \end{itemize}
+      \end{frame}
+
+  - id: figure_on_top_text_below
+    purpose: Show a wide-aspect figure with a brief sentence of framing under it.
+    when_to_use: |
+      Figure aspect ratio is wider than tall (roughly width:height > 1.6).
+      A two-column layout would crush the figure into illegibility. The
+      figure carries the message; one bolded sentence under it tells the
+      audience what to look at.
+    example: |
+      \begin{frame}{The setup}
+        \centering
+        \includegraphics[width=0.85\linewidth,keepaspectratio]{p0-fig-001}\\[0.5em]
+        \textbf{Three benchmarks; ours (red) beats the prior SOTA (blue) on all.}
+      \end{frame}
+
+  - id: portrait_figure_left_text_right
+    purpose: Pair a portrait or square figure with a short bullet explanation.
+    when_to_use: |
+      Figure aspect ratio is taller-than-wide or near-square (roughly
+      width:height < 1.3). The two-column layout works: figure on the
+      left at ~55% width, bullets on the right at ~45%. Use 2-4 short
+      bullets — anything longer means the figure is doing two jobs.
+    example: |
+      \begin{frame}{Method}
+        \begin{columns}[T]
+          \begin{column}{0.55\textwidth}
+            \includegraphics[width=\linewidth,keepaspectratio]{p0-fig-002}
+          \end{column}
+          \begin{column}{0.45\textwidth}
+            \begin{itemize}\setlength\itemsep{0.3em}
+              \item Stage 1: tokenize observations
+              \item Stage 2: predict next action token
+              \item Stage 3: decode to continuous control
+            \end{itemize}
+          \end{column}
+        \end{columns}
+      \end{frame}
+
+  - id: comparison_table
+    purpose: Contrast multiple items side-by-side along a few axes.
+    when_to_use: |
+      You're comparing N papers / baselines / metrics and a table is
+      the clearest way to display the differences. Use booktabs rules
+      (\toprule / \midrule / \bottomrule) for typography that reads
+      as serious work; avoid vertical rules.
+    example: |
+      \begin{frame}{Results}
+        \centering
+        \begin{tabular}{l c c c}
+          \toprule
+          Method & Success Rate & Latency (ms) & Params (M) \\
+          \midrule
+          Baseline A   & 62.3\% & 180 & 12 \\
+          Baseline B   & 68.1\% & 220 & 15 \\
+          \textbf{Ours} & \textbf{74.5\%} & \textbf{95} & \textbf{14} \\
+          \bottomrule
+        \end{tabular}
+      \end{frame}
+
+  - id: concept_explainer_no_visual
+    purpose: Explain a concept the paper introduces verbally, without a figure.
+    when_to_use: |
+      The paper introduces this concept in prose with no figure or
+      equation attached, but the audience needs the concept to follow
+      later slides. This is a pure-text slide: structured bullets with
+      optional sub-bullets, or a one-sentence framing followed by
+      supporting points. Do NOT invent a figure for it — text-only is
+      the honest design.
+    example: |
+      \begin{frame}{Tokenization, briefly}
+        \begin{itemize}\setlength\itemsep{0.4em}
+          \item The model treats each timestep as a \textbf{token}.
+          \begin{itemize}
+            \item Observations: one token per camera view
+            \item Actions: one token per joint
+          \end{itemize}
+          \item Tokens are predicted \textbf{autoregressively} — the
+                next-token loss carries all the supervision.
+        \end{itemize}
+      \end{frame}
+
+  - id: pure_prose_motivation
+    purpose: Frame a motivation or rationale narratively.
+    when_to_use: |
+      The slide's job is to set up WHY, not WHAT or HOW. A short
+      paragraph or two with one bolded take-away sentence reads more
+      like a talk's opening sentence than a list of bullets. Reach for
+      this on the second or third slide when you want the audience to
+      feel the problem before you start solving it.
+    example: |
+      \begin{frame}{Why this matters}
+        Today's vision-language-action models are powerful, but they
+        run at 5--10 Hz on a workstation GPU. Real robots need
+        something closer to 50 Hz to react to contact events.
+        \vspace{0.5em}
+        \textbf{So: can we make VLAs fast enough for closed-loop control?}
+      \end{frame}
+
+  - id: bottlenecks_overview_table
+    purpose: |
+      Connective tissue mapping multiple papers to one shared problem
+      axis.
+    when_to_use: |
+      Multi-paper conference talk where you want to frame the papers
+      as multiple angles on a shared problem rather than as a sequence
+      of disconnected sections. A three-row table mapping (axis ->
+      paper -> headline result) ties the papers together early in the
+      talk and sets up the per-paper sections that follow.
+    example: |
+      \begin{frame}{Three bottlenecks, three solutions}
+        \centering
+        \begin{tabular}{l l c}
+          \toprule
+          Bottleneck & Paper & Speedup \\
+          \midrule
+          Decoder latency  & [1] FastVLA   & 6.5$\times$ \\
+          Sampling NFE     & [2] DenoiseLite & 3.1$\times$ \\
+          Action smoothing & [3] StableAct   & 2.0$\times$ \\
+          \bottomrule
+        \end{tabular}
+        \vspace{0.6em}
+        \begin{block}{One pipeline, three pressure points}
+          Each paper attacks a different stage of the same hot path.
+        \end{block}
+      \end{frame}
+
+  - id: text_overflow_split_into_two
+    purpose: Split a content-heavy slide that won't fit on one frame.
+    when_to_use: |
+      You attempted a single frame and the content overflows the
+      visible area (Overfull \vbox warnings, content disappears past
+      the footer). Split into TWO frames that share a header so the
+      audience tracks the continuation; mark the header with "(1/2)"
+      and "(2/2)". Prefer splitting over shrinking the font — small
+      fonts are unreadable from the back of the room.
+    example: |
+      \begin{frame}{Method (1/2)}
+        \begin{itemize}\setlength\itemsep{0.3em}
+          \item Stage 1: encode the observation stream
+          \item Stage 2: tokenize each modality independently
+          \item Stage 3: cross-attend across modality tokens
+        \end{itemize}
+      \end{frame}
+
+      \begin{frame}{Method (2/2)}
+        \begin{itemize}\setlength\itemsep{0.3em}
+          \item Stage 4: decode action tokens autoregressively
+          \item Stage 5: smooth across timesteps via a low-pass filter
+          \item Loss: next-token cross-entropy on the action tokens
+        \end{itemize}
+      \end{frame}
+
+  # ────────────────── closing slide — multiple variants ──────────────────
+  # The closer is highly audience-dependent — DIFFERENT shapes serve
+  # different contexts. The library lists several distinct closers as
+  # separate entries so the agent can pick the one matching the talk's
+  # context, OR design a fresh closer if the user's instruction (in the
+  # planner goal or key_points) signals a specific preference.
+  # NEVER pick a closer mechanically — read the talk_title + goal and
+  # pick what genuinely serves THIS talk's audience.
+
+  - id: closer_conference_takeaway_open_question
+    purpose: Conference / research-pitch closer with discussion bait.
+    when_to_use: |
+      The talk is a conference paper presentation or research pitch
+      where Q&A is expected. Leaves the audience with a one-sentence
+      take-away AND an open question to spark discussion, plus a
+      thank-you to signal end-of-talk.
+    example: |
+      \begin{frame}[plain]
+        \centering
+        \rule{0.6\linewidth}{0.4pt}\\[1em]
+        {\Large\bfseries Take-away}\\[0.75em]
+        Fast inference unlocks a class of robotics tasks closed-loop
+        models could not previously touch.\\[1em]
+        \rule{0.6\linewidth}{0.4pt}\\[1em]
+        \begin{block}{Open Question}
+          \itshape Does the same recipe work for soft-contact tasks?
+        \end{block}
+        \vspace{1em}
+        \textbf{\Large Thank you. Questions?}
+      \end{frame}
+
+  - id: closer_lecture_takeaway
+    purpose: Lecture closer focused on one durable take-away.
+    when_to_use: |
+      The talk is a lecture, tutorial, or seminar where the audience
+      should leave with ONE clear concept they remember. No Q&A
+      framing required. The slide centres the take-away as the thing
+      worth carrying away — no open question, no discussion bait.
+    example: |
+      \begin{frame}[plain]
+        \centering
+        \vfill
+        {\Large\bfseries Take-away}\\[1em]
+        Attention is not about \emph{looking everywhere} — it is about
+        \emph{deciding what to ignore}.\\[2em]
+        \vfill
+        \textbf{Thank you.}
+      \end{frame}
+
+  - id: closer_workshop_thank_you
+    purpose: Casual workshop / informal-talk closer.
+    when_to_use: |
+      The talk is a workshop, journal-club presentation, internal
+      seminar, or other casual setting where elaborate closer framing
+      would feel over-produced. Simple thanks suffices.
+    example: |
+      \begin{frame}[plain]
+        \centering
+        \vfill
+        {\Huge\bfseries Thank you.}
+        \vfill
+      \end{frame}
+
+  - id: closer_paper_pitch_contact
+    purpose: Paper / poster pitch closer with reading next step.
+    when_to_use: |
+      The talk is a short pitch (3–5 min, poster session, lightning
+      talk) where the goal is to get the audience to READ THE PAPER.
+      The closer surfaces a contact (author email or website) and a
+      direct link / arXiv id so attendees can follow up.
+    example: |
+      \begin{frame}[plain]
+        \centering
+        \vfill
+        {\Large\bfseries Want the full story?}\\[1em]
+        {\large arXiv:2509.22093 \quad·\quad first.author@lab.org}\\[2em]
+        \vfill
+        \textbf{Thanks for stopping by.}
+      \end{frame}
+
+  - id: closer_open_design
+    purpose: Catch-all entry — design the closer from scratch.
+    when_to_use: |
+      None of the above closer variants fits THIS talk's context, OR
+      the user's instruction in the planner goal / key_points signals
+      a specific closer shape the library doesn't list. Design a
+      closer that serves the goal. Examples of contexts that may
+      warrant a fresh design: a defense closer with the
+      committee-question framing; a keynote closer with a memorable
+      quote; a closer that reprints the talk's headline number; a
+      closer that lists collaborators / acknowledgements.
+    example: |
+      % No example LaTeX — by definition this entry covers cases the
+      % library does not. Design the frame from the goal + the user's
+      % explicit instruction (if any).

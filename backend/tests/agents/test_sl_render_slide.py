@@ -325,8 +325,10 @@ async def test_sl_render_slide_title_pattern_emits_titlepage_frame(
             response_language="English",
         )
 
-    assert rendered.frame_tex.startswith("\\begin{frame}[plain]")
-    assert "\\titlepage" in rendered.frame_tex
+    # T10: no surface-form enforcement on the title pattern; the renderer
+    # echoes whatever the LLM designed. Assert STRUCTURAL roundtrip only.
+    assert rendered.frame_tex.startswith("\\begin{frame}")
+    assert rendered.frame_tex.endswith("\\end{frame}")
     assert rendered.slide_index == 0
     assert rendered.pattern_kind == "title"
     assert rendered.figure_keys_used == []
@@ -437,38 +439,48 @@ async def test_sl_render_slide_takeaway_closer_pattern_has_no_frametitle(
             response_language="English",
         )
 
-    assert "\\frametitle" not in rendered.frame_tex
-    assert "[plain]" in rendered.frame_tex
-    assert "\\rule" in rendered.frame_tex
-    assert "Thank you" in rendered.frame_tex
+    # T10: no surface-form enforcement on the closer. The closer's shape
+    # is audience-dependent (lecture vs conference vs workshop); the
+    # renderer echoes whatever the LLM designed. Assert structural
+    # roundtrip + that the LLM-emitted content survives the echo.
+    assert rendered.frame_tex.startswith("\\begin{frame}")
+    assert rendered.frame_tex.endswith("\\end{frame}")
+    assert rendered.pattern_kind == "takeaway_closer"
 
 
 # ─────────────────────────── validation failures ────────────────────
 
 
 @pytest.mark.asyncio
-async def test_sl_render_slide_math_stack_requires_equation_block(
+async def test_sl_render_slide_accepts_llm_designed_layout_without_library_match(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Any,
 ) -> None:
-    """``math_stack`` with NO ``\\[...\\]`` block is rejected."""
+    """T10: the renderer accepts WHATEVER shape the LLM designed.
+
+    Previously a `math_stack` slide without a ``\\[...\\]`` block was
+    rejected by a surface-form validator. T10 dropped that validator —
+    the LLM may design any layout that serves the slide's purpose,
+    including a math-themed slide that uses prose or a TikZ figure
+    instead of display-math, if that's the design call. Structural
+    contract (1 frame env, figure-key consistency) still applies.
+    """
     slide = _planned(
         pattern_kind="math_stack",
         title="Central equation",
-        goal="Show the loss.",
+        goal="Show the loss conceptually.",
         paper_id=100,
         equation_index=0,
     )
     outline = _outline_with([slide])
     briefs = [_brief(paper_id=100)]
 
-    # Frame is a SINGLE \begin{frame}...\end{frame} (so the multi-frame
-    # check passes) but contains no display-math block — math_stack must
-    # carry at least one.
+    # No \[...\] block — the LLM decided prose is the better fit. Per T10
+    # this must NOT raise. (Whether the design is GOOD is a human call.)
     frame_tex = (
         "\\begin{frame}{Central equation}\n"
-        "  \\textbf{Loss:}\n"
-        "  This is just prose, no equation.\n"
+        "  \\textbf{Loss:} we minimise the negative log-likelihood of\n"
+        "  the next action token under the policy distribution.\n"
         "\\end{frame}"
     )
     payload = _rendered_payload(
@@ -481,13 +493,8 @@ async def test_sl_render_slide_math_stack_requires_equation_block(
 
     from paperhub.agents.sl_render_slide import run_sl_render_slide
 
-    with (
-        patch(
-            "paperhub.agents.sl_render_slide.litellm.acompletion", new=mock_completion
-        ),
-        pytest.raises(ValueError, match="math_stack"),
-    ):
-        await run_sl_render_slide(
+    with patch("paperhub.agents.sl_render_slide.litellm.acompletion", new=mock_completion):
+        rendered = await run_sl_render_slide(
             planned_slide=slide,
             deck_outline=outline,
             paper_brief=briefs[0],
@@ -497,11 +504,13 @@ async def test_sl_render_slide_math_stack_requires_equation_block(
             response_language="English",
         )
 
-    status, error, _args, result = await _read_step_row(migrated_db)
-    assert status == "error"
-    assert error == "render_validation_failed"
-    assert result.get("validation_failed") is True
-    assert "math_stack" in result.get("validation_error", "")
+    # Structural roundtrip preserved; no surface-form rejection.
+    assert rendered.frame_tex.startswith("\\begin{frame}")
+    assert rendered.frame_tex.endswith("\\end{frame}")
+    assert rendered.pattern_kind == "math_stack"
+
+    status, _error, _args, _result = await _read_step_row(migrated_db)
+    assert status == "ok"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Per-slide Beamer-frame renderer for the F4.4 slide pipeline (T3).
+"""Per-slide Beamer-frame renderer for the F4.4 slide pipeline.
 
 Consumes ONE :class:`PlannedSlide` + (for per-paper patterns) the relevant
 :class:`PaperTalkBrief` and emits a single
@@ -10,6 +10,17 @@ pre-extracted summary is insufficient. Cross-paper patterns
 (``paper_id is None``) have NO callback tools wired — the LLM gets a
 direct render call.
 
+**Philosophy (T10 refactor).** The renderer feeds the LLM the slide's
+PURPOSE (goal) + the available CONTENT (figure / equation / brief) +
+a LIBRARY OF LAYOUT EXAMPLES (each tagged with `purpose` + `when_to_use`
+reasoning). The LLM REASONS about which layout serves the content,
+picks AND adapts an example, OR designs its own layout if the library
+doesn't cover the case. The library is INSPIRATION, not a set of
+templates the output must match. ``PlannedSlide.pattern_kind`` is kept
+on the schema as advisory information about the planner's intent, but
+the renderer ignores it for layout choice — the layout decision is the
+LLM's, informed by goal + content + library.
+
 Hard contracts (closes T5/T6's assemble + verify burden):
 
 - The LLM's final no-tool-calls response is parsed via
@@ -19,15 +30,12 @@ Hard contracts (closes T5/T6's assemble + verify burden):
   the agent-flow observability iron rule a silent fallback emitting
   structurally-valid garbage downstream is exactly the failure mode we
   refuse to swallow.
-- After parsing, deterministic sanity validation runs (``"render_validation_failed"``):
-  exactly one ``\\begin{frame}`` / ``\\end{frame}``; every
-  ``\\includegraphics`` key extracted from ``frame_tex`` is mirrored in
-  ``figure_keys_used``; ``math_stack`` MUST contain at least one
-  ``\\[...\\]`` display-math block; ``title`` MUST contain ``[plain]``
-  and ``\\titlepage``; ``takeaway_closer`` MUST NOT contain
-  ``\\frametitle``.
-
-T3 ships the node + tests only; the subgraph wiring lands in T5.
+- After parsing, deterministic STRUCTURAL validation runs
+  (``"render_validation_failed"``): exactly one ``\\begin{frame}`` /
+  ``\\end{frame}`` env per slide; every ``\\includegraphics`` key
+  extracted from ``frame_tex`` is mirrored in ``figure_keys_used`` so
+  ``sl_verify_figures`` can audit it. No surface-form per-pattern
+  validators — those were the template-fill anti-pattern T10 removed.
 """
 from __future__ import annotations
 
@@ -40,6 +48,10 @@ import aiosqlite
 import litellm
 from pydantic import ValidationError
 
+from paperhub.agents._layout_examples import (
+    LayoutExample,
+    load_layout_examples,
+)
 from paperhub.agents.sl_paper_brief import (
     _read_figure_block,
     _read_section,
@@ -57,7 +69,6 @@ from paperhub.tracing.tracer import Tracer
 
 __all__ = [
     "MAX_CALLBACK_CALLS",
-    "PATTERN_TEMPLATES",
     "run_sl_render_slide",
 ]
 
@@ -82,153 +93,6 @@ _INCLUDEGRAPHICS_RE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}")
 # we will count occurrences, not extract a specific instance).
 _FRAME_BEGIN_RE = re.compile(r"\\begin\{frame\}")
 _FRAME_END_RE = re.compile(r"\\end\{frame\}")
-
-# Display-math detector for the math_stack sanity check. Matches \[...\]
-# OR \begin{equation}...\end{equation} / \begin{align}...\end{align}, which
-# are the project's accepted display-math forms on slides.
-_DISPLAY_MATH_RE = re.compile(
-    r"\\\[.*?\\\]"
-    r"|\\begin\{equation\*?\}.*?\\end\{equation\*?\}"
-    r"|\\begin\{align\*?\}.*?\\end\{align\*?\}",
-    re.DOTALL,
-)
-
-
-# ────────────────────────── pattern templates ───────────────────────
-# These templates are SHOWN to the LLM via the prompt user message. They are
-# hand-authored design references (no comparison-target text leaked) encoding
-# the layout discipline T2 plans against.
-PATTERN_TEMPLATES: dict[str, str] = {
-    "title": (
-        r"""\begin{frame}[plain]
-  \titlepage
-\end{frame}"""
-    ),
-    "references": (
-        r"""\begin{frame}{<frametitle>}
-  \begin{columns}[T]
-    % One column per paper (3 expected). Each column an [s]-stretch minipage
-    % so heights match. Replace <N>/<short_name>/<title>/<authors>/<venue>/<url>
-    % from ALL BRIEFS. Skip <venue> line if missing.
-    \begin{column}{0.32\textwidth}
-      \begin{minipage}[t][0.78\textheight][s]{\linewidth}
-        \textbf{[<N>] <short_name>}\\[0.25em]
-        {\scriptsize\itshape <title>}\\[0.25em]
-        {\tiny <authors>}\\[0.25em]
-        \textcolor{accent}{\textbf{<venue>}}
-        \vfill
-        {\tiny\ttfamily <url>}
-      \end{minipage}
-    \end{column}
-    % ... repeat for each paper
-  \end{columns}
-\end{frame}"""
-    ),
-    "motivation_figure": (
-        r"""\begin{frame}{<frametitle>}
-  \centering
-  \includegraphics[width=0.65\linewidth,height=0.6\textheight,keepaspectratio]{<figure_key>}\\
-  \textbf{<one-sentence motivation under the figure>}
-\end{frame}"""
-    ),
-    "bottlenecks_table": (
-        r"""\begin{frame}{<frametitle>}
-  \begin{tabular}{l l l}
-    \toprule
-    Bottleneck & Paper & Speedup / Result \\
-    \midrule
-    <bottleneck 1> & [<N1>] <short_name_1> & <number_1> \\
-    <bottleneck 2> & [<N2>] <short_name_2> & <number_2> \\
-    <bottleneck 3> & [<N3>] <short_name_3> & <number_3> \\
-    \bottomrule
-  \end{tabular}
-  \vspace{0.5em}
-  \begin{block}{<goal as tagline>}
-    <one-sentence framing of the three together>
-  \end{block}
-\end{frame}"""
-    ),
-    "concept_2col": (
-        r"""\begin{frame}{<frametitle>}
-  \begin{columns}[T]
-    \begin{column}{0.55\textwidth}
-      \includegraphics[width=\linewidth]{<figure_key>}
-    \end{column}
-    \begin{column}{0.45\textwidth}
-      \begin{itemize}
-        \item <key_point 1, <=15 words>
-        \item <key_point 2, <=15 words>
-        \item <key_point 3, optional>
-        \item <key_point 4, optional>
-      \end{itemize}
-      \begin{block}{Result}
-        <headline number from brief.key_results, or empty block if none fits>
-      \end{block}
-    \end{column}
-  \end{columns}
-\end{frame}"""
-    ),
-    "math_stack": (
-        r"""\begin{frame}{<frametitle>}
-  % For EACH equation (max 2): a section-style label followed by a display-math
-  % block followed by a one-line italic notation explanation. NO bullets on
-  % math slides. Use the assigned equation from PaperTalkBrief.key_equations.
-  \textbf{<role label, e.g. "Loss:" or "Update rule:">}
-  \[
-    <equation_latex verbatim from brief>
-  \]
-  {\small\itshape notation: <notation_explanation from brief>}
-\end{frame}"""
-    ),
-    "results_table": (
-        r"""\begin{frame}{<frametitle>}
-  \begin{tabular}{l c c c}
-    \toprule
-    Metric & Baseline & Ours & Delta \\
-    \midrule
-    <metric 1> & <baseline> & <ours> & <delta> \\
-    <metric 2> & <baseline> & <ours> & <delta> \\
-    \bottomrule
-  \end{tabular}
-\end{frame}"""
-    ),
-    "proposed_direction_placeholder": (
-        r"""\begin{frame}{<frametitle>}
-  \textbf{[Proposed direction --- fill with your own contribution here]}\\[0.5em]
-  <one-line restatement of the slide goal as the synthesis prompt>\\[0.5em]
-  \begin{tikzpicture}
-    \node[draw, dashed, minimum width=6cm, minimum height=2cm, align=center]
-      {your synthesis here};
-  \end{tikzpicture}
-\end{frame}"""
-    ),
-    "plan_numbered": (
-        r"""\begin{frame}{<frametitle>}
-  \small
-  \begin{enumerate}
-    \item <step 1>
-    \item <step 2>
-    \item <step 3>
-    \item <step 4>
-    % optional steps 5 / 6
-  \end{enumerate}
-\end{frame}"""
-    ),
-    "takeaway_closer": (
-        r"""\begin{frame}[plain]
-  \centering
-  \rule{0.6\linewidth}{0.4pt}\\[1em]
-  {\Large\bfseries Take-away}\\[0.75em]
-  <one-sentence take-away derived from slide goal>\\[1em]
-  \rule{0.6\linewidth}{0.4pt}\\[1em]
-  \begin{block}{Open Question}
-    \itshape <one-sentence open question for the audience>
-  \end{block}
-  \vspace{1em}
-  \textbf{\Large Thank you. Questions?}
-\end{frame}"""
-    ),
-}
 
 
 # ────────────────────────── tool schemas ────────────────────────────
@@ -354,6 +218,27 @@ def _format_all_briefs_block(all_briefs: list[PaperTalkBrief]) -> str:
     return json.dumps(rows, ensure_ascii=False, indent=2)
 
 
+def _format_layout_library_block(library: list[LayoutExample]) -> str:
+    """Render the FULL layout-example library into the user-message body.
+
+    Every entry's id + purpose + when_to_use + example is included — the
+    LLM sees the full library and reasons about which (if any) entry
+    serves the slide. The layout decision is the LLM's; the library
+    informs it but does not constrain it.
+    """
+    if not library:
+        return "(no layout examples available)"
+    blocks: list[str] = []
+    for entry in library:
+        blocks.append(
+            f"### id: {entry.id}\n"
+            f"purpose: {entry.purpose}\n"
+            f"when_to_use:\n{entry.when_to_use}\n"
+            f"example:\n```latex\n{entry.example}\n```"
+        )
+    return "\n\n".join(blocks)
+
+
 def _format_assigned_equation_block(
     planned: PlannedSlide, brief: PaperTalkBrief | None
 ) -> str:
@@ -393,10 +278,23 @@ def _parse_rendered_slide(raw: str) -> RenderedSlide:
 
 
 def _validate_rendered_slide(rendered: RenderedSlide) -> None:
-    """Deterministic post-parse checks. Raises ValueError on violation.
+    """Deterministic STRUCTURAL post-parse checks. Raises ValueError on violation.
 
-    Closes T5's assemble burden — after this pass the frame may be
-    concatenated as-is with no per-pattern re-inspection.
+    T10 deliberately scopes this to *structural* checks only — surface-form
+    per-pattern validators (math_stack must contain \\[...\\], title must
+    have [plain]+\\titlepage, takeaway_closer must not have \\frametitle)
+    were removed: those enforced the template-fill anti-pattern. The LLM
+    designs its own layout informed by the layout-example library; the
+    examples are inspiration, not validation targets.
+
+    What stays:
+    * Exactly one ``\\begin{frame}`` / ``\\end{frame}`` env per slide
+      (so ``assemble`` can concatenate frames as-is). Multi-frame splits
+      are a separate layout the planner asks for, not something the
+      renderer emits implicitly.
+    * Every ``\\includegraphics`` key in ``frame_tex`` is mirrored in
+      ``figure_keys_used`` — required for ``sl_verify_figures`` to audit
+      the deck-wide figure inventory.
     """
     tex = rendered.frame_tex
 
@@ -435,34 +333,6 @@ def _validate_rendered_slide(rendered: RenderedSlide) -> None:
             f"{missing} (slide_index={rendered.slide_index}); the renderer "
             "must record every \\includegraphics key it emits so "
             "sl_verify_figures can audit it."
-        )
-
-    if rendered.pattern_kind == "math_stack" and not _DISPLAY_MATH_RE.search(tex):
-        raise ValueError(
-            f"render emitted a math_stack frame with no \\[...\\] / "
-            f"\\begin{{equation}} block (slide_index={rendered.slide_index}); "
-            "math_stack must carry at least one display-math equation."
-        )
-
-    if rendered.pattern_kind == "title":
-        if "[plain]" not in tex:
-            raise ValueError(
-                f"render emitted a title frame without [plain] "
-                f"(slide_index={rendered.slide_index}); title pages must "
-                "use \\begin{frame}[plain] to suppress the frame chrome."
-            )
-        if "\\titlepage" not in tex:
-            raise ValueError(
-                f"render emitted a title frame without \\titlepage "
-                f"(slide_index={rendered.slide_index}); the title page "
-                "must render the deck's \\titlepage block."
-            )
-
-    if rendered.pattern_kind == "takeaway_closer" and "\\frametitle" in tex:
-        raise ValueError(
-            f"render emitted a takeaway_closer frame with \\frametitle "
-            f"(slide_index={rendered.slide_index}); the closer uses "
-            "[plain] + \\rule framing and MUST NOT carry a \\frametitle."
         )
 
 
@@ -533,10 +403,7 @@ async def run_sl_render_slide(
             ) from None
         slide_index = soft_match
 
-    pattern_template = PATTERN_TEMPLATES.get(
-        planned_slide.pattern_kind,
-        "(no template defined for this pattern_kind)",
-    )
+    layout_library = load_layout_examples()
 
     system = prompt.system.format(
         max_callback_calls=max_callback_calls,
@@ -555,7 +422,7 @@ async def run_sl_render_slide(
         sibling_block=_format_sibling_block(deck_outline, slide_index),
         brief_block=_format_brief_block(paper_brief),
         all_briefs_block=_format_all_briefs_block(all_briefs),
-        pattern_template=pattern_template,
+        layout_library_block=_format_layout_library_block(layout_library),
         assigned_equation_block=_format_assigned_equation_block(
             planned_slide, paper_brief
         ),
