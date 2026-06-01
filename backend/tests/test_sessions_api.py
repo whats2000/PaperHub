@@ -310,12 +310,12 @@ async def test_get_session_messages_replays_deck(
         )
         await conn.execute(
             "INSERT INTO decks (session_id, run_id, tex_path, pdf_path, "
-            "speaker_notes_json, plan_json, page_count, theme, "
+            "speaker_notes_json, plan_json, page_count, "
             "contributing_paper_ids_json, status) "
             "VALUES (1, 1, '/x.tex', '/x.pdf', "
             "'{\"1\": \"intro notes\"}', "
             "'{\"title\": \"Flow Matching, Explained\"}', "
-            "5, 'metropolis', '[3, 7]', 'ok')",
+            "5, '[3, 7]', 'ok')",
         )
         await conn.execute(
             "INSERT INTO messages (session_id, role, content, run_id) "
@@ -374,9 +374,9 @@ async def test_get_session_messages_deck_default_title(
         )
         await conn.execute(
             "INSERT INTO decks (session_id, run_id, tex_path, pdf_path, "
-            "speaker_notes_json, plan_json, page_count, theme, "
+            "speaker_notes_json, plan_json, page_count, "
             "contributing_paper_ids_json, status) "
-            "VALUES (1, 1, '/x.tex', NULL, '{}', '{}', 3, 'metropolis', "
+            "VALUES (1, 1, '/x.tex', NULL, '{}', '{}', 3, "
             "'[]', 'ok')",
         )
         await conn.execute(

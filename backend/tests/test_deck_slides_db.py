@@ -18,7 +18,7 @@ async def _seed_deck(conn) -> int:
     await conn.commit()
     await upsert_deck(
         conn, session_id=1, run_id=None, tex_path="/x/deck.tex", pdf_path=None,
-        speaker_notes={}, plan={}, page_count=2, theme="metropolis",
+        speaker_notes={}, plan={}, page_count=2,
         contributing_paper_ids=[], status="ok",
     )
     deck = await get_deck(conn, session_id=1)

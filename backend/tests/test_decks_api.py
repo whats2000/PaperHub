@@ -29,7 +29,7 @@ async def _seed_deck_with_slides(conn: aiosqlite.Connection, tmp_path: Path) -> 
     await upsert_deck(
         conn, session_id=1, run_id=None,
         tex_path=str(tmp_path / "deck.tex"), pdf_path=str(pdf),
-        speaker_notes={}, plan={"title": "T"}, page_count=3, theme="metropolis",
+        speaker_notes={}, plan={"title": "T"}, page_count=3,
         contributing_paper_ids=[], status="ok",
     )
     deck = await get_deck(conn, session_id=1)
@@ -81,7 +81,6 @@ async def test_get_deck_and_pdf(
         speaker_notes={"1": "n"},
         plan={},
         page_count=1,
-        theme="metropolis",
         contributing_paper_ids=[],
         status="ok",
     )
@@ -128,7 +127,6 @@ async def test_download_filename_derived_from_title(
         # Title carries an illegal ':' that must be stripped from the filename.
         plan={"title": "Attention: Is All You Need"},
         page_count=1,
-        theme="metropolis",
         contributing_paper_ids=[],
         status="ok",
     )
