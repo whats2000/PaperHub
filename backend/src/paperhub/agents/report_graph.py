@@ -226,6 +226,63 @@ async def _enabled_papers(
     return out
 
 
+async def _stage_figures(
+    papers: list[dict[str, Any]], workdir: Path
+) -> list[str]:
+    """Copy every paper's figure files into ``workdir`` under the
+    inventory-key-matching name ``p{paper_idx}-{fig.id}{src.suffix}``.
+
+    This is what the R1 ``sl_assemble.stage_inventory`` step used to do.
+    Without it, the slide_agent's ``\\includegraphics{p{idx}-{stem}}``
+    resolves to a missing file at compile time and the rendered PDF
+    contains placeholders instead of images (F4.5 bug: every generated
+    deck silently had placeholder rectangles). The key scheme MUST match
+    :func:`gather_context._format_figure_inventory_block` and
+    :func:`figure_inventory.build_inventory` exactly — the slide_agent
+    writes those keys verbatim into the deck.
+
+    Degrades gracefully: a paper without ``source_dir``, an unreadable
+    ``PaperAsset``, or a figure whose source file doesn't exist is
+    silently skipped (matches ``probe_figure_dimensions``'s soft-fail
+    posture — a missing figure simply isn't staged, the deterministic
+    ``verify_and_fix_graphics`` pass then rewrites any reference to it
+    as ``[figure omitted]``).
+
+    ``papers`` items match the shape produced by ``_enabled_papers``:
+    a dict with at least ``source_dir`` (string path to the
+    ``paper_content`` source dir; ``paper_asset_dir(source_dir)`` is the
+    ``asset/`` subtree). Iteration order = ``paper_idx`` (must match
+    gather_context's enumeration).
+
+    Returns the list of staged filenames (for the trace).
+    """
+
+    def _stage_all() -> list[str]:
+        workdir.mkdir(parents=True, exist_ok=True)
+        staged: list[str] = []
+        for paper_idx, p in enumerate(papers):
+            source_dir_raw = p.get("source_dir")
+            if not source_dir_raw:
+                continue
+            source_dir = Path(str(source_dir_raw))
+            if not source_dir.exists():
+                continue
+            asset = read_paper_asset(source_dir)
+            if asset is None:
+                continue
+            for fig in asset.figures:
+                src = fig.abs_image_path(source_dir)
+                if not src.exists():
+                    continue
+                stem = fig.id or src.stem
+                dest = workdir / f"p{paper_idx}-{stem}{src.suffix or '.png'}"
+                shutil.copy2(src, dest)
+                staged.append(dest.name)
+        return staged
+
+    return await asyncio.to_thread(_stage_all)
+
+
 def build_report_subgraph(deps: ReportDeps) -> Any:
     async def _resolve(state: AgentState) -> AgentState:
         papers = await _enabled_papers(deps.conn, state["session_id"])
@@ -376,6 +433,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         inv = await asyncio.to_thread(build_inventory, papers)
         return {f.key for f in inv}
 
+
     def _deck_title(deck: Any) -> str:
         """Best-effort deck title from the persisted plan.
 
@@ -507,6 +565,14 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
         )
         await asyncio.to_thread(lambda: slides_dir.mkdir(parents=True, exist_ok=True))
+
+        # Stage figure files into workdir under inventory-key-matching names
+        # so the slide_agent's \includegraphics{p{idx}-{stem}} resolves via
+        # pdflatex's default \graphicspath (= the document directory =
+        # slides_dir). This replaces the deleted R1
+        # ``sl_assemble.stage_inventory`` step — without it, every emitted
+        # deck PDF rendered placeholders instead of figures (F4.5 bug).
+        await _stage_figures(papers, slides_dir)
 
         resolved_preamble = await resolve_preamble(
             session_id=int(state["session_id"]), conn=deps.conn
