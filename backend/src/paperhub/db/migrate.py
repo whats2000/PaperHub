@@ -279,38 +279,45 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         decks_cols = {row[1] for row in await cur.fetchall()}
 
     if "theme" in decks_cols or "current_version_id" not in decks_cols:
-        await conn.executescript(
-            """
-            CREATE TABLE decks_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-                run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-                tex_path TEXT NOT NULL,
-                pdf_path TEXT,
-                speaker_notes_json TEXT,
-                plan_json TEXT,
-                page_count INTEGER NOT NULL DEFAULT 0,
-                current_version_id TEXT,
-                contributing_paper_ids_json TEXT NOT NULL DEFAULT '[]',
-                status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error')),
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE (session_id)
-            );
-            INSERT INTO decks_new (
-                id, session_id, run_id, tex_path, pdf_path, speaker_notes_json,
-                plan_json, page_count, current_version_id,
-                contributing_paper_ids_json, status, created_at, updated_at
+        # Atomic rebuild — mirrors _rebuild_papers_table / _rebuild_messages_table.
+        # executescript auto-commits each statement, so an interruption between
+        # INSERT and DROP could leave decks_new orphaned and trip the next run.
+        await conn.execute("BEGIN")
+        try:
+            await conn.execute("""
+                CREATE TABLE decks_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                    run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+                    tex_path TEXT NOT NULL,
+                    pdf_path TEXT,
+                    speaker_notes_json TEXT,
+                    plan_json TEXT,
+                    page_count INTEGER NOT NULL DEFAULT 0,
+                    current_version_id TEXT,
+                    contributing_paper_ids_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (session_id)
+                )
+            """)
+            await conn.execute(
+                "INSERT INTO decks_new ("
+                "id, session_id, run_id, tex_path, pdf_path, speaker_notes_json, "
+                "plan_json, page_count, current_version_id, "
+                "contributing_paper_ids_json, status, created_at, updated_at) "
+                "SELECT id, session_id, run_id, tex_path, pdf_path, speaker_notes_json, "
+                "plan_json, page_count, NULL, "
+                "contributing_paper_ids_json, status, created_at, updated_at "
+                "FROM decks"
             )
-            SELECT id, session_id, run_id, tex_path, pdf_path, speaker_notes_json,
-                   plan_json, page_count, NULL,
-                   contributing_paper_ids_json, status, created_at, updated_at
-            FROM decks;
-            DROP TABLE decks;
-            ALTER TABLE decks_new RENAME TO decks;
-            """
-        )
-        await conn.commit()
+            await conn.execute("DROP TABLE decks")
+            await conn.execute("ALTER TABLE decks_new RENAME TO decks")
+            await conn.execute("COMMIT")
+        except Exception:
+            await conn.execute("ROLLBACK")
+            raise
 
     # Create slide_style_overrides if missing (pre-existing DBs created before
     # F4.5 won't have it; schema.sql will create it on fresh DBs but the

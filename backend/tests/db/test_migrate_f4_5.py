@@ -96,35 +96,79 @@ async def test_slide_style_overrides_table_created(tmp_path):
             "updated_at",
         ]
 
-        # CHECK constraint on source enforces enum.
+        # Seed chat_sessions rows OUTSIDE the raises block so only the bogus
+        # INSERT is exercised inside it.
         await conn.execute(
             "INSERT INTO chat_sessions (id, created_at, title) "
             "VALUES (1, datetime('now'), 't')"
         )
         await conn.execute(
+            "INSERT INTO chat_sessions (id, created_at, title) "
+            "VALUES (2, datetime('now'), 't2')"
+        )
+        await conn.execute(
+            "INSERT INTO chat_sessions (id, created_at, title) "
+            "VALUES (3, datetime('now'), 't3')"
+        )
+        await conn.execute(
+            "INSERT INTO chat_sessions (id, created_at, title) "
+            "VALUES (4, datetime('now'), 't4')"
+        )
+        # Positive acceptance — every allowed enum value succeeds.
+        await conn.execute(
             "INSERT INTO slide_style_overrides (session_id, preamble_tex, source) "
             "VALUES (1, '\\\\usetheme{Madrid}', 'user_request')"
         )
+        await conn.execute(
+            "INSERT INTO slide_style_overrides (session_id, preamble_tex, source) "
+            "VALUES (2, '\\\\usetheme{Madrid}', 'agent_inferred')"
+        )
+        await conn.execute(
+            "INSERT INTO slide_style_overrides (session_id, preamble_tex, source) "
+            "VALUES (3, '\\\\usetheme{Madrid}', 'global_memory_projection')"
+        )
         await conn.commit()
+
+        # CHECK constraint on source rejects any value outside the enum.
         with pytest.raises(aiosqlite.IntegrityError):
             await conn.execute(
-                "INSERT INTO chat_sessions (id, created_at, title) "
-                "VALUES (2, datetime('now'), 't2')"
-            )
-            await conn.execute(
                 "INSERT INTO slide_style_overrides "
-                "(session_id, preamble_tex, source) VALUES (2, 'x', 'bogus')"
+                "(session_id, preamble_tex, source) VALUES (4, 'x', 'bogus')"
             )
             await conn.commit()
+
+        # Confirm the three accepted rows actually landed.
+        async with conn.execute(
+            "SELECT session_id, source FROM slide_style_overrides ORDER BY session_id"
+        ) as cur:
+            rows = await cur.fetchall()
+        assert rows == [
+            (1, "user_request"),
+            (2, "agent_inferred"),
+            (3, "global_memory_projection"),
+        ]
 
 
 @pytest.mark.asyncio
 async def test_f4_5_migration_idempotent(tmp_path):
-    """Running apply_schema twice on a freshly migrated DB must not raise."""
+    """Running apply_schema twice on a freshly migrated DB must not raise,
+    must leave the schema unchanged, AND must preserve existing data."""
     db = tmp_path / "test.db"
     async with aiosqlite.connect(str(db)) as conn:
         await conn.execute("PRAGMA foreign_keys = ON")
         await apply_schema(conn)
+
+        # Seed a deck row between the two migrations to verify data preservation.
+        await conn.execute(
+            "INSERT INTO chat_sessions (id, created_at, title) "
+            "VALUES (1, datetime('now'), 't')"
+        )
+        await conn.execute(
+            "INSERT INTO decks (session_id, tex_path, current_version_id) "
+            "VALUES (1, '/tmp/d.tex', 'v-abc123')"
+        )
+        await conn.commit()
+
         # Second run must be a no-op (no `theme` to drop, table already there).
         await apply_schema(conn)
 
@@ -138,3 +182,11 @@ async def test_f4_5_migration_idempotent(tmp_path):
             "AND name='slide_style_overrides'"
         ) as cur:
             assert await cur.fetchone() is not None
+
+        # The seeded deck row must survive the second migration unchanged.
+        async with conn.execute(
+            "SELECT session_id, tex_path, current_version_id "
+            "FROM decks WHERE session_id = 1"
+        ) as cur:
+            row = await cur.fetchone()
+        assert row == (1, "/tmp/d.tex", "v-abc123")
