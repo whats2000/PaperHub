@@ -64,15 +64,83 @@ def _is_inside_layout_env(tex: str, pos: int) -> bool:
     return False
 
 
+def _center_wrap_state(
+    tex: str, fig_start: int, fig_end: int
+) -> tuple[bool, int]:
+    """Return ``(has_center_wrap, end_center_line_end)``.
+
+    ``has_center_wrap`` is True when the previous non-whitespace line is
+    ``\\begin{center}`` AND the next non-whitespace line after the figure is
+    ``\\end{center}``. ``end_center_line_end`` is the index of the newline
+    that terminates the ``\\end{center}`` line (or -1 if there's no wrap),
+    used to decide where to inject a missing ``\\par``.
+    """
+    prev_nl = tex.rfind("\n", 0, fig_start)
+    if prev_nl == -1:
+        return (False, -1)
+    scan = prev_nl
+    found_begin = False
+    while scan > 0:
+        line_end = scan
+        line_start = tex.rfind("\n", 0, scan) + 1
+        prev_line = tex[line_start:line_end].strip()
+        if prev_line:
+            if prev_line != "\\begin{center}":
+                return (False, -1)
+            found_begin = True
+            break
+        scan = line_start - 1
+    if not found_begin:
+        return (False, -1)
+
+    next_nl = tex.find("\n", fig_end)
+    if next_nl == -1:
+        return (False, -1)
+    scan = next_nl
+    while scan < len(tex):
+        line_start = scan + 1
+        line_end_idx = tex.find("\n", line_start)
+        if line_end_idx == -1:
+            line_end_idx = len(tex)
+        next_line = tex[line_start:line_end_idx].strip()
+        if next_line:
+            if next_line != "\\end{center}":
+                return (False, -1)
+            return (True, line_end_idx)
+        scan = line_end_idx
+    return (False, -1)
+
+
+def _has_par_after(tex: str, end_center_line_end: int) -> bool:
+    """Return True if the next non-whitespace line after ``end_center_line_end``
+    is ``\\par`` (possibly with trailing whitespace)."""
+    scan = end_center_line_end
+    while scan < len(tex):
+        line_start = scan + 1
+        line_end_idx = tex.find("\n", line_start)
+        if line_end_idx == -1:
+            line_end_idx = len(tex)
+        after_line = tex[line_start:line_end_idx].strip()
+        if after_line:
+            return after_line == "\\par"
+        scan = line_end_idx
+    return False
+
+
 def _is_already_wrapped_in_center(tex: str, fig_start: int, fig_end: int) -> bool:
     """Return True if the ``\\includegraphics`` is already wrapped in a
-    ``\\begin{center}...\\end{center}`` environment on the surrounding lines.
+    ``\\begin{center}...\\end{center}`` environment on the surrounding lines
+    AND the line immediately after ``\\end{center}`` is ``\\par``.
 
     Concretely: the previous non-whitespace line (within the same frame body)
-    must be ``\\begin{center}`` and the next non-whitespace line must be
-    ``\\end{center}``. We don't try to handle the figure being part of a
-    multi-line ``center`` block with other content — that's a structure the
-    LLM never produces; we only need to detect our own previous injection.
+    must be ``\\begin{center}``, the next non-whitespace line after the figure
+    must be ``\\end{center}``, AND the line after THAT must be ``\\par`` — the
+    trailing ``\\par`` is the load-bearing piece that forces a paragraph break
+    under Beamer+xeCJK, so a previous run that wrapped without the ``\\par``
+    is NOT considered already-wrapped — we want to re-run to add it.
+    We don't try to handle the figure being part of a multi-line ``center``
+    block with other content — that's a structure the LLM never produces; we
+    only need to detect our own previous injection.
     """
     # Look backwards for the previous non-whitespace line.
     prev_nl = tex.rfind("\n", 0, fig_start)
@@ -92,11 +160,12 @@ def _is_already_wrapped_in_center(tex: str, fig_start: int, fig_end: int) -> boo
     else:
         return False
 
-    # Look forward for the next non-whitespace line.
+    # Look forward for the next non-whitespace line (must be \end{center}).
     next_nl = tex.find("\n", fig_end)
     if next_nl == -1:
         return False
     scan = next_nl
+    end_center_line_end = -1
     while scan < len(tex):
         line_start = scan + 1
         line_end_idx = tex.find("\n", line_start)
@@ -104,7 +173,25 @@ def _is_already_wrapped_in_center(tex: str, fig_start: int, fig_end: int) -> boo
             line_end_idx = len(tex)
         next_line = tex[line_start:line_end_idx].strip()
         if next_line:
-            return next_line == "\\end{center}"
+            if next_line != "\\end{center}":
+                return False
+            end_center_line_end = line_end_idx
+            break
+        scan = line_end_idx
+    if end_center_line_end == -1:
+        return False
+
+    # Look forward for the next non-whitespace line after \end{center}.
+    # Must be exactly ``\par`` (possibly with trailing whitespace).
+    scan = end_center_line_end
+    while scan < len(tex):
+        line_start = scan + 1
+        line_end_idx = tex.find("\n", line_start)
+        if line_end_idx == -1:
+            line_end_idx = len(tex)
+        after_line = tex[line_start:line_end_idx].strip()
+        if after_line:
+            return after_line == "\\par"
         scan = line_end_idx
     return False
 
@@ -122,24 +209,31 @@ def enforce_figure_paragraph_break(tex: str) -> str:
     state and Beamer+xeCJK still flowed it inline next to the image.
 
     The fix uses the ``center`` ENVIRONMENT instead — its scope ends with
-    ``\\end{center}``, so the caption text below is in a fresh paragraph
-    context with no scope bleed. The environment also inserts vertical space
-    before/after and forces a paragraph break.
+    ``\\end{center}`` — AND injects an explicit ``\\par`` on its own line
+    immediately after ``\\end{center}``. Real-API run 372 (session 236)
+    showed the ``center`` env alone was insufficient under Beamer+xeCJK: the
+    caption-text still flowed inline next to the figure. The literal
+    ``\\par`` after ``\\end{center}`` guarantees the next content starts in
+    a fresh paragraph regardless of how Beamer/xeCJK treats the environment
+    boundary.
 
     For each ``\\includegraphics`` not inside a column/figure env, this
     function:
 
       1. Wraps the ``\\includegraphics`` line in
-         ``\\begin{center}\\n<figure>\\n\\end{center}`` (preserving the
-         figure's original indent on the figure line; the wrapper lines
+         ``\\begin{center}\\n<figure>\\n\\end{center}\\n\\par`` (preserving
+         the figure's original indent on the figure line; the wrapper lines
          carry the same indent).
       2. Injects a literal blank line (``\\n\\n``) between the end of the
-         figure block (the ``\\end{center}`` + any trailing
+         figure block (the ``\\par`` + any trailing
          ``\\vspace``/``\\hspace``) and the next non-whitespace content.
 
     The function is idempotent and conservative:
       - Skips wrapping when the figure is already inside an explicit
-        ``\\begin{center}``/``\\end{center}`` pair on adjacent lines.
+        ``\\begin{center}``/``\\end{center}`` pair AND followed by ``\\par``.
+      - When the ``\\begin{center}/\\end{center}`` pair exists but the
+        trailing ``\\par`` is missing, injects ONLY the missing ``\\par``
+        (no double-wrap).
       - Skips the blank-line injection when one is already present.
       - Skips everything when the figure is inside ``\\begin{column}`` /
         ``\\begin{columns}`` / ``\\begin{figure}`` / ``\\begin{wrapfigure}``.
@@ -153,12 +247,26 @@ def enforce_figure_paragraph_break(tex: str) -> str:
         if _is_inside_layout_env(tex, m.start()):
             continue
 
+        # Detect whether the figure is already wrapped in \begin{center}/
+        # \end{center} on adjacent lines (regardless of whether \par follows).
+        has_center_wrap, end_center_line_end = _center_wrap_state(
+            tex, m.start(), m.end()
+        )
+
+        # If the figure IS center-wrapped, we need to operate AFTER
+        # \end{center}, not after the figure call — the existing
+        # \end{center} line + indent must be preserved verbatim and any
+        # \par/blank-line injection happens past the wrap.
+        block_end_anchor = (
+            end_center_line_end + 1 if has_center_wrap else m.end()
+        )
+
         # Find the end of the includegraphics "block" — the figure call
         # itself plus any immediately-following \v/hspace commands and
         # whitespace (including a single newline, but NOT a blank line which
-        # already terminates the block correctly).
-        block_end = m.end()
-        scan = block_end
+        # already terminates the block correctly). When already wrapped, we
+        # scan from past \end{center} instead.
+        scan = block_end_anchor
         while scan < len(tex):
             # Try to consume a spacing cmd that's either right at scan or
             # preceded only by horizontal whitespace + a single newline
@@ -176,9 +284,8 @@ def enforce_figure_paragraph_break(tex: str) -> str:
                 continue
             break
 
-        # ``scan`` is now after the figure + trailing spacing cmds, sitting on
-        # whatever comes next (possibly a newline starting a blank line, or
-        # the next content token).
+        # ``scan`` is now after the figure-block (figure + optional center
+        # wrapper + trailing spacing cmds), sitting on whatever comes next.
         remainder = tex[scan:]
 
         # Look ahead at the first non-whitespace token. If it's an \end{...}
@@ -192,16 +299,18 @@ def enforce_figure_paragraph_break(tex: str) -> str:
         if tex[next_pos:].startswith("\\end{"):
             continue
 
-        # Decide what already exists.
-        already_wrapped = _is_already_wrapped_in_center(tex, m.start(), m.end())
+        has_par_after = has_center_wrap and _has_par_after(
+            tex, end_center_line_end
+        )
         has_paragraph_break = bool(
             re.match(r"\s*\n\s*\n", remainder)
             or re.match(r"\s*\\par\b", remainder)
             or re.match(r"\s*\\\\", remainder)
         )
 
-        # Nothing to do if BOTH are already present.
-        if already_wrapped and has_paragraph_break:
+        # Nothing to do if EVERYTHING is already present: center-wrap +
+        # trailing \par + blank line before the next content.
+        if has_center_wrap and has_par_after and has_paragraph_break:
             continue
 
         # Find the start of the figure's line so we can replace it (and its
@@ -216,39 +325,52 @@ def enforce_figure_paragraph_break(tex: str) -> str:
         # would be unusual LLM output).
         prefix_is_indent_only = fig_line_prefix.strip() == ""
 
-        if already_wrapped:
-            # Just emit the figure region verbatim; only the blank-line
-            # injection (below) may still need to run.
-            out_parts.append(tex[cursor:scan])
+        if has_center_wrap:
+            # Already wrapped — emit through the \end{center} line verbatim.
+            out_parts.append(tex[cursor:end_center_line_end + 1])
+            cursor = end_center_line_end + 1
+            # If \par is missing after \end{center}, inject one (using the
+            # same indent as the \end{center} line for consistency). The
+            # \end{center} line is at [line_start_of_end_center .. end_center_line_end].
+            if not has_par_after:
+                ec_line_start = tex.rfind(
+                    "\n", 0, end_center_line_end
+                ) + 1
+                ec_line = tex[ec_line_start:end_center_line_end]
+                ec_indent_m = re.match(r"[ \t]*", ec_line)
+                ec_indent = ec_indent_m.group(0) if ec_indent_m else indent
+                out_parts.append(f"{ec_indent}\\par\n")
+            # Re-emit trailing spacing cmds (between end_center_line_end+1
+            # and scan) verbatim.
+            out_parts.append(tex[end_center_line_end + 1:scan])
             cursor = scan
         else:
-            # Emit everything up to (but not including) the figure line's
-            # leading indent — we replace that line with our wrapped form.
+            # Not yet wrapped — emit the wrapped block (with trailing \par).
             if prefix_is_indent_only:
                 out_parts.append(tex[cursor:line_start])
                 # Wrapped block: \begin{center} / figure (with original
-                # indent) / \end{center}, each on its own line.
+                # indent) / \end{center} / \par, each on its own line. The
+                # trailing \par is what forces a paragraph break under
+                # Beamer+xeCJK; \end{center} alone is insufficient.
                 wrapped = (
                     f"{indent}\\begin{{center}}\n"
                     f"{indent}{tex[m.start():m.end()]}\n"
-                    f"{indent}\\end{{center}}"
+                    f"{indent}\\end{{center}}\n"
+                    f"{indent}\\par"
                 )
                 out_parts.append(wrapped)
-                # Continue emitting from immediately after the figure call;
-                # the original trailing newline + spacing cmds are preserved.
                 cursor = m.end()
-                # Re-emit any trailing spacing cmds verbatim (they are in
-                # tex[m.end():scan]).
+                # Re-emit any trailing spacing cmds verbatim.
                 out_parts.append(tex[m.end():scan])
                 cursor = scan
             else:
                 # Fallback: figure is not on its own line. Emit up to the
                 # figure, prepend a \begin{center}+newline, emit the figure,
-                # append a newline+\end{center}. Indent is best-effort.
+                # append a newline+\end{center}+\par. Indent is best-effort.
                 out_parts.append(tex[cursor:m.start()])
                 out_parts.append(
                     f"\\begin{{center}}\n{indent}{tex[m.start():m.end()]}\n"
-                    f"{indent}\\end{{center}}"
+                    f"{indent}\\end{{center}}\n{indent}\\par"
                 )
                 cursor = m.end()
                 out_parts.append(tex[m.end():scan])

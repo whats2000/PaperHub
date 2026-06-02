@@ -53,13 +53,14 @@ def test_wraps_figure_in_begin_center_env() -> None:
 
 
 def test_skips_wrapping_when_already_in_center_env() -> None:
-    """If ``\\includegraphics`` is already inside ``\\begin{center}...\\end{center}``,
-    don't double-wrap."""
+    """If ``\\includegraphics`` is already inside ``\\begin{center}...\\end{center}``
+    AND followed by ``\\par``, don't double-wrap."""
     tex = (
         r"\begin{frame}{X}" "\n"
         r"  \begin{center}" "\n"
         r"    \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
         r"  \end{center}" "\n"
+        r"  \par" "\n"
         r"  \vspace{0.3em}" "\n"
         r"" "\n"
         r"  {\small Caption.}" "\n"
@@ -101,12 +102,13 @@ def test_idempotent_after_full_treatment() -> None:
 
 
 def test_idempotent_when_already_wrapped_with_blank_line() -> None:
-    """Already-wrapped figure with blank line after → no change on re-run."""
+    """Already-wrapped figure with \\par + blank line after → no change on re-run."""
     tex = (
         r"\begin{frame}{X}" "\n"
         r"  \begin{center}" "\n"
         r"    \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
         r"  \end{center}" "\n"
+        r"  \par" "\n"
         r"  \vspace{0.3em}" "\n"
         r"" "\n"
         r"  {\small Caption text.}" "\n"
@@ -170,3 +172,69 @@ def test_handles_multiple_figures_in_one_deck() -> None:
     assert fixed.count("\\begin{center}") == 2
     assert fixed.count("\\end{center}") == 2
     assert fixed.count("\n\n") >= 2
+
+
+def test_wraps_figure_in_center_env_with_trailing_par() -> None:
+    """The fix must wrap \\includegraphics in \\begin{center}...\\end{center}
+    AND add a \\par on its own line after \\end{center}."""
+    tex = (
+        r"\begin{frame}{X}" "\n"
+        r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \vspace{0.3em}" "\n"
+        r"  {\small Caption.}" "\n"
+        r"\end{frame}" "\n"
+    )
+    fixed = enforce_figure_paragraph_break(tex)
+    # Look for the canonical structure:
+    #   \begin{center}\n  \includegraphics{...}\n  \end{center}\n  \par
+    assert "\\begin{center}" in fixed
+    assert "\\end{center}" in fixed
+    end_center_pos = fixed.find("\\end{center}")
+    par_after_pos = fixed.find("\\par", end_center_pos)
+    vspace_pos = fixed.find("\\vspace", end_center_pos)
+    # \par must come AFTER \end{center} but BEFORE \vspace
+    assert end_center_pos < par_after_pos < vspace_pos, (
+        f"end_center={end_center_pos}, par={par_after_pos}, vspace={vspace_pos}"
+    )
+
+
+def test_idempotent_when_already_wrapped_with_par() -> None:
+    """Running the fixer twice on already-fixed tex (center + trailing \\par)
+    produces the same result — no double-wrap, no double \\par."""
+    tex = (
+        r"\begin{frame}{X}" "\n"
+        r"  \begin{center}" "\n"
+        r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \end{center}" "\n"
+        r"  \par" "\n"
+        r"  \vspace{0.3em}" "\n"
+        r"" "\n"
+        r"  {\small Caption.}" "\n"
+        r"\end{frame}" "\n"
+    )
+    fixed = enforce_figure_paragraph_break(tex)
+    assert fixed.count("\\begin{center}") == 1
+    assert fixed.count("\\end{center}") == 1
+    # \par should appear once between \end{center} and \vspace
+    seg = fixed[fixed.find("\\end{center}"):fixed.find("\\vspace")]
+    assert seg.count("\\par") == 1
+
+
+def test_adds_missing_par_when_center_present_but_par_missing() -> None:
+    """A deck pre-wrapped with \\begin{center} but WITHOUT trailing \\par
+    should still get the \\par injected (idempotency-by-content, not by structure)."""
+    tex = (
+        r"\begin{frame}{X}" "\n"
+        r"  \begin{center}" "\n"
+        r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \end{center}" "\n"
+        r"  \vspace{0.3em}" "\n"
+        r"  {\small Caption.}" "\n"
+        r"\end{frame}" "\n"
+    )
+    fixed = enforce_figure_paragraph_break(tex)
+    # The pre-existing \begin{center} should NOT get double-wrapped, BUT
+    # the missing \par should be added between \end{center} and \vspace.
+    assert fixed.count("\\begin{center}") == 1
+    seg = fixed[fixed.find("\\end{center}"):fixed.find("\\vspace")]
+    assert "\\par" in seg, f"missing \\par after \\end{{center}}: {seg!r}"
