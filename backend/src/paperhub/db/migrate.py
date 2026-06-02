@@ -188,6 +188,18 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # F4.5: Idempotent column-add for runs.deck_version_id — records which
+    # deck-version snapshot a turn stamped, so per-turn DeckChip cards in
+    # the chat replay refer to the version produced by THAT turn (not just
+    # the most recent one). NULL for non-slide runs.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(runs)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "deck_version_id" not in cols:
+        await conn.execute("ALTER TABLE runs ADD COLUMN deck_version_id TEXT")
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # C4: Idempotent column-add migration for paper_content.abstract
     # (pre-existing DBs created before Plan C won't have this column).
     # -----------------------------------------------------------------------

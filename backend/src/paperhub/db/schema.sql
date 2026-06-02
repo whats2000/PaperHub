@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS runs (
     session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     routing_decision_json TEXT,
     search_results_json TEXT,
+    -- F4.5: which deck version snapshot this run stamped (or NULL for
+    -- non-slide runs). Used so per-turn DeckChip cards in the chat
+    -- replay refer to the version produced by THAT turn — not just the
+    -- currently-active one.
+    deck_version_id TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT,
     status TEXT NOT NULL DEFAULT 'running'
