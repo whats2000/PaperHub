@@ -464,9 +464,18 @@ async def run_sl_emit(
     pdf_path = workdir / "deck.pdf"
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
     version_id = f"version_{ts}"
+    # Bundled-notes convention (matches reference paper2slides-plus):
+    #   {dict} → restore replays these notes into deck_slides by slide_index
+    #   null   → restore explicitly clears notes
+    # We emit null (not ``{}``) when no notes were threaded in, so a GENERATE
+    # snapshot says "fresh deck, no notes" and a restore correctly wipes any
+    # stale notes from a later state the user is rolling back from.
+    snapshot_notes: dict[str, str] | None = (
+        {str(k): v for k, v in speaker_notes.items()} if speaker_notes else None
+    )
     snapshot = {
         "tex_content": audited_tex,
-        "speaker_notes": {str(k): v for k, v in (speaker_notes or {}).items()},
+        "speaker_notes": snapshot_notes,
         "description": "F4.5 sl_emit snapshot",
         "timestamp": ts,
     }
@@ -538,6 +547,15 @@ async def run_sl_emit(
 
     # 5. Rebuild deck_slides rows. Earlier rows (if any) are cleared because
     # frame_count likely changed; notes are reapplied by index from `speaker_notes`.
+    # F4.5: record which version snapshot THIS run stamped so per-turn
+    # DeckChip cards on replay can point at the version produced by THAT
+    # turn (not just the deck's current_version_id, which only matches
+    # the most recent run).
+    await conn.execute(
+        "UPDATE runs SET deck_version_id = ? WHERE id = ?",
+        (version_id, run_id),
+    )
+
     await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
     spans = _frame_spans(audited_tex)
     for idx, (frame_tex, page_start, page_end) in enumerate(spans):
