@@ -1,7 +1,11 @@
-"""F4.5 — defensive post-process that injects ``\\centering`` before
-``\\includegraphics`` and a blank line after the figure block so the
-following text breaks onto its own paragraph. Without it, CJK decks rendered
-caption text inline to the RIGHT of the figure instead of below.
+"""F4.5 — defensive post-process that wraps ``\\includegraphics`` in a
+``\\begin{center}...\\end{center}`` environment (explicit scope, no
+declaration-leak into surrounding caption text) and injects a blank line
+after the figure block so the following text breaks onto its own paragraph.
+
+Without it, CJK decks rendered caption text inline to the RIGHT of the figure
+instead of below — and the earlier ``\\centering``-based fix leaked declaration
+state across the rest of the frame body, so the bug recurred.
 """
 from paperhub.agents.sl_emit import enforce_figure_paragraph_break
 
@@ -16,16 +20,22 @@ def test_injects_par_when_text_follows_includegraphics_inline() -> None:
         r"\end{frame}" "\n"
     )
     fixed = enforce_figure_paragraph_break(tex)
-    # Must contain a paragraph break (blank line) between \vspace and {\small ...}.
+    # Must wrap the figure in \begin{center}...\end{center}.
+    begin_idx = fixed.find("\\begin{center}")
+    fig_idx = fixed.find("\\includegraphics")
+    end_idx = fixed.find("\\end{center}")
+    assert begin_idx != -1 and begin_idx < fig_idx < end_idx
+    # And contain a blank line between \vspace and {\small ...}.
     vspace_idx = fixed.find("\\vspace{0.3em}")
     text_idx = fixed.find("{\\small Caption", vspace_idx)
     between = fixed[vspace_idx:text_idx]
     assert "\n\n" in between, f"missing blank line between \\vspace and text: {between!r}"
 
 
-def test_injects_centering_before_includegraphics() -> None:
-    """The fix must inject ``\\centering`` on its own line before
-    ``\\includegraphics`` when not already present."""
+def test_wraps_figure_in_begin_center_env() -> None:
+    """The fix must wrap ``\\includegraphics`` in
+    ``\\begin{center}...\\end{center}`` (an environment with explicit scope,
+    not ``\\centering`` whose declaration leaks across the frame body)."""
     tex = (
         r"\begin{frame}{X}" "\n"
         r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
@@ -34,9 +44,30 @@ def test_injects_centering_before_includegraphics() -> None:
         r"\end{frame}" "\n"
     )
     fixed = enforce_figure_paragraph_break(tex)
-    centering_pos = fixed.find("\\centering")
-    figure_pos = fixed.find("\\includegraphics")
-    assert centering_pos != -1 and centering_pos < figure_pos
+    begin_idx = fixed.find("\\begin{center}")
+    fig_idx = fixed.find("\\includegraphics")
+    end_idx = fixed.find("\\end{center}")
+    assert begin_idx != -1 and begin_idx < fig_idx < end_idx
+    # \centering should NOT be present (we're using the env approach).
+    assert "\\centering" not in fixed
+
+
+def test_skips_wrapping_when_already_in_center_env() -> None:
+    """If ``\\includegraphics`` is already inside ``\\begin{center}...\\end{center}``,
+    don't double-wrap."""
+    tex = (
+        r"\begin{frame}{X}" "\n"
+        r"  \begin{center}" "\n"
+        r"    \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \end{center}" "\n"
+        r"  \vspace{0.3em}" "\n"
+        r"" "\n"
+        r"  {\small Caption.}" "\n"
+        r"\end{frame}" "\n"
+    )
+    fixed = enforce_figure_paragraph_break(tex)
+    assert fixed.count("\\begin{center}") == 1
+    assert fixed.count("\\end{center}") == 1
 
 
 def test_injects_blank_line_after_vspace_before_caption() -> None:
@@ -55,21 +86,6 @@ def test_injects_blank_line_after_vspace_before_caption() -> None:
     assert "\n\n" in between, f"missing blank line between \\vspace and text: {between!r}"
 
 
-def test_skips_centering_when_already_present() -> None:
-    """Don't double-inject ``\\centering`` when it's already there."""
-    tex = (
-        r"\begin{frame}{X}" "\n"
-        r"  \centering" "\n"
-        r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
-        r"  \vspace{0.3em}" "\n"
-        r"" "\n"
-        r"  {\small Caption.}" "\n"
-        r"\end{frame}" "\n"
-    )
-    fixed = enforce_figure_paragraph_break(tex)
-    assert fixed.count("\\centering") == 1
-
-
 def test_idempotent_after_full_treatment() -> None:
     """Running the fixer twice on already-fixed tex produces the same result."""
     tex = (
@@ -84,12 +100,13 @@ def test_idempotent_after_full_treatment() -> None:
     assert once == twice
 
 
-def test_idempotent_when_paragraph_break_already_present() -> None:
-    """The English-deck pattern: blank line + \\centering already there → no change."""
+def test_idempotent_when_already_wrapped_with_blank_line() -> None:
+    """Already-wrapped figure with blank line after → no change on re-run."""
     tex = (
         r"\begin{frame}{X}" "\n"
-        r"  \centering" "\n"
-        r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \begin{center}" "\n"
+        r"    \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
+        r"  \end{center}" "\n"
         r"  \vspace{0.3em}" "\n"
         r"" "\n"
         r"  {\small Caption text.}" "\n"
@@ -116,7 +133,8 @@ def test_no_injection_inside_columns_block() -> None:
         r"\end{frame}" "\n"
     )
     fixed = enforce_figure_paragraph_break(tex)
-    # No \centering or blank-line injection inside columns.
+    # No \begin{center} added — inside columns is a no-op zone.
+    assert "\\begin{center}" not in fixed
     assert "\\centering" not in fixed
     assert fixed == tex
 
@@ -133,7 +151,7 @@ def test_no_injection_when_followed_by_end_frame() -> None:
 
 
 def test_handles_multiple_figures_in_one_deck() -> None:
-    """Multi-frame deck with multiple ``\\includegraphics`` + text patterns: each gets fixed."""
+    """Multi-frame deck with multiple ``\\includegraphics`` + text patterns: each gets wrapped."""
     tex = (
         r"\begin{frame}{A}" "\n"
         r"  \includegraphics[width=\linewidth]{p0-fig-001}" "\n"
@@ -147,7 +165,8 @@ def test_handles_multiple_figures_in_one_deck() -> None:
         r"\end{frame}" "\n"
     )
     fixed = enforce_figure_paragraph_break(tex)
-    # Both frames should have \centering injected and a blank line between
-    # \vspace and {\small ...}.
-    assert fixed.count("\\centering") == 2
+    # Both frames should have a \begin{center}/\end{center} pair plus a blank
+    # line between \vspace and {\small ...}.
+    assert fixed.count("\\begin{center}") == 2
+    assert fixed.count("\\end{center}") == 2
     assert fixed.count("\n\n") >= 2
