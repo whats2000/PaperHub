@@ -27,12 +27,15 @@ from paperhub.db.connection import open_db
 from paperhub.db.deck_slides import (
     get_deck_slides,
     rebuild_speaker_notes_json,
+    replace_deck_slides,
     update_slide_note,
 )
 from paperhub.db.decks import get_deck
+from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
 )
+from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
 
 
@@ -293,6 +296,21 @@ async def restore_deck_version(
         slides_dir = _slides_workdir(session_id)
         snapshot_path = slides_dir / "edit_history" / f"{version_id}.json"
 
+        # Read the snapshot's bundled notes BEFORE restoring deck.tex so we
+        # can replay them into deck_slides after the rebuild. The DB is the
+        # source of truth for the UI, so writing notes to disk via
+        # restore_version alone is not enough.
+        def _read_snapshot_notes() -> dict[str, str] | None:
+            data = _read_snapshot(snapshot_path)
+            if data is None:
+                return None
+            notes = data.get("speaker_notes")
+            if not isinstance(notes, dict):
+                return None  # absent, null, or unexpected shape → no notes
+            return {str(k): str(v) for k, v in notes.items()}
+
+        bundled_notes = await asyncio.to_thread(_read_snapshot_notes)
+
         def _restore() -> bool:
             if not snapshot_path.exists():
                 return False
@@ -309,16 +327,85 @@ async def restore_deck_version(
                 detail=f"snapshot {version_id} not found or unreadable",
             )
 
-        # Bump current_version_id + updated_at in the same connection so a
-        # concurrent GET /deck sees the new value atomically.
-        await conn.execute(
-            "UPDATE decks SET current_version_id = ?, updated_at = datetime('now') "
-            "WHERE session_id = ?",
-            (version_id, session_id),
+        # Recompile so deck.pdf reflects the restored tex. The snapshot was a
+        # successful compile when it was saved, so no LLM-revise is needed —
+        # we pass an identity revise callback and the standard 2 attempts
+        # (the first run resolves \tableofcontents-style refs; the second
+        # produces a final, ref-stable PDF).
+        async def _identity_revise(_log: str, tex: str) -> str:
+            return tex
+
+        restored_tex = await asyncio.to_thread(
+            (slides_dir / "deck.tex").read_text, encoding="utf-8"
         )
+        result = await compile_mod.compile_with_revise(
+            tex=restored_tex,
+            workdir=slides_dir,
+            tex_name="deck.tex",
+            revise=_identity_revise,
+            max_retries=1,
+        )
+
+        # Bump current_version_id + page_count + status + pdf_path + updated_at
+        # in one statement so a concurrent GET /deck sees the new state
+        # atomically. A failed recompile is unexpected (the snapshot used to
+        # build cleanly) but we still flip current_version_id so the chip on
+        # screen matches the source — status=error surfaces the failure.
+        pdf_path = slides_dir / "deck.pdf"
+        new_pdf_path = str(pdf_path) if result.ok and pdf_path.exists() else None
+        await conn.execute(
+            """
+            UPDATE decks SET
+                current_version_id = ?,
+                page_count = ?,
+                pdf_path = ?,
+                status = ?,
+                updated_at = datetime('now')
+            WHERE session_id = ?
+            """,
+            (
+                version_id,
+                result.page_count if result.ok else 0,
+                new_pdf_path,
+                "ok" if result.ok else "error",
+                session_id,
+            ),
+        )
+        # Refresh deck_slides so per-page navigation + speaker-note lookup
+        # match the restored frame list (a previous edit could have changed
+        # frame count), then REAPPLY the snapshot's bundled speaker_notes
+        # by slide_index. The DB is what the SlidesPanel reads, so a
+        # restored version isn't truly restored until note_text rows match
+        # the snapshot's per-page mapping. ``bundled_notes`` keys are
+        # stringified slide_index ints (matching how sl_emit / the
+        # in-place notes patch write them).
+        fresh = await get_deck(conn, session_id=session_id)
+        if fresh is not None and result.ok:
+            await replace_deck_slides(
+                conn,
+                deck_id=fresh.id,
+                slides=build_deck_slides(result.tex, result.page_count),
+            )
+            if bundled_notes:
+                for r in await get_deck_slides(conn, deck_id=fresh.id):
+                    nt = bundled_notes.get(str(r.slide_index))
+                    if nt:
+                        await update_slide_note(
+                            conn,
+                            deck_id=fresh.id,
+                            slide_index=r.slide_index,
+                            note_text=nt,
+                            note_language="",
+                        )
+            await rebuild_speaker_notes_json(conn, deck_id=fresh.id)
         await conn.commit()
 
-    return {"ok": True, "current_version_id": version_id}
+    return {
+        "ok": True,
+        "current_version_id": version_id,
+        "page_count": result.page_count if result.ok else 0,
+        "status": "ok" if result.ok else "error",
+    }
 
 
 __all__ = ["router"]
