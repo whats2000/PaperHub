@@ -9,11 +9,9 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import {
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
-  History,
   Loader2,
   Pencil,
   X,
@@ -27,7 +25,6 @@ import {
 } from "@/store/slides";
 import { fetchDeckPdfData, deckPdfUrl, deckTexUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { VersionList } from "./VersionList";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
 // import.meta.url so the worker is bundled + served from the app origin.
@@ -76,6 +73,14 @@ export function SlidesPanel({
 }: Props) {
   const deck = useSlidesStore((s) => s.deckBySession[sessionId]);
   const revision = useSlidesStore((s) => s.deckRevisionBySession[sessionId] ?? 0);
+  // True while a DeckChip "Switch to this version" round-trip is in flight.
+  // We fold this into ``masked`` so the old PDF doesn't sit on screen during
+  // the restore POST + getDeck handshake (mirrors how ``busy`` masks a
+  // chat-turn edit). The post-setDeck refetch is still covered by
+  // ``reloading`` below, so the mask stays continuous through to fresh bytes.
+  const restoringVersion = useSlidesStore(
+    (s) => s.restoringBySession[sessionId] ?? false,
+  );
   const currentPage = useSlidesStore(
     (s) => s.currentPageBySession[sessionId] ?? 1,
   );
@@ -190,12 +195,19 @@ export function SlidesPanel({
     [bytes, loadedSid, sessionId],
   );
 
-  // Mask the canvas while a turn is in flight, OR while a completed edit's fresh
-  // deck is still loading (same session, newer revision than what's on screen).
+  // Mask the canvas while a turn is in flight, while a version-switch
+  // restore is mid-handshake, OR while a completed edit/restore's fresh deck
+  // is still loading (same session, newer revision than what's on screen).
   // Derived — no extra state — so the effect stays setState-free.
   const reloading =
     !busy && bytes !== null && loadedSid === sessionId && loadedRev !== revision;
-  const masked = busy || reloading;
+  const masked = busy || restoringVersion || reloading;
+  // Restore wins as the stage label when both are present so the user knows
+  // why the panel masked (version switch vs. chat-turn edit). The chat-turn's
+  // ``stage`` prop carries live slide-agent stage names when ``busy`` is set.
+  const stageLabel = restoringVersion
+    ? "Restoring version…"
+    : stage;
 
   // Keyboard navigation.
   useEffect(() => {
@@ -280,13 +292,6 @@ export function SlidesPanel({
   // editing; the real note lives on the owning slide's first page.
   const noteEditable =
     !!onSaveNote && !busy && speakerNote !== CONTINUED_NOTE;
-
-  // Collapsible version-history drawer (F4.5 Task 13.3). Starts collapsed so
-  // the panel's visual budget defaults to slide + speaker-note; opening is one
-  // click. `openActive` is wired into `VersionList.onOpen` so clicking "Open
-  // Slide" on the active card collapses the drawer back to the slide view.
-  const [showVersions, setShowVersions] = useState(false);
-  const openActiveDeck = useCallback(() => setShowVersions(false), []);
 
   const beginEditNote = () => {
     setNoteDraft(speakerNote && speakerNote !== CONTINUED_NOTE ? speakerNote : "");
@@ -473,11 +478,11 @@ export function SlidesPanel({
           >
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">
-              Updating slides…
+              {restoringVersion ? "Restoring version…" : "Updating slides…"}
             </span>
-            {stage && (
+            {stageLabel && !restoringVersion && (
               <span className="px-4 text-center text-xs text-muted-foreground">
-                {stage}
+                {stageLabel}
               </span>
             )}
           </div>
@@ -571,35 +576,11 @@ export function SlidesPanel({
         )}
       </div>
 
-      {/* Version-history drawer (F4.5). Collapsed by default; toggled by a
-          header button styled like the rest of the panel's affordances. The
-          body's max-height + overflow-y-auto keeps the list bounded so a deck
-          with many snapshots doesn't push the speaker-note pane offscreen. */}
-      <div className="shrink-0 border-t border-border bg-card">
-        <button
-          type="button"
-          onClick={() => setShowVersions((v) => !v)}
-          className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted/50 transition-colors"
-          aria-expanded={showVersions}
-          aria-controls="slides-version-history"
-        >
-          {showVersions ? (
-            <ChevronDown className="h-3 w-3" aria-hidden />
-          ) : (
-            <ChevronRight className="h-3 w-3" aria-hidden />
-          )}
-          <History className="h-3 w-3" aria-hidden />
-          <span>Version history</span>
-        </button>
-        {showVersions && (
-          <div
-            id="slides-version-history"
-            className="max-h-64 overflow-y-auto border-t border-border"
-          >
-            <VersionList sessionId={sessionId} onOpen={openActiveDeck} />
-          </div>
-        )}
-      </div>
+      {/* F4.5: standalone version-history drawer removed — version switching
+          now lives on per-turn DeckChip cards in the chat history, so each
+          generate/edit message offers its own "Switch to this version"
+          affordance and the deck chip in the panel header has no separate
+          drawer to mirror. */}
     </div>
   );
 }
