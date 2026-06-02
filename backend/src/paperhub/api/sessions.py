@@ -54,6 +54,11 @@ class DeckOut(BaseModel):
     status: str
     contributing_papers: list[ContributingPaperOut] = []
     has_notes: bool = False
+    # F4.5: the version snapshot THIS turn stamped (NULL on legacy rows
+    # before runs.deck_version_id existed, or runs that didn't produce a
+    # version). The per-turn DeckChip uses this to drive "Switch to this
+    # version" against /deck/versions/{vid}/restore.
+    version_id: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -143,15 +148,20 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
         ) as cur:
             if await cur.fetchone() is None:
                 raise HTTPException(404, f"chat_sessions row {session_id} not found")
+        # F4.5: join the session's deck row (one per session) so every
+        # turn that stamped a version_id can carry its own DeckChip. We
+        # ALSO read d.run_id so legacy runs (no deck_version_id) keep
+        # the pre-F4.5 single-card behavior — gated below.
         async with conn.execute(
             """
             SELECT m.role, m.content, m.run_id, m.created_at,
                    r.routing_decision_json, r.search_results_json,
-                   d.id, d.page_count, d.plan_json, d.status,
+                   r.deck_version_id,
+                   d.id, d.run_id, d.page_count, d.plan_json, d.status,
                    d.speaker_notes_json, d.contributing_paper_ids_json
             FROM messages m
             LEFT JOIN runs r ON r.id = m.run_id
-            LEFT JOIN decks d ON d.run_id = m.run_id
+            LEFT JOIN decks d ON d.session_id = m.session_id
             WHERE m.session_id = ?
             ORDER BY m.id ASC
             """,
@@ -167,7 +177,9 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
         created_at,
         routing_json,
         cards_json,
+        deck_version_id,
         deck_id,
+        deck_run_id,
         deck_page_count,
         deck_plan_json,
         deck_status,
@@ -190,7 +202,18 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                     ]
                 except (json.JSONDecodeError, TypeError, ValueError):
                     cards = None
-            if deck_id is not None:
+            # Surface a per-turn DeckChip when EITHER:
+            #   (a) F4.5+: this run stamped a version snapshot
+            #       (``runs.deck_version_id IS NOT NULL``), OR
+            #   (b) legacy: the deck row's run_id matches this message's
+            #       run_id (pre-F4.5 behavior, preserved so old DBs with
+            #       no per-run version still surface a single card).
+            attach = deck_id is not None and (
+                deck_version_id is not None
+                or (deck_run_id is not None and run_id is not None
+                    and int(deck_run_id) == int(run_id))
+            )
+            if attach:
                 deck = _build_deck_out(
                     deck_id=int(deck_id),
                     session_id=session_id,
@@ -199,6 +222,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                     status=str(deck_status),
                     notes_json=deck_notes_json,
                     paper_ids_json=deck_paper_ids_json,
+                    version_id=str(deck_version_id) if deck_version_id else None,
                 )
         out.append(
             MessageOut(
@@ -251,6 +275,7 @@ def _build_deck_out(
     status: str,
     notes_json: str | None,
     paper_ids_json: str | None,
+    version_id: str | None = None,
 ) -> DeckOut:
     """Assemble a DeckOut from the joined `decks` columns, matching the SSE
     `deck` event shape. `title` comes from the plan (default 'Slides'),
@@ -286,6 +311,7 @@ def _build_deck_out(
         status=status,
         contributing_papers=contributing,
         has_notes=has_notes,
+        version_id=version_id,
     )
 
 
