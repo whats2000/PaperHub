@@ -91,7 +91,34 @@ def apply_initial_draft(state: DeckState, *, deck_tex: str) -> DeckState:
     string — preamble + every frame. We cache the preamble block (everything
     before ``\\begin{document}``) so later ``replace_preamble`` calls can
     splice cleanly.
+
+    F4.5: validate structural minimums so a malformed first cut surfaces as a
+    tool-call error the LLM sees on the next turn, rather than silently
+    becoming a "successful" deck downstream. Real-API benchmark seventh round
+    (run 362, slides-multi-zh) caught the LLM emitting a deck_tex with NO
+    preamble (no ``\\documentclass``, no ``\\usepackage``, no theme — just
+    ``\\title{...}\\begin{document}...``); pdflatex's nonstopmode error
+    recovery silently produced a broken 1-page PDF and the agent called
+    ``done()`` thinking the deck was clean. Reject at the tool boundary so the
+    LLM gets an explicit, actionable error message.
     """
+    if "\\documentclass" not in deck_tex:
+        raise ValueError(
+            "deck_tex is missing \\documentclass — emit a COMPLETE deck "
+            "starting with `\\documentclass{beamer}` (or use the "
+            "resolved_preamble we passed you verbatim). Do NOT emit only "
+            "the document body; the preamble is REQUIRED."
+        )
+    if "\\begin{document}" not in deck_tex:
+        raise ValueError(
+            "deck_tex is missing \\begin{document} — the preamble must be "
+            "followed by \\begin{document} ... \\end{document}."
+        )
+    if "\\end{document}" not in deck_tex:
+        raise ValueError(
+            "deck_tex is missing \\end{document} — close the document body "
+            "with \\end{document} after the last frame."
+        )
     extracted = _extract_preamble_block(deck_tex)
     preamble = extracted[0] if extracted is not None else ""
     return replace(state, deck_tex=deck_tex, preamble=preamble, dirty=True)

@@ -25,6 +25,37 @@ def test_initial_draft_sets_deck_tex():
     assert state2.deck_tex == _DECK
 
 
+def test_apply_initial_draft_rejects_missing_documentclass():
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    bad_tex = r"\title{X}\begin{document}\begin{frame}{x}y\end{frame}\end{document}"
+    with pytest.raises(ValueError, match=r"\\documentclass"):
+        apply_initial_draft(state, deck_tex=bad_tex)
+
+
+def test_apply_initial_draft_rejects_missing_begin_document():
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    bad_tex = r"\documentclass{beamer}\begin{frame}{x}y\end{frame}\end{document}"
+    with pytest.raises(ValueError, match=r"\\begin\{document\}"):
+        apply_initial_draft(state, deck_tex=bad_tex)
+
+
+def test_apply_initial_draft_rejects_missing_end_document():
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    bad_tex = r"\documentclass{beamer}\begin{document}\begin{frame}{x}y\end{frame}"
+    with pytest.raises(ValueError, match=r"\\end\{document\}"):
+        apply_initial_draft(state, deck_tex=bad_tex)
+
+
+def test_apply_initial_draft_accepts_valid_minimal_deck():
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    good_tex = (
+        r"\documentclass{beamer}\begin{document}"
+        r"\begin{frame}{x}y\end{frame}\end{document}"
+    )
+    s2 = apply_initial_draft(state, deck_tex=good_tex)
+    assert s2.deck_tex == good_tex
+
+
 def test_replace_frame_swaps_one_frame_by_index():
     state = DeckState(deck_tex=_DECK, preamble="", workdir=None)
     state2 = apply_replace_frame(

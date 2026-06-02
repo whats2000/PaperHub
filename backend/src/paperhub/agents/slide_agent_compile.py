@@ -31,6 +31,7 @@ from paperhub.pipelines.slide_pipeline.overflow_detector import detect_overflow
 Script = Literal["en", "cjk"]
 
 _COMPILE_ERR_RE = re.compile(r"^!\s.+|^l\.\d+\s.+", re.MULTILINE)
+_FRAME_COUNT_RE = re.compile(r"\\begin\{frame\}")
 
 
 def _parse_compile_errors(log: str) -> list[str]:
@@ -82,9 +83,15 @@ async def run_compile_check(
         revise=_noop_revise,
         max_retries=0,
     )
-    compile_errors = (
-        _parse_compile_errors(compile_result.log) if not compile_result.ok else []
-    )
+    # F4.5: ALWAYS parse compile errors regardless of compile_result.ok.
+    # pdflatex in -interaction=nonstopmode can recover from real errors and
+    # produce a partial PDF, which makes compile_result.ok=True (because
+    # pdf_path.exists()) even though the deck is broken. We need to surface
+    # the errors so the agent knows to fix them. Real-API benchmark seventh
+    # round (run 362, slides-multi-zh) caught this: a deck with no preamble
+    # compiled into a broken 1-page PDF, errors in the log were silenced,
+    # and the agent called done() believing all contracts were clean.
+    compile_errors = _parse_compile_errors(compile_result.log)
 
     canvas_budget = load_canvas_budget()
     frame_overflow = detect_overflow(
@@ -96,11 +103,27 @@ async def run_compile_check(
     )
     unrendered_math = audit_math_frames(deck_tex=deck_tex, bundles=bundles)
 
-    ok = (
-        compile_result.ok
-        and len(compile_errors) == 0
-        and len(unrendered_math) == 0
-    )
+    # F4.5: defensive — if pdflatex produced fewer pages than the deck has
+    # frames, pdflatex likely encountered errors and went into recovery mode.
+    # Surface this as a synthetic compile error so the agent re-iterates
+    # even when the error-log parser missed the offending lines.
+    expected_frames = len(_FRAME_COUNT_RE.findall(deck_tex))
+    actual_pages = compile_result.page_count
+    # Allow page_count == expected (normal) OR expected + 1 (e.g. \maketitle
+    # adds a page). Reject when actual_pages < expected_frames - 1.
+    if expected_frames > 0 and actual_pages < expected_frames - 1:
+        compile_errors.append(
+            f"PDF page count ({actual_pages}) is less than deck frame count "
+            f"({expected_frames}) — pdflatex likely recovered from errors. "
+            f"Check the log above; common causes: missing \\documentclass, "
+            f"missing \\usepackage, unbalanced braces, undefined commands."
+        )
+
+    # F4.5: ok = True iff zero compile errors AND zero unrendered math frames.
+    # We DO NOT trust compile_result.ok alone — pdflatex's error-recovery can
+    # produce a partial PDF that passes pdf_path.exists() with broken content.
+    # The compile_errors length check above (now always populated) catches it.
+    ok = len(compile_errors) == 0 and len(unrendered_math) == 0
     return CompileCheckResult(
         ok=ok,
         page_count=compile_result.page_count,

@@ -212,6 +212,84 @@ async def test_compile_check_writes_empty_additional_tex_when_no_newcommands(tmp
 
 
 @pytest.mark.asyncio
+async def test_compile_check_surfaces_errors_even_when_compile_result_ok(tmp_path, monkeypatch):
+    """F4.5 silent-recovery bug: pdflatex's -interaction=nonstopmode can recover
+    from real errors and emit a partial PDF (ok=True via pdf_path.exists()) but
+    the log shows them. compile_check MUST surface those errors so the agent
+    re-iterates instead of treating the deck as clean."""
+    async def fake_compile_with_revise(*, tex, workdir, tex_name, revise, max_retries):
+        from paperhub.pipelines.slide_pipeline.compile import CompileResult
+        return CompileResult(
+            ok=True,  # pdf_path.exists() True even though deck is broken
+            attempts=1,
+            tex=tex,
+            log=(
+                "! Undefined control sequence.\n"
+                "l.2 \\subtitle\n"
+                "! LaTeX Error: Unicode character missing\n"
+            ),
+            page_count=1,
+        )
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent_compile.compile_with_revise", fake_compile_with_revise
+    )
+
+    bundles = [_bundle()]
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    figure_inventory = {b.key_figures[0].key: b.key_figures[0] for b in bundles}
+
+    result = await run_compile_check(
+        deck_tex=_GOOD_DECK,
+        bundles=bundles,
+        figure_inventory=figure_inventory,
+        workdir=workdir,
+        script="en",
+    )
+    # Even though compile_result.ok was True, the error log MUST be surfaced.
+    assert result.ok is False
+    assert any("Undefined control sequence" in e for e in result.compile_errors)
+
+
+@pytest.mark.asyncio
+async def test_compile_check_flags_page_count_below_frame_count(tmp_path, monkeypatch):
+    """F4.5: when pdflatex recovers from errors and produces 1 page from a
+    5-frame deck, surface that as a synthetic compile error so the agent
+    re-iterates even if the error-log parser missed the offending lines."""
+    async def fake_compile_with_revise(*, tex, workdir, tex_name, revise, max_retries):
+        from paperhub.pipelines.slide_pipeline.compile import CompileResult
+        return CompileResult(ok=True, attempts=1, tex=tex, log="", page_count=1)
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent_compile.compile_with_revise", fake_compile_with_revise
+    )
+
+    bundles = [_bundle()]
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+
+    deck_with_5_frames = (
+        "\\documentclass{beamer}\n"
+        "\\begin{document}\n"
+        "\\begin{frame}{A}1\\end{frame}\n"
+        "\\begin{frame}{B}2\\end{frame}\n"
+        "\\begin{frame}{C}3\\end{frame}\n"
+        "\\begin{frame}{D}4\\end{frame}\n"
+        "\\begin{frame}{E}5\\end{frame}\n"
+        "\\end{document}\n"
+    )
+
+    result = await run_compile_check(
+        deck_tex=deck_with_5_frames,
+        bundles=bundles,
+        figure_inventory={},
+        workdir=workdir,
+        script="en",
+    )
+    assert result.ok is False
+    assert any("page count" in e.lower() for e in result.compile_errors)
+
+
+@pytest.mark.asyncio
 async def test_compile_check_ok_flag_false_when_math_contract_violated(tmp_path, monkeypatch):
     async def fake_compile_with_revise(*, tex, workdir, tex_name, revise, max_retries):
         from paperhub.pipelines.slide_pipeline.compile import CompileResult
