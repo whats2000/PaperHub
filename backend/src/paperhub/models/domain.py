@@ -119,6 +119,26 @@ class TargetLanguage(BaseModel):
     language: str | None = None
 
 
+class DeckNoteEntry(BaseModel):
+    """One slide's speaker note in the deck-wide notes-author response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slide_index: int
+    note: str
+
+
+class DeckNotesAuthor(BaseModel):
+    """Structured response for ``author_deck_notes`` — the deck-wide speaker
+    notes pass that sees ALL frames (so notes foreshadow + call back) and
+    grounds each note in the source paper's narrative. The author returns one
+    entry per slide_index it was asked to write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    notes: list[DeckNoteEntry]
+
+
 class AgentState(TypedDict, total=False):
     run_id: int
     branch: Branch

@@ -1,14 +1,17 @@
 """Traced LLM-calling units for the Report Agent subgraph (Plan F4/F4.5).
 
-The F4 follow-up units (classify_deck_command, author_note, edit_frame,
-revise_tex, edit_title_block, edit_preamble_block) are each wrapped in a
-Tracer step per the agent-flow observability policy (CLAUDE.md). Every step
+The F4 follow-up units (classify_deck_command, edit_frame, revise_tex,
+edit_title_block, edit_preamble_block, author_deck_notes) are each wrapped in
+a Tracer step per the agent-flow observability policy (CLAUDE.md). Every step
 records enough state to reconstruct the agent context entirely from the DB
-alone. Speaker notes are authored separately by ``author_note`` (the F4 NOTES
-flow), NOT generated at deck-create time. The F3/F4 R1 fan-out helpers
-(understand_paper, narrate_talk, draft_frame, coherence_pass) were removed in
-the F4.5 monolithic-slide-agent cleanup — the slide_agent + gather_context
-paths replaced them.
+alone. Speaker notes are authored separately by ``author_deck_notes`` — a
+deck-wide single-call author that sees ALL frames + the source-paper context
+so notes have a real narrative arc (foreshadow / callback) and stay grounded
+in the actual research, not generic prose. The earlier per-slide
+``author_note`` path was retired with that change (see SRS v2.25 / F4.5).
+The F3/F4 R1 fan-out helpers (understand_paper, narrate_talk, draft_frame,
+coherence_pass) were removed in the F4.5 monolithic-slide-agent cleanup —
+the slide_agent + gather_context paths replaced them.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import re
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import (
     DeckCommand,
+    DeckNotesAuthor,
     SlideBudget,
     TargetLanguage,
 )
@@ -148,42 +152,188 @@ async def detect_slide_language(
 # F4: Note-author + frame-edit streaming functions (SRS v2.21, Task 8).
 # --------------------------------------------------------------------------
 
-async def author_note(
+async def author_deck_notes(
     *,
     adapter: LlmAdapter,
     tracer: Tracer,
     model: str,
-    frame_tex: str,
-    existing_note: str | None,
-    instruction: str | None,
+    papers: list[dict[str, object]],
+    frames: list[tuple[int, int, str]],  # (slide_index, page_start, frame_tex)
+    existing_notes: dict[int, str],  # slide_index -> existing note (kept verbatim)
+    wanted_indices: list[int],  # which slides to author/re-author
     note_language: str,
-) -> str:
-    """Write (or rewrite) the SPEAKER NOTE for one Beamer frame.
+    instruction: str | None = None,
+) -> dict[int, str]:
+    """Author speaker notes for the WANTED subset of slides in ONE pass that
+    sees the entire deck + the source-paper context.
 
-    When ``existing_note`` is supplied the model translates / rewrites it per
-    ``instruction``; otherwise it authors a fresh note from the frame content.
-    Slot ``slides_note_author/v1``.  Streams the note token-by-token; traced as
-    ``report:note_author``.
+    Why one pass: a talk has narrative arc — slide N's note may foreshadow
+    slide N+3, slide N may call back to slide N-2, the closing slide needs
+    to know what the opening promised. Per-slide authoring can't do this.
+
+    The model:
+      - reads PAPERS (title / authors / abstract per contributing paper) so
+        each note stays grounded in the actual research, not generic prose;
+      - reads every frame (so cross-slide references are real);
+      - reads EXISTING notes for slides we're NOT regenerating, so a single
+        edit's re-authored note matches the talk's voice + level of detail;
+      - writes notes ONLY for ``wanted_indices`` (one per index, in order).
+
+    Returns ``{slide_index: note_text}`` for the wanted indices. Structured
+    output via ``DeckNotesAuthor``; the schema forces ``extra=forbid`` so the
+    model's drift to extra fields trips a retry. Slot
+    ``slides_deck_notes_author/v1``; traced as ``report:deck_notes_author``.
     """
-    async with tracer.step(agent="report", tool="report:note_author", model=model) as step:
+    # Render the papers block. Prefer the rich PaperContextBundle fields
+    # (narrative_summary + key_figures + key_equations + section_excerpts)
+    # that the slide_agent itself consumed at generate time — the speaker
+    # needs the SAME grounding the slides were built from, not just the bare
+    # abstract. Fall back to abstract when those fields are absent (legacy
+    # decks pre-dating bundle persistence, or single-call notes turns).
+    def _authors(p: dict[str, object]) -> str:
+        a = p.get("authors")
+        if isinstance(a, list):
+            return ", ".join(str(x) for x in a if x)
+        return str(a) if a else ""
+
+    def _render(p: dict[str, object], idx: int) -> str:
+        lines: list[str] = [
+            f"[paper {idx + 1}] {p.get('title') or '(untitled)'}",
+            f"  authors: {_authors(p) or '(unknown)'}",
+        ]
+        narrative = p.get("narrative_summary")
+        if narrative:
+            lines.append(f"  narrative: {narrative}")
+        else:
+            abstract = p.get("abstract")
+            lines.append(f"  abstract: {abstract or '(no abstract)'}")
+        key_figures = p.get("key_figures") or []
+        if isinstance(key_figures, list) and key_figures:
+            lines.append("  key figures:")
+            for f in key_figures:
+                if isinstance(f, dict):
+                    key = f.get("key") or "(no key)"
+                    role = f.get("role") or "?"
+                    interp = (
+                        f.get("one_line_interpretation")
+                        or f.get("interpretation")
+                        or ""
+                    )
+                    lines.append(f"    - {key} ({role}): {interp}")
+        key_eqs = p.get("key_equations") or []
+        if isinstance(key_eqs, list) and key_eqs:
+            lines.append("  key equations (verbalize, NEVER quote LaTeX in spoken text):")
+            for eq in key_eqs:
+                if isinstance(eq, dict):
+                    role = eq.get("role") or "?"
+                    legend = eq.get("notation_legend") or ""
+                    lines.append(f"    - {role}: {legend}")
+        sections = p.get("section_excerpts") or []
+        if isinstance(sections, list) and sections:
+            lines.append("  section excerpts:")
+            for s in sections:
+                if isinstance(s, dict):
+                    name = s.get("section_name") or "(unnamed)"
+                    text = (s.get("text") or "").strip()
+                    if text:
+                        # Cap at ~400 chars to keep the prompt focused — the
+                        # full text is still in the persisted bundle if a
+                        # later turn needs to recover it.
+                        snippet = text if len(text) <= 400 else text[:400] + "…"
+                        lines.append(f"    - [{name}] {snippet}")
+        return "\n".join(lines)
+
+    papers_block = "\n\n".join(
+        _render(p, i) for i, p in enumerate(papers)
+    ) or "(no papers attached)"
+
+    frames_block = "\n\n".join(
+        f"[slide_index={idx}, page={page}]\n{tex}"
+        for idx, page, tex in frames
+    ) or "(no frames)"
+
+    existing_notes_block = "\n\n".join(
+        f"[slide_index={idx}]\n{note}"
+        for idx, note in sorted(existing_notes.items())
+    ) or "(no existing notes — all slides being authored fresh)"
+
+    wanted_sorted = sorted(set(wanted_indices))
+    wanted_block = ", ".join(str(i) for i in wanted_sorted) or "(none)"
+
+    # Per-paper context shape so a trace inspector can verify the
+    # papers_block isn't silently degraded (e.g. context_bundles.json missing
+    # → fell through to abstract-only). The first chars of each rendered
+    # block let you see what the model actually saw, without recording the
+    # full prompt (which is template-derived and large).
+    def _len_if_list(v: object) -> int:
+        return len(v) if isinstance(v, list) else 0
+
+    paper_shapes: list[dict[str, object]] = [
+        {
+            "title": str(p.get("title") or "")[:80],
+            "has_narrative": bool(p.get("narrative_summary")),
+            "has_abstract": bool(p.get("abstract")),
+            "n_key_figures": _len_if_list(p.get("key_figures")),
+            "n_key_equations": _len_if_list(p.get("key_equations")),
+            "n_section_excerpts": _len_if_list(p.get("section_excerpts")),
+        }
+        for p in papers
+    ]
+
+    async with tracer.step(
+        agent="report", tool="report:deck_notes_author", model=model
+    ) as step:
         step.record_args(
-            {"note_language": note_language, "has_existing": existing_note is not None}
+            {
+                "n_papers": len(papers),
+                "paper_shapes": paper_shapes,
+                "n_frames": len(frames),
+                "frame_indices": [idx for idx, _, _ in frames],
+                "n_existing_notes": len(existing_notes),
+                "existing_note_indices": sorted(existing_notes.keys()),
+                "wanted_indices": wanted_sorted,
+                "note_language": note_language,
+                "instruction": instruction or "(none)",
+                "papers_block_head": papers_block[:600],
+                "frames_block_head": frames_block[:400],
+                "existing_notes_block_head": existing_notes_block[:400],
+            }
         )
-        toks: list[str] = []
-        async for t in adapter.stream(
-            slot="slides_note_author/v1",
+        out = await adapter.structured(
+            slot="slides_deck_notes_author/v1",
             variables={
-                "frame_tex": frame_tex,
-                "existing_note": existing_note or "(none — author fresh)",
+                "papers_block": papers_block,
+                "frames_block": frames_block,
+                "existing_notes_block": existing_notes_block,
+                "wanted_block": wanted_block,
                 "instruction": instruction or "(none)",
                 "note_language": note_language or "the user's language",
             },
+            response_model=DeckNotesAuthor,
             model=model,
-        ):
-            toks.append(t)
-        out = "".join(toks).strip()
-        step.record_result({"note": out})
-    return out
+        )
+        result: dict[int, str] = {
+            entry.slide_index: entry.note.strip()
+            for entry in out.notes
+            if entry.note.strip()
+        }
+        step.record_result(
+            {
+                "returned_indices": sorted(result.keys()),
+                "n_returned": len(result),
+                "missing_indices": [i for i in wanted_sorted if i not in result],
+                # The actual notes (per slide) so a trace inspector can read
+                # what the model produced without re-running. Capped at 800
+                # chars per note (notes are 3-6 sentences, well under 800).
+                "notes": {
+                    str(idx): (text if len(text) <= 800 else text[:800] + "…")
+                    for idx, text in sorted(result.items())
+                },
+            }
+        )
+    return result
+
+
 
 
 async def edit_frame(
