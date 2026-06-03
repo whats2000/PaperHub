@@ -386,6 +386,13 @@ export function deckPdfUrl(sessionId: number): string {
   return `${API_BASE_URL}/sessions/${sessionId}/deck/pdf`;
 }
 
+/** Like `deckPdfUrl` but pins the download to a specific version's cached PDF. */
+export function deckPdfUrlForVersion(sessionId: number, versionId: string | null): string {
+  return versionId
+    ? `${API_BASE_URL}/sessions/${sessionId}/deck/pdf?version_id=${encodeURIComponent(versionId)}`
+    : deckPdfUrl(sessionId);
+}
+
 /** Fetch a session's compiled deck PDF bytes. Passed to react-pdf as
  * `{ data }` so it renders inline — no cross-origin iframe needed.
  *

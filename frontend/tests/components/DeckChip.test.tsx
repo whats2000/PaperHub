@@ -8,6 +8,10 @@ import type { DeckEventData } from "@/types/domain";
 
 vi.mock("@/lib/api", () => ({
   deckPdfUrl: (sessionId: number) => `http://x/sessions/${sessionId}/deck/pdf`,
+  deckPdfUrlForVersion: (sessionId: number, versionId: string | null) =>
+    versionId
+      ? `http://x/sessions/${sessionId}/deck/pdf?version_id=${encodeURIComponent(versionId)}`
+      : `http://x/sessions/${sessionId}/deck/pdf`,
 }));
 
 const deck: DeckEventData = {
@@ -105,5 +109,37 @@ describe("DeckChip", () => {
   it("does not render prefill affordances without onPrefill", () => {
     render(<DeckChip deck={deck} />);
     expect(screen.queryByRole("button", { name: /edit slide/i })).toBeNull();
+  });
+
+  it("active version card downloads without ?version_id query", () => {
+    useSlidesStore.setState({
+      open: false,
+      deckBySession: {
+        7: { ...deck, version_id: "v-active" },
+      },
+      currentPageBySession: {},
+    });
+    render(<DeckChip deck={{ ...deck, version_id: "v-active" }} />);
+    const link = screen.getByRole("link", { name: /download pdf/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "http://x/sessions/7/deck/pdf",
+    );
+  });
+
+  it("older version card downloads with ?version_id=<encoded>", () => {
+    useSlidesStore.setState({
+      open: false,
+      deckBySession: {
+        7: { ...deck, version_id: "v-active" },
+      },
+      currentPageBySession: {},
+    });
+    render(<DeckChip deck={{ ...deck, version_id: "v-old/1" }} />);
+    const link = screen.getByRole("link", { name: /download pdf/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "http://x/sessions/7/deck/pdf?version_id=v-old%2F1",
+    );
   });
 });

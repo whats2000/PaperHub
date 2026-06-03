@@ -10,7 +10,7 @@ import { toast } from "sonner";
 
 import type { DeckEventData } from "@/types/domain";
 import { useSlidesStore } from "@/store/slides";
-import { API_BASE_URL, deckPdfUrl, getDeck } from "@/lib/api";
+import { API_BASE_URL, deckPdfUrlForVersion, getDeck } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -202,7 +202,10 @@ export function DeckChip({ deck, onPrefill }: Props) {
             </Button>
           )}
           <a
-            href={deckPdfUrl(deck.session_id)}
+            href={deckPdfUrlForVersion(
+              deck.session_id,
+              isActiveVersion ? null : (deck.version_id ?? null),
+            )}
             download
             aria-label="Download PDF"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
