@@ -50,13 +50,59 @@ router = APIRouter(tags=["decks"])
 _FILENAME_BANNED = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
+def _read_title_from_tex(tex_path: str) -> str:
+    """Extract the deck's ``\\title{...}`` value from the LaTeX source.
+
+    F4.5 sl_emit no longer persists a plan, but the talk title IS baked into
+    ``\\title{}`` in the preamble (built by ``build_title_metadata`` at
+    generate time and re-edited by the title sub-flow). Reading the source
+    gives a single source of truth that stays correct through edits.
+
+    Returns the inner text (balanced-brace aware so ``\\title{A {B} C}`` works),
+    or an empty string on any failure / missing file. Bounded read so an
+    accidentally huge deck.tex can't OOM the handler.
+    """
+    try:
+        tex = Path(tex_path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    marker = r"\title{"
+    pos = tex.find(marker)
+    if pos < 0:
+        return ""
+    start = pos + len(marker)
+    depth = 1
+    i = start
+    while i < len(tex):
+        c = tex[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return tex[start:i]
+        i += 1
+    return ""
+
+
 def _download_name(deck: Any, ext: str) -> str:
     """Build a human, source-identifying download filename from the deck title
     (e.g. "Transformer 拋棄遞迴與卷積的注意力架構.pdf") instead of a generic
     ``deck.pdf``. Non-ASCII titles are preserved — Starlette emits them via the
-    RFC 5987 ``filename*`` form. Falls back to ``slides`` for an empty title."""
+    RFC 5987 ``filename*`` form.
+
+    Title-resolution order:
+      1. ``plan.title`` / ``plan.talk_title`` (when the generator persists one).
+      2. The ``\\title{...}`` macro in ``deck.tex_path`` (the source of truth
+         after F4.5; sl_emit and edit_title both write it there).
+      3. ``"slides"`` fallback so the response always has a filename.
+    """
     plan = deck.plan or {}
-    title = str(plan.get("title") or "").strip()
+    title = str(
+        plan.get("talk_title") or plan.get("title") or ""
+    ).strip()
+    if not title and getattr(deck, "tex_path", None):
+        title = _read_title_from_tex(str(deck.tex_path)).strip()
     name = _FILENAME_BANNED.sub("", title)
     name = re.sub(r"\s+", " ", name).strip(" .")
     return f"{(name or 'slides')[:80]}.{ext}"
