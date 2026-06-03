@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,9 @@ router = APIRouter(tags=["decks"])
 _FILENAME_BANNED = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
-def _read_title_from_tex(tex_path: str) -> str:
+def _read_title_from_tex(
+    tex_path: str | None = None, *, tex_content: str | None = None
+) -> str:
     """Extract the deck's ``\\title{...}`` value from the LaTeX source.
 
     F4.5 sl_emit no longer persists a plan, but the talk title IS baked into
@@ -59,12 +62,18 @@ def _read_title_from_tex(tex_path: str) -> str:
     gives a single source of truth that stays correct through edits.
 
     Returns the inner text (balanced-brace aware so ``\\title{A {B} C}`` works),
-    or an empty string on any failure / missing file. Bounded read so an
-    accidentally huge deck.tex can't OOM the handler.
+    or an empty string on any failure / missing file. ``tex_content`` (Phase 16)
+    wins over ``tex_path`` so the version-id download path can pass the
+    snapshot's tex directly without round-tripping through a temp file.
     """
-    try:
-        tex = Path(tex_path).read_text(encoding="utf-8")
-    except OSError:
+    if tex_content is not None:
+        tex = tex_content
+    elif tex_path is not None:
+        try:
+            tex = Path(tex_path).read_text(encoding="utf-8")
+        except OSError:
+            return ""
+    else:
         return ""
     marker = r"\title{"
     pos = tex.find(marker)
@@ -85,24 +94,32 @@ def _read_title_from_tex(tex_path: str) -> str:
     return ""
 
 
-def _download_name(deck: Any, ext: str) -> str:
+def _download_name(
+    deck: Any, ext: str, *, title_override: str | None = None
+) -> str:
     """Build a human, source-identifying download filename from the deck title
     (e.g. "Transformer 拋棄遞迴與卷積的注意力架構.pdf") instead of a generic
     ``deck.pdf``. Non-ASCII titles are preserved — Starlette emits them via the
     RFC 5987 ``filename*`` form.
 
     Title-resolution order:
+      0. ``title_override`` (Phase 16: the version-id download path passes the
+         snapshot's own ``\\title{}`` so an older deck's filename matches its
+         contents, not the live deck.tex).
       1. ``plan.title`` / ``plan.talk_title`` (when the generator persists one).
       2. The ``\\title{...}`` macro in ``deck.tex_path`` (the source of truth
          after F4.5; sl_emit and edit_title both write it there).
       3. ``"slides"`` fallback so the response always has a filename.
     """
-    plan = deck.plan or {}
-    title = str(
-        plan.get("talk_title") or plan.get("title") or ""
-    ).strip()
-    if not title and getattr(deck, "tex_path", None):
-        title = _read_title_from_tex(str(deck.tex_path)).strip()
+    if title_override is not None:
+        title = title_override.strip()
+    else:
+        plan = deck.plan or {}
+        title = str(
+            plan.get("talk_title") or plan.get("title") or ""
+        ).strip()
+        if not title and getattr(deck, "tex_path", None):
+            title = _read_title_from_tex(str(deck.tex_path)).strip()
     name = _FILENAME_BANNED.sub("", title)
     name = re.sub(r"\s+", " ", name).strip(" .")
     return f"{(name or 'slides')[:80]}.{ext}"
@@ -140,12 +157,64 @@ async def get_deck_meta(session_id: int) -> dict[str, Any]:
 
 
 @router.get("/sessions/{session_id}/deck/pdf")
-async def get_deck_pdf(session_id: int) -> FileResponse:
-    """Stream the compiled PDF, 404 if no deck or pdf_path missing/not-on-disk."""
+async def get_deck_pdf(
+    session_id: int, version_id: str | None = None
+) -> FileResponse:
+    """Stream the compiled PDF.
+
+    F4.5 Phase 16: when ``?version_id=<v>`` is set AND that version is not the
+    active one, serve the cached ``edit_history/<v>.pdf`` (so an older
+    chat-turn's DeckChip downloads the deck that turn produced, not whichever
+    version happens to be active now). A version without a cached PDF returns
+    404 with a helpful detail; the user can restore the version to recompile.
+    Omitted/current version_id keeps the original behaviour (serve deck.pdf).
+    """
+    if version_id is not None and not _VERSION_ID_RE.match(version_id):
+        raise HTTPException(status_code=400, detail="invalid version_id")
+
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         deck = await get_deck(conn, session_id=session_id)
-    if deck is None or not deck.pdf_path or not _exists(deck.pdf_path):
+    if deck is None:
+        raise HTTPException(
+            status_code=404, detail="no compiled PDF for this session"
+        )
+
+    if version_id is not None and version_id != (deck.current_version_id or ""):
+        edit_history = _slides_workdir(session_id) / "edit_history"
+        snapshot = _read_snapshot(edit_history / f"{version_id}.json")
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404, detail=f"snapshot {version_id} not found"
+            )
+        pdf_filename = snapshot.get("pdf_filename")
+        if not isinstance(pdf_filename, str) or not pdf_filename:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "this version's PDF is not cached; restore the version to "
+                    "recompile, then download"
+                ),
+            )
+        cached_pdf = edit_history / pdf_filename
+        if not cached_pdf.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "this version's PDF is not cached; restore the version to "
+                    "recompile, then download"
+                ),
+            )
+        snapshot_title = _read_title_from_tex(
+            tex_content=str(snapshot.get("tex_content") or "")
+        )
+        return FileResponse(
+            str(cached_pdf),
+            media_type="application/pdf",
+            filename=_download_name(deck, "pdf", title_override=snapshot_title),
+        )
+
+    if not deck.pdf_path or not _exists(deck.pdf_path):
         raise HTTPException(
             status_code=404, detail="no compiled PDF for this session"
         )
@@ -157,12 +226,59 @@ async def get_deck_pdf(session_id: int) -> FileResponse:
 
 
 @router.get("/sessions/{session_id}/deck/tex")
-async def get_deck_tex(session_id: int) -> FileResponse:
-    """Stream the LaTeX source, 404 if no deck or tex_path not-on-disk."""
+async def get_deck_tex(
+    session_id: int, version_id: str | None = None
+) -> FileResponse:
+    """Stream the LaTeX source.
+
+    F4.5 Phase 16: when ``?version_id=<v>`` is set AND not the active version,
+    write the snapshot's ``tex_content`` to a temp file and serve that — same
+    rationale as ``get_deck_pdf``. The snapshot always has tex_content (unlike
+    ``pdf_filename`` which is optional), so no special legacy 404 path.
+    """
+    if version_id is not None and not _VERSION_ID_RE.match(version_id):
+        raise HTTPException(status_code=400, detail="invalid version_id")
+
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         deck = await get_deck(conn, session_id=session_id)
-    if deck is None or not _exists(deck.tex_path):
+    if deck is None:
+        raise HTTPException(
+            status_code=404, detail="no deck source for this session"
+        )
+
+    if version_id is not None and version_id != (deck.current_version_id or ""):
+        edit_history = _slides_workdir(session_id) / "edit_history"
+        snapshot = _read_snapshot(edit_history / f"{version_id}.json")
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404, detail=f"snapshot {version_id} not found"
+            )
+        tex_content = str(snapshot.get("tex_content") or "")
+        if not tex_content:
+            raise HTTPException(
+                status_code=404,
+                detail=f"snapshot {version_id} has no tex_content",
+            )
+        # Write the snapshot tex to a temp file so FileResponse can stream it;
+        # we don't keep a permanent on-disk copy because the snapshot JSON is
+        # already the source of truth. ``delete=False`` so FileResponse can
+        # read it back after the with-block closes the handle.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".tex",
+            delete=False,
+        ) as tmp:
+            tmp.write(tex_content)
+        snapshot_title = _read_title_from_tex(tex_content=tex_content)
+        return FileResponse(
+            tmp.name,
+            media_type="text/plain",
+            filename=_download_name(deck, "tex", title_override=snapshot_title),
+        )
+
+    if not _exists(deck.tex_path):
         raise HTTPException(
             status_code=404, detail="no deck source for this session"
         )

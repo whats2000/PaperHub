@@ -89,14 +89,34 @@ class VersionHistory:
             else:
                 snapshot_notes = {str(k): v for k, v in speaker_notes.items()}
 
+            version_id = f"version_{timestamp_str}"
+
+            # F4.5 Phase 16: cache deck.pdf next to the snapshot so older
+            # versions can be downloaded without recompiling. Copy BEFORE the
+            # JSON write so a partial failure leaves the snapshot reading
+            # pdf_filename=null (caller falls back to recompile on restore).
+            pdf_filename: str | None = None
+            deck_pdf = self.workspace_dir / "deck.pdf"
+            if deck_pdf.exists():
+                cached_pdf = self.history_dir / f"{version_id}.pdf"
+                try:
+                    shutil.copy2(deck_pdf, cached_pdf)
+                    pdf_filename = cached_pdf.name
+                except OSError as exc:
+                    # Don't fail the snapshot just because the PDF couldn't be
+                    # cached — the tex/notes record is still useful.
+                    logging.warning(
+                        "Failed to cache deck.pdf for %s: %r", version_id, exc
+                    )
+
             version_data = {
                 "timestamp": timestamp.isoformat(),
                 "description": description,
                 "tex_content": tex_content,
                 "speaker_notes": snapshot_notes,  # may be None for decks without notes yet
+                "pdf_filename": pdf_filename,
             }
 
-            version_id = f"version_{timestamp_str}"
             version_file = self.history_dir / f"{version_id}.json"
             with open(version_file, "w", encoding="utf-8") as f:
                 json.dump(version_data, f, indent=2, ensure_ascii=False)
@@ -104,7 +124,8 @@ class VersionHistory:
             note_count = len(snapshot_notes) if snapshot_notes else 0
             logging.info(
                 f"Saved version: {description} at {timestamp_str} "
-                f"(speaker notes bundled: {note_count})"
+                f"(speaker notes bundled: {note_count}, "
+                f"pdf cached: {bool(pdf_filename)})"
             )
             return version_id
 
@@ -291,6 +312,26 @@ class VersionHistory:
         except Exception as e:
             logging.error(f"Failed to restore slides.tex: {e}")
             return False
+
+        # F4.5 Phase 16: if the snapshot cached its compiled PDF, copy it back
+        # to deck.pdf so the caller can skip a recompile. Soft-fail: the tex
+        # write above already succeeded, so a missing/unreadable cached PDF
+        # just leaves the caller's existing fallback (recompile) in play.
+        pdf_filename = data.get("pdf_filename")
+        if isinstance(pdf_filename, str) and pdf_filename:
+            cached_pdf = self.history_dir / pdf_filename
+            if cached_pdf.exists():
+                try:
+                    shutil.copy2(cached_pdf, self.workspace_dir / "deck.pdf")
+                    logging.info(
+                        f"Restored deck.pdf from cached {pdf_filename}"
+                    )
+                except OSError as exc:
+                    logging.warning(
+                        "Failed to restore cached deck.pdf for %s: %r",
+                        filename,
+                        exc,
+                    )
 
         if "speaker_notes" in data:
             snapshot_notes = data["speaker_notes"]
