@@ -26,9 +26,7 @@ from pathlib import Path
 import aiosqlite
 
 from paperhub.models.slide_domain import KeyFigureBundle
-from paperhub.pipelines.slide_pipeline.beamer_helpers import (
-    extract_frames_from_beamer,
-)
+from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
     verify_and_fix_graphics,
 )
@@ -406,33 +404,6 @@ class EmitResult:
     figure_audit_replacements: int  # how many \includegraphics were replaced
 
 
-def _frame_spans(deck_tex: str) -> list[tuple[str, int, int]]:
-    """Return ``[(frame_tex, page_start, page_end), ...]`` in source order.
-
-    ``extract_frames_from_beamer`` already duplicates each frame across its
-    overlay pages (page numbers align with the rendered PDF), so collapsing
-    by frame body gives ``(content, first_page, last_page)`` per logical
-    frame.
-    """
-    raw = extract_frames_from_beamer(deck_tex)
-    if not raw:
-        return []
-    spans: list[tuple[str, int, int]] = []
-    cur_content = raw[0][1]
-    cur_start = raw[0][0]
-    cur_end = raw[0][0]
-    for page_num, content, _s, _e in raw[1:]:
-        if content == cur_content and page_num == cur_end + 1:
-            cur_end = page_num
-            continue
-        spans.append((cur_content, cur_start, cur_end))
-        cur_content = content
-        cur_start = page_num
-        cur_end = page_num
-    spans.append((cur_content, cur_start, cur_end))
-    return spans
-
-
 async def run_sl_emit(
     *,
     session_id: int,
@@ -557,9 +528,16 @@ async def run_sl_emit(
     )
 
     await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
-    spans = _frame_spans(audited_tex)
-    for idx, (frame_tex, page_start, page_end) in enumerate(spans):
-        note_text = (speaker_notes or {}).get(idx)
+    # F4.5: reuse ``build_deck_slides`` (the same helper the F4 EDIT flow
+    # uses) so sl_emit and edit flows produce IDENTICALLY shaped deck_slides
+    # rows. Earlier sl_emit walked frames itself via ``_frame_spans`` and
+    # kept the leading title frame as slide_index 0, while build_deck_slides
+    # drops the title — so a single-page edit shifted every slide_index by 1
+    # and mangled every note via the restore-by-index loop. Unifying both
+    # paths on build_deck_slides eliminates the asymmetry.
+    inputs = build_deck_slides(audited_tex, page_count)
+    for s in inputs:
+        note_text = (speaker_notes or {}).get(s.slide_index)
         await conn.execute(
             """
             INSERT INTO deck_slides (
@@ -567,7 +545,8 @@ async def run_sl_emit(
                 page_start, page_end
             ) VALUES (?, ?, ?, ?, NULL, ?, ?)
             """,
-            (deck_id, idx, frame_tex, note_text, page_start, page_end),
+            (deck_id, s.slide_index, s.frame_tex, note_text,
+             s.page_start, s.page_end),
         )
     await conn.commit()
 
