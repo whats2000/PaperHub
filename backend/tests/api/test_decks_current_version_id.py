@@ -166,7 +166,12 @@ async def test_restore_endpoint_updates_current_version_id(
     tmp_path: Path,
     app_with_db: tuple[Any, aiosqlite.Connection],
 ) -> None:
-    """Restoring an older version must update decks.current_version_id."""
+    """Restoring an older version must update decks.current_version_id.
+
+    The older snapshot carries a cached PDF so the endpoint takes the Phase 16
+    hot path (file-copy, no pdflatex), keeping this test runnable on CI hosts
+    without a LaTeX install.
+    """
     app, conn = app_with_db
     session_id = 1
     slides_dir = tmp_path / "chat_session" / str(session_id) / "slides"
@@ -178,6 +183,8 @@ async def test_restore_endpoint_updates_current_version_id(
         edit_history, older_id,
         description="older",
         timestamp_iso="2026-06-01T12:00:00",
+        pdf_filename=f"{older_id}.pdf",
+        pdf_bytes=b"%PDF-1.4 cached pdf\n",
     )
     _write_snapshot(
         edit_history, newer_id,
