@@ -30,7 +30,10 @@ interface SlidesState {
    *  close/reopen (a panel unmount/remount) does not lose it. */
   presentingBySession: Record<number, boolean>;
   /** Epoch ms when presentation began, per session — drives the cockpit timer
-   *  so it survives a panel remount during Q&A. */
+   *  so it survives a panel remount during Q&A. `stopPresenting` deliberately
+   *  leaves the last value here (harmless: it is only read while
+   *  `presentingBySession[sid]` is true, and `startPresenting` re-stamps it on
+   *  every start), so consumers MUST gate on the presenting flag first. */
   presentStartedAtBySession: Record<number, number>;
   /** Draggable filmstrip rail width (px). Persisted. */
   filmstripWidth: number;
