@@ -1,5 +1,4 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import {
   BookOpen,
   BrainCircuit,
@@ -85,10 +84,10 @@ export function Composer({
     baseDraftRef.current = value;
     const rec = createSpeechRecognizer({
       onInterim: (text) => {
+        // onInterim delivers the FULL session transcript each event (see
+        // createSpeechRecognizer), so REPLACE the base draft — never append.
         const base = baseDraftRef.current;
-        flushSync(() => {
-          setValue(base && text ? `${base} ${text}` : base || text);
-        });
+        setValue(base && text ? `${base} ${text}` : base || text);
       },
       onEnd: () => setListening(false),
       onError: () => setListening(false),

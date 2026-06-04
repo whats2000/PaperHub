@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "@/components/chat/Composer";
@@ -44,7 +44,9 @@ describe("Composer voice input", () => {
       window as unknown as { __lastRecognition?: FakeRecognition }
     ).__lastRecognition;
     expect(instance).toBeDefined();
-    instance!.emit("find the limitations");
+    // emit() fires onInterim outside React's event flow; act() flushes the
+    // resulting state update so the textarea reflects it before we assert.
+    act(() => instance!.emit("find the limitations"));
     expect(
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
