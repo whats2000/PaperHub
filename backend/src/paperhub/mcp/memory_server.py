@@ -18,7 +18,6 @@ this call on the loopback path, and the middleware handles the external path.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import asdict
 from typing import Any
 
@@ -34,6 +33,7 @@ from paperhub.agents.memory_tools import (
     forget_memory,
     recall_memories,
 )
+from paperhub.config import load_settings
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.mcp.server_context import require_request_context
 
@@ -83,9 +83,7 @@ async def _add_handler(content: str, scope: Scope) -> dict[str, Any]:
             content=content,
             scope=scope,
             adapter=LiteLlmAdapter(),
-            model=os.environ.get(
-                "PAPERHUB_MEMORY_CONFLICT_MODEL", "gemini/gemini-3.1-flash-lite"
-            ),
+            model=load_settings().memory_conflict_model,
         )
     except (MemoryScopeError, MemoryGateRefusal) as exc:
         return {"error": "rejected", "reason": str(exc)}

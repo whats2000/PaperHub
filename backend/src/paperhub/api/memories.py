@@ -18,7 +18,6 @@ session context.  A missing or non-integer header is treated as ``None``
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Literal
 
 import aiosqlite
@@ -140,8 +139,6 @@ async def list_memories(
 # POST /memories
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CONFLICT_MODEL = "gemini/gemini-3.1-flash-lite"
-
 
 @router.post("", response_model=dict[str, Any], status_code=201)
 async def create_memory(
@@ -173,9 +170,7 @@ async def create_memory(
                 content=body.content,
                 scope=body.scope,
                 adapter=LiteLlmAdapter(),
-                model=os.environ.get(
-                    "PAPERHUB_MEMORY_CONFLICT_MODEL", _DEFAULT_CONFLICT_MODEL
-                ),
+                model=settings.memory_conflict_model,
             )
         except MemoryGateRefusal as exc:
             raise HTTPException(422, str(exc)) from exc

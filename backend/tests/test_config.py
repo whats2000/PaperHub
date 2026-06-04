@@ -96,3 +96,113 @@ def test_slide_style_profile_accepts_canonical_name(
     assert load_settings().slide_style_profile == "default"
     monkeypatch.setenv("PAPERHUB_SLIDE_STYLE_PROFILE", "metropolis_minimal")
     assert load_settings().slide_style_profile == "metropolis_minimal"
+
+
+# ---------------------------------------------------------------------------
+# 3. Tier defaults for LLM models — small vs flagship
+# ---------------------------------------------------------------------------
+
+
+def test_tier_defaults_unset_use_built_in_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No env vars set: small-tier slots resolve to the built-in flash-lite
+    string; flagship-tier slots resolve to the built-in 2.5-pro string."""
+    for name in (
+        "PAPERHUB_MODEL_SMALL", "PAPERHUB_MODEL_FLAGSHIP",
+        "PAPERHUB_ROUTER_MODEL", "PAPERHUB_CHITCHAT_MODEL",
+        "PAPERHUB_PAPER_QA_MODEL", "PAPERHUB_PAPER_QA_SUBAGENT_MODEL",
+        "PAPERHUB_SQL_AGENT_MODEL", "PAPERHUB_SQL_ANSWER_MODEL",
+        "PAPERHUB_REPORT_PLAN_MODEL", "PAPERHUB_REPORT_SECTION_MODEL",
+        "PAPERHUB_REPORT_NOTES_MODEL", "PAPERHUB_REPORT_RESOLVE_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    s = load_settings()
+    # Small-tier slots
+    assert s.router_model == "gemini/gemini-3.1-flash-lite"
+    assert s.chitchat_model == "gemini/gemini-3.1-flash-lite"
+    assert s.paper_qa_subagent_model == "gemini/gemini-3.1-flash-lite"
+    assert s.sql_agent_model == "gemini/gemini-3.1-flash-lite"
+    assert s.report_resolve_model == "gemini/gemini-3.1-flash-lite"
+    # Flagship-tier slots
+    assert s.paper_qa_model == "gemini/gemini-2.5-pro"
+    assert s.sql_answer_model == "gemini/gemini-2.5-pro"
+    assert s.report_plan_model == "gemini/gemini-2.5-pro"
+    assert s.report_section_model == "gemini/gemini-2.5-pro"
+    assert s.report_notes_model == "gemini/gemini-2.5-pro"
+
+
+def test_small_tier_env_var_changes_all_small_tier_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``PAPERHUB_MODEL_SMALL`` is the default for every small-tier slot."""
+    for name in (
+        "PAPERHUB_ROUTER_MODEL", "PAPERHUB_CHITCHAT_MODEL",
+        "PAPERHUB_PAPER_QA_SUBAGENT_MODEL",
+        "PAPERHUB_SQL_AGENT_MODEL", "PAPERHUB_REPORT_RESOLVE_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "openai/gpt-4o-mini")
+    s = load_settings()
+    assert s.router_model == "openai/gpt-4o-mini"
+    assert s.chitchat_model == "openai/gpt-4o-mini"
+    assert s.paper_qa_subagent_model == "openai/gpt-4o-mini"
+    assert s.sql_agent_model == "openai/gpt-4o-mini"
+    assert s.report_resolve_model == "openai/gpt-4o-mini"
+
+
+def test_flagship_tier_env_var_changes_all_flagship_tier_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``PAPERHUB_MODEL_FLAGSHIP`` is the default for every flagship-tier slot."""
+    for name in (
+        "PAPERHUB_PAPER_QA_MODEL", "PAPERHUB_SQL_ANSWER_MODEL",
+        "PAPERHUB_REPORT_PLAN_MODEL", "PAPERHUB_REPORT_SECTION_MODEL",
+        "PAPERHUB_REPORT_NOTES_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PAPERHUB_MODEL_FLAGSHIP", "anthropic/claude-opus-4-7")
+    s = load_settings()
+    assert s.paper_qa_model == "anthropic/claude-opus-4-7"
+    assert s.sql_answer_model == "anthropic/claude-opus-4-7"
+    assert s.report_plan_model == "anthropic/claude-opus-4-7"
+    assert s.report_section_model == "anthropic/claude-opus-4-7"
+    assert s.report_notes_model == "anthropic/claude-opus-4-7"
+
+
+def test_specific_override_wins_over_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Specific slot env vars (e.g. ``PAPERHUB_ROUTER_MODEL``) still take
+    precedence over the tier default, so operators can pin one slot
+    independently."""
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("PAPERHUB_ROUTER_MODEL", "gemini/gemini-3.1-flash-lite")
+    monkeypatch.delenv("PAPERHUB_CHITCHAT_MODEL", raising=False)
+    s = load_settings()
+    # Specific override wins for router
+    assert s.router_model == "gemini/gemini-3.1-flash-lite"
+    # Tier still applies to the un-overridden chitchat slot
+    assert s.chitchat_model == "openai/gpt-4o-mini"
+
+
+def test_memory_conflict_model_defaults_to_small_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Memory.add's conflict-detection LLM is now a proper Settings field
+    (was previously read directly from env in two places, bypassing config)."""
+    monkeypatch.delenv("PAPERHUB_MEMORY_CONFLICT_MODEL", raising=False)
+    monkeypatch.delenv("PAPERHUB_MODEL_SMALL", raising=False)
+    assert load_settings().memory_conflict_model == "gemini/gemini-3.1-flash-lite"
+
+
+def test_memory_conflict_model_follows_small_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PAPERHUB_MEMORY_CONFLICT_MODEL", raising=False)
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "openai/gpt-4o-mini")
+    assert load_settings().memory_conflict_model == "openai/gpt-4o-mini"
+
+
+def test_memory_conflict_model_specific_override_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("PAPERHUB_MEMORY_CONFLICT_MODEL", "pinned/model")
+    assert load_settings().memory_conflict_model == "pinned/model"

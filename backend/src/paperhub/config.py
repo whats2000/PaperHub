@@ -46,6 +46,8 @@ class Settings:
     sql_agent_model: str
     # SQL Agent answer phrasing (flagship tier).
     sql_answer_model: str
+    # Memory-add conflict detector (small tier; classifier-shaped).
+    memory_conflict_model: str
 
     # ── 4. Local embedding + rerank (hosted in the modelserver process) ─
     embedding_model: str
@@ -132,9 +134,31 @@ class Settings:
     slide_style_profile: str
 
 
+_SMALL_TIER_DEFAULT = "gemini/gemini-3.1-flash-lite"
+_FLAGSHIP_TIER_DEFAULT = "gemini/gemini-2.5-pro"
+
+
+def small_tier_model() -> str:
+    """Resolve the small-tier LLM model (``PAPERHUB_MODEL_SMALL`` or the
+    built-in default). Used as the default for every per-slot env var whose
+    workload is a cheap classifier / fast lookup (router, chitchat, paper_qa
+    subagent, sql planner, report resolver). Per-slot env vars still win."""
+    return os.environ.get("PAPERHUB_MODEL_SMALL") or _SMALL_TIER_DEFAULT
+
+
+def flagship_tier_model() -> str:
+    """Resolve the flagship-tier LLM model (``PAPERHUB_MODEL_FLAGSHIP`` or
+    the built-in default). Default for slots that produce user-facing prose
+    (paper_qa synthesis, sql answer, slide notes/plan/section). Per-slot
+    env vars still win."""
+    return os.environ.get("PAPERHUB_MODEL_FLAGSHIP") or _FLAGSHIP_TIER_DEFAULT
+
+
 def load_settings() -> Settings:
     workspace = Path(os.environ.get("PAPERHUB_WORKSPACE", "./workspace")).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
+    small = small_tier_model()
+    flagship = flagship_tier_model()
     return Settings(
         # 2. Workspace + storage.
         workspace_dir=workspace,
@@ -143,24 +167,19 @@ def load_settings() -> Settings:
         chroma_dir=workspace / "chroma",
         max_upload_mb=int(os.environ.get("PAPERHUB_MAX_UPLOAD_MB", "30")),
 
-        # 3. LLM model selection.
-        router_model=os.environ.get(
-            "PAPERHUB_ROUTER_MODEL", "gemini/gemini-3.1-flash-lite",
-        ),
-        chitchat_model=os.environ.get(
-            "PAPERHUB_CHITCHAT_MODEL", "gemini/gemini-3.1-flash-lite",
-        ),
-        paper_qa_model=os.environ.get(
-            "PAPERHUB_PAPER_QA_MODEL", "gemini/gemini-2.5-pro",
-        ),
+        # 3. LLM model selection. Each slot's per-slot env var (e.g.
+        # PAPERHUB_ROUTER_MODEL) STILL takes precedence; the tier values
+        # are only the default when the per-slot var is unset.
+        router_model=os.environ.get("PAPERHUB_ROUTER_MODEL", small),
+        chitchat_model=os.environ.get("PAPERHUB_CHITCHAT_MODEL", small),
+        paper_qa_model=os.environ.get("PAPERHUB_PAPER_QA_MODEL", flagship),
         paper_qa_subagent_model=os.environ.get(
-            "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", "gemini/gemini-3.1-flash-lite",
+            "PAPERHUB_PAPER_QA_SUBAGENT_MODEL", small,
         ),
-        sql_agent_model=os.environ.get(
-            "PAPERHUB_SQL_AGENT_MODEL", "gemini/gemini-3.1-flash-lite",
-        ),
-        sql_answer_model=os.environ.get(
-            "PAPERHUB_SQL_ANSWER_MODEL", "gemini/gemini-2.5-pro",
+        sql_agent_model=os.environ.get("PAPERHUB_SQL_AGENT_MODEL", small),
+        sql_answer_model=os.environ.get("PAPERHUB_SQL_ANSWER_MODEL", flagship),
+        memory_conflict_model=os.environ.get(
+            "PAPERHUB_MEMORY_CONFLICT_MODEL", small,
         ),
 
         # 4. Local embedding + rerank.
@@ -206,19 +225,14 @@ def load_settings() -> Settings:
         inprocess_marker=os.environ.get("PAPERHUB_INPROCESS_MARKER", "0") == "1",
         marker_max_pages=int(os.environ.get("PAPERHUB_MARKER_MAX_PAGES", "1")),
 
-        # 9. Report Agent (slides) model selection.
-        report_plan_model=os.environ.get(
-            "PAPERHUB_REPORT_PLAN_MODEL", "gemini/gemini-2.5-pro",
-        ),
+        # 9. Report Agent (slides) model selection — tier defaults; per-slot
+        # env vars still win.
+        report_plan_model=os.environ.get("PAPERHUB_REPORT_PLAN_MODEL", flagship),
         report_section_model=os.environ.get(
-            "PAPERHUB_REPORT_SECTION_MODEL", "gemini/gemini-2.5-pro",
+            "PAPERHUB_REPORT_SECTION_MODEL", flagship,
         ),
-        report_notes_model=os.environ.get(
-            "PAPERHUB_REPORT_NOTES_MODEL", "gemini/gemini-2.5-pro",
-        ),
-        report_resolve_model=os.environ.get(
-            "PAPERHUB_REPORT_RESOLVE_MODEL", "gemini/gemini-3.1-flash-lite",
-        ),
+        report_notes_model=os.environ.get("PAPERHUB_REPORT_NOTES_MODEL", flagship),
+        report_resolve_model=os.environ.get("PAPERHUB_REPORT_RESOLVE_MODEL", small),
 
         # 10. External lookup services.
         unpaywall_email=os.environ.get("PAPERHUB_UNPAYWALL_EMAIL") or None,
