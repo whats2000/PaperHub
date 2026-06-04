@@ -32,6 +32,8 @@ class MemoryBroadcastChannel {
     MemoryBroadcastChannel.channels.set(name, set);
   }
   postMessage(data: unknown) {
+    // Only `data` is populated — consumers read `e.data` exclusively. Other
+    // MessageEvent fields (origin, source, ports) are intentionally omitted.
     for (const ch of MemoryBroadcastChannel.channels.get(this.name) ?? []) {
       if (ch !== this && ch.onmessage) ch.onmessage({ data } as MessageEvent);
     }
@@ -43,4 +45,9 @@ class MemoryBroadcastChannel {
 (globalThis as unknown as { BroadcastChannel: unknown }).BroadcastChannel =
   MemoryBroadcastChannel;
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Drop any channels a test forgot to close() so a leaked instance can't
+  // deliver to a later test reusing the same session id.
+  MemoryBroadcastChannel.channels.clear();
+});

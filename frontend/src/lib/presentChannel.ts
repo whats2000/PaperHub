@@ -5,6 +5,9 @@ export type PresentMessage =
   | { type: "ping" }
   | { type: "pong" };
 
+/** One channel per session. Each `onX` registration holds a SINGLE callback —
+ *  calling it again replaces the previous one (this is a single-consumer
+ *  presenter↔audience topology, not a multi-subscriber bus). */
 export interface PresentChannel {
   /** Presenter → audience: show this 1-indexed page. */
   postPage: (page: number) => void;
