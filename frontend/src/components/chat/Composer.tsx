@@ -79,8 +79,12 @@ export function Composer({
   const toggleVoice = () => {
     if (listening) {
       recognizerRef.current?.stop();
+      recognizerRef.current = null;
       return;
     }
+    // Guard a rapid double-click: the ref updates synchronously, so a second
+    // call in the same tick (before listening re-renders) bails here.
+    if (recognizerRef.current) return;
     baseDraftRef.current = value;
     const rec = createSpeechRecognizer({
       onInterim: (text) => {
@@ -89,14 +93,24 @@ export function Composer({
         const base = baseDraftRef.current;
         setValue(base && text ? `${base} ${text}` : base || text);
       },
-      onEnd: () => setListening(false),
-      onError: () => setListening(false),
+      onEnd: () => {
+        recognizerRef.current = null;
+        setListening(false);
+      },
+      onError: () => {
+        recognizerRef.current = null;
+        setListening(false);
+      },
     });
     if (!rec) return;
     recognizerRef.current = rec;
     rec.start();
     setListening(true);
   };
+
+  // Stop an in-flight recognizer if the composer unmounts mid-dictation (e.g. a
+  // session switch) so the mic doesn't stay open writing to the draft store.
+  useEffect(() => () => recognizerRef.current?.stop(), []);
 
   // If the parent provides a canvas toggle handler + open state, use those
   // (so ChatPage can enforce mutual exclusivity with Memory). Otherwise fall
