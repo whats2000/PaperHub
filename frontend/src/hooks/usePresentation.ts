@@ -96,7 +96,11 @@ export function usePresentation(
     if (!presenting) return;
     const id = setInterval(() => {
       channelRef.current?.ping();
-      setAudienceConnected(Date.now() - lastPongRef.current < STALE_MS);
+      // Gate on a live channel so a tick that slips in right after stop()
+      // (which nulls channelRef) can't briefly re-flip the badge to connected.
+      setAudienceConnected(
+        channelRef.current !== null && Date.now() - lastPongRef.current < STALE_MS,
+      );
     }, HEARTBEAT_MS);
     return () => clearInterval(id);
   }, [presenting]);
