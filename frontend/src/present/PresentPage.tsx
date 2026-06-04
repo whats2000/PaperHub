@@ -26,10 +26,7 @@ export function PresentPage({ sessionId }: Props) {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  const [size, setSize] = useState({
-    w: window.innerWidth,
-    h: window.innerHeight,
-  });
+  const [width, setWidth] = useState(window.innerWidth);
   const chRef = useRef<PresentChannel | null>(null);
 
   // Fetch the compiled deck PDF once.
@@ -55,10 +52,10 @@ export function PresentPage({ sessionId }: Props) {
     return () => ch.close();
   }, [sessionId]);
 
-  // Refit on window resize.
+  // Refit on window resize. Fit by width only (a landscape Beamer slide fits
+  // the viewport height at full width on a typical 16:9 / 4:3 projector).
   useEffect(() => {
-    const onResize = () =>
-      setSize({ w: window.innerWidth, h: window.innerHeight });
+    const onResize = () => setWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -67,9 +64,6 @@ export function PresentPage({ sessionId }: Props) {
   // copy each render (same pattern as SlidesPanel/PdfView).
   const file = useMemo(() => (bytes ? { data: bytes.slice() } : null), [bytes]);
   const safePage = Math.min(Math.max(1, page), numPages || 1);
-
-  // size.h is part of the resize snapshot; referenced here to satisfy lint.
-  void size.h;
 
   return (
     <div
@@ -89,9 +83,7 @@ export function PresentPage({ sessionId }: Props) {
           onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
           loading=""
         >
-          {/* Fit by width; a landscape Beamer slide fits the viewport height at
-              full width on a typical 16:9 / 4:3 projector. */}
-          <Page pageNumber={safePage} width={size.w} loading="" />
+          <Page pageNumber={safePage} width={width} loading="" />
         </Document>
       )}
     </div>
