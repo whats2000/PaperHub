@@ -10,6 +10,14 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "./src") },
   },
   server: { port: 5173 },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        present: path.resolve(__dirname, "present.html"),
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

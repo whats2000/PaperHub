@@ -25,6 +25,16 @@ interface SlidesState {
    *  ``busy`` prop masks during an edit. */
   restoringBySession: Record<number, boolean>;
   currentPageBySession: Record<number, number>;
+  /** Per-session "presentation mode active" flag. Ephemeral (NOT persisted) and
+   *  kept in the store — never in SlidesPanel local state — so the Q&A
+   *  close/reopen (a panel unmount/remount) does not lose it. */
+  presentingBySession: Record<number, boolean>;
+  /** Epoch ms when presentation began, per session — drives the cockpit timer
+   *  so it survives a panel remount during Q&A. `stopPresenting` deliberately
+   *  leaves the last value here (harmless: it is only read while
+   *  `presentingBySession[sid]` is true, and `startPresenting` re-stamps it on
+   *  every start), so consumers MUST gate on the presenting flag first. */
+  presentStartedAtBySession: Record<number, number>;
   /** Draggable filmstrip rail width (px). Persisted. */
   filmstripWidth: number;
   /** Draggable speaker-note pane height (px). Persisted. */
@@ -33,6 +43,8 @@ interface SlidesState {
   clearDeck: (sid: number) => void;
   setCurrentPage: (sid: number, page: number) => void;
   setRestoring: (sid: number, restoring: boolean) => void;
+  startPresenting: (sid: number) => void;
+  stopPresenting: (sid: number) => void;
   toggleOpen: () => void;
   openPanel: () => void;
   closePanel: () => void;
@@ -48,6 +60,8 @@ export const useSlidesStore = create<SlidesState>()(
       deckRevisionBySession: {},
       restoringBySession: {},
       currentPageBySession: {},
+      presentingBySession: {},
+      presentStartedAtBySession: {},
       filmstripWidth: FILMSTRIP_DEFAULT_WIDTH,
       noteHeight: NOTE_DEFAULT_HEIGHT,
       setDeck: (sid, deck) =>
@@ -72,6 +86,18 @@ export const useSlidesStore = create<SlidesState>()(
       setRestoring: (sid, restoring) =>
         set((s) => ({
           restoringBySession: { ...s.restoringBySession, [sid]: restoring },
+        })),
+      startPresenting: (sid) =>
+        set((s) => ({
+          presentingBySession: { ...s.presentingBySession, [sid]: true },
+          presentStartedAtBySession: {
+            ...s.presentStartedAtBySession,
+            [sid]: Date.now(),
+          },
+        })),
+      stopPresenting: (sid) =>
+        set((s) => ({
+          presentingBySession: { ...s.presentingBySession, [sid]: false },
         })),
       toggleOpen: () => set((s) => ({ open: !s.open })),
       openPanel: () => set({ open: true }),

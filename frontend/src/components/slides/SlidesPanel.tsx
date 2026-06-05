@@ -14,6 +14,7 @@ import {
   Download,
   Loader2,
   Pencil,
+  Presentation,
   X,
 } from "lucide-react";
 
@@ -25,6 +26,8 @@ import {
 } from "@/store/slides";
 import { fetchDeckPdfData, deckPdfUrl, deckTexUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { usePresentation } from "@/hooks/usePresentation";
+import { PresenterControls } from "@/components/slides/PresenterControls";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
 // import.meta.url so the worker is bundled + served from the app origin.
@@ -85,6 +88,13 @@ export function SlidesPanel({
     (s) => s.currentPageBySession[sessionId] ?? 1,
   );
   const setCurrentPage = useSlidesStore((s) => s.setCurrentPage);
+  const presentStartedAt = useSlidesStore(
+    (s) => s.presentStartedAtBySession[sessionId] ?? 0,
+  );
+  const { presenting, audienceConnected, present, stop } = usePresentation(
+    sessionId,
+    currentPage,
+  );
   // Layout dimensions live in the store so they survive panel close/reopen
   // (the panel unmounts on close) and reload (persisted to localStorage).
   const noteHeight = useSlidesStore((s) => s.noteHeight);
@@ -367,6 +377,20 @@ export function SlidesPanel({
           <ChevronRight className="h-3 w-3" />
         </Button>
 
+        {/* Present button */}
+        <Button
+          type="button"
+          size="icon-xs"
+          variant={presenting ? "default" : "ghost"}
+          aria-label={presenting ? "presenting" : "present"}
+          aria-pressed={presenting}
+          disabled={presenting || numPages === 0 || deck?.status !== "ok"}
+          onClick={present}
+          title={presenting ? "Presenting — Stop from the presenter bar" : "Open the audience window"}
+        >
+          <Presentation className="h-3 w-3" />
+        </Button>
+
         {/* Download links */}
         <a
           href={deckPdfUrl(sessionId)}
@@ -453,6 +477,20 @@ export function SlidesPanel({
             ref={measureMainArea}
             className="flex-1 min-h-0 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-2"
           >
+            {presenting && (
+              <PresenterControls
+                startedAt={presentStartedAt}
+                currentPage={currentPage}
+                numPages={numPages}
+                audienceConnected={audienceConnected}
+                onStop={stop}
+                nextPreview={
+                  currentPage < numPages ? (
+                    <Page pageNumber={currentPage + 1} width={64} />
+                  ) : undefined
+                }
+              />
+            )}
             {Array.from({ length: numPages }, (_, i) => {
               const pageNum = i + 1;
               const isActive = pageNum === currentPage;

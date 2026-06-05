@@ -14,8 +14,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-1026%20backend%20%2B%20318%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/Plan%20F-merged%20(SRS%20v2.25)-success)
+![Tests](https://img.shields.io/badge/tests-1026%20backend%20%2B%20340%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/Plan%20F-merged%20(SRS%20v2.26)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 </div>
@@ -263,7 +263,7 @@ Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-
 | **D** | Search results + Reference Sources + Citation Canvas (HTML + PDF passage highlighting) | ✅ complete — merged (SRS v2.13) |
 | **E** | SQL Agent + `library_stats` (sqlite MCP) + session/global memory governance (gate, conflict-supersede, Memory Manager UI) | ✅ complete — merged (SRS v2.17) |
 | **F** | Slide Pipeline + Report Agent — Marker ingestion (F2/F2.1), PhD-grade slide agent (F3), decoupled opt-in notes + diff-editing + length budget (F4), conference-grade metadata title page + title/style customization (F4.2) | ✅ complete — merged (SRS v2.22) |
-| **F5** | Slide presentation mode (fullscreen window + `BroadcastChannel` sync + presenter controls) + Q&A-during-talk + version-history UI | 🔜 planned |
+| **F5** | Slide presentation mode (audience pop-up window + `BroadcastChannel` sync + presenter cockpit) + Q&A-during-talk + composer voice input | ✅ complete — merged (SRS v2.26) |
 | **G** | Compare view + filesystem / `paperhub.*` MCP | 🔜 planned |
 
 Each plan ships working, testable software on its own. Plans live under [`docs/superpowers/plans/`](docs/superpowers/plans/).
@@ -334,7 +334,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 Documentation
 
-- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.25**).
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (currently **v2.26**).
 - **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
 - **[Backend developer docs](backend/README.md)** — backend-specific notes.
 

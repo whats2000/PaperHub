@@ -1,7 +1,8 @@
-import { KeyboardEvent, useEffect, useRef } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   BrainCircuit,
+  Mic,
   Presentation,
   Columns2,
   Send,
@@ -17,6 +18,7 @@ import {
 import { AttachPaperMenu } from "@/components/chat/AttachPaperMenu";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
+import { createSpeechRecognizer, isSpeechSupported, type SpeechRecognizer } from "@/lib/speech";
 
 interface Props {
   onSubmit: (text: string) => void;
@@ -69,6 +71,47 @@ export function Composer({
   const canvasOpenStore = useCanvasStore((s) => s.open);
   const ref = useRef<HTMLTextAreaElement>(null);
 
+  const [listening, setListening] = useState(false);
+  const recognizerRef = useRef<SpeechRecognizer | null>(null);
+  const baseDraftRef = useRef("");
+  const speechSupported = isSpeechSupported();
+
+  const toggleVoice = () => {
+    if (listening) {
+      recognizerRef.current?.stop();
+      recognizerRef.current = null;
+      return;
+    }
+    // Guard a rapid double-click: the ref updates synchronously, so a second
+    // call in the same tick (before listening re-renders) bails here.
+    if (recognizerRef.current) return;
+    baseDraftRef.current = value;
+    const rec = createSpeechRecognizer({
+      onInterim: (text) => {
+        // onInterim delivers the FULL session transcript each event (see
+        // createSpeechRecognizer), so REPLACE the base draft — never append.
+        const base = baseDraftRef.current;
+        setValue(base && text ? `${base} ${text}` : base || text);
+      },
+      onEnd: () => {
+        recognizerRef.current = null;
+        setListening(false);
+      },
+      onError: () => {
+        recognizerRef.current = null;
+        setListening(false);
+      },
+    });
+    if (!rec) return;
+    recognizerRef.current = rec;
+    rec.start();
+    setListening(true);
+  };
+
+  // Stop an in-flight recognizer if the composer unmounts mid-dictation (e.g. a
+  // session switch) so the mic doesn't stay open writing to the draft store.
+  useEffect(() => () => recognizerRef.current?.stop(), []);
+
   // If the parent provides a canvas toggle handler + open state, use those
   // (so ChatPage can enforce mutual exclusivity with Memory). Otherwise fall
   // back to the store values for backwards-compat (Composer.canvas.test).
@@ -93,6 +136,13 @@ export function Composer({
   const submit = () => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
+    // Stop dictation on send so a live recognizer doesn't keep writing partial
+    // transcripts into the just-cleared composer.
+    if (listening) {
+      recognizerRef.current?.stop();
+      recognizerRef.current = null;
+      setListening(false);
+    }
     onSubmit(trimmed);
     setDraft("");
     ref.current?.focus();
@@ -133,6 +183,36 @@ export function Composer({
             <TooltipProvider>
               <div className="flex items-center gap-0.5">
                 <AttachPaperMenu />
+                {speechSupported && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span tabIndex={0} className="inline-flex" />}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggleVoice}
+                        aria-pressed={listening}
+                        className={
+                          listening
+                            ? "h-8 w-8 bg-accent text-foreground"
+                            : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                        }
+                        aria-label="Voice input"
+                      >
+                        <Mic className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>
+                        {listening
+                          ? "Listening — click to stop"
+                          : "Dictate your question (Web Speech)"}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={<span tabIndex={0} className="inline-flex" />}
