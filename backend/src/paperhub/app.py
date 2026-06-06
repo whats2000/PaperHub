@@ -87,11 +87,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_registry = MCPRegistry()
     await app.state.mcp_registry.startup(mcp_toml)
 
-    # The dense-vector RAG stack (embedder + reranker + Chroma) was removed;
-    # there is no model pre-warm here. The stack announces ready as soon as
-    # the rest of boot completes.
-    _print_boot_banner(settings, app)
-
     # Background Marker upgrade worker (Plan F2.1): drains PDF papers marked
     # 'marker_pending' by re-extracting them via Marker (one at a time — a
     # concurrent Marker call OOMs a small GPU), upgrading the on-disk
@@ -117,6 +112,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             name="paperhub-marker-worker",
         )
         _LOG.info("marker worker started")
+
+    # The dense-vector RAG stack (embedder + reranker + Chroma) was removed, so
+    # there is no model pre-warm to wait on — announce ready now that the whole
+    # stack (DB, MCP registry, Marker worker) is wired, just before serving.
+    _print_boot_banner(settings, app)
 
     try:
         yield
