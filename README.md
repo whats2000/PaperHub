@@ -96,7 +96,7 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 | --- | --- |
 | **Backend** | Python 3.11 · FastAPI · LangGraph · LiteLLM · SQLite (`aiosqlite`) · Pydantic v2 |
 | **Frontend** | TypeScript · React 19 · Vite · Tailwind · Zustand · `react-markdown` + KaTeX |
-| **RAG** | Chroma · `BAAI/bge-small-en-v1.5` embedder · `ms-marco-MiniLM` cross-encoder (hosted in a sibling model-server process) |
+| **Retrieval** | SQLite `chunks` table — agentic section navigation via `list_sections`/`read_section` (no vector store) |
 | **Slides** | Beamer + `pdflatex` (`metropolis` theme) · `datalab-to/marker` PDF ingestion as a docker-compose service (optional, GPU-aware) |
 | **LLM** | Gemini by default (any LiteLLM provider — small-tier subagents, flagship finalizer) |
 | **Tooling** | `uv` · `pytest` · `ruff` · `mypy --strict` · Vitest · ESLint · Conventional Commits |
@@ -116,12 +116,12 @@ git clone https://github.com/whats2000/PaperHub.git
 cd PaperHub
 cp backend/.env.example backend/.env   # then fill in GEMINI_API_KEY (or your provider's key)
 
-docker compose up -d --build           # CPU; first build downloads TeX Live + torch (a few GB, once)
+docker compose up -d --build           # CPU; first build downloads TeX Live + Marker weights (a few GB, once)
 ```
 
 Open **http://localhost:8080**.
 
-> **GPU (optional, NVIDIA + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)):** faster Marker ingestion + local embedding/rerank. Layer the GPU override:
+> **GPU (optional, NVIDIA + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)):** faster Marker PDF ingestion. Layer the GPU override:
 > ```bash
 > docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 > ```
@@ -154,10 +154,10 @@ cp .env.example .env           # then fill in GEMINI_API_KEY (or your provider's
 
 **Recommended (Windows, one command):** `scripts/start.ps1` orchestrates all
 the sibling processes — it brings up the external MCP daemons (open-websearch)
-via `paperhub-mcp-up`, the model-server, then the backend with hot-reload:
+via `paperhub-mcp-up`, then the backend with hot-reload:
 
 ```powershell
-# Terminal 1 — backend stack (MCP daemons + model-server + FastAPI on :8000)
+# Terminal 1 — backend stack (MCP daemons + FastAPI on :8000)
 cd backend
 .\scripts\start.ps1
 ```
@@ -172,8 +172,6 @@ Open **http://localhost:5173** and start chatting.
 
 <details>
 <summary>Lower-level: run uvicorn directly</summary>
-
-The model-server auto-spawns on first backend boot, so the minimum is:
 
 ```bash
 cd backend
@@ -206,10 +204,7 @@ All settings live in `backend/.env` (grouped by function in [`.env.example`](bac
 | `GEMINI_API_KEY` | LLM provider credential (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
 | `PAPERHUB_PAPER_QA_MODEL` | Flagship finalizer (cross-paper synthesis) | `gemini/gemini-2.5-pro` |
 | `PAPERHUB_PAPER_QA_SUBAGENT_MODEL` | Per-paper section navigator (lightweight) | `gemini/gemini-3.1-flash-lite` |
-| `PAPERHUB_DEVICE` | Embedder/reranker device (`auto`/`cpu`/`cuda`/`mps`) | `auto` |
 | `PAPERHUB_SEMANTIC_SCHOLAR_API_KEY` | Higher Semantic Scholar rate limit (optional) | — |
-
-**GPU (optional).** torch installs CPU-only by default. For CUDA boxes: `uv sync --extra cu124` / `--extra cu126` / `--extra cu130`.
 
 **Web-search discovery (optional).** `paper_search` / `paper_suggest` gain a no-key multi-engine discovery step when an [`open-websearch`](https://www.npmjs.com/package/open-websearch) daemon is reachable on `:3000`. You don't install it by hand — `scripts/start.ps1` (or `uv run paperhub-mcp-up`) reads `mcp_servers.toml` and launches every `launch`-declaring MCP server for you via `npx -y`, which fetches the package on first run (~25s, one-time):
 
@@ -237,17 +232,14 @@ When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`
                                    │     ▼  paper_qa: fan out one subagent     │
                                    │        per paper → section nav →          │
                                    │        flagship finalizer over raw chunks │
-                                   │  ┌─────────┐ ┌──────────┐ ┌────────────┐  │
-                                   │  │ LiteLLM │ │ Chroma   │ │ SQLite     │  │
-                                   │  │ adapter │ │ (RAG)    │ │ (audit +   │  │
-                                   │  │         │ │          │ │  schema)   │  │
-                                   │  └─────────┘ └──────────┘ └────────────┘  │
-                                   │     ▲ embedder + reranker in a sibling    │
-                                   │       model-server process (:8001)        │
+                                   │  ┌─────────┐ ┌────────────────────────┐  │
+                                   │  │ LiteLLM │ │ SQLite (chunks + audit │  │
+                                   │  │ adapter │ │ + schema)              │  │
+                                   │  └─────────┘ └────────────────────────┘  │
                                    └───────────────────────────────────────────┘
 ```
 
-Every model call, MCP call, and pipeline step writes a `tool_calls` row before returning — enough state to reconstruct the full agent context from `SELECT * FROM tool_calls WHERE run_id = ?` alone. Paper content is **deduplicated**: one `paper_content` row + one cache dir + one set of chunks/vectors per unique paper, regardless of how many sessions reference it.
+Every model call, MCP call, and pipeline step writes a `tool_calls` row before returning — enough state to reconstruct the full agent context from `SELECT * FROM tool_calls WHERE run_id = ?` alone. Paper content is **deduplicated**: one `paper_content` row + one cache dir + one set of chunks per unique paper, regardless of how many sessions reference it.
 
 Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-srs.md).
 
@@ -259,7 +251,7 @@ Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-
 | --- | --- | --- |
 | **A** | Backend foundation + Router-only chat | ✅ complete |
 | **B** | Frontend foundation (React shell, SSE, routing badge, trace panel) | ✅ complete |
-| **C** | Paper Pipeline + Research Agent (ingest, RAG, paper_search, agentic paper_qa, MCP layer, model-server, PDF upload) | ✅ complete — merged (SRS v2.10) |
+| **C** | Paper Pipeline + Research Agent (ingest, paper_search, agentic paper_qa, MCP layer, PDF upload) | ✅ complete — merged (SRS v2.10) |
 | **D** | Search results + Reference Sources + Citation Canvas (HTML + PDF passage highlighting) | ✅ complete — merged (SRS v2.13) |
 | **E** | SQL Agent + `library_stats` (sqlite MCP) + session/global memory governance (gate, conflict-supersede, Memory Manager UI) | ✅ complete — merged (SRS v2.17) |
 | **F** | Slide Pipeline + Report Agent — Marker ingestion (F2/F2.1), PhD-grade slide agent (F3), decoupled opt-in notes + diff-editing + length budget (F4), conference-grade metadata title page + title/style customization (F4.2) | ✅ complete — merged (SRS v2.22) |
@@ -315,7 +307,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 ```
 .
 ├── backend/
-│   ├── src/paperhub/         # FastAPI app · agents · pipelines · rag · mcp · modelserver · tracer
+│   ├── src/paperhub/         # FastAPI app · agents · pipelines · mcp · tracer
 │   ├── tests/                # pytest suite (831 tests, hermetic)
 │   ├── benchmark/            # config-driven real-API e2e benchmark + LLM-as-Judge
 │   └── pyproject.toml        # uv project · mypy --strict · ruff
@@ -328,7 +320,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 └── README.md
 ```
 
-`workspace/` (gitignored) holds runtime state — the SQLite database, the papers cache, and the Chroma index.
+`workspace/` (gitignored) holds runtime state — the SQLite database and the papers cache.
 
 ---
 
