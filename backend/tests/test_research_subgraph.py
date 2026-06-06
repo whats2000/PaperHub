@@ -127,7 +127,6 @@ async def test_paper_qa_subgraph_empty_session_resolves_to_pq_empty(
     from paperhub.agents.research_graph import ResearchDeps, build_paper_qa_subgraph
     from paperhub.mcp.registry import MCPRegistry
     from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     session_id = await _make_session(migrated_db)
 
@@ -138,7 +137,6 @@ async def test_paper_qa_subgraph_empty_session_resolves_to_pq_empty(
         paper_qa_model="stub",
         conn=migrated_db,
         pipeline=MagicMock(spec=PaperPipeline),
-        retriever=MagicMock(spec=Retriever),
         mcp_registry=MagicMock(spec=MCPRegistry),
         paper_qa_subagent_model="stub",
         paper_qa_max_section_reads=2,
@@ -175,7 +173,6 @@ async def test_paper_qa_subgraph_dispatches_one_subagent_per_enabled_paper(
     from paperhub.agents.research_graph import ResearchDeps, build_paper_qa_subgraph
     from paperhub.mcp.registry import MCPRegistry
     from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     session_id = await _make_session(migrated_db)
     pcid_a = await _insert_paper(
@@ -214,7 +211,6 @@ async def test_paper_qa_subgraph_dispatches_one_subagent_per_enabled_paper(
         paper_qa_model="stub",
         conn=migrated_db,
         pipeline=MagicMock(spec=PaperPipeline),
-        retriever=MagicMock(spec=Retriever),
         mcp_registry=MagicMock(spec=MCPRegistry),
         paper_qa_subagent_model="stub",
         paper_qa_max_section_reads=2,
@@ -322,7 +318,6 @@ async def test_paper_search_emits_every_step_under_out_of_order_completion(
         paper_qa_model="stub",
         conn=migrated_db,
         pipeline=MagicMock(),
-        retriever=MagicMock(),
         mcp_registry=MagicMock(),
     )
 
@@ -375,7 +370,6 @@ async def test_paper_qa_subgraph_all_empty_picks_yields_no_content_message(
     from paperhub.agents.research_graph import ResearchDeps, build_paper_qa_subgraph
     from paperhub.mcp.registry import MCPRegistry
     from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     session_id = await _make_session(migrated_db)
     await _insert_paper(
@@ -396,7 +390,6 @@ async def test_paper_qa_subgraph_all_empty_picks_yields_no_content_message(
         paper_qa_model="stub",
         conn=migrated_db,
         pipeline=MagicMock(spec=PaperPipeline),
-        retriever=MagicMock(spec=Retriever),
         mcp_registry=MagicMock(spec=MCPRegistry),
         paper_qa_subagent_model="stub",
         paper_qa_max_section_reads=2,

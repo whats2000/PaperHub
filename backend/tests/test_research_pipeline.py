@@ -925,7 +925,6 @@ async def test_paper_search_finalize_records_emitted_candidates(
         build_paper_search_subgraph,
     )
     from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     # arxiv_id path: parse is deterministic (no LLM), discover short-
     # circuits (no LLM), resolve queries SS once, finalize builds the
@@ -942,7 +941,6 @@ async def test_paper_search_finalize_records_emitted_candidates(
         paper_qa_model="m",
         conn=migrated_db,
         pipeline=MagicMock(spec=PaperPipeline),
-        retriever=MagicMock(spec=Retriever),
         mcp_registry=reg,  # type: ignore[arg-type]
     )
     graph = build_paper_search_subgraph(deps)
@@ -1009,7 +1007,6 @@ async def test_paper_search_subgraph_uses_suggest_slots(
         build_paper_search_subgraph,
     )
     from paperhub.pipelines.paper_pipeline import PaperPipeline
-    from paperhub.rag.retriever import Retriever
 
     # The suggest parse prompt returns 2 distinct angle hints; the SS stub
     # resolves each to a unique paper so both land as candidates.
@@ -1062,7 +1059,6 @@ async def test_paper_search_subgraph_uses_suggest_slots(
         paper_qa_model="m",
         conn=migrated_db,
         pipeline=MagicMock(spec=PaperPipeline),
-        retriever=MagicMock(spec=Retriever),
         mcp_registry=cycling_reg,  # type: ignore[arg-type]
         parse_slot="paper_search_parse_suggest/v1",
         synth_slot="paper_search_synthesize_suggest/v1",

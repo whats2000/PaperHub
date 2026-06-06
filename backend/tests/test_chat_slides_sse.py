@@ -99,7 +99,6 @@ async def test_chat_sse_slides_emits_deck_event(
         adapter: Any,
         tracer: Any,
         conn: Any,
-        retriever: Any,
         settings: Any,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
@@ -172,7 +171,6 @@ async def test_chat_sse_slides_threads_current_view_page(
         adapter: Any,
         tracer: Any,
         conn: Any,
-        retriever: Any,
         settings: Any,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
@@ -238,7 +236,6 @@ async def test_chat_sse_slides_tool_step_events_forwarded(
         adapter: Any,
         tracer: Any,
         conn: Any,
-        retriever: Any,
         settings: Any,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:

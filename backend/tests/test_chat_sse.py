@@ -16,7 +16,6 @@ from paperhub.agents.research_tools import AddResult, NoIngestibleSourceError
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
-from paperhub.rag.retriever import RetrievedChunk
 
 
 class _FakeMcpRegistry:
@@ -165,11 +164,6 @@ async def test_chat_sse_paper_qa_streams(tmp_path, monkeypatch) -> None:
         '"confidence":0.97,"reasoning":"asks about paper content"}',
     )
 
-    # Canned retrieved chunks returned by the monkeypatched Retriever.
-    _canned_chunks = [
-        RetrievedChunk(chunk_id=1, paper_content_id=1, text="chunk text A", score=0.9),
-        RetrievedChunk(chunk_id=2, paper_content_id=1, text="chunk text B", score=0.8),
-    ]
     _canned_tokens = ["answer ", "[chunk:1]"]
 
     async def _fake_paper_qa_stream(
@@ -178,7 +172,6 @@ async def test_chat_sse_paper_qa_streams(tmp_path, monkeypatch) -> None:
         adapter: Any,
         tracer: Any,
         model: Any,
-        retriever: Any,
         conn: Any,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
@@ -260,7 +253,6 @@ async def test_chat_sse_paper_qa_empty_refs_no_double_emit(
         adapter: Any,
         tracer: Any,
         model: Any,
-        retriever: Any,
         conn: Any,
         **kwargs: Any,
     ) -> AsyncIterator[str | FinalOnlyMessage]:

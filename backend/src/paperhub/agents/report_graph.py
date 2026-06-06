@@ -212,7 +212,6 @@ class ReportDeps:
     adapter: LlmAdapter
     tracer: Tracer
     conn: aiosqlite.Connection
-    retriever: Any
     workspace: Path
     # F1 model-tier names are reused as-is so chat.py / config.py need no
     # change. The F4.5 flat flow maps them: plan_model → slide_agent,

@@ -28,17 +28,14 @@ from paperhub.tracing.tracer import Tracer  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _reset_model_singletons() -> Iterator[None]:
-    """Clear cached embedder/reranker singletons between tests so a
-    test that monkeypatches PAPERHUB_INPROCESS_MODELS doesn't leak
-    its choice to neighbours. Yields nothing — just brackets the test."""
+    """Clear cached embedder singleton between tests so a test that
+    monkeypatches PAPERHUB_INPROCESS_MODELS doesn't leak its choice to
+    neighbours. Yields nothing — just brackets the test."""
     from paperhub.pipelines import embedder as _embedder_mod
-    from paperhub.rag import reranker as _reranker_mod
 
     _embedder_mod.reset_singleton()
-    _reranker_mod.reset_singleton()
     yield
     _embedder_mod.reset_singleton()
-    _reranker_mod.reset_singleton()
 
 
 @pytest_asyncio.fixture

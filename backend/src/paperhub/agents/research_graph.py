@@ -74,7 +74,6 @@ from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.mcp.registry import MCPRegistry
 from paperhub.pipelines.paper_pipeline import PaperPipeline
-from paperhub.rag.retriever import Retriever
 from paperhub.tracing.tracer import Tracer
 
 ResearchExtraKwargs = dict[str, Any]
@@ -92,7 +91,6 @@ class ResearchDeps:
     paper_qa_model: str
     conn: aiosqlite.Connection
     pipeline: PaperPipeline
-    retriever: Retriever
     mcp_registry: MCPRegistry
     # Optional adapter kwargs (e.g. ``mock_response`` injected by smoke tests).
     adapter_kwargs: ResearchExtraKwargs | None = None

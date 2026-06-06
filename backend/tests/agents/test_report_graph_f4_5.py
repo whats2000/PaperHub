@@ -119,7 +119,6 @@ def _deps(adapter: Any, tracer: Tracer, conn: aiosqlite.Connection, tmp_path: Pa
         adapter=adapter,
         tracer=tracer,
         conn=conn,
-        retriever=None,
         workspace=tmp_path,
         plan_model="m",
         section_model="m",

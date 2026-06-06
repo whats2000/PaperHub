@@ -24,7 +24,7 @@ from paperhub.api import decks as decks_api
 from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
-from paperhub.config import Settings, load_settings
+from paperhub.config import load_settings
 from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import (
     apply_schema,
@@ -112,24 +112,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.mcp_registry.startup(mcp_toml)
 
     # Pre-warm embedder + reranker as a FIRE-AND-FORGET background task
-    # so lifespan finishes immediately. The modelserver's first /embed
-    # call triggers SentenceTransformer load (HF Hub download on cold
-    # cache — minutes on a slow network); blocking lifespan on that
-    # would hang the backend for the full download. Real ingest
-    # requests arriving before warm-up completes will simply queue
-    # behind the in-flight model load on the modelserver side.
-    # Guarded by PAPERHUB_PREWARM_MODELS=0 so offline / CI envs can skip.
-    app.state.prewarm_task = None
-    if os.environ.get("PAPERHUB_PREWARM_MODELS", "1") != "0":
-        # Defer the "ready" banner until warm-up resolves — it sometimes
-        # finishes last, and announcing ready while the models are still cold
-        # is misleading. The task prints the banner when it completes.
-        app.state.prewarm_task = asyncio.create_task(
-            _prewarm_models(settings, app), name="paperhub-prewarm",
-        )
-    else:
-        # No warm-up to wait on — the stack is ready right now.
-        _print_boot_banner(settings, app)
+    # The modelserver's first /embed call triggers SentenceTransformer load
+    # (HF Hub download on cold cache — minutes on a slow network); the
+    # pre-warm that used to happen here was removed when the dead
+    # Retriever/Reranker query path was deleted. The stack announces
+    # ready as soon as the rest of boot completes.
+    _print_boot_banner(settings, app)
 
     # Background Marker upgrade worker (Plan F2.1): drains PDF papers marked
     # 'marker_pending' by re-extracting them via Marker (one at a time — a
@@ -162,12 +150,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        # Cancel pre-warm if still in flight at shutdown.
-        prewarm = app.state.prewarm_task
-        if prewarm is not None and not prewarm.done():
-            prewarm.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await prewarm
         # Stop the Marker worker (guard with a timeout so a slow in-flight
         # Marker call can't hang shutdown indefinitely).
         worker_stop = app.state.marker_worker_stop
@@ -281,43 +263,6 @@ def _print_boot_banner(settings: object, app: FastAPI) -> None:
         print("\n".join(out), flush=True)
 
 
-async def _prewarm_models(settings: Settings, app: FastAPI) -> None:
-    """Background warm-up of the modelserver's embedder + reranker.
-
-    Runs the blocking HTTP calls in a worker thread (via
-    ``asyncio.to_thread``) so the event loop stays responsive to
-    incoming requests during warm-up. Best-effort: any failure
-    (modelserver not running, slow HF download, network blip, etc.)
-    is logged at WARN and swallowed — the first real request will
-    just pay the load cost itself.
-
-    Prints the "ready" boot banner once warm-up resolves (success OR
-    non-cancel failure) — this is the genuinely-ready moment, since warm-up
-    can finish after the rest of the stack. Skipped if cancelled at shutdown.
-    """
-    try:
-        from paperhub.pipelines.embedder import get_embedder
-        from paperhub.rag.reranker import get_reranker
-
-        _LOG.info("paperhub.app prewarm starting (background)")
-        await asyncio.to_thread(get_embedder().embed, [""])
-        await asyncio.to_thread(
-            get_reranker().rerank, "warm", ["up"], 1,
-        )
-        _LOG.info("paperhub.app prewarm complete")
-    except asyncio.CancelledError:
-        _LOG.info("paperhub.app prewarm cancelled at shutdown")
-        raise  # shutting down — no banner
-    except Exception as exc:  # noqa: BLE001
-        _LOG.warning(
-            "paperhub.app prewarm failed (%s: %s) — first ingest "
-            "will pay the model-load cost. Is `scripts/start.ps1` "
-            "running, or PAPERHUB_INPROCESS_MODELS=1 set?",
-            type(exc).__name__, exc,
-        )
-    # API has been serving since lifespan yielded; models are now warm (or will
-    # load lazily). Announce ready.
-    _print_boot_banner(settings, app)
 
 
 def create_app() -> FastAPI:
