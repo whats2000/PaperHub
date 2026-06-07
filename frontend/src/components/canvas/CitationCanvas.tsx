@@ -197,6 +197,31 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
+  // Switch the active paper when the References panel asks to "Open in canvas"
+  // (no chunk highlight — just a paper swap). We react via Zustand's subscribe
+  // API (a ref tracks the last-handled nonce, so re-opening the SAME paper still
+  // re-switches) rather than a deps-effect, so the setState runs in a
+  // subscription callback — not synchronously in the effect body — satisfying
+  // the react-hooks/set-state-in-effect rule (mirrors ChatPage's pattern).
+  // ensureDoc covers a toggled-off paper the prefetch skipped (shown view-only
+  // via the transient tab); consumePaperRequest stops a later browse-mode reopen
+  // from re-jumping here.
+  const prevPaperNonceRef = useRef(useCanvasStore.getState().paperRequestNonce);
+  useEffect(() => {
+    return useCanvasStore.subscribe((state) => {
+      if (state.paperRequestNonce === prevPaperNonceRef.current) return;
+      prevPaperNonceRef.current = state.paperRequestNonce;
+      const pid = state.requestedPaperId;
+      if (pid == null) return;
+      ensureDoc(pid);
+      setDisplayedPaperId(pid);
+      setActiveChunk(null);
+      setStale(false);
+      useCanvasStore.getState().consumePaperRequest();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Background prefetch: fetch every enabled reference's document when the
   // session's reference set changes, so each paper is ready before the user
   // opens it. `ensureDoc` dedupes so each paper loads once. (Toggled-off papers

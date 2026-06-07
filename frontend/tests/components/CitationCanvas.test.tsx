@@ -91,7 +91,13 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 beforeEach(() => {
   vi.clearAllMocks();
-  useCanvasStore.setState({ open: false, requestedChunkId: null, requestNonce: 0 });
+  useCanvasStore.setState({
+    open: false,
+    requestedChunkId: null,
+    requestNonce: 0,
+    requestedPaperId: null,
+    paperRequestNonce: 0,
+  });
   useChatStore.getState().reset();
   const sid = useChatStore.getState().newSession();
   useChatStore.getState().patchSessionBackendId(sid, 99);
@@ -143,6 +149,37 @@ describe("CitationCanvas reading panel", () => {
       ),
     );
     await userEvent.click(screen.getByRole("button", { name: /Paper B/ }));
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper B body",
+      ),
+    );
+  });
+
+  it("openPaper switches the active paper (References 'Open in canvas')", async () => {
+    const { container } = render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().toggleCanvas()); // browse → Paper A default
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper A body",
+      ),
+    );
+    // Ask to open Paper B (paper_content_id 8) — the panel button's action.
+    act(() => useCanvasStore.getState().openPaper(8));
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
+        "Paper B body",
+      ),
+    );
+    // The request is consumed so a later browse reopen doesn't re-jump here.
+    expect(useCanvasStore.getState().requestedPaperId).toBeNull();
+  });
+
+  it("openPaper opens the canvas when it was closed", async () => {
+    const { container } = render(<CitationCanvas />);
+    expect(useCanvasStore.getState().open).toBe(false);
+    act(() => useCanvasStore.getState().openPaper(8));
+    expect(useCanvasStore.getState().open).toBe(true);
     await waitFor(() =>
       expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
         "Paper B body",

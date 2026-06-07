@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesPanel";
 import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
 import { API_BASE_URL } from "@/lib/api";
 import type { ReferenceItem } from "@/types/domain";
 
@@ -71,6 +72,11 @@ beforeEach(() => {
     ),
   );
   useChatStore.getState().reset();
+  useCanvasStore.setState({
+    open: false,
+    requestedPaperId: null,
+    paperRequestNonce: 0,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -147,6 +153,21 @@ describe("ReferenceSourcesPanel", () => {
     // Optimistic store update — references map shows enabled=false for papers_id=1
     const refs = useChatStore.getState().referencesBySession[42] ?? [];
     expect(refs[0]?.enabled).toBe(false);
+  });
+
+  it("clicking 'Open in canvas' opens the canvas for that paper", async () => {
+    const frontendId = seedSession(42);
+    render(<ReferenceSourcesPanel frontendSessionId={frontendId} />);
+    await screen.findByText("Attention Is All You Need");
+
+    const openBtn = screen.getByRole("button", {
+      name: /open attention is all you need in canvas/i,
+    });
+    await userEvent.click(openBtn);
+
+    // The canvas store now requests this paper (paper_content_id 1) + is open.
+    expect(useCanvasStore.getState().open).toBe(true);
+    expect(useCanvasStore.getState().requestedPaperId).toBe(1);
   });
 
   it("clicking trash fires DELETE and removes the row optimistically", async () => {

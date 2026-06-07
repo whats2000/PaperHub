@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, Loader2, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2, PanelRight, Trash2 } from "lucide-react";
 
 import type { ReferenceItem } from "@/types/domain";
 import {
@@ -8,6 +8,7 @@ import {
   toggleReference,
 } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -34,6 +35,7 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
   const removeReferenceLocal = useChatStore((s) => s.removeReferenceLocal);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
   const sessions = useChatStore((s) => s.sessions);
+  const openPaperInCanvas = useCanvasStore((s) => s.openPaper);
 
   const activeSession =
     frontendSessionId !== null
@@ -170,15 +172,31 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                     </Badge>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => void handleRemove(ref)}
-                  aria-label={`Remove ${ref.title}`}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {/* Actions stacked in a narrow column so they don't steal the
+                    title's horizontal room (which would force it to wrap +
+                    grow the row height). */}
+                <div className="flex shrink-0 flex-col gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => openPaperInCanvas(ref.paper_content_id)}
+                    aria-label={`Open ${ref.title} in canvas`}
+                    title="Open in canvas"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <PanelRight className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => void handleRemove(ref)}
+                    aria-label={`Remove ${ref.title}`}
+                    title="Remove"
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
