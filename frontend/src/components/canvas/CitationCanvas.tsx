@@ -28,6 +28,7 @@ import {
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
+import { ImageLightbox } from "@/components/canvas/ImageLightbox";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
 const MAX_VISIBLE_TABS = 3;
@@ -46,6 +47,7 @@ export function CitationCanvas() {
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
+  const setActivePaperId = useCanvasStore((s) => s.setActivePaperId);
 
   // Derive the active session's enabled references (mirror ReferenceSourcesPanel)
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -80,6 +82,10 @@ export function CitationCanvas() {
   // stays mounted) so re-opening / tab-switching never re-fetches.
   const [docByPaper, setDocByPaper] = useState<Record<number, DocEntry>>({});
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // The figure the reader clicked to inspect full-screen (null = no lightbox).
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
+    null,
+  );
 
   // Papers we've already kicked off a fetch for (prefetch dedupe).
   const fetchedDocs = useRef<Set<number>>(new Set());
@@ -197,6 +203,31 @@ export function CitationCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
+  // Switch the active paper when the References panel asks to "Open in canvas"
+  // (no chunk highlight — just a paper swap). We react via Zustand's subscribe
+  // API (a ref tracks the last-handled nonce, so re-opening the SAME paper still
+  // re-switches) rather than a deps-effect, so the setState runs in a
+  // subscription callback — not synchronously in the effect body — satisfying
+  // the react-hooks/set-state-in-effect rule (mirrors ChatPage's pattern).
+  // ensureDoc covers a toggled-off paper the prefetch skipped (shown view-only
+  // via the transient tab); consumePaperRequest stops a later browse-mode reopen
+  // from re-jumping here.
+  const prevPaperNonceRef = useRef(useCanvasStore.getState().paperRequestNonce);
+  useEffect(() => {
+    return useCanvasStore.subscribe((state) => {
+      if (state.paperRequestNonce === prevPaperNonceRef.current) return;
+      prevPaperNonceRef.current = state.paperRequestNonce;
+      const pid = state.requestedPaperId;
+      if (pid == null) return;
+      ensureDoc(pid);
+      setDisplayedPaperId(pid);
+      setActiveChunk(null);
+      setStale(false);
+      useCanvasStore.getState().consumePaperRequest();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Background prefetch: fetch every enabled reference's document when the
   // session's reference set changes, so each paper is ready before the user
   // opens it. `ensureDoc` dedupes so each paper loads once. (Toggled-off papers
@@ -205,6 +236,13 @@ export function CitationCanvas() {
     for (const pid of refIds) ensureDoc(pid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refIdsKey]);
+
+  // Publish the paper this canvas is currently showing (null when closed) so the
+  // References panel can mark the active row. `setActivePaperId` is a Zustand
+  // action, not a React setter, so calling it in the effect body is fine.
+  useEffect(() => {
+    setActivePaperId(open ? effectivePaperId : null);
+  }, [open, effectivePaperId, setActivePaperId]);
 
   const handleTabClick = (pid: number) => {
     // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
@@ -411,6 +449,7 @@ export function CitationCanvas() {
                 onHighlightMiss={() =>
                   toast.message("Couldn't locate this passage in the paper")
                 }
+                onImageActivate={(src, alt) => setLightbox({ src, alt })}
               />
             </div>
           );
@@ -453,6 +492,15 @@ export function CitationCanvas() {
             </DeferredRemount>
           )}
       </div>
+
+      {/* Full-screen figure previewer (portals to body, covers the viewport). */}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </aside>
   );
 }

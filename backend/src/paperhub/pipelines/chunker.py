@@ -176,14 +176,17 @@ def chunk_text(
         while cursor < span_end:
             tentative_end = min(cursor + hard * 5, span_end)
             piece = text[cursor:tentative_end]
-            tok_len = len(enc.encode(piece))
+            # disallowed_special=() so literal text like "<|endoftext|>" (NLP
+            # papers discuss it — e.g. arXiv:2406.07524) is counted as ordinary
+            # tokens instead of raising; we only need a length estimate here.
+            tok_len = len(enc.encode(piece, disallowed_special=()))
             # Safe halving — never overshoots below cursor + 1. The previous
             # `tentative_end -= (tok_len - hard) * 4` would clamp to cursor
             # +1 on dense LaTeX and emit 1-char chunks indefinitely.
             while tok_len > hard and tentative_end - cursor > 1:
                 tentative_end = cursor + max(1, (tentative_end - cursor) // 2)
                 piece = text[cursor:tentative_end]
-                tok_len = len(enc.encode(piece))
+                tok_len = len(enc.encode(piece, disallowed_special=()))
 
             # Early-close at a natural boundary when we are not at the last
             # chunk in the span and the piece is not a sliver (floor 100 chars).

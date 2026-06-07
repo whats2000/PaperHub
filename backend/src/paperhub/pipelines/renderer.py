@@ -61,6 +61,102 @@ _DATA_URI_EXT = {
 # other pandoc failure — fall back to pylatexenc, then the raw envelope.
 _PANDOC_TIMEOUT_SECONDS = 60
 
+# Max stray unclosed braces we'll delete before retrying pandoc. A real-world
+# typo leaves 1 (arXiv:2406.07524 ships `\owt{` with no close); a large count
+# signals something else (e.g. a verbatim miscount) where blind editing is
+# unlikely to help, so we don't bother and fall back instead.
+_MAX_BRACE_FIX = 16
+
+
+def _unmatched_open_braces(text: str) -> list[int]:
+    """Indices of unmatched opening ``{`` (escape- + comment-aware).
+
+    pdflatex tolerates a stray unclosed brace — a common authoring typo
+    (arXiv:2406.07524 ships ``\\owt{`` with no close) — by implicitly closing
+    the group at ``\\end{document}``; pandoc's stricter parser instead rejects
+    the whole document with "unexpected end of input". Returning the exact
+    positions lets us delete the typo'd opener and retry pandoc.
+
+    We delete the opener rather than append a closer at EOF: a trailing ``}``
+    makes the stray ``{`` swallow the entire remainder of the paper into the
+    preceding macro's argument (so pandoc renders only the prefix), whereas
+    deleting the typo'd ``{`` renders the full document.
+    """
+    stack: list[int] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:  # escaped char (\{ \} \%) — skip both
+            i += 2
+            continue
+        if c == "%":  # unescaped comment — skip to end of line
+            nl = text.find("\n", i)
+            if nl == -1:
+                break
+            i = nl + 1
+            continue
+        if c == "{":
+            stack.append(i)
+        elif c == "}" and stack:
+            stack.pop()
+        i += 1
+    return stack
+
+
+def _unclosed_braces(text: str) -> int:
+    """Count of unmatched opening braces (see :func:`_unmatched_open_braces`)."""
+    return len(_unmatched_open_braces(text))
+
+
+# Max orphaned \end we'll delete before retrying pandoc — same rationale as
+# _MAX_BRACE_FIX: a couple is an author typo, a flood signals something else.
+_MAX_ENV_FIX = 16
+_ENV_TOKEN_RE = re.compile(r"\\(begin|end)\{([^}]+)\}")
+
+
+def _is_commented(text: str, pos: int) -> bool:
+    r"""True if an unescaped ``%`` precedes ``pos`` on its line (so a token at
+    ``pos`` is inside a LaTeX comment and invisible to pandoc)."""
+    line_start = text.rfind("\n", 0, pos) + 1
+    i = line_start
+    while i < pos:
+        if text[i] == "\\":  # escaped char (\%) — skip both
+            i += 2
+            continue
+        if text[i] == "%":
+            return True
+        i += 1
+    return False
+
+
+def _orphaned_env_ends(text: str) -> list[tuple[int, int]]:
+    r"""``(start, end)`` spans of every ``\end{X}`` with no live matching
+    ``\begin{X}`` — comment-aware.
+
+    A paper can ship a commented-out ``% \begin{table}`` while leaving the
+    matching ``\end{table}`` live (arXiv:2501.02902 — an author typo). pdflatex
+    tolerates it; pandoc correctly ignores the commented ``\begin`` and then
+    aborts the WHOLE parse on the orphaned ``\end{table}`` ("unexpected \\end,
+    expecting end of input"), so the paper degrades to the plain-text envelope.
+    Deleting the orphaned ``\end`` lets pandoc render the rest as HTML. The
+    in-between content (caption, tabular) renders as ordinary blocks."""
+    stack: list[str] = []
+    orphans: list[tuple[int, int]] = []
+    for m in _ENV_TOKEN_RE.finditer(text):
+        if _is_commented(text, m.start()):
+            continue
+        kind, env = m.group(1), m.group(2)
+        if kind == "begin":
+            stack.append(env)
+        elif env in stack:
+            while stack and stack[-1] != env:  # pop to the matching frame
+                stack.pop()
+            stack.pop()
+        else:
+            orphans.append((m.start(), m.end()))
+    return orphans
+
 
 def render_html(
     *,
@@ -109,6 +205,13 @@ def render_html(
                     exc.returncode,
                     (exc.stderr or "")[:500],
                 )
+                # A stray unclosed brace (author typo pdflatex tolerates) makes
+                # pandoc reject the whole document. Re-balance and retry once
+                # before degrading to the plain-text fallback.
+                if _try_pandoc_brace_balanced(
+                    source, out_path, resource_dir=resource_dir, macros=macros,
+                ):
+                    return out_path
             except subprocess.TimeoutExpired:
                 # pandoc hung past the cap — kill it and fall back rather than
                 # parking the ingest until the worker OOMs.
@@ -169,6 +272,14 @@ def _render_latex_pandoc(
         # <img> refs are rewritten to served asset/ URLs by
         # _externalize_local_images (NOT base64-inlined — that OOM'd the canvas).
         "--mathjax",
+        # Preserve the source's line breaks instead of reflowing at ~72 cols.
+        # Default wrapping splits a long line inside math, and a `%` LaTeX
+        # comment line (e.g. arXiv:1706.03762's commented MultiHead `where`
+        # row) then only comments its FIRST wrapped fragment — the remainder
+        # (here an invalid double-subscript `QW_Q_i`) becomes live math and
+        # breaks the render. Preserving line breaks keeps each `%` comment on
+        # its own line, fully commented.
+        "--wrap=preserve",
     ]
     if resource_dir is not None:
         # Figures live in the extracted source/ subtree, not next to the
@@ -183,6 +294,54 @@ def _render_latex_pandoc(
         cwd=tex_path.parent,
         timeout=_PANDOC_TIMEOUT_SECONDS,
     )
+
+
+def _try_pandoc_brace_balanced(
+    source: Path,
+    out_path: Path,
+    *,
+    resource_dir: Path | None,
+    macros: dict[str, MacroValue] | None,
+) -> bool:
+    r"""Retry pandoc once after deleting author typos pandoc rejects but pdflatex
+    tolerates: stray unclosed ``{`` braces AND orphaned ``\end{X}`` (whose
+    ``\begin`` is commented out / missing).
+
+    Returns True iff the repaired source rendered. The temp copy lives beside
+    ``source`` so its ``\input`` + relative figure paths still resolve; sentinels
+    are preserved (we only delete the typo'd characters), so chunk anchoring
+    survives the retry.
+    """
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    brace_positions = _unmatched_open_braces(text)
+    end_spans = _orphaned_env_ends(text)
+    if len(brace_positions) > _MAX_BRACE_FIX or len(end_spans) > _MAX_ENV_FIX:
+        return False
+    if not brace_positions and not end_spans:
+        return False
+    # Collect every cut as a (start, end) span and delete in descending order so
+    # earlier indices stay valid. Braces are one char; orphaned \end are a token.
+    cuts = [(p, p + 1) for p in brace_positions] + end_spans
+    chars = list(text)
+    for s, e in sorted(cuts, key=lambda x: x[0], reverse=True):
+        del chars[s:e]
+    repaired = "".join(chars)
+    balanced = source.with_name(source.stem + ".balanced.tex")
+    try:
+        balanced.write_text(repaired, encoding="utf-8")
+        _render_latex_pandoc(balanced, out_path, resource_dir=resource_dir)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    finally:
+        balanced.unlink(missing_ok=True)
+    if resource_dir is not None:
+        _externalize_local_images(out_path, resource_dir)
+    _inject_mathjax_macros(out_path, macros)
+    logger.info(
+        "pandoc succeeded on %s after removing %d stray brace(s) + %d orphaned end(s)",
+        source, len(brace_positions), len(end_spans),
+    )
+    return True
 
 
 def _inject_mathjax_macros(

@@ -157,6 +157,39 @@ def test_extract_latex_ignores_commented_begin_document(tmp_path: Path) -> None:
     assert "The real body content." in out.flattened_text
 
 
+def test_extract_latex_picks_paper_root_over_standalone_fragment(
+    tmp_path: Path,
+) -> None:
+    """Regression: arXiv:2406.07524 shipped gb_results_table.tex — a
+    standalone-compilable table fragment (same \\documentclass +
+    \\begin{document} as the paper) — next to the real main.tex. First-match-
+    wins picked the fragment because it sorts before 'main', so the Citation
+    Canvas rendered only two tables. The scorer must pick main.tex (it carries
+    \\title + \\maketitle + \\section; the fragment has none)."""
+    # The fragment sorts alphabetically BEFORE main.tex ('g' < 'm').
+    (tmp_path / "gb_results_table.tex").write_text(
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\begin{table}\\begin{tabular}{ll}a & b\\end{tabular}\\end{table}\n"
+        "\\end{document}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.tex").write_text(
+        "\\documentclass{article}\n"
+        "\\title{Simple and Effective Masked Diffusion Language Models}\n"
+        "\\begin{document}\n"
+        "\\maketitle\n"
+        "\\section{Introduction}\nWe present a masked diffusion model.\n"
+        "\\section{Method}\nThe approach trains on a denoising objective.\n"
+        "\\end{document}\n",
+        encoding="utf-8",
+    )
+    out = extract_latex(tmp_path)
+    assert out.main_path.name == "main.tex"
+    assert "Introduction" in out.flattened_text
+    assert "denoising objective" in out.flattened_text
+
+
 def test_extract_latex_raises_on_empty_dir(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         extract_latex(tmp_path)

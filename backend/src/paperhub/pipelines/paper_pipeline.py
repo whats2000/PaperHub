@@ -63,11 +63,12 @@ from paperhub.pipelines.marker_client import (
 )
 from paperhub.pipelines.marker_health import marker_available
 from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
-from paperhub.pipelines.mathjax_macros import extract_macros
+from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.table_figures import rasterize_complex_tables
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 from paperhub.pipelines.title_extract import llm_extract_title
 
@@ -333,6 +334,10 @@ class PaperPipeline:
         marked = rasterize_tikz_figures(
             marked, preamble=ext.preamble, out_dir=source_path.parent,
         )
+        # Rasterise pandoc-hostile tables (tabular*, \multirow, …) to images.
+        marked = rasterize_complex_tables(
+            marked, preamble=ext.preamble, out_dir=source_path.parent,
+        )
         # Drop LaTeX column-width hints — pandoc would otherwise emit
         # style="width:50.0%" on every <img> and shrink high-DPI figures
         # to half-width on the wide Citation Canvas.
@@ -346,7 +351,7 @@ class PaperPipeline:
         render_html(
             source=render_tex_path, kind="latex", out_path=html_path,
             resource_dir=source_path.parent,
-            macros=extract_macros(ext.preamble),
+            macros=extract_macros_from_dir(source_path.parent, ext.preamble),
         )
         # Rewrite rendered HTML: replace surviving sentinel tokens with
         # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.
@@ -519,6 +524,10 @@ class PaperPipeline:
             marked = rasterize_tikz_figures(
                 marked, preamble=ext.preamble, out_dir=source_path.parent,
             )
+            # Rasterise pandoc-hostile tables (tabular*, \multirow, …) to images.
+            marked = rasterize_complex_tables(
+                marked, preamble=ext.preamble, out_dir=source_path.parent,
+            )
             marked = strip_includegraphics_options(marked)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
@@ -528,7 +537,7 @@ class PaperPipeline:
             render_html(
                 source=render_source, kind=kind, out_path=html_path,
                 resource_dir=source_path.parent,
-                macros=extract_macros(ext.preamble),
+                macros=extract_macros_from_dir(source_path.parent, ext.preamble),
             )
             # Rewrite rendered HTML: replace surviving sentinel tokens with
             # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.
@@ -900,7 +909,9 @@ class PaperPipeline:
                     name=name,
                     char_start=group[0].char_start,
                     char_end=group[-1].char_end,
-                    token_count=len(_CL100K.encode(section_text)),
+                    # disallowed_special=() so literal "<|endoftext|>" in the
+                    # text (NLP papers discuss it) is counted, not raised.
+                    token_count=len(_CL100K.encode(section_text, disallowed_special=())),
                     chunk_count=len(group),
                 )
             )

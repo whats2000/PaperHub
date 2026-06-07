@@ -403,7 +403,9 @@ def _group_pieces_to_chunks(pieces: list[_Piece]) -> list[Chunk]:
         text = "\n\n".join(p.text for p in buf)
         if extra is not None:
             text = (text + "\n\n" + extra) if text else extra
-        return len(enc.encode(text))
+        # disallowed_special=() so literal "<|endoftext|>" in the text (NLP
+        # papers discuss it) is counted as tokens, not raised.
+        return len(enc.encode(text, disallowed_special=()))
 
     for piece in pieces:
         same_group = bool(buf) and buf[-1].section == piece.section and buf[-1].page == piece.page

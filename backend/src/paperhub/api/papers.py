@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import os
 import shutil
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -537,20 +538,18 @@ async def serve_asset(paper_content_id: int, asset_path: str) -> FileResponse:
         row = await cur.fetchone()
     if not row or not row[0]:
         raise HTTPException(404, f"no source dir for paper_content {paper_content_id}")
-    # Reject traversal up front: any absolute segment or `..` in the
-    # client-supplied path is illegal before we ever touch the filesystem.
-    if PurePosixPath(asset_path).is_absolute() or ".." in PurePosixPath(asset_path).parts:
-        raise HTTPException(400, "asset path escapes paper directory")
+    # Resolve base + target with realpath (follows symlinks + normalises `..`),
+    # then require the target to stay within base. This is the containment
+    # barrier the path-injection analysis recognises: realpath collapses any
+    # `../` escape and the startswith check rejects anything outside base_dir.
     # Sync path ops are acceptable here (same scope decision as serve_html/serve_pdf).
-    base_dir = Path(row[0]).resolve()  # noqa: ASYNC240
-    target = (base_dir / asset_path).resolve()  # noqa: ASYNC240
-    # Containment guard — the resolved target MUST stay inside the paper's cache
-    # dir (defends against symlinks / normalization the prefix check above misses).
-    if not target.is_relative_to(base_dir):
+    base_dir = os.path.realpath(str(row[0]))  # noqa: ASYNC240
+    target = os.path.realpath(os.path.join(base_dir, asset_path))  # noqa: ASYNC240
+    if target != base_dir and not target.startswith(base_dir + os.sep):
         raise HTTPException(400, "asset path escapes paper directory")
-    if not target.is_file():  # noqa: ASYNC240
+    if not os.path.isfile(target):  # noqa: ASYNC240
         raise HTTPException(404, f"asset not found: {asset_path}")
-    media_type, _ = mimetypes.guess_type(target.name)
+    media_type, _ = mimetypes.guess_type(target)
     return FileResponse(target, media_type=media_type or "application/octet-stream")
 
 

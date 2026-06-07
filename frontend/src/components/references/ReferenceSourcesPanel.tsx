@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, Loader2, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2, PanelRight, Trash2 } from "lucide-react";
 
 import type { ReferenceItem } from "@/types/domain";
 import {
@@ -8,6 +8,7 @@ import {
   toggleReference,
 } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useCanvasStore } from "@/store/canvas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -34,6 +35,10 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
   const removeReferenceLocal = useChatStore((s) => s.removeReferenceLocal);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
   const sessions = useChatStore((s) => s.sessions);
+  const openPaperInCanvas = useCanvasStore((s) => s.openPaper);
+  // The paper currently shown on the canvas (null when the canvas is closed),
+  // so the matching row reads as active.
+  const activePaperId = useCanvasStore((s) => s.activePaperId);
 
   const activeSession =
     frontendSessionId !== null
@@ -133,10 +138,16 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
           </p>
         ) : (
           <ul className="divide-y divide-border">
-            {refs.map((ref) => (
+            {refs.map((ref) => {
+              const isActiveOnCanvas =
+                activePaperId === ref.paper_content_id;
+              return (
               <li
                 key={ref.papers_id}
-                className="flex items-start gap-2 px-3 py-2.5"
+                className={
+                  "flex items-start gap-2 px-3 py-2.5 transition-colors" +
+                  (isActiveOnCanvas ? " bg-primary/5" : "")
+                }
               >
                 <Switch
                   checked={ref.enabled}
@@ -170,17 +181,45 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                     </Badge>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => void handleRemove(ref)}
-                  aria-label={`Remove ${ref.title}`}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {/* Actions stacked in a narrow column so they don't steal the
+                    title's horizontal room (which would force it to wrap +
+                    grow the row height). */}
+                <div className="flex shrink-0 flex-col gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => openPaperInCanvas(ref.paper_content_id)}
+                    aria-pressed={isActiveOnCanvas}
+                    aria-label={
+                      isActiveOnCanvas
+                        ? `${ref.title} is open in canvas`
+                        : `Open ${ref.title} in canvas`
+                    }
+                    title={
+                      isActiveOnCanvas ? "Showing in canvas" : "Open in canvas"
+                    }
+                    className={
+                      isActiveOnCanvas
+                        ? "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }
+                  >
+                    <PanelRight className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => void handleRemove(ref)}
+                    aria-label={`Remove ${ref.title}`}
+                    title="Remove"
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

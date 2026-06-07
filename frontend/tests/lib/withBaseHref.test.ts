@@ -29,6 +29,11 @@ describe("injectPerfStyle", () => {
     expect(out.startsWith("<style>")).toBe(true);
     expect(out).toContain("bare fragment");
   });
+
+  it("hints figures are clickable with a zoom-in cursor", () => {
+    const out = injectPerfStyle("<html><head></head><body></body></html>");
+    expect(out).toContain("cursor: zoom-in");
+  });
 });
 
 describe("withBaseHref", () => {

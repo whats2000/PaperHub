@@ -42,6 +42,17 @@ _BEGIN_DOC = re.compile(r"(?m)^(?:[^%\n]|\\%)*(\\begin\{document\})")
 _END_DOC = re.compile(r"(?m)^(?:[^%\n]|\\%)*(\\end\{document\})")
 _INPUT_INCLUDE = re.compile(r"\\(?:input|include)\{([^}]+)\}")
 
+# Signals used to score which .tex file is the paper's root document (see
+# _main_tex_score). All ignore commented-out lines, same as _BEGIN_DOC.
+_DOCUMENTCLASS = re.compile(r"(?m)^(?:[^%\n]|\\%)*\\documentclass")
+_TITLE_CMD = re.compile(r"(?m)^(?:[^%\n]|\\%)*\\title\{")
+_MAKETITLE = re.compile(r"(?m)^(?:[^%\n]|\\%)*\\maketitle")
+_SECTION_CMD = re.compile(r"(?m)^(?:[^%\n]|\\%)*\\(?:section|chapter)\b")
+# Common root filenames; a tarball's true main is very often one of these.
+_PREFERRED_MAIN_STEMS = frozenset(
+    {"main", "paper", "ms", "manuscript", "root", "article", "arxiv"}
+)
+
 # Stock placeholder titles emitted by Word, OpenOffice, InDesign etc. when the
 # author never set a real title — anything here gets treated as "no title".
 _STOCK_PLACEHOLDER_TITLE = re.compile(
@@ -69,16 +80,44 @@ class LatexExtract:
     preamble: str = ""
 
 
+def _main_tex_score(path: Path, text: str) -> float:
+    """Heuristic score for how likely a ``.tex`` file is the paper's root.
+
+    arXiv tarballs frequently ship table/figure files that are *independently
+    compilable* — same ``\\documentclass`` + ``\\begin{document}`` as the real
+    paper — e.g. arXiv:2406.07524 shipped ``gb_results_table.tex`` (two tables)
+    next to the 160 KB ``main.tex``. First-match-wins then picked whichever
+    sorted first (``gb_...`` < ``main``), so the Citation Canvas rendered only
+    the tables. The real root almost always carries a ``\\title`` +
+    ``\\maketitle`` + many ``\\section`` commands and is large; a fragment has
+    none of those. Higher = more likely the true main file. All signals ignore
+    commented-out lines, same as ``_BEGIN_DOC``."""
+    score = 0.0
+    if _DOCUMENTCLASS.search(text):
+        score += 5.0
+    if _TITLE_CMD.search(text):
+        score += 10.0
+    if _MAKETITLE.search(text):
+        score += 5.0
+    score += min(len(_SECTION_CMD.findall(text)), 10)
+    if path.stem.lower() in _PREFERRED_MAIN_STEMS:
+        score += 8.0
+    # Size as a minor tiebreak — the real paper dwarfs a fragment.
+    score += len(text) / 50_000.0
+    return score
+
+
 def _find_main_tex(source_dir: Path) -> Path:
-    candidates = list(source_dir.glob("*.tex"))
+    candidates = sorted(source_dir.glob("*.tex"))  # deterministic tie order
     if not candidates:
         raise FileNotFoundError(f"no .tex files in {source_dir}")
-    for cand in candidates:
-        text = cand.read_text(encoding="utf-8", errors="ignore")
-        if _BEGIN_DOC.search(text):
-            return cand
-    # Fallback: first .tex.
-    return candidates[0]
+    texts = {c: c.read_text(encoding="utf-8", errors="ignore") for c in candidates}
+    # Prefer files that actually open a document body; among those (or all .tex
+    # if none do) pick the highest-scoring root. `max` returns the first on a
+    # tie, and `candidates` is sorted, so ties break alphabetically.
+    roots = [c for c in candidates if _BEGIN_DOC.search(texts[c])]
+    pool = roots or candidates
+    return max(pool, key=lambda c: _main_tex_score(c, texts[c]))
 
 
 def _inline_recursive(text: str, root: Path, seen: set[Path]) -> str:

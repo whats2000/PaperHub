@@ -1,3 +1,4 @@
+export const BASE_STYLE_ID = "ph-base-style";
 export const DARK_STYLE_ID = "ph-dark-mode";
 
 /**
@@ -12,6 +13,22 @@ export const DARK_STYLE_ID = "ph-dark-mode";
  * HTML mode only — a native PDF viewer in the iframe can't be styled this way.
  */
 export function applyIframeTheme(doc: Document, dark: boolean): void {
+  // Base style, applied in BOTH themes: fill every figure with a white
+  // backdrop. Many figures are transparent PNGs (black strokes/text on an
+  // empty background); without a fill their transparent areas show the page
+  // through — invisible on the dark page, tinted on a light one. The white
+  // backdrop only shows where the figure is transparent (opaque pixels cover
+  // it), so the figure's own colours are unchanged. In dark mode the image's
+  // re-invert filter (below) carries this white fill through the SAME double
+  // inversion as the figure's own white pixels, so it blends seamlessly
+  // instead of flipping to black.
+  if (!doc.getElementById(BASE_STYLE_ID)) {
+    const base = doc.createElement("style");
+    base.id = BASE_STYLE_ID;
+    base.textContent = "img { background-color: #ffffff; }";
+    (doc.head ?? doc.documentElement).appendChild(base);
+  }
+
   const existing = doc.getElementById(DARK_STYLE_ID);
   if (!dark) {
     existing?.remove();

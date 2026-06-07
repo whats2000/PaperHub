@@ -276,6 +276,27 @@ describe("MessageBubble", () => {
     expect(article?.textContent).not.toContain("$\\mathbbm");
   });
 
+  it("renders \\Tilde (capital wide-tilde idiom) via the KaTeX macro mapping", () => {
+    const { container } = render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "The reverse process uses $\\Tilde{R}_t$ as the estimate.",
+          run_id: 1,
+          status: "ok",
+        }}
+      />,
+    );
+    // \Tilde isn't a KaTeX builtin; the macro maps it to \widetilde so it
+    // renders instead of surfacing a red parse-error node.
+    expect(container.querySelector(".katex")).not.toBeNull();
+    const article = container.querySelector("article");
+    // No red parse-error node, and the raw $-delimited source didn't survive as
+    // text (KaTeX keeps \Tilde{R} only in its MathML annotation, like \mathbbm).
+    expect(article?.querySelector(".katex-error")).toBeNull();
+    expect(article?.textContent).not.toContain("$\\Tilde");
+  });
+
   it("renders block LaTeX math ($$...$$) as KaTeX", () => {
     const { container } = render(
       <MessageBubble

@@ -20,6 +20,19 @@ interface CanvasState {
    *  TRUE when the canvas was already open: the glide shows the reader where the
    *  passage sits relative to the current view. */
   requestAnimateScroll: boolean;
+  /** A paper the user asked to OPEN (References panel "Open in canvas" button) —
+   *  by paper_content_id. The canvas switches its active tab to it. Distinct
+   *  from a citation: no chunk highlight, just a paper swap. Null when none
+   *  pending. */
+  requestedPaperId: number | null;
+  /** Bumped on every openPaper so clicking the SAME paper twice re-triggers the
+   *  swap effect in the component (which keys an effect on this). */
+  paperRequestNonce: number;
+  /** The paper currently SHOWN on the canvas (by paper_content_id), or null when
+   *  the canvas is closed / empty. Published by CitationCanvas (it owns the
+   *  displayed-paper state) so other UI — the References panel — can mark which
+   *  paper is live. Ephemeral (not persisted). */
+  activePaperId: number | null;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number) => void;
@@ -27,6 +40,15 @@ interface CanvasState {
    *  browse mode (References button — no new request) doesn't re-jump to the
    *  last-cited passage even when the canvas remounts. */
   consumeCitation: () => void;
+  /** References panel "Open in canvas": open the canvas (if closed) and switch
+   *  its active paper to `paperContentId`. */
+  openPaper: (paperContentId: number) => void;
+  /** Cleared by the canvas once it has switched to the requested paper, so a
+   *  later browse-mode reopen doesn't re-jump to it. */
+  consumePaperRequest: () => void;
+  /** Set by CitationCanvas to publish the paper it is currently showing (null
+   *  when closed/empty), so the References panel can highlight the active row. */
+  setActivePaperId: (paperContentId: number | null) => void;
   /** References button: open in browse mode if closed, else close. */
   toggleCanvas: () => void;
   closeCanvas: () => void;
@@ -40,6 +62,9 @@ export const useCanvasStore = create<CanvasState>()(
       requestedChunkId: null,
       requestNonce: 0,
       requestAnimateScroll: false,
+      requestedPaperId: null,
+      paperRequestNonce: 0,
+      activePaperId: null,
       width: CANVAS_DEFAULT_WIDTH,
       openCitation: (chunkId) =>
         set((s) => ({
@@ -50,6 +75,15 @@ export const useCanvasStore = create<CanvasState>()(
           requestNonce: s.requestNonce + 1,
         })),
       consumeCitation: () => set({ requestedChunkId: null }),
+      openPaper: (paperContentId) =>
+        set((s) => ({
+          open: true,
+          requestedPaperId: paperContentId,
+          paperRequestNonce: s.paperRequestNonce + 1,
+        })),
+      consumePaperRequest: () => set({ requestedPaperId: null }),
+      setActivePaperId: (paperContentId) =>
+        set({ activePaperId: paperContentId }),
       toggleCanvas: () => set((s) => ({ open: !s.open })),
       closeCanvas: () => set({ open: false }),
       setWidth: (width) => set({ width }),

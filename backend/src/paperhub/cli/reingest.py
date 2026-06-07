@@ -54,7 +54,8 @@ def _build_sections_json(
                 "name": name,
                 "char_start": group[0].char_start,
                 "char_end": group[-1].char_end,
-                "token_count": len(_CL100K.encode(section_text)),
+                # disallowed_special=() — see paper_pipeline._build_sections_json.
+                "token_count": len(_CL100K.encode(section_text, disallowed_special=())),
                 "chunk_count": len(group),
             }
         )
@@ -87,6 +88,10 @@ async def _reingest_one(
     title: str = str(row[3] or "")
     # PDF heading boundaries (populated only for pdf_upload below).
     pdf_headings: list[tuple[str, int]] = []
+    # The actual main .tex chosen by extraction (LaTeX only) — used below to
+    # rewrite source.flattened.tex + the stored source_path so the HTML
+    # re-render stays in sync with the re-extracted body.
+    latex_main_path: Path | None = None
 
     # CRITICAL: chunking must run on EXTRACTED body text, NOT raw source bytes.
     # For arxiv / latex_upload the chunker needs the flattened body (preamble
@@ -114,7 +119,9 @@ async def _reingest_one(
             )
             return (0, 0)
         try:
-            extracted = extract_latex(source_dir).flattened_text
+            _ext = extract_latex(source_dir)
+            extracted = _ext.flattened_text
+            latex_main_path = _ext.main_path
         except FileNotFoundError as exc:
             _LOG.warning("pcid=%d: extract_latex failed: %s — skipped", pcid, exc)
             return (0, 0)
@@ -171,6 +178,16 @@ async def _reingest_one(
         chunks, flattened, strip_comments=not pdf_path_kind,
     )
 
+    # Keep the HTML-render input in sync with the re-extracted body: the
+    # Citation-Canvas re-render (paperhub-rerender-html) reads
+    # <cache>/source.flattened.tex, so a reingest that corrects extraction
+    # (e.g. a fixed main-file pick) must rewrite it too — otherwise the Canvas
+    # keeps rendering the old (wrong) body while the DB chunks are correct.
+    if latex_main_path is not None and source_dir_path_raw is not None:
+        (Path(source_dir_path_raw) / "source.flattened.tex").write_text(  # noqa: ASYNC240
+            extracted, encoding="utf-8",
+        )
+
     # Destructive delete then re-insert.
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = ?", (pcid,))
     await conn.commit()
@@ -187,10 +204,18 @@ async def _reingest_one(
              c.page, bbox_json),
         )
 
-    await conn.execute(
-        "UPDATE paper_content SET sections_json = ? WHERE id = ?",
-        (sections_json, pcid),
-    )
+    # Also correct the stored main-file path when extraction re-picked it (the
+    # original ingest may have recorded a standalone fragment, arXiv:2406.07524).
+    if latex_main_path is not None:
+        await conn.execute(
+            "UPDATE paper_content SET sections_json = ?, source_path = ? WHERE id = ?",
+            (sections_json, str(latex_main_path), pcid),
+        )
+    else:
+        await conn.execute(
+            "UPDATE paper_content SET sections_json = ? WHERE id = ?",
+            (sections_json, pcid),
+        )
     await conn.commit()
 
     return (before, len(chunks))

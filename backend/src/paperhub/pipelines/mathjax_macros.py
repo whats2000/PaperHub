@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 # Macro value is either a replacement string, or [replacement, nargs], or
 # [replacement, nargs, optional_default] — exactly MathJax's tex.macros shape.
@@ -33,6 +34,55 @@ CURATED_MACROS: dict[str, MacroValue] = {
     "bm": [r"\boldsymbol{#1}", 1],
     # isomath — slanted sans; closest native fallback.
     "mathsfit": [r"\mathit{#1}", 1],
+    # Capitalized "wide accent" idiom some preambles use (\Tilde{X} = a tilde
+    # scaled to X). MathJax ships \widetilde but not \Tilde, and papers use it
+    # only INSIDE their own macros (arXiv:2406.07524: \def\Rrevt{\Tilde{R}_t}),
+    # so it never reaches extract_macros and renders as "Undefined control
+    # sequence \Tilde". Map to the native wide tilde.
+    "Tilde": [r"\widetilde{#1}", 1],
+    # LaTeX font-size switches are NOT in MathJax's default build (they live in
+    # the unshipped `textmacros` extension), so a paper that de-emphasises a
+    # formula annotation with `\text{\footnotesize $\because …$}`
+    # (arXiv:2406.07524) hit "Undefined control sequence \footnotesize" and the
+    # annotation rendered broken. Map each to a no-op so the content renders (at
+    # default size) instead of erroring. KaTeX (the chat) supports these
+    # natively, so this only affects the MathJax Citation-Canvas path.
+    "tiny": "",
+    "scriptsize": "",
+    "footnotesize": "",
+    "small": "",
+    "normalsize": "",
+    "large": "",
+    "Large": "",
+    "LARGE": "",
+    "huge": "",
+    "Huge": "",
+    # Spacing commands that land inside math — authored, or pulled into a \[..\]
+    # block by pandoc grouping (arXiv:2512.04952 renders `\[\vspace{-0.5em}\]`).
+    # MathJax has no \vspace; map \vspace/\hspace to a no-op that consumes the
+    # dimension argument and emits nothing (the bare ones are commonly no-arg).
+    "vspace": ["", 1],
+    "hspace": ["", 1],
+    "smallskip": "",
+    "medskip": "",
+    "bigskip": "",
+    # Cross-reference commands sometimes sit inside math (e.g. \eqref to a tag
+    # within an aligned block); MathJax can't resolve them and errors. No-op
+    # them (consume the {label}) so the surrounding math still renders.
+    "ref": ["", 1],
+    "eqref": ["", 1],
+    "cref": ["", 1],
+    "Cref": ["", 1],
+    # mathtools assignment colon (:=) — not in MathJax's base build.
+    "coloneqq": r"\mathrel{:=}",
+    "eqqcolon": r"\mathrel{=:}",
+    # `\dag`/`\ddag` are LaTeX TEXT-mode symbols (†/‡) that papers routinely use
+    # inside math for footnote markers — `$^{\dag}$ represents the reproduced
+    # result` (arXiv:2602.20200). MathJax's math build ships only the math names
+    # `\dagger`/`\ddagger`, so `\dag` reached it as "Undefined control sequence"
+    # and the superscript rendered broken. Map each to its math equivalent.
+    "dag": r"\dagger",
+    "ddag": r"\ddagger",
 }
 
 # Unescaped `%` starts a LaTeX comment to end-of-line; `\%` is a literal.
@@ -141,6 +191,51 @@ def extract_macros(preamble: str) -> dict[str, MacroValue]:
     _parse_declare_operators(text, out)
     _parse_simple_defs(text, out)
     return out
+
+
+def extract_macros_from_dir(source_dir: Path, preamble: str = "") -> dict[str, MacroValue]:
+    """Macros from the paper's LOCAL ``.cls``/``.sty`` files merged under the
+    main ``.tex`` preamble.
+
+    ``extract_latex`` only reaches the main ``.tex`` preamble (+ inlined
+    ``\\input`` of ``.tex`` files); a paper that ships its math macros in a
+    custom document class or style package loaded via
+    ``\\documentclass``/``\\usepackage`` (arXiv:2407.15595 defines ``\\gD``,
+    ``\\sI``, ``\\dummy`` in ``fairmeta.cls``) loses ALL of them, so the
+    Citation Canvas renders "Undefined control sequence" throughout. Parse the
+    bundled class/style files too. Precedence: the main preamble wins on a key
+    collision (it's the author's final say), then ``.sty``/``.cls`` in sorted
+    order. Only top-level bundled files are scanned — system packages aren't in
+    the tarball, so this stays scoped to the paper's own definitions.
+
+    Class/style files are mostly LAYOUT machinery, not math. Two filters keep
+    that junk out of the math config: (1) skip any definition whose body uses an
+    ``@``-internal command (e.g. ``\\footnotesize`` → ``\\@setfontsize...``) —
+    these break MathJax; (2) never let a bundled file override a CURATED macro
+    (a class redefining ``\\footnotesize`` as a font-size switch must not clobber
+    our safe no-op). Definitions from the main ``.tex`` preamble are trusted as
+    the author's math macros and skip both filters.
+    """
+    out: dict[str, MacroValue] = {}
+    for path in sorted([*source_dir.glob("*.cls"), *source_dir.glob("*.sty")]):
+        try:
+            parsed = extract_macros(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+        for name, body in parsed.items():
+            if name in CURATED_MACROS or _body_has_internal(body):
+                continue  # layout machinery / would clobber a curated safe def
+            out[name] = body
+    out.update(extract_macros(preamble))  # main preamble overrides bundled files
+    return out
+
+
+def _body_has_internal(body: MacroValue) -> bool:
+    """True if a macro body references an ``@``-internal command — the signature
+    of LaTeX class/style layout machinery (``\\@setfontsize``, ``\\@ixpt``, …),
+    which is never valid MathJax math and would surface as a render error."""
+    text = body if isinstance(body, str) else (str(body[0]) if body else "")
+    return "@" in text
 
 
 def build_mathjax_config_script(extra: dict[str, MacroValue] | None = None) -> str:

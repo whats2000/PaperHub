@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
 import {
@@ -30,6 +30,10 @@ interface Props {
    *  when this click also opened the canvas (layout isn't settled, so animating
    *  would track a shifting target). */
   scrollBehavior?: ScrollBehavior;
+  /** Called when the reader clicks a figure in the paper, with the figure's
+   *  resolved (absolute) URL + alt text — the parent opens a zoom/pan lightbox.
+   *  Omitted disables the affordance. */
+  onImageActivate?: (src: string, alt: string) => void;
 }
 
 /**
@@ -48,8 +52,15 @@ export function HtmlView({
   onHighlightMiss,
   nonce,
   scrollBehavior = "smooth",
+  onImageActivate,
 }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
+  // Keep the latest callback in a ref so the delegated click handler (attached
+  // once per iframe load) always calls the current one without re-binding.
+  const onImageActivateRef = useRef(onImageActivate);
+  useEffect(() => {
+    onImageActivateRef.current = onImageActivate;
+  }, [onImageActivate]);
   // Whether the iframe's srcdoc has finished loading. The highlight effect can
   // fire between mount and load (e.g. a freshly-fetched paper opened by a
   // citation) when the document is still empty `about:blank` — a "not found"
@@ -97,10 +108,34 @@ export function HtmlView({
     cancelPending.current = () => win.clearTimeout(id);
   };
 
+  // Delegated click on the iframe document: a click on a figure opens the
+  // lightbox. `currentSrc` is the resolved (post-`<base href>`) backend URL, so
+  // the parent can load the same image at full resolution. Stable identity
+  // (reads the callback through a ref) so add/remove pair up across loads.
+  const handleDocClick = useCallback((e: Event): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target || target.tagName !== "IMG") return;
+    const img = target as HTMLImageElement;
+    e.preventDefault();
+    onImageActivateRef.current?.(img.currentSrc || img.src, img.alt ?? "");
+  }, []);
+
   const handleLoad = (): void => {
     loadedRef.current = true;
     apply();
+    ref.current?.contentDocument?.addEventListener("click", handleDocClick);
   };
+
+  // Detach the figure-click listener on unmount (a srcdoc reload swaps in a
+  // fresh document, so its listener is discarded with the old one — only the
+  // final mounted document needs explicit cleanup). The iframe ELEMENT is stable
+  // across reloads, so capture it and read its live `contentDocument` at cleanup.
+  useEffect(() => {
+    const iframe = ref.current;
+    return () => {
+      iframe?.contentDocument?.removeEventListener("click", handleDocClick);
+    };
+  }, [handleDocClick]);
 
   // Re-apply when the theme toggles or the target changes (the iframe is
   // already loaded in those cases, so onLoad won't fire again).

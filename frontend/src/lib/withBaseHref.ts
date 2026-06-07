@@ -49,6 +49,10 @@ export function stripDeadCdnScripts(html: string): string {
  * scrolls into view. `contain-intrinsic-size` supplies a placeholder size so the
  * scroll height stays stable for not-yet-rendered blocks.
  *
+ * The `cursor: zoom-in` on images hints that a figure is clickable — the
+ * Citation Canvas opens it in a full-screen zoom/pan lightbox (the click is
+ * intercepted by HtmlView's delegated handler).
+ *
  * BUT a skipped block reports that 600px PLACEHOLDER instead of its real height,
  * which throws off `scrollIntoView` offsets. We mitigate the worst case by
  * EXCLUDING image-bearing blocks (`:not(:has(img))`) so figures — whose height
@@ -65,7 +69,7 @@ export function stripDeadCdnScripts(html: string): string {
 const PERF_STYLE =
   "<style>" +
   "body > *:not(:has(img)) { content-visibility: auto; contain-intrinsic-size: auto 600px; }" +
-  "img { max-width: 100%; height: auto; }" +
+  "img { max-width: 100%; height: auto; cursor: zoom-in; }" +
   "</style>";
 
 export function injectPerfStyle(html: string): string {

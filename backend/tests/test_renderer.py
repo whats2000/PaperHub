@@ -7,7 +7,113 @@ from unittest.mock import patch
 
 import pytest
 
-from paperhub.pipelines.renderer import render_html
+from paperhub.pipelines.renderer import (
+    _orphaned_env_ends,
+    _unclosed_braces,
+    render_html,
+)
+
+
+def test_unclosed_braces_counts_stray_open() -> None:
+    assert _unclosed_braces("balanced {a} {b}") == 0
+    assert _unclosed_braces(r"on \owt{. Additionally") == 1  # the arXiv:2406.07524 typo
+    assert _unclosed_braces("a {b {c}") == 1
+    # Escaped braces and comments must not count.
+    assert _unclosed_braces(r"literal \{ and \}") == 0
+    assert _unclosed_braces("text % a stray { in a comment\nmore") == 0
+
+
+def test_orphaned_env_ends_detects_commented_begin() -> None:
+    # \begin commented out but \end live (arXiv:2501.02902) -> orphaned \end.
+    tex = (
+        "% \\begin{table}\n\\caption{x}\n\\begin{tabular}{cc}a & b\\\\\\end{tabular}\n"
+        "\\end{table}\n"
+    )
+    orphans = _orphaned_env_ends(tex)
+    assert len(orphans) == 1
+    s, e = orphans[0]
+    assert tex[s:e] == "\\end{table}"
+
+
+def test_orphaned_env_ends_none_when_balanced() -> None:
+    tex = "\\begin{table}\\begin{tabular}{cc}a & b\\\\\\end{tabular}\\end{table}"
+    assert _orphaned_env_ends(tex) == []
+    # A commented \end is ignored (not orphaned), and so is its commented \begin.
+    assert _orphaned_env_ends("% \\begin{figure}\n% \\end{figure}\n") == []
+
+
+def test_render_latex_repairs_orphaned_env_end_and_retries_pandoc(tmp_path: Path) -> None:
+    """A commented `% \\begin{table}` with a live `\\end{table}` (arXiv:2501.02902,
+    an author typo) makes pandoc abort the whole parse. render_html must drop the
+    orphaned `\\end` + retry so it produces structured HTML, not the <pre> dump."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        "\\section{Introduction}\nText before the table.\n\n"
+        "% \\begin{table}[t]\n\\centering\n\\caption{Spec}\n"
+        "\\begin{tabular}{@{}lr@{}}\\toprule a & b\\\\ \\bottomrule\\end{tabular}\n"
+        "\\end{table}\n\n"
+        "\\section{Method}\nText after the table.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    assert "<h1" in html or "<h2" in html
+    assert "<pre" not in html
+    assert "Introduction" in html and "Method" in html
+
+
+def test_render_latex_balances_stray_brace_and_retries_pandoc(tmp_path: Path) -> None:
+    """An author-typo unclosed brace makes pandoc reject the whole document
+    (arXiv:2406.07524's `\\owt{`). render_html must re-balance + retry pandoc so
+    it produces real structured HTML, not the plain-text <pre> fallback."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        "\\section{Introduction}\n"
+        "We evaluate perplexity on \\owt{. Additionally we report results.\n\n"
+        "\\section{Method}\nThe model denoises masked tokens.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    # pandoc succeeded on the balanced retry → heading tags, NOT a <pre> dump.
+    assert "<h1" in html or "<h2" in html
+    assert "<pre" not in html
+    assert "Introduction" in html and "Method" in html
+
+
+def test_render_preserves_comment_line_in_math(tmp_path: Path) -> None:
+    """A long %-comment line inside a math environment must stay fully commented
+    (arXiv:1706.03762's MultiHead block). Default pandoc wrapping split it so
+    only the first fragment was commented and an invalid double-subscript
+    leaked into live math. --wrap=preserve keeps the comment on one line."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        "\\begin{align*}\n"
+        "    \\mathrm{MultiHead}(Q,K,V) &= \\mathrm{Concat}(\\mathrm{head_1})W^O\\\\\n"
+        "%    \\mathrm{where} \\mathrm{head_i} &= \\mathrm{Attention}"
+        "(QW_Q_i^{abcdefghij}, KW_K_i^{abcdefghij}, VW^V_i^{abcdefghij})\\\\\n"
+        "    \\text{where}~\\mathrm{head_i} &= \\mathrm{Attention}(QW^Q_i)\\\\\n"
+        "\\end{align*}\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    # The commented double-subscript fragment, if present at all, must remain on
+    # a line that is still a LaTeX comment (begins with %) — never un-commented.
+    for line in html.splitlines():
+        if "QW_Q_i" in line:
+            assert line.lstrip().startswith("%"), (
+                f"commented math leaked into live math: {line!r}"
+            )
 
 
 def test_render_pdf_uses_pymupdf(tmp_path: Path) -> None:

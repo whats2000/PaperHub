@@ -1,23 +1,22 @@
 <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="pg" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#9a55ff"/>
-      <stop offset=".55" stop-color="#7e14ff"/>
-      <stop offset="1" stop-color="#47bfff"/>
+    <linearGradient id="pg" x1="4" y1="4" x2="26" y2="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9a55ff"/><stop offset=".55" stop-color="#7e14ff"/><stop offset="1" stop-color="#47bfff"/>
     </linearGradient>
   </defs>
   <!-- page -->
-  <rect x="8" y="4" width="29" height="40" rx="6" fill="url(#pg)"/>
-  <!-- body lines -->
-  <rect x="14" y="13" width="17" height="3" rx="1.5" fill="#fff" opacity=".5"/>
-  <rect x="14" y="20" width="17" height="3" rx="1.5" fill="#fff" opacity=".5"/>
-  <!-- the cited line, highlighted -->
-  <rect x="14" y="27" width="13" height="4" rx="2" fill="#8adcff"/>
-  <rect x="14" y="35" width="9" height="3" rx="1.5" fill="#fff" opacity=".5"/>
-  <!-- provenance: connector from cited line to source node -->
-  <path d="M27 29 C 34 29, 37 33, 39 38" stroke="#8adcff" stroke-width="2.4" stroke-linecap="round"/>
-  <!-- source node -->
-  <circle cx="40" cy="39" r="6" fill="#fff"/>
-  <circle cx="40" cy="39" r="6" fill="none" stroke="#47bfff" stroke-width="2.2"/>
-  <circle cx="40" cy="39" r="2.1" fill="#7e14ff"/>
+  <rect x="4" y="5" width="23" height="36" rx="6" fill="url(#pg)"/>
+  <rect x="9" y="13" width="13" height="2.6" rx="1.3" fill="#fff" opacity=".5"/>
+  <rect x="9" y="19" width="13" height="2.6" rx="1.3" fill="#fff" opacity=".5"/>
+  <!-- the cited line, highlighted (the source chunk) -->
+  <rect x="9" y="25" width="9" height="3.6" rx="1.8" fill="#8adcff"/>
+  <rect x="9" y="32.5" width="6" height="2.6" rx="1.3" fill="#fff" opacity=".5"/>
+  <!-- zoom beam: chunk widens out into the dialog (magnification cone) -->
+  <path d="M18 25.4 L 31 27 L 31 42 L 18 28.6 Z" fill="#8adcff" opacity=".3"/>
+  <path d="M18 25.4 L 31 27 M18 28.6 L 31 42" stroke="#8adcff" stroke-width="1.2" stroke-linecap="round" opacity=".75"/>
+  <!-- zoomed dialog -->
+  <rect x="31" y="27" width="14" height="15" rx="3" fill="#7e14ff" stroke="#8adcff" stroke-width="1.4"/>
+  <!-- symbol: quotation marks (citation) -->
+  <path d="M36.4 31.5 c-2 0 -3.2 1.5 -3.2 3.6 0 1.8 1.1 3 2.7 3 1.4 0 2.4 -1 2.4 -2.4 0 -1.3 -.9 -2.3 -2.1 -2.3 -.2 0 -.4 0 -.5 .1 .2 -.9 .9 -1.4 1.8 -1.5 z" fill="#fff"/>
+  <path d="M42.4 31.5 c-2 0 -3.2 1.5 -3.2 3.6 0 1.8 1.1 3 2.7 3 1.4 0 2.4 -1 2.4 -2.4 0 -1.3 -.9 -2.3 -2.1 -2.3 -.2 0 -.4 0 -.5 .1 .2 -.9 .9 -1.4 1.8 -1.5 z" fill="#fff"/>
 </svg>
