@@ -28,6 +28,7 @@ import {
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
+import { ImageLightbox } from "@/components/canvas/ImageLightbox";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
 const MAX_VISIBLE_TABS = 3;
@@ -81,6 +82,10 @@ export function CitationCanvas() {
   // stays mounted) so re-opening / tab-switching never re-fetches.
   const [docByPaper, setDocByPaper] = useState<Record<number, DocEntry>>({});
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // The figure the reader clicked to inspect full-screen (null = no lightbox).
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
+    null,
+  );
 
   // Papers we've already kicked off a fetch for (prefetch dedupe).
   const fetchedDocs = useRef<Set<number>>(new Set());
@@ -444,6 +449,7 @@ export function CitationCanvas() {
                 onHighlightMiss={() =>
                   toast.message("Couldn't locate this passage in the paper")
                 }
+                onImageActivate={(src, alt) => setLightbox({ src, alt })}
               />
             </div>
           );
@@ -486,6 +492,15 @@ export function CitationCanvas() {
             </DeferredRemount>
           )}
       </div>
+
+      {/* Full-screen figure previewer (portals to body, covers the viewport). */}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </aside>
   );
 }

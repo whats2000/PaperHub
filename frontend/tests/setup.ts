@@ -18,6 +18,16 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+// jsdom has no ResizeObserver — react-zoom-pan-pinch (the Citation Canvas image
+// lightbox) constructs one on mount. A no-op stub lets it render in tests.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+  ResizeObserverStub;
+
 // jsdom has no BroadcastChannel. Provide a deterministic in-memory one that
 // delivers synchronously to other open instances of the same name (excluding
 // the sender), so presentation-sync tests don't depend on event-loop timing.
