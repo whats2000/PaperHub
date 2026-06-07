@@ -1,6 +1,6 @@
 [project]
 name = "paperhub-marker"
-version = "2.27.1"
+version = "2.27.2"
 description = "FastAPI wrapper around datalab-to/marker for PaperHub PDF ingestion (SRS v2.19 §III-6)."
 requires-python = ">=3.10"
 dependencies = [
