@@ -11,6 +11,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: every job only checks out + reads the repo. Declared at the
+# top level so all jobs inherit read-only access to repo contents and nothing
+# else (no write to issues, PRs, packages, etc.).
+permissions:
+  contents: read
+
 # Supersede in-flight runs for the same ref (a force-push / new commit).
 concurrency:
   group: ci-${{ github.ref }}
