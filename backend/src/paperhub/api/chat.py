@@ -36,7 +36,6 @@ from paperhub.agents.style_commands import (
     classify_style_command,
     handle_style_command,
 )
-from paperhub.api.deps import get_chroma
 from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
@@ -57,7 +56,6 @@ from paperhub.models.events import (
     TokenEvent,
 )
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, PaperPipeline
-from paperhub.rag.retriever import Retriever
 from paperhub.tracing.redactor import redact
 from paperhub.tracing.tracer import Tracer
 
@@ -343,7 +341,6 @@ async def paper_search(
     the Parser decomposes the request as a topic-recommendation query
     instead of an explicit-paper lookup.
     """
-    retriever = kwargs.pop("retriever", None)
     parse_slot = (
         "paper_search_parse_suggest/v1" if suggest else "paper_search_parse/v1"
     )
@@ -356,7 +353,6 @@ async def paper_search(
         paper_qa_model=model,
         conn=conn,
         pipeline=pipeline,
-        retriever=retriever if retriever is not None else _NULL_RETRIEVER,
         mcp_registry=mcp_registry,
         adapter_kwargs=kwargs or None,
         parse_slot=parse_slot,
@@ -390,7 +386,6 @@ async def paper_qa_stream(
     adapter: Any,
     tracer: Tracer,
     model: str,
-    retriever: Retriever,
     conn: aiosqlite.Connection,
     **kwargs: Any,
 ) -> AsyncIterator[Any]:
@@ -417,7 +412,6 @@ async def paper_qa_stream(
         paper_qa_model=model,
         conn=conn,
         pipeline=pipeline if pipeline is not None else _NULL_PIPELINE,
-        retriever=retriever,
         mcp_registry=mcp_registry if mcp_registry is not None else _NULL_REGISTRY,
         adapter_kwargs=kwargs or None,
         paper_qa_subagent_model=_settings.paper_qa_subagent_model,
@@ -457,7 +451,6 @@ async def report_stream(
     adapter: Any,
     tracer: Tracer,
     conn: aiosqlite.Connection,
-    retriever: Any,
     settings: Settings,
     **kwargs: Any,
 ) -> AsyncIterator[Any]:
@@ -473,7 +466,6 @@ async def report_stream(
         adapter=adapter,
         tracer=tracer,
         conn=conn,
-        retriever=retriever,
         workspace=settings.workspace_dir,
         plan_model=settings.report_plan_model,
         section_model=settings.report_section_model,
@@ -500,15 +492,11 @@ async def report_stream(
 
 
 # Sentinels so the shims can build ResearchDeps without a real
-# pipeline / retriever when the caller is using only one branch.
+# pipeline when the caller is using only one branch.
 # These are never actually invoked because the corresponding subgraph
-# node doesn't touch them — paper_search subgraph never touches
-# ``retriever``; paper_qa subgraph never touches ``pipeline``.
+# node doesn't touch them — paper_qa subgraph never touches
+# ``pipeline``.
 class _NullPipeline:  # noqa: D101 — local sentinel
-    pass
-
-
-class _NullRetriever:  # noqa: D101 — local sentinel
     pass
 
 
@@ -517,7 +505,6 @@ class _NullRegistry:  # noqa: D101 — local sentinel
 
 
 _NULL_PIPELINE: Any = _NullPipeline()
-_NULL_RETRIEVER: Any = _NullRetriever()
 _NULL_REGISTRY: Any = _NullRegistry()
 
 
@@ -603,7 +590,6 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     pipeline = PaperPipeline(
                         conn,
                         papers_cache_dir=settings.papers_cache_dir,
-                        chroma=get_chroma(request, settings),
                     )
                     mcp_registry: MCPRegistry = request.app.state.mcp_registry
                     final_content = ""
@@ -681,13 +667,12 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         elif isinstance(ps_item, FinalOnlyMessage):
                             final_content = ps_item.content
                 elif intent == "paper_qa":
-                    retriever = Retriever(chroma=get_chroma(request, settings))
                     qa_chunks: list[str] = []
                     final_content = ""
                     final_only_seen = False
                     async for item in paper_qa_stream(
                         state, adapter=adapter, tracer=tracer,
-                        model=settings.paper_qa_model, retriever=retriever,
+                        model=settings.paper_qa_model,
                         conn=conn,
                     ):
                         if isinstance(item, ToolStepYield):
@@ -788,12 +773,11 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         # Don't fall through to the LangGraph; final/drain
                         # below in the shared epilogue still fires.
                     else:
-                        slides_retriever = Retriever(chroma=get_chroma(request, settings))
                         final_content = ""
                         # report_stream is module-level so monkeypatch can swap it.
                         async for rs_item in report_stream(
                             state, adapter=adapter, tracer=tracer, conn=conn,
-                            retriever=slides_retriever, settings=settings,
+                            settings=settings,
                         ):
                             if isinstance(rs_item, ToolStepYield):
                                 yield {

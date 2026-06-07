@@ -11,7 +11,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import aiosqlite
-import numpy as np
 import pytest
 import pytest_asyncio
 
@@ -22,7 +21,6 @@ from paperhub.pipelines.paper_pipeline import (
     PaperPipeline,
     compute_content_key,
 )
-from paperhub.rag.chroma import ChromaStore
 
 # ---------------------------------------------------------------------------
 # Fixture: arxiv_sample path
@@ -30,19 +28,6 @@ from paperhub.rag.chroma import ChromaStore
 
 _ARXIV_SAMPLE = Path(__file__).parent / "fixtures" / "papers" / "arxiv_sample"
 _FIXTURE_ARXIV_ID = "test-fixture"
-
-
-# ---------------------------------------------------------------------------
-# Fake Embedder (no model load, deterministic 384-dim vectors)
-# ---------------------------------------------------------------------------
-
-
-class FakeEmbedder:
-    def embed(self, texts: list[str]) -> np.ndarray:
-        rng = np.random.RandomState(42)
-        vecs = rng.randn(len(texts), 384).astype(np.float32)
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        return vecs / np.where(norms > 0, norms, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -141,15 +126,11 @@ async def pipeline_env(
     migrated_db: aiosqlite.Connection,
     tmp_path: Path,
 ) -> AsyncIterator[tuple[PaperPipeline, aiosqlite.Connection, Path]]:
-    """Yields (pipeline, conn, cache_root) with a real migrated DB and tmp-path Chroma."""
+    """Yields (pipeline, conn, cache_root) with a real migrated DB."""
     cache_root = tmp_path / "papers_cache"
-    chroma_dir = tmp_path / "chroma"
-    chroma = ChromaStore(chroma_dir)
     pipeline = PaperPipeline(
         migrated_db,
         papers_cache_dir=cache_root,
-        chroma=chroma,
-        embedder=FakeEmbedder(),
     )
     yield pipeline, migrated_db, cache_root
 
@@ -181,13 +162,9 @@ async def pipeline_env_with_marker(
     background-worker test can reuse this fixture.
     """
     cache_root = tmp_path / "papers_cache"
-    chroma_dir = tmp_path / "chroma"
-    chroma = ChromaStore(chroma_dir)
     pipeline = PaperPipeline(
         migrated_db,
         papers_cache_dir=cache_root,
-        chroma=chroma,
-        embedder=FakeEmbedder(),
         marker_client=_FakeMarker(),
     )
     yield pipeline, migrated_db, cache_root
@@ -508,12 +485,9 @@ async def test_ingest_arxiv_skips_lookup_when_metadata_override_provided(
     for SS-driven adds — see commit d3834a6)."""
     from paperhub.pipelines.paper_pipeline import ArxivMetadata
 
-    chroma = ChromaStore(tmp_path / "chroma")
     pipeline = PaperPipeline(
         migrated_db,
         papers_cache_dir=tmp_path / "papers_cache",
-        chroma=chroma,
-        embedder=FakeEmbedder(),
     )
 
     # Stub download_arxiv_source so we don't hit the network.

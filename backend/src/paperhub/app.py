@@ -24,7 +24,7 @@ from paperhub.api import decks as decks_api
 from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
-from paperhub.config import Settings, load_settings
+from paperhub.config import load_settings
 from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import (
     apply_schema,
@@ -40,10 +40,8 @@ from paperhub.mcp import (
     mount_paperhub_papers_on,
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
-from paperhub.modelserver.spawn import ensure_running as _modelserver_ensure_running
 from paperhub.pipelines.marker_worker import build_worker_pipeline
 from paperhub.pipelines.marker_worker import run_worker as run_marker_worker
-from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.app")
 
@@ -79,28 +77,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         orphans = await sweep_orphan_session_folders(conn, settings.workspace_dir)
         if orphans:
             _LOG.info("swept %d orphan session folder(s)", orphans)
-    # ChromaStore holds a PersistentClient; chromadb manages its own cleanup.
-    app.state.chroma = ChromaStore(settings.chroma_dir)
-
-    # Model server: detach-and-leak. If an instance is already
-    # reachable on host:port, reuse it — this is what makes uvicorn
-    # --reload zero-cost: the previous worker's spawn outlives the
-    # reload, the new worker probes /health, sees green, skips spawn.
-    # If nothing is listening, spawn ONE detached subprocess (Windows
-    # CREATE_NEW_PROCESS_GROUP / Unix start_new_session) so a future
-    # worker restart won't take it down with us. We intentionally do
-    # NOT track this proc on app.state and do NOT terminate it at
-    # shutdown — that's what was killing the modelserver on every
-    # reload before. Operators who want explicit lifecycle use
-    # `scripts/start.ps1`; otherwise the modelserver leaks across
-    # backend restarts (cleaned up at OS reboot, or by manual
-    # taskkill / pkill paperhub-modelserver). Skipped entirely when
-    # PAPERHUB_INPROCESS_MODELS=1.
-    if not settings.inprocess_models:
-        await _modelserver_ensure_running(
-            host=settings.model_server_host,
-            port=settings.model_server_port,
-        )
 
     # MCP registry: load mcp_servers.toml + construct (NOT connect) clients.
     # Connection is lazy on first tool use so this never blocks startup —
@@ -111,30 +87,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_registry = MCPRegistry()
     await app.state.mcp_registry.startup(mcp_toml)
 
-    # Pre-warm embedder + reranker as a FIRE-AND-FORGET background task
-    # so lifespan finishes immediately. The modelserver's first /embed
-    # call triggers SentenceTransformer load (HF Hub download on cold
-    # cache — minutes on a slow network); blocking lifespan on that
-    # would hang the backend for the full download. Real ingest
-    # requests arriving before warm-up completes will simply queue
-    # behind the in-flight model load on the modelserver side.
-    # Guarded by PAPERHUB_PREWARM_MODELS=0 so offline / CI envs can skip.
-    app.state.prewarm_task = None
-    if os.environ.get("PAPERHUB_PREWARM_MODELS", "1") != "0":
-        # Defer the "ready" banner until warm-up resolves — it sometimes
-        # finishes last, and announcing ready while the models are still cold
-        # is misleading. The task prints the banner when it completes.
-        app.state.prewarm_task = asyncio.create_task(
-            _prewarm_models(settings, app), name="paperhub-prewarm",
-        )
-    else:
-        # No warm-up to wait on — the stack is ready right now.
-        _print_boot_banner(settings, app)
-
     # Background Marker upgrade worker (Plan F2.1): drains PDF papers marked
     # 'marker_pending' by re-extracting them via Marker (one at a time — a
     # concurrent Marker call OOMs a small GPU), upgrading the on-disk
-    # PaperAsset, and re-chunking + re-embedding. Durable: the queue lives in
+    # PaperAsset, and re-chunking. Durable: the queue lives in
     # the DB, so pending papers resume across restarts. Runs on a DEDICATED
     # long-lived connection (the migration conn above is closed). Disabled with
     # PAPERHUB_MARKER_WORKER=0 (tests set this so they never spawn it).
@@ -144,9 +100,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if os.environ.get("PAPERHUB_MARKER_WORKER", "1") != "0":
         worker_conn = await aiosqlite.connect(settings.db_path)
         await configure_connection(worker_conn)
-        worker_pipeline = build_worker_pipeline(
-            worker_conn, settings, chroma=app.state.chroma,
-        )
+        worker_pipeline = build_worker_pipeline(worker_conn, settings)
         stop = asyncio.Event()
         app.state.marker_worker_conn = worker_conn
         app.state.marker_worker_stop = stop
@@ -159,15 +113,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         _LOG.info("marker worker started")
 
+    # The dense-vector RAG stack (embedder + reranker + Chroma) was removed, so
+    # there is no model pre-warm to wait on. Defer the "ready" banner to a
+    # background task so it lands AFTER uvicorn logs "Application startup
+    # complete" — the banner is the human-facing "we're up" marker and should be
+    # the last thing on screen. uvicorn emits that log the instant this lifespan
+    # startup phase yields, so an inline print here would always precede it.
+    app.state.ready_banner_task = asyncio.create_task(
+        _announce_ready(settings, app), name="paperhub-ready-banner",
+    )
+
     try:
         yield
     finally:
-        # Cancel pre-warm if still in flight at shutdown.
-        prewarm = app.state.prewarm_task
-        if prewarm is not None and not prewarm.done():
-            prewarm.cancel()
+        # Cancel the ready banner if boot was so fast it hasn't fired yet.
+        ready_task = getattr(app.state, "ready_banner_task", None)
+        if ready_task is not None and not ready_task.done():
+            ready_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
-                await prewarm
+                await ready_task
         # Stop the Marker worker (guard with a timeout so a slow in-flight
         # Marker call can't hang shutdown indefinitely).
         worker_stop = app.state.marker_worker_stop
@@ -184,15 +148,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if worker_conn is not None:
             with contextlib.suppress(Exception):
                 await worker_conn.close()
-        # Lifespan: chroma cleanup handled internally by chromadb.
         await app.state.mcp_registry.shutdown()
 
 
 # PaperHub wordmark (figlet "slant"). A clear, iconic "we're up" marker so the
 # transient connection errors the UI logs while polling a not-yet-listening
 # backend aren't mistaken for a failed boot — printed once the whole stack
-# (DB, vectors, model server, MCP) is wired AND model warm-up has resolved,
-# since warm-up can finish last.
+# (DB, MCP) is wired.
 _BANNER_ART = [
     r"    ____                        __  __      __  ",
     r"   / __ \____ _____  ___  _____/ / / /_  __/ /_ ",
@@ -203,7 +165,21 @@ _BANNER_ART = [
 ]
 
 
-def _print_boot_banner(settings: object, app: FastAPI) -> None:
+async def _announce_ready(settings: object, app: FastAPI) -> None:
+    """Print the boot banner once uvicorn has finished startup.
+
+    uvicorn logs ``Application startup complete`` the instant the lifespan
+    startup phase yields. Scheduling this as a background task (rather than an
+    inline print before the yield) lets the banner land AFTER that line, so the
+    'we're up' marker is the last thing on screen. The short sleep cedes the
+    loop so the startup-complete log wins the race; cancelled cleanly at
+    shutdown if boot was too fast for it to fire."""
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.sleep(0.2)
+        _print_boot_banner(settings, app)
+
+
+def _print_boot_banner(_settings: object, app: FastAPI) -> None:
     """Print an iconic 'boot complete' banner to stdout once the full stack is
     wired. Skipped under tests / when ``PAPERHUB_BOOT_BANNER=0``."""
     if os.environ.get("PAPERHUB_BOOT_BANNER", "1") == "0":
@@ -235,12 +211,6 @@ def _print_boot_banner(settings: object, app: FastAPI) -> None:
     except Exception:  # noqa: BLE001
         ver = ""
 
-    s = settings  # has model_server_*, inprocess_models, db_path
-    model = (
-        "in-process"
-        if getattr(s, "inprocess_models", False)
-        else f"{getattr(s, 'model_server_host', '?')}:{getattr(s, 'model_server_port', '?')}"
-    )
     mcp_names = sorted(getattr(app.state.mcp_registry, "_clients", {}) or {})
     mcp = ", ".join(mcp_names) if mcp_names else "none (web search optional)"
 
@@ -250,7 +220,6 @@ def _print_boot_banner(settings: object, app: FastAPI) -> None:
         f"{'PaperHub ready':<16}{ver}",
         "",
         f"{'Open the app':<16}http://localhost:5173",
-        f"{'Model server':<16}{model}",
         f"{'MCP servers':<16}{mcp}",
         "",
         "Connection errors logged above were the UI polling before",
@@ -281,43 +250,6 @@ def _print_boot_banner(settings: object, app: FastAPI) -> None:
         print("\n".join(out), flush=True)
 
 
-async def _prewarm_models(settings: Settings, app: FastAPI) -> None:
-    """Background warm-up of the modelserver's embedder + reranker.
-
-    Runs the blocking HTTP calls in a worker thread (via
-    ``asyncio.to_thread``) so the event loop stays responsive to
-    incoming requests during warm-up. Best-effort: any failure
-    (modelserver not running, slow HF download, network blip, etc.)
-    is logged at WARN and swallowed — the first real request will
-    just pay the load cost itself.
-
-    Prints the "ready" boot banner once warm-up resolves (success OR
-    non-cancel failure) — this is the genuinely-ready moment, since warm-up
-    can finish after the rest of the stack. Skipped if cancelled at shutdown.
-    """
-    try:
-        from paperhub.pipelines.embedder import get_embedder
-        from paperhub.rag.reranker import get_reranker
-
-        _LOG.info("paperhub.app prewarm starting (background)")
-        await asyncio.to_thread(get_embedder().embed, [""])
-        await asyncio.to_thread(
-            get_reranker().rerank, "warm", ["up"], 1,
-        )
-        _LOG.info("paperhub.app prewarm complete")
-    except asyncio.CancelledError:
-        _LOG.info("paperhub.app prewarm cancelled at shutdown")
-        raise  # shutting down — no banner
-    except Exception as exc:  # noqa: BLE001
-        _LOG.warning(
-            "paperhub.app prewarm failed (%s: %s) — first ingest "
-            "will pay the model-load cost. Is `scripts/start.ps1` "
-            "running, or PAPERHUB_INPROCESS_MODELS=1 set?",
-            type(exc).__name__, exc,
-        )
-    # API has been serving since lifespan yielded; models are now warm (or will
-    # load lazily). Announce ready.
-    _print_boot_banner(settings, app)
 
 
 def create_app() -> FastAPI:

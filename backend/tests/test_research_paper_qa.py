@@ -11,13 +11,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
-from unittest.mock import MagicMock
 
 import aiosqlite
 import pytest
 
 from paperhub.agents.research import FinalOnlyMessage, paper_qa_stream
-from paperhub.rag.retriever import Retriever
 from paperhub.tracing.tracer import Tracer
 
 pytestmark = pytest.mark.asyncio
@@ -86,7 +84,6 @@ async def test_paper_qa_no_enabled_papers_short_circuits(
 ) -> None:
     """If the session has no enabled papers, yield a FinalOnlyMessage and stop."""
     session_id = await _make_session(migrated_db)
-    retriever = MagicMock(spec=Retriever)
     adapter = _StubAdapter(["should not stream"])
 
     state = {
@@ -97,13 +94,12 @@ async def test_paper_qa_no_enabled_papers_short_circuits(
     out: list[str | FinalOnlyMessage] = []
     async for item in paper_qa_stream(
         state, adapter=adapter, tracer=fake_tracer,
-        model="m", retriever=retriever, conn=migrated_db,
+        model="m", conn=migrated_db,
     ):
         out.append(item)
     assert len(out) == 1
     assert isinstance(out[0], FinalOnlyMessage)
     assert "No references are enabled" in out[0].content
-    retriever.retrieve.assert_not_called()
     assert adapter.last_variables is None
 
 

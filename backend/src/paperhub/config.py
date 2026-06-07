@@ -30,7 +30,6 @@ class Settings:
     workspace_dir: Path
     db_path: Path
     papers_cache_dir: Path
-    chroma_dir: Path
     max_upload_mb: int
 
     # ── 3. LLM model selection ──────────────────────────────────────────
@@ -48,22 +47,6 @@ class Settings:
     sql_answer_model: str
     # Memory-add conflict detector (small tier; classifier-shaped).
     memory_conflict_model: str
-
-    # ── 4. Local embedding + rerank (hosted in the modelserver process) ─
-    embedding_model: str
-    reranker_model: str
-
-    # ── 5. Model server ─────────────────────────────────────────────────
-    # The sentence-transformers + cross-encoder live in a SEPARATE process
-    # so uvicorn --reload on backend code doesn't reset the ~110 MB
-    # embedder + ~80 MB reranker weights. Auto-spawned by the backend's
-    # lifespan and reused across reload cycles.
-    model_server_host: str
-    model_server_port: int
-    # When True, skip the HTTP client + auto-spawn and load models in the
-    # worker process directly. Used by tests and by hosts that can't run
-    # an extra process.
-    inprocess_models: bool
 
     # ── 6. Agent tunables ───────────────────────────────────────────────
     # Maximum number of read_section() calls the subagent makes per paper
@@ -164,7 +147,6 @@ def load_settings() -> Settings:
         workspace_dir=workspace,
         db_path=workspace / "paperhub.db",
         papers_cache_dir=workspace / "papers_cache",
-        chroma_dir=workspace / "chroma",
         max_upload_mb=int(os.environ.get("PAPERHUB_MAX_UPLOAD_MB", "30")),
 
         # 3. LLM model selection. Each slot's per-slot env var (e.g.
@@ -181,25 +163,6 @@ def load_settings() -> Settings:
         memory_conflict_model=os.environ.get(
             "PAPERHUB_MEMORY_CONFLICT_MODEL", small,
         ),
-
-        # 4. Local embedding + rerank.
-        embedding_model=os.environ.get(
-            "PAPERHUB_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5",
-        ),
-        reranker_model=os.environ.get(
-            "PAPERHUB_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        ),
-
-        # 5. Model server.
-        model_server_host=os.environ.get(
-            "PAPERHUB_MODEL_SERVER_HOST", "127.0.0.1",
-        ),
-        model_server_port=int(
-            os.environ.get("PAPERHUB_MODEL_SERVER_PORT", "8001"),
-        ),
-        inprocess_models=os.environ.get(
-            "PAPERHUB_INPROCESS_MODELS", "0",
-        ) not in ("0", "", "false", "False"),
 
         # 6. Agent tunables.
         paper_qa_max_section_reads=int(

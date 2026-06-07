@@ -17,7 +17,7 @@ from paperhub.agents.research_tools import (
     NoIngestibleSourceError,
     add_paper_to_session_dispatch,
 )
-from paperhub.api.deps import get_chroma, get_llm
+from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.pipelines.paper_pipeline import (
@@ -152,7 +152,6 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
             pipeline = PaperPipeline(
                 conn,
                 papers_cache_dir=settings.papers_cache_dir,
-                chroma=get_chroma(request, settings),
             )
             result = await add_paper_to_session_dispatch(
                 paper_id,
@@ -250,7 +249,6 @@ async def upload_paper(
             pipeline = PaperPipeline(
                 conn,
                 papers_cache_dir=settings.papers_cache_dir,
-                chroma=get_chroma(request, settings),
                 llm=get_llm(request),
                 title_extract_model=settings.router_model,
             )
@@ -554,13 +552,12 @@ async def serve_asset(paper_content_id: int, asset_path: str) -> FileResponse:
 @router.delete("/content/{paper_content_id}", status_code=204)
 async def delete_library_paper(
     paper_content_id: int,
-    request: Request,
     force: bool = Query(
         False, description="If true, also remove any papers (session-membership) rows referencing this paper_content."
     ),
 ) -> None:
     """Purge a paper from the library entirely — paper_content row, chunks
-    (cascade), Chroma vectors, and the on-disk cache directory.
+    (cascade), and the on-disk cache directory.
 
     Test-friendly destructive endpoint. The proper UX (with batch ops,
     cascading session warnings, and probably an undo window) belongs in a
@@ -614,16 +611,6 @@ async def delete_library_paper(
             "DELETE FROM paper_content WHERE id = ?", (paper_content_id,),
         )
         await conn.commit()
-
-    # Chroma vectors — best-effort; log on failure so DB stays consistent.
-    try:
-        chroma = get_chroma(request, settings)
-        chroma.delete_paper(paper_content_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "chroma delete failed for paper_content_id=%s: %s",
-            paper_content_id, exc,
-        )
 
     # On-disk cache — best-effort. paper_content.source_dir_path stores
     # the per-paper cache dir itself (e.g. workspace/papers_cache/arxiv/

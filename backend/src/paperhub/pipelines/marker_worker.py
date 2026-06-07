@@ -3,7 +3,7 @@
 PDF ingest returns instantly on a PyMuPDF baseline and marks the paper
 ``asset_status='marker_pending'`` when the Marker service is reachable. This
 worker drains those pending rows: for each, it re-extracts via Marker, upgrades
-the on-disk PaperAsset, re-chunks + re-embeds, and flips ``asset_status`` to
+the on-disk PaperAsset, re-chunks, and flips ``asset_status`` to
 ``marker_ready`` (or ``marker_failed`` on error, keeping the PyMuPDF baseline).
 
 It processes ONE paper at a time — concurrent Marker calls OOM a small GPU — and
@@ -23,7 +23,6 @@ import httpx
 
 from paperhub.config import Settings
 from paperhub.pipelines.paper_pipeline import PaperPipeline
-from paperhub.rag.chroma import ChromaStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +45,17 @@ def _is_transient(exc: BaseException) -> bool:
 
 
 def build_worker_pipeline(
-    conn: aiosqlite.Connection, settings: Settings, *, chroma: ChromaStore | None = None,
+    conn: aiosqlite.Connection, settings: Settings,
 ) -> PaperPipeline:
     """Construct the worker's own ``PaperPipeline``.
 
     The worker runs on a DEDICATED long-lived aiosqlite connection (the
     lifespan's migration connection is short-lived), so it builds a pipeline
-    bound to that connection. Reuses the app's ChromaStore when supplied so
-    both share one persistent client; the embedder/marker_client default to the
-    process-wide singletons (HTTP-client embedder + Marker service)."""
+    bound to that connection. The marker_client defaults to the process-wide
+    singleton (Marker service)."""
     return PaperPipeline(
         conn,
         papers_cache_dir=Path(settings.papers_cache_dir),
-        chroma=chroma if chroma is not None else ChromaStore(settings.chroma_dir),
     )
 
 

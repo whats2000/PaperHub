@@ -1,8 +1,7 @@
-"""Re-chunk + re-embed every paper_content row using the current chunker.
+"""Re-chunk every paper_content row using the current chunker.
 
-Deletes chunks + Chroma vectors first; preserves paper_content.id so
-membership (papers) + message history survive. Idempotent — runs as
-many times as needed.
+Deletes chunks first; preserves paper_content.id so membership (papers) +
+message history survive. Idempotent — runs as many times as needed.
 
 Usage:
     uv run paperhub-reingest                 # all paper_content rows
@@ -24,9 +23,7 @@ import tiktoken
 
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
-from paperhub.pipelines.embedder import get_embedder
 from paperhub.pipelines.extract import extract_latex, extract_pdf_with_headings
-from paperhub.rag.chroma import ChromaStore
 
 _LOG = logging.getLogger("paperhub.reingest")
 _CL100K = tiktoken.get_encoding("cl100k_base")
@@ -68,10 +65,9 @@ async def _reingest_one(
     pcid: int,
     *,
     conn: aiosqlite.Connection,
-    chroma: ChromaStore,
     dry_run: bool,
 ) -> tuple[int, int]:
-    """Re-chunk + re-embed one paper_content row.
+    """Re-chunk one paper_content row.
 
     Returns (chunks_before, chunks_after) for logging.
     chunks_before is 0 when the row is skipped (missing source_path).
@@ -170,35 +166,26 @@ async def _reingest_one(
         )
         return (before, len(chunks))
 
-    # Embed FIRST (idempotent if it fails — no mutation yet).
-    embedder = get_embedder()
-    embeddings = embedder.embed([c.text for c in chunks])
-
-    # Compute sections_json before delete too (pure function; no I/O).
+    # Compute sections_json before delete (pure function; no I/O).
     sections_json = _build_sections_json(
         chunks, flattened, strip_comments=not pdf_path_kind,
     )
 
-    # Only now do destructive deletes.
+    # Destructive delete then re-insert.
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = ?", (pcid,))
-    chroma.delete_paper(pcid)
     await conn.commit()
 
-    # Insert new chunks; capture auto-assigned ids.
-    new_ids: list[int] = []
+    # Insert new chunks.
     for c in chunks:
         bbox_json = json.dumps(list(c.bbox)) if c.bbox is not None else None
-        async with conn.execute(
+        await conn.execute(
             "INSERT INTO chunks "
             "(paper_content_id, section, char_start, char_end, text, match_text, "
             "page, bbox) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (pcid, c.section, c.char_start, c.char_end, c.text, c.match_text,
              c.page, bbox_json),
-        ) as cur:
-            r = await cur.fetchone()
-            assert r is not None
-            new_ids.append(int(r[0]))
+        )
 
     await conn.execute(
         "UPDATE paper_content SET sections_json = ? WHERE id = ?",
@@ -206,13 +193,6 @@ async def _reingest_one(
     )
     await conn.commit()
 
-    # Insert Chroma vectors keyed by the new chunk ids.
-    chroma.add_chunks(
-        paper_content_id=pcid,
-        chunk_ids=new_ids,
-        texts=[c.text for c in chunks],
-        embeddings=embeddings,
-    )
     return (before, len(chunks))
 
 
@@ -220,8 +200,8 @@ async def _amain() -> int:
     parser = argparse.ArgumentParser(
         prog="paperhub-reingest",
         description=(
-            "Re-chunk + re-embed every paper_content row using the current chunker. "
-            "Deletes chunks + Chroma vectors first; preserves paper_content.id so "
+            "Re-chunk every paper_content row using the current chunker. "
+            "Deletes chunks first; preserves paper_content.id so "
             "membership (papers) + message history survive. Idempotent."
         ),
     )
@@ -234,7 +214,7 @@ async def _amain() -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print what would happen without modifying DB or Chroma.",
+        help="Print what would happen without modifying the DB.",
     )
     args = parser.parse_args()
 
@@ -244,7 +224,6 @@ async def _amain() -> int:
     )
 
     settings = load_settings()
-    chroma = ChromaStore(settings.chroma_dir)
     async with aiosqlite.connect(settings.db_path) as conn:
         if args.paper_content_id is not None:
             ids = [args.paper_content_id]
@@ -257,7 +236,7 @@ async def _amain() -> int:
         for pcid in ids:
             try:
                 before, after = await _reingest_one(
-                    pcid, conn=conn, chroma=chroma, dry_run=args.dry_run
+                    pcid, conn=conn, dry_run=args.dry_run
                 )
                 _LOG.info("pcid=%d: %d chunks -> %d chunks", pcid, before, after)
             except Exception as exc:  # noqa: BLE001 — per-paper recovery

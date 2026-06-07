@@ -4,8 +4,8 @@ Stages:
 1. Compute content_key (arxiv:<id> or sha256:<hex>)
 2. Cache lookup on paper_content.content_key
 3. On hit: insert papers row, return.
-4. On miss: download → extract → chunk → embed → render HTML → persist
-   paper_content row + chunks rows + Chroma vectors → insert papers row.
+4. On miss: download → extract → chunk → render HTML → persist
+   paper_content row + chunks rows → insert papers row.
 
 NOTE (sync-in-async): ``download_arxiv_source`` and ``search_arxiv`` are
 synchronous network calls invoked inside ``async`` methods.  This blocks the
@@ -42,7 +42,6 @@ from paperhub.pipelines.chunker import (
     chunk_text,
     map_stripped_offsets_to_original,
 )
-from paperhub.pipelines.embedder import Embedder, get_embedder
 from paperhub.pipelines.extract import (
     _extract_pdf_metadata,
     extract_latex,
@@ -71,7 +70,6 @@ from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 from paperhub.pipelines.title_extract import llm_extract_title
-from paperhub.rag.chroma import ChromaStore
 
 logger = logging.getLogger(__name__)
 
@@ -150,19 +148,15 @@ class PaperPipeline:
         conn: aiosqlite.Connection,
         *,
         papers_cache_dir: Path,
-        chroma: ChromaStore,
-        embedder: Embedder | None = None,
         marker_client: MarkerClient | None = None,
         llm: LlmAdapter | None = None,
         title_extract_model: str | None = None,
     ) -> None:
         self._conn = conn
         self._cache_root = papers_cache_dir
-        self._chroma = chroma
-        self._embedder = embedder or get_embedder()
         # Marker HTTP client for PDF extraction. Lazily resolved on first PDF
-        # ingest (mirrors how ``embedder`` defaults), so callers that never
-        # ingest a PDF — and tests — don't need a reachable Marker service.
+        # ingest, so callers that never ingest a PDF — and tests — don't need
+        # a reachable Marker service.
         self._marker_client = marker_client
         # Optional LLM fallback for PDF title extraction. Both must be set
         # to enable the path; either ``None`` (legacy callers, tests) leaves
@@ -172,7 +166,7 @@ class PaperPipeline:
         self._title_extract_model = title_extract_model
 
     def _get_marker_client(self) -> MarkerClient:
-        """Lazily resolve the Marker client on first PDF use (mirrors embedder)."""
+        """Lazily resolve the Marker client on first PDF use."""
         if self._marker_client is None:
             self._marker_client = get_marker_client()
         return self._marker_client
@@ -374,16 +368,13 @@ class PaperPipeline:
             else self._lookup_arxiv_metadata(arxiv_id)
         )
 
-        texts = [c.text for c in chunks]
-        embeddings = self._embedder.embed(texts)
-
         # Compute section TOC for paper_qa subagent (v2.10-2).
         sections_json = self._build_sections_json(chunks, full_text)
 
         # Persist paper_content + chunks in a single transaction.
         # asset_status='latex': the asset was built synchronously from the
         # LaTeX e-print source above (no Marker upgrade ever needed).
-        paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
+        paper_content_id, _chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
             arxiv_id=arxiv_id,
@@ -395,13 +386,6 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status="latex",
-        )
-
-        self._chroma.add_chunks(
-            paper_content_id=paper_content_id,
-            chunk_ids=chunk_ids,
-            texts=texts,
-            embeddings=embeddings,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -420,7 +404,7 @@ class PaperPipeline:
 
         Equation fidelity is lower than LaTeX rendering (PDF text
         extraction collapses math to glyph soup in many cases), but the
-        paper is still ingestible end-to-end: chunked, embedded,
+        paper is still ingestible end-to-end: chunked,
         searchable, and rendered in the Citation Canvas. Persisted with
         kind="arxiv" (the paper IS from arxiv; the kind enum reflects
         source identifier, not rendering path) and the same content_key
@@ -458,8 +442,6 @@ class PaperPipeline:
 
         boundaries = self._pdf_boundaries(headings, str(metadata.get("title", "")))
         chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
-        texts = [c.text for c in chunks]
-        embeddings = self._embedder.embed(texts)
 
         # Compute section TOC for paper_qa subagent (v2.10-2).
         sections_json = self._build_sections_json(
@@ -470,7 +452,7 @@ class PaperPipeline:
         # else stay on the PyMuPDF baseline.
         asset_status = "marker_pending" if marker_available() else "pymupdf_only"
 
-        paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
+        paper_content_id, _chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="arxiv",
             arxiv_id=arxiv_id,
@@ -482,13 +464,6 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status=asset_status,
-        )
-
-        self._chroma.add_chunks(
-            paper_content_id=paper_content_id,
-            chunk_ids=chunk_ids,
-            texts=texts,
-            embeddings=embeddings,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -638,8 +613,6 @@ class PaperPipeline:
         else:
             # LaTeX: chunks already populated above with dom_ids set.
             sections_json = self._build_sections_json(chunks, full_text)
-        texts = [c.text for c in chunks]
-        embeddings = self._embedder.embed(texts)
 
         db_kind: Literal["pdf_upload", "latex_upload"] = (
             "pdf_upload" if kind == "pdf" else "latex_upload"
@@ -654,7 +627,7 @@ class PaperPipeline:
         else:
             asset_status = "latex"
 
-        paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
+        paper_content_id, _chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind=db_kind,
             arxiv_id=None,
@@ -666,13 +639,6 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status=asset_status,
-        )
-
-        self._chroma.add_chunks(
-            paper_content_id=paper_content_id,
-            chunk_ids=chunk_ids,
-            texts=texts,
-            embeddings=embeddings,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -742,8 +708,6 @@ class PaperPipeline:
         full_text, headings = extract_pdf_with_headings(pdf_path)
         boundaries = self._pdf_boundaries(headings, title_hint)
         chunks = chunk_text(full_text, sections=boundaries, strip_comments=False)
-        texts = [c.text for c in chunks]
-        embeddings = self._embedder.embed(texts)
 
         # Compute section TOC for paper_qa subagent (v2.10-2).
         sections_json = self._build_sections_json(
@@ -761,7 +725,7 @@ class PaperPipeline:
         asset_status = "marker_pending" if marker_available() else "pymupdf_only"
 
         # 7. Persist paper_content + chunks transactionally.
-        paper_content_id, chunk_ids = await self._persist_paper_content_and_chunks(
+        paper_content_id, _chunk_ids = await self._persist_paper_content_and_chunks(
             content_key=content_key,
             kind="pdf_upload",
             arxiv_id=None,
@@ -775,13 +739,6 @@ class PaperPipeline:
             asset_status=asset_status,
         )
 
-        self._chroma.add_chunks(
-            paper_content_id=paper_content_id,
-            chunk_ids=chunk_ids,
-            texts=texts,
-            embeddings=embeddings,
-        )
-
         papers_id = await self._link_to_session(session_id, paper_content_id)
         return IngestResult(
             paper_content_id, papers_id, cache_hit=False, title=title_hint,
@@ -793,14 +750,13 @@ class PaperPipeline:
         """Upgrade a PDF paper from the PyMuPDF baseline to Marker quality.
 
         Re-extracts the PDF via the Marker service, overwrites the on-disk
-        PaperAsset, re-chunks + re-embeds from Marker's cleaner structure
-        (better RAG), and flips ``asset_status`` to ``marker_ready``.
+        PaperAsset, re-chunks from Marker's cleaner structure (better
+        navigation), and flips ``asset_status`` to ``marker_ready``.
 
         Runs the (multi-minute, blocking) Marker call off the event loop. The
-        re-chunk/re-embed mirrors ``reingest._reingest_one``'s ordering: embed
-        FIRST, then the destructive DELETE + Chroma delete, then INSERT new
-        chunks, recompute ``sections_json``, and re-add Chroma vectors — so a
-        failure before the deletes leaves the baseline intact.
+        re-chunk mirrors ``reingest._reingest_one``'s ordering: the destructive
+        DELETE then INSERT new chunks + recompute ``sections_json`` happen in
+        one serialised write transaction.
 
         Exceptions propagate (the worker records ``marker_failed``); they are
         NOT swallowed here.
@@ -860,26 +816,18 @@ class PaperPipeline:
             if c.match_text is not None:
                 c.match_text = c.match_text.encode("utf-8", "ignore").decode("utf-8")
 
-        # Embed FIRST (no mutation yet — safe to fail before the destructive
-        # deletes). Mirrors reingest._reingest_one ordering.
-        texts = [c.text for c in chunks]
-        embeddings = self._embedder.embed(texts)
         sections_json = self._build_sections_json(chunks)
 
-        # Destructive replace: delete old chunks + vectors, insert new + flip
+        # Destructive replace: delete old chunks, insert new + flip
         # asset_status — all in ONE serialised write transaction (v2.23.2) so
         # the marker worker can't race a concurrent paper ingest on the SQLite
-        # write lock. Chroma's delete still happens inside the transaction
-        # because a partial state (DB rows gone but vectors retained) would be
-        # worse than the small risk of orphan vectors if the commit fails
-        # after this point (the next reingest cleans them up).
+        # write lock.
         new_ids: list[int] = []
         async with write_transaction(self._conn):
             await self._conn.execute(
                 "DELETE FROM chunks WHERE paper_content_id = ?",
                 (paper_content_id,),
             )
-            self._chroma.delete_paper(paper_content_id)
 
             for c in chunks:
                 async with self._conn.execute(
@@ -905,13 +853,6 @@ class PaperPipeline:
                 "asset_status = 'marker_ready' WHERE id = ?",
                 (sections_json, layout_json, paper_content_id),
             )
-
-        self._chroma.add_chunks(
-            paper_content_id=paper_content_id,
-            chunk_ids=new_ids,
-            texts=texts,
-            embeddings=embeddings,
-        )
 
     @staticmethod
     def _pdf_boundaries(

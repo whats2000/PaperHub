@@ -3,7 +3,7 @@
 
 The worker drains ``asset_status='marker_pending'`` paper_content rows ONE AT A
 TIME (concurrent Marker calls OOM the GPU): it re-extracts each PDF via Marker,
-upgrades the on-disk PaperAsset to Marker quality, re-chunks + re-embeds from
+upgrades the on-disk PaperAsset to Marker quality, re-chunks from
 Marker's cleaner structure, and flips ``asset_status`` to ``marker_ready`` (or
 ``marker_failed`` on error, keeping the PyMuPDF baseline).
 """
@@ -15,7 +15,6 @@ from pathlib import Path
 
 import aiosqlite
 import httpx
-import numpy as np
 import pytest
 import pytest_asyncio
 
@@ -23,19 +22,10 @@ from paperhub.pipelines.marker_client import MarkerClient
 from paperhub.pipelines.paper_asset import read_paper_asset, write_paper_asset
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
-from paperhub.rag.chroma import ChromaStore
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _MARKER_DOC = _FIXTURES / "marker_doc.json"
 _SAMPLE_PDF = _FIXTURES / "papers" / "sample.pdf"
-
-
-class _FakeEmbedder:
-    def embed(self, texts: list[str]) -> np.ndarray:
-        rng = np.random.RandomState(7)
-        vecs = rng.randn(len(texts), 384).astype(np.float32)
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        return vecs / np.where(norms > 0, norms, 1.0)
 
 
 def _marker_client_from_fixture() -> MarkerClient:
@@ -71,28 +61,23 @@ def _marker_client_genuine_failure() -> MarkerClient:
 
 def _make_pipeline(
     conn: aiosqlite.Connection, tmp_path: Path, marker_client: MarkerClient,
-) -> tuple[PaperPipeline, ChromaStore]:
-    chroma = ChromaStore(tmp_path / "chroma")
-    pipeline = PaperPipeline(
+) -> PaperPipeline:
+    return PaperPipeline(
         conn,
         papers_cache_dir=tmp_path / "papers_cache",
-        chroma=chroma,
-        embedder=_FakeEmbedder(),
         marker_client=marker_client,
     )
-    return pipeline, chroma
 
 
 async def _seed_pending_pdf(
     conn: aiosqlite.Connection,
-    chroma: ChromaStore,
     cache_dir: Path,
     *,
     content_key: str,
 ) -> int:
     """Insert a kind='pdf_upload' paper_content row with asset_status=
     'marker_pending', a real PDF on disk, a PyMuPDF baseline asset, and some
-    initial chunks + Chroma vectors — exactly the state PDF ingest leaves."""
+    initial chunks — exactly the state PDF ingest leaves."""
     cache_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 — test seed; sync fs is fine
     pdf_path = cache_dir / "source.pdf"
     pdf_path.write_bytes(_SAMPLE_PDF.read_bytes())
@@ -122,9 +107,8 @@ async def _seed_pending_pdf(
     assert row is not None
     pcid = int(row[0])
 
-    # Seed some initial chunks + Chroma vectors (the PyMuPDF-baseline chunks).
+    # Seed some initial chunks (the PyMuPDF-baseline chunks).
     initial_texts = ["initial baseline chunk one", "initial baseline chunk two"]
-    chunk_ids: list[int] = []
     for i, t in enumerate(initial_texts):
         await conn.execute(
             "INSERT INTO chunks "
@@ -132,18 +116,7 @@ async def _seed_pending_pdf(
             "VALUES (?, 'Full text', ?, ?, ?)",
             (pcid, i * 10, i * 10 + 10, t),
         )
-        async with conn.execute("SELECT last_insert_rowid()") as cur:
-            r = await cur.fetchone()
-        assert r is not None
-        chunk_ids.append(int(r[0]))
     await conn.commit()
-    embedder = _FakeEmbedder()
-    chroma.add_chunks(
-        paper_content_id=pcid,
-        chunk_ids=chunk_ids,
-        texts=initial_texts,
-        embeddings=embedder.embed(initial_texts),
-    )
     return pcid
 
 
@@ -175,12 +148,12 @@ async def _asset_status(conn: aiosqlite.Connection, pcid: int) -> str:
 
 
 @pytest.mark.asyncio
-async def test_upgrade_pdf_asset_via_marker_upgrades_and_reembeds(
+async def test_upgrade_pdf_asset_via_marker_upgrades_and_rechunks(
     conn: aiosqlite.Connection, tmp_path: Path,
 ) -> None:
-    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_from_fixture())
+    pipeline = _make_pipeline(conn, tmp_path, _marker_client_from_fixture())
     cache_dir = tmp_path / "papers_cache" / "upload" / "abc"
-    pcid = await _seed_pending_pdf(conn, chroma, cache_dir, content_key="sha256:abc")
+    pcid = await _seed_pending_pdf(conn, cache_dir, content_key="sha256:abc")
 
     before_texts = await _chunk_texts(conn, pcid)
 
@@ -275,9 +248,9 @@ async def test_worker_genuine_failure_marks_failed(
     """A non-transport exception (genuine extraction error) → marker_failed."""
     from paperhub.pipelines.marker_worker import run_worker
 
-    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_genuine_failure())
+    pipeline = _make_pipeline(conn, tmp_path, _marker_client_genuine_failure())
     cache_dir = tmp_path / "papers_cache" / "upload" / "fail"
-    pcid = await _seed_pending_pdf(conn, chroma, cache_dir, content_key="sha256:fail")
+    pcid = await _seed_pending_pdf(conn, cache_dir, content_key="sha256:fail")
     before_texts = await _chunk_texts(conn, pcid)
 
     stop = asyncio.Event()
@@ -306,10 +279,10 @@ async def test_worker_transient_error_stays_pending(
     so the next worker poll retries it instead of permanently stranding the paper."""
     from paperhub.pipelines.marker_worker import run_worker
 
-    pipeline, chroma = _make_pipeline(conn, tmp_path, _marker_client_raising())
+    pipeline = _make_pipeline(conn, tmp_path, _marker_client_raising())
     cache_dir = tmp_path / "papers_cache" / "upload" / "transient"
     pcid = await _seed_pending_pdf(
-        conn, chroma, cache_dir, content_key="sha256:transient"
+        conn, cache_dir, content_key="sha256:transient"
     )
     before_texts = await _chunk_texts(conn, pcid)
 
@@ -342,10 +315,10 @@ async def test_worker_connection_error_stays_pending(
         raise ConnectionAbortedError("WinError 10053 — connection aborted")
 
     marker = MarkerClient("http://marker:8002", transport=httpx.MockTransport(handler))
-    pipeline, chroma = _make_pipeline(conn, tmp_path, marker)
+    pipeline = _make_pipeline(conn, tmp_path, marker)
     cache_dir = tmp_path / "papers_cache" / "upload" / "connreset"
     pcid = await _seed_pending_pdf(
-        conn, chroma, cache_dir, content_key="sha256:connreset"
+        conn, cache_dir, content_key="sha256:connreset"
     )
     before_texts = await _chunk_texts(conn, pcid)
 
@@ -391,14 +364,14 @@ async def test_worker_is_sequential_and_stops(
                 in_flight -= 1
 
     marker = MarkerClient("http://marker:8002", transport=httpx.MockTransport(handler))
-    pipeline, chroma = _make_pipeline(conn, tmp_path, marker)
+    pipeline = _make_pipeline(conn, tmp_path, marker)
 
     pcid1 = await _seed_pending_pdf(
-        conn, chroma, tmp_path / "papers_cache" / "upload" / "one",
+        conn, tmp_path / "papers_cache" / "upload" / "one",
         content_key="sha256:one",
     )
     pcid2 = await _seed_pending_pdf(
-        conn, chroma, tmp_path / "papers_cache" / "upload" / "two",
+        conn, tmp_path / "papers_cache" / "upload" / "two",
         content_key="sha256:two",
     )
 

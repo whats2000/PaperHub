@@ -186,7 +186,6 @@ async def paper_qa_stream(
     adapter: LlmAdapter,
     tracer: Tracer,
     model: str,
-    retriever: Any,
     conn: aiosqlite.Connection,
     **adapter_kwargs: Any,
 ) -> AsyncIterator[str | FinalOnlyMessage]:

@@ -1,8 +1,8 @@
 """Tests for paperhub-reingest CLI (Plan C v2.10-5).
 
-Exercises _reingest_one() in isolation against a tmp-path SQLite DB and a
-real (empty) ChromaStore instance. The embedder is monkey-patched so no
-model server or SentenceTransformer is needed.
+Exercises _reingest_one() in isolation against a tmp-path SQLite DB. The CLI
+re-chunks paper_content rows and rewrites the SQLite chunks (no embeddings /
+vectors).
 """
 from __future__ import annotations
 
@@ -11,28 +11,16 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-import numpy as np
 import pytest
 import pytest_asyncio
 
 from paperhub.db.migrate import apply_schema
-from paperhub.rag.chroma import ChromaStore
 
 # ---------------------------------------------------------------------------
 # Helpers & fixtures
 # ---------------------------------------------------------------------------
 
 _FIXTURE_TEX = Path(__file__).parent / "fixtures" / "papers" / "arxiv_sample" / "main.tex"
-
-
-class FakeEmbedder:
-    """Returns deterministic unit vectors — no model load required."""
-
-    def embed(self, texts: list[str]) -> np.ndarray:
-        rng = np.random.RandomState(42)
-        vecs = rng.randn(len(texts), 384).astype(np.float32)
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        return vecs / np.where(norms > 0, norms, 1.0)
 
 
 @pytest_asyncio.fixture
@@ -42,11 +30,6 @@ async def test_db(tmp_path: Path) -> aiosqlite.Connection:
     await conn.execute("PRAGMA foreign_keys = ON")
     await apply_schema(conn)
     return conn
-
-
-@pytest.fixture
-def chroma(tmp_path: Path) -> ChromaStore:
-    return ChromaStore(tmp_path / "chroma")
 
 
 _SEED_COUNTER = 0
@@ -129,15 +112,11 @@ async def _get_sections_json(conn: aiosqlite.Connection, pcid: int) -> Any:
 @pytest.mark.asyncio
 async def test_reingest_one_replaces_chunks_and_populates_sections_json(
     test_db: aiosqlite.Connection,
-    chroma: ChromaStore,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """Re-ingesting a row removes old chunks, inserts sane new chunks, and
     populates sections_json. paper_content.id must be unchanged."""
     import paperhub.cli.reingest as reingest_mod
-
-    monkeypatch.setattr(reingest_mod, "get_embedder", lambda: FakeEmbedder())
 
     # Seed: one paper_content row + one bogus chunk
     pcid = await _seed_paper_content_row(test_db, str(_FIXTURE_TEX))
@@ -145,7 +124,7 @@ async def test_reingest_one_replaces_chunks_and_populates_sections_json(
     assert await _count_chunks(test_db, pcid) == 1
 
     before, after = await reingest_mod._reingest_one(
-        pcid, conn=test_db, chroma=chroma, dry_run=False
+        pcid, conn=test_db, dry_run=False
     )
 
     # (a) old chunk gone — old id must not exist
@@ -194,22 +173,18 @@ async def test_reingest_one_replaces_chunks_and_populates_sections_json(
 @pytest.mark.asyncio
 async def test_reingest_one_skips_missing_source_file(
     test_db: aiosqlite.Connection,
-    chroma: ChromaStore,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """When source_path points at a nonexistent file, _reingest_one should
     skip without modifying the DB and return (0, 0)."""
     import paperhub.cli.reingest as reingest_mod
 
-    monkeypatch.setattr(reingest_mod, "get_embedder", lambda: FakeEmbedder())
-
     missing_path = str(tmp_path / "does_not_exist.tex")
     pcid = await _seed_paper_content_row(test_db, missing_path)
     bogus_chunk_id = await _insert_bogus_chunk(test_db, pcid)
 
     before, after = await reingest_mod._reingest_one(
-        pcid, conn=test_db, chroma=chroma, dry_run=False
+        pcid, conn=test_db, dry_run=False
     )
 
     assert (before, after) == (0, 0), "should return (0, 0) for missing file"
@@ -229,23 +204,16 @@ async def test_reingest_one_skips_missing_source_file(
 @pytest.mark.asyncio
 async def test_reingest_one_dry_run_does_not_mutate(
     test_db: aiosqlite.Connection,
-    chroma: ChromaStore,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """dry_run=True must not change DB state or Chroma vectors."""
+    """dry_run=True must not change DB state."""
     import paperhub.cli.reingest as reingest_mod
-
-    monkeypatch.setattr(reingest_mod, "get_embedder", lambda: FakeEmbedder())
 
     pcid = await _seed_paper_content_row(test_db, str(_FIXTURE_TEX))
     await _insert_bogus_chunk(test_db, pcid)
 
-    count_before = chroma._coll.count()
     before, after = await reingest_mod._reingest_one(
-        pcid, conn=test_db, chroma=chroma, dry_run=True
+        pcid, conn=test_db, dry_run=True
     )
-    count_after = chroma._coll.count()
-    assert count_after == count_before, "dry_run must not write Chroma vectors"
 
     # DB still has the original 1 bogus chunk
     db_count_after = await _count_chunks(test_db, pcid)
@@ -258,38 +226,3 @@ async def test_reingest_one_dry_run_does_not_mutate(
     # before=1 (the bogus chunk), after>0 (what *would* be inserted)
     assert before == 1
     assert after > 0
-
-
-@pytest.mark.asyncio
-async def test_reingest_one_leaves_db_untouched_when_embed_raises(
-    test_db: aiosqlite.Connection,
-    chroma: ChromaStore,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Regression for Plan C v2.10-5 review: embed must run BEFORE delete so
-    a modelserver failure doesn't strand the paper with zero chunks."""
-    import paperhub.cli.reingest as reingest_mod
-
-    class _BoomEmbedder:
-        def embed(self, texts: list[str]) -> Any:
-            raise RuntimeError("modelserver unreachable")
-
-    monkeypatch.setattr(reingest_mod, "get_embedder", lambda: _BoomEmbedder())
-
-    pcid = await _seed_paper_content_row(test_db, str(_FIXTURE_TEX))
-    # Insert 3 old chunks so we have a non-trivial before-count to check.
-    await _insert_bogus_chunk(test_db, pcid)
-    await _insert_bogus_chunk(test_db, pcid)
-    await _insert_bogus_chunk(test_db, pcid)
-    before_count = await _count_chunks(test_db, pcid)
-    assert before_count == 3
-
-    with pytest.raises(RuntimeError, match="unreachable"):
-        await reingest_mod._reingest_one(
-            pcid, conn=test_db, chroma=chroma, dry_run=False
-        )
-
-    # DB must be unchanged — embed failure must not delete chunks.
-    after_count = await _count_chunks(test_db, pcid)
-    assert after_count == 3, "embed failure must not delete chunks"

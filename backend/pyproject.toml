@@ -1,13 +1,12 @@
 [project]
 name = "paperhub"
-version = "2.26.0"
+version = "2.27.0"
 description = "PaperHub backend — UX-first chat shell with paper KB + RAG + slide pipeline."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.22.1",
     "arxiv>=4.0.0",
-    "chromadb>=1.5.9",
     "fastapi>=0.136.1",
     "langgraph>=1.2.0",
     "litellm>=1.85.0",
@@ -18,74 +17,15 @@ dependencies = [
     "pymupdf>=1.27.2.3",
     "pypdf>=6.12.1",
     "pyyaml>=6.0.3",
-    "sentence-transformers>=5.5.0",
     "sqlglot>=30.8.0",
     "sse-starlette>=3.4.4",
     "tiktoken>=0.13.0",
     "uvicorn[standard]>=0.47.0",
 ]
 
-# ─── Optional GPU extras ─────────────────────────────────────────────────
-# torch is a transitive dep of sentence-transformers + chromadb. By
-# default (`uv sync` with no extras) operators get the PyPI CPU wheel —
-# correct on machines without an NVIDIA GPU.
-#
-# To use a GPU, pick the extra matching your CUDA toolkit and re-sync:
-#   uv sync --extra cu124   # CUDA 12.4 — broad driver compat (>= 530)
-#   uv sync --extra cu126   # CUDA 12.6
-#   uv sync --extra cu130   # CUDA 13.0 — newest published wheel
-#
-# The three extras are mutually exclusive (`[tool.uv] conflicts` below),
-# so `uv sync --extra cu124 --extra cu126` is rejected up-front.
-# Switching between them is just a fresh `uv sync --extra cuXXX` — uv
-# replaces the previously-installed torch wheel automatically.
-[project.optional-dependencies]
-cu124 = ["torch>=2.0"]
-cu126 = ["torch>=2.0"]
-cu130 = ["torch>=2.0"]
-
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]
 build-backend = "uv_build"
-
-# ─── PyTorch CUDA wheel indices ──────────────────────────────────────────
-# `explicit = true` means uv only consults each index for packages
-# routed to it via [tool.uv.sources] below; the indices are NOT used in
-# general resolution (they host many packages we don't want uv pulling
-# from there).
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
-
-[tool.uv.sources]
-# Route the torch dependency through the CUDA wheel index that matches
-# the operator's chosen extra. Without any extra, torch resolves
-# transitively via PyPI (= CPU wheel) — the documented default.
-torch = [
-    { index = "pytorch-cu124", extra = "cu124" },
-    { index = "pytorch-cu126", extra = "cu126" },
-    { index = "pytorch-cu130", extra = "cu130" },
-]
-
-[tool.uv]
-conflicts = [
-    [
-        { extra = "cu124" },
-        { extra = "cu126" },
-        { extra = "cu130" },
-    ],
-]
 
 [dependency-groups]
 dev = [
@@ -100,7 +40,6 @@ dev = [
 
 [project.scripts]
 paperhub-replay = "paperhub.cli.replay:main"
-paperhub-modelserver = "paperhub.modelserver.__main__:main"
 paperhub-reingest = "paperhub.cli.reingest:main"
 paperhub-backfill-assets = "paperhub.cli.backfill_assets:main"
 paperhub-rerender-html = "paperhub.cli.rerender_html:main"
@@ -126,10 +65,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pylatexenc.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["chromadb.*"]
 ignore_missing_imports = true
 
 

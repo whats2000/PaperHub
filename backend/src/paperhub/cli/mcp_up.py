@@ -18,7 +18,7 @@ survive ``uvicorn --reload`` and are reused on the next boot via the probe.
 already running, which we don't own) are written to a sidecar file next to
 ``mcp_servers.toml`` so the boot script (``scripts/start.ps1``) can tree-kill
 them in its ``finally`` — otherwise Ctrl+C on the boot script stops the
-backend + modelserver but leaves the MCP daemon running. Always exits 0: a
+backend but leaves the MCP daemon running. Always exits 0: a
 daemon that won't start is non-fatal (the agent falls back), so it must not
 fail the boot script.
 """

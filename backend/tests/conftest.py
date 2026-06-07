@@ -1,5 +1,5 @@
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -8,12 +8,6 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-# Tests must run with in-process models — the HTTP-client embedder /
-# reranker would otherwise try to dial the (non-running) model server
-# and fail. Set before any paperhub.config import resolves the env so
-# load_settings() sees it. Must happen at module import time, not
-# inside a fixture.
-os.environ.setdefault("PAPERHUB_INPROCESS_MODELS", "1")
 # Keep the boot banner out of test output.
 os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
 # Default the background Marker upgrade worker OFF in tests — it would otherwise
@@ -24,21 +18,6 @@ os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402
 from paperhub.tracing.tracer import Tracer  # noqa: E402
-
-
-@pytest.fixture(autouse=True)
-def _reset_model_singletons() -> Iterator[None]:
-    """Clear cached embedder/reranker singletons between tests so a
-    test that monkeypatches PAPERHUB_INPROCESS_MODELS doesn't leak
-    its choice to neighbours. Yields nothing — just brackets the test."""
-    from paperhub.pipelines import embedder as _embedder_mod
-    from paperhub.rag import reranker as _reranker_mod
-
-    _embedder_mod.reset_singleton()
-    _reranker_mod.reset_singleton()
-    yield
-    _embedder_mod.reset_singleton()
-    _reranker_mod.reset_singleton()
 
 
 @pytest_asyncio.fixture

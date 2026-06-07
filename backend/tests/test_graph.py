@@ -86,9 +86,6 @@ async def test_paper_suggest_routes_to_research_path(migrated_db: aiosqlite.Conn
     class _FakePipeline:
         pass
 
-    class _FakeRetriever:
-        pass
-
     class _FakeMcpRegistry:
         async def aggregate_tool_schemas(self) -> list:
             return []
@@ -106,7 +103,6 @@ async def test_paper_suggest_routes_to_research_path(migrated_db: aiosqlite.Conn
         paper_qa_model="gpt-4o-mini",
         conn=migrated_db,
         pipeline=_FakePipeline(),  # type: ignore[arg-type]
-        retriever=_FakeRetriever(),  # type: ignore[arg-type]
         mcp_registry=_FakeMcpRegistry(),  # type: ignore[arg-type]
     )
     deps = GraphDeps(
