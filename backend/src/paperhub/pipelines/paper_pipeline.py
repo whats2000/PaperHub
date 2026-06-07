@@ -900,7 +900,9 @@ class PaperPipeline:
                     name=name,
                     char_start=group[0].char_start,
                     char_end=group[-1].char_end,
-                    token_count=len(_CL100K.encode(section_text)),
+                    # disallowed_special=() so literal "<|endoftext|>" in the
+                    # text (NLP papers discuss it) is counted, not raised.
+                    token_count=len(_CL100K.encode(section_text, disallowed_special=())),
                     chunk_count=len(group),
                 )
             )

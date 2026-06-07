@@ -1,6 +1,20 @@
 from paperhub.pipelines.chunker import chunk_text
 
 
+def test_chunker_handles_tiktoken_special_token_text() -> None:
+    """Regression: an NLP paper (arXiv:2406.07524) discusses the literal token
+    string "<|endoftext|>". tiktoken's encode() treats that as a disallowed
+    special token and raised ValueError, crashing ingestion. chunk_text must
+    encode it as ordinary text and chunk normally."""
+    text = (
+        "We append the <|endoftext|> token to each sequence. "
+        "The model treats <|endoftext|> as a separator between documents. "
+    ) * 50
+    chunks = chunk_text(text, target=100, hard=200)
+    assert len(chunks) >= 1
+    assert any("<|endoftext|>" in c.text for c in chunks)
+
+
 def test_chunks_respect_hard_cap() -> None:
     # ~3000 tokens of "word " repeated.
     text = ("word " * 3000).strip()

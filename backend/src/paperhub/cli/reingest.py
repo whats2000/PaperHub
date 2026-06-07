@@ -54,7 +54,8 @@ def _build_sections_json(
                 "name": name,
                 "char_start": group[0].char_start,
                 "char_end": group[-1].char_end,
-                "token_count": len(_CL100K.encode(section_text)),
+                # disallowed_special=() — see paper_pipeline._build_sections_json.
+                "token_count": len(_CL100K.encode(section_text, disallowed_special=())),
                 "chunk_count": len(group),
             }
         )
