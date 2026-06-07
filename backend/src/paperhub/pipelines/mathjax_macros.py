@@ -66,6 +66,16 @@ CURATED_MACROS: dict[str, MacroValue] = {
     "smallskip": "",
     "medskip": "",
     "bigskip": "",
+    # Cross-reference commands sometimes sit inside math (e.g. \eqref to a tag
+    # within an aligned block); MathJax can't resolve them and errors. No-op
+    # them (consume the {label}) so the surrounding math still renders.
+    "ref": ["", 1],
+    "eqref": ["", 1],
+    "cref": ["", 1],
+    "Cref": ["", 1],
+    # mathtools assignment colon (:=) — not in MathJax's base build.
+    "coloneqq": r"\mathrel{:=}",
+    "eqqcolon": r"\mathrel{=:}",
 }
 
 # Unescaped `%` starts a LaTeX comment to end-of-line; `\%` is a literal.
