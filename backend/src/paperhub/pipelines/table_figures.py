@@ -185,8 +185,13 @@ def _compile_table_to_png(
                 (proc.stdout or "")[-500:],
             )
             return False
-        # rc!=0 with a PDF present is a harmless warning (e.g. overfull hbox);
-        # the table rendered, so use it.
+        if proc.returncode != 0:
+            # rc!=0 with a PDF present is a harmless warning (e.g. overfull
+            # hbox); the table rendered, so log + use it (mirrors tikz_figures).
+            logger.debug(
+                "table: pdflatex rc=%s but PDF produced; using it",
+                proc.returncode,
+            )
         try:
             with pymupdf.open(pdf_path) as doc:  # type: ignore[no-untyped-call]
                 doc.load_page(0).get_pixmap(dpi=dpi).save(str(png_path))
