@@ -63,7 +63,7 @@ from paperhub.pipelines.marker_client import (
 )
 from paperhub.pipelines.marker_health import marker_available
 from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
-from paperhub.pipelines.mathjax_macros import extract_macros
+from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import render_html
@@ -346,7 +346,7 @@ class PaperPipeline:
         render_html(
             source=render_tex_path, kind="latex", out_path=html_path,
             resource_dir=source_path.parent,
-            macros=extract_macros(ext.preamble),
+            macros=extract_macros_from_dir(source_path.parent, ext.preamble),
         )
         # Rewrite rendered HTML: replace surviving sentinel tokens with
         # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.
@@ -528,7 +528,7 @@ class PaperPipeline:
             render_html(
                 source=render_source, kind=kind, out_path=html_path,
                 resource_dir=source_path.parent,
-                macros=extract_macros(ext.preamble),
+                macros=extract_macros_from_dir(source_path.parent, ext.preamble),
             )
             # Rewrite rendered HTML: replace surviving sentinel tokens with
             # <span id="phchunk-N"> anchors and tag each chunk with its dom_id.

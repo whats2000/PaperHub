@@ -32,7 +32,7 @@ from paperhub.pipelines.figures import (
     rasterize_and_normalize_figures,
     strip_includegraphics_options,
 )
-from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros
+from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros_from_dir
 from paperhub.pipelines.renderer import render_html
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
@@ -115,7 +115,9 @@ async def _rerender_one(
     preamble = ""
     try:  # noqa: ASYNC240 — sequential CLI; sync extract is fine
         ext = extract_latex(resource_dir)
-        macros = extract_macros(ext.preamble)
+        # Include macros from bundled .cls/.sty files, not just the main
+        # preamble (arXiv:2407.15595 defines its math macros in fairmeta.cls).
+        macros = extract_macros_from_dir(resource_dir, ext.preamble)
         preamble = ext.preamble
     except Exception:  # noqa: BLE001 — never block a re-render on macro recovery
         _LOG.debug("pcid=%d: preamble recovery failed", pcid, exc_info=True)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 # Macro value is either a replacement string, or [replacement, nargs], or
 # [replacement, nargs, optional_default] — exactly MathJax's tex.macros shape.
@@ -163,6 +164,31 @@ def extract_macros(preamble: str) -> dict[str, MacroValue]:
     _parse_newcommands(text, out)
     _parse_declare_operators(text, out)
     _parse_simple_defs(text, out)
+    return out
+
+
+def extract_macros_from_dir(source_dir: Path, preamble: str = "") -> dict[str, MacroValue]:
+    """Macros from the paper's LOCAL ``.cls``/``.sty`` files merged under the
+    main ``.tex`` preamble.
+
+    ``extract_latex`` only reaches the main ``.tex`` preamble (+ inlined
+    ``\\input`` of ``.tex`` files); a paper that ships its math macros in a
+    custom document class or style package loaded via
+    ``\\documentclass``/``\\usepackage`` (arXiv:2407.15595 defines ``\\gD``,
+    ``\\sI``, ``\\dummy`` in ``fairmeta.cls``) loses ALL of them, so the
+    Citation Canvas renders "Undefined control sequence" throughout. Parse the
+    bundled class/style files too. Precedence: the main preamble wins on a key
+    collision (it's the author's final say), then ``.sty``/``.cls`` in sorted
+    order. Only top-level bundled files are scanned — system packages aren't in
+    the tarball, so this stays scoped to the paper's own definitions.
+    """
+    out: dict[str, MacroValue] = {}
+    for path in sorted([*source_dir.glob("*.cls"), *source_dir.glob("*.sty")]):
+        try:
+            out.update(extract_macros(path.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            continue
+    out.update(extract_macros(preamble))  # main preamble overrides bundled files
     return out
 
 

@@ -9,11 +9,13 @@ fail to render. We extract those definitions and feed them to MathJax as
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from paperhub.pipelines.mathjax_macros import (
     CURATED_MACROS,
     build_mathjax_config_script,
     extract_macros,
+    extract_macros_from_dir,
 )
 
 
@@ -86,6 +88,34 @@ class TestBuildScript:
         assert "mathbbm" in script
         # Curated mappings are present.
         assert any("mathbbm" in k for k in CURATED_MACROS)
+
+    def test_extract_macros_from_dir_reads_cls_and_sty(self, tmp_path: Path) -> None:
+        """Author macros defined in a bundled .cls/.sty (not the main .tex
+        preamble) must be harvested — arXiv:2407.15595 defines \\gD/\\sI/\\dummy
+        in fairmeta.cls; the main preamble still wins on collision."""
+        (tmp_path / "fairmeta.cls").write_text(
+            "\\newcommand{\\dummy}{\\mathbb{m}}\n"
+            "\\def\\gD{{\\mathcal{D}}}\n"
+            "\\def\\sI{{\\mathbb{I}}}\n"
+            "\\def\\shared{FROM_CLS}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "extra.sty").write_text("\\def\\foo{\\alpha}\n", encoding="utf-8")
+        macros = extract_macros_from_dir(
+            tmp_path, preamble="\\def\\shared{FROM_PREAMBLE}"
+        )
+        assert macros["gD"] == r"{\mathcal{D}}"
+        assert macros["sI"] == r"{\mathbb{I}}"
+        assert macros["dummy"] == r"\mathbb{m}"
+        assert macros["foo"] == r"\alpha"
+        # Main preamble overrides a bundled-file definition of the same name.
+        assert macros["shared"] == "FROM_PREAMBLE"
+
+    def test_extract_macros_from_dir_no_packages_is_just_preamble(
+        self, tmp_path: Path
+    ) -> None:
+        macros = extract_macros_from_dir(tmp_path, preamble="\\def\\a{\\beta}")
+        assert macros == {"a": r"\beta"}
 
     def test_capitalized_wide_tilde_maps_to_widetilde(self) -> None:
         """\\Tilde (used inside author macros, never reaching extract_macros)
