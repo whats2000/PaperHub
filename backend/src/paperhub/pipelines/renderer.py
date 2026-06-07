@@ -223,6 +223,14 @@ def _render_latex_pandoc(
         # <img> refs are rewritten to served asset/ URLs by
         # _externalize_local_images (NOT base64-inlined — that OOM'd the canvas).
         "--mathjax",
+        # Preserve the source's line breaks instead of reflowing at ~72 cols.
+        # Default wrapping splits a long line inside math, and a `%` LaTeX
+        # comment line (e.g. arXiv:1706.03762's commented MultiHead `where`
+        # row) then only comments its FIRST wrapped fragment — the remainder
+        # (here an invalid double-subscript `QW_Q_i`) becomes live math and
+        # breaks the render. Preserving line breaks keeps each `%` comment on
+        # its own line, fully commented.
+        "--wrap=preserve",
     ]
     if resource_dir is not None:
         # Figures live in the extracted source/ subtree, not next to the

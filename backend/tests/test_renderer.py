@@ -41,6 +41,35 @@ def test_render_latex_balances_stray_brace_and_retries_pandoc(tmp_path: Path) ->
     assert "Introduction" in html and "Method" in html
 
 
+def test_render_preserves_comment_line_in_math(tmp_path: Path) -> None:
+    """A long %-comment line inside a math environment must stay fully commented
+    (arXiv:1706.03762's MultiHead block). Default pandoc wrapping split it so
+    only the first fragment was commented and an invalid double-subscript
+    leaked into live math. --wrap=preserve keeps the comment on one line."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        "\\begin{align*}\n"
+        "    \\mathrm{MultiHead}(Q,K,V) &= \\mathrm{Concat}(\\mathrm{head_1})W^O\\\\\n"
+        "%    \\mathrm{where} \\mathrm{head_i} &= \\mathrm{Attention}"
+        "(QW_Q_i^{abcdefghij}, KW_K_i^{abcdefghij}, VW^V_i^{abcdefghij})\\\\\n"
+        "    \\text{where}~\\mathrm{head_i} &= \\mathrm{Attention}(QW^Q_i)\\\\\n"
+        "\\end{align*}\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    # The commented double-subscript fragment, if present at all, must remain on
+    # a line that is still a LaTeX comment (begins with %) — never un-commented.
+    for line in html.splitlines():
+        if "QW_Q_i" in line:
+            assert line.lstrip().startswith("%"), (
+                f"commented math leaked into live math: {line!r}"
+            )
+
+
 def test_render_pdf_uses_pymupdf(tmp_path: Path) -> None:
     fixture = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
     out = tmp_path / "source.html"
