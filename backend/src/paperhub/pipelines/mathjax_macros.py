@@ -76,6 +76,13 @@ CURATED_MACROS: dict[str, MacroValue] = {
     # mathtools assignment colon (:=) — not in MathJax's base build.
     "coloneqq": r"\mathrel{:=}",
     "eqqcolon": r"\mathrel{=:}",
+    # `\dag`/`\ddag` are LaTeX TEXT-mode symbols (†/‡) that papers routinely use
+    # inside math for footnote markers — `$^{\dag}$ represents the reproduced
+    # result` (arXiv:2602.20200). MathJax's math build ships only the math names
+    # `\dagger`/`\ddagger`, so `\dag` reached it as "Undefined control sequence"
+    # and the superscript rendered broken. Map each to its math equivalent.
+    "dag": r"\dagger",
+    "ddag": r"\ddagger",
 }
 
 # Unescaped `%` starts a LaTeX comment to end-of-line; `\%` is a literal.

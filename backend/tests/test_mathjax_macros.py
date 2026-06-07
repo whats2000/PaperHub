@@ -173,6 +173,17 @@ class TestBuildScript:
         assert macros.get("hspace") == ["", 1]
         assert macros.get("bigskip") == ""  # bare, no-arg
 
+    def test_dagger_text_symbols_map_to_math_equivalents(self) -> None:
+        """\\dag/\\ddag are LaTeX text symbols papers use in math for footnote
+        markers ($^{\\dag}$); MathJax's math build has only \\dagger/\\ddagger,
+        so they must be mapped or the superscript renders as an error."""
+        script = build_mathjax_config_script()
+        start = script.index("{tex:") + len("{tex:{macros:")
+        end = script.index("}};</script>")
+        macros = json.loads(script[start:end])
+        assert macros.get("dag") == r"\dagger"
+        assert macros.get("ddag") == r"\ddagger"
+
     def test_merges_and_overrides_with_extracted(self) -> None:
         script = build_mathjax_config_script({"Ls": r"\mathcal{L}"})
         # Extract the JSON object from `window.MathJax={tex:{macros:<JSON>}};`.
