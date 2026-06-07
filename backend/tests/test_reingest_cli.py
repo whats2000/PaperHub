@@ -7,6 +7,7 @@ vectors).
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,18 @@ from paperhub.db.migrate import apply_schema
 # ---------------------------------------------------------------------------
 
 _FIXTURE_TEX = Path(__file__).parent / "fixtures" / "papers" / "arxiv_sample" / "main.tex"
+
+
+def _fixture_copy(tmp_path: Path) -> Path:
+    """Copy the arxiv_sample main.tex into a tmp dir and return the copy.
+
+    reingest now rewrites ``source.flattened.tex`` next to the source on a
+    non-dry-run re-extract; pointing it at the committed fixture would pollute
+    the repo, so tests that mutate must work on a throwaway copy.
+    """
+    dest = tmp_path / "main.tex"
+    shutil.copy(_FIXTURE_TEX, dest)
+    return dest
 
 
 @pytest_asyncio.fixture
@@ -118,8 +131,9 @@ async def test_reingest_one_replaces_chunks_and_populates_sections_json(
     populates sections_json. paper_content.id must be unchanged."""
     import paperhub.cli.reingest as reingest_mod
 
-    # Seed: one paper_content row + one bogus chunk
-    pcid = await _seed_paper_content_row(test_db, str(_FIXTURE_TEX))
+    # Seed: one paper_content row + one bogus chunk. Use a tmp copy so the
+    # non-dry-run reingest's source.flattened.tex write can't touch the fixture.
+    pcid = await _seed_paper_content_row(test_db, str(_fixture_copy(tmp_path)))
     old_chunk_id = await _insert_bogus_chunk(test_db, pcid)
     assert await _count_chunks(test_db, pcid) == 1
 
