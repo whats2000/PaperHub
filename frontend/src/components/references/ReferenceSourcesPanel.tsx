@@ -36,6 +36,9 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
   const referencesBySession = useChatStore((s) => s.referencesBySession);
   const sessions = useChatStore((s) => s.sessions);
   const openPaperInCanvas = useCanvasStore((s) => s.openPaper);
+  // The paper currently shown on the canvas (null when the canvas is closed),
+  // so the matching row reads as active.
+  const activePaperId = useCanvasStore((s) => s.activePaperId);
 
   const activeSession =
     frontendSessionId !== null
@@ -135,10 +138,16 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
           </p>
         ) : (
           <ul className="divide-y divide-border">
-            {refs.map((ref) => (
+            {refs.map((ref) => {
+              const isActiveOnCanvas =
+                activePaperId === ref.paper_content_id;
+              return (
               <li
                 key={ref.papers_id}
-                className="flex items-start gap-2 px-3 py-2.5"
+                className={
+                  "flex items-start gap-2 px-3 py-2.5 transition-colors" +
+                  (isActiveOnCanvas ? " bg-primary/5" : "")
+                }
               >
                 <Switch
                   checked={ref.enabled}
@@ -180,9 +189,20 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => openPaperInCanvas(ref.paper_content_id)}
-                    aria-label={`Open ${ref.title} in canvas`}
-                    title="Open in canvas"
-                    className="text-muted-foreground hover:text-foreground"
+                    aria-pressed={isActiveOnCanvas}
+                    aria-label={
+                      isActiveOnCanvas
+                        ? `${ref.title} is open in canvas`
+                        : `Open ${ref.title} in canvas`
+                    }
+                    title={
+                      isActiveOnCanvas ? "Showing in canvas" : "Open in canvas"
+                    }
+                    className={
+                      isActiveOnCanvas
+                        ? "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }
                   >
                     <PanelRight className="h-3.5 w-3.5" />
                   </Button>
@@ -198,7 +218,8 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                   </Button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

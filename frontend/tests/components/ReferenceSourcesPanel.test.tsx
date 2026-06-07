@@ -76,6 +76,7 @@ beforeEach(() => {
     open: false,
     requestedPaperId: null,
     paperRequestNonce: 0,
+    activePaperId: null,
   });
 });
 
@@ -168,6 +169,19 @@ describe("ReferenceSourcesPanel", () => {
     // The canvas store now requests this paper (paper_content_id 1) + is open.
     expect(useCanvasStore.getState().open).toBe(true);
     expect(useCanvasStore.getState().requestedPaperId).toBe(1);
+  });
+
+  it("marks the row active when its paper is shown on the canvas", async () => {
+    const frontendId = seedSession(42);
+    useCanvasStore.setState({ open: true, activePaperId: 1 });
+    render(<ReferenceSourcesPanel frontendSessionId={frontendId} />);
+    await screen.findByText("Attention Is All You Need");
+
+    // The active paper's open button reflects the live state (label + pressed).
+    const activeBtn = screen.getByRole("button", {
+      name: /attention is all you need is open in canvas/i,
+    });
+    expect(activeBtn).toHaveAttribute("aria-pressed", "true");
   });
 
   it("clicking trash fires DELETE and removes the row optimistically", async () => {

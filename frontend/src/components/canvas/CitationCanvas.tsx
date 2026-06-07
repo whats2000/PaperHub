@@ -46,6 +46,7 @@ export function CitationCanvas() {
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
+  const setActivePaperId = useCanvasStore((s) => s.setActivePaperId);
 
   // Derive the active session's enabled references (mirror ReferenceSourcesPanel)
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -230,6 +231,13 @@ export function CitationCanvas() {
     for (const pid of refIds) ensureDoc(pid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refIdsKey]);
+
+  // Publish the paper this canvas is currently showing (null when closed) so the
+  // References panel can mark the active row. `setActivePaperId` is a Zustand
+  // action, not a React setter, so calling it in the effect body is fine.
+  useEffect(() => {
+    setActivePaperId(open ? effectivePaperId : null);
+  }, [open, effectivePaperId, setActivePaperId]);
 
   const handleTabClick = (pid: number) => {
     // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
