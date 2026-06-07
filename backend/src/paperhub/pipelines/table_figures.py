@@ -17,6 +17,7 @@ as-is), and the whole pass is a no-op when ``pdflatex`` is absent.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -157,6 +158,14 @@ def _compile_table_to_png(
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         (tmpdir / "tbl.tex").write_text(standalone_tex, encoding="utf-8")
+        # Local class/style files (cvpr.sty, fairmeta.cls, …) live in the
+        # paper's source dir (= png_path.parent), not the isolated temp dir, so
+        # the paper preamble's \usepackage{cvpr} would fail "File not found".
+        # Point TEXINPUTS at that dir; the trailing os.pathsep keeps the default
+        # texmf search path so standard packages still resolve.
+        env = dict(os.environ)
+        prior = env.get("TEXINPUTS", "")
+        env["TEXINPUTS"] = str(png_path.parent.resolve()) + os.pathsep + prior
         try:
             proc = subprocess.run(
                 ["pdflatex", "-interaction=nonstopmode", "tbl.tex"],
@@ -167,6 +176,7 @@ def _compile_table_to_png(
                 errors="replace",
                 timeout=_PDFLATEX_TIMEOUT_SECONDS,
                 check=False,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             logger.warning(
@@ -238,7 +248,29 @@ def rasterize_complex_tables(
         parts.append(f"\\includegraphics{{{png_name}}}" if ok else tex[start:end])
         last_end = end
     parts.append(tex[last_end:])
-    return "".join(parts)
+    return _unwrap_fitting_boxes("".join(parts))
+
+
+# Width-fitting wrappers (\resizebox{W}{H}{…}, \scalebox{f}{…},
+# \adjustbox{key}{…}) commonly wrap wide tables. pandoc drops the macro AND its
+# content, so a rasterised table left inside one vanishes from the HTML
+# (arXiv:2602.20200's LIBERO tables). The table is now an image that the Canvas
+# CSS scales to the panel width, so the box is redundant — unwrap it around OUR
+# generated image (the controlled `table-fig-NNN.png` pattern only).
+_FITTING_BOX_RE = re.compile(
+    r"\\(?:resizebox|scalebox|adjustbox)\s*(?:\{[^{}]*\}){1,2}\s*"
+    r"\{\s*(?:%[^\n]*\n\s*)?"
+    r"(\\includegraphics\{table-fig-\d+\.png\})"
+    r"\s*(?:%[^\n]*\n\s*)?\}",
+    re.DOTALL,
+)
+
+
+def _unwrap_fitting_boxes(tex: str) -> str:
+    """Strip a width-fitting box (\\resizebox/\\scalebox/\\adjustbox) that wraps
+    only one of our rasterised-table images, leaving the bare
+    ``\\includegraphics`` (pandoc would otherwise drop the whole box)."""
+    return _FITTING_BOX_RE.sub(r"\1", tex)
 
 
 __all__ = ["rasterize_complex_tables"]

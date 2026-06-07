@@ -8,8 +8,40 @@ from paperhub.pipelines.table_figures import (
     _compile_table_to_png,
     _find_table_envs,
     _is_hostile,
+    _unwrap_fitting_boxes,
     rasterize_complex_tables,
 )
+
+
+def test_unwrap_resizebox_around_table_image() -> None:
+    # The exact shape pandoc drops (arXiv:2602.20200's LIBERO table): a
+    # \resizebox wrapping our rasterised-table image, with % line-comments.
+    tex = (
+        "\\resizebox{\\linewidth}{!}{%\n"
+        "\\includegraphics{table-fig-001.png}%\n"
+        "}"
+    )
+    assert _unwrap_fitting_boxes(tex) == "\\includegraphics{table-fig-001.png}"
+
+
+def test_unwrap_scalebox_and_adjustbox_around_table_image() -> None:
+    assert (
+        _unwrap_fitting_boxes("\\scalebox{0.8}{\\includegraphics{table-fig-002.png}}")
+        == "\\includegraphics{table-fig-002.png}"
+    )
+    assert (
+        _unwrap_fitting_boxes(
+            "\\adjustbox{width=\\linewidth}{\\includegraphics{table-fig-003.png}}"
+        )
+        == "\\includegraphics{table-fig-003.png}"
+    )
+
+
+def test_unwrap_leaves_non_table_figures_alone() -> None:
+    # A \resizebox around a REAL figure (not our table-fig-N image) must NOT be
+    # unwrapped — only our generated table images are.
+    tex = "\\resizebox{\\linewidth}{!}{\\includegraphics{figure3.png}}"
+    assert _unwrap_fitting_boxes(tex) == tex
 
 # ---------------------------------------------------------------------------
 # Task 1: Hostility classifier
