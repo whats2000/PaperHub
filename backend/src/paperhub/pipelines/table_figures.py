@@ -35,3 +35,53 @@ def _is_hostile(env_name: str, body: str) -> bool:
     if _HOSTILE_BODY_RE.search(body):
         return True
     return bool(_MULTICOLUMN_RE.search(body) and _CMIDRULE_RE.search(body))
+
+
+# Match \begin{<name>} where <name> is a table family env. Order the
+# alternation so the starred / x variants win over the bare "tabular".
+_BEGIN_RE = re.compile(r"\\begin\{(tabular\*|tabularx|tabular)\}")
+
+
+def _matching_end(tex: str, name: str, after: int) -> int:
+    r"""Return the index just past the ``\end{name}`` matching the
+    ``\begin{name}`` whose body starts at ``after``, counting same-name nesting.
+    Returns -1 if unbalanced."""
+    begin_tok = "\\begin{" + name + "}"
+    end_tok = "\\end{" + name + "}"
+    depth = 1
+    i = after
+    while i < len(tex):
+        b = tex.find(begin_tok, i)
+        e = tex.find(end_tok, i)
+        if e == -1:
+            return -1
+        if b != -1 and b < e:
+            depth += 1
+            i = b + len(begin_tok)
+        else:
+            depth -= 1
+            if depth == 0:
+                return e + len(end_tok)
+            i = e + len(end_tok)
+    return -1
+
+
+def _find_table_envs(tex: str) -> list[tuple[int, int, str]]:
+    r"""Find every OUTERMOST tabular-family environment as ``(start, end,
+    name)``. Env-depth-aware: a ``tabular`` nested inside a ``tabular*`` is part
+    of the outer match, not returned separately (we jump past each outer env).
+    Unbalanced begins are skipped."""
+    envs: list[tuple[int, int, str]] = []
+    i = 0
+    while True:
+        m = _BEGIN_RE.search(tex, i)
+        if m is None:
+            break
+        name = m.group(1)
+        end = _matching_end(tex, name, m.end())
+        if end == -1:
+            i = m.end()
+            continue
+        envs.append((m.start(), end, name))
+        i = end  # skip the whole env so nested children aren't double-counted
+    return envs
