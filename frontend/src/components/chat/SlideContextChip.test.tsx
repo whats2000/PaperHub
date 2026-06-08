@@ -17,4 +17,12 @@ describe("SlideContextChip", () => {
     expect(screen.getByRole("button")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText(/Slide 3/)).toBeInTheDocument();
   });
+
+  it("exposes a context hint via aria-label", () => {
+    render(<SlideContextChip page={2} attached onToggle={() => {}} />);
+    expect(screen.getByRole("button")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("context"),
+    );
+  });
 });
