@@ -53,12 +53,15 @@ export function useChatStream() {
 
     // When this session has a deck open, tell the backend which slide is on
     // screen so the Report Agent's deck-command classifier can resolve
-    // "edit this slide" to the visible page.
+    // "edit this slide" to the visible page, and whether the slide is
+    // attached as context for the QA agent.
     const slides = useSlidesStore.getState();
+    const hasDeck =
+      backendSessionId !== null && !!slides.deckBySession[backendSessionId];
     const currentViewPage =
-      backendSessionId !== null && slides.deckBySession[backendSessionId]
-        ? (slides.currentPageBySession[backendSessionId] ?? 1)
-        : undefined;
+      hasDeck ? (slides.currentPageBySession[backendSessionId] ?? 1) : undefined;
+    const slideAttached =
+      hasDeck ? (slides.slideAttachedBySession[backendSessionId] ?? true) : false;
 
     try {
       await streamChat(
@@ -67,6 +70,7 @@ export function useChatStream() {
           user_message: userMessage,
           history,
           ...(currentViewPage !== undefined ? { current_view_page: currentViewPage } : {}),
+          slide_attached: slideAttached,
         },
         {
           onEvent: (event, data) => {

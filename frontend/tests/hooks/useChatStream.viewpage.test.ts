@@ -17,7 +17,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   server.resetHandlers(chitchatHappyPath);
   useChatStore.getState().reset();
-  useSlidesStore.setState({ open: false, deckBySession: {}, currentPageBySession: {} });
+  useSlidesStore.setState({ open: false, deckBySession: {}, currentPageBySession: {}, slideAttachedBySession: {} });
 });
 
 const enc = new TextEncoder();
@@ -112,5 +112,72 @@ describe("useChatStream current_view_page threading", () => {
       expect(captured.body).toBeDefined();
     });
     expect("current_view_page" in captured.body!).toBe(false);
+  });
+
+  it("sends slide_attached=true (default) when a deck is open and attach is unset", async () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    server.resetHandlers(captureBodyHandler(captured));
+
+    const sessionId = useChatStore.getState().newSession();
+    // Establish backend_session_id so deckBySession is keyed by it.
+    useChatStore.getState().patchSessionBackendId(sessionId, 11);
+    useSlidesStore.getState().setDeck(11, fakeDeck);
+    useSlidesStore.getState().setCurrentPage(11, 1);
+    // slideAttachedBySession[11] is unset → treated as true (attached)
+
+    const { result } = renderHook(() => useChatStream());
+
+    await act(async () => {
+      await result.current.send(sessionId, "edit this slide");
+    });
+
+    await waitFor(() => {
+      expect(captured.body).toBeDefined();
+    });
+    expect(captured.body!.slide_attached).toBe(true);
+    expect(captured.body!.current_view_page).toBe(1);
+  });
+
+  it("sends slide_attached=false when the attach toggle is explicitly off", async () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    server.resetHandlers(captureBodyHandler(captured));
+
+    const sessionId = useChatStore.getState().newSession();
+    useChatStore.getState().patchSessionBackendId(sessionId, 11);
+    useSlidesStore.getState().setDeck(11, fakeDeck);
+    useSlidesStore.getState().setCurrentPage(11, 3);
+    useSlidesStore.getState().setSlideAttached(11, false);
+
+    const { result } = renderHook(() => useChatStream());
+
+    await act(async () => {
+      await result.current.send(sessionId, "general question");
+    });
+
+    await waitFor(() => {
+      expect(captured.body).toBeDefined();
+    });
+    expect(captured.body!.slide_attached).toBe(false);
+    expect(captured.body!.current_view_page).toBe(3);
+  });
+
+  it("sends slide_attached=false when no deck is open", async () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    server.resetHandlers(captureBodyHandler(captured));
+
+    const sessionId = useChatStore.getState().newSession();
+    useChatStore.getState().patchSessionBackendId(sessionId, 11);
+    // No deck set for session 11.
+
+    const { result } = renderHook(() => useChatStream());
+
+    await act(async () => {
+      await result.current.send(sessionId, "hello");
+    });
+
+    await waitFor(() => {
+      expect(captured.body).toBeDefined();
+    });
+    expect(captured.body!.slide_attached).toBe(false);
   });
 });
