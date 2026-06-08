@@ -20,6 +20,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from paperhub.db.connection import write_transaction
+
 _FORK_TITLE_PREFIX = "Fork of "
 
 
@@ -55,7 +57,7 @@ async def fork_session(
     *,
     source_session_id: int,
     fork_run_id: int,
-    workspace_dir: Path,
+    workspace_dir: Path,  # used by the deck copy added in Task 2
 ) -> ForkResult:
     # Resolve the fork point first (raises if the run_id is bogus).
     fork_msg_id, forked_text = await _forked_message(
@@ -71,8 +73,7 @@ async def fork_session(
     new_title = f"{_FORK_TITLE_PREFIX}{srow[0]}"
 
     # --- Core copy: atomic. -------------------------------------------------
-    await conn.execute("BEGIN")
-    try:
+    async with write_transaction(conn):
         cur = await conn.execute(
             "INSERT INTO chat_sessions (title) VALUES (?)", (new_title,)
         )
@@ -143,11 +144,6 @@ async def fork_session(
             "WHERE session_id = ?",
             (new_sid, source_session_id),
         )
-
-        await conn.execute("COMMIT")
-    except Exception:
-        await conn.execute("ROLLBACK")
-        raise
 
     # Deck copy (best-effort) is added in Task 2.
 
