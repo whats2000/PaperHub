@@ -286,3 +286,52 @@ async def test_paper_qa_finalizer_empty_memory_context_renders_harmlessly(
     slot = PromptRegistry().get("paper_qa_synthesize/v2")
     rendered = slot.user_template.format(**synth_calls[0]["variables"])
     assert "{memory_context}" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# v2.29 FR-13: slide-aware QA — slide context prepended to subagent query
+# ---------------------------------------------------------------------------
+
+
+async def test_slide_context_reaches_subagent_query(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer, monkeypatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from paperhub.agents import research_graph as rg
+    from paperhub.agents.paper_qa_subagent import PerPaperPicks
+    from paperhub.mcp.registry import MCPRegistry
+    from paperhub.pipelines.paper_pipeline import PaperPipeline
+
+    session_id = await _make_session(migrated_db)
+    captured: dict[str, str] = {}
+
+    async def _fake_resolve(*_a, **_k):
+        return [(15, "FASTerVQ")]
+
+    async def _fake_subagent(*, user_message: str, **_k):
+        captured["user_message"] = user_message
+        return PerPaperPicks(paper_content_id=15, title="FASTerVQ",
+                             picked_chunks=[], rationale="")
+
+    monkeypatch.setattr(rg, "_resolve_enabled_papers", _fake_resolve)
+    monkeypatch.setattr(rg, "run_paper_qa_subagent", _fake_subagent)
+
+    deps = rg.ResearchDeps(
+        adapter=_StubAdapter(["ok"]),  # type: ignore[arg-type]
+        tracer=fake_tracer,
+        paper_qa_model="m",
+        conn=migrated_db,
+        pipeline=MagicMock(spec=PaperPipeline),
+        mcp_registry=MagicMock(spec=MCPRegistry),
+    )
+    graph = rg.build_paper_qa_subgraph(deps)
+    state = {"run_id": fake_tracer._run_id, "branch": "", "session_id": session_id,  # noqa: SLF001
+             "user_message": "explain this graph",
+             "effective_query": "explain the graph on the current slide",
+             "slide_context": "Active slide (page 5) title: FASTerVQ Architecture"}
+    async for _ in graph.astream(state, stream_mode=["values"]):
+        pass
+    assert captured["user_message"].startswith(
+        "Active slide (page 5) title: FASTerVQ Architecture")
+    assert "explain the graph on the current slide" in captured["user_message"]

@@ -69,6 +69,7 @@ from paperhub.agents.research_pipeline import (
     resolve_via_ss,
     synthesize_prose,
 )
+from paperhub.agents.slide_context import slide_aware_query
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
@@ -478,7 +479,7 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
             picks = await run_paper_qa_subagent(
                 paper_content_id=pid,
                 title=title,
-                user_message=effective_query(state),
+                user_message=slide_aware_query(state),
                 tracer=deps.tracer,
                 model=subagent_model,
                 conn=deps.conn,
@@ -531,7 +532,7 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
         collected: list[str] = []
         async for tok in paper_qa_finalize(
             per_paper_picks=picks,
-            user_message=effective_query(state),
+            user_message=slide_aware_query(state),
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.paper_qa_model,
