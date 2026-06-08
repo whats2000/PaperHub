@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import aiosqlite
+import pytest
 
 from paperhub.db.fork import fork_session
-from paperhub.db.migrate import apply_schema
+from paperhub.db.migrate import apply_schema, purge_deleted_sessions
 
 
 async def _seed_paper_content(conn: aiosqlite.Connection, *, title: str) -> int:
@@ -229,3 +231,158 @@ async def test_fork_deck_artifact_failure_yields_deckless_fork(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?",
             (res.new_session_id,)) as cur:
             assert (await cur.fetchone())[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# Deletion side-effects: the fork is deliberately INDEPENDENT of the original.
+# Everything except paper_content is copied (its own messages/runs/decks/
+# deck_slides rows + its own slides/ artifact folder); paper_content is shared
+# but RESTRICT-protected, so it survives as long as either session references
+# it. Deleting one session must never break the other.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_source_with_paper_and_deck(
+    conn: aiosqlite.Connection, tmp_path: Path
+) -> tuple[int, int, Path]:
+    """Source session 1 with a shared paper + a deck (run r1) + a later turn r2.
+    Returns (pc1, r2, src_slides)."""
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('Orig')")
+    await conn.commit()
+    pc1 = await _seed_paper_content(conn, title="P1")
+    await conn.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, ?, 1)",
+        (pc1,))
+    r1 = await _turn(conn, 1, "make slides", "done")
+    src_slides = tmp_path / "chat_session" / "1" / "slides"
+    await _seed_deck(conn, session_id=1, run_id=r1, slides_dir=src_slides)
+    r2 = await _turn(conn, 1, "next", "ok")
+    return pc1, r2, src_slides
+
+
+async def test_fork_survives_source_hard_delete(tmp_path: Path) -> None:
+    """Hard-deleting the ORIGINAL session (FK cascade) leaves the fork's copied
+    rows, its slides dir, and the shared paper_content untouched."""
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        pc1, r2, _ = await _seed_source_with_paper_and_deck(conn, tmp_path)
+        res = await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path)
+        fork_slides = tmp_path / "chat_session" / str(res.new_session_id) / "slides"
+        assert (fork_slides / "deck.tex").exists()
+
+        # Hard-delete the original (cascade papers/messages/runs/decks/deck_slides).
+        await conn.execute("DELETE FROM chat_sessions WHERE id = 1")
+        await conn.commit()
+
+        # Fork session + every copied row survives.
+        async with conn.execute(
+            "SELECT COUNT(*) FROM chat_sessions WHERE id = ?",
+            (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == 1
+        async with conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+            (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == 2  # r1 user+assistant
+        async with conn.execute(
+            "SELECT paper_content_id FROM papers WHERE session_id = ?",
+            (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == pc1
+        async with conn.execute(
+            "SELECT COUNT(*) FROM deck_slides d JOIN decks k ON k.id = d.deck_id "
+            "WHERE k.session_id = ?", (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == 2
+        # Shared paper_content survives (the fork still references it).
+        async with conn.execute(
+            "SELECT COUNT(*) FROM paper_content WHERE id = ?", (pc1,)) as cur:
+            assert (await cur.fetchone())[0] == 1
+        # The fork's OWN deck artifacts on disk are untouched.
+        assert (fork_slides / "deck.tex").exists()
+
+
+async def test_fork_artifacts_survive_source_purge(tmp_path: Path) -> None:
+    """purge_deleted_sessions removes the ORIGINAL's chat_session/<id>/ folder;
+    the fork's own folder + deck rows must survive (this is exactly why the deck
+    artifacts are COPIED into the fork's dir, not shared)."""
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        pc1, r2, src_slides = await _seed_source_with_paper_and_deck(conn, tmp_path)
+        res = await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path)
+        fork_slides = tmp_path / "chat_session" / str(res.new_session_id) / "slides"
+
+        # Tombstone the original in the past (older than the retention window),
+        # then purge — the folder-removal path runs for the original only.
+        await conn.execute(
+            "UPDATE chat_sessions SET deleted_at = datetime('now', '-2 days') "
+            "WHERE id = 1")
+        await conn.commit()
+        n = await purge_deleted_sessions(conn, 1, workspace_dir=tmp_path)
+        assert n == 1
+
+        # Original folder gone; fork folder + deck rows intact.
+        assert not src_slides.exists()
+        assert (fork_slides / "deck.tex").exists()
+        async with conn.execute(
+            "SELECT COUNT(*) FROM decks WHERE session_id = ?",
+            (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == 1
+        async with conn.execute(
+            "SELECT COUNT(*) FROM paper_content WHERE id = ?", (pc1,)) as cur:
+            assert (await cur.fetchone())[0] == 1
+
+
+async def test_source_survives_fork_hard_delete(tmp_path: Path) -> None:
+    """Deleting the FORK leaves the original session + the shared paper_content
+    fully intact (the reverse direction)."""
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        pc1, r2, src_slides = await _seed_source_with_paper_and_deck(conn, tmp_path)
+        res = await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path)
+
+        await conn.execute(
+            "DELETE FROM chat_sessions WHERE id = ?", (res.new_session_id,))
+        await conn.commit()
+
+        # Original is untouched: messages (4), papers row, deck, shared paper.
+        async with conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id = 1") as cur:
+            assert (await cur.fetchone())[0] == 4
+        async with conn.execute(
+            "SELECT COUNT(*) FROM papers WHERE session_id = 1") as cur:
+            assert (await cur.fetchone())[0] == 1
+        async with conn.execute(
+            "SELECT COUNT(*) FROM decks WHERE session_id = 1") as cur:
+            assert (await cur.fetchone())[0] == 1
+        async with conn.execute(
+            "SELECT COUNT(*) FROM paper_content WHERE id = ?", (pc1,)) as cur:
+            assert (await cur.fetchone())[0] == 1
+        assert (src_slides / "deck.tex").exists()
+
+
+async def test_shared_paper_content_restrict_blocks_delete_while_forked(
+    tmp_path: Path,
+) -> None:
+    """The shared paper_content is RESTRICT-protected: forking adds a second
+    reference, so paper_content cannot be deleted while EITHER session keeps it
+    — the fork can never orphan or destroy the original's paper data."""
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        pc1, r2, _ = await _seed_source_with_paper_and_deck(conn, tmp_path)
+        await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path)
+
+        # Two papers rows (original + fork) now reference pc1; RESTRICT blocks
+        # a direct paper_content delete.
+        with pytest.raises(sqlite3.IntegrityError):
+            await conn.execute("DELETE FROM paper_content WHERE id = ?", (pc1,))
+        await conn.rollback()
