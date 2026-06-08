@@ -154,6 +154,16 @@ CREATE TABLE IF NOT EXISTS slide_style_overrides (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Runtime configuration overlay (Plan G / FR-14). Durable source of truth
+-- for editable .env-class config; projected onto os.environ at boot. A row
+-- exists ONLY for keys the user overrode in the Settings panel; absence means
+-- "fall back to backend/.env / built-in default".
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content,
     content='memories',
