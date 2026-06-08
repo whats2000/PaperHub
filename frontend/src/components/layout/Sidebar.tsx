@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { AccountMenu } from "@/components/layout/AccountMenu";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesPanel";
 import { deleteBackendSession, restoreBackendSession } from "@/lib/api";
@@ -268,6 +269,12 @@ export function Sidebar() {
           )}
         </>
       )}
+
+      {/* Footer — account menu (language / theme / settings / about). The
+          Settings store lands in a later task; wire a no-op for now. */}
+      <div className="mt-auto border-t border-border p-2">
+        <AccountMenu collapsed={collapsed} onOpenSettings={() => {}} />
+      </div>
     </div>
   );
 }
