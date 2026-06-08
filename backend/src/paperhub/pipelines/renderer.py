@@ -158,6 +158,69 @@ def _orphaned_env_ends(text: str) -> list[tuple[int, int]]:
     return orphans
 
 
+# pandoc's LaTeX reader understands \newcommand/\def but NOT these package-
+# specific definition forms, so a `#1` parameter reference inside one aborts the
+# WHOLE parse with "unexpected #1" — the paper then degrades to the <pre> dump
+# (arXiv:2404.07214's body `\newcolumntype{P}[1]{...#1...}`, arXiv:2603.03276's
+# `\newtcolorbox{...}[1][]{... title=#1 ...}`). These commands DEFINE column
+# types / coloured boxes and emit nothing themselves, so deleting the definition
+# is safe: the document renders, and any `\begin{name}...\end{name}` usage that
+# follows still emits its content as an ordinary block.
+_MAX_DEF_FIX = 200
+_HOSTILE_DEF_RE = re.compile(
+    r"\\(?:newcolumntype|newtcolorbox|renewtcolorbox|newtcbox|renewtcbox"
+    r"|DeclareTColorBox|NewTColorBox|NewTotalTColorBox|DeclareTotalTColorBox"
+    r"|tcbset)(?![A-Za-z])"
+)
+
+
+def _skip_group(text: str, i: int, open_ch: str, close_ch: str) -> int:
+    r"""Index just after the balanced ``open_ch``…``close_ch`` group starting at
+    ``text[i]`` (escape-aware); returns ``i`` unchanged if ``text[i]`` isn't
+    ``open_ch``."""
+    if i >= len(text) or text[i] != open_ch:
+        return i
+    depth = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\":  # escaped char — skip both
+            i += 2
+            continue
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return i
+
+
+def _pandoc_hostile_def_spans(text: str) -> list[tuple[int, int]]:
+    r"""``(start, end)`` spans of every pandoc-hostile DEFINITION command —
+    ``\newcolumntype`` and the tcolorbox ``\newtcolorbox`` family — whose ``#1``
+    aborts pandoc's parse (see the ``_MAX_DEF_FIX`` block above). Comment-aware.
+    Each span covers the command plus its following ``[..]``/``{..}`` argument
+    groups, so the whole definition is removed as one unit."""
+    spans: list[tuple[int, int]] = []
+    for m in _HOSTILE_DEF_RE.finditer(text):
+        if _is_commented(text, m.start()):
+            continue
+        j = m.end()
+        for _ in range(6):  # \newtcolorbox takes at most ~5 bracketed/braced args
+            k = j
+            while k < len(text) and text[k] in " \t\n":
+                k += 1
+            if k < len(text) and text[k] == "[":
+                j = _skip_group(text, k, "[", "]")
+            elif k < len(text) and text[k] == "{":
+                j = _skip_group(text, k, "{", "}")
+            else:
+                break
+        spans.append((m.start(), j))
+    return spans
+
+
 def render_html(
     *,
     source: Path,
@@ -303,25 +366,42 @@ def _try_pandoc_brace_balanced(
     resource_dir: Path | None,
     macros: dict[str, MacroValue] | None,
 ) -> bool:
-    r"""Retry pandoc once after deleting author typos pandoc rejects but pdflatex
-    tolerates: stray unclosed ``{`` braces AND orphaned ``\end{X}`` (whose
-    ``\begin`` is commented out / missing).
+    r"""Retry pandoc once after deleting constructs pandoc rejects but pdflatex
+    tolerates: stray unclosed ``{`` braces, orphaned ``\end{X}`` (whose
+    ``\begin`` is commented out / missing), AND pandoc-hostile definition
+    commands (``\newcolumntype`` / the ``\newtcolorbox`` family) whose ``#1``
+    aborts the parse.
 
     Returns True iff the repaired source rendered. The temp copy lives beside
     ``source`` so its ``\input`` + relative figure paths still resolve; sentinels
-    are preserved (we only delete the typo'd characters), so chunk anchoring
+    are preserved (we only delete the offending spans), so chunk anchoring
     survives the retry.
     """
     text = source.read_text(encoding="utf-8", errors="ignore")
     brace_positions = _unmatched_open_braces(text)
     end_spans = _orphaned_env_ends(text)
-    if len(brace_positions) > _MAX_BRACE_FIX or len(end_spans) > _MAX_ENV_FIX:
+    def_spans = _pandoc_hostile_def_spans(text)
+    if (
+        len(brace_positions) > _MAX_BRACE_FIX
+        or len(end_spans) > _MAX_ENV_FIX
+        or len(def_spans) > _MAX_DEF_FIX
+    ):
         return False
-    if not brace_positions and not end_spans:
+    if not brace_positions and not end_spans and not def_spans:
         return False
-    # Collect every cut as a (start, end) span and delete in descending order so
-    # earlier indices stay valid. Braces are one char; orphaned \end are a token.
-    cuts = [(p, p + 1) for p in brace_positions] + end_spans
+    # Collect every cut as a (start, end) span (braces are one char; orphaned
+    # \end are a token; hostile defs a multi-line block), MERGE overlaps so a
+    # nested cut can't double-delete, then delete in descending order so earlier
+    # indices stay valid.
+    raw_cuts = sorted(
+        [(p, p + 1) for p in brace_positions] + end_spans + def_spans
+    )
+    cuts: list[tuple[int, int]] = []
+    for s, e in raw_cuts:
+        if cuts and s <= cuts[-1][1]:
+            cuts[-1] = (cuts[-1][0], max(cuts[-1][1], e))
+        else:
+            cuts.append((s, e))
     chars = list(text)
     for s, e in sorted(cuts, key=lambda x: x[0], reverse=True):
         del chars[s:e]
@@ -338,8 +418,9 @@ def _try_pandoc_brace_balanced(
         _externalize_local_images(out_path, resource_dir)
     _inject_mathjax_macros(out_path, macros)
     logger.info(
-        "pandoc succeeded on %s after removing %d stray brace(s) + %d orphaned end(s)",
-        source, len(brace_positions), len(end_spans),
+        "pandoc succeeded on %s after removing %d stray brace(s) + %d orphaned "
+        "end(s) + %d hostile def(s)",
+        source, len(brace_positions), len(end_spans), len(def_spans),
     )
     return True
 

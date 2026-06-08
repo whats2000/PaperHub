@@ -9,6 +9,7 @@ import pytest
 
 from paperhub.pipelines.renderer import (
     _orphaned_env_ends,
+    _pandoc_hostile_def_spans,
     _unclosed_braces,
     render_html,
 )
@@ -40,6 +41,60 @@ def test_orphaned_env_ends_none_when_balanced() -> None:
     assert _orphaned_env_ends(tex) == []
     # A commented \end is ignored (not orphaned), and so is its commented \begin.
     assert _orphaned_env_ends("% \\begin{figure}\n% \\end{figure}\n") == []
+
+
+def test_pandoc_hostile_def_spans_finds_newcolumntype() -> None:
+    # \newcolumntype{P}[1]{...#1...} in the body makes pandoc abort on the #1
+    # (arXiv:2404.07214). The span must cover the whole definition.
+    tex = "before \\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}} after"
+    spans = _pandoc_hostile_def_spans(tex)
+    assert len(spans) == 1
+    s, e = spans[0]
+    assert tex[s:e] == "\\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}}"
+
+
+def test_pandoc_hostile_def_spans_finds_newtcolorbox() -> None:
+    # \newtcolorbox{name}[1][]{... title=#1 ...} (arXiv:2603.03276).
+    tex = (
+        "x\n\\newtcolorbox{promptbox}[1][]{\n  colback=gray!5,\n  title=#1,\n"
+        "  boxrule=0.5pt,\n}\n\\begin{promptbox}[T]y\\end{promptbox}\n"
+    )
+    spans = _pandoc_hostile_def_spans(tex)
+    assert len(spans) == 1
+    s, e = spans[0]
+    assert tex[s:e].startswith("\\newtcolorbox{promptbox}[1][]{")
+    assert tex[s:e].endswith("}")
+    # The usage that follows the definition is left intact (its content renders).
+    assert "\\begin{promptbox}" in tex[e:]
+
+
+def test_pandoc_hostile_def_spans_ignores_commented_and_newcommand() -> None:
+    # A commented definition is invisible to pandoc — don't touch it.
+    assert _pandoc_hostile_def_spans("% \\newcolumntype{P}[1]{p{#1}}\n") == []
+    # \newcommand/\def are understood by pandoc — must NOT be stripped.
+    assert _pandoc_hostile_def_spans("\\newcommand{\\x}[1]{y#1}") == []
+    assert _pandoc_hostile_def_spans("\\tcbsetfoo{a}") == []  # not a real hostile cmd
+
+
+def test_render_latex_strips_hostile_def_and_retries_pandoc(tmp_path: Path) -> None:
+    """A body-level `\\newcolumntype{P}[1]{...#1...}` (arXiv:2404.07214) makes
+    pandoc abort the whole parse on the `#1`. render_html must strip the hostile
+    definition + retry so it produces structured HTML, not the <pre> dump."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        "\\section{Introduction}\nText before.\n\n"
+        "\\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}}\n\n"
+        "\\section{Method}\nText after.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    assert "<pre" not in html
+    assert "<h1" in html or "<h2" in html
+    assert "Introduction" in html and "Method" in html
 
 
 def test_render_latex_repairs_orphaned_env_end_and_retries_pandoc(tmp_path: Path) -> None:
