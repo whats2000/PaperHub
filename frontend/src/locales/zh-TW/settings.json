@@ -1,0 +1,12 @@
+{
+  "restartBadge": "重新啟動以套用",
+  "restartPending": "重新啟動後端以套用：{{keys}}",
+  "replace": "更換",
+  "remove": "移除",
+  "add": "新增",
+  "setIndicator": "••• 已設定",
+  "notSet": "未設定",
+  "providerKeyPlaceholder": "PROVIDER_API_KEY",
+  "valuePlaceholder": "值",
+  "saveFailed": "無法儲存設定"
+}

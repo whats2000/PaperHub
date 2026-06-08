@@ -1,0 +1,12 @@
+{
+  "restartBadge": "再起動して適用",
+  "restartPending": "バックエンドを再起動して適用：{{keys}}",
+  "replace": "変更",
+  "remove": "削除",
+  "add": "追加",
+  "setIndicator": "••• 設定済み",
+  "notSet": "未設定",
+  "providerKeyPlaceholder": "PROVIDER_API_KEY",
+  "valuePlaceholder": "値",
+  "saveFailed": "設定を保存できませんでした"
+}

@@ -1,0 +1,12 @@
+{
+  "restartBadge": "重启以应用",
+  "restartPending": "重启后端以应用：{{keys}}",
+  "replace": "更换",
+  "remove": "移除",
+  "add": "添加",
+  "setIndicator": "••• 已设置",
+  "notSet": "未设置",
+  "providerKeyPlaceholder": "PROVIDER_API_KEY",
+  "valuePlaceholder": "值",
+  "saveFailed": "无法保存设置"
+}

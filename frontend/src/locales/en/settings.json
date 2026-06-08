@@ -1,0 +1,12 @@
+{
+  "restartBadge": "Restart to apply",
+  "restartPending": "Restart the backend to apply: {{keys}}",
+  "replace": "Replace",
+  "remove": "Remove",
+  "add": "Add",
+  "setIndicator": "••• set",
+  "notSet": "not set",
+  "providerKeyPlaceholder": "PROVIDER_API_KEY",
+  "valuePlaceholder": "value",
+  "saveFailed": "Couldn't save the setting"
+}
