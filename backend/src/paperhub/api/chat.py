@@ -450,6 +450,28 @@ async def paper_qa_stream(
         yield FinalOnlyMessage(final_text)
 
 
+def _build_slide_qa_answerer(
+    *, adapter: Any, tracer: Tracer, model: str, conn: aiosqlite.Connection
+) -> Any:
+    """Return an async callable answering a slide question via the shared
+    paper_qa subgraph; returns the full text (FinalOnlyMessage content or the
+    joined token stream). Trace steps land in tool_calls (drained end-of-turn).
+    """
+    async def _answer(state: AgentState) -> str:
+        chunks: list[str] = []
+        async for item in paper_qa_stream(
+            state, adapter=adapter, tracer=tracer, model=model, conn=conn,
+        ):
+            if isinstance(item, ToolStepYield):
+                continue
+            if isinstance(item, FinalOnlyMessage):
+                return item.content
+            chunks.append(item)
+        return "".join(chunks)
+
+    return _answer
+
+
 async def report_stream(
     state: AgentState,
     *,
@@ -478,6 +500,10 @@ async def report_stream(
         resolve_model=settings.report_resolve_model,
         recall_enabled=settings.memory_recall_enabled,
         slide_style_profile_name=settings.slide_style_profile,
+        answer_slide_question=_build_slide_qa_answerer(
+            adapter=adapter, tracer=tracer,
+            model=settings.paper_qa_model, conn=conn,
+        ),
     )
     graph = build_report_subgraph(deps)
     final_text = ""

@@ -285,3 +285,20 @@ def test_chat_request_defaults_slide_attached_false() -> None:
     assert req.slide_attached is False
     req2 = ChatRequest(user_message="hi", slide_attached=True, current_view_page=5)
     assert req2.slide_attached is True
+
+
+# ---------------------------------------------------------------------------
+# Task 8: _build_slide_qa_answerer closure joins paper_qa stream
+# ---------------------------------------------------------------------------
+
+async def test_answer_slide_question_closure_joins_paper_qa(monkeypatch: Any) -> None:
+    from paperhub.api import chat as chatmod
+
+    async def _fake_qa_stream(state: Any, **_k: Any) -> AsyncIterator[Any]:
+        yield "The graph "
+        yield "shows X [chunk:9]."
+
+    monkeypatch.setattr(chatmod, "paper_qa_stream", _fake_qa_stream)
+    closure = chatmod._build_slide_qa_answerer(
+        adapter=object(), tracer=object(), model="m", conn=object())
+    assert await closure({"session_id": 1}) == "The graph shows X [chunk:9]."
