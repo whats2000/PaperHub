@@ -14,7 +14,7 @@ export interface ChatRequestBody {
   /** 1-based page on screen in the Slides panel; sent only when a deck is open. */
   current_view_page?: number;
   /** Whether the on-screen slide is attached as context for the QA agent.
-   *  False when no deck is open. Undefined (i.e. no deck) → backend treats as false. */
+   *  Always sent; false when no deck is open. Backend default: false. */
   slide_attached: boolean;
 }
 
