@@ -707,3 +707,24 @@ async def test_fork_endpoint_400_on_bad_run_id(
         await conn.commit()
     resp = await sessions_client.post("/sessions/1/fork", json={"run_id": 4242})
     assert resp.status_code == 400
+
+
+async def test_fork_endpoint_404_on_soft_deleted_session(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """Forking a tombstoned session must 404 — it's invisible in GET /sessions,
+    so a stale client id must not resurrect its history as a live fork."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await conn.execute(
+            "INSERT INTO chat_sessions (title, deleted_at) "
+            "VALUES ('Gone', datetime('now'))")
+        c = await conn.execute("INSERT INTO runs (session_id, status) VALUES (1, 'ok')")
+        r1 = int(c.lastrowid)
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'user', 'q', ?)", (r1,))
+        await conn.commit()
+    resp = await sessions_client.post("/sessions/1/fork", json={"run_id": r1})
+    assert resp.status_code == 404

@@ -414,8 +414,13 @@ async def fork_session_endpoint(
     """
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
+        # 404 (not 400) when the session is gone/tombstoned: fork_session raises
+        # ValueError for BOTH "missing session" and "bad run_id", but only the
+        # latter is a client 400. A soft-deleted session is invisible in
+        # GET /sessions, so forking it must 404 too (not resurrect its history).
         async with conn.execute(
-            "SELECT 1 FROM chat_sessions WHERE id = ?", (session_id,)
+            "SELECT 1 FROM chat_sessions WHERE id = ? AND deleted_at IS NULL",
+            (session_id,),
         ) as cur:
             if await cur.fetchone() is None:
                 raise HTTPException(404, f"chat_sessions row {session_id} not found")
