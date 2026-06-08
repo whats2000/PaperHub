@@ -1,0 +1,43 @@
+{
+  "panel": {
+    "noSession": "Start or pick a chat to manage its references.",
+    "addFromLibrary": "Add from library",
+    "empty": "No papers attached to this session yet.",
+    "toggleAria": "Toggle {{title}}",
+    "openInCanvasActiveAria": "{{title}} is open in canvas",
+    "openInCanvasAria": "Open {{title}} in canvas",
+    "showingInCanvas": "Showing in canvas",
+    "openInCanvas": "Open in canvas",
+    "removeAria": "Remove {{title}}",
+    "remove": "Remove"
+  },
+  "library": {
+    "title": "Add from Library",
+    "close": "Close library browser",
+    "searchPlaceholder": "Search title or abstract…",
+    "searchAria": "Search library",
+    "loading": "Loading…",
+    "noResults": "No results found.",
+    "emptyForSession": "Library is empty for this session.",
+    "attachAria": "Attach {{title}}",
+    "attach": "Attach",
+    "adding": "Adding…",
+    "deleteAria": "Delete {{title}} from library",
+    "deleteTitle": "Delete from library (test-only)",
+    "cancel": "Cancel",
+    "confirmDeleteAria": "Confirm delete from library",
+    "confirmDeleteBody": "Delete this paper from the library? Removes the cached source, chunks, and embeddings. Cannot be undone.",
+    "delete": "Delete",
+    "confirmForceDeleteAria": "Confirm force delete from library",
+    "forceDeleteBody_one": "Still attached to {{count}} session. Force-delete will detach from all of them and purge the paper.",
+    "forceDeleteBody_other": "Still attached to {{count}} sessions. Force-delete will detach from all of them and purge the paper.",
+    "forceDelete": "Force delete"
+  },
+  "toast": {
+    "attached": "Added \"{{title}}\" to this session",
+    "attachFailed": "Failed to attach \"{{title}}\": {{error}}",
+    "deletedForced": "Deleted (forced detach)",
+    "deleted": "Deleted from library",
+    "deleteFailed": "Delete failed"
+  }
+}

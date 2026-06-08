@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ export function LibraryBrowserModal({
   backendSessionId,
   onAttached,
 }: Props) {
+  const { t } = useTranslation("references");
   const [q, setQ] = useState("");
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -117,10 +119,13 @@ export function LibraryBrowserModal({
         prev.filter((x) => x.paper_content_id !== item.paper_content_id),
       );
       onAttached();
-      toast.success(`Added "${item.title}" to this session`);
+      toast.success(t("toast.attached", { title: item.title }));
     } catch (err) {
       toast.error(
-        `Failed to attach "${item.title}": ${err instanceof Error ? err.message : String(err)}`,
+        t("toast.attachFailed", {
+          title: item.title,
+          error: err instanceof Error ? err.message : String(err),
+        }),
       );
     } finally {
       setAttachingId(null);
@@ -139,7 +144,9 @@ export function LibraryBrowserModal({
     try {
       await deleteLibraryPaper(pcId, force);
       setItems((prev) => prev.filter((x) => x.paper_content_id !== pcId));
-      toast.success(force ? "Deleted (forced detach)" : "Deleted from library");
+      toast.success(
+        force ? t("toast.deletedForced") : t("toast.deleted"),
+      );
     } catch (err) {
       if (err instanceof PaperInUseByOtherSessions) {
         // Promote to force-confirm stage; keep the row visible.
@@ -150,7 +157,7 @@ export function LibraryBrowserModal({
         });
         return;
       }
-      toast.error("Delete failed", {
+      toast.error(t("toast.deleteFailed"), {
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -175,28 +182,28 @@ export function LibraryBrowserModal({
       {/* Modal panel */}
       <div
         role="dialog"
-        aria-label="Add from Library"
+        aria-label={t("library.title")}
         className="relative z-10 bg-background rounded-xl border border-border shadow-xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col gap-4"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold leading-none tracking-tight">
-            Add from Library
+            {t("library.title")}
           </h2>
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onClose}
-            aria-label="Close library browser"
+            aria-label={t("library.close")}
           >
             <X className="h-4 w-4" />
           </Button>
         </div>
 
         <Input
-          placeholder="Search title or abstract…"
+          placeholder={t("library.searchPlaceholder")}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          aria-label="Search library"
+          aria-label={t("library.searchAria")}
         />
 
         <div
@@ -205,12 +212,12 @@ export function LibraryBrowserModal({
         >
           {loading && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              Loading…
+              {t("library.loading")}
             </p>
           )}
           {!loading && items.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              {q ? "No results found." : "Library is empty for this session."}
+              {q ? t("library.noResults") : t("library.emptyForSession")}
             </p>
           )}
           {items.map((item) => {
@@ -246,9 +253,11 @@ export function LibraryBrowserModal({
                     variant="secondary"
                     disabled={attachingId === item.paper_content_id || isConfirming || isDeleting}
                     onClick={() => void handleAttach(item)}
-                    aria-label={`Attach ${item.title}`}
+                    aria-label={t("library.attachAria", { title: item.title })}
                   >
-                    {attachingId === item.paper_content_id ? "Adding…" : "Attach"}
+                    {attachingId === item.paper_content_id
+                      ? t("library.adding")
+                      : t("library.attach")}
                   </Button>
                   <Button
                     size="icon-sm"
@@ -257,8 +266,8 @@ export function LibraryBrowserModal({
                     onClick={() =>
                       setDeleteState({ stage: "prompt", pcId: item.paper_content_id })
                     }
-                    aria-label={`Delete ${item.title} from library`}
-                    title="Delete from library (test-only)"
+                    aria-label={t("library.deleteAria", { title: item.title })}
+                    title={t("library.deleteTitle")}
                     className="text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -268,12 +277,11 @@ export function LibraryBrowserModal({
                 {isConfirming && deleteState.stage === "prompt" && (
                   <div
                     role="alertdialog"
-                    aria-label="Confirm delete from library"
+                    aria-label={t("library.confirmDeleteAria")}
                     className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs space-y-2"
                   >
                     <p className="text-foreground">
-                      Delete this paper from the library? Removes the cached source,
-                      chunks, and embeddings. Cannot be undone.
+                      {t("library.confirmDeleteBody")}
                     </p>
                     <div className="flex justify-end gap-2">
                       <Button
@@ -281,14 +289,14 @@ export function LibraryBrowserModal({
                         variant="ghost"
                         onClick={() => setDeleteState(null)}
                       >
-                        Cancel
+                        {t("library.cancel")}
                       </Button>
                       <Button
                         size="xs"
                         variant="destructive"
                         onClick={() => void performDelete(item.paper_content_id, false)}
                       >
-                        Delete
+                        {t("library.delete")}
                       </Button>
                     </div>
                   </div>
@@ -297,13 +305,13 @@ export function LibraryBrowserModal({
                 {isConfirming && deleteState.stage === "force" && (
                   <div
                     role="alertdialog"
-                    aria-label="Confirm force delete from library"
+                    aria-label={t("library.confirmForceDeleteAria")}
                     className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs space-y-2"
                   >
                     <p className="text-foreground">
-                      Still attached to {deleteState.sessionCount} session
-                      {deleteState.sessionCount === 1 ? "" : "s"}. Force-delete
-                      will detach from all of them and purge the paper.
+                      {t("library.forceDeleteBody", {
+                        count: deleteState.sessionCount,
+                      })}
                     </p>
                     <div className="flex justify-end gap-2">
                       <Button
@@ -311,14 +319,14 @@ export function LibraryBrowserModal({
                         variant="ghost"
                         onClick={() => setDeleteState(null)}
                       >
-                        Cancel
+                        {t("library.cancel")}
                       </Button>
                       <Button
                         size="xs"
                         variant="destructive"
                         onClick={() => void performDelete(item.paper_content_id, true)}
                       >
-                        Force delete
+                        {t("library.forceDelete")}
                       </Button>
                     </div>
                   </div>

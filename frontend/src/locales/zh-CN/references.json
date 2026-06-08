@@ -1,0 +1,43 @@
+{
+  "panel": {
+    "noSession": "开始或选择一个对话以管理其参考文献。",
+    "addFromLibrary": "从文献库添加",
+    "empty": "尚未有论文附加到此对话。",
+    "toggleAria": "切换 {{title}}",
+    "openInCanvasActiveAria": "{{title}} 已在画布中打开",
+    "openInCanvasAria": "在画布中打开 {{title}}",
+    "showingInCanvas": "显示于画布",
+    "openInCanvas": "在画布中打开",
+    "removeAria": "移除 {{title}}",
+    "remove": "移除"
+  },
+  "library": {
+    "title": "从文献库添加",
+    "close": "关闭文献库浏览器",
+    "searchPlaceholder": "搜索标题或摘要…",
+    "searchAria": "搜索文献库",
+    "loading": "加载中…",
+    "noResults": "未找到结果。",
+    "emptyForSession": "此对话的文献库为空。",
+    "attachAria": "附加 {{title}}",
+    "attach": "附加",
+    "adding": "添加中…",
+    "deleteAria": "从文献库删除 {{title}}",
+    "deleteTitle": "从文献库删除（仅供测试）",
+    "cancel": "取消",
+    "confirmDeleteAria": "确认从文献库删除",
+    "confirmDeleteBody": "要从文献库删除这篇论文吗？将移除缓存的来源、分块与嵌入内容。此操作无法撤销。",
+    "delete": "删除",
+    "confirmForceDeleteAria": "确认从文献库强制删除",
+    "forceDeleteBody_one": "仍附加于 {{count}} 个对话。强制删除将从所有对话中卸除并清除此论文。",
+    "forceDeleteBody_other": "仍附加于 {{count}} 个对话。强制删除将从所有对话中卸除并清除此论文。",
+    "forceDelete": "强制删除"
+  },
+  "toast": {
+    "attached": "已将“{{title}}”添加到此对话",
+    "attachFailed": "附加“{{title}}”失败：{{error}}",
+    "deletedForced": "已删除（强制卸除）",
+    "deleted": "已从文献库删除",
+    "deleteFailed": "删除失败"
+  }
+}

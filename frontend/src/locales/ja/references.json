@@ -1,0 +1,43 @@
+{
+  "panel": {
+    "noSession": "チャットを開始または選択して、その参考文献を管理してください。",
+    "addFromLibrary": "ライブラリから追加",
+    "empty": "このセッションにはまだ論文が添付されていません。",
+    "toggleAria": "{{title}} を切り替える",
+    "openInCanvasActiveAria": "{{title}} はキャンバスで開かれています",
+    "openInCanvasAria": "{{title}} をキャンバスで開く",
+    "showingInCanvas": "キャンバスに表示中",
+    "openInCanvas": "キャンバスで開く",
+    "removeAria": "{{title}} を削除",
+    "remove": "削除"
+  },
+  "library": {
+    "title": "ライブラリから追加",
+    "close": "ライブラリブラウザを閉じる",
+    "searchPlaceholder": "タイトルまたは要約を検索…",
+    "searchAria": "ライブラリを検索",
+    "loading": "読み込み中…",
+    "noResults": "結果が見つかりません。",
+    "emptyForSession": "このセッションのライブラリは空です。",
+    "attachAria": "{{title}} を添付",
+    "attach": "添付",
+    "adding": "追加中…",
+    "deleteAria": "{{title}} をライブラリから削除",
+    "deleteTitle": "ライブラリから削除（テスト専用）",
+    "cancel": "キャンセル",
+    "confirmDeleteAria": "ライブラリからの削除を確認",
+    "confirmDeleteBody": "この論文をライブラリから削除しますか？ キャッシュされたソース、チャンク、埋め込みが削除されます。元に戻せません。",
+    "delete": "削除",
+    "confirmForceDeleteAria": "ライブラリからの強制削除を確認",
+    "forceDeleteBody_one": "まだ {{count}} 件のセッションに添付されています。強制削除するとすべてのセッションから切り離され、論文が消去されます。",
+    "forceDeleteBody_other": "まだ {{count}} 件のセッションに添付されています。強制削除するとすべてのセッションから切り離され、論文が消去されます。",
+    "forceDelete": "強制削除"
+  },
+  "toast": {
+    "attached": "「{{title}}」をこのセッションに追加しました",
+    "attachFailed": "「{{title}}」の添付に失敗しました：{{error}}",
+    "deletedForced": "削除しました（強制切り離し）",
+    "deleted": "ライブラリから削除しました",
+    "deleteFailed": "削除に失敗しました"
+  }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ExternalLink, Loader2, PanelRight, Trash2 } from "lucide-react";
 
 import type { ReferenceItem } from "@/types/domain";
@@ -26,6 +27,7 @@ interface Props {
  * Canvas, Plan F's Slide Preview, and Plan G's Compare Split.
  */
 export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
+  const { t } = useTranslation("references");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
 
@@ -107,7 +109,7 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
   if (activeSession === null) {
     return (
       <p className="text-xs text-muted-foreground text-center px-4 py-8">
-        Start or pick a chat to manage its references.
+        {t("panel.noSession")}
       </p>
     );
   }
@@ -126,7 +128,7 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
           {sessionLoading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
           ) : null}
-          Add from library
+          {t("panel.addFromLibrary")}
         </Button>
       </div>
 
@@ -134,7 +136,7 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
       <div className="flex-1 overflow-y-auto">
         {refs.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center px-4 py-8">
-            No papers attached to this session yet.
+            {t("panel.empty")}
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -152,7 +154,7 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                 <Switch
                   checked={ref.enabled}
                   onCheckedChange={(checked) => void handleToggle(ref, checked)}
-                  aria-label={`Toggle ${ref.title}`}
+                  aria-label={t("panel.toggleAria", { title: ref.title })}
                 />
                 <div className="flex-1 min-w-0">
                   {ref.arxiv_id ? (
@@ -192,11 +194,13 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                     aria-pressed={isActiveOnCanvas}
                     aria-label={
                       isActiveOnCanvas
-                        ? `${ref.title} is open in canvas`
-                        : `Open ${ref.title} in canvas`
+                        ? t("panel.openInCanvasActiveAria", { title: ref.title })
+                        : t("panel.openInCanvasAria", { title: ref.title })
                     }
                     title={
-                      isActiveOnCanvas ? "Showing in canvas" : "Open in canvas"
+                      isActiveOnCanvas
+                        ? t("panel.showingInCanvas")
+                        : t("panel.openInCanvas")
                     }
                     className={
                       isActiveOnCanvas
@@ -210,8 +214,8 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void handleRemove(ref)}
-                    aria-label={`Remove ${ref.title}`}
-                    title="Remove"
+                    aria-label={t("panel.removeAria", { title: ref.title })}
+                    title={t("panel.remove")}
                     className="text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

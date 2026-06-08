@@ -1,0 +1,43 @@
+{
+  "panel": {
+    "noSession": "開始或選擇一個對話以管理其參考文獻。",
+    "addFromLibrary": "從文獻庫加入",
+    "empty": "尚未有論文附加到此對話。",
+    "toggleAria": "切換 {{title}}",
+    "openInCanvasActiveAria": "{{title}} 已在畫布中開啟",
+    "openInCanvasAria": "在畫布中開啟 {{title}}",
+    "showingInCanvas": "顯示於畫布",
+    "openInCanvas": "在畫布中開啟",
+    "removeAria": "移除 {{title}}",
+    "remove": "移除"
+  },
+  "library": {
+    "title": "從文獻庫加入",
+    "close": "關閉文獻庫瀏覽器",
+    "searchPlaceholder": "搜尋標題或摘要…",
+    "searchAria": "搜尋文獻庫",
+    "loading": "載入中…",
+    "noResults": "找不到結果。",
+    "emptyForSession": "此對話的文獻庫是空的。",
+    "attachAria": "附加 {{title}}",
+    "attach": "附加",
+    "adding": "新增中…",
+    "deleteAria": "從文獻庫刪除 {{title}}",
+    "deleteTitle": "從文獻庫刪除（僅供測試）",
+    "cancel": "取消",
+    "confirmDeleteAria": "確認從文獻庫刪除",
+    "confirmDeleteBody": "要從文獻庫刪除這篇論文嗎？將移除快取的來源、分塊與嵌入內容。此動作無法復原。",
+    "delete": "刪除",
+    "confirmForceDeleteAria": "確認從文獻庫強制刪除",
+    "forceDeleteBody_one": "仍附加於 {{count}} 個對話。強制刪除將從所有對話中卸除並清除此論文。",
+    "forceDeleteBody_other": "仍附加於 {{count}} 個對話。強制刪除將從所有對話中卸除並清除此論文。",
+    "forceDelete": "強制刪除"
+  },
+  "toast": {
+    "attached": "已將「{{title}}」加入此對話",
+    "attachFailed": "附加「{{title}}」失敗：{{error}}",
+    "deletedForced": "已刪除（強制卸除）",
+    "deleted": "已從文獻庫刪除",
+    "deleteFailed": "刪除失敗"
+  }
+}
