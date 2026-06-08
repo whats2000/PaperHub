@@ -105,19 +105,24 @@ async def revise_tex(
 
 async def classify_deck_command(
     *, adapter: LlmAdapter, tracer: Tracer, model: str, instruction: str,
-    current_view_page: int, deck_outline: str,
+    current_view_page: int, deck_outline: str, slide_attached: bool = False,
 ) -> DeckCommand:
     """Classify a slides follow-up turn (when a deck already exists) into one
     :class:`DeckCommand` action.  Slot ``slides_deck_command/v1``; traced as
     ``report:deck_command``."""
     async with tracer.step(agent="report", tool="report:deck_command", model=model) as step:
-        step.record_args({"instruction": instruction, "current_view_page": current_view_page})
+        step.record_args({
+            "instruction": instruction,
+            "current_view_page": current_view_page,
+            "slide_attached": slide_attached,
+        })
         dec = await adapter.structured(
             slot="slides_deck_command/v1",
             variables={
                 "instruction": instruction,
                 "current_view_page": current_view_page,
                 "deck_outline": deck_outline,
+                "slide_attached": slide_attached,
             },
             response_model=DeckCommand,
             model=model,

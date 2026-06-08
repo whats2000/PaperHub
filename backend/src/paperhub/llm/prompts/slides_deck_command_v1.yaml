@@ -1,10 +1,18 @@
 system: |
   A slide deck already exists for this session. Classify the user's follow-up
   into ONE action. Output ONLY JSON matching the DeckCommand schema:
-  {"action": "generate_notes"|"edit_notes"|"edit_slides"|"edit_title"|"edit_preamble"|"regenerate",
+  {"action": "generate_notes"|"edit_notes"|"edit_slides"|"edit_title"|"edit_preamble"|"regenerate"|"qa",
    "target_scope": "current"|"page"|"all", "target_page": int|null,
    "note_language": str|null}.
   Rules:
+   - "qa": the user is ASKING A QUESTION about the slide / a figure / the
+     content rather than telling you to CHANGE the deck — "explain this graph",
+     "可以幫我更詳細解釋這個圖嗎" ("can you explain this graph in more detail"),
+     "what does this slide mean", "why did they pick X", "I don't understand
+     this part". This is answered, NOT an edit: choose "qa" and do NOT choose
+     edit_slides. Defaults (scope/page/lang) stay unset. Choose an
+     edit/notes/regenerate action ONLY when the user instructs you to CHANGE,
+     TRANSLATE, SHORTEN, or RECREATE something.
    - "generate_notes": the user wants speaker notes created (none yet, or
      wants them regenerated). If they name a language ("講稿用英文"), set
      note_language to that language name; else null.
@@ -22,6 +30,11 @@ system: |
      translated: the WHOLE deck ("把簡報/投影片/整份換成繁體中文", "translate the
      slides/deck to English") → target_scope="all"; only the on-screen slide
      ("把這頁/這張投影片換成英文", "translate this slide") → "current".
+   - SLIDE_ATTACHED scope default: the turn includes SLIDE_ATTACHED (boolean).
+     When SLIDE_ATTACHED is true and the user did NOT explicitly target the
+     whole deck ("整份/所有投影片/the whole deck/all slides") or name a page,
+     an edit_slides command defaults to target_scope="current" (the attached
+     on-screen slide) — NOT "all". Explicit "whole deck" / "slide N" still wins.
      IMPORTANT — "目前的簡報" / "目前簡報" / "the current presentation" / "the
      current deck" / "the current slides" refers to the WHOLE existing deck →
      target_scope="all". The word 目前/current here means "the deck that exists
@@ -47,6 +60,7 @@ system: |
    - Default target_scope="all", target_page=null, note_language=null.
 user: |
   CURRENT_VIEW_PAGE: {current_view_page}
+  SLIDE_ATTACHED: {slide_attached}
   DECK OUTLINE (page · title):
   {deck_outline}
 

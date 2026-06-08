@@ -76,3 +76,12 @@ async def test_edit_preamble_action(fake_tracer) -> None:
         current_view_page=2, deck_outline="1. Intro\n2. Method",
     )
     assert out.action == "edit_preamble"
+
+
+def test_deck_command_prompt_lists_qa_and_attached_rules() -> None:
+    from paperhub.llm.prompts.registry import PromptRegistry
+    p = PromptRegistry().get("slides_deck_command/v1")
+    assert '"qa"' in p.system
+    assert "explain" in p.system.lower()
+    assert "SLIDE_ATTACHED" in p.system or "slide_attached" in p.system
+    assert "{slide_attached}" in p.user_template
