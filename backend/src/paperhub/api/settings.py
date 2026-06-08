@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from paperhub import settings_overlay as ov
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.settings_registry import (
     PROVIDER_CREDENTIAL_SUGGESTIONS,
     SETTINGS_REGISTRY,
+    coerce_value,
     field_by_key,
     is_allowed_credential_key,
 )
@@ -37,7 +40,7 @@ _CATEGORY_ORDER = [
 ]
 
 
-async def _db_rows(db_path: Any) -> dict[str, str]:
+async def _db_rows(db_path: Path) -> dict[str, str]:
     async with open_db(db_path) as conn, conn.execute(
         "SELECT key, value FROM settings"
     ) as cur:
@@ -94,3 +97,54 @@ async def get_settings() -> dict[str, Any]:
             for c in _CATEGORY_ORDER
         ]
     }
+
+
+@router.patch("")
+async def patch_settings(body: dict[str, str | None]) -> dict[str, Any]:
+    updated: list[str] = []
+    cleared: list[str] = []
+    restart: list[str] = []
+
+    # Validate + coerce ALL keys first (reject the whole request on any error).
+    to_set: dict[str, str] = {}
+    to_clear: list[str] = []
+    for key, raw in body.items():
+        field = field_by_key(key)
+        is_cred = field is None and is_allowed_credential_key(key)
+        if field is None and not is_cred:
+            raise HTTPException(422, f"Unknown or non-editable setting: {key}")
+        if field is not None and field.read_only:
+            raise HTTPException(422, f"{key} is read-only.")
+        if raw is None or raw.strip() == "":
+            to_clear.append(key)
+            continue
+        if field is not None:
+            try:
+                to_set[key] = coerce_value(field, raw)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        else:  # credential: opaque non-empty secret
+            to_set[key] = raw.strip()
+
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        for key, value in to_set.items():
+            await conn.execute(
+                "INSERT INTO settings (key, value, updated_at) "
+                "VALUES (?, ?, datetime('now')) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=datetime('now')",
+                (key, value),
+            )
+            ov.set_override(key, value)
+            updated.append(key)
+            f = field_by_key(key)
+            if f is not None and f.restart_required:
+                restart.append(key)
+        for key in to_clear:
+            await conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+            ov.clear_override(key)
+            cleared.append(key)
+        await conn.commit()
+
+    return {"updated": updated, "cleared": cleared, "restart_required": restart}
