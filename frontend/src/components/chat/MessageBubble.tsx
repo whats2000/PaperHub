@@ -173,16 +173,19 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* Fork (rewind & resend) — hover-revealed on the user's own messages.
-            RotateCcw signals "rewind to here" (Claude-Code idiom), NOT a pencil
-            (which would imply destructive in-place editing). */}
+        {/* Fork (rewind & resend) — hover-revealed at the top-right corner of
+            the user's own message bubble. RotateCcw signals "rewind to here"
+            (Claude-Code idiom), NOT a pencil (which would imply destructive
+            in-place editing). Circular outlined button floating over the corner.
+            z-10 keeps it above adjacent bubbles; bg-background makes the circle
+            opaque over the bubble fill. */}
         {showFork && (
-          <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-7 left-0 flex gap-1">
+          <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -top-3 -right-2 z-10">
             <Button
               type="button"
               size="icon"
-              variant="ghost"
-              className="h-6 w-6"
+              variant="outline"
+              className="h-7 w-7 rounded-full bg-background shadow-sm"
               aria-label="Fork from this message"
               title="Fork from here — branch a new chat and edit this message"
               onClick={onFork}
