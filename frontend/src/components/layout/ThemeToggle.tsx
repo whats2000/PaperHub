@@ -1,5 +1,6 @@
 import { Moon, Sun, Monitor } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,17 +18,19 @@ const NEXT: Record<ThemeChoice, ThemeChoice> = {
   system: "light",
 };
 
-const LABEL: Record<ThemeChoice, string> = {
-  light: "Light theme",
-  dark: "Dark theme",
-  system: "System theme",
+const LABEL_KEY: Record<ThemeChoice, string> = {
+  light: "theme.light",
+  dark: "theme.dark",
+  system: "theme.system",
 };
 
 export function ThemeToggle() {
+  const { t } = useTranslation("states");
   const { theme, setTheme } = useTheme();
   const current = (theme as ThemeChoice | undefined) ?? "system";
   const Icon =
     current === "light" ? Sun : current === "dark" ? Moon : Monitor;
+  const label = t(LABEL_KEY[current]);
 
   return (
     <TooltipProvider>
@@ -37,7 +40,7 @@ export function ThemeToggle() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label={`Theme: ${LABEL[current]}. Click to cycle.`}
+              aria-label={t("theme.buttonAria", { label })}
               onClick={() => setTheme(NEXT[current])}
             />
           }
@@ -45,7 +48,7 @@ export function ThemeToggle() {
           <Icon className="h-4 w-4" />
         </TooltipTrigger>
         <TooltipContent>
-          <p className="text-sm">{LABEL[current]} (click to cycle)</p>
+          <p className="text-sm">{t("theme.tooltip", { label })}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

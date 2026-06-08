@@ -1,0 +1,46 @@
+{
+  "appName": "PaperHub",
+  "sidebar": {
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "sections": "Sidebar sections",
+    "tabChats": "Chats",
+    "tabReferences": "References",
+    "referencesWithCount": "References ({{count}})",
+    "newChat": "New chat",
+    "noChats": "No chats yet.",
+    "deleteChat": "Delete chat: {{title}}",
+    "forkedFrom": "{{title}} (forked from {{parent}})"
+  },
+  "sessionToast": {
+    "deleteFailed": "Failed to delete chat",
+    "deleted": "Chat deleted",
+    "undo": "Undo",
+    "restoreFailed": "Couldn't restore this chat on the server"
+  },
+  "theme": {
+    "light": "Light theme",
+    "dark": "Dark theme",
+    "system": "System theme",
+    "buttonAria": "Theme: {{label}}. Click to cycle.",
+    "tooltip": "{{label}} (click to cycle)"
+  },
+  "empty": {
+    "heading": "What can I help you with?",
+    "findPapers": "Find papers",
+    "findPapersPrompt": "Find recent papers on mixture-of-experts routing",
+    "comparePapers": "Compare papers",
+    "comparePapersPrompt": "How do these two papers differ on expert collapse?",
+    "generateSlides": "Generate slides",
+    "generateSlidesPrompt": "Make slides comparing the methodology of the enabled papers",
+    "libraryStats": "Library stats",
+    "libraryStatsPrompt": "How many papers did I add this week?"
+  },
+  "loading": {
+    "default": "Loading",
+    "streaming": "streaming"
+  },
+  "rejection": {
+    "label": "Rejected: {{reason}}"
+  }
+}

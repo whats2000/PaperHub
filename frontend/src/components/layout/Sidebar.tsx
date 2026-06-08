@@ -7,6 +7,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { useChatStore } from "@/store/chat";
 import { useSettingsStore } from "@/store/settings";
 
 export function Sidebar() {
+  const { t } = useTranslation("states");
   const openSettings = useSettingsStore((s) => s.open);
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -56,16 +58,16 @@ export function Sidebar() {
       void deleteBackendSession(backendSessionId).catch((err: unknown) => {
         // Roll the local removal back so the UI matches the server.
         useChatStore.getState().restoreSession(removed, idx);
-        toast.error("Failed to delete chat", {
+        toast.error(t("sessionToast.deleteFailed"), {
           description: err instanceof Error ? err.message : String(err),
         });
       });
     }
 
-    toast("Chat deleted", {
+    toast(t("sessionToast.deleted"), {
       description: removed.title,
       action: {
-        label: "Undo",
+        label: t("sessionToast.undo"),
         onClick: () => {
           useChatStore.getState().restoreSession(removed, idx);
           // Un-tombstone on the server. An empty session was hard-deleted, so
@@ -76,7 +78,7 @@ export function Sidebar() {
             void restoreBackendSession(backendSessionId).catch((err: unknown) => {
               const msg = err instanceof Error ? err.message : String(err);
               if (!msg.includes("404")) {
-                toast.error("Couldn't restore this chat on the server");
+                toast.error(t("sessionToast.restoreFailed"));
               }
             });
           }
@@ -101,13 +103,15 @@ export function Sidebar() {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border">
-        {!collapsed && <span className="text-lg font-semibold">PaperHub</span>}
+        {!collapsed && (
+          <span className="text-lg font-semibold">{t("appName")}</span>
+        )}
         <div className="flex items-center gap-1 ml-auto">
           {!collapsed && <ThemeToggle />}
           <Button
             variant="ghost"
             size="icon"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
             onClick={toggleSidebar}
           >
             {collapsed ? (
@@ -127,7 +131,7 @@ export function Sidebar() {
             size="icon"
             variant={sidebarTab === "chats" ? "default" : "ghost"}
             onClick={() => expandToTab("chats")}
-            aria-label="Chats"
+            aria-label={t("sidebar.tabChats")}
             aria-current={sidebarTab === "chats" ? "page" : undefined}
             className="w-full"
           >
@@ -137,7 +141,11 @@ export function Sidebar() {
             size="icon"
             variant={sidebarTab === "references" ? "default" : "ghost"}
             onClick={() => expandToTab("references")}
-            aria-label={`References${refsCount > 0 ? ` (${refsCount.toString()})` : ""}`}
+            aria-label={
+              refsCount > 0
+                ? t("sidebar.referencesWithCount", { count: refsCount })
+                : t("sidebar.tabReferences")
+            }
             aria-current={sidebarTab === "references" ? "page" : undefined}
             className="w-full"
           >
@@ -149,7 +157,7 @@ export function Sidebar() {
           {/* Tab bar — single source of truth for which view is active. */}
           <div
             role="tablist"
-            aria-label="Sidebar sections"
+            aria-label={t("sidebar.sections")}
             className="flex border-b border-border"
           >
             <button
@@ -164,7 +172,7 @@ export function Sidebar() {
               }`}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              Chats
+              {t("sidebar.tabChats")}
             </button>
             <button
               type="button"
@@ -178,7 +186,7 @@ export function Sidebar() {
               }`}
             >
               <BookMarked className="h-3.5 w-3.5" />
-              References
+              {t("sidebar.tabReferences")}
               {refsCount > 0 && (
                 <span className="ml-0.5 inline-flex items-center justify-center min-w-[1.25rem] h-4 rounded-full bg-muted px-1 text-[10px] tabular-nums">
                   {refsCount}
@@ -196,7 +204,7 @@ export function Sidebar() {
                   className="w-full justify-start gap-2"
                   onClick={() => newSession()}
                 >
-                  <Plus className="h-4 w-4" /> New chat
+                  <Plus className="h-4 w-4" /> {t("sidebar.newChat")}
                   <kbd className="ml-auto text-[10px] text-muted-foreground border rounded px-1 py-0.5">
                     {kbdNew}
                   </kbd>
@@ -205,7 +213,7 @@ export function Sidebar() {
               <nav className="flex-1 overflow-y-auto px-2 pb-4">
                 {sessions.length === 0 && (
                   <p className="px-2 text-sm text-muted-foreground">
-                    No chats yet.
+                    {t("sidebar.noChats")}
                   </p>
                 )}
                 {sessions.length > 0 && (
@@ -230,7 +238,10 @@ export function Sidebar() {
                             aria-current={isActive ? "page" : undefined}
                             aria-label={
                               parentTitle
-                                ? `${s.title} (forked from ${parentTitle})`
+                                ? t("sidebar.forkedFrom", {
+                                    title: s.title,
+                                    parent: parentTitle,
+                                  })
                                 : undefined
                             }
                             className={`w-full text-left text-sm rounded-md px-3 py-2 pr-8 transition-colors ${
@@ -252,7 +263,7 @@ export function Sidebar() {
                           <button
                             type="button"
                             onClick={(e) => handleDelete(e, s.id)}
-                            aria-label={`Delete chat: ${s.title}`}
+                            aria-label={t("sidebar.deleteChat", { title: s.title })}
                             className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10"
                           >
                             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />

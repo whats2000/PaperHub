@@ -1,0 +1,46 @@
+{
+  "appName": "PaperHub",
+  "sidebar": {
+    "expand": "サイドバーを展開",
+    "collapse": "サイドバーを折りたたむ",
+    "sections": "サイドバーのセクション",
+    "tabChats": "チャット",
+    "tabReferences": "参考文献",
+    "referencesWithCount": "参考文献（{{count}}）",
+    "newChat": "新しいチャット",
+    "noChats": "チャットはまだありません。",
+    "deleteChat": "チャットを削除：{{title}}",
+    "forkedFrom": "{{title}}（{{parent}} から分岐）"
+  },
+  "sessionToast": {
+    "deleteFailed": "チャットの削除に失敗しました",
+    "deleted": "チャットを削除しました",
+    "undo": "元に戻す",
+    "restoreFailed": "サーバー上でこのチャットを復元できませんでした"
+  },
+  "theme": {
+    "light": "ライトテーマ",
+    "dark": "ダークテーマ",
+    "system": "システムテーマ",
+    "buttonAria": "テーマ：{{label}}。クリックで切り替え。",
+    "tooltip": "{{label}}（クリックで切り替え）"
+  },
+  "empty": {
+    "heading": "何かお手伝いできることはありますか？",
+    "findPapers": "論文を探す",
+    "findPapersPrompt": "mixture-of-experts routing に関する最近の論文を探す",
+    "comparePapers": "論文を比較",
+    "comparePapersPrompt": "これら2本の論文は expert collapse についてどう異なりますか？",
+    "generateSlides": "スライドを生成",
+    "generateSlidesPrompt": "有効な論文の手法を比較するスライドを作成",
+    "libraryStats": "ライブラリ統計",
+    "libraryStatsPrompt": "今週は何本の論文を追加しましたか？"
+  },
+  "loading": {
+    "default": "読み込み中",
+    "streaming": "ストリーミング中"
+  },
+  "rejection": {
+    "label": "却下：{{reason}}"
+  }
+}

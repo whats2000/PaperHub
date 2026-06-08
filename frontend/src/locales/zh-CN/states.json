@@ -1,0 +1,46 @@
+{
+  "appName": "PaperHub",
+  "sidebar": {
+    "expand": "展开侧边栏",
+    "collapse": "收起侧边栏",
+    "sections": "侧边栏区块",
+    "tabChats": "对话",
+    "tabReferences": "参考文献",
+    "referencesWithCount": "参考文献（{{count}}）",
+    "newChat": "新对话",
+    "noChats": "暂无对话。",
+    "deleteChat": "删除对话：{{title}}",
+    "forkedFrom": "{{title}}（从 {{parent}} 分支）"
+  },
+  "sessionToast": {
+    "deleteFailed": "删除对话失败",
+    "deleted": "已删除对话",
+    "undo": "撤销",
+    "restoreFailed": "无法在服务器上还原此对话"
+  },
+  "theme": {
+    "light": "浅色主题",
+    "dark": "深色主题",
+    "system": "跟随系统主题",
+    "buttonAria": "主题：{{label}}。点击以切换。",
+    "tooltip": "{{label}}（点击以切换）"
+  },
+  "empty": {
+    "heading": "有什么可以帮您的吗？",
+    "findPapers": "查找论文",
+    "findPapersPrompt": "查找近期关于 mixture-of-experts routing 的论文",
+    "comparePapers": "比较论文",
+    "comparePapersPrompt": "这两篇论文在 expert collapse 上有何不同？",
+    "generateSlides": "生成幻灯片",
+    "generateSlidesPrompt": "制作幻灯片，比较已启用论文的研究方法",
+    "libraryStats": "文库统计",
+    "libraryStatsPrompt": "我这周新增了几篇论文？"
+  },
+  "loading": {
+    "default": "加载中",
+    "streaming": "流式传输中"
+  },
+  "rejection": {
+    "label": "已拒绝：{{reason}}"
+  }
+}

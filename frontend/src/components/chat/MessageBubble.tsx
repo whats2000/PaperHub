@@ -49,6 +49,7 @@ export function MessageBubble({
   onFork,
 }: Props) {
   const { t } = useTranslation("chat");
+  const { t: tStates } = useTranslation("states");
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isOk = message.status === "ok" || (isAssistant && message.status === undefined);
@@ -103,7 +104,7 @@ export function MessageBubble({
           ) : isStreamingEmpty ? (
             // Pre-token waiting state — tight three-dot cluster so it reads
             // as a real "…" typing indicator, not stretched apart.
-            <LoadingDots ariaLabel="streaming" />
+            <LoadingDots ariaLabel={tStates("loading.streaming")} />
           ) : (
             // react-markdown renders to React elements (no dangerouslySetInnerHTML).
             // Raw HTML in source is not rendered as HTML by default — exactly what
