@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+from paperhub import settings_overlay as ov
 from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
 from paperhub.api import decks as decks_api
@@ -47,6 +48,13 @@ from paperhub.pipelines.marker_worker import run_worker as run_marker_worker
 _LOG = logging.getLogger("paperhub.app")
 
 
+async def apply_settings_overlay_at_boot(conn: aiosqlite.Connection) -> None:
+    """Project persisted settings rows onto os.environ at startup (FR-14)."""
+    async with conn.execute("SELECT key, value FROM settings") as cur:
+        rows = {r[0]: r[1] for r in await cur.fetchall()}
+    ov.apply_overlay(rows)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Transient connection drops to upstream LLM providers (Gemini/Vertex
@@ -62,6 +70,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
+        await apply_settings_overlay_at_boot(conn)
         # Reclaim storage from chats soft-deleted longer ago than the
         # retention window (their messages/runs/papers cascade away, and
         # their workspace/chat_session/<id>/ folder is rmtree'd).
