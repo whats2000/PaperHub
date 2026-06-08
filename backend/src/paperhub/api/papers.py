@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -538,18 +537,26 @@ async def serve_asset(paper_content_id: int, asset_path: str) -> FileResponse:
         row = await cur.fetchone()
     if not row or not row[0]:
         raise HTTPException(404, f"no source dir for paper_content {paper_content_id}")
-    # Resolve base + target with realpath (follows symlinks + normalises `..`),
-    # then require the target to stay within base. This is the containment
-    # barrier the path-injection analysis recognises: realpath collapses any
-    # `../` escape and the startswith check rejects anything outside base_dir.
-    # Sync path ops are acceptable here (same scope decision as serve_html/serve_pdf).
-    base_dir = os.path.realpath(str(row[0]))  # noqa: ASYNC240
-    target = os.path.realpath(os.path.join(base_dir, asset_path))  # noqa: ASYNC240
-    if target != base_dir and not target.startswith(base_dir + os.sep):
+    # Path-traversal barrier on the RAW user-supplied component, BEFORE it is
+    # joined into a filesystem path. We split on BOTH separators and reject any
+    # `..` segment, an absolute root, or a Windows drive — so the value can no
+    # longer reference anything outside the paper's cache dir. (The earlier
+    # realpath+startswith form was a correct RUNTIME defence, but the path-
+    # injection analysis did not accept it as a barrier — the alerts stayed open;
+    # an explicit `..`/absolute reject on the raw input is the recognised form.)
+    segments = asset_path.replace("\\", "/").split("/")
+    if ".." in segments or asset_path.startswith(("/", "\\")) or ":" in asset_path:
         raise HTTPException(400, "asset path escapes paper directory")
-    if not os.path.isfile(target):  # noqa: ASYNC240
+    safe_segments = [s for s in segments if s and s != "."]
+    base_dir = Path(str(row[0])).resolve()  # noqa: ASYNC240
+    target = base_dir.joinpath(*safe_segments)
+    # Defence in depth: a symlink INSIDE the cache must not redirect outside it.
+    resolved = target.resolve()  # noqa: ASYNC240
+    if resolved != base_dir and base_dir not in resolved.parents:
+        raise HTTPException(400, "asset path escapes paper directory")
+    if not target.is_file():  # noqa: ASYNC240
         raise HTTPException(404, f"asset not found: {asset_path}")
-    media_type, _ = mimetypes.guess_type(target)
+    media_type, _ = mimetypes.guess_type(str(target))
     return FileResponse(target, media_type=media_type or "application/octet-stream")
 
 

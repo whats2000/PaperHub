@@ -1711,6 +1711,38 @@ async def test_serve_asset_404_when_file_missing(
     assert r.status_code == 404
 
 
+async def test_serve_asset_blocks_backslash_and_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backslash-style traversal and an absolute/drive path must be refused —
+    the raw-input `..`/absolute barrier rejects both before any path join."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret", encoding="utf-8")
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        pc_id = await _seed_paper_content(
+            conn, content_key="arxiv:bs", title="T", arxiv_id="bs",
+            html_path=str(cache_dir / "source.html"),
+        )
+        await conn.execute(
+            "UPDATE paper_content SET source_dir_path = ? WHERE id = ?",
+            (str(cache_dir), pc_id),
+        )
+        await conn.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for payload in ("..%5Csecret.txt", "source%5C..%5C..%5Csecret.txt"):
+            r = await client.get(f"/papers/content/{pc_id}/asset/{payload}")
+            assert r.status_code in (400, 404), payload
+            assert "top secret" not in r.text
+
+
 async def test_delete_library_paper_preserves_sibling_caches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
