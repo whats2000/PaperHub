@@ -148,17 +148,145 @@ _STAR_COL_RE = re.compile(r"\*\{(\d+)\}\{((?:[^{}]|\{[^{}]*\})*)\}")
 _BANG_SEP_RE = re.compile(r"!\{(?:[^{}]|\{[^{}]*\})*\}")
 
 
-def _normalize_colspec_for_plain(cols: str) -> str:
+# Custom column types — `\newcolumntype{X}[n]{body}` (array package). pandoc
+# does NOT process these definitions, so a colspec using the custom letter
+# (e.g. `P{30pt}` from `\newcolumntype{P}[1]{>{\centering}p{#1}}`, arXiv:
+# 2404.07214) is unparseable and the WHOLE tabular dumps to raw text. We parse
+# the definitions, rewrite each usage to its pandoc-renderable base column, and
+# strip the definitions (the `#1` inside them also aborts pandoc's parse).
+ColTypeMap = dict[str, tuple[int, str]]  # name -> (nargs, base column)
+_NEWCOLTYPE_RE = re.compile(r"\\newcolumntype\{(.)\}")
+
+
+def _newcolumntype_base(body: str, nargs: int) -> str:
+    r"""The pandoc-renderable base column for a ``\newcolumntype`` body. A
+    parameterised column (takes a width arg) -> ``p`` (paragraph); a fixed
+    column -> its top-level alignment char (``c``/``l``/``r``), else ``l``."""
+    if nargs >= 1:
+        return "p"
+    depth = 0
+    for ch in body:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif depth == 0 and ch in "clr":
+            return ch
+    return "l"
+
+
+def _parse_newcolumntype_defs(tex: str) -> ColTypeMap:
+    r"""Map each single-char ``\newcolumntype{X}[n]{body}`` name to
+    ``(nargs, base_column)``. Comment-aware; malformed defs are skipped."""
+    defs: ColTypeMap = {}
+    for m in _NEWCOLTYPE_RE.finditer(tex):
+        if _is_commented(tex, m.start()):
+            continue
+        i = m.end()
+        nargs = 0
+        if i < len(tex) and tex[i] == "[":
+            close = tex.find("]", i)
+            if close != -1:
+                try:
+                    nargs = int(tex[i + 1 : close].strip() or "0")
+                except ValueError:
+                    nargs = 0
+                i = close + 1
+        while i < len(tex) and tex[i] in " \t\n":
+            i += 1
+        if i >= len(tex) or tex[i] != "{":
+            continue
+        end = _matching_brace(tex, i)
+        if end == -1:
+            continue
+        defs[m.group(1)] = (nargs, _newcolumntype_base(tex[i + 1 : end], nargs))
+    return defs
+
+
+def _strip_newcolumntype_defs(tex: str) -> str:
+    r"""Remove every ``\newcolumntype{X}[n]{body}`` definition (comment-aware).
+    pandoc can't use them and the ``#1`` inside aborts its parse; usages are
+    rewritten separately by :func:`_rewrite_custom_columns`."""
+    spans: list[tuple[int, int]] = []
+    for m in _NEWCOLTYPE_RE.finditer(tex):
+        if _is_commented(tex, m.start()):
+            continue
+        i = m.end()
+        if i < len(tex) and tex[i] == "[":
+            close = tex.find("]", i)
+            if close != -1:
+                i = close + 1
+        while i < len(tex) and tex[i] in " \t\n":
+            i += 1
+        if i < len(tex) and tex[i] == "{":
+            end = _matching_brace(tex, i)
+            if end != -1:
+                spans.append((m.start(), end + 1))
+                continue
+        spans.append((m.start(), m.end()))  # malformed — drop the token only
+    if not spans:
+        return tex
+    chars = list(tex)
+    for s, e in sorted(spans, reverse=True):
+        del chars[s:e]
+    return "".join(chars)
+
+
+def _rewrite_custom_columns(cols: str, custom: ColTypeMap) -> str:
+    """Rewrite top-level custom-column usages in a colspec to their base column:
+    a parameterised ``P{30pt}`` -> ``p{30pt}`` (keep the arg), a fixed ``C`` ->
+    ``c``. Only depth-0 letters are touched, so a custom letter inside a
+    ``>{..}`` group is left alone."""
+    if not custom:
+        return cols
+    out: list[str] = []
+    i, depth = 0, 0
+    while i < len(cols):
+        c = cols[i]
+        if c == "{":
+            depth += 1
+            out.append(c)
+            i += 1
+            continue
+        if c == "}":
+            depth -= 1
+            out.append(c)
+            i += 1
+            continue
+        if depth == 0 and c in custom:
+            nargs, base = custom[c]
+            if nargs >= 1:
+                j = i + 1
+                while j < len(cols) and cols[j] in " \t":
+                    j += 1
+                if j < len(cols) and cols[j] == "{":
+                    k = _matching_brace(cols, j)
+                    if k != -1:
+                        out.append(base)
+                        out.append(cols[j : k + 1])  # keep the {width} arg
+                        i = k + 1
+                        continue
+            out.append(base)
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _normalize_colspec_for_plain(cols: str, custom: ColTypeMap | None = None) -> str:
     r"""Rewrite a colspec into the subset pandoc renders as a plain ``tabular``:
 
     * expand ``*{n}{X}`` column repeats (pandoc can't parse them -> dump);
     * replace ``!{\\vrule…}`` custom separators with ``|``;
+    * rewrite ``\\newcolumntype`` custom columns (``custom`` map) to their base;
     * map the flexible ``X`` / ``Y`` columns (tabularx/tabulary) to ``l``.
 
-    Only TOP-LEVEL ``X``/``Y`` are mapped — letters inside ``{..}`` groups
-    (``p{2cm}``, ``>{\\bfseries}``) are preserved."""
+    Only TOP-LEVEL ``X``/``Y`` (and custom letters) are mapped — letters inside
+    ``{..}`` groups (``p{2cm}``, ``>{\\bfseries}``) are preserved."""
     cols = _STAR_COL_RE.sub(lambda m: m.group(2) * int(m.group(1)), cols)
     cols = _BANG_SEP_RE.sub("|", cols)
+    cols = _rewrite_custom_columns(cols, custom or {})
     out, depth = [], 0
     for c in cols:
         if c == "{":
@@ -169,18 +297,20 @@ def _normalize_colspec_for_plain(cols: str) -> str:
     return "".join(out)
 
 
-def _rewrite_colspec_at(tex: str, brace_open: int) -> tuple[str, int]:
+def _rewrite_colspec_at(
+    tex: str, brace_open: int, custom: ColTypeMap | None = None,
+) -> tuple[str, int]:
     """Rewrite the colspec group whose ``{`` is at ``brace_open`` via
     :func:`_normalize_colspec_for_plain`; return ``(new_tex, new_close_index)``."""
     c_end = _matching_brace(tex, brace_open)
     if c_end == -1:
         return tex, brace_open
-    cols = _normalize_colspec_for_plain(tex[brace_open + 1 : c_end])
+    cols = _normalize_colspec_for_plain(tex[brace_open + 1 : c_end], custom)
     new = tex[:brace_open] + "{" + cols + "}" + tex[c_end + 1 :]
     return new, brace_open + len(cols) + 1
 
 
-def downgrade_width_tables(tex: str) -> str:
+def downgrade_width_tables(tex: str, custom: ColTypeMap | None = None) -> str:
     r"""Rewrite ``\begin{tabular*}{W}{cols}`` / ``tabularx`` / ``tabulary`` to a
     plain ``\begin{tabular}{cols}`` (dropping the width arg, normalising the
     colspec) and their ``\end{...}`` to ``\end{tabular}``. pandoc renders plain
@@ -201,7 +331,7 @@ def downgrade_width_tables(tex: str) -> str:
                 tex = tex[: m.start()] + "\\begin{tabular}" + tex[m.end() :]
                 continue
             c_end = _matching_brace(tex, c_start)
-            cols = _normalize_colspec_for_plain(tex[c_start + 1 : c_end])
+            cols = _normalize_colspec_for_plain(tex[c_start + 1 : c_end], custom)
             tex = tex[: m.start()] + "\\begin{tabular}{" + cols + "}" + tex[c_end + 1 :]
         tex = tex.replace("\\end{" + name + "}", "\\end{tabular}")
     return tex
@@ -210,24 +340,29 @@ def downgrade_width_tables(tex: str) -> str:
 _PLAIN_BEGIN_RE = re.compile(r"\\begin\{tabular\}\{")
 
 
-def _normalize_plain_colspecs(tex: str) -> str:
+def _normalize_plain_colspecs(tex: str, custom: ColTypeMap | None = None) -> str:
     """Apply the colspec normalisation to every plain ``\\begin{tabular}{...}`` —
-    an originally-plain tabular can still carry ``*{n}{c}`` / ``!{..}`` that
-    pandoc dumps on."""
+    an originally-plain tabular can still carry ``*{n}{c}`` / ``!{..}`` / a
+    custom ``\\newcolumntype`` letter that pandoc dumps on."""
     i = 0
     while True:
         m = _PLAIN_BEGIN_RE.search(tex, i)
         if m is None:
             return tex
-        tex, i = _rewrite_colspec_at(tex, m.end() - 1)
+        tex, i = _rewrite_colspec_at(tex, m.end() - 1, custom)
 
 
 def repair_tables_for_pandoc(tex: str) -> str:
     """All pure-text repairs that let pandoc render a table as HTML."""
     tex = strip_cmidrule_trim(tex)
     tex = unwrap_table_boxes(tex)
-    tex = downgrade_width_tables(tex)
-    return _normalize_plain_colspecs(tex)
+    # Capture custom \newcolumntype columns BEFORE stripping their definitions,
+    # so colspec usages (P{30pt} -> p{30pt}) can be rewritten to a base column
+    # pandoc renders instead of dumping the whole tabular (arXiv:2404.07214).
+    custom = _parse_newcolumntype_defs(tex)
+    tex = _strip_newcolumntype_defs(tex)
+    tex = downgrade_width_tables(tex, custom)
+    return _normalize_plain_colspecs(tex, custom)
 
 
 # ---------------------------------------------------------------------------

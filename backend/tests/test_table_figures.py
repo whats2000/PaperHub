@@ -11,6 +11,7 @@ from paperhub.pipelines.table_figures import (
     _find_plain_tabulars,
     _is_blank_pixmap,
     _normalize_colspec_for_plain,
+    _parse_newcolumntype_defs,
     _residual_dump_envs,
     _table_pixmap,
     downgrade_width_tables,
@@ -93,6 +94,32 @@ def test_downgrade_tabularx_maps_X_columns_to_l() -> None:
 def test_normalize_colspec_preserves_letters_inside_groups() -> None:
     # X inside p{...}/>{...} (e.g. a unit or macro) must NOT be touched.
     assert _normalize_colspec_for_plain("lXp{2Xcm}X") == "llp{2Xcm}l"
+
+
+def test_parse_newcolumntype_param_and_fixed() -> None:
+    # Parameterised P (takes a width) -> base 'p'; fixed C -> its alignment 'c'.
+    tex = (
+        "\\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}}\n"
+        "\\newcolumntype{C}{>{\\centering}c}\n"
+    )
+    defs = _parse_newcolumntype_defs(tex)
+    assert defs == {"P": (1, "p"), "C": (0, "c")}
+    # A commented def is invisible to pandoc — don't capture it.
+    assert _parse_newcolumntype_defs("% \\newcolumntype{P}[1]{p{#1}}\n") == {}
+
+
+def test_repair_rewrites_custom_column_and_strips_def() -> None:
+    # arXiv:2404.07214: a body `\newcolumntype{P}[1]{...p{#1}}` + a tabular whose
+    # colspec uses P{30pt}. pandoc can't parse P -> dumps the whole table. The
+    # repair must rewrite P{30pt} -> p{30pt} and drop the definition.
+    tex = (
+        "\\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}}\n"
+        "\\begin{tabular}{|p{56pt}|P{30pt}|P{30pt}|}a & b & c\\\\\\end{tabular}\n"
+    )
+    out = repair_tables_for_pandoc(tex)
+    assert "\\newcolumntype" not in out
+    assert "P{30pt}" not in out
+    assert "{|p{56pt}|p{30pt}|p{30pt}|}" in out
 
 
 def test_downgrade_handles_repeated_envs() -> None:
