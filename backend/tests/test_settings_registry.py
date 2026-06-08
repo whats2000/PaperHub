@@ -1,6 +1,7 @@
 # backend/tests/test_settings_registry.py
 import pytest
 
+from paperhub.api.settings import _CATEGORY_LABELS, _CATEGORY_ORDER
 from paperhub.settings_registry import (
     SETTINGS_REGISTRY,
     coerce_value,
@@ -84,3 +85,9 @@ def test_string_field_rejects_empty() -> None:
 def test_paperhub_prefixed_keys_are_not_credentials() -> None:
     assert not is_allowed_credential_key("PAPERHUB_SECRET_KEY")
     assert not is_allowed_credential_key("PAPERHUB_API_KEY")
+
+
+def test_every_registry_category_has_a_nav_slot() -> None:
+    cats = {f.category for f in SETTINGS_REGISTRY} | {"provider_credentials"}
+    assert cats == set(_CATEGORY_ORDER)
+    assert cats == set(_CATEGORY_LABELS)

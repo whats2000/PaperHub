@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from paperhub import settings_overlay as ov
 from paperhub.config import load_settings
-from paperhub.db.connection import open_db
+from paperhub.db.connection import open_db, write_transaction
 from paperhub.settings_registry import (
     PROVIDER_CREDENTIAL_SUGGESTIONS,
     SETTINGS_REGISTRY,
@@ -127,7 +127,7 @@ async def patch_settings(body: dict[str, str | None]) -> dict[str, Any]:
             to_set[key] = raw.strip()
 
     settings = load_settings()
-    async with open_db(settings.db_path) as conn:
+    async with open_db(settings.db_path) as conn, write_transaction(conn):
         for key, value in to_set.items():
             await conn.execute(
                 "INSERT INTO settings (key, value, updated_at) "
@@ -136,15 +136,18 @@ async def patch_settings(body: dict[str, str | None]) -> dict[str, Any]:
                 "updated_at=datetime('now')",
                 (key, value),
             )
-            ov.set_override(key, value)
-            updated.append(key)
-            f = field_by_key(key)
-            if f is not None and f.restart_required:
-                restart.append(key)
         for key in to_clear:
             await conn.execute("DELETE FROM settings WHERE key = ?", (key,))
-            ov.clear_override(key)
-            cleared.append(key)
-        await conn.commit()
+
+    # DB committed — now project onto os.environ and build the response.
+    for key, value in to_set.items():
+        ov.set_override(key, value)
+        updated.append(key)
+        f = field_by_key(key)
+        if f is not None and f.restart_required:
+            restart.append(key)
+    for key in to_clear:
+        ov.clear_override(key)
+        cleared.append(key)
 
     return {"updated": updated, "cleared": cleared, "restart_required": restart}

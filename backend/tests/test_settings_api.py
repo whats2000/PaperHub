@@ -108,11 +108,3 @@ async def test_patch_clear_reverts_to_default(settings_client: AsyncClient) -> N
     assert "PAPERHUB_PAPER_QA_MAX_SECTION_READS" in resp.json()["cleared"]
     from paperhub.config import load_settings
     assert load_settings().paper_qa_max_section_reads == 8  # default restored
-
-
-def test_every_registry_category_has_a_nav_slot() -> None:
-    from paperhub.api.settings import _CATEGORY_LABELS, _CATEGORY_ORDER
-    from paperhub.settings_registry import SETTINGS_REGISTRY
-    cats = {f.category for f in SETTINGS_REGISTRY} | {"provider_credentials"}
-    assert cats == set(_CATEGORY_ORDER)
-    assert cats == set(_CATEGORY_LABELS)
