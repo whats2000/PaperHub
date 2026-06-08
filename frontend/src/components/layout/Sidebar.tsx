@@ -16,8 +16,10 @@ import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesP
 import { deleteBackendSession, restoreBackendSession } from "@/lib/api";
 import { groupSessionsByFork } from "@/lib/sessionTree";
 import { useChatStore } from "@/store/chat";
+import { useSettingsStore } from "@/store/settings";
 
 export function Sidebar() {
+  const openSettings = useSettingsStore((s) => s.open);
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
@@ -270,10 +272,9 @@ export function Sidebar() {
         </>
       )}
 
-      {/* Footer — account menu (language / theme / settings / about). The
-          Settings store lands in a later task; wire a no-op for now. */}
+      {/* Footer — account menu (language / theme / settings / about). */}
       <div className="mt-auto border-t border-border p-2">
-        <AccountMenu collapsed={collapsed} onOpenSettings={() => {}} />
+        <AccountMenu collapsed={collapsed} onOpenSettings={openSettings} />
       </div>
     </div>
   );
