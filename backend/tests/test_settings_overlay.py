@@ -40,3 +40,11 @@ def test_apply_overlay_records_base_before_applying() -> None:
     assert os.environ["PAPERHUB_MODEL_SMALL"] == "from-db"
     ov.clear_override("PAPERHUB_MODEL_SMALL")
     assert os.environ["PAPERHUB_MODEL_SMALL"] == "from-env"
+
+
+def test_literal_absent_string_value_is_restored_not_deleted() -> None:
+    # A real env value equal to the old string sentinel must be restored.
+    os.environ["PAPERHUB_LOG_LEVEL"] = "__absent__"
+    ov.set_override("PAPERHUB_LOG_LEVEL", "DEBUG")
+    ov.clear_override("PAPERHUB_LOG_LEVEL")
+    assert os.environ["PAPERHUB_LOG_LEVEL"] == "__absent__"

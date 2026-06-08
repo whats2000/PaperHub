@@ -12,6 +12,10 @@ import os
 # key -> value held by os.environ BEFORE the first override (None = was unset).
 _base: dict[str, str | None] = {}
 
+# Sentinel distinct from any possible str | None env value, so a literal
+# env value can never be mistaken for "never overridden".
+_ABSENT: object = object()
+
 
 def _record_base(key: str) -> None:
     if key not in _base:
@@ -24,11 +28,12 @@ def set_override(key: str, value: str) -> None:
 
 
 def clear_override(key: str) -> None:
-    original = _base.pop(key, "__absent__")
-    if original == "__absent__" or original is None:
-        os.environ.pop(key, None)
+    original = _base.pop(key, _ABSENT)
+    if isinstance(original, str):
+        os.environ[key] = original  # restore the pre-override value
     else:
-        os.environ[key] = original
+        # never overridden (_ABSENT) or base was unset (None) -> remove it
+        os.environ.pop(key, None)
 
 
 def apply_overlay(rows: dict[str, str]) -> None:
@@ -38,4 +43,6 @@ def apply_overlay(rows: dict[str, str]) -> None:
 
 
 def reset_for_tests() -> None:
-    _base.clear()
+    # Revert every still-overridden key, then the base map is empty.
+    for key in list(_base):
+        clear_override(key)
