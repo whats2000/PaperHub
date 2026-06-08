@@ -232,10 +232,10 @@ When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`
                                    │     ▼  paper_qa: fan out one subagent     │
                                    │        per paper → section nav →          │
                                    │        flagship finalizer over raw chunks │
-                                   │  ┌─────────┐ ┌────────────────────────┐  │
-                                   │  │ LiteLLM │ │ SQLite (chunks + audit │  │
-                                   │  │ adapter │ │ + schema)              │  │
-                                   │  └─────────┘ └────────────────────────┘  │
+                                   │  ┌─────────┐ ┌────────────────────────┐   │
+                                   │  │ LiteLLM │ │ SQLite (chunks + audit │   │
+                                   │  │ adapter │ │ + schema)              │   │
+                                   │  └─────────┘ └────────────────────────┘   │
                                    └───────────────────────────────────────────┘
 ```
 
