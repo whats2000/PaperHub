@@ -29,11 +29,9 @@ const POPUP_CLASS =
 const LABEL_CLASS =
   "px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground";
 
-// App version for the About line. A build-time env override is preferred;
-// otherwise fall back to a static string so typecheck never depends on an
-// undefined global.
-const APP_VERSION =
-  (import.meta.env.VITE_APP_VERSION as string | undefined) ?? "2.30.0";
+// App version for the About line — injected at build time from package.json
+// via the `__APP_VERSION__` Vite `define` (see vite.config.ts).
+const APP_VERSION = __APP_VERSION__;
 
 export function AccountMenu({ collapsed, onOpenSettings }: Props) {
   const { t, i18n } = useTranslation("common");
@@ -53,42 +51,54 @@ export function AccountMenu({ collapsed, onOpenSettings }: Props) {
       <Menu.Portal>
         <Menu.Positioner side="top" align="start" className="isolate z-50">
           <Menu.Popup className={POPUP_CLASS}>
-            {/* Language — inline group so each endonym is a directly
-                selectable menuitem (keeps the menu shallow + accessible). */}
+            {/* Language — a single-select radio group so each endonym renders
+                as role="menuitemradio" with real aria-checked state. */}
             <Menu.Group>
               <Menu.GroupLabel className={LABEL_CLASS}>{t("language")}</Menu.GroupLabel>
-              {SUPPORTED_LANGUAGES.map((lng: SupportedLanguage) => (
-                <Menu.Item
-                  key={lng}
-                  className={`${ITEM_CLASS} justify-between`}
-                  closeOnClick={false}
-                  onClick={() => void i18n.changeLanguage(lng)}
-                >
-                  <span>{LANGUAGE_ENDONYMS[lng]}</span>
-                  {i18n.language === lng && <Check className="size-4" />}
-                </Menu.Item>
-              ))}
+              <Menu.RadioGroup
+                value={i18n.language}
+                onValueChange={(value) => void i18n.changeLanguage(value as string)}
+              >
+                {SUPPORTED_LANGUAGES.map((lng: SupportedLanguage) => (
+                  <Menu.RadioItem
+                    key={lng}
+                    value={lng}
+                    className={`${ITEM_CLASS} justify-between`}
+                  >
+                    <span>{LANGUAGE_ENDONYMS[lng]}</span>
+                    <Menu.RadioItemIndicator>
+                      <Check className="size-4" />
+                    </Menu.RadioItemIndicator>
+                  </Menu.RadioItem>
+                ))}
+              </Menu.RadioGroup>
             </Menu.Group>
 
             <Menu.Separator className="my-1 h-px bg-border" />
 
-            {/* Theme — inline group, same shape as Language. */}
+            {/* Theme — a single-select radio group, same shape as Language. */}
             <Menu.Group>
               <Menu.GroupLabel className={LABEL_CLASS}>{t("theme")}</Menu.GroupLabel>
-              {THEME_OPTIONS.map(({ value, icon: Icon, key }) => (
-                <Menu.Item
-                  key={value}
-                  className={`${ITEM_CLASS} justify-between`}
-                  closeOnClick={false}
-                  onClick={() => setTheme(value)}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-4" />
-                    {t(key)}
-                  </span>
-                  {theme === value && <Check className="size-4" />}
-                </Menu.Item>
-              ))}
+              <Menu.RadioGroup
+                value={theme}
+                onValueChange={(value) => setTheme(value as string)}
+              >
+                {THEME_OPTIONS.map(({ value, icon: Icon, key }) => (
+                  <Menu.RadioItem
+                    key={value}
+                    value={value}
+                    className={`${ITEM_CLASS} justify-between`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-4" />
+                      {t(key)}
+                    </span>
+                    <Menu.RadioItemIndicator>
+                      <Check className="size-4" />
+                    </Menu.RadioItemIndicator>
+                  </Menu.RadioItem>
+                ))}
+              </Menu.RadioGroup>
             </Menu.Group>
 
             <Menu.Separator className="my-1 h-px bg-border" />

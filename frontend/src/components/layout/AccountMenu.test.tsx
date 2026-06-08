@@ -11,9 +11,9 @@ describe("AccountMenu", () => {
     render(<AccountMenu collapsed={false} onOpenSettings={() => {}} />);
     await user.click(screen.getByRole("button", { name: /account/i }));
     // The Language label is visible (English source catalog). Base UI renders
-    // the popup (which contains submenus) on a later tick, so query async.
+    // the popup (which contains the radio groups) on a later tick, so query async.
     expect(await screen.findByText("Language")).toBeInTheDocument();
-    await user.click(await screen.findByRole("menuitem", { name: "日本語" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "日本語" }));
     expect(i18n.language).toBe("ja");
     await i18n.changeLanguage("en");
   });
