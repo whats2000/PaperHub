@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -7,18 +9,8 @@ import {
 } from "@/components/ui/tooltip";
 import type { RoutingDecision } from "@/types/domain";
 
-const intentLabel: Record<RoutingDecision["intent"], string> = {
-  paper_search: "Paper search",
-  paper_suggest: "Paper recommendations",
-  paper_qa: "Paper Q&A",
-  slides: "Slides",
-  library_stats: "Library stats",
-  memory: "Memory",
-  clarify: "Clarify",
-  chitchat: "Chitchat",
-};
-
 export function RoutingBadge({ decision }: { decision: RoutingDecision }) {
+  const { t } = useTranslation("chat");
   const conf = decision.confidence;
   const confLevel = conf >= 0.8 ? "high" : conf >= 0.5 ? "mid" : "low";
   return (
@@ -34,7 +26,7 @@ export function RoutingBadge({ decision }: { decision: RoutingDecision }) {
           }
         >
           <Badge variant={confLevel === "low" ? "destructive" : "secondary"}>
-            {intentLabel[decision.intent]}
+            {t(`routing.${decision.intent}`)}
           </Badge>
           <span className="text-muted-foreground">
             {Math.round(conf * 100)}% · {decision.model_tier}

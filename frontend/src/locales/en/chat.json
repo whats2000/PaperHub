@@ -1,0 +1,120 @@
+{
+  "composer": {
+    "placeholder": "Ask about a paper, search, or just chat… (Enter to send, Shift+Enter for new line)",
+    "messageAria": "Message",
+    "send": "Send",
+    "voice": "Voice input",
+    "voiceListening": "Listening — click to stop",
+    "voiceDictate": "Dictate your question (Web Speech)",
+    "references": "References",
+    "referencesTooltip": "Toggle the reference reading panel",
+    "memory": "Memory",
+    "memoryTooltip": "Manage memory for this session",
+    "slides": "Slides",
+    "slidesTooltip": "Toggle the slide deck panel",
+    "compare": "Compare",
+    "compareTooltip": "Coming in Plan G — fan out the same prompt to two models"
+  },
+  "slideChip": {
+    "label": "Slide {{page}}",
+    "attachedHint": "Showing the assistant slide {{page}} as context for your question. Click to detach.",
+    "detachedHint": "Slide {{page}} is hidden from the assistant. Click to attach it as context."
+  },
+  "attach": {
+    "trigger": "Attach paper",
+    "tooltip": "Attach paper — upload PDF or paste arXiv ID",
+    "tabPdf": "Upload PDF",
+    "tabArxiv": "Paste arXiv ID",
+    "needSession": "Send a message first to create a session.",
+    "pdfHint": "PDF file (≤ 30 MiB)",
+    "pdfFileAria": "PDF file",
+    "arxivHint": "arXiv ID or URL",
+    "arxivInputAria": "arXiv identifier",
+    "arxivPlaceholder": "2310.06825 or https://arxiv.org/abs/2310.06825",
+    "invalidArxiv": "Not a valid arXiv identifier or URL.",
+    "import": "Import"
+  },
+  "search": {
+    "foundPapers": "Found papers",
+    "whyLabel": "Why:",
+    "addAsReference": "Add as reference",
+    "establishingSession": "Establishing session — try again in a second",
+    "addedByAgent": "Added by agent",
+    "added": "Added",
+    "manualDownloadBadge": "Manual download",
+    "sourceUnavailable": "Source unavailable",
+    "noIngestibleSourceTitle": "Neither arXiv source nor open PDF available",
+    "noIngestibleSourceTitleShort": "No ingestible source",
+    "adding": "Adding…",
+    "retry": "Retry",
+    "manualDownloadMessage": "Couldn't auto-fetch — the source blocks automated downloads. Download the PDF manually and upload it:",
+    "uploadForPaperAria": "Upload PDF for this paper",
+    "uploadPdf": "Upload PDF",
+    "uploading": "Uploading…"
+  },
+  "toast": {
+    "reattached": "Re-attached",
+    "added": "Added",
+    "uploadFailed": "Upload failed",
+    "importFailed": "Import failed",
+    "sessionChanged": "Session changed; the attached paper was discarded.",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Copy failed",
+    "forkFailed": "Couldn't fork this message",
+    "requestFailed": "Request failed",
+    "saveNoteFailed": "Couldn't save the speaker note"
+  },
+  "bubble": {
+    "retry": "Retry",
+    "copy": "Copy message",
+    "fork": "Fork from this message",
+    "forkTitle": "Fork from here — branch a new chat and edit this message"
+  },
+  "routing": {
+    "paper_search": "Paper search",
+    "paper_suggest": "Paper recommendations",
+    "paper_qa": "Paper Q&A",
+    "slides": "Slides",
+    "library_stats": "Library stats",
+    "memory": "Memory",
+    "clarify": "Clarify",
+    "chitchat": "Chitchat"
+  },
+  "research": {
+    "headingSearch": "Conducting deep research",
+    "headingSuggest": "Curating recommendations",
+    "warmup": "Warming up the research agent…",
+    "parse": "Understanding your request…",
+    "discover": "Identifying candidate papers…",
+    "web": "Searching the web for sources…",
+    "resolve": "Matching against Semantic Scholar…",
+    "fetch": "Fetching full text from arXiv…",
+    "read": "Reading the papers…",
+    "synth": "Writing up the findings…",
+    "gather": "Gathering paper information…",
+    "hint": "Deep search — gathering and verifying papers can take a few minutes.",
+    "step_one": "{{count}} step so far",
+    "step_other": "{{count}} steps so far"
+  },
+  "slideCard": {
+    "title": "Building your slide deck",
+    "hint": "Building slides — drafting and compiling can take a few minutes.",
+    "drafted_one": "{{count}} slide drafted so far",
+    "drafted_other": "{{count}} slides drafted so far",
+    "step_one": "{{count}} step so far",
+    "step_other": "{{count}} steps so far"
+  },
+  "trace": {
+    "label": "Trace",
+    "step_one": "{{count}} step",
+    "step_other": "{{count}} steps",
+    "loading": "Loading trace…",
+    "empty": "No steps recorded.",
+    "retry": "retry"
+  },
+  "panel": {
+    "memory": "Memory",
+    "slides": "Slides",
+    "resize": "Resize reference panel"
+  }
+}

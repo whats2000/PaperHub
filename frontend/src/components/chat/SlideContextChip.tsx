@@ -1,4 +1,5 @@
 import { Eye, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   Tooltip,
   TooltipContent,
@@ -19,9 +20,10 @@ interface Props {
  *  is in view (content tracks the active slide even when detached); the eye
  *  toggles whether the slide is attached as chat context. */
 export function SlideContextChip({ page, attached, onToggle }: Props) {
+  const { t } = useTranslation("chat");
   const hint = attached
-    ? `Showing the assistant slide ${page} as context for your question. Click to detach.`
-    : `Slide ${page} is hidden from the assistant. Click to attach it as context.`;
+    ? t("slideChip.attachedHint", { page })
+    : t("slideChip.detachedHint", { page });
   return (
     <TooltipProvider>
       <Tooltip>
@@ -40,7 +42,7 @@ export function SlideContextChip({ page, attached, onToggle }: Props) {
             }
           >
             {attached ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            <span>Slide {page}</span>
+            <span>{t("slideChip.label", { page })}</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">

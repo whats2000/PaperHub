@@ -18,3 +18,13 @@ describe("Composer slideChip prop", () => {
     expect(screen.queryByText(/Slide/)).not.toBeInTheDocument();
   });
 });
+
+describe("Composer i18n", () => {
+  it("localizes the send label when the language switches", async () => {
+    const { default: i18n } = await import("../../lib/i18n");
+    await i18n.changeLanguage("ja");
+    render(<Composer onSubmit={() => {}} disabled={false} />);
+    expect(screen.getByLabelText("送信")).toBeInTheDocument();
+    await i18n.changeLanguage("en");
+  });
+});

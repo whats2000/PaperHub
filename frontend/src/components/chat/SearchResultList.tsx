@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import type {
@@ -71,6 +72,7 @@ function ManualDownloadFallback({
   candidate,
   onAdded,
 }: ManualDownloadFallbackProps) {
+  const { t } = useTranslation("chat");
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const appendReferenceLocal = useChatStore((s) => s.appendReferenceLocal);
@@ -91,12 +93,12 @@ function ManualDownloadFallback({
         year: candidate.year,
         kind: "pdf_upload",
       });
-      toast.success(result.cache_hit ? "Re-attached" : "Added", {
+      toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
         description: result.title,
       });
       onAdded();
     } catch (err) {
-      toast.error("Upload failed", {
+      toast.error(t("toast.uploadFailed"), {
         description: err instanceof Error ? err.message : String(err),
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -108,8 +110,7 @@ function ManualDownloadFallback({
   return (
     <div className="mt-1 space-y-1.5 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs dark:border-amber-800 dark:bg-amber-950/30">
       <p className="text-muted-foreground">
-        Couldn't auto-fetch — the source blocks automated downloads. Download
-        the PDF manually and upload it:
+        {t("search.manualDownloadMessage")}
       </p>
       <ul className="space-y-0.5">
         {triedUrls.map((url) => (
@@ -130,7 +131,7 @@ function ManualDownloadFallback({
         ref={fileInputRef}
         type="file"
         accept="application/pdf"
-        aria-label="Upload PDF for this paper"
+        aria-label={t("search.uploadForPaperAria")}
         className="sr-only"
         onChange={(e) => void handleFileChange(e)}
         disabled={uploading || sessionId === null}
@@ -142,7 +143,7 @@ function ManualDownloadFallback({
         disabled={uploading || sessionId === null}
         onClick={() => fileInputRef.current?.click()}
       >
-        {uploading ? "Uploading…" : "Upload PDF"}
+        {uploading ? t("search.uploading") : t("search.uploadPdf")}
       </Button>
     </div>
   );
@@ -156,6 +157,7 @@ interface AddButtonProps {
 const EMPTY_REFS: ReferenceItem[] = [];
 
 function AddButton({ candidate, sessionId }: AddButtonProps) {
+  const { t } = useTranslation("chat");
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   // Subscribe to this session's slice only — a stable EMPTY_REFS fallback
   // avoids returning a fresh array each render, which would tick the
@@ -178,9 +180,9 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
         size="sm"
         variant="outline"
         disabled
-        title="Establishing session — try again in a second"
+        title={t("search.establishingSession")}
       >
-        Add as reference
+        {t("search.addAsReference")}
       </Button>
     );
   }
@@ -193,7 +195,9 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
 
   if (matchingRef) {
     const label =
-      candidate.auto_added || candidate.finalize ? "Added by agent" : "Added";
+      candidate.auto_added || candidate.finalize
+        ? t("search.addedByAgent")
+        : t("search.added");
     return (
       <Badge variant="secondary" className="whitespace-nowrap">
         {label}
@@ -208,7 +212,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
     if ((candidate.tried_urls ?? []).length > 0) {
       return (
         <Badge variant="outline" className="whitespace-nowrap text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700">
-          Manual download
+          {t("search.manualDownloadBadge")}
         </Badge>
       );
     }
@@ -217,9 +221,9 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
         size="sm"
         variant="outline"
         disabled
-        title="Neither arXiv source nor open PDF available"
+        title={t("search.noIngestibleSourceTitle")}
       >
-        Source unavailable
+        {t("search.sourceUnavailable")}
       </Button>
     );
   }
@@ -227,7 +231,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
   if (state === "loading") {
     return (
       <Button size="sm" disabled>
-        Adding…
+        {t("search.adding")}
       </Button>
     );
   }
@@ -243,9 +247,9 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
         size="sm"
         variant="outline"
         disabled
-        title="No ingestible source"
+        title={t("search.noIngestibleSourceTitleShort")}
       >
-        Source unavailable
+        {t("search.sourceUnavailable")}
       </Button>
     );
   }
@@ -293,7 +297,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
         variant="outline"
         onClick={() => void doIngest()}
       >
-        Retry
+        {t("search.retry")}
       </Button>
     );
   }
@@ -303,7 +307,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
       size="sm"
       onClick={() => void doIngest()}
     >
-      Add as reference
+      {t("search.addAsReference")}
     </Button>
   );
 }
@@ -314,6 +318,7 @@ interface Props {
 }
 
 export function SearchResultList({ candidates, sessionId }: Props) {
+  const { t } = useTranslation("chat");
   // Live references for this session — used to suppress the manual-download
   // fallback once the paper has been successfully attached via any route
   // (card Upload PDF button, composer paperclip, or a separate tab).
@@ -327,11 +332,11 @@ export function SearchResultList({ candidates, sessionId }: Props) {
 
   return (
     <section
-      aria-label="Search results"
+      aria-label={t("search.foundPapers")}
       className="mt-3 space-y-2"
     >
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        Found papers
+        {t("search.foundPapers")}
       </p>
       {candidates.map((c, i) => {
         // Whether this candidate has a live matching reference (by id, arxiv_id,
@@ -379,7 +384,7 @@ export function SearchResultList({ candidates, sessionId }: Props) {
 
             {c.reason && (
               <p className="text-xs text-muted-foreground italic">
-                <span className="not-italic font-medium">Why:</span> {c.reason}
+                <span className="not-italic font-medium">{t("search.whyLabel")}</span> {c.reason}
               </p>
             )}
 

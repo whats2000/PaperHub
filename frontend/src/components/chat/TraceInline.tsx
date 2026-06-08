@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { fetchRunTrace } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
@@ -210,6 +211,7 @@ export function TraceInline({
   sessionId: number;
   runId: number;
 }) {
+  const { t } = useTranslation("chat");
   // Outer toggle: show/hide the whole step list
   const [open, setOpen] = useState(false);
   // Per-row toggle: which rows are expanded
@@ -272,28 +274,28 @@ export function TraceInline({
         className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
         aria-expanded={open}
       >
-        <OuterIcon className="h-3 w-3" /> Trace
+        <OuterIcon className="h-3 w-3" /> {t("trace.label")}
         {hasShown && (
           <>
             {" "}
-            · {shown.length} {shown.length === 1 ? "step" : "steps"}
+            · {t("trace.step", { count: shown.length })}
           </>
         )}
       </button>
 
       {open && loading && (
-        <p className="mt-1 text-muted-foreground">Loading trace…</p>
+        <p className="mt-1 text-muted-foreground">{t("trace.loading")}</p>
       )}
       {open && error && (
         <p className="mt-1 text-destructive">
           {error}{" "}
           <button type="button" onClick={() => void loadTrace()} className="underline">
-            retry
+            {t("trace.retry")}
           </button>
         </p>
       )}
       {open && !loading && !error && !hasShown && fetched && (
-        <p className="mt-1 italic text-muted-foreground">No steps recorded.</p>
+        <p className="mt-1 italic text-muted-foreground">{t("trace.empty")}</p>
       )}
 
       {open && hasShown && (

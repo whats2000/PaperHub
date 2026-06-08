@@ -1,0 +1,120 @@
+{
+  "composer": {
+    "placeholder": "詢問論文、搜尋，或隨意聊聊…（Enter 送出，Shift+Enter 換行）",
+    "messageAria": "訊息",
+    "send": "送出",
+    "voice": "語音輸入",
+    "voiceListening": "聆聽中 — 點擊以停止",
+    "voiceDictate": "口述你的問題（Web Speech）",
+    "references": "參考文獻",
+    "referencesTooltip": "切換參考文獻閱讀面板",
+    "memory": "記憶",
+    "memoryTooltip": "管理此工作階段的記憶",
+    "slides": "投影片",
+    "slidesTooltip": "切換投影片面板",
+    "compare": "比較",
+    "compareTooltip": "Plan G 即將推出 — 將同一提示分發給兩個模型"
+  },
+  "slideChip": {
+    "label": "投影片 {{page}}",
+    "attachedHint": "正將助理的投影片 {{page}} 作為你問題的脈絡顯示。點擊以分離。",
+    "detachedHint": "投影片 {{page}} 對助理隱藏中。點擊以將其作為脈絡附加。"
+  },
+  "attach": {
+    "trigger": "附加論文",
+    "tooltip": "附加論文 — 上傳 PDF 或貼上 arXiv ID",
+    "tabPdf": "上傳 PDF",
+    "tabArxiv": "貼上 arXiv ID",
+    "needSession": "請先傳送訊息以建立工作階段。",
+    "pdfHint": "PDF 檔案（≤ 30 MiB）",
+    "pdfFileAria": "PDF 檔案",
+    "arxivHint": "arXiv ID 或網址",
+    "arxivInputAria": "arXiv 識別碼",
+    "arxivPlaceholder": "2310.06825 或 https://arxiv.org/abs/2310.06825",
+    "invalidArxiv": "不是有效的 arXiv 識別碼或網址。",
+    "import": "匯入"
+  },
+  "search": {
+    "foundPapers": "找到的論文",
+    "whyLabel": "原因：",
+    "addAsReference": "加入參考文獻",
+    "establishingSession": "正在建立工作階段 — 請稍後再試",
+    "addedByAgent": "由代理加入",
+    "added": "已加入",
+    "manualDownloadBadge": "手動下載",
+    "sourceUnavailable": "來源無法使用",
+    "noIngestibleSourceTitle": "既無 arXiv 來源也無開放 PDF",
+    "noIngestibleSourceTitleShort": "無可擷取的來源",
+    "adding": "加入中…",
+    "retry": "重試",
+    "manualDownloadMessage": "無法自動擷取 — 來源封鎖自動下載。請手動下載 PDF 後上傳：",
+    "uploadForPaperAria": "為此論文上傳 PDF",
+    "uploadPdf": "上傳 PDF",
+    "uploading": "上傳中…"
+  },
+  "toast": {
+    "reattached": "已重新附加",
+    "added": "已加入",
+    "uploadFailed": "上傳失敗",
+    "importFailed": "匯入失敗",
+    "sessionChanged": "工作階段已變更；已捨棄附加的論文。",
+    "copied": "已複製到剪貼簿",
+    "copyFailed": "複製失敗",
+    "forkFailed": "無法分支此訊息",
+    "requestFailed": "請求失敗",
+    "saveNoteFailed": "無法儲存講稿備註"
+  },
+  "bubble": {
+    "retry": "重試",
+    "copy": "複製訊息",
+    "fork": "從此訊息分支",
+    "forkTitle": "從此處分支 — 開新對話並編輯此訊息"
+  },
+  "routing": {
+    "paper_search": "論文搜尋",
+    "paper_suggest": "論文推薦",
+    "paper_qa": "論文問答",
+    "slides": "投影片",
+    "library_stats": "資料庫統計",
+    "memory": "記憶",
+    "clarify": "澄清",
+    "chitchat": "閒聊"
+  },
+  "research": {
+    "headingSearch": "正在進行深度研究",
+    "headingSuggest": "正在精選推薦",
+    "warmup": "正在啟動研究代理…",
+    "parse": "正在理解你的請求…",
+    "discover": "正在辨識候選論文…",
+    "web": "正在網路上搜尋來源…",
+    "resolve": "正在與 Semantic Scholar 比對…",
+    "fetch": "正在從 arXiv 取得全文…",
+    "read": "正在閱讀論文…",
+    "synth": "正在撰寫研究結果…",
+    "gather": "正在收集論文資訊…",
+    "hint": "深度搜尋 — 收集並驗證論文可能需要幾分鐘。",
+    "step_one": "目前 {{count}} 個步驟",
+    "step_other": "目前 {{count}} 個步驟"
+  },
+  "slideCard": {
+    "title": "正在製作你的投影片",
+    "hint": "正在製作投影片 — 草擬與編譯可能需要幾分鐘。",
+    "drafted_one": "目前已草擬 {{count}} 張投影片",
+    "drafted_other": "目前已草擬 {{count}} 張投影片",
+    "step_one": "目前 {{count}} 個步驟",
+    "step_other": "目前 {{count}} 個步驟"
+  },
+  "trace": {
+    "label": "追蹤",
+    "step_one": "{{count}} 個步驟",
+    "step_other": "{{count}} 個步驟",
+    "loading": "正在載入追蹤…",
+    "empty": "沒有記錄任何步驟。",
+    "retry": "重試"
+  },
+  "panel": {
+    "memory": "記憶",
+    "slides": "投影片",
+    "resize": "調整參考面板大小"
+  }
+}

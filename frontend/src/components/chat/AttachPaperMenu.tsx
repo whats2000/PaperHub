@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Paperclip } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ function buildReference(
 }
 
 export function AttachPaperMenu() {
+  const { t } = useTranslation("chat");
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const sessions = useChatStore((s) => s.sessions);
   const appendReferenceLocal = useChatStore((s) => s.appendReferenceLocal);
@@ -87,17 +89,17 @@ export function AttachPaperMenu() {
     try {
       const result = await uploadPdf(startedAt, file);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info("Session changed; the attached paper was discarded.");
+        toast.info(t("toast.sessionChanged"));
         return;
       }
       const ref = buildReference(result, "pdf_upload", null);
       appendReferenceLocal(startedAt, ref);
-      toast.success(result.cache_hit ? "Re-attached" : "Added", {
+      toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
         description: result.title,
       });
       handleOpenChange(false);
     } catch (err) {
-      toast.error("Upload failed", {
+      toast.error(t("toast.uploadFailed"), {
         description: err instanceof Error ? err.message : String(err),
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -110,7 +112,7 @@ export function AttachPaperMenu() {
     setArxivError(null);
     const canonical = parseArxivId(arxivInput);
     if (canonical === null) {
-      setArxivError("Not a valid arXiv identifier or URL.");
+      setArxivError(t("attach.invalidArxiv"));
       return;
     }
     // Snapshot the active session at the start. If it changes before the
@@ -121,14 +123,14 @@ export function AttachPaperMenu() {
     try {
       const result = await ingestPaper(startedAt, canonical);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info("Session changed; the attached paper was discarded.");
+        toast.info(t("toast.sessionChanged"));
         return;
       }
       // canonical is "arxiv:<id>" — strip the prefix for ReferenceItem.arxiv_id.
       const arxivId = canonical.replace(/^arxiv:/i, "");
       const ref = buildReference(result, "arxiv", arxivId);
       appendReferenceLocal(startedAt, ref);
-      toast.success(result.cache_hit ? "Re-attached" : "Added", {
+      toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
         description: result.title,
       });
       handleOpenChange(false);
@@ -138,7 +140,7 @@ export function AttachPaperMenu() {
       // the toast keeps the unedited message for parity with PDF uploads.
       const inlineMessage = raw.replace(/^API \d+:\s*/, "");
       setArxivError(inlineMessage);
-      toast.error("Import failed", { description: raw });
+      toast.error(t("toast.importFailed"), { description: raw });
     } finally {
       setBusy(false);
     }
@@ -156,7 +158,7 @@ export function AttachPaperMenu() {
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  aria-label="Attach paper"
+                  aria-label={t("attach.trigger")}
                 />
               }
             >
@@ -174,20 +176,20 @@ export function AttachPaperMenu() {
       >
         <Tabs defaultValue="pdf">
           <TabsList>
-            <TabsTrigger value="pdf">Upload PDF</TabsTrigger>
-            <TabsTrigger value="arxiv">Paste arXiv ID</TabsTrigger>
+            <TabsTrigger value="pdf">{t("attach.tabPdf")}</TabsTrigger>
+            <TabsTrigger value="arxiv">{t("attach.tabArxiv")}</TabsTrigger>
           </TabsList>
 
           {!hasBackendSession && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Send a message first to create a session.
+              {t("attach.needSession")}
             </p>
           )}
 
           <TabsContent value="pdf">
             <div className="flex flex-col gap-2 text-sm">
               <span className="text-xs text-muted-foreground">
-                PDF file (≤ 30 MiB)
+                {t("attach.pdfHint")}
               </span>
               <input
                 ref={fileInputRef}
@@ -195,7 +197,7 @@ export function AttachPaperMenu() {
                 accept="application/pdf"
                 onChange={(e) => void handlePdfChange(e)}
                 disabled={busy || !hasBackendSession}
-                aria-label="PDF file"
+                aria-label={t("attach.pdfFileAria")}
                 className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium hover:file:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
@@ -205,7 +207,7 @@ export function AttachPaperMenu() {
             <div className="flex flex-col gap-2">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-xs text-muted-foreground">
-                  arXiv ID or URL
+                  {t("attach.arxivHint")}
                 </span>
                 <Input
                   type="text"
@@ -214,9 +216,9 @@ export function AttachPaperMenu() {
                     setArxivInput(e.target.value);
                     if (arxivError) setArxivError(null);
                   }}
-                  placeholder="2310.06825 or https://arxiv.org/abs/2310.06825"
+                  placeholder={t("attach.arxivPlaceholder")}
                   disabled={busy || !hasBackendSession}
-                  aria-label="arXiv identifier"
+                  aria-label={t("attach.arxivInputAria")}
                   aria-invalid={arxivError !== null}
                 />
               </label>
@@ -235,7 +237,7 @@ export function AttachPaperMenu() {
                   disabled={busy || !hasBackendSession || arxivInput.trim() === ""}
                   onClick={() => void handleArxivSubmit()}
                 >
-                  Import
+                  {t("attach.import")}
                 </Button>
               </div>
             </div>
@@ -244,7 +246,7 @@ export function AttachPaperMenu() {
       </PopoverContent>
       </Popover>
       <TooltipContent side="top">
-        Attach paper — upload PDF or paste arXiv ID
+        {t("attach.tooltip")}
       </TooltipContent>
     </Tooltip>
   );

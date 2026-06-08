@@ -1,0 +1,120 @@
+{
+  "composer": {
+    "placeholder": "論文について質問・検索、または雑談を…（Enterで送信、Shift+Enterで改行）",
+    "messageAria": "メッセージ",
+    "send": "送信",
+    "voice": "音声入力",
+    "voiceListening": "認識中 — クリックで停止",
+    "voiceDictate": "質問を音声入力（Web Speech）",
+    "references": "参考文献",
+    "referencesTooltip": "参考文献の閲覧パネルを切り替え",
+    "memory": "メモリ",
+    "memoryTooltip": "このセッションのメモリを管理",
+    "slides": "スライド",
+    "slidesTooltip": "スライドデッキのパネルを切り替え",
+    "compare": "比較",
+    "compareTooltip": "Plan Gで提供予定 — 同じプロンプトを2つのモデルに展開"
+  },
+  "slideChip": {
+    "label": "スライド {{page}}",
+    "attachedHint": "アシスタントのスライド {{page}} を質問の文脈として表示中。クリックで切り離します。",
+    "detachedHint": "スライド {{page}} はアシスタントから隠れています。クリックで文脈として添付します。"
+  },
+  "attach": {
+    "trigger": "論文を添付",
+    "tooltip": "論文を添付 — PDFをアップロードまたはarXiv IDを貼り付け",
+    "tabPdf": "PDFをアップロード",
+    "tabArxiv": "arXiv IDを貼り付け",
+    "needSession": "セッションを作成するには、まずメッセージを送信してください。",
+    "pdfHint": "PDFファイル（≤ 30 MiB）",
+    "pdfFileAria": "PDFファイル",
+    "arxivHint": "arXiv IDまたはURL",
+    "arxivInputAria": "arXiv識別子",
+    "arxivPlaceholder": "2310.06825 または https://arxiv.org/abs/2310.06825",
+    "invalidArxiv": "有効なarXiv識別子またはURLではありません。",
+    "import": "インポート"
+  },
+  "search": {
+    "foundPapers": "見つかった論文",
+    "whyLabel": "理由:",
+    "addAsReference": "参考文献に追加",
+    "establishingSession": "セッションを確立中 — 数秒後に再試行してください",
+    "addedByAgent": "エージェントが追加",
+    "added": "追加済み",
+    "manualDownloadBadge": "手動ダウンロード",
+    "sourceUnavailable": "ソースが利用不可",
+    "noIngestibleSourceTitle": "arXivソースも公開PDFも利用できません",
+    "noIngestibleSourceTitleShort": "取り込み可能なソースがありません",
+    "adding": "追加中…",
+    "retry": "再試行",
+    "manualDownloadMessage": "自動取得できませんでした — ソースが自動ダウンロードをブロックしています。PDFを手動でダウンロードしてアップロードしてください:",
+    "uploadForPaperAria": "この論文のPDFをアップロード",
+    "uploadPdf": "PDFをアップロード",
+    "uploading": "アップロード中…"
+  },
+  "toast": {
+    "reattached": "再添付しました",
+    "added": "追加しました",
+    "uploadFailed": "アップロードに失敗しました",
+    "importFailed": "インポートに失敗しました",
+    "sessionChanged": "セッションが変更されたため、添付した論文は破棄されました。",
+    "copied": "クリップボードにコピーしました",
+    "copyFailed": "コピーに失敗しました",
+    "forkFailed": "このメッセージをフォークできませんでした",
+    "requestFailed": "リクエストに失敗しました",
+    "saveNoteFailed": "発表者ノートを保存できませんでした"
+  },
+  "bubble": {
+    "retry": "再試行",
+    "copy": "メッセージをコピー",
+    "fork": "このメッセージからフォーク",
+    "forkTitle": "ここからフォーク — 新しいチャットに分岐してこのメッセージを編集"
+  },
+  "routing": {
+    "paper_search": "論文検索",
+    "paper_suggest": "論文のおすすめ",
+    "paper_qa": "論文Q&A",
+    "slides": "スライド",
+    "library_stats": "ライブラリ統計",
+    "memory": "メモリ",
+    "clarify": "確認",
+    "chitchat": "雑談"
+  },
+  "research": {
+    "headingSearch": "ディープリサーチを実行中",
+    "headingSuggest": "おすすめを厳選中",
+    "warmup": "リサーチエージェントを起動中…",
+    "parse": "ご依頼を理解中…",
+    "discover": "候補論文を特定中…",
+    "web": "ウェブでソースを検索中…",
+    "resolve": "Semantic Scholarと照合中…",
+    "fetch": "arXivから全文を取得中…",
+    "read": "論文を読み込み中…",
+    "synth": "調査結果をまとめ中…",
+    "gather": "論文情報を収集中…",
+    "hint": "ディープ検索 — 論文の収集と検証には数分かかる場合があります。",
+    "step_one": "これまでに{{count}}ステップ",
+    "step_other": "これまでに{{count}}ステップ"
+  },
+  "slideCard": {
+    "title": "スライドデッキを作成中",
+    "hint": "スライド作成中 — 下書きとコンパイルには数分かかる場合があります。",
+    "drafted_one": "これまでに{{count}}枚下書き済み",
+    "drafted_other": "これまでに{{count}}枚下書き済み",
+    "step_one": "これまでに{{count}}ステップ",
+    "step_other": "これまでに{{count}}ステップ"
+  },
+  "trace": {
+    "label": "トレース",
+    "step_one": "{{count}}ステップ",
+    "step_other": "{{count}}ステップ",
+    "loading": "トレースを読み込み中…",
+    "empty": "記録されたステップはありません。",
+    "retry": "再試行"
+  },
+  "panel": {
+    "memory": "メモリ",
+    "slides": "スライド",
+    "resize": "参考パネルのサイズを変更"
+  }
+}

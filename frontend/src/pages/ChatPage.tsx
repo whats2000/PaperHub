@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
@@ -36,6 +37,7 @@ const SlidesPanel = lazy(() =>
 );
 
 export function ChatPage() {
+  const { t } = useTranslation("chat");
   useGlobalShortcuts();
   useSessionsSync();
   useReferencesSync();
@@ -179,7 +181,7 @@ export function ChatPage() {
       const res = await updateDeckNote(backendSessionId, page, text);
       setSpeakerNotes(res.speaker_notes);
     } catch (err: unknown) {
-      toast.error("Couldn't save the speaker note", {
+      toast.error(t("toast.saveNoteFailed"), {
         description: err instanceof Error ? err.message : String(err),
       });
       throw err;
@@ -189,7 +191,7 @@ export function ChatPage() {
   const handleSubmit = (text: string): void => {
     const sessionId = activeSessionId ?? newSession();
     send(sessionId, text).catch((err: unknown) => {
-      toast.error("Request failed", {
+      toast.error(t("toast.requestFailed"), {
         description: err instanceof Error ? err.message : String(err),
       });
     });
@@ -259,7 +261,7 @@ export function ChatPage() {
           <div
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize reference panel"
+            aria-label={t("panel.resize")}
             onPointerDown={onPointerDown}
             className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40"
           />
@@ -291,7 +293,7 @@ export function ChatPage() {
           {memoryOpen && (
             <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
               <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
-                Memory
+                {t("panel.memory")}
               </div>
               <div className="flex-1 overflow-y-auto">
                 <Suspense fallback={null}>
@@ -307,7 +309,7 @@ export function ChatPage() {
           {slidesOpen && backendSessionId !== null && (
             <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
               <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
-                Slides
+                {t("panel.slides")}
               </div>
               <div className="flex-1 min-h-0 overflow-hidden">
                 <Suspense fallback={null}>

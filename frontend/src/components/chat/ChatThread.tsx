@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import type { ChatSession } from "@/types/domain";
@@ -13,6 +14,7 @@ import { useChatStore } from "@/store/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 
 export function ChatThread({ session }: { session: ChatSession | null }) {
+  const { t } = useTranslation("chat");
   const endRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
   const messageCount = session?.messages.length ?? 0;
@@ -66,10 +68,10 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
         store.requestComposerText(res.forked_message);
       } catch (err) {
         console.warn("[ChatThread] fork failed:", err);
-        toast.error("Couldn't fork this message");
+        toast.error(t("toast.forkFailed"));
       }
     },
-    [session],
+    [session, t],
   );
 
   if (!session || session.messages.length === 0) {

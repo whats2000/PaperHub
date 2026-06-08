@@ -1,4 +1,5 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BookOpen,
   BrainCircuit,
@@ -48,15 +49,16 @@ interface Props {
 
 interface Capability {
   icon: typeof BookOpen;
-  label: string;
-  tooltip: string;
+  /** i18n key under chat:composer for the label + tooltip. */
+  labelKey: string;
+  tooltipKey: string;
 }
 
 const CAPABILITIES: Capability[] = [
   {
     icon: Columns2,
-    label: "Compare",
-    tooltip: "Coming in Plan G — fan out the same prompt to two models",
+    labelKey: "composer.compare",
+    tooltipKey: "composer.compareTooltip",
   },
 ];
 
@@ -71,6 +73,7 @@ export function Composer({
   onToggleSlides,
   slideChip = null,
 }: Props) {
+  const { t } = useTranslation("chat");
   const draft = useChatStore((s) => s.composerDraft);
   const setDraft = useChatStore((s) => s.setComposerDraft);
   const focusSeq = useChatStore((s) => s.composerFocusSeq);
@@ -189,11 +192,11 @@ export function Composer({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Ask about a paper, search, or just chat… (Enter to send, Shift+Enter for new line)"
+            placeholder={t("composer.placeholder")}
             rows={2}
             className="block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled}
-            aria-label="Message"
+            aria-label={t("composer.messageAria")}
           />
           <div className="flex items-center justify-between gap-1 px-2 pb-2">
             <TooltipProvider>
@@ -215,7 +218,7 @@ export function Composer({
                             ? "h-8 w-8 bg-accent text-foreground"
                             : "h-8 w-8 text-muted-foreground hover:text-foreground"
                         }
-                        aria-label="Voice input"
+                        aria-label={t("composer.voice")}
                       >
                         <Mic className="h-4 w-4" />
                       </Button>
@@ -223,8 +226,8 @@ export function Composer({
                     <TooltipContent side="top">
                       <p>
                         {listening
-                          ? "Listening — click to stop"
-                          : "Dictate your question (Web Speech)"}
+                          ? t("composer.voiceListening")
+                          : t("composer.voiceDictate")}
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -244,13 +247,13 @@ export function Composer({
                           ? "h-8 w-8 bg-accent text-foreground"
                           : "h-8 w-8 text-muted-foreground hover:text-foreground"
                       }
-                      aria-label="References"
+                      aria-label={t("composer.references")}
                     >
                       <BookOpen className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    <p>Toggle the reference reading panel</p>
+                    <p>{t("composer.referencesTooltip")}</p>
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -268,13 +271,13 @@ export function Composer({
                           ? "h-8 w-8 bg-accent text-foreground"
                           : "h-8 w-8 text-muted-foreground hover:text-foreground"
                       }
-                      aria-label="Memory"
+                      aria-label={t("composer.memory")}
                     >
                       <BrainCircuit className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    <p>Manage memory for this session</p>
+                    <p>{t("composer.memoryTooltip")}</p>
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -292,17 +295,17 @@ export function Composer({
                           ? "h-8 w-8 bg-accent text-foreground"
                           : "h-8 w-8 text-muted-foreground hover:text-foreground"
                       }
-                      aria-label="Slides"
+                      aria-label={t("composer.slides")}
                     >
                       <Presentation className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    <p>Toggle the slide deck panel</p>
+                    <p>{t("composer.slidesTooltip")}</p>
                   </TooltipContent>
                 </Tooltip>
-                {CAPABILITIES.map(({ icon: Icon, label, tooltip }) => (
-                  <Tooltip key={label}>
+                {CAPABILITIES.map(({ icon: Icon, labelKey, tooltipKey }) => (
+                  <Tooltip key={labelKey}>
                     <TooltipTrigger
                       render={<span tabIndex={0} className="inline-flex" />}
                     >
@@ -312,13 +315,13 @@ export function Composer({
                         size="icon"
                         disabled
                         className="h-8 w-8 pointer-events-none text-muted-foreground"
-                        aria-label={label}
+                        aria-label={t(labelKey)}
                       >
                         <Icon className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      <p>{tooltip}</p>
+                      <p>{t(tooltipKey)}</p>
                     </TooltipContent>
                   </Tooltip>
                 ))}
@@ -328,7 +331,7 @@ export function Composer({
               type="submit"
               size="icon"
               disabled={disabled || value.trim().length === 0}
-              aria-label="Send"
+              aria-label={t("composer.send")}
               className="h-8 w-8 rounded-full"
             >
               <Send className="h-4 w-4" />

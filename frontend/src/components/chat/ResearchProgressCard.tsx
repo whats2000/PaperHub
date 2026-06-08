@@ -1,32 +1,33 @@
 import { useMemo } from "react";
 import { Telescope } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { Intent, ToolCallRecord } from "@/types/domain";
 
 /**
- * Maps the most-recent trace step to a human, present-tense status so the
- * card reflects what the agent is actually doing right now — even during the
- * long, silent stretches (e.g. a multi-minute arXiv full-text fetch) where no
- * new step closes for a while.
+ * Maps the most-recent trace step to a stable i18n key (under chat:research)
+ * describing what the agent is doing right now — even during the long, silent
+ * stretches (e.g. a multi-minute arXiv full-text fetch) where no new step
+ * closes for a while.
  */
-function stageLabel(trace: ToolCallRecord[] | undefined): string {
+function stageKey(trace: ToolCallRecord[] | undefined): string {
   const last = trace && trace.length > 0 ? trace[trace.length - 1] : undefined;
-  if (!last) return "Warming up the research agent…";
+  if (!last) return "research.warmup";
   const t = last.tool.toLowerCase();
-  if (t.includes("parse")) return "Understanding your request…";
-  if (t.includes("discover")) return "Identifying candidate papers…";
-  if (t.includes("web") || t.includes("search_web")) return "Searching the web for sources…";
-  if (t.includes("resolve") || t.includes("semantic")) return "Matching against Semantic Scholar…";
+  if (t.includes("parse")) return "research.parse";
+  if (t.includes("discover")) return "research.discover";
+  if (t.includes("web") || t.includes("search_web")) return "research.web";
+  if (t.includes("resolve") || t.includes("semantic")) return "research.resolve";
   if (t.includes("ingest") || t.includes("arxiv") || t.includes("fetch") || t.includes("download"))
-    return "Fetching full text from arXiv…";
-  if (t.includes("section") || t.includes("read") || t.includes("subagent")) return "Reading the papers…";
-  if (t.includes("finalize") || t.includes("synth")) return "Writing up the findings…";
-  return "Gathering paper information…";
+    return "research.fetch";
+  if (t.includes("section") || t.includes("read") || t.includes("subagent")) return "research.read";
+  if (t.includes("finalize") || t.includes("synth")) return "research.synth";
+  return "research.gather";
 }
 
-const headingFor: Partial<Record<Intent, string>> = {
-  paper_search: "Conducting deep research",
-  paper_suggest: "Curating recommendations",
+const headingKeyFor: Partial<Record<Intent, string>> = {
+  paper_search: "research.headingSearch",
+  paper_suggest: "research.headingSuggest",
 };
 
 /**
@@ -43,8 +44,9 @@ export function ResearchProgressCard({
   intent: Intent;
   trace?: ToolCallRecord[];
 }) {
-  const stage = useMemo(() => stageLabel(trace), [trace]);
-  const title = headingFor[intent] ?? "Conducting deep research";
+  const { t } = useTranslation("chat");
+  const stage = useMemo(() => t(stageKey(trace)), [t, trace]);
+  const title = t(headingKeyFor[intent] ?? "research.headingSearch");
   const steps = trace?.length ?? 0;
 
   return (
@@ -75,11 +77,11 @@ export function ResearchProgressCard({
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{stage}</p>
           <p className="mt-1 text-[11px] leading-tight text-muted-foreground/70">
-            Deep search — gathering and verifying papers can take a few minutes.
+            {t("research.hint")}
             {steps > 0 && (
               <>
                 {" · "}
-                {steps} step{steps === 1 ? "" : "s"} so far
+                {t("research.step", { count: steps })}
               </>
             )}
           </p>
