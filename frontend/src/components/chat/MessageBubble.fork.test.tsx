@@ -40,4 +40,11 @@ describe("MessageBubble fork control", () => {
     );
     expect(onFork).toHaveBeenCalledTimes(1);
   });
+
+  it("offers a copy button on the user's own message bubble too", () => {
+    render(<MessageBubble message={userMsg} onFork={vi.fn()} />);
+    expect(
+      screen.getByRole("button", { name: /copy/i }),
+    ).toBeInTheDocument();
+  });
 });

@@ -54,7 +54,10 @@ export function MessageBubble({
   const isError = message.status === "error";
   const isStreamingEmpty = isStreaming && !message.content;
   const isStreamingWithContent = isStreaming && !!message.content;
-  const showCopy = isAssistant && isOk && !isStreaming;
+  // Copy is offered on completed assistant messages AND on the user's own
+  // input bubbles (always copyable). Fork (rollback) is user-only.
+  const canCopy =
+    (isAssistant && isOk && !isStreaming) || (isUser && !!message.content);
   const showFork = isUser && !!onFork;
   const hasSearchResults =
     isAssistant &&
@@ -152,46 +155,43 @@ export function MessageBubble({
           <DeckChip deck={message.deck} onPrefill={onPrefill} />
         )}
 
-        {/* Copy button — hover-revealed on completed assistant messages */}
-        {showCopy && (
+        {/* Hover-revealed action row under the bubble, bottom-right — the same
+            affordance for both roles. Assistant: Copy. User's own input: Copy +
+            Fork (Undo2 curved back-arrow = "roll back to this point", distinct
+            from the Retry button's RotateCcw refresh loop and from a pencil,
+            which would imply destructive in-place editing). */}
+        {(canCopy || showFork) && (
           <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-7 right-0 flex gap-1">
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6"
-              aria-label="Copy message"
-              onClick={() => {
-                navigator.clipboard.writeText(message.content).then(
-                  () => toast.success("Copied to clipboard"),
-                  () => toast.error("Copy failed"),
-                );
-              }}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        )}
-
-        {/* Fork (rewind & resend) — hover-revealed at the top-right corner of
-            the user's own message bubble. The Undo2 curved back-arrow signals
-            "go back / roll back to this point", distinct from the Retry
-            button's RotateCcw refresh loop and from a pencil (which would imply
-            destructive in-place editing). Circular theme-aware button floating
-            over the corner; z-10 keeps it above adjacent bubbles. */}
-        {showFork && (
-          <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -top-3 -right-2 z-10">
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="secondary"
-              className="rounded-full border border-border shadow-sm"
-              aria-label="Fork from this message"
-              title="Fork from here — branch a new chat and edit this message"
-              onClick={onFork}
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-            </Button>
+            {canCopy && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                aria-label="Copy message"
+                onClick={() => {
+                  navigator.clipboard.writeText(message.content).then(
+                    () => toast.success("Copied to clipboard"),
+                    () => toast.error("Copy failed"),
+                  );
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {showFork && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                aria-label="Fork from this message"
+                title="Fork from here — branch a new chat and edit this message"
+                onClick={onFork}
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
         )}
       </div>
