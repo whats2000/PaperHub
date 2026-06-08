@@ -6,7 +6,7 @@ GitHub / Slack / X). 1280×640 — GitHub's recommended size.
 | File | What |
 | --- | --- |
 | `card.html` | Source layout (themeable: `?theme=dark`). Renders with the Geist webfont from the frontend deps. |
-| `mark.svg` | The PaperHub mark: a page with one highlighted **cited line** tracing down to a **provenance node** — "every cited sentence traces back to its source." Same art as `frontend/public/favicon.svg`. |
+| `mark.svg` | The PaperHub mark: a page whose highlighted **cited line** zooms out along a magnification beam into a **dialog holding a quotation mark** — the Citation Canvas (click a chunk → expand to its source). Same art as `frontend/public/favicon.svg`. |
 | `paperhub-card-light.png` | Light variant (rendered). |
 | `paperhub-card-dark.png` | Dark variant (rendered). |
 
