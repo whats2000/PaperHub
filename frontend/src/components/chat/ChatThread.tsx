@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { toast } from "sonner";
 
 import type { ChatSession } from "@/types/domain";
 import { MessageBubble } from "@/components/chat/MessageBubble";
@@ -7,6 +8,7 @@ import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { SlideProgressCard } from "@/components/chat/SlideProgressCard";
 import { TraceInline } from "@/components/chat/TraceInline";
 import { EmptyState } from "@/components/states/EmptyState";
+import { forkSession } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 
@@ -46,6 +48,24 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
     [session, send],
   );
 
+  const forkFrom = useCallback(
+    async (runId: number) => {
+      if (!session || session.backend_session_id === null) return;
+      try {
+        const res = await forkSession(session.backend_session_id, runId);
+        const store = useChatStore.getState();
+        store.addForkedSession(res.session_id, res.title);
+        // Prefill the forked message — editable, NOT sent (edit = re-prompt;
+        // send unchanged = retry). requestComposerText focuses the composer.
+        store.requestComposerText(res.forked_message);
+      } catch (err) {
+        console.warn("[ChatThread] fork failed:", err);
+        toast.error("Couldn't fork this message");
+      }
+    },
+    [session],
+  );
+
   if (!session || session.messages.length === 0) {
     return <EmptyState />;
   }
@@ -72,6 +92,18 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
               const capturedIndex = i;
               const capturedContent = userContent;
               retryHandler = () => retryFrom(capturedIndex, capturedContent);
+            }
+          }
+
+          // A user message can fork. Its turn run_id is the message's own
+          // run_id, or — for a just-sent turn not yet hydrated — the paired
+          // assistant message's. Hidden when neither is known.
+          let forkHandler: (() => void) | undefined;
+          if (msg.role === "user" && session.backend_session_id !== null) {
+            const runId = msg.run_id ?? session.messages[i + 1]?.run_id ?? null;
+            if (runId !== null) {
+              const captured = runId;
+              forkHandler = () => void forkFrom(captured);
             }
           }
 
@@ -118,6 +150,7 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
                 backendSessionId={session.backend_session_id}
                 researching={showResearchCard || showSlideCard}
                 onPrefill={requestComposerText}
+                onFork={forkHandler}
               />
               {msg.role === "assistant" && msg.routing_decision && (
                 <div className="flex justify-start pl-1">

@@ -34,6 +34,9 @@ interface Props {
    * drop a starter prompt into the input instead of sending immediately.
    */
   onPrefill?: (message: string) => void;
+  /** Fork this (user) message: branch a new session from the point above it
+   *  and prefill the composer with this message. Only shown on user messages. */
+  onFork?: () => void;
 }
 
 export function MessageBubble({
@@ -42,6 +45,7 @@ export function MessageBubble({
   backendSessionId,
   researching = false,
   onPrefill,
+  onFork,
 }: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -51,6 +55,7 @@ export function MessageBubble({
   const isStreamingEmpty = isStreaming && !message.content;
   const isStreamingWithContent = isStreaming && !!message.content;
   const showCopy = isAssistant && isOk && !isStreaming;
+  const showFork = isUser && !!onFork;
   const hasSearchResults =
     isAssistant &&
     message.search_results !== undefined &&
@@ -164,6 +169,25 @@ export function MessageBubble({
               }}
             >
               <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {/* Fork (rewind & resend) — hover-revealed on the user's own messages.
+            RotateCcw signals "rewind to here" (Claude-Code idiom), NOT a pencil
+            (which would imply destructive in-place editing). */}
+        {showFork && (
+          <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-7 left-0 flex gap-1">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6"
+              aria-label="Fork from this message"
+              title="Fork from here — branch a new chat and edit this message"
+              onClick={onFork}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
             </Button>
           </div>
         )}
