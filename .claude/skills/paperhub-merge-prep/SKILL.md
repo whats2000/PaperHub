@@ -153,11 +153,12 @@ rule. The following commands are NOT auto-runnable:
 
 - `git checkout main && git merge --no-ff <branch>` (modifies shared
   branch state — requires explicit per-instance approval)
-- `git tag -a vX.Y.Z -m "Release vX.Y.Z"` (creates an annotated tag —
-  fine locally but typically pushed in the same flow)
+- `git tag -a vX.Y.Z <branch-name> -m "Release vX.Y.Z"` (annotated tag
+  on the RELEASE commit — NOT the merge commit; see the warning below)
 - `git push origin main` (publishes — requires explicit approval)
-- `git push origin --tags` (publishes the tag — requires explicit
-  approval)
+- `git push origin vX.Y.Z` (publishes that one tag — requires explicit
+  approval; push the **specific** tag, never `--tags`, which also
+  publishes any stray local tags)
 
 Describe the **exact** sequence you propose to the user and wait. Do
 not execute. Do not assume previous approval from earlier in the
@@ -167,12 +168,36 @@ Recommended proposal to surface:
 
 ```
 git checkout main
-git pull origin main                # in case main moved since this branch was cut
-git merge --no-ff <branch-name>     # the actual merge
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git pull origin main                  # in case main moved since this branch was cut
+git merge --no-ff <branch-name>       # the actual merge (a merge commit becomes main's tip)
+
+# Tag the RELEASE commit, NOT the merge commit. After --no-ff the
+# <branch-name> ref still points at the chore(release) commit, so tag THAT:
+git tag -a vX.Y.Z <branch-name> -m "Release vX.Y.Z"
+
 git push origin main
-git push origin --tags
+git push origin vX.Y.Z                 # the specific tag — NEVER --tags
 ```
+
+**⚠️ Never tag the merge commit — tag-triggered CD does not fire on it.**
+A deploy pipeline keyed on `on: push: tags` will NOT run for a tag that
+points at a `--no-ff` merge commit; the release looks shipped but never
+deploys (silent). Always anchor the tag on the `chore(release): vX.Y.Z`
+commit — i.e. the branch tip, which has the **identical tree** to the
+merge but is a normal 1-parent commit. If a tag was mistakenly placed on
+the merge commit, move it (delete-then-recreate gives CD a clean
+tag-create event to fire on):
+
+```
+git push origin :refs/tags/vX.Y.Z     # delete the bad remote tag
+git tag -d vX.Y.Z                      # delete it locally
+git tag -a vX.Y.Z <release-commit-sha> -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+This bit the **v2.31.0** release — the tag first landed on the merge
+commit and CD stayed silent until it was moved to the `chore(release)`
+commit.
 
 If a frontend rebuild or backend Docker image rebuild is needed for
 deployment, NOTE that to the user but DO NOT trigger it. The deploy is
@@ -195,6 +220,11 @@ a separate downstream action with its own approval.
 - Auto-executing the merge / push / tag commands → restricted ops
   always need per-instance approval, even when the user has approved
   similar ops earlier in the same session.
+- **Tagging the `--no-ff` merge commit instead of the `chore(release)`
+  commit** → tag-triggered CD (`on: push: tags`) does not fire on a
+  merge commit, so the release silently never deploys. Always tag the
+  release commit (the branch tip). Likewise `git push origin --tags`
+  instead of `git push origin vX.Y.Z` → publishes stray local tags.
 
 ## Conventions reference (from CLAUDE.md)
 
