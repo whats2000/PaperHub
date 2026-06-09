@@ -18,6 +18,7 @@ import {
   withBaseHref,
   stripDeadCdnScripts,
   injectPerfStyle,
+  localizeMathjax,
 } from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
 import { Button } from "@/components/ui/button";
@@ -109,13 +110,18 @@ export function CitationCanvas() {
                 mode,
                 status: "ready",
                 // Strip the dead polyfill.io/html5shiv scripts (they stall the
-                // load), inject a content-visibility hint (so revealing the
-                // canvas doesn't lay out the whole paper at once — the
-                // multi-second open/close freeze), then inject <base> so the
-                // paper's relative asset URLs (`asset/...`, served by the
-                // backend) resolve to the backend, not the app origin.
+                // load), repoint any MathJax loader (Debian-local path OR CDN)
+                // at the vendored same-origin build (else math renders as raw
+                // \(...\) in the iframe / needs the internet), inject a content-
+                // visibility hint (so revealing the canvas doesn't lay out the
+                // whole paper at once — the multi-second open/close freeze),
+                // then inject <base> so the paper's relative asset URLs
+                // (`asset/...`, served by the backend) resolve to the backend,
+                // not the app origin.
                 html: withBaseHref(
-                  injectPerfStyle(stripDeadCdnScripts(await fetchPaperHtml(pid))),
+                  injectPerfStyle(
+                    localizeMathjax(stripDeadCdnScripts(await fetchPaperHtml(pid))),
+                  ),
                   `${API_BASE_URL}/papers/content/${pid}/`,
                 ),
               };

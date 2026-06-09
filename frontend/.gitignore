@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Vendored MathJax 3 build — a build artefact copied from the pinned `mathjax`
+# npm dependency by scripts/vendor-mathjax.mjs (predev/prebuild/pretest).
+public/vendor/mathjax
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

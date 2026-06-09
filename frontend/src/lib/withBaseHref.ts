@@ -22,6 +22,49 @@
  * - `html5shiv` — an old-IE shim, irrelevant in modern browsers.
  * MathJax itself (the CDN script that actually typesets math) is left intact.
  */
+/** App-root path of the vendored MathJax 3 build (copied into `public/` by
+ *  `scripts/vendor-mathjax.mjs`; served by Vite in dev and nginx in deploy).
+ *  MathJax 3 — matches the injected `window.MathJax` (v3 syntax) config. */
+export const MATHJAX_PATH = "/vendor/mathjax/tex-chtml-full.js";
+
+/**
+ * Repoint a paper's MathJax loader `<script>` at the vendored, self-hosted build.
+ *
+ * Two upstream variants reach us, both broken or fragile in the iframe:
+ *  - Papers rendered in the Debian backend container get pandoc's patched
+ *    `--mathjax` default — a LOCAL `/usr/share/javascript/mathjax/MathJax.js`
+ *    (MathJax 2). With the iframe's `<base href>`, that absolute path resolves
+ *    to the app origin's nginx SPA fallback (`index.html`, HTML) → the browser
+ *    parses HTML as JS (`Unexpected token '<'`) and math stays raw `\(...\)`.
+ *  - Papers rendered elsewhere reference the jsdelivr CDN — works only when the
+ *    browser can reach the internet.
+ *
+ * We rewrite BOTH to an ABSOLUTE, frontend-ORIGIN URL of the vendored build.
+ * It must be absolute, not root-relative (`/vendor/...`): the iframe's
+ * `<base href>` points at the BACKEND origin in dev
+ * (`VITE_API_BASE_URL=http://localhost:8000`), so a root-relative path would
+ * resolve against the backend — which doesn't serve the vendored file — and
+ * break dev. An absolute frontend-origin URL is immune to the base href and
+ * always hits the app that serves `/vendor/` (and MathJax resolves its fonts
+ * relative to this same URL). `origin` defaults to the running app's origin.
+ *
+ * Makes the canvas fully self-hosted (offline-capable, dev ≡ deploy) and
+ * self-heals already-cached markup at display time without a re-ingest. Matches
+ * any `<script src>` whose URL contains `mathjax`; idempotent on an already-
+ * vendored tag. The inline `window.MathJax` config script has no `src`, so it
+ * is never touched.
+ */
+export function localizeMathjax(
+  html: string,
+  origin: string = window.location.origin,
+): string {
+  const url = `${origin}${MATHJAX_PATH}`;
+  return html.replace(
+    /(<script\b[^>]*\bsrc=")[^"]*mathjax[^"]*("[^>]*>)/gi,
+    `$1${url}$2`,
+  );
+}
+
 export function stripDeadCdnScripts(html: string): string {
   const re =
     /<script\b[^>]*\bsrc="[^"]*(?:polyfill\.io|html5shiv)[^"]*"[^>]*>\s*<\/script>/gi;

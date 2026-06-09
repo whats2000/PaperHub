@@ -3,7 +3,12 @@ import {
   withBaseHref,
   stripDeadCdnScripts,
   injectPerfStyle,
+  localizeMathjax,
+  MATHJAX_PATH,
 } from "@/lib/withBaseHref";
+
+const ORIGIN = "http://localhost:5173";
+const VENDORED = `${ORIGIN}${MATHJAX_PATH}`;
 
 const BASE = "http://localhost:8000/papers/content/7/";
 
@@ -79,6 +84,53 @@ describe("withBaseHref", () => {
     const out = stripDeadCdnScripts(html);
     expect(out).not.toContain("polyfill.io");
     expect(out).toContain("mathjax");
+  });
+
+  it("repoints a Debian local MathJax path at the vendored build, preserving attrs", () => {
+    // Debian's pandoc patches --mathjax to this local path; in the iframe it
+    // resolves to the app origin's SPA fallback (HTML) and math never typesets.
+    const html =
+      '<head><script src="/usr/share/javascript/mathjax/MathJax.js" type="text/javascript"></script></head>';
+    const out = localizeMathjax(html, ORIGIN);
+    expect(out).not.toContain("/usr/share/javascript/mathjax/MathJax.js");
+    expect(out).toContain(`src="${VENDORED}"`);
+    expect(out).toContain('type="text/javascript"');
+  });
+
+  it("repoints the local path even with a ?config query (MathJax 2 form)", () => {
+    const html =
+      '<script src="/usr/share/javascript/mathjax/MathJax.js?config=TeX-AMS_HTML"></script>';
+    expect(localizeMathjax(html, ORIGIN)).toContain(`src="${VENDORED}"`);
+    expect(localizeMathjax(html, ORIGIN)).not.toContain("config=TeX-AMS_HTML");
+  });
+
+  it("repoints a jsdelivr CDN MathJax tag at the vendored build (offline-capable)", () => {
+    const html =
+      '<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"></script>';
+    const out = localizeMathjax(html, ORIGIN);
+    expect(out).toContain(`src="${VENDORED}"`);
+    expect(out).not.toContain("cdn.jsdelivr.net");
+  });
+
+  it("uses an ABSOLUTE frontend-origin URL (immune to the iframe's backend <base href>)", () => {
+    // Dev sets <base href="http://localhost:8000/..."> (the backend). A root-
+    // relative /vendor/... would resolve against the backend and 404; the
+    // injected URL must carry the frontend origin so it hits the app that
+    // serves /vendor/.
+    const html =
+      '<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"></script>';
+    const out = localizeMathjax(html, "http://localhost:5173");
+    expect(out).toContain('src="http://localhost:5173/vendor/mathjax/tex-chtml-full.js"');
+  });
+
+  it("is idempotent on an already-vendored tag", () => {
+    const html = `<script src="${VENDORED}"></script>`;
+    expect(localizeMathjax(html, ORIGIN)).toBe(html);
+  });
+
+  it("never touches the inline window.MathJax config (no src)", () => {
+    const html = "<script>window.MathJax={tex:{macros:{}}};</script>";
+    expect(localizeMathjax(html, ORIGIN)).toBe(html);
   });
 
   it("makes a relative asset URL resolve against the backend (DOMParser check)", () => {
