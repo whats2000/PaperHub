@@ -1,3 +1,4 @@
+import { Dialog } from "@base-ui/react/dialog";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -14,20 +15,28 @@ export function SettingsModal() {
     if (isOpen && !config) void fetchConfig();
   }, [isOpen, config, fetchConfig]);
 
-  if (!isOpen) return null;
   // Derive the effective category: an explicit selection, else the first one.
   // Deriving (rather than syncing via an effect) avoids cascading renders.
   const effectiveCat = activeCat ?? config?.categories[0]?.key ?? null;
   const current = config?.categories.find((c) => c.key === effectiveCat);
 
+  // Base UI Dialog keeps the popup mounted through the close transition, so both
+  // open and close animate (fade + scale). The centering wrapper isolates the
+  // scale transform from the centering transform so they don't fight.
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) close();
+      }}
     >
-      <div className="flex h-[70vh] w-[840px] max-w-[92vw] overflow-hidden rounded-lg border bg-background shadow-xl">
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center p-4">
+          <Dialog.Popup
+            aria-labelledby="settings-title"
+            className="pointer-events-auto flex h-[70vh] w-[840px] max-w-[92vw] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0"
+          >
         {/* Left nav */}
         <nav className="w-56 shrink-0 overflow-y-auto border-r p-2">
           <h2 id="settings-title" className="px-2 py-1 text-sm font-semibold">
@@ -73,8 +82,10 @@ export function SettingsModal() {
             )}
           </div>
         </div>
-      </div>
-    </div>
+          </Dialog.Popup>
+        </div>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
