@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -61,9 +61,15 @@ export function SettingsModal() {
         {/* Field panel */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-end border-b p-3">
-            <button onClick={close} className="rounded px-2 py-1 text-sm hover:bg-muted">
-              {t("common:close")}
-            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("common:close")}
+              title={t("common:close")}
+              onClick={close}
+            >
+              <X />
+            </Button>
           </div>
           {restartPending.length > 0 && (
             <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -137,7 +143,9 @@ function FieldRow({
               className="w-full rounded border px-2 py-1 text-sm"
             />
             <Button
-              size="sm"
+              size="icon"
+              aria-label={t("save")}
+              title={t("save")}
               onClick={() =>
                 void onSave({ [field.key]: draft })
                   .then(() => setReplacing(false))
@@ -149,7 +157,6 @@ function FieldRow({
               }
             >
               <Check />
-              {t("save")}
             </Button>
           </div>
         ) : (
@@ -157,9 +164,14 @@ function FieldRow({
             <span className={field.is_set ? "text-green-600" : "text-muted-foreground"}>
               {field.is_set ? t("setIndicator", "••• set") : t("notSet", "not set")}
             </span>
-            <Button variant="outline" size="xs" onClick={() => setReplacing(true)}>
+            <Button
+              variant="outline"
+              size="icon-xs"
+              aria-label={t("replace", "Replace")}
+              title={t("replace", "Replace")}
+              onClick={() => setReplacing(true)}
+            >
               <Pencil />
-              {t("replace", "Replace")}
             </Button>
           </div>
         )}
@@ -214,11 +226,13 @@ function FieldRow({
             type={field.type === "int" ? "number" : "text"}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         )}
         <Button
-          size="sm"
+          size="icon"
+          aria-label={t("save")}
+          title={t("save")}
           onClick={() =>
             void onSave({ [field.key]: draft === "" ? null : draft }).catch((e: unknown) =>
               toast.error(
@@ -228,7 +242,6 @@ function FieldRow({
           }
         >
           <Check />
-          {t("save")}
         </Button>
       </div>
       {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
@@ -270,6 +283,7 @@ function CredentialEditor({
               variant="ghost"
               size="icon-xs"
               aria-label={t("remove", "Remove")}
+              title={t("remove", "Remove")}
               className="text-destructive hover:text-destructive"
               onClick={() =>
                 void onSave({ [f.key]: null }).catch((e: unknown) =>
@@ -291,7 +305,7 @@ function CredentialEditor({
           placeholder={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
           value={newKey}
           onChange={(e) => setNewKey(e.target.value.toUpperCase())}
-          className="w-1/2 rounded-md border border-border bg-background px-2.5 py-1 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         />
         <datalist id="cred-suggestions">
           {suggestions.map((s) => (
@@ -304,11 +318,13 @@ function CredentialEditor({
           placeholder={t("valuePlaceholder", "value")}
           value={newVal}
           onChange={(e) => setNewVal(e.target.value)}
-          className="w-1/2 rounded-md border border-border bg-background px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         />
         <Button
-          size="sm"
+          size="icon"
           disabled={!newKey || !newVal}
+          aria-label={t("add", "Add")}
+          title={t("add", "Add")}
           onClick={() =>
             void onSave({ [newKey]: newVal })
               .then(() => {
@@ -323,7 +339,6 @@ function CredentialEditor({
           }
         >
           <Plus />
-          {t("add", "Add")}
         </Button>
       </div>
     </div>
