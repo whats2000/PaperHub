@@ -259,7 +259,7 @@ uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if alr
 | **E** | SQL 代理 + `library_stats`（sqlite MCP）+ 工作階段／全域記憶治理（防線、衝突取代、記憶管理 UI） | ✅ 完成 — 已合併（SRS v2.17） |
 | **F** | 投影片流程 + 報告代理 — Marker 擷取（F2/F2.1）、博士等級的投影片代理（F3）、解耦的可選講稿 + 差異編輯 + 長度預算（F4）、會議等級的標題頁中繼資料 + 標題／樣式客製（F4.2） | ✅ 完成 — 已合併（SRS v2.22） |
 | **F5** | 投影片簡報模式（觀眾彈出視窗 + `BroadcastChannel` 同步 + 簡報者操作台）+ 演講中問答 + 編輯器語音輸入 | ✅ 完成 — 已合併（SRS v2.26） |
-| **G** | 前端 UI 國際化（i18n：`en` / `zh-TW` / `zh-CN` / `ja`）+ 帳號選單語言切換器 | 🔜 已規劃（SRS v2.31） |
+| **G** | 前端 UI 國際化（i18n：`en` / `zh-TW` / `zh-CN` / `ja`）+ 帳號選單（語言／主題切換、關於）+ 以資料庫為後盾的執行期設定面板 | ✅ 完成 — 已合併（SRS v2.31） |
 | **H** | 比較檢視 + 檔案系統 / `paperhub.*` MCP | 🔜 已規劃 |
 
 每個計畫都能各自交付可運作、可測試的軟體。計畫放在 [`docs/superpowers/plans/`](docs/superpowers/plans/) 之下。

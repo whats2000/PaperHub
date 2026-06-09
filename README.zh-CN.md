@@ -253,7 +253,7 @@ uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if alr
 | **E** | SQL 智能体 + `library_stats`（sqlite MCP）+ 会话/全局记忆治理（闸门、冲突取代、记忆管理 UI） | ✅ 已完成——已合并（SRS v2.17） |
 | **F** | 幻灯片流水线 + 报告智能体——Marker 解析（F2/F2.1）、博士级幻灯片智能体（F3）、解耦的可选备注 + 差异化编辑 + 长度预算（F4）、会议级元数据标题页 + 标题/样式定制（F4.2） | ✅ 已完成——已合并（SRS v2.22） |
 | **F5** | 幻灯片演示模式（观众弹出窗口 + `BroadcastChannel` 同步 + 演讲者驾驶舱）+ 演讲中问答 + 输入框语音输入 | ✅ 已完成——已合并（SRS v2.26） |
-| **G** | 前端 UI 国际化（i18n：`en` / `zh-TW` / `zh-CN` / `ja`）+ 账户菜单语言切换器 | 🔜 已规划（SRS v2.31） |
+| **G** | 前端 UI 国际化（i18n：`en` / `zh-TW` / `zh-CN` / `ja`）+ 账户菜单（语言／主题切换、关于）+ 以数据库为后盾的运行期设置面板 | ✅ 完成 — 已合并（SRS v2.31） |
 | **H** | 对比视图 + 文件系统 / `paperhub.*` MCP | 🔜 已规划 |
 
 每个计划都独立交付可工作、可测试的软件。计划存放在 [`docs/superpowers/plans/`](docs/superpowers/plans/)。

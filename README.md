@@ -259,7 +259,7 @@ Full architecture lives in the [SRS](docs/superpowers/specs/2026-05-17-paperhub-
 | **E** | SQL Agent + `library_stats` (sqlite MCP) + session/global memory governance (gate, conflict-supersede, Memory Manager UI) | ✅ complete — merged (SRS v2.17) |
 | **F** | Slide Pipeline + Report Agent — Marker ingestion (F2/F2.1), PhD-grade slide agent (F3), decoupled opt-in notes + diff-editing + length budget (F4), conference-grade metadata title page + title/style customization (F4.2) | ✅ complete — merged (SRS v2.22) |
 | **F5** | Slide presentation mode (audience pop-up window + `BroadcastChannel` sync + presenter cockpit) + Q&A-during-talk + composer voice input | ✅ complete — merged (SRS v2.26) |
-| **G** | Frontend UI internationalization (i18n: `en` / `zh-TW` / `zh-CN` / `ja`) + account-menu language switcher | 🔜 planned (SRS v2.31) |
+| **G** | Frontend UI internationalization (i18n: `en` / `zh-TW` / `zh-CN` / `ja`) + account menu (language / theme switcher, About) + DB-backed runtime Settings panel | ✅ complete — merged (SRS v2.31) |
 | **H** | Compare view + filesystem / `paperhub.*` MCP | 🔜 planned |
 
 Each plan ships working, testable software on its own. Plans live under [`docs/superpowers/plans/`](docs/superpowers/plans/).
