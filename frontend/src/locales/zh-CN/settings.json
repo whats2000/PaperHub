@@ -9,6 +9,8 @@
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "值",
   "saveFailed": "无法保存设置",
+  "loadFailed": "无法加载设置。",
+  "retry": "重试",
   "advancedModels": "各任务模型覆盖",
   "category": {
     "models_providers": "模型与供应商",

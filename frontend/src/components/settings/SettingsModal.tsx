@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -12,7 +12,8 @@ import { Switch } from "../ui/switch";
 
 export function SettingsModal() {
   const { t } = useTranslation(["common", "settings"]);
-  const { isOpen, config, restartPending, close, fetchConfig, save } = useSettingsStore();
+  const { isOpen, config, error, restartPending, close, fetchConfig, save } =
+    useSettingsStore();
   const [activeCat, setActiveCat] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,6 +42,8 @@ export function SettingsModal() {
             aria-labelledby="settings-title"
             className="pointer-events-auto flex h-[70vh] w-[840px] max-w-[92vw] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0"
           >
+        {config ? (
+          <>
         {/* Left nav */}
         <nav className="w-56 shrink-0 overflow-y-auto border-r p-2">
           <h2 id="settings-title" className="px-2 py-1 text-sm font-semibold">
@@ -105,6 +108,37 @@ export function SettingsModal() {
             )}
           </div>
         </div>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col">
+            <div className="flex items-center justify-between border-b p-3">
+              <h2 id="settings-title" className="text-sm font-semibold">
+                {t("common:settings")}
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("common:close")}
+                title={t("common:close")}
+                onClick={close}
+              >
+                <X />
+              </Button>
+            </div>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+              {error ? (
+                <>
+                  <p>{t("settings:loadFailed", "Couldn't load settings.")}</p>
+                  <Button variant="outline" size="sm" onClick={() => void fetchConfig()}>
+                    {t("settings:retry", "Retry")}
+                  </Button>
+                </>
+              ) : (
+                <Loader2 className="size-5 animate-spin" />
+              )}
+            </div>
+          </div>
+        )}
           </Dialog.Popup>
         </div>
       </Dialog.Portal>

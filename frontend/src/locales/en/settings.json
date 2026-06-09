@@ -9,6 +9,8 @@
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "value",
   "saveFailed": "Couldn't save the setting",
+  "loadFailed": "Couldn't load settings.",
+  "retry": "Retry",
   "category": {
     "models_providers": "Models & providers",
     "agents_memory": "Agents & memory",

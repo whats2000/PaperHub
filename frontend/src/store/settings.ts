@@ -7,6 +7,7 @@ interface SettingsState {
   isOpen: boolean;
   config: SettingsConfig | null;
   loading: boolean;
+  error: boolean;
   restartPending: string[];
   open: () => void;
   close: () => void;
@@ -18,6 +19,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   isOpen: false,
   config: null,
   loading: false,
+  error: false,
   restartPending: [],
   open: () => {
     set({ isOpen: true });
@@ -25,10 +27,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   close: () => set({ isOpen: false }),
   fetchConfig: async () => {
-    set({ loading: true });
+    set({ loading: true, error: false });
     try {
       const config = await getSettings();
       set({ config });
+    } catch {
+      // Surfaced as a retry state in the modal; never an unhandled rejection.
+      set({ error: true });
     } finally {
       set({ loading: false });
     }

@@ -9,6 +9,8 @@
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "値",
   "saveFailed": "設定を保存できませんでした",
+  "loadFailed": "設定を読み込めませんでした。",
+  "retry": "再試行",
   "advancedModels": "スロット別モデル上書き",
   "category": {
     "models_providers": "モデルとプロバイダー",
