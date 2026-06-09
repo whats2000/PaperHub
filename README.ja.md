@@ -15,7 +15,7 @@
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
 ![Tests](https://img.shields.io/badge/tests-1130%20backend%20%2B%20426%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.31.1%20(SRS%20v2.31.1)-success)
+![Status](https://img.shields.io/badge/release-v2.31.2%20(SRS%20v2.31.2)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · **日本語** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
@@ -324,7 +324,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 ドキュメント
 
-- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.31.1** まで提供)。
+- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.31.2** まで提供)。
 - **[実装プラン](docs/superpowers/plans/)** — サブプロジェクトごとに 1 つ、それぞれ TDD で実行。
 - **[バックエンド開発者向けドキュメント](backend/README.md)** — バックエンド固有の注記。
 
@@ -340,7 +340,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.31.1}
+  version = {2.31.2}
 }
 ```
 
