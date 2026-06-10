@@ -26,6 +26,11 @@ import { createSpeechRecognizer, isSpeechSupported, type SpeechRecognizer } from
 interface Props {
   onSubmit: (text: string) => void;
   disabled: boolean;
+  /** First-run gate: show a "finish setup" hint and treat the composer as
+   *  locked (the parent also folds this into `disabled`). */
+  setupRequired?: boolean;
+  /** Open the Settings modal from the setup hint. */
+  onOpenSettings?: () => void;
   /** Whether the Memory Manager panel is currently open. */
   memoryOpen?: boolean;
   /** Called when the user clicks the Memory button to toggle the panel. */
@@ -65,6 +70,8 @@ const CAPABILITIES: Capability[] = [
 export function Composer({
   onSubmit,
   disabled,
+  setupRequired = false,
+  onOpenSettings,
   memoryOpen = false,
   onToggleMemory,
   onToggleCanvas,
@@ -175,6 +182,18 @@ export function Composer({
       }}
     >
       <div className="max-w-3xl mx-auto">
+        {setupRequired && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <span className="min-w-0 flex-1">{t("composer.setupRequired")}</span>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="shrink-0 rounded font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              {t("composer.setupCta")}
+            </button>
+          </div>
+        )}
         {/* Single rounded container — textarea on top, tool row + send on bottom.
             focus-within ring unifies the visual treatment across child focus. */}
         <div className="rounded-2xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">

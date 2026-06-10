@@ -9,6 +9,7 @@ import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useSlidesStore } from "@/store/slides";
+import { useSettingsStore } from "@/store/settings";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
 import { useSessionsSync } from "@/hooks/useSessionsSync";
@@ -113,6 +114,12 @@ export function ChatPage() {
 
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
+
+  // First-run gate: lock the composer until the backend confirms a usable
+  // small + flagship model (otherwise sending just errors). `null` (not yet
+  // probed) is treated as ok to avoid a lock-flash for configured users.
+  const setupRequired = useSettingsStore((s) => s.readiness?.ready === false);
+  const openSettings = useSettingsStore((s) => s.open);
 
   const deckForChip = useSlidesStore((s) =>
     backendSessionId === null ? undefined : s.deckBySession[backendSessionId]);
@@ -243,7 +250,9 @@ export function ChatPage() {
         <ChatThread session={activeSession} />
         <Composer
           onSubmit={handleSubmit}
-          disabled={isStreaming}
+          disabled={isStreaming || setupRequired}
+          setupRequired={setupRequired}
+          onOpenSettings={openSettings}
           memoryOpen={memoryOpen}
           onToggleMemory={handleToggleMemory}
           onToggleCanvas={handleToggleCanvas}
