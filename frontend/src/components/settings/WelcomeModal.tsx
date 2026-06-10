@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { CheckCircle2, Circle, Settings, Sparkles } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, Settings, Sparkles } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -77,11 +77,26 @@ export function WelcomeModal() {
                 </li>
               ))}
             </ul>
-            <p className="mb-4 text-xs text-muted-foreground">
+            <p className="mb-2 text-xs text-muted-foreground">
               {t(
                 "welcome.lockNote",
                 "The composer stays locked until all three are valid.",
               )}
+            </p>
+            <p className="mb-4 text-xs text-muted-foreground">
+              {t(
+                "welcome.optionalSS",
+                "Optional: add a Semantic Scholar API key in Settings → Integrations for faster paper search (the free tier is rate-limited; it won't block anything).",
+              )}{" "}
+              <a
+                href="https://www.semanticscholar.org/product/api#api-key"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                {t("welcome.optionalSSLink", "Get a key")}
+                <ExternalLink className="ml-0.5 inline size-3 align-text-bottom" />
+              </a>
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={dismissWelcome}>

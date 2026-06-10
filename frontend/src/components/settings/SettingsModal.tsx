@@ -260,6 +260,7 @@ function FieldRow({
           </div>
         )}
         {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
+        {field.docs_url && <DocsLink url={field.docs_url} />}
       </div>
     );
   }
@@ -356,7 +357,23 @@ function FieldRow({
         )
       )}
       {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
+      {field.docs_url && <DocsLink url={field.docs_url} />}
     </div>
+  );
+}
+
+function DocsLink({ url }: { url: string }) {
+  const { t } = useTranslation("settings");
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+    >
+      {t("getApiKey", "Get an API key")}
+      <ExternalLink className="size-3" />
+    </a>
   );
 }
 

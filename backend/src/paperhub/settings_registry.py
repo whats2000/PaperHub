@@ -38,6 +38,9 @@ class SettingField:
     max: int | None = None
     choices: tuple[str, ...] = ()
     suggestions: tuple[str, ...] = ()
+    # Optional "where to get this" link (e.g. a provider's API-key page), shown
+    # under the field. The frontend localizes the link label, not the URL.
+    docs_url: str = ""
 
 
 # Curated set of known LiteLLM provider env vars (offered as autocomplete in
@@ -179,9 +182,6 @@ SETTINGS_REGISTRY: list[SettingField] = [
                  "Max section reads / subagent turn", "int", default="8", min=1, max=50),
     SettingField("PAPERHUB_SESSION_RETENTION_DAYS", "agents_memory",
                  "Soft-deleted session retention (days)", "int", default="30", min=1, max=3650),
-    SettingField("PAPERHUB_MARKER_MAX_PAGES", "integrations",
-                 "Marker pages per /extract call", "int", default="1", min=1, max=100,
-                 restart_required=True),
     # ── Memory / recall ─────────────────────────────────────────────────
     SettingField("PAPERHUB_MEMORY_RECALL", "agents_memory", "Inject recalled memories", "bool",
                  default="1", help="Surface active memories to answering agents."),
@@ -189,7 +189,10 @@ SETTINGS_REGISTRY: list[SettingField] = [
     # ── External services ───────────────────────────────────────────────
     SettingField("PAPERHUB_SEMANTIC_SCHOLAR_API_KEY", "integrations",
                  "Semantic Scholar API key", "secret", secret=True,
-                 help="Optional; the unauthenticated tier is rate-limited."),
+                 help="Optional but recommended — speeds up paper search. The "
+                      "unauthenticated tier is heavily rate-limited (it won't "
+                      "block the app, just slow searches).",
+                 docs_url="https://www.semanticscholar.org/product/api#api-key"),
     # ── External lookup ─────────────────────────────────────────────────
     SettingField("PAPERHUB_UNPAYWALL_EMAIL", "integrations", "Unpaywall contact email", "email",
                  help="Enables the DOI→free-PDF fallback. Used for abuse logging only."),
@@ -202,7 +205,10 @@ SETTINGS_REGISTRY: list[SettingField] = [
     # ── Logging ─────────────────────────────────────────────────────────
     SettingField("PAPERHUB_LOG_LEVEL", "system", "Log level", "enum", default="INFO",
                  restart_required=True, choices=("DEBUG", "INFO", "WARNING", "ERROR")),
-    # ── Marker ──────────────────────────────────────────────────────────
+    # ── Marker (PDF ingestion) — grouped together at the bottom ──────────
+    SettingField("PAPERHUB_MARKER_MAX_PAGES", "integrations",
+                 "Marker pages per /extract call", "int", default="1", min=1, max=100,
+                 restart_required=True),
     SettingField("PAPERHUB_MARKER_URL", "integrations", "Marker service URL", "string",
                  default="http://127.0.0.1:8002", restart_required=True),
     SettingField("PAPERHUB_INPROCESS_MARKER", "integrations", "In-process Marker", "bool",

@@ -19,10 +19,13 @@
   "modelKeyMissing": "缺少供應商金鑰：{{keys}}",
   "modelUnusable": "此模型無法使用——請確認模型名稱可用且 API 金鑰有效。",
   "modelChecking": "正在檢查模型可用性…",
+  "getApiKey": "取得 API 金鑰",
   "welcome": {
     "title": "歡迎使用 PaperHub",
     "subtitle": "連接模型供應商即可開始對話。請在「設定」中完成以下步驟：",
     "lockNote": "在三項皆有效之前，輸入框將維持鎖定。",
+    "optionalSS": "選用：可在「設定 → 整合服務」新增 Semantic Scholar API 金鑰以加速論文搜尋（免費層級有速率限制，但不會阻擋任何功能）。",
+    "optionalSSLink": "取得金鑰",
     "openSettings": "開啟設定",
     "later": "稍後再說",
     "step": {
@@ -115,7 +118,7 @@
     },
     "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY": {
       "label": "Semantic Scholar API 金鑰",
-      "help": "選填；未驗證層級有速率限制。"
+      "help": "選用但建議設定——可加速論文搜尋。未驗證層級有嚴格的速率限制（不會阻擋應用程式，只是搜尋較慢）。"
     },
     "PAPERHUB_UNPAYWALL_EMAIL": {
       "label": "Unpaywall 聯絡 Email",

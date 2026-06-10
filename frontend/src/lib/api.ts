@@ -462,6 +462,8 @@ export interface SettingsField {
   choices?: string[];
   min?: number;
   max?: number;
+  /** Optional "where to get this" link (e.g. a provider's API-key page). */
+  docs_url?: string;
 }
 
 export interface SettingsCredentials {

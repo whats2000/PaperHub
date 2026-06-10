@@ -75,6 +75,8 @@ async def get_settings() -> dict[str, Any]:
             "read_only": f.read_only, "help": f.help, "advanced": f.advanced,
             "is_default": f.key not in rows,
         }
+        if f.docs_url:
+            item["docs_url"] = f.docs_url
         if f.choices:
             item["choices"] = list(f.choices)
         if f.min is not None:

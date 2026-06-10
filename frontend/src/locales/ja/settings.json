@@ -19,10 +19,13 @@
   "modelKeyMissing": "プロバイダーキーがありません：{{keys}}",
   "modelUnusable": "このモデルは使用できません——モデル名が利用可能か、API キーが有効かを確認してください。",
   "modelChecking": "モデルの利用可否を確認中…",
+  "getApiKey": "API キーを取得",
   "welcome": {
     "title": "PaperHub へようこそ",
     "subtitle": "モデルプロバイダーを接続すると会話を開始できます。「設定」で次の手順を完了してください：",
     "lockNote": "3 つすべてが有効になるまで、入力欄はロックされたままです。",
+    "optionalSS": "任意：「設定 → 連携サービス」で Semantic Scholar API キーを追加すると論文検索が速くなります（無料枠はレート制限がありますが、機能をブロックすることはありません）。",
+    "optionalSSLink": "キーを取得",
     "openSettings": "設定を開く",
     "later": "後で",
     "step": {
@@ -115,7 +118,7 @@
     },
     "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY": {
       "label": "Semantic Scholar API キー",
-      "help": "任意。未認証ティアはレート制限あり。"
+      "help": "任意ですが推奨——論文検索が速くなります。未認証ティアは厳しいレート制限があります（アプリをブロックすることはなく、検索が遅くなるだけです）。"
     },
     "PAPERHUB_UNPAYWALL_EMAIL": {
       "label": "Unpaywall 連絡先メール",
