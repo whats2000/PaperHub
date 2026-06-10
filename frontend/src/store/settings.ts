@@ -65,7 +65,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   fetchReadiness: async () => {
     try {
-      set({ readiness: await getReadiness() });
+      const prev = get().readiness;
+      const next = await getReadiness();
+      // Re-surface the tour whenever the app newly becomes not-ready (first boot,
+      // or a key/model the user just removed or broke) — even if dismissed before.
+      const becameNotReady = !next.ready && (prev === null || prev.ready);
+      set(becameNotReady ? { readiness: next, welcomeDismissed: false } : { readiness: next });
     } catch {
       // Boot-time / transient backend errors must not crash the app; leave the
       // last known readiness in place (null = treated as not-ready by callers).

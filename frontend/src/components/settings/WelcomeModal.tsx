@@ -25,10 +25,14 @@ export function WelcomeModal() {
 
   const open = readiness !== null && !readiness.ready && !welcomeDismissed;
 
+  const smallOk = readiness?.models.small.key_ok ?? false;
+  const flagshipOk = readiness?.models.flagship.key_ok ?? false;
   const steps = [
-    { key: "credential", done: readiness?.credentials_set ?? false },
-    { key: "small", done: readiness?.models.small.key_ok ?? false },
-    { key: "flagship", done: readiness?.models.flagship.key_ok ?? false },
+    // A working model proves the key works; a removed/empty key fails the ping,
+    // so the credential step reflects "a usable key", not just a DB row.
+    { key: "credential", done: (readiness?.credentials_set ?? false) || smallOk || flagshipOk },
+    { key: "small", done: smallOk },
+    { key: "flagship", done: flagshipOk },
   ];
 
   return (
