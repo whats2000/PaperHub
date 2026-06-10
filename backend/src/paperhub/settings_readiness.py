@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from typing import Any
 
@@ -84,11 +85,11 @@ async def _ping_model(model: str) -> dict[str, Any]:
     empty/invalid key or a non-existent model id is caught (it would error on
     send otherwise)."""
     if not model:
-        return {"model": "", "key_ok": False, "missing_keys": [], "error": "no model configured"}
+        return {"model": "", "key_ok": False, "missing_keys": [], "error": None, "detail": None}
 
     missing = _missing_keys(model)
     if missing:  # key plainly absent — no point spending a network round-trip
-        return {"model": model, "key_ok": False, "missing_keys": missing, "error": None}
+        return {"model": model, "key_ok": False, "missing_keys": missing, "error": None, "detail": None}
 
     try:
         await litellm.acompletion(
@@ -97,15 +98,26 @@ async def _ping_model(model: str) -> dict[str, Any]:
             max_tokens=1,
             timeout=_PING_TIMEOUT_S,
         )
-        return {"model": model, "key_ok": True, "missing_keys": [], "error": None}
+        return {"model": model, "key_ok": True, "missing_keys": [], "error": None, "detail": None}
     except Exception as exc:  # noqa: BLE001 — any failure means "not runnable"
-        # Re-derive missing keys: an empty key surfaces here, not above.
+        # Re-derive missing keys: an empty key surfaces here, not above. The
+        # detail is the provider's own reason (redacted) so the UI can tell the
+        # user whether it's the KEY or the MODEL — an opaque class name can't.
         return {
             "model": model,
             "key_ok": False,
             "missing_keys": _missing_keys(model),
             "error": type(exc).__name__,
+            "detail": _redact_detail(str(exc)),
         }
+
+
+def _redact_detail(message: str) -> str:
+    """First line of a provider error, with anything key-shaped scrubbed."""
+    head = message.strip().splitlines()[0] if message.strip() else ""
+    # Scrub obvious secret-shaped tokens (sk-..., AIza..., long base64-ish runs).
+    head = re.sub(r"\b(sk-|AIza)[A-Za-z0-9_\-]{6,}\b", "<redacted>", head)
+    return head[:200]
 
 
 async def _model_check(model: str) -> dict[str, Any]:

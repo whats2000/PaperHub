@@ -345,6 +345,13 @@ function FieldRow({
                   "settings:modelUnusable",
                   "This model isn't usable — check that the model name is available and the API key is valid.",
                 )}
+            {/* The provider's own reason (redacted) — distinguishes a rejected
+                key from a wrong/unavailable model name, per slot. */}
+            {modelCheck.detail && (
+              <span className="mt-0.5 block font-normal text-muted-foreground">
+                {modelCheck.detail}
+              </span>
+            )}
           </p>
         )
       )}

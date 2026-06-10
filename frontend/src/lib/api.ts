@@ -517,10 +517,15 @@ export interface SettingsReadiness {
 
 export interface SettingsModelCheck {
   model: string;
-  /** The model's provider has its required key(s) in the environment. */
+  /** The model is runnable: key present AND a 1-token pre-flight succeeded. */
   key_ok: boolean;
   /** Env var names LiteLLM still needs for this model's provider. */
   missing_keys: string[];
+  /** Exception class name when the pre-flight failed (e.g. AuthenticationError). */
+  error?: string | null;
+  /** The provider's own first-line reason (redacted) — tells the user whether
+   *  it's the key or the model that's wrong. */
+  detail?: string | null;
 }
 
 /** First-run gate: are the small + flagship models usable? Drives the composer
