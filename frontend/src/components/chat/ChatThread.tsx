@@ -141,7 +141,12 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
             !msg.deck;
 
           return (
-            <div key={`${msg.run_id ?? "user"}-${i}`} className="space-y-1">
+            <div
+              key={`${msg.run_id ?? "user"}-${i}`}
+              // Match the user bubble's reserved bottom space on the assistant
+              // section so the area under the trace breathes the same way.
+              className={`space-y-1${msg.role === "assistant" ? " pb-6" : ""}`}
+            >
               {showResearchCard && (
                 <div className="pl-1">
                   <ResearchProgressCard intent={intent} trace={msg.trace} />

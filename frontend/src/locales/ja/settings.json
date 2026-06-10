@@ -6,17 +6,54 @@
   "add": "追加",
   "setIndicator": "••• 設定済み",
   "notSet": "未設定",
+  "credentialsHeading": "プロバイダー認証情報",
+  "credentialsIntro": "PaperHub は LiteLLM を介して、あなた自身の API キーで LLM プロバイダーを呼び出します。キーは名前／値のペアで追加します——名前はプロバイダーの環境変数（例：OPENAI_API_KEY）、値はシークレットです。値はこのサーバーのローカルに保存されます。",
+  "credentialsDocsLink": "正確なキー名と各プロバイダーの取得方法は LiteLLM のプロバイダー一覧を参照してください",
+  "keyNameLabel": "キー名",
+  "valueLabel": "値",
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "値",
   "saveFailed": "設定を保存できませんでした",
   "loadFailed": "設定を読み込めませんでした。",
   "retry": "再試行",
+  "modelKeyMissing": "プロバイダーキーがありません：{{keys}}",
+  "modelUnusable": "このモデルは使用できません——モデル名が利用可能か、API キーが有効かを確認してください。",
+  "modelUnreachable": "現在プロバイダーに接続できません——通常は一時的な問題です。しばらくして再試行してください。",
+  "modelChecking": "モデルの利用可否を確認中…",
+  "getApiKey": "API キーを取得",
+  "welcome": {
+    "title": "PaperHub へようこそ",
+    "subtitle": "モデルプロバイダーを接続すると会話を開始できます。「設定」で次の手順を完了してください：",
+    "lockNote": "3 つすべてが有効になるまで、入力欄はロックされたままです。",
+    "optionalSS": "任意：「設定 → 連携サービス」で Semantic Scholar API キーを追加すると論文検索が速くなります（無料枠はレート制限がありますが、機能をブロックすることはありません）。",
+    "optionalSSLink": "キーを取得",
+    "openSettings": "設定を開く",
+    "later": "後で",
+    "step": {
+      "credential": {
+        "label": "プロバイダー API キーを追加",
+        "help": "例：GEMINI_API_KEY または OPENAI_API_KEY（「モデルとプロバイダー」内）。"
+      },
+      "small": {
+        "label": "有効な小規模モデルを設定",
+        "help": "分類器と高速なツール呼び出しに使用します。"
+      },
+      "flagship": {
+        "label": "有効なフラッグシップモデルを設定",
+        "help": "ユーザー向けの回答に使用します。"
+      }
+    }
+  },
   "advancedModels": "スロット別モデル上書き",
   "category": {
     "models_providers": "モデルとプロバイダー",
     "agents_memory": "エージェントとメモリ",
     "integrations": "連携サービス",
     "system": "システム"
+  },
+  "group": {
+    "paper_sources": "論文検索とオープンアクセス",
+    "marker": "Marker（PDF 取り込み）"
   },
   "field": {
     "PAPERHUB_MODEL_SMALL": {
@@ -86,7 +123,7 @@
     },
     "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY": {
       "label": "Semantic Scholar API キー",
-      "help": "任意。未認証ティアはレート制限あり。"
+      "help": "任意ですが推奨——論文検索が速くなります。未認証ティアは厳しいレート制限があります（アプリをブロックすることはなく、検索が遅くなるだけです）。"
     },
     "PAPERHUB_UNPAYWALL_EMAIL": {
       "label": "Unpaywall 連絡先メール",

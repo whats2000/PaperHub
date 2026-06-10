@@ -12,6 +12,9 @@ const server = setupServer(
   http.get(`${API_BASE_URL}/settings`, () =>
     HttpResponse.json({
       categories: [
+        { key: "models_providers", label: "Models & providers",
+          credentials: { suggestions: ["OPENAI_API_KEY", "GEMINI_API_KEY"], keys: [] },
+          fields: [] },
         { key: "integrations", label: "Integrations",
           fields: [{ key: "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY", label: "Semantic Scholar API key",
             type: "secret", secret: true, is_set: false, restart_required: false }] },
@@ -34,5 +37,17 @@ describe("SettingsModal", () => {
     await userEvent.click(screen.getByText("Integrations"));
     // Secret renders as not-set with a Replace affordance, never a value.
     expect(screen.getByText(/not set/i)).toBeInTheDocument();
+  });
+
+  it("explains provider credentials with a LiteLLM docs link", async () => {
+    render(<SettingsModal />);
+    // The first category (models & providers) is selected by default.
+    expect(await screen.findByText(/Provider credentials/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /LiteLLM's provider list/i });
+    expect(link).toHaveAttribute("href", "https://docs.litellm.ai/docs/providers");
+    expect(link).toHaveAttribute("target", "_blank");
+    // The add-row inputs are now labeled.
+    expect(screen.getByLabelText(/Key name/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Value$/i)).toBeInTheDocument();
   });
 });

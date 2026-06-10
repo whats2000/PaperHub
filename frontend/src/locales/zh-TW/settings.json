@@ -6,17 +6,54 @@
   "add": "新增",
   "setIndicator": "••• 已設定",
   "notSet": "未設定",
+  "credentialsHeading": "供應商憑證",
+  "credentialsIntro": "PaperHub 透過 LiteLLM 使用您自己的 API 金鑰呼叫 LLM 供應商。請以名稱／值配對方式新增金鑰——名稱是供應商的環境變數（例如 OPENAI_API_KEY），值則是密鑰。所有值僅儲存在此伺服器本機。",
+  "credentialsDocsLink": "查看 LiteLLM 的供應商清單，瞭解正確的金鑰名稱與各家的取得方式",
+  "keyNameLabel": "金鑰名稱",
+  "valueLabel": "值",
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "值",
   "saveFailed": "無法儲存設定",
   "loadFailed": "無法載入設定。",
   "retry": "重試",
+  "modelKeyMissing": "缺少供應商金鑰：{{keys}}",
+  "modelUnusable": "此模型無法使用——請確認模型名稱可用且 API 金鑰有效。",
+  "modelUnreachable": "目前無法連線到供應商——通常是暫時性問題，請稍後再試。",
+  "modelChecking": "正在檢查模型可用性…",
+  "getApiKey": "取得 API 金鑰",
+  "welcome": {
+    "title": "歡迎使用 PaperHub",
+    "subtitle": "連接模型供應商即可開始對話。請在「設定」中完成以下步驟：",
+    "lockNote": "在三項皆有效之前，輸入框將維持鎖定。",
+    "optionalSS": "選用：可在「設定 → 整合服務」新增 Semantic Scholar API 金鑰以加速論文搜尋（免費層級有速率限制，但不會阻擋任何功能）。",
+    "optionalSSLink": "取得金鑰",
+    "openSettings": "開啟設定",
+    "later": "稍後再說",
+    "step": {
+      "credential": {
+        "label": "新增供應商 API 金鑰",
+        "help": "例如 GEMINI_API_KEY 或 OPENAI_API_KEY，位於「模型與供應商」。"
+      },
+      "small": {
+        "label": "設定有效的小型層級模型",
+        "help": "用於分類器與快速工具呼叫。"
+      },
+      "flagship": {
+        "label": "設定有效的旗艦層級模型",
+        "help": "用於面向使用者的回覆。"
+      }
+    }
+  },
   "advancedModels": "各任務模型覆寫",
   "category": {
     "models_providers": "模型與供應商",
     "agents_memory": "代理與記憶",
     "integrations": "整合服務",
     "system": "系統"
+  },
+  "group": {
+    "paper_sources": "論文搜尋與開放取用",
+    "marker": "Marker（PDF 解析）"
   },
   "field": {
     "PAPERHUB_MODEL_SMALL": {
@@ -86,7 +123,7 @@
     },
     "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY": {
       "label": "Semantic Scholar API 金鑰",
-      "help": "選填；未驗證層級有速率限制。"
+      "help": "選用但建議設定——可加速論文搜尋。未驗證層級有嚴格的速率限制（不會阻擋應用程式，只是搜尋較慢）。"
     },
     "PAPERHUB_UNPAYWALL_EMAIL": {
       "label": "Unpaywall 聯絡 Email",

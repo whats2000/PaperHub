@@ -6,16 +6,53 @@
   "add": "Add",
   "setIndicator": "••• set",
   "notSet": "not set",
+  "credentialsHeading": "Provider credentials",
+  "credentialsIntro": "PaperHub calls LLM providers through LiteLLM using your own API keys. Add a key as a name/value pair — the name is the provider's environment variable (e.g. OPENAI_API_KEY) and the value is the secret. Values are stored locally on this server.",
+  "credentialsDocsLink": "See LiteLLM's provider list for the exact key name and where to get each key",
+  "keyNameLabel": "Key name",
+  "valueLabel": "Value",
   "providerKeyPlaceholder": "PROVIDER_API_KEY",
   "valuePlaceholder": "value",
   "saveFailed": "Couldn't save the setting",
   "loadFailed": "Couldn't load settings.",
   "retry": "Retry",
+  "modelKeyMissing": "Missing provider key: {{keys}}",
+  "modelUnusable": "This model isn't usable — check that the model name is available and the API key is valid.",
+  "modelUnreachable": "Couldn't reach the provider just now — this is usually transient, try again.",
+  "modelChecking": "Checking model availability…",
+  "getApiKey": "Get an API key",
+  "welcome": {
+    "title": "Welcome to PaperHub",
+    "subtitle": "Connect a model provider to start chatting. Finish these steps in Settings:",
+    "lockNote": "The composer stays locked until all three are valid.",
+    "optionalSS": "Optional: add a Semantic Scholar API key in Settings → Integrations for faster paper search (the free tier is rate-limited; it won't block anything).",
+    "optionalSSLink": "Get a key",
+    "openSettings": "Open Settings",
+    "later": "Maybe later",
+    "step": {
+      "credential": {
+        "label": "Add a provider API key",
+        "help": "e.g. GEMINI_API_KEY or OPENAI_API_KEY, under Models & providers."
+      },
+      "small": {
+        "label": "Set a valid Small-tier model",
+        "help": "Used for classifiers and fast tool calls."
+      },
+      "flagship": {
+        "label": "Set a valid Flagship-tier model",
+        "help": "Used for user-facing answers."
+      }
+    }
+  },
   "category": {
     "models_providers": "Models & providers",
     "agents_memory": "Agents & memory",
     "integrations": "Integrations",
     "system": "System"
+  },
+  "group": {
+    "paper_sources": "Paper search & open access",
+    "marker": "Marker (PDF ingestion)"
   },
   "advancedModels": "Per-slot model overrides",
   "field": {
@@ -86,7 +123,7 @@
     },
     "PAPERHUB_SEMANTIC_SCHOLAR_API_KEY": {
       "label": "Semantic Scholar API key",
-      "help": "Optional; the unauthenticated tier is rate-limited."
+      "help": "Optional but recommended — speeds up paper search. The unauthenticated tier is heavily rate-limited (it won't block the app, just slow searches)."
     },
     "PAPERHUB_UNPAYWALL_EMAIL": {
       "label": "Unpaywall contact email",

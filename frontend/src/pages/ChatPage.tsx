@@ -9,6 +9,8 @@ import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useSlidesStore } from "@/store/slides";
+import { useSettingsStore } from "@/store/settings";
+import { hasBlockingConfigIssue } from "@/lib/readiness";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
 import { useSessionsSync } from "@/hooks/useSessionsSync";
@@ -113,6 +115,15 @@ export function ChatPage() {
 
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
+
+  // First-run gate: lock the composer only on a definitive config problem
+  // (missing / rejected key) — NOT on a transient readiness blip (e.g. the
+  // re-ping after the site idled). `null` (not yet probed) stays unlocked to
+  // avoid a lock-flash for configured users.
+  const setupRequired = useSettingsStore(
+    (s) => s.readiness != null && hasBlockingConfigIssue(s.readiness),
+  );
+  const openSettings = useSettingsStore((s) => s.open);
 
   const deckForChip = useSlidesStore((s) =>
     backendSessionId === null ? undefined : s.deckBySession[backendSessionId]);
@@ -243,7 +254,9 @@ export function ChatPage() {
         <ChatThread session={activeSession} />
         <Composer
           onSubmit={handleSubmit}
-          disabled={isStreaming}
+          disabled={isStreaming || setupRequired}
+          setupRequired={setupRequired}
+          onOpenSettings={openSettings}
           memoryOpen={memoryOpen}
           onToggleMemory={handleToggleMemory}
           onToggleCanvas={handleToggleCanvas}

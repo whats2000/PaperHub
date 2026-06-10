@@ -1,10 +1,11 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ExternalLink, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import type { SettingsCredentials, SettingsField } from "../../lib/api";
+import type { SettingsCredentials, SettingsField, SettingsModelCheck } from "../../lib/api";
+import { isTransientError } from "../../lib/readiness";
 import { useSettingsStore } from "../../store/settings";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
@@ -14,11 +15,72 @@ export function SettingsModal() {
   const { t } = useTranslation(["common", "settings"]);
   const { isOpen, config, error, restartPending, close, fetchConfig, save } =
     useSettingsStore();
+  const modelOptions = useSettingsStore((s) => s.modelOptions);
+  const readiness = useSettingsStore((s) => s.readiness);
+  const readinessChecking = useSettingsStore((s) => s.readinessChecking);
   const [activeCat, setActiveCat] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && !config) void fetchConfig();
   }, [isOpen, config, fetchConfig]);
+
+  // Flatten per-provider model options into one de-duped autocomplete list for
+  // the model-name fields. Best-effort: empty list just means no suggestions.
+  const modelSuggestions = Array.from(
+    new Set(Object.values(modelOptions?.options ?? {}).flat()),
+  ).sort();
+  // readiness only validates the two gate models — surface their missing-key
+  // hint inline on the matching field.
+  const modelChecks: Record<string, SettingsModelCheck | undefined> = {
+    PAPERHUB_MODEL_SMALL: readiness?.models.small,
+    PAPERHUB_MODEL_FLAGSHIP: readiness?.models.flagship,
+  };
+  const renderField = (f: SettingsField) => (
+    <FieldRow
+      key={`${f.key}:${f.value ?? ""}`}
+      field={f}
+      onSave={save}
+      modelListId={f.key.includes("MODEL") && modelSuggestions.length > 0 ? "model-suggestions" : undefined}
+      modelCheck={modelChecks[f.key]}
+      modelChecking={readinessChecking && f.key in modelChecks}
+    />
+  );
+
+  // Render fields, wrapping each contiguous sub-group under a titled, indented
+  // container so the group's fields read as nested below its heading. Ungrouped
+  // fields render inline as before.
+  const renderFields = (fields: SettingsField[]) => {
+    const out: ReactNode[] = [];
+    let i = 0;
+    while (i < fields.length) {
+      const field = fields[i]!;
+      const group = field.group;
+      if (!group) {
+        out.push(renderField(field));
+        i += 1;
+        continue;
+      }
+      const groupFields: SettingsField[] = [];
+      for (let f = fields[i]; f && f.group === group; f = fields[i]) {
+        groupFields.push(f);
+        i += 1;
+      }
+      out.push(
+        <section
+          key={`group:${group}`}
+          className="mt-4 overflow-hidden rounded-xl border border-border first:mt-0"
+        >
+          <header className="border-b border-border bg-muted/40 px-4 py-2.5">
+            <h3 className="text-sm font-semibold text-foreground">
+              {t(`settings:group.${group}`, group)}
+            </h3>
+          </header>
+          <div className="px-4 pt-4">{groupFields.map(renderField)}</div>
+        </section>,
+      );
+    }
+    return out;
+  };
 
   // Derive the effective category: an explicit selection, else the first one.
   // Deriving (rather than syncing via an effect) avoids cascading renders.
@@ -87,25 +149,23 @@ export function SettingsModal() {
                 <CredentialEditor credentials={current.credentials} onSave={save} />
               </div>
             )}
-            {current?.fields
-              .filter((f) => !f.advanced)
-              .map((f) => (
-                <FieldRow key={`${f.key}:${f.value ?? ""}`} field={f} onSave={save} />
-              ))}
+            {current && renderFields(current.fields.filter((f) => !f.advanced))}
             {current?.fields.some((f) => f.advanced) && (
               <details className="mt-2 rounded-md border border-border">
                 <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-muted-foreground">
                   {t("settings:advancedModels", "Per-slot model overrides")}
                 </summary>
                 <div className="border-t border-border p-3 pb-0">
-                  {current.fields
-                    .filter((f) => f.advanced)
-                    .map((f) => (
-                      <FieldRow key={`${f.key}:${f.value ?? ""}`} field={f} onSave={save} />
-                    ))}
+                  {current.fields.filter((f) => f.advanced).map(renderField)}
                 </div>
               </details>
             )}
+            {/* Shared autocomplete source for all model-name fields. */}
+            <datalist id="model-suggestions">
+              {modelSuggestions.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
           </div>
         </div>
           </>
@@ -149,9 +209,19 @@ export function SettingsModal() {
 function FieldRow({
   field,
   onSave,
+  modelListId,
+  modelCheck,
+  modelChecking,
 }: {
   field: SettingsField;
   onSave: (patch: Record<string, string | null>) => Promise<void>;
+  /** When set, the string input offers this `<datalist>` of model suggestions. */
+  modelListId?: string;
+  /** Gate-model validity (small/flagship only) for an inline missing-key hint. */
+  modelCheck?: SettingsModelCheck;
+  /** True while readiness is being re-checked — show "checking…" not the stale
+   *  warning (the pre-flight ping takes a few seconds). */
+  modelChecking?: boolean;
 }) {
   const { t } = useTranslation(["common", "settings"]);
   const [draft, setDraft] = useState<string>(field.value ?? "");
@@ -227,6 +297,7 @@ function FieldRow({
           </div>
         )}
         {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
+        {field.docs_url && <DocsLink url={field.docs_url} />}
       </div>
     );
   }
@@ -275,6 +346,7 @@ function FieldRow({
           <input
             id={field.key}
             type={field.type === "int" ? "number" : "text"}
+            list={modelListId}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -295,8 +367,55 @@ function FieldRow({
           <Check />
         </Button>
       </div>
+      {modelChecking ? (
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          {t("settings:modelChecking", "Checking model availability…")}
+        </p>
+      ) : (
+        modelCheck && !modelCheck.key_ok && (
+          <p className="mt-1 text-xs text-destructive">
+            {modelCheck.missing_keys.length > 0
+              ? t("settings:modelKeyMissing", "Missing provider key: {{keys}}", {
+                  keys: modelCheck.missing_keys.join(", "),
+                })
+              : isTransientError(modelCheck.error)
+                ? t(
+                    "settings:modelUnreachable",
+                    "Couldn't reach the provider just now — this is usually transient, try again.",
+                  )
+                : t(
+                    "settings:modelUnusable",
+                    "This model isn't usable — check that the model name is available and the API key is valid.",
+                  )}
+            {/* The provider's own reason (redacted) — distinguishes a rejected
+                key from a wrong/unavailable model name, per slot. */}
+            {modelCheck.detail && (
+              <span className="mt-0.5 block font-normal text-muted-foreground">
+                {modelCheck.detail}
+              </span>
+            )}
+          </p>
+        )
+      )}
       {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
+      {field.docs_url && <DocsLink url={field.docs_url} />}
     </div>
+  );
+}
+
+function DocsLink({ url }: { url: string }) {
+  const { t } = useTranslation("settings");
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+    >
+      {t("getApiKey", "Get an API key")}
+      <ExternalLink className="size-3" />
+    </a>
   );
 }
 
@@ -321,6 +440,29 @@ function CredentialEditor({
   const [newVal, setNewVal] = useState("");
   return (
     <div>
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">
+          {t("credentialsHeading", "Provider credentials")}
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {t(
+            "credentialsIntro",
+            "PaperHub calls LLM providers through LiteLLM using your own API keys. Add a key as a name/value pair — the name is the provider's environment variable (e.g. OPENAI_API_KEY) and the value is the secret. Values are stored locally on this server and shown masked.",
+          )}
+        </p>
+        <a
+          href="https://docs.litellm.ai/docs/providers"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          {t(
+            "credentialsDocsLink",
+            "See LiteLLM's provider list for the exact key name and where to get each key",
+          )}
+          <ExternalLink className="size-3" />
+        </a>
+      </div>
       <ul className="mb-4 space-y-1">
         {credentials.keys.map((k) => (
           <li
@@ -347,28 +489,38 @@ function CredentialEditor({
           </li>
         ))}
       </ul>
-      <div className="flex gap-2">
-        <input
-          list="cred-suggestions"
-          aria-label={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
-          placeholder={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
-          value={newKey}
-          onChange={(e) => setNewKey(e.target.value.toUpperCase())}
-          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
-        <datalist id="cred-suggestions">
-          {credentials.suggestions.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-        <input
-          type="password"
-          aria-label={t("valuePlaceholder", "value")}
-          placeholder={t("valuePlaceholder", "value")}
-          value={newVal}
-          onChange={(e) => setNewVal(e.target.value)}
-          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
+      <div className="flex items-end gap-2">
+        <div className="flex flex-1 flex-col gap-1">
+          <label htmlFor="cred-new-key" className="text-xs font-medium text-muted-foreground">
+            {t("keyNameLabel", "Key name")}
+          </label>
+          <input
+            id="cred-new-key"
+            list="cred-suggestions"
+            placeholder={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value.toUpperCase())}
+            className="h-8 w-full rounded-md border border-border bg-background px-2.5 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+          <datalist id="cred-suggestions">
+            {credentials.suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </div>
+        <div className="flex flex-1 flex-col gap-1">
+          <label htmlFor="cred-new-val" className="text-xs font-medium text-muted-foreground">
+            {t("valueLabel", "Value")}
+          </label>
+          <input
+            id="cred-new-val"
+            type="password"
+            placeholder={t("valuePlaceholder", "value")}
+            value={newVal}
+            onChange={(e) => setNewVal(e.target.value)}
+            className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        </div>
         <Button
           size="icon"
           disabled={!newKey || !newVal}

@@ -2,6 +2,8 @@
   "composer": {
     "placeholder": "論文について質問・検索、または雑談を…（Enterで送信、Shift+Enterで改行）",
     "messageAria": "メッセージ",
+    "setupRequired": "セットアップを完了すると会話を開始できます——プロバイダーキーを追加し、有効なモデルを選択してください。",
+    "setupCta": "設定を開く",
     "send": "送信",
     "voice": "音声入力",
     "voiceListening": "認識中 — クリックで停止",

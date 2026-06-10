@@ -10,6 +10,12 @@ from fastapi import APIRouter, HTTPException
 from paperhub import settings_overlay as ov
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
+from paperhub.settings_readiness import (
+    clear_readiness_cache,
+    compute_readiness,
+    configured_providers,
+    fetch_model_options,
+)
 from paperhub.settings_registry import (
     PROVIDER_CREDENTIAL_SUGGESTIONS,
     SETTINGS_REGISTRY,
@@ -40,6 +46,14 @@ async def _db_rows(db_path: Path) -> dict[str, str]:
         return {r[0]: r[1] for r in await cur.fetchall()}
 
 
+def _credential_keys(rows: dict[str, str]) -> list[str]:
+    """DB rows that are provider credentials (not structured registry fields)."""
+    return [
+        key for key in sorted(rows)
+        if field_by_key(key) is None and is_allowed_credential_key(key)
+    ]
+
+
 @router.get("")
 async def get_settings() -> dict[str, Any]:
     settings = load_settings()
@@ -50,11 +64,7 @@ async def get_settings() -> dict[str, Any]:
     # Provider credentials ride on the models_providers category as a dedicated
     # sub-section: every DB row that is an allowed credential key (and not a
     # structured registry field). Values are NEVER returned.
-    credential_keys = [
-        {"key": key, "is_set": True}
-        for key in sorted(rows)
-        if field_by_key(key) is None and is_allowed_credential_key(key)
-    ]
+    credential_keys = [{"key": key, "is_set": True} for key in _credential_keys(rows)]
 
     # Structured fields from the registry.
     for f in SETTINGS_REGISTRY:
@@ -65,6 +75,10 @@ async def get_settings() -> dict[str, Any]:
             "read_only": f.read_only, "help": f.help, "advanced": f.advanced,
             "is_default": f.key not in rows,
         }
+        if f.docs_url:
+            item["docs_url"] = f.docs_url
+        if f.group:
+            item["group"] = f.group
         if f.choices:
             item["choices"] = list(f.choices)
         if f.min is not None:
@@ -89,6 +103,33 @@ async def get_settings() -> dict[str, Any]:
         categories.append(entry)
 
     return {"categories": categories}
+
+
+@router.get("/readiness")
+async def get_readiness() -> dict[str, Any]:
+    """First-run gate: are the small + flagship models runnable right now?
+
+    ``ready`` drives the frontend composer lock + onboarding tour. Pre-flights a
+    1-token call per gate model (cached, invalidated on PATCH) so an empty /
+    invalid key or a bad model id is caught before the user hits it on send.
+    """
+    settings = load_settings()
+    rows = await _db_rows(settings.db_path)
+    return await compute_readiness(_credential_keys(rows))
+
+
+@router.get("/model-options")
+async def get_model_options() -> dict[str, Any]:
+    """Autocomplete suggestions: usable models per configured provider.
+
+    Best-effort live discovery with a static fallback (see settings_readiness).
+    Never authoritative — the model-name fields stay free text.
+    """
+    settings = load_settings()
+    rows = await _db_rows(settings.db_path)
+    providers = configured_providers(_credential_keys(rows))
+    options = await fetch_model_options(providers)
+    return {"providers": providers, "options": options}
 
 
 @router.patch("")
@@ -142,4 +183,6 @@ async def patch_settings(body: dict[str, str | None]) -> dict[str, Any]:
         ov.clear_override(key)
         cleared.append(key)
 
+    # A credential / model change invalidates cached readiness pings.
+    clear_readiness_cache()
     return {"updated": updated, "cleared": cleared, "restart_required": restart}

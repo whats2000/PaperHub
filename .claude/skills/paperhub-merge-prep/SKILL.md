@@ -92,10 +92,21 @@ grep -n 'version = "X.Y.Z"'   marker_service/uv.lock       # expect 1 match for 
 
 Then update the two doc files:
 
-- `README.md` — three changes:
-  1. Tests badge: update both counts from step 2's fresh runs
-  2. Status badge: `Plan%20F-merged%20(SRS%20vX.Y.Z)`
-  3. The "currently **vX.Y.Z**" sentence in the docs/SRS pointer
+- **All FOUR README language files** — `README.md` (en), `README.ja.md`,
+  `README.zh-CN.md`, `README.zh-TW.md`. The badges + version text + the
+  citation block are duplicated in EVERY locale file; update all four, with
+  **four changes each**:
+  1. Tests badge: update both counts from step 2's fresh runs (the stale
+     count may differ per file — they drift independently; set all four to
+     the same fresh numbers)
+  2. Status badge: `release-vX.Y.Z%20(SRS%20vX.Y.Z)-success`
+  3. The "shipped through **vX.Y.Z**" sentence in the docs/SRS pointer
+     (translated per locale — match each file's existing wording)
+  4. The BibTeX **citation** block's `version = {X.Y.Z}` line (under
+     `## Citation` / `## 引用`) — easy to miss; a public citation that
+     undersells the released version
+  After editing, `grep -nE "v?<OLD>" README*.md` MUST return nothing — every
+  language file and the citation line must have moved.
 - `CLAUDE.md` — every literal `v(old)` reference to the SRS pointer
   (use `Edit` with `replace_all: true` after confirming via grep that
   every match is intended — there are typically two: the spec link in
@@ -129,9 +140,9 @@ Edit `docs/superpowers/specs/2026-05-17-paperhub-srs.md`:
 
 ## 5 — Commit as one release bump
 
-Stage every file changed in steps 3 and 4 — typically **nine files**:
-the three manifests, the three lockfiles, README, CLAUDE.md, and the
-SRS. Then commit:
+Stage every file changed in steps 3 and 4 — typically **twelve files**:
+the three manifests, the three lockfiles, the **four README language
+files**, CLAUDE.md, and the SRS. Then commit:
 
 ```
 chore(release): vX.Y.Z

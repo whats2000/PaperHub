@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Composer } from "./Composer";
@@ -16,6 +17,28 @@ describe("Composer slideChip prop", () => {
   it("omits the slide chip when slideChip is null", () => {
     render(<Composer onSubmit={() => {}} disabled={false} slideChip={null} />);
     expect(screen.queryByText(/Slide/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Composer setup gate", () => {
+  it("shows the setup hint and opens settings when setupRequired", async () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <Composer
+        onSubmit={() => {}}
+        disabled={true}
+        setupRequired={true}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+    expect(screen.getByText(/Finish setup/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByText(/Open Settings/i));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("omits the setup hint when not required", () => {
+    render(<Composer onSubmit={() => {}} disabled={false} />);
+    expect(screen.queryByText(/Finish setup/i)).not.toBeInTheDocument();
   });
 });
 

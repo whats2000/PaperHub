@@ -38,6 +38,12 @@ class SettingField:
     max: int | None = None
     choices: tuple[str, ...] = ()
     suggestions: tuple[str, ...] = ()
+    # Optional "where to get this" link (e.g. a provider's API-key page), shown
+    # under the field. The frontend localizes the link label, not the URL.
+    docs_url: str = ""
+    # Optional sub-group key within a category — the panel renders a heading per
+    # contiguous group (the frontend localizes the title). Empty = ungrouped.
+    group: str = ""
 
 
 # Curated set of known LiteLLM provider env vars (offered as autocomplete in
@@ -75,6 +81,60 @@ _CREDENTIAL_SUFFIX_RE = re.compile(
 
 def is_allowed_credential_key(key: str) -> bool:
     return key in PROVIDER_CREDENTIAL_SUGGESTIONS or bool(_CREDENTIAL_SUFFIX_RE.match(key))
+
+
+# Map a credential env-var key -> the LiteLLM provider it unlocks. Used to derive
+# the configured-provider set for live model discovery. Keys whose provider name
+# doesn't match the lowercased prefix (together_ai, perplexity, vertex_ai) are
+# listed explicitly; unlisted *_API_KEY keys fall back to the lowercased prefix.
+_CREDENTIAL_KEY_TO_PROVIDER: dict[str, str] = {
+    "GEMINI_API_KEY": "gemini",
+    "OPENAI_API_KEY": "openai",
+    "ANTHROPIC_API_KEY": "anthropic",
+    "AZURE_API_KEY": "azure",
+    "OPENROUTER_API_KEY": "openrouter",
+    "MISTRAL_API_KEY": "mistral",
+    "GROQ_API_KEY": "groq",
+    "COHERE_API_KEY": "cohere",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "TOGETHERAI_API_KEY": "together_ai",
+    "XAI_API_KEY": "xai",
+    "PERPLEXITYAI_API_KEY": "perplexity",
+    "GOOGLE_APPLICATION_CREDENTIALS": "vertex_ai",
+    "VERTEXAI_PROJECT": "vertex_ai",
+}
+
+# Providers whose models LiteLLM can fetch live from the provider's own API
+# (``get_valid_models(check_provider_endpoint=True)``). Others fall back to the
+# bundled static model map. See docs.litellm.ai/docs/proxy/model_discovery.
+LIVE_DISCOVERY_PROVIDERS: frozenset[str] = frozenset(
+    {"gemini", "openai", "anthropic", "xai", "vertex_ai", "fireworks_ai", "vllm", "topaz"}
+)
+
+
+# Reverse of the *_API_KEY entries above: provider -> its primary key env var.
+# Lets the readiness check name the key a model needs even when LiteLLM reports
+# an empty-valued env var as "present" (so we can flag it as actually missing).
+PROVIDER_PRIMARY_KEY: dict[str, str] = {
+    provider: key
+    for key, provider in _CREDENTIAL_KEY_TO_PROVIDER.items()
+    if key.endswith("_API_KEY")
+}
+
+
+def primary_key_for_model(model: str) -> str | None:
+    """The primary API-key env var for a ``provider/model`` id, if known."""
+    provider = model.split("/", 1)[0] if "/" in model else None
+    return PROVIDER_PRIMARY_KEY.get(provider) if provider else None
+
+
+def provider_for_credential_key(key: str) -> str | None:
+    """The LiteLLM provider a credential key unlocks, or None for non-key creds
+    (config-only keys like AZURE_API_BASE that don't map to a provider list)."""
+    if key in _CREDENTIAL_KEY_TO_PROVIDER:
+        return _CREDENTIAL_KEY_TO_PROVIDER[key]
+    m = re.match(r"^([A-Z][A-Z0-9]*)_API_KEY$", key)
+    return m.group(1).lower() if m else None
 
 
 _SMALL = "gemini/gemini-3.1-flash-lite"
@@ -125,19 +185,20 @@ SETTINGS_REGISTRY: list[SettingField] = [
                  "Max section reads / subagent turn", "int", default="8", min=1, max=50),
     SettingField("PAPERHUB_SESSION_RETENTION_DAYS", "agents_memory",
                  "Soft-deleted session retention (days)", "int", default="30", min=1, max=3650),
-    SettingField("PAPERHUB_MARKER_MAX_PAGES", "integrations",
-                 "Marker pages per /extract call", "int", default="1", min=1, max=100,
-                 restart_required=True),
     # ── Memory / recall ─────────────────────────────────────────────────
     SettingField("PAPERHUB_MEMORY_RECALL", "agents_memory", "Inject recalled memories", "bool",
                  default="1", help="Surface active memories to answering agents."),
     # NOTE: PAPERHUB_MEMORY_SEMANTIC is intentionally OMITTED — dead config.
     # ── External services ───────────────────────────────────────────────
     SettingField("PAPERHUB_SEMANTIC_SCHOLAR_API_KEY", "integrations",
-                 "Semantic Scholar API key", "secret", secret=True,
-                 help="Optional; the unauthenticated tier is rate-limited."),
+                 "Semantic Scholar API key", "secret", secret=True, group="paper_sources",
+                 help="Optional but recommended — speeds up paper search. The "
+                      "unauthenticated tier is heavily rate-limited (it won't "
+                      "block the app, just slow searches).",
+                 docs_url="https://www.semanticscholar.org/product/api#api-key"),
     # ── External lookup ─────────────────────────────────────────────────
     SettingField("PAPERHUB_UNPAYWALL_EMAIL", "integrations", "Unpaywall contact email", "email",
+                 group="paper_sources",
                  help="Enables the DOI→free-PDF fallback. Used for abuse logging only."),
     # ── Storage ─────────────────────────────────────────────────────────
     SettingField("PAPERHUB_MAX_UPLOAD_MB", "system", "Max PDF upload (MiB)", "int",
@@ -148,11 +209,14 @@ SETTINGS_REGISTRY: list[SettingField] = [
     # ── Logging ─────────────────────────────────────────────────────────
     SettingField("PAPERHUB_LOG_LEVEL", "system", "Log level", "enum", default="INFO",
                  restart_required=True, choices=("DEBUG", "INFO", "WARNING", "ERROR")),
-    # ── Marker ──────────────────────────────────────────────────────────
+    # ── Marker (PDF ingestion) — grouped together at the bottom ──────────
+    SettingField("PAPERHUB_MARKER_MAX_PAGES", "integrations",
+                 "Marker pages per /extract call", "int", default="1", min=1, max=100,
+                 restart_required=True, group="marker"),
     SettingField("PAPERHUB_MARKER_URL", "integrations", "Marker service URL", "string",
-                 default="http://127.0.0.1:8002", restart_required=True),
+                 default="http://127.0.0.1:8002", restart_required=True, group="marker"),
     SettingField("PAPERHUB_INPROCESS_MARKER", "integrations", "In-process Marker", "bool",
-                 default="0", restart_required=True),
+                 default="0", restart_required=True, group="marker"),
     # ── Slides ──────────────────────────────────────────────────────────
     SettingField("PAPERHUB_SLIDE_STYLE_PROFILE", "system", "Slide style profile", "enum",
                  default="default", choices=("default", "metropolis_minimal")),

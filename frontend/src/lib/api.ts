@@ -462,6 +462,11 @@ export interface SettingsField {
   choices?: string[];
   min?: number;
   max?: number;
+  /** Optional "where to get this" link (e.g. a provider's API-key page). */
+  docs_url?: string;
+  /** Optional sub-group key within a category; the panel renders a heading per
+   *  contiguous group. */
+  group?: string;
 }
 
 export interface SettingsCredentials {
@@ -502,4 +507,47 @@ export async function patchSettings(
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+export interface SettingsReadiness {
+  /** True iff both gate models are runnable right now (composer unlock). */
+  ready: boolean;
+  /** Whether ≥1 provider credential is set. */
+  credentials_set: boolean;
+  models: {
+    small: SettingsModelCheck;
+    flagship: SettingsModelCheck;
+  };
+}
+
+export interface SettingsModelCheck {
+  model: string;
+  /** The model is runnable: key present AND a 1-token pre-flight succeeded. */
+  key_ok: boolean;
+  /** Env var names LiteLLM still needs for this model's provider. */
+  missing_keys: string[];
+  /** Exception class name when the pre-flight failed (e.g. AuthenticationError). */
+  error?: string | null;
+  /** The provider's own first-line reason (redacted) — tells the user whether
+   *  it's the key or the model that's wrong. */
+  detail?: string | null;
+}
+
+/** First-run gate: are the small + flagship models usable? Drives the composer
+ * lock + onboarding tour. Cheap (no network on the backend); safe on boot. */
+export async function getReadiness(): Promise<SettingsReadiness> {
+  return apiFetch<SettingsReadiness>("/settings/readiness");
+}
+
+export interface SettingsModelOptions {
+  /** Providers derived from the set credential keys. */
+  providers: string[];
+  /** Usable model ids per provider (live-discovered or static fallback). */
+  options: Record<string, string[]>;
+}
+
+/** Autocomplete suggestions for the model-name fields, per configured provider.
+ * Best-effort — the model name stays free text, so this never blocks. */
+export async function getModelOptions(): Promise<SettingsModelOptions> {
+  return apiFetch<SettingsModelOptions>("/settings/model-options");
 }

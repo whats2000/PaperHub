@@ -26,6 +26,11 @@ import { createSpeechRecognizer, isSpeechSupported, type SpeechRecognizer } from
 interface Props {
   onSubmit: (text: string) => void;
   disabled: boolean;
+  /** First-run gate: show a "finish setup" hint and treat the composer as
+   *  locked (the parent also folds this into `disabled`). */
+  setupRequired?: boolean;
+  /** Open the Settings modal from the setup hint. */
+  onOpenSettings?: () => void;
   /** Whether the Memory Manager panel is currently open. */
   memoryOpen?: boolean;
   /** Called when the user clicks the Memory button to toggle the panel. */
@@ -65,6 +70,8 @@ const CAPABILITIES: Capability[] = [
 export function Composer({
   onSubmit,
   disabled,
+  setupRequired = false,
+  onOpenSettings,
   memoryOpen = false,
   onToggleMemory,
   onToggleCanvas,
@@ -175,6 +182,18 @@ export function Composer({
       }}
     >
       <div className="max-w-3xl mx-auto">
+        {setupRequired && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <span className="min-w-0 flex-1">{t("composer.setupRequired")}</span>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="shrink-0 rounded font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              {t("composer.setupCta")}
+            </button>
+          </div>
+        )}
         {/* Single rounded container — textarea on top, tool row + send on bottom.
             focus-within ring unifies the visual treatment across child focus. */}
         <div className="rounded-2xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">
@@ -198,40 +217,10 @@ export function Composer({
             disabled={disabled}
             aria-label={t("composer.messageAria")}
           />
-          <div className="flex items-center justify-between gap-1 px-2 pb-2">
-            <TooltipProvider>
+          <TooltipProvider>
+            <div className="flex items-center justify-between gap-1 px-2 pb-2">
               <div className="flex items-center gap-0.5">
                 <AttachPaperMenu />
-                {speechSupported && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<span tabIndex={0} className="inline-flex" />}
-                    >
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={toggleVoice}
-                        aria-pressed={listening}
-                        className={
-                          listening
-                            ? "h-8 w-8 bg-accent text-foreground"
-                            : "h-8 w-8 text-muted-foreground hover:text-foreground"
-                        }
-                        aria-label={t("composer.voice")}
-                      >
-                        <Mic className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>
-                        {listening
-                          ? t("composer.voiceListening")
-                          : t("composer.voiceDictate")}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={<span tabIndex={0} className="inline-flex" />}
@@ -326,17 +315,51 @@ export function Composer({
                   </Tooltip>
                 ))}
               </div>
-            </TooltipProvider>
-            <Button
-              type="submit"
-              size="icon"
-              disabled={disabled || value.trim().length === 0}
-              aria-label={t("composer.send")}
-              className="h-8 w-8 rounded-full"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
+              {/* Right cluster: voice + send — input actions, set apart from
+                  the left-side panel toggles. */}
+              <div className="flex items-center gap-1">
+                {speechSupported && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span tabIndex={0} className="inline-flex" />}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggleVoice}
+                        aria-pressed={listening}
+                        className={
+                          listening
+                            ? "h-8 w-8 bg-accent text-foreground"
+                            : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                        }
+                        aria-label={t("composer.voice")}
+                      >
+                        <Mic className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>
+                        {listening
+                          ? t("composer.voiceListening")
+                          : t("composer.voiceDictate")}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={disabled || value.trim().length === 0}
+                  aria-label={t("composer.send")}
+                  className="h-8 w-8 rounded-full"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </TooltipProvider>
         </div>
       </div>
     </form>

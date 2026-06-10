@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +15,7 @@ import type { ChatMessage } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
+import { SqlCard } from "@/components/chat/SqlCard";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
@@ -76,13 +78,23 @@ export function MessageBubble({
   return (
     <article
       data-role={message.role}
-      className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
+      // Reserve space under a user bubble so its hover action row (absolute
+      // -bottom-7) sits within the message's own section, not over the next one.
+      className={`flex w-full ${isUser ? "justify-end pb-6" : "justify-start"}`}
     >
-      <div className={`group/bubble relative max-w-[80%] ${isStreamingEmpty ? "min-w-[64px]" : ""}`}>
+      <div
+        className={`group/bubble relative ${
+          isUser ? "max-w-[80%]" : "w-full pl-1 pr-8 sm:pl-2 sm:pr-12"
+        } ${isStreamingEmpty ? "min-w-[64px]" : ""}`}
+      >
         <div
-          className={`rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert ${
-            isUser ? "bg-primary text-primary-foreground" : "bg-card border border-border"
-          }`}
+          className={
+            isUser
+              ? "rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert bg-primary text-primary-foreground"
+              : // Assistant: full-width, no bubble — markdown, cards and traces get
+                // the whole reading column (ChatGPT/Claude convention).
+                "prose prose-sm max-w-none dark:prose-invert"
+          }
         >
           {isError ? (
             <div className="space-y-2">
@@ -113,6 +125,21 @@ export function MessageBubble({
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }], rehypeChunkCitations]}
               components={{
+                // A ```sql fenced block (the SQL a library_stats turn ran) is
+                // lifted out of the prose into a distinct collapsible card.
+                pre: ({ node, children }: ExtraProps & { children?: ReactNode }) => {
+                  const codeEl = node?.children?.[0] as
+                    | { properties?: { className?: unknown }; children?: { value?: string }[] }
+                    | undefined;
+                  const cls = Array.isArray(codeEl?.properties?.className)
+                    ? (codeEl.properties.className as string[]).join(" ")
+                    : "";
+                  if (/\blanguage-sql\b/.test(cls)) {
+                    const sql = (codeEl?.children?.[0]?.value ?? "").replace(/\n+$/, "");
+                    return <SqlCard sql={sql} />;
+                  }
+                  return <pre>{children}</pre>;
+                },
                 "chunk-cite": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as {
                     dataChunkId?: number | string;
@@ -164,7 +191,11 @@ export function MessageBubble({
             from the Retry button's RotateCcw refresh loop and from a pencil,
             which would imply destructive in-place editing). */}
         {(canCopy || showFork) && (
-          <div className="opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-7 right-0 flex gap-1">
+          <div
+            className={`opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-6 flex gap-1 ${
+              isUser ? "right-0" : "right-8 sm:right-12"
+            }`}
+          >
             {canCopy && (
               <Button
                 type="button"
