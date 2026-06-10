@@ -66,7 +66,7 @@ from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
 from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
-from paperhub.pipelines.renderer import render_html, replace_pifont_dings
+from paperhub.pipelines.renderer import render_html, replace_symbol_macros
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.table_figures import rasterize_complex_tables
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
@@ -345,7 +345,7 @@ class PaperPipeline:
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
         render_tex_path.write_text(
-            replace_pifont_dings(
+            replace_symbol_macros(
                 rasterize_and_normalize_figures(marked, source_path.parent)
             ),
             encoding="utf-8",
@@ -533,7 +533,7 @@ class PaperPipeline:
             marked = strip_includegraphics_options(marked)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
-                replace_pifont_dings(
+                replace_symbol_macros(
                     rasterize_and_normalize_figures(marked, source_path.parent)
                 ),
                 encoding="utf-8",

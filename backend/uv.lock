@@ -1757,7 +1757,7 @@ wheels = [
 
 [[package]]
 name = "paperhub"
-version = "2.31.4"
+version = "2.31.5"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

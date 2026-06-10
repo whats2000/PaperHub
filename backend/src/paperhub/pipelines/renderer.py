@@ -221,15 +221,19 @@ def _pandoc_hostile_def_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-# pifont \ding{NN} symbol macros pandoc can't expand. A check/cross inside a
-# coloured wrapper (`\textcolor{red}{\ding{55}}`, arXiv:2506.10100's ablation
-# table) renders as an EMPTY `<span style="color: red"></span>` — the colour
-# survives but the glyph is silently dropped, so the table shows nothing in the
-# cells. We substitute the Unicode glyph BEFORE pandoc so the mark appears.
-# Applied to the render-time tex AFTER table rasterisation, so a table compiled
-# to a PNG keeps native \ding (pdflatex renders pifont natively); only the
-# HTML-rendered residue is rewritten. Unknown ding codes are left untouched
-# (better a literal `\ding{N}` than a wrong glyph).
+# Symbol macros pandoc can't expand, which render as an EMPTY span. A check/cross
+# inside a coloured wrapper drops to `<span style="color: red"></span>` — colour
+# survives, glyph vanishes, cell shows nothing. Two flavours:
+#  * pifont `\ding{NN}` used directly (`\textcolor{red}{\ding{55}}`,
+#    arXiv:2506.10100's ablation table); and
+#  * the custom `\cmark`/`\xmark` aliases (`\newcommand{\cmark}{\ding{51}}`,
+#    arXiv:2509.22093) — by far the more common idiom — whose DEFINITION is
+#    frequently outside the rendered body, so pandoc can't expand the usage.
+# We substitute the Unicode glyph BEFORE pandoc. Applied to the render-time tex
+# AFTER table rasterisation, so a table compiled to a PNG keeps native macros
+# (pdflatex renders pifont/amssymb natively); only the HTML-rendered residue is
+# rewritten. Unknown ding codes are left untouched (better a literal macro than a
+# wrong glyph).
 _PIFONT_DING_GLYPH = {
     "51": "✓",  # ✓ check mark
     "52": "✔",  # ✔ heavy check mark
@@ -242,16 +246,27 @@ _PIFONT_DING_GLYPH = {
 }
 _DING_RE = re.compile(r"\\ding\s*\{\s*(\d+)\s*\}")
 
+# The conventional check/cross aliases. The negative lookbehinds skip a DEFINING
+# site (`\newcommand{\cmark}{…}`, `\def\cmark…`) so we rewrite only USAGES and
+# never corrupt a definition that happens to survive into the render tex.
+_CHECK_CROSS_GLYPH = {"cmark": "✓", "xmark": "✗"}
+_CHECK_CROSS_RE = re.compile(
+    r"(?<!\\newcommand\{)(?<!\\renewcommand\{)(?<!\\providecommand\{)"
+    r"(?<!\\DeclareRobustCommand\{)(?<!\\def)"
+    r"\\(cmark|xmark)(?![A-Za-z])"
+)
 
-def replace_pifont_dings(tex: str) -> str:
-    r"""Rewrite pifont ``\ding{NN}`` macros to their Unicode glyph so they
-    survive pandoc (which drops the unknown macro, leaving an empty span).
 
-    Unknown ding codes are left untouched. See ``_PIFONT_DING_GLYPH`` for the
-    rationale + why this runs on the render-time tex (post-rasterisation)."""
-    return _DING_RE.sub(
-        lambda m: _PIFONT_DING_GLYPH.get(m.group(1), m.group(0)), tex
-    )
+def replace_symbol_macros(tex: str) -> str:
+    r"""Rewrite check/cross symbol macros pandoc can't expand to their Unicode
+    glyph so they survive (pandoc drops the unknown macro, leaving an empty
+    span): pifont ``\ding{NN}`` and the ``\cmark``/``\xmark`` aliases.
+
+    Runs on the render-time tex AFTER rasterisation (see the module note above).
+    Unknown ding codes are left untouched; ``\cmark``/``\xmark`` are rewritten as
+    usages only (definition sites are skipped via lookbehind)."""
+    tex = _DING_RE.sub(lambda m: _PIFONT_DING_GLYPH.get(m.group(1), m.group(0)), tex)
+    return _CHECK_CROSS_RE.sub(lambda m: _CHECK_CROSS_GLYPH[m.group(1)], tex)
 
 
 def render_html(

@@ -33,7 +33,7 @@ from paperhub.pipelines.figures import (
     strip_includegraphics_options,
 )
 from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros_from_dir
-from paperhub.pipelines.renderer import render_html, replace_pifont_dings
+from paperhub.pipelines.renderer import render_html, replace_symbol_macros
 from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
 from paperhub.pipelines.table_figures import rasterize_complex_tables
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
@@ -139,7 +139,7 @@ async def _rerender_one(
 
     render_source = source_dir / "source.render.tex"
     render_source.write_text(  # noqa: ASYNC240
-        replace_pifont_dings(rasterize_and_normalize_figures(marked, resource_dir)),
+        replace_symbol_macros(rasterize_and_normalize_figures(marked, resource_dir)),
         encoding="utf-8",
     )
 

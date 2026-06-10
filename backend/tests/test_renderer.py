@@ -12,22 +12,41 @@ from paperhub.pipelines.renderer import (
     _pandoc_hostile_def_spans,
     _unclosed_braces,
     render_html,
-    replace_pifont_dings,
+    replace_symbol_macros,
 )
 
 
-def test_replace_pifont_dings_check_and_cross() -> None:
+def test_replace_symbol_macros_ding_check_and_cross() -> None:
     # arXiv:2506.10100's ablation table: \textcolor{red}{\ding{55}} renders as an
     # empty coloured span under pandoc; the glyph must be substituted pre-pandoc.
     tex = r"\textcolor{green}{\ding{51}} & \textcolor{red}{\ding{55}}"
-    assert replace_pifont_dings(tex) == r"\textcolor{green}{✓} & \textcolor{red}{✗}"
+    assert replace_symbol_macros(tex) == r"\textcolor{green}{✓} & \textcolor{red}{✗}"
 
 
-def test_replace_pifont_dings_tolerates_spaces_and_leaves_unknown() -> None:
-    assert replace_pifont_dings(r"\ding{ 52 }") == "✔"
-    assert replace_pifont_dings(r"\ding {56}") == "✘"
+def test_replace_symbol_macros_tolerates_spaces_and_leaves_unknown() -> None:
+    assert replace_symbol_macros(r"\ding{ 52 }") == "✔"
+    assert replace_symbol_macros(r"\ding {56}") == "✘"
     # An unmapped code is left as-is — better a literal macro than a wrong glyph.
-    assert replace_pifont_dings(r"\ding{200}") == r"\ding{200}"
+    assert replace_symbol_macros(r"\ding{200}") == r"\ding{200}"
+
+
+def test_replace_symbol_macros_cmark_xmark_usages() -> None:
+    # arXiv:2509.22093: \newcommand{\cmark}{\ding{51}} — pandoc drops the custom
+    # macro usage (definition often outside the rendered body) -> empty span.
+    tex = r"\textcolor{green}{\cmark} & \textcolor{red}{\xmark}"
+    assert replace_symbol_macros(tex) == r"\textcolor{green}{✓} & \textcolor{red}{✗}"
+
+
+def test_replace_symbol_macros_skips_macro_definition_sites() -> None:
+    # The \newcommand/\def DEFINITION must not be corrupted — only usages rewrite.
+    # (\ding inside the body IS rewritten, which is fine: a valid Unicode body.)
+    assert (
+        replace_symbol_macros(r"\newcommand{\cmark}{\ding{51}}")
+        == r"\newcommand{\cmark}{✓}"
+    )
+    assert replace_symbol_macros(r"\def\xmark{x}") == r"\def\xmark{x}"
+    # \cmarked / \xmarker (longer names) are not matched (word-boundary).
+    assert replace_symbol_macros(r"\cmarked") == r"\cmarked"
 
 
 def test_unclosed_braces_counts_stray_open() -> None:
