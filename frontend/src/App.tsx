@@ -10,11 +10,12 @@ import { useSettingsStore } from "@/store/settings";
 
 function App() {
   // Probe the first-run config gate once on boot — drives the composer lock and
-  // the onboarding tour.
-  const fetchReadiness = useSettingsStore((s) => s.fetchReadiness);
+  // the onboarding tour. Uses the verified cache (skips the live ping) when the
+  // config was confirmed good recently.
+  const ensureReadiness = useSettingsStore((s) => s.ensureReadiness);
   useEffect(() => {
-    void fetchReadiness();
-  }, [fetchReadiness]);
+    void ensureReadiness();
+  }, [ensureReadiness]);
 
   return (
     <>

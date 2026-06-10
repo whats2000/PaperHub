@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import type { SettingsCredentials, SettingsField, SettingsModelCheck } from "../../lib/api";
+import { isTransientError } from "../../lib/readiness";
 import { useSettingsStore } from "../../store/settings";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
@@ -378,10 +379,15 @@ function FieldRow({
               ? t("settings:modelKeyMissing", "Missing provider key: {{keys}}", {
                   keys: modelCheck.missing_keys.join(", "),
                 })
-              : t(
-                  "settings:modelUnusable",
-                  "This model isn't usable — check that the model name is available and the API key is valid.",
-                )}
+              : isTransientError(modelCheck.error)
+                ? t(
+                    "settings:modelUnreachable",
+                    "Couldn't reach the provider just now — this is usually transient, try again.",
+                  )
+                : t(
+                    "settings:modelUnusable",
+                    "This model isn't usable — check that the model name is available and the API key is valid.",
+                  )}
             {/* The provider's own reason (redacted) — distinguishes a rejected
                 key from a wrong/unavailable model name, per slot. */}
             {modelCheck.detail && (

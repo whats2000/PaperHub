@@ -18,6 +18,7 @@
   "retry": "再試行",
   "modelKeyMissing": "プロバイダーキーがありません：{{keys}}",
   "modelUnusable": "このモデルは使用できません——モデル名が利用可能か、API キーが有効かを確認してください。",
+  "modelUnreachable": "現在プロバイダーに接続できません——通常は一時的な問題です。しばらくして再試行してください。",
   "modelChecking": "モデルの利用可否を確認中…",
   "getApiKey": "API キーを取得",
   "welcome": {

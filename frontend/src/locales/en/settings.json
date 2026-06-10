@@ -18,6 +18,7 @@
   "retry": "Retry",
   "modelKeyMissing": "Missing provider key: {{keys}}",
   "modelUnusable": "This model isn't usable — check that the model name is available and the API key is valid.",
+  "modelUnreachable": "Couldn't reach the provider just now — this is usually transient, try again.",
   "modelChecking": "Checking model availability…",
   "getApiKey": "Get an API key",
   "welcome": {

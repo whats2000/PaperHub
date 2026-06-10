@@ -18,6 +18,7 @@
   "retry": "重试",
   "modelKeyMissing": "缺少提供商密钥：{{keys}}",
   "modelUnusable": "此模型无法使用——请确认模型名称可用且 API 密钥有效。",
+  "modelUnreachable": "目前无法连接到提供商——通常是暂时性问题，请稍后再试。",
   "modelChecking": "正在检查模型可用性…",
   "getApiKey": "获取 API 密钥",
   "welcome": {

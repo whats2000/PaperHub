@@ -10,6 +10,7 @@ import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useSlidesStore } from "@/store/slides";
 import { useSettingsStore } from "@/store/settings";
+import { hasBlockingConfigIssue } from "@/lib/readiness";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useReferencesSync } from "@/hooks/useReferencesSync";
 import { useSessionsSync } from "@/hooks/useSessionsSync";
@@ -115,10 +116,13 @@ export function ChatPage() {
   const isStreaming =
     activeSession?.messages.some((m) => m.status === "streaming") ?? false;
 
-  // First-run gate: lock the composer until the backend confirms a usable
-  // small + flagship model (otherwise sending just errors). `null` (not yet
-  // probed) is treated as ok to avoid a lock-flash for configured users.
-  const setupRequired = useSettingsStore((s) => s.readiness?.ready === false);
+  // First-run gate: lock the composer only on a definitive config problem
+  // (missing / rejected key) — NOT on a transient readiness blip (e.g. the
+  // re-ping after the site idled). `null` (not yet probed) stays unlocked to
+  // avoid a lock-flash for configured users.
+  const setupRequired = useSettingsStore(
+    (s) => s.readiness != null && hasBlockingConfigIssue(s.readiness),
+  );
   const openSettings = useSettingsStore((s) => s.open);
 
   const deckForChip = useSlidesStore((s) =>

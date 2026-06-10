@@ -3,6 +3,7 @@ import { CheckCircle2, Circle, ExternalLink, Settings, Sparkles } from "lucide-r
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
+import { hasBlockingConfigIssue } from "../../lib/readiness";
 import { useSettingsStore } from "../../store/settings";
 import { Button } from "../ui/button";
 
@@ -13,17 +14,20 @@ export function WelcomeModal() {
   const { t } = useTranslation(["settings", "common"]);
   const readiness = useSettingsStore((s) => s.readiness);
   const welcomeDismissed = useSettingsStore((s) => s.welcomeDismissed);
-  const fetchReadiness = useSettingsStore((s) => s.fetchReadiness);
+  const ensureReadiness = useSettingsStore((s) => s.ensureReadiness);
   const dismissWelcome = useSettingsStore((s) => s.dismissWelcome);
   const openSettings = useSettingsStore((s) => s.open);
 
   // Pull the gate state once on mount (App boot also triggers this, but mounting
   // the modal independently keeps it self-sufficient in tests).
   useEffect(() => {
-    if (readiness === null) void fetchReadiness();
-  }, [readiness, fetchReadiness]);
+    if (readiness === null) void ensureReadiness();
+  }, [readiness, ensureReadiness]);
 
-  const open = readiness !== null && !readiness.ready && !welcomeDismissed;
+  // Only auto-show for a definitive config problem (missing / rejected key),
+  // not a transient readiness blip after the site idled.
+  const open =
+    readiness !== null && hasBlockingConfigIssue(readiness) && !welcomeDismissed;
 
   const smallOk = readiness?.models.small.key_ok ?? false;
   const flagshipOk = readiness?.models.flagship.key_ok ?? false;
