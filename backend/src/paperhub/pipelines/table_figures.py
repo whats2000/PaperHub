@@ -807,7 +807,8 @@ def _crop_and_pad(pix: pymupdf.Pixmap, pad: int, max_px: int = _TABLE_MAX_PX) ->
         img = img.crop(bbox)
     if img.width > max_px:
         img = img.resize(
-            (max_px, max(1, round(img.height * max_px / img.width))), Image.LANCZOS
+            (max_px, max(1, round(img.height * max_px / img.width))),
+            Image.Resampling.LANCZOS,
         )
     return ImageOps.expand(img, border=pad, fill=(255, 255, 255))
 
