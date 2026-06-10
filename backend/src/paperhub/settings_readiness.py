@@ -47,6 +47,7 @@ _OPTIONS_TTL_S = 600.0
 _options_cache: dict[str, tuple[float, list[str]]] = {}
 
 _PING_TIMEOUT_S = 12.0
+_PING_RETRIES = 2  # transient-only; litellm won't retry auth / bad-model errors
 _READINESS_TTL_S = 60.0
 # model id -> (checked_at_monotonic, check dict). The ping is a real API call, so
 # cache it; clear_readiness_cache() (called on a settings PATCH) forces a recheck.
@@ -97,6 +98,10 @@ async def _ping_model(model: str) -> dict[str, Any]:
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,
             timeout=_PING_TIMEOUT_S,
+            # Retry transient provider blips (connection drops, timeouts, 429/5xx)
+            # so a momentary network hiccup doesn't falsely lock the composer.
+            # litellm fails fast on real errors (auth, bad model) — no retry there.
+            num_retries=_PING_RETRIES,
         )
         return {"model": model, "key_ok": True, "missing_keys": [], "error": None, "detail": None}
     except Exception as exc:  # noqa: BLE001 — any failure means "not runnable"
