@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ExternalLink, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -321,6 +321,29 @@ function CredentialEditor({
   const [newVal, setNewVal] = useState("");
   return (
     <div>
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">
+          {t("credentialsHeading", "Provider credentials")}
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {t(
+            "credentialsIntro",
+            "PaperHub calls LLM providers through LiteLLM using your own API keys. Add a key as a name/value pair — the name is the provider's environment variable (e.g. OPENAI_API_KEY) and the value is the secret. Values are stored locally on this server and shown masked.",
+          )}
+        </p>
+        <a
+          href="https://docs.litellm.ai/docs/providers"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          {t(
+            "credentialsDocsLink",
+            "See LiteLLM's provider list for the exact key name and where to get each key",
+          )}
+          <ExternalLink className="size-3" />
+        </a>
+      </div>
       <ul className="mb-4 space-y-1">
         {credentials.keys.map((k) => (
           <li
@@ -347,28 +370,38 @@ function CredentialEditor({
           </li>
         ))}
       </ul>
-      <div className="flex gap-2">
-        <input
-          list="cred-suggestions"
-          aria-label={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
-          placeholder={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
-          value={newKey}
-          onChange={(e) => setNewKey(e.target.value.toUpperCase())}
-          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
-        <datalist id="cred-suggestions">
-          {credentials.suggestions.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-        <input
-          type="password"
-          aria-label={t("valuePlaceholder", "value")}
-          placeholder={t("valuePlaceholder", "value")}
-          value={newVal}
-          onChange={(e) => setNewVal(e.target.value)}
-          className="h-8 w-1/2 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
+      <div className="flex items-end gap-2">
+        <div className="flex flex-1 flex-col gap-1">
+          <label htmlFor="cred-new-key" className="text-xs font-medium text-muted-foreground">
+            {t("keyNameLabel", "Key name")}
+          </label>
+          <input
+            id="cred-new-key"
+            list="cred-suggestions"
+            placeholder={t("providerKeyPlaceholder", "PROVIDER_API_KEY")}
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value.toUpperCase())}
+            className="h-8 w-full rounded-md border border-border bg-background px-2.5 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+          <datalist id="cred-suggestions">
+            {credentials.suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </div>
+        <div className="flex flex-1 flex-col gap-1">
+          <label htmlFor="cred-new-val" className="text-xs font-medium text-muted-foreground">
+            {t("valueLabel", "Value")}
+          </label>
+          <input
+            id="cred-new-val"
+            type="password"
+            placeholder={t("valuePlaceholder", "value")}
+            value={newVal}
+            onChange={(e) => setNewVal(e.target.value)}
+            className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        </div>
         <Button
           size="icon"
           disabled={!newKey || !newVal}
