@@ -16,6 +16,28 @@
   "saveFailed": "无法保存设置",
   "loadFailed": "无法加载设置。",
   "retry": "重试",
+  "modelKeyMissing": "缺少提供商密钥：{{keys}}",
+  "welcome": {
+    "title": "欢迎使用 PaperHub",
+    "subtitle": "连接模型提供商即可开始对话。请在“设置”中完成以下步骤：",
+    "lockNote": "在三项均有效之前，输入框将保持锁定。",
+    "openSettings": "打开设置",
+    "later": "稍后再说",
+    "step": {
+      "credential": {
+        "label": "添加提供商 API 密钥",
+        "help": "例如 GEMINI_API_KEY 或 OPENAI_API_KEY，位于“模型与提供商”。"
+      },
+      "small": {
+        "label": "设置有效的小型层级模型",
+        "help": "用于分类器与快速工具调用。"
+      },
+      "flagship": {
+        "label": "设置有效的旗舰层级模型",
+        "help": "用于面向用户的回复。"
+      }
+    }
+  },
   "advancedModels": "各任务模型覆盖",
   "category": {
     "models_providers": "模型与供应商",

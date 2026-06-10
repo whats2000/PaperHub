@@ -16,6 +16,28 @@
   "saveFailed": "Couldn't save the setting",
   "loadFailed": "Couldn't load settings.",
   "retry": "Retry",
+  "modelKeyMissing": "Missing provider key: {{keys}}",
+  "welcome": {
+    "title": "Welcome to PaperHub",
+    "subtitle": "Connect a model provider to start chatting. Finish these steps in Settings:",
+    "lockNote": "The composer stays locked until all three are valid.",
+    "openSettings": "Open Settings",
+    "later": "Maybe later",
+    "step": {
+      "credential": {
+        "label": "Add a provider API key",
+        "help": "e.g. GEMINI_API_KEY or OPENAI_API_KEY, under Models & providers."
+      },
+      "small": {
+        "label": "Set a valid Small-tier model",
+        "help": "Used for classifiers and fast tool calls."
+      },
+      "flagship": {
+        "label": "Set a valid Flagship-tier model",
+        "help": "Used for user-facing answers."
+      }
+    }
+  },
   "category": {
     "models_providers": "Models & providers",
     "agents_memory": "Agents & memory",

@@ -2,6 +2,8 @@
   "composer": {
     "placeholder": "Ask about a paper, search, or just chat… (Enter to send, Shift+Enter for new line)",
     "messageAria": "Message",
+    "setupRequired": "Finish setup to start chatting — add a provider key and pick a valid model.",
+    "setupCta": "Open Settings",
     "send": "Send",
     "voice": "Voice input",
     "voiceListening": "Listening — click to stop",

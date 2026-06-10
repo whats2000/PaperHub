@@ -16,6 +16,28 @@
   "saveFailed": "設定を保存できませんでした",
   "loadFailed": "設定を読み込めませんでした。",
   "retry": "再試行",
+  "modelKeyMissing": "プロバイダーキーがありません：{{keys}}",
+  "welcome": {
+    "title": "PaperHub へようこそ",
+    "subtitle": "モデルプロバイダーを接続すると会話を開始できます。「設定」で次の手順を完了してください：",
+    "lockNote": "3 つすべてが有効になるまで、入力欄はロックされたままです。",
+    "openSettings": "設定を開く",
+    "later": "後で",
+    "step": {
+      "credential": {
+        "label": "プロバイダー API キーを追加",
+        "help": "例：GEMINI_API_KEY または OPENAI_API_KEY（「モデルとプロバイダー」内）。"
+      },
+      "small": {
+        "label": "有効な小規模モデルを設定",
+        "help": "分類器と高速なツール呼び出しに使用します。"
+      },
+      "flagship": {
+        "label": "有効なフラッグシップモデルを設定",
+        "help": "ユーザー向けの回答に使用します。"
+      }
+    }
+  },
   "advancedModels": "スロット別モデル上書き",
   "category": {
     "models_providers": "モデルとプロバイダー",

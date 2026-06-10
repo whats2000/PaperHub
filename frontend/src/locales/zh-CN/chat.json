@@ -2,6 +2,8 @@
   "composer": {
     "placeholder": "询问论文、搜索，或随便聊聊…（Enter 发送，Shift+Enter 换行）",
     "messageAria": "消息",
+    "setupRequired": "完成设置后即可开始对话——请添加提供商密钥并选择有效的模型。",
+    "setupCta": "打开设置",
     "send": "发送",
     "voice": "语音输入",
     "voiceListening": "聆听中 — 点击以停止",
