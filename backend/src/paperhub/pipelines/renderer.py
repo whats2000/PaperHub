@@ -221,6 +221,39 @@ def _pandoc_hostile_def_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+# pifont \ding{NN} symbol macros pandoc can't expand. A check/cross inside a
+# coloured wrapper (`\textcolor{red}{\ding{55}}`, arXiv:2506.10100's ablation
+# table) renders as an EMPTY `<span style="color: red"></span>` — the colour
+# survives but the glyph is silently dropped, so the table shows nothing in the
+# cells. We substitute the Unicode glyph BEFORE pandoc so the mark appears.
+# Applied to the render-time tex AFTER table rasterisation, so a table compiled
+# to a PNG keeps native \ding (pdflatex renders pifont natively); only the
+# HTML-rendered residue is rewritten. Unknown ding codes are left untouched
+# (better a literal `\ding{N}` than a wrong glyph).
+_PIFONT_DING_GLYPH = {
+    "51": "✓",  # ✓ check mark
+    "52": "✔",  # ✔ heavy check mark
+    "53": "✕",  # ✕ multiplication x
+    "54": "✖",  # ✖ heavy multiplication x
+    "55": "✗",  # ✗ ballot x
+    "56": "✘",  # ✘ heavy ballot x
+    "72": "★",  # ★ black star
+    "73": "☆",  # ☆ white star
+}
+_DING_RE = re.compile(r"\\ding\s*\{\s*(\d+)\s*\}")
+
+
+def replace_pifont_dings(tex: str) -> str:
+    r"""Rewrite pifont ``\ding{NN}`` macros to their Unicode glyph so they
+    survive pandoc (which drops the unknown macro, leaving an empty span).
+
+    Unknown ding codes are left untouched. See ``_PIFONT_DING_GLYPH`` for the
+    rationale + why this runs on the render-time tex (post-rasterisation)."""
+    return _DING_RE.sub(
+        lambda m: _PIFONT_DING_GLYPH.get(m.group(1), m.group(0)), tex
+    )
+
+
 def render_html(
     *,
     source: Path,

@@ -12,7 +12,22 @@ from paperhub.pipelines.renderer import (
     _pandoc_hostile_def_spans,
     _unclosed_braces,
     render_html,
+    replace_pifont_dings,
 )
+
+
+def test_replace_pifont_dings_check_and_cross() -> None:
+    # arXiv:2506.10100's ablation table: \textcolor{red}{\ding{55}} renders as an
+    # empty coloured span under pandoc; the glyph must be substituted pre-pandoc.
+    tex = r"\textcolor{green}{\ding{51}} & \textcolor{red}{\ding{55}}"
+    assert replace_pifont_dings(tex) == r"\textcolor{green}{✓} & \textcolor{red}{✗}"
+
+
+def test_replace_pifont_dings_tolerates_spaces_and_leaves_unknown() -> None:
+    assert replace_pifont_dings(r"\ding{ 52 }") == "✔"
+    assert replace_pifont_dings(r"\ding {56}") == "✘"
+    # An unmapped code is left as-is — better a literal macro than a wrong glyph.
+    assert replace_pifont_dings(r"\ding{200}") == r"\ding{200}"
 
 
 def test_unclosed_braces_counts_stray_open() -> None:
