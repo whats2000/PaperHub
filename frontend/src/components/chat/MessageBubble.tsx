@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +15,7 @@ import type { ChatMessage } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
+import { SqlCard } from "@/components/chat/SqlCard";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
@@ -121,6 +123,21 @@ export function MessageBubble({
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }], rehypeChunkCitations]}
               components={{
+                // A ```sql fenced block (the SQL a library_stats turn ran) is
+                // lifted out of the prose into a distinct collapsible card.
+                pre: ({ node, children }: ExtraProps & { children?: ReactNode }) => {
+                  const codeEl = node?.children?.[0] as
+                    | { properties?: { className?: unknown }; children?: { value?: string }[] }
+                    | undefined;
+                  const cls = Array.isArray(codeEl?.properties?.className)
+                    ? (codeEl.properties.className as string[]).join(" ")
+                    : "";
+                  if (/\blanguage-sql\b/.test(cls)) {
+                    const sql = (codeEl?.children?.[0]?.value ?? "").replace(/\n+$/, "");
+                    return <SqlCard sql={sql} />;
+                  }
+                  return <pre>{children}</pre>;
+                },
                 "chunk-cite": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as {
                     dataChunkId?: number | string;
