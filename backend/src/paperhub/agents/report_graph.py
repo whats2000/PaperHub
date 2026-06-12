@@ -42,6 +42,7 @@ from langgraph.graph import END, START, StateGraph
 
 from paperhub.agents.gather_context import run_gather_context
 from paperhub.agents.memory_recall import build_active_memory_block
+from paperhub.agents.paper_digest import get_or_build_digest
 from paperhub.agents.report_pipeline import (
     author_deck_notes,
     classify_deck_command,
@@ -54,7 +55,7 @@ from paperhub.agents.report_pipeline import (
 )
 from paperhub.agents.sl_emit import run_sl_emit
 from paperhub.agents.sl_outline import run_sl_outline
-from paperhub.agents.sl_seed import section_names_from_json
+from paperhub.agents.sl_read import ReadResult, read_section_chunks
 from paperhub.agents.slide_agent import run_slide_agent
 from paperhub.agents.state import effective_query, response_language
 from paperhub.agents.style_resolver import resolve_preamble
@@ -72,7 +73,12 @@ from paperhub.models.domain import (
     AgentState,
     DeckCommand,
 )
-from paperhub.models.slide_domain import KeyFigureBundle, PaperContextBundle, SeedFigure, SeedPaper
+from paperhub.models.slide_domain import (
+    KeyFigureBundle,
+    PaperContextBundle,
+    PaperDigest,
+    SeedFigure,
+)
 from paperhub.pipelines.paper_asset import PaperAsset, read_paper_asset
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
@@ -704,86 +710,52 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         if title_meta.date:
             preamble_with_title += f"\\date{{{title_meta.date}}}\n"
 
-        # Build seed map from papers (sections from DB) + bundles (figures already gathered).
-        # paper_idx matches the order in `papers` which matches `bundles` (same enumeration).
+        # Build the digest map for the outline orchestrator (F6.1-R). Each
+        # paper gets a cheap cached per-section digest (full coverage of what it
+        # says) instead of the slow full-paper gather. The blind Stage-1 gather
+        # above still produces the bundles that drive the drafter; here we only
+        # feed the OUTLINE.
         _bundle_by_paper_id: dict[int, PaperContextBundle] = {b.paper_id: b for b in bundles}
-        _seeds: list[SeedPaper] = []
+        _digests: list[PaperDigest] = []
         for _idx, p in enumerate(papers):
-            pid = int(p["id"])
-            _b = _bundle_by_paper_id.get(pid)
-            # Sections: prefer DB sections_json (full TOC; a list of {name,...}
-            # dicts — extract the names), fall back to bundle excerpts.
-            _secs: list[str] = section_names_from_json(p.get("sections_json"))
-            if not _secs and _b is not None:
-                _secs = list({e.section_name for e in _b.section_excerpts})
-            # Figures: from the already-gathered bundle (already probed + namespaced).
-            _figs: list[SeedFigure] = []
-            if _b is not None:
-                _figs = [SeedFigure(key=f.key, caption=f.one_line_interpretation[:120]) for f in _b.key_figures]
-            _is_survey = bool(_b.section_excerpts) and any(
-                kw in (p.get("title") or "").lower()
-                for kw in ("survey", "review", "overview", "taxonomy", "benchmark")
-            ) if _b is not None else False
-            _seeds.append(SeedPaper(
-                paper_id=pid,
-                title=str(p.get("title") or ""),
-                abstract=str(p.get("abstract") or "")[:800],
-                is_survey=_is_survey,
-                sections=_secs,
-                figures=_figs,
-            ))
-
-        # Build gather_fn closure — called by sl_outline when it needs targeted evidence.
-        # Uses the same asset-loading + run_gather_context path as Stage 1.
-        _paper_map: dict[int, dict[str, Any]] = {int(p["id"]): p for p in papers}
-        _paper_idx_map: dict[int, int] = {int(p["id"]): idx for idx, p in enumerate(papers)}
-
-        async def _gather_fn(aim: str, paper_id: int) -> PaperContextBundle:
-            p = _paper_map.get(paper_id)
-            if p is None:
-                raise ValueError(f"gather_fn: paper_id={paper_id} not in deck papers")
             source_dir_raw = p.get("source_dir")
             if not source_dir_raw:
-                raise ValueError(f"gather_fn: paper_id={paper_id} has no source_dir")
+                continue
             source_dir = Path(str(source_dir_raw))
-            asset: PaperAsset | None = await asyncio.to_thread(read_paper_asset, source_dir)
-            if asset is None:
-                raise ValueError(f"gather_fn: no PaperAsset for paper_id={paper_id}")
-
-            def _read_macros() -> list[str]:
-                add = source_dir / "ADDITIONAL.tex"
-                if not add.exists():
-                    return []
-                raw = add.read_text(encoding="utf-8", errors="replace")
-                return [
-                    ln for ln in raw.splitlines()
-                    if ln.strip().startswith(("\\newcommand", "\\providecommand"))
-                ]
-
-            paper_newcommands = await asyncio.to_thread(_read_macros)
-            paper_idx = _paper_idx_map.get(paper_id, 0)
-            bundle = await run_gather_context(
-                paper_id=paper_id,
-                paper_idx=paper_idx,
-                source_dir=source_dir,
-                paper_title=str(p.get("title") or ""),
-                paper_authors=list(p.get("authors") or []),
-                paper_year=p.get("year"),
-                paper_abstract=str(p.get("abstract") or ""),
-                paper_newcommands=paper_newcommands,
-                asset=asset,
+            if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
+                continue
+            asset = await asyncio.to_thread(read_paper_asset, source_dir)
+            digest = await get_or_build_digest(
+                paper_id=int(p["id"]),
                 conn=deps.conn,
-                tracer=deps.tracer,
-                model=deps.notes_model,
-                response_language=lang,
-                aim=aim,
+                asset=asset,
+                adapter=deps.adapter,
+                model=deps.section_model,
             )
-            # Stream this aimed gather as it completes so the SSE trace updates
-            # DURING the orchestrator loop instead of going silent for minutes
-            # until run_sl_outline returns. _flush_steps is lock-guarded, so
-            # concurrent calls from the orchestrator's parallel dispatch are safe.
+            # Override the digest's figures with the deck-namespaced bundle
+            # figures so the outline's figure keys match the drafter's
+            # figure_inventory (which is namespaced by paper_idx).
+            _b = _bundle_by_paper_id.get(int(p["id"]))
+            figs = (
+                [
+                    SeedFigure(key=f.key, caption=f.one_line_interpretation[:120])
+                    for f in _b.key_figures
+                ]
+                if _b
+                else []
+            )
+            digest = digest.model_copy(update={"figures": figs})
+            _digests.append(digest)
+
+        # Read closure — called by sl_outline when it needs a slide's exact
+        # evidence. A cheap deterministic SQL fetch (no LLM); flush after each
+        # so the SSE trace stays live during the orchestrator loop.
+        async def _read_fn(paper_id: int, section_name: str) -> ReadResult:
+            res = await read_section_chunks(
+                paper_content_id=paper_id, section_name=section_name, conn=deps.conn
+            )
             await _flush_steps()
-            return bundle
+            return res
 
         _budget = state.get("report_budget")
         _target_slides: int = (
@@ -791,14 +763,14 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         )
 
         outline_result = await run_sl_outline(
-            seeds=_seeds,
+            digests=_digests,
             task_description=effective_query(state) or state.get("user_message", ""),
             response_language=lang,
             target_slides=_target_slides,
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.plan_model,
-            gather_fn=_gather_fn,
+            read_fn=_read_fn,
         )
         outline = outline_result.outline
         await _flush_steps()

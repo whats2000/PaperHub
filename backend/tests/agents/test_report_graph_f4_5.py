@@ -153,10 +153,17 @@ class _NullAdapter:
 
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         from paperhub.models.domain import TargetLanguage
-        from paperhub.models.slide_domain import DeckOutlineDraft, OutlineSlideDraft, RoundAction
+        from paperhub.models.slide_domain import (
+            DeckOutlineDraft,
+            DigestSection,
+            OutlineSlideDraft,
+            RoundAction,
+        )
 
         if response_model is TargetLanguage:
             return TargetLanguage(language=None)
+        if response_model is DigestSection:
+            return DigestSection(name="stub", insight="stub insight")
         if response_model is RoundAction:
             return RoundAction(
                 action="finalize",
