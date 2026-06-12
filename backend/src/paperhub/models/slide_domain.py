@@ -142,25 +142,31 @@ class OutlineSlideDraft(BaseModel):
     `chunks.id` deterministically (see :class:`OutlineSlide`).
     """
 
+    # No extra="forbid": LLM structured output is not schema-strict; ignore unknown keys.
+
     goal: str  # one-line purpose of the slide
     key_message: str  # the single point it makes (may be "" for a title slide)
     transition_from_prev: str = ""  # the bridge from the previous slide
     paper_id: int | None = None  # paper_content.id this slide is about; None = synthesis/title
     figure_key: str | None = None  # inventory key, if the slide centres on a figure
-    grounding_sections: list[str] = []  # bundle section names this slide draws on
+    grounding_sections: list[str] = Field(default_factory=list)  # bundle section names this slide draws on
 
 
 class DeckOutlineDraft(BaseModel):
     """The whole talk plan, as authored by the sl_outline LLM."""
 
+    # No extra="forbid": LLM structured output is not schema-strict; ignore unknown keys.
+
     talk_title: str
-    audience_intent: str  # what the talk should accomplish; default = walk the references
+    audience_intent: str  # what the talk should accomplish; e.g. "walk through the references"
     narrative_arc: str  # the throughline: problem framing -> bridges -> synthesis takeaway
     slides: list[OutlineSlideDraft]
 
 
 class OutlineSlide(BaseModel):
     """A planned slide after deterministic resolution (grounding + index)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     slide_index: int  # 0-based; matches the final deck_slides.slide_index (1:1 contract)
     goal: str
@@ -173,6 +179,8 @@ class OutlineSlide(BaseModel):
 
 class DeckOutline(BaseModel):
     """The resolved talk plan handed to the slide_agent (rendered 1:1)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     talk_title: str
     audience_intent: str
