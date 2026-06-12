@@ -21,9 +21,11 @@ import json
 import logging
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 import aiosqlite
 
@@ -399,6 +401,28 @@ def enforce_figure_paragraph_break(tex: str) -> str:
     return "".join(out_parts)
 
 
+class RecompileOutcome(Protocol):
+    """Structural type for what a ``recompile`` callback returns.
+
+    Matches ``compile.CompileResult`` (ok / tex / page_count) without coupling
+    this deterministic module to the compile module's concrete type — the
+    callback is injected by the caller (report_graph), same as ``compile.py``
+    injects its LLM ``revise`` callback to stay adapter-agnostic.
+    """
+
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def tex(self) -> str: ...
+    @property
+    def page_count(self) -> int: ...
+
+
+# Given the post-audit deck tex, recompile deck.tex -> deck.pdf in the workdir
+# and return the outcome. The callback OWNS writing deck.tex + deck.pdf.
+RecompileFn = Callable[[str], Awaitable[RecompileOutcome]]
+
+
 @dataclass(frozen=True)
 class EmitResult:
     deck_id: int
@@ -420,6 +444,7 @@ async def run_sl_emit(
     figure_inventory: dict[str, KeyFigureBundle],
     conn: aiosqlite.Connection,
     speaker_notes: dict[int, str] | None = None,  # opt-in NOTES path
+    recompile: RecompileFn | None = None,
 ) -> EmitResult:
     # 1. Contract #1: figure-key audit.
     inventory_keys: set[str] = set(figure_inventory.keys())
@@ -432,6 +457,22 @@ async def run_sl_emit(
     # standalone paragraph instead of flowing inline beside the figure
     # (observed on Chinese decks in real-API gate; \centering's scope leaked).
     audited_tex = enforce_figure_paragraph_break(audited_tex)
+
+    # 1b. Recompile so deck.pdf MATCHES the audited tex. The two transforms
+    # above mutate the deck AFTER the slide_agent's last compile; without a
+    # recompile the served/cached deck.pdf renders the PRE-audit layout (the
+    # centering wrap + figure-omission replacements never appear). The EDIT
+    # flow (_recompile_and_emit) already does this; GENERATE used to skip it,
+    # shipping a deck.pdf that didn't match its own deck.tex. The callback
+    # owns writing deck.tex + deck.pdf and may further rewrite the tex
+    # (font/engine injection, Overfull revise), so we adopt its returned tex
+    # and page_count as authoritative. Hard-compile failure downgrades status.
+    if recompile is not None:
+        outcome = await recompile(audited_tex)
+        audited_tex = outcome.tex
+        page_count = outcome.page_count
+        if not outcome.ok:
+            status = "error"
 
     # 2. + 3. Filesystem work off the event loop (write audited deck.tex,
     # write the version snapshot under edit_history/).

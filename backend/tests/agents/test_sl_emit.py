@@ -177,6 +177,75 @@ async def test_emit_caches_pdf_when_deck_pdf_exists(
 
 
 @pytest.mark.asyncio
+async def test_emit_recompiles_after_audit_so_pdf_matches_finalized_tex(
+    conn: aiosqlite.Connection, tmp_path: Path
+) -> None:
+    """Regression: the deterministic finalize (verify_and_fix_graphics +
+    enforce_figure_paragraph_break) mutates deck.tex AFTER the slide_agent's
+    last compile. Without a recompile, the cached/served deck.pdf renders the
+    PRE-audit layout (the centering wrap never appears). When a ``recompile``
+    callback is supplied, sl_emit must (1) hand it the audited (center-wrapped)
+    tex, and (2) cache the FRESH pdf the recompile produced — not the stale one.
+    """
+    import json
+
+    deck = (
+        "\\documentclass{beamer}\n\\begin{document}\n"
+        "\\begin{frame}{Fig}\n  \\includegraphics{p0-fig-001}\n  caption text\n"
+        "\\end{frame}\n\\end{document}\n"
+    )
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    (workdir / "deck.tex").write_text(deck, encoding="utf-8")
+    # The slide_agent's stale compile output — must NOT be what gets cached.
+    (workdir / "deck.pdf").write_bytes(b"%PDF-STALE-pre-audit\n")
+
+    inventory = {
+        "p0-fig-001": KeyFigureBundle(
+            key="p0-fig-001",
+            role="overview",
+            one_line_interpretation="x",
+            dimensions=FigureDimensions(width_px=1000, height_px=1000),
+        )
+    }
+
+    seen: dict[str, str] = {}
+
+    class _Outcome:
+        def __init__(self, ok: bool, tex: str, page_count: int) -> None:
+            self.ok, self.tex, self.page_count = ok, tex, page_count
+
+    async def _recompile(audited_tex: str) -> _Outcome:
+        seen["tex"] = audited_tex
+        # Simulate compile_with_revise: it writes deck.tex + a fresh deck.pdf.
+        (workdir / "deck.tex").write_text(audited_tex, encoding="utf-8")
+        (workdir / "deck.pdf").write_bytes(b"%PDF-FRESH-post-audit\n")
+        return _Outcome(ok=True, tex=audited_tex, page_count=1)
+
+    result = await run_sl_emit(
+        session_id=1, run_id=1, deck_tex=deck, workdir=workdir,
+        page_count=0,  # agent reported 0; recompile is authoritative -> 1
+        status="ok", contributing_paper_ids=[],
+        figure_inventory=inventory, conn=conn, recompile=_recompile,
+    )
+
+    # (1) the callback received the center-wrapped tex.
+    assert "\\begin{center}" in seen["tex"]
+    # (2) the cached snapshot pdf is the FRESH one, not the stale pre-audit pdf.
+    snapshots = list((workdir / "edit_history").glob("version_*.json"))
+    data = json.loads(snapshots[0].read_text(encoding="utf-8"))
+    cached = (workdir / "edit_history") / data["pdf_filename"]
+    assert cached.read_bytes() == b"%PDF-FRESH-post-audit\n"
+    # (3) page_count came from the recompile, not the (stale) agent value.
+    assert result.page_count == 1
+    async with conn.execute(
+        "SELECT page_count FROM decks WHERE id=?", (result.deck_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == 1
+
+
+@pytest.mark.asyncio
 async def test_emit_records_null_pdf_filename_when_deck_pdf_missing(
     conn: aiosqlite.Connection, tmp_path: Path
 ) -> None:
