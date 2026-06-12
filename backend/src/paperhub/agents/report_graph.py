@@ -762,7 +762,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
 
             paper_newcommands = await asyncio.to_thread(_read_macros)
             paper_idx = _paper_idx_map.get(paper_id, 0)
-            return await run_gather_context(
+            bundle = await run_gather_context(
                 paper_id=paper_id,
                 paper_idx=paper_idx,
                 source_dir=source_dir,
@@ -778,6 +778,12 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 response_language=lang,
                 aim=aim,
             )
+            # Stream this aimed gather as it completes so the SSE trace updates
+            # DURING the orchestrator loop instead of going silent for minutes
+            # until run_sl_outline returns. _flush_steps is lock-guarded, so
+            # concurrent calls from the orchestrator's parallel dispatch are safe.
+            await _flush_steps()
+            return bundle
 
         _budget = state.get("report_budget")
         _target_slides: int = (

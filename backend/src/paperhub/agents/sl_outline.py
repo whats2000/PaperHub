@@ -34,6 +34,7 @@ from typing import Any
 
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.slide_domain import (
+    ContextRequest,
     DeckOutline,
     DeckOutlineDraft,
     OutlineResult,
@@ -47,6 +48,10 @@ from paperhub.tracing.tracer import Tracer
 
 # Maximum support excerpts injected per slide to keep prompt size bounded.
 _MAX_SUPPORT_EXCERPTS = 6
+# Dispatch caps — the orchestrator LLM can over-ask (empty/duplicate aims); each
+# aim is a full, slow flagship gather, so bound how many actually run.
+_MAX_AIMS_PER_ROUND = 4
+_MAX_TOTAL_AIMS = 8
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +244,7 @@ async def run_sl_outline(
     known_fig_keys: set[str] = {f.key for s in seeds for f in s.figures}
 
     gathered: dict[str, PaperContextBundle] = {}
+    gathered_keys: set[str] = set()  # normalized aims already fetched (dedup guard)
     round_log: list[dict[str, Any]] = []
     narrative_pattern = "synthesis"  # default; overridden by first LLM response
     final_draft: DeckOutlineDraft | None = None
@@ -305,18 +311,41 @@ async def run_sl_outline(
                 break
 
             if action.action == "dispatch" and action.requests and not is_last_round:
-                # Fan-out: gather all aims in parallel
-                aims = action.requests
+                # Filter the LLM's requests BEFORE gathering: an empty aim, a
+                # duplicate within the round, or an aim already gathered each
+                # triggers a full (slow, expensive) flagship gather otherwise —
+                # this is the cause of the 8x-redundant-gather token waste. Cap
+                # per-round and total so a runaway dispatch can't fan out.
+                seen_round: set[str] = set()
+                fresh: list[ContextRequest] = []
+                for r in action.requests:
+                    key = " ".join(r.aim.split()).lower()  # normalize whitespace+case
+                    if not key or key in gathered_keys or key in seen_round:
+                        continue
+                    seen_round.add(key)
+                    fresh.append(r)
+                    if (
+                        len(fresh) >= _MAX_AIMS_PER_ROUND
+                        or len(gathered) + len(fresh) >= _MAX_TOTAL_AIMS
+                    ):
+                        break
                 round_entry["dispatched_aims"] = [
-                    {"aim": r.aim, "paper_id": r.paper_id} for r in aims
+                    {"aim": r.aim, "paper_id": r.paper_id} for r in fresh
                 ]
+                round_entry["skipped_requests"] = len(action.requests) - len(fresh)
                 round_log.append(round_entry)
 
+                if not fresh:
+                    # Nothing NEW to fetch (all empty/duplicate/already-have) —
+                    # there is no more evidence to gather, so move toward finalize.
+                    continue
+
                 bundles: list[PaperContextBundle] = await asyncio.gather(
-                    *[gather_fn(r.aim, r.paper_id) for r in aims]
+                    *[gather_fn(r.aim, r.paper_id) for r in fresh]
                 )
-                for req, bundle in zip(aims, bundles, strict=True):
+                for req, bundle in zip(fresh, bundles, strict=True):
                     gathered[req.aim] = bundle
+                    gathered_keys.add(" ".join(req.aim.split()).lower())
                 continue
 
             # Either: action==dispatch on the last round, or action==finalize with
