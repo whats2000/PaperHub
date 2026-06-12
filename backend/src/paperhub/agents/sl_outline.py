@@ -97,7 +97,6 @@ def _resolve_slide(
     gathered: dict[str, PaperContextBundle],
     known_paper_ids: set[int],
     known_fig_keys: set[str],
-    narrative_pattern: str,
     dropped: list[str],
 ) -> OutlineSlide:
     """Resolve one draft slide deterministically."""
@@ -160,7 +159,6 @@ def _resolve_outline(
             gathered=gathered,
             known_paper_ids=known_paper_ids,
             known_fig_keys=known_fig_keys,
-            narrative_pattern=narrative_pattern,
             dropped=dropped,
         )
         for idx, s in enumerate(draft.slides)

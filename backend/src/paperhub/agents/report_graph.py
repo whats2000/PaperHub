@@ -707,7 +707,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         # paper_idx matches the order in `papers` which matches `bundles` (same enumeration).
         _bundle_by_paper_id: dict[int, PaperContextBundle] = {b.paper_id: b for b in bundles}
         _seeds: list[SeedPaper] = []
-        for idx, p in enumerate(papers):
+        for _idx, p in enumerate(papers):
             pid = int(p["id"])
             _b = _bundle_by_paper_id.get(pid)
             # Sections: prefer DB sections_json (full TOC), fall back to bundle excerpts.

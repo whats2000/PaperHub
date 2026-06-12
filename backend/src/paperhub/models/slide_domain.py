@@ -203,7 +203,7 @@ class OutlineSlide(BaseModel):
     transition_from_prev: str
     paper_id: int | None
     figure_key: str | None
-    grounding_chunk_ids: list[int]  # resolved from grounding_sections via SQL
+    grounding_chunk_ids: list[int]  # union of read_chunk_ids from each cited aim's PaperContextBundle
     support_excerpts: list[str] = Field(default_factory=list)  # gathered evidence for the drafter
 
 
