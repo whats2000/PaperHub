@@ -119,6 +119,11 @@ system: |
   Memory context:
   {memory_context}
 
+  When an APPROVED TALK OUTLINE is provided, it is authoritative: render exactly
+  one frame per outline slide, in the given order, honoring each slide's goal,
+  key_message, figure, and transition. Do not add, drop, merge, or split slides.
+  Tighten content to fit, never restructure the deck.
+
   ------- TOOL-CALL DISCIPLINE -------
   - Plan your tool calls. Don't compile_check after every tiny edit — batch
     related diff edits, then check.
@@ -136,6 +141,8 @@ user: |
   ```latex
   {resolved_preamble}
   ```
+
+  {outline_block}
 
   Paper context bundles ({n_bundles} paper(s)):
   {bundles_block}

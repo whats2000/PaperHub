@@ -38,6 +38,7 @@ from paperhub.agents.style_resolver import set_session_override
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.models.slide_domain import (
     CompileCheckResult,
+    DeckOutline,
     KeyFigureBundle,
     PaperContextBundle,
 )
@@ -311,6 +312,28 @@ def _format_layout_examples_block() -> str:
     )
 
 
+def _format_outline_block(outline: DeckOutline | None) -> str:
+    """Render the approved outline for the drafter. The drafter MUST render
+    exactly one frame per slide, in order — no add/drop/split (the 1:1 contract
+    that keeps grounding mapped to pages by slide_index)."""
+    if outline is None:
+        return ""
+    lines = [
+        "## APPROVED TALK OUTLINE — render EXACTLY one frame per slide below, "
+        "in this order. Do NOT add, drop, merge, or split slides.",
+        f"Talk title: {outline.talk_title}",
+        f"Audience intent: {outline.audience_intent}",
+        f"Narrative arc: {outline.narrative_arc}",
+        "",
+        "Slides:",
+    ]
+    for s in outline.slides:
+        fig = f" [figure: {s.figure_key}]" if s.figure_key else ""
+        bridge = f" (transition: {s.transition_from_prev})" if s.transition_from_prev else ""
+        lines.append(f"{s.slide_index + 1}. {s.goal} — {s.key_message}{fig}{bridge}")
+    return "\n".join(lines)
+
+
 async def _dispatch_tool_call(
     *,
     name: str,
@@ -464,6 +487,7 @@ async def run_slide_agent(
     resolved_preamble: str,
     workdir: Path,
     existing_deck_tex: str | None,
+    outline: DeckOutline | None = None,
     figure_inventory: dict[str, KeyFigureBundle],
     memory_context: str,
     tracer: Tracer,
@@ -493,6 +517,7 @@ async def run_slide_agent(
         task_description=task_description,
         response_language=response_language,
         resolved_preamble=resolved_preamble,
+        outline_block=_format_outline_block(outline),
         bundles_block=_format_bundles_block(bundles),
         n_bundles=len(bundles),
         figure_inventory_block=_format_figure_inventory_block(figure_inventory),
