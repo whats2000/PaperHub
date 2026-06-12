@@ -32,9 +32,6 @@ from paperhub.db.migrate import apply_schema
 from paperhub.models.domain import RoutingDecision
 from paperhub.models.slide_domain import (
     CompileCheckResult,
-    FigureDimensions,
-    KeyFigureBundle,
-    PaperContextBundle,
 )
 from paperhub.pipelines.paper_asset import (
     FigureAsset,
@@ -207,28 +204,6 @@ async def test_generate_invokes_three_stages_in_order_and_persists_deck(
 
     calls: list[str] = []
 
-    async def fake_gather(**kw: Any) -> PaperContextBundle:
-        calls.append("gather")
-        return PaperContextBundle(
-            paper_id=kw["paper_id"],
-            paper_idx=kw["paper_idx"],
-            title=kw["paper_title"],
-            authors=kw["paper_authors"],
-            year=kw["paper_year"],
-            narrative_summary="x",
-            key_figures=[
-                KeyFigureBundle(
-                    key=f"p{kw['paper_idx']}-fig-000",
-                    role="overview",
-                    one_line_interpretation="x",
-                    dimensions=FigureDimensions(width_px=1000, height_px=800),
-                )
-            ],
-            key_equations=[],
-            section_excerpts=[],
-            paper_newcommands=[],
-        )
-
     async def fake_agent(**kw: Any) -> SlideAgentResult:
         calls.append("agent")
         # Write a one-frame deck.tex matching what sl_emit will read.
@@ -252,7 +227,6 @@ async def test_generate_invokes_three_stages_in_order_and_persists_deck(
             preamble_persisted=False,
         )
 
-    monkeypatch.setattr(rg, "run_gather_context", fake_gather)
     monkeypatch.setattr(rg, "run_slide_agent", fake_agent)
     # Bypass the pdflatex CLI check so the gate doesn't short-circuit.
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
@@ -277,8 +251,9 @@ async def test_generate_invokes_three_stages_in_order_and_persists_deck(
         ):
             final_text = payload["final_response"]
 
-    # Three F4.5 stages fired (gather is per-paper, so once for one paper).
-    assert calls == ["gather", "agent"]
+    # F6.1-R: the flagship gather is gone — only slide_agent runs; the
+    # bundles are built cheaply from the digest + disk figure inventory.
+    assert calls == ["agent"]
     # sl_emit persisted the deck (current_version_id stamped, page_count > 0).
     async with conn.execute(
         "SELECT id, page_count, current_version_id, status "
@@ -309,14 +284,14 @@ async def test_generate_short_circuits_when_no_enabled_papers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No enabled papers → empty short-circuit; gather_context never fires."""
+    """No enabled papers → empty short-circuit before any bundle build."""
     called: list[str] = []
 
-    async def boom_gather(**kw: Any) -> PaperContextBundle:
-        called.append("gather")
-        raise AssertionError("gather_context must not run with no papers")
+    async def boom_agent(**kw: Any) -> SlideAgentResult:
+        called.append("agent")
+        raise AssertionError("slide_agent must not run with no papers")
 
-    monkeypatch.setattr(rg, "run_gather_context", boom_gather)
+    monkeypatch.setattr(rg, "run_slide_agent", boom_agent)
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
 
     deps = _deps(_NullAdapter(), fake_tracer, conn, tmp_path)
@@ -345,16 +320,16 @@ async def test_generate_short_circuits_when_pdflatex_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """pdflatex absent → no_latex short-circuit; gather_context never fires."""
+    """pdflatex absent → no_latex short-circuit before any bundle build."""
     await _seed_paper(conn, tmp_path)
 
     called: list[str] = []
 
-    async def boom_gather(**kw: Any) -> PaperContextBundle:
-        called.append("gather")
-        raise AssertionError("gather_context must not run without pdflatex")
+    async def boom_agent(**kw: Any) -> SlideAgentResult:
+        called.append("agent")
+        raise AssertionError("slide_agent must not run without pdflatex")
 
-    monkeypatch.setattr(rg, "run_gather_context", boom_gather)
+    monkeypatch.setattr(rg, "run_slide_agent", boom_agent)
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: False)
 
     deps = _deps(_NullAdapter(), fake_tracer, conn, tmp_path)
@@ -414,20 +389,6 @@ async def test_generate_injects_title_metadata_into_preamble(
 
     captured_preambles: list[str] = []
 
-    async def fake_gather(**kw: Any) -> PaperContextBundle:
-        return PaperContextBundle(
-            paper_id=kw["paper_id"],
-            paper_idx=kw["paper_idx"],
-            title=kw["paper_title"],
-            authors=kw["paper_authors"],
-            year=kw["paper_year"],
-            narrative_summary="x",
-            key_figures=[],
-            key_equations=[],
-            section_excerpts=[],
-            paper_newcommands=[],
-        )
-
     async def fake_agent(**kw: Any) -> SlideAgentResult:
         captured_preambles.append(kw["resolved_preamble"])
         return SlideAgentResult(
@@ -450,7 +411,6 @@ async def test_generate_injects_title_metadata_into_preamble(
             preamble_persisted=False,
         )
 
-    monkeypatch.setattr(rg, "run_gather_context", fake_gather)
     monkeypatch.setattr(rg, "run_slide_agent", fake_agent)
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
 
@@ -523,20 +483,6 @@ async def test_generate_multi_paper_uses_user_message_as_talk_title(
 
     captured_preambles: list[str] = []
 
-    async def fake_gather(**kw: Any) -> PaperContextBundle:
-        return PaperContextBundle(
-            paper_id=kw["paper_id"],
-            paper_idx=kw["paper_idx"],
-            title=kw["paper_title"],
-            authors=kw["paper_authors"],
-            year=kw["paper_year"],
-            narrative_summary="x",
-            key_figures=[],
-            key_equations=[],
-            section_excerpts=[],
-            paper_newcommands=[],
-        )
-
     async def fake_agent(**kw: Any) -> SlideAgentResult:
         captured_preambles.append(kw["resolved_preamble"])
         return SlideAgentResult(
@@ -567,7 +513,6 @@ async def test_generate_multi_paper_uses_user_message_as_talk_title(
     import paperhub.agents.title_synthesizer as ts
 
     monkeypatch.setattr(ts, "synthesize_talk_title", fake_synth)
-    monkeypatch.setattr(rg, "run_gather_context", fake_gather)
     monkeypatch.setattr(rg, "run_slide_agent", fake_agent)
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
 

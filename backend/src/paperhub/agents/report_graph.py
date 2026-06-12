@@ -41,7 +41,6 @@ import aiosqlite
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from paperhub.agents.gather_context import run_gather_context
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.paper_digest import get_or_build_digest
 from paperhub.agents.report_pipeline import (
@@ -75,12 +74,15 @@ from paperhub.models.domain import (
     DeckCommand,
 )
 from paperhub.models.slide_domain import (
+    FigureDimensions,
+    KeyEquationBundle,
     KeyFigureBundle,
     PaperContextBundle,
     PaperDigest,
+    SectionExcerpt,
     SeedFigure,
 )
-from paperhub.pipelines.paper_asset import PaperAsset, read_paper_asset
+from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
@@ -90,7 +92,11 @@ from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     replace_preamble,
 )
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
+from paperhub.pipelines.slide_pipeline.figure_geometry import (
+    probe_figure_dimensions,
+)
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
+    InventoryFigure,
     build_inventory,
     verify_and_fix_graphics,
 )
@@ -577,13 +583,16 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         return str(plan.get("talk_title") or plan.get("title") or "Slides")
 
     async def _generate(state: AgentState) -> AgentState:
-        """F4.5 flat 3-step orchestrator.
+        """F6.1-R flat 3-step orchestrator.
 
-        Stage 1: ``gather_context`` (fan-out per enabled paper) — each call
-            navigates ONE paper's F2 ``PaperAsset`` via bounded
-            ``list_sections`` / ``read_section`` / ``read_figure_block``
-            callbacks and emits a :class:`PaperContextBundle`
-            (narrative + grounded asset inventory + dimension-probed figures).
+        Stage 1 (CHEAP build): for each enabled paper, build a per-section
+            :class:`PaperDigest` (cached, small model) + a disk-probed figure
+            inventory, then assemble a :class:`PaperContextBundle` per paper
+            from those cheap sources — NO flagship full-paper gather. The
+            bundle keeps its exact interchange shape (narrative + key figures
+            + equations + section excerpts + macros) so every downstream
+            consumer (figure_inventory, bundle persistence/notes grounding,
+            title synthesis, the drafter) works unchanged.
 
         Stage 2: ``slide_agent`` (single monolithic agentic loop) — sees ALL
             bundles + the resolved Beamer preamble + the deck-wide figure
@@ -599,14 +608,6 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         """
         writer, _flush_steps = _streaming(state)
 
-        async def _then_flush(coro: Any) -> Any:
-            """Await one fan-out task, then drain+stream its tool_step the
-            instant it closes — so a finished bundle surfaces live rather
-            than being batched until the whole ``gather`` resolves."""
-            result = await coro
-            await _flush_steps()
-            return result
-
         papers: list[dict[str, Any]] = state["report_papers"]
         lang = _slide_language(state)
         # Active memory recall per the SRS v2.17 + CLAUDE.md contract — flows
@@ -618,28 +619,37 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 deps.conn, session_id=state.get("session_id")
             )
 
-        # ---- Stage 1: gather_context fan-out ----
-        # For each enabled paper, load the F2 PaperAsset + the paper-row
-        # metadata + ADDITIONAL.tex macros, then call run_gather_context.
-        # Papers whose asset is missing/unreadable are skipped (no usable
-        # F2 ingest → cannot ground figures/equations safely).
-        async def _gather_one(idx: int, p: dict[str, Any]) -> PaperContextBundle | None:
-            source_dir_raw = p.get("source_dir")
-            if not source_dir_raw:
-                return None
-            source_dir = Path(str(source_dir_raw))
-            if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
-                return None
+        run_id = state.get("run_id")
 
-            asset: PaperAsset | None = await asyncio.to_thread(
-                read_paper_asset, source_dir
-            )
-            if asset is None:
-                return None
+        # ---- Stage 1 (F6.1-R): cheap digest-derived bundles ----
+        # No flagship full-paper gather. Build the PaperContextBundle
+        # interchange from (a) a per-section PaperDigest (cached, small model)
+        # and (b) a disk-probed figure inventory. The figure inventory + its
+        # pixel-dimension probes (PIL) are kept OFF the event loop in one
+        # to_thread call; the deck-namespaced keys (``p{idx}-{fig.id}``) match
+        # the drafter's \includegraphics + verify_and_fix_graphics exactly.
+        def _build_fig_inventory(
+            paper_list: list[dict[str, Any]],
+        ) -> tuple[list[InventoryFigure], dict[str, KeyFigureBundle]]:
+            inv = build_inventory(paper_list)
+            fig_inv: dict[str, KeyFigureBundle] = {}
+            for f in inv:
+                dims = probe_figure_dimensions(f.abs_path) or FigureDimensions(
+                    width_px=1000, height_px=1000
+                )
+                fig_inv[f.key] = KeyFigureBundle(
+                    key=f.key,
+                    role="supporting",
+                    one_line_interpretation=f.caption[:200],
+                    dimensions=dims,
+                )
+            return inv, fig_inv
 
-            # ADDITIONAL.tex macros from the paper's source dir (arXiv LaTeX
-            # path; PDF-only papers have no macros file → empty list).
-            def _read_macros() -> list[str]:
+        async def _read_macros(source_dir: Path) -> list[str]:
+            """ADDITIONAL.tex \\newcommand/\\providecommand lines (arXiv LaTeX
+            path; PDF-only papers have no macros file → empty list). The notes
+            math needs these, so they ride the cheap bundle just as gather did."""
+            def _read() -> list[str]:
                 add = source_dir / "ADDITIONAL.tex"
                 if not add.exists():
                     return []
@@ -649,31 +659,82 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     if ln.strip().startswith(("\\newcommand", "\\providecommand"))
                 ]
 
-            paper_newcommands = await asyncio.to_thread(_read_macros)
+            return await asyncio.to_thread(_read)
 
-            return await run_gather_context(
-                paper_id=int(p["id"]),
-                paper_idx=idx,
-                source_dir=source_dir,
-                paper_title=str(p["title"] or ""),
-                paper_authors=list(p.get("authors") or []),
-                paper_year=p.get("year"),
-                paper_abstract=str(p.get("abstract") or ""),
-                paper_newcommands=paper_newcommands,
-                asset=asset,
-                conn=deps.conn,
-                tracer=deps.tracer,
-                model=deps.notes_model,
-                response_language=lang,
+        bundles: list[PaperContextBundle] = []
+        async with _stage_heartbeat(writer, run_id, "report:reading"):
+            inventory, figure_inventory = await asyncio.to_thread(
+                _build_fig_inventory, papers
             )
 
-        gathered: list[PaperContextBundle | None] = list(
-            await asyncio.gather(
-                *[_then_flush(_gather_one(idx, p)) for idx, p in enumerate(papers)]
-            )
-        )
-        bundles: list[PaperContextBundle] = [b for b in gathered if b is not None]
-        await _flush_steps()
+            # Per-paper digest (full coverage of what the paper says). The
+            # digest's figures are overridden from the deck-namespaced
+            # inventory so the outline's figure keys match the drafter's
+            # figure_inventory.
+            _digests: list[PaperDigest] = []
+            for idx, p in enumerate(papers):
+                source_dir_raw = p.get("source_dir")
+                if not source_dir_raw:
+                    continue
+                source_dir = Path(str(source_dir_raw))
+                if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
+                    continue
+                asset = await asyncio.to_thread(read_paper_asset, source_dir)
+                if asset is None:
+                    continue
+                pid = int(p["id"])
+                digest = await get_or_build_digest(
+                    paper_id=pid,
+                    conn=deps.conn,
+                    asset=asset,
+                    adapter=deps.adapter,
+                    model=deps.section_model,
+                )
+                inv_figs = [f for f in inventory if f.paper_id == pid]
+                digest = digest.model_copy(
+                    update={
+                        "figures": [
+                            SeedFigure(key=f.key, caption=f.caption[:120])
+                            for f in inv_figs
+                        ]
+                    }
+                )
+                _digests.append(digest)
+
+                # Assemble the cheap interchange bundle for THIS paper.
+                key_figures = [figure_inventory[f.key] for f in inv_figs]
+                key_equations = [
+                    KeyEquationBundle(
+                        latex=e.latex, role=(e.role or "equation"), notation_legend=""
+                    )
+                    for e in digest.key_equations
+                ]
+                section_excerpts = [
+                    SectionExcerpt(section_name=s.name, text=s.insight[:1000])
+                    for s in digest.sections
+                    if s.insight
+                ]
+                narrative_summary = (
+                    " ".join(s.insight for s in digest.sections if s.insight)[:2000]
+                    or str(p.get("abstract") or "")
+                )
+                paper_newcommands = await _read_macros(source_dir)
+                bundles.append(
+                    PaperContextBundle(
+                        paper_id=pid,
+                        paper_idx=idx,
+                        title=str(p.get("title") or ""),
+                        authors=list(p.get("authors") or []),
+                        year=p.get("year"),
+                        narrative_summary=narrative_summary,
+                        key_figures=key_figures,
+                        key_equations=key_equations,
+                        section_excerpts=section_excerpts,
+                        paper_newcommands=paper_newcommands,
+                        read_chunk_ids=[],
+                    )
+                )
+            await _flush_steps()
 
         if not bundles:
             return {
@@ -684,25 +745,18 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 ),
             }
 
-        # Deck-wide figure inventory from the bundles (each bundle's
-        # key_figures are already namespaced by paper_idx via the
-        # gather_context formatter, so no collision risk).
-        figure_inventory: dict[str, KeyFigureBundle] = {}
-        for b in bundles:
-            for f in b.key_figures:
-                figure_inventory[f.key] = f
-
         # ---- Stage 2: slide_agent (monolithic agentic loop) ----
         slides_dir = (
             deps.workspace / "chat_session" / str(state["session_id"]) / "slides"
         )
         await asyncio.to_thread(lambda: slides_dir.mkdir(parents=True, exist_ok=True))
 
-        # Persist the rich PaperContextBundles produced by gather_context so a
-        # later notes / regen turn can ground each slide's speaker note in the
-        # SAME context the slide_agent saw (narrative summary + key figures +
+        # Persist the cheap digest-derived PaperContextBundles so a later
+        # notes / regen turn can ground each slide's speaker note in the SAME
+        # context the slide_agent saw (narrative summary + key figures +
         # equations + section excerpts), not just the bare paper abstract.
-        # Without this every notes call would have to re-run gather_context.
+        # These are strictly richer than _load_paper_context's title+abstract
+        # fallback, so the notes flow grounds on real per-section insight.
         def _persist_bundles() -> None:
             (slides_dir / "context_bundles.json").write_text(
                 json.dumps(
@@ -769,44 +823,9 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         if title_meta.date:
             preamble_with_title += f"\\date{{{title_meta.date}}}\n"
 
-        # Build the digest map for the outline orchestrator (F6.1-R). Each
-        # paper gets a cheap cached per-section digest (full coverage of what it
-        # says) instead of the slow full-paper gather. The blind Stage-1 gather
-        # above still produces the bundles that drive the drafter; here we only
-        # feed the OUTLINE.
-        run_id = state.get("run_id")
-        _bundle_by_paper_id: dict[int, PaperContextBundle] = {b.paper_id: b for b in bundles}
-        _digests: list[PaperDigest] = []
-        async with _stage_heartbeat(writer, run_id, "report:reading"):
-            for _idx, p in enumerate(papers):
-                source_dir_raw = p.get("source_dir")
-                if not source_dir_raw:
-                    continue
-                source_dir = Path(str(source_dir_raw))
-                if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
-                    continue
-                asset = await asyncio.to_thread(read_paper_asset, source_dir)
-                digest = await get_or_build_digest(
-                    paper_id=int(p["id"]),
-                    conn=deps.conn,
-                    asset=asset,
-                    adapter=deps.adapter,
-                    model=deps.section_model,
-                )
-                # Override the digest's figures with the deck-namespaced bundle
-                # figures so the outline's figure keys match the drafter's
-                # figure_inventory (which is namespaced by paper_idx).
-                _b = _bundle_by_paper_id.get(int(p["id"]))
-                figs = (
-                    [
-                        SeedFigure(key=f.key, caption=f.one_line_interpretation[:120])
-                        for f in _b.key_figures
-                    ]
-                    if _b
-                    else []
-                )
-                digest = digest.model_copy(update={"figures": figs})
-                _digests.append(digest)
+        # ``_digests`` (built in Stage 1 alongside the cheap bundles) feeds the
+        # outline orchestrator below — each paper's per-section digest with its
+        # figures already overridden from the deck-namespaced inventory.
 
         # Read closure — called by sl_outline when it needs a slide's exact
         # evidence. A cheap deterministic SQL fetch (no LLM); flush after each
