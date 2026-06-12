@@ -15,8 +15,8 @@ def test_format_outline_block_lists_slides_in_order() -> None:
                          transition_from_prev="", paper_id=None, figure_key=None,
                          grounding_chunk_ids=[]),
             OutlineSlide(slide_index=1, goal="motivate the problem", key_message="VLMs hallucinate",
-                         transition_from_prev="", paper_id=73, figure_key="p0-fig-001",
-                         grounding_chunk_ids=[101]),
+                         transition_from_prev="building on the taxonomy", paper_id=73,
+                         figure_key="p0-fig-001", grounding_chunk_ids=[101]),
         ],
     )
     block = _format_outline_block(outline)
@@ -26,3 +26,6 @@ def test_format_outline_block_lists_slides_in_order() -> None:
     assert "motivate the problem" in block
     assert "p0-fig-001" in block
     assert "exactly one frame" in block.lower()
+    assert "(transition: building on the taxonomy)" in block
+    # title slide has empty key_message -> no dangling em-dash
+    assert "title page — " not in block
