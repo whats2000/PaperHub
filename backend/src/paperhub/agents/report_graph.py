@@ -2,8 +2,12 @@
 
 GENERATE path. F4.5 collapsed the R1 7-node subgraph
 (``sl_paper_brief → sl_plan_deck → sl_render_slide → sl_coherence →
-sl_assemble → sl_verify_figures → sl_compile``) into a flat 3-step
-orchestrator: ``gather_context`` (fan-out per paper) → ``slide_agent``
+sl_assemble → sl_verify_figures → sl_compile``) into a flat orchestrator.
+F6.1-R reworked Stage 1: a cached per-section ``PaperDigest`` (small model)
++ a disk-probed figure inventory assemble a cheap ``PaperContextBundle`` per
+paper (NO flagship full-paper gather); the ``sl_outline`` orchestrator then
+structures the deck from the digests and fetches exact evidence via
+deterministic ``read_section`` reads. Stages: digest/outline → ``slide_agent``
 (monolithic agentic loop owning ``initial_draft``/``compile_check``/
 ``replace_frame``/``replace_preamble``) → ``sl_emit`` (deterministic figure
 audit + deck/deck_slides persistence + version snapshot).
