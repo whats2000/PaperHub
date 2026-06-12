@@ -76,6 +76,8 @@
   "stage": {
     "warmup": "Warming up the slide agent…",
     "resolve": "Gathering the papers…",
+    "reading": "Reading the papers…",
+    "planning": "Planning the talk…",
     "understand": "Studying the papers…",
     "narrate": "Outlining the talk…",
     "draft": "Drafting slide frames…",

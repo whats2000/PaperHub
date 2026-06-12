@@ -76,6 +76,8 @@
   "stage": {
     "warmup": "正在啟動投影片代理…",
     "resolve": "正在收集論文…",
+    "reading": "正在閱讀論文…",
+    "planning": "正在規劃演講…",
     "understand": "正在研讀論文…",
     "narrate": "正在規劃演講大綱…",
     "draft": "正在草擬投影片框架…",

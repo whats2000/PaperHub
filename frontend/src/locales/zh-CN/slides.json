@@ -76,6 +76,8 @@
   "stage": {
     "warmup": "正在启动幻灯片代理…",
     "resolve": "正在收集论文…",
+    "reading": "正在阅读论文…",
+    "planning": "正在规划演讲…",
     "understand": "正在研读论文…",
     "narrate": "正在规划演讲大纲…",
     "draft": "正在草拟幻灯片框架…",

@@ -13,12 +13,14 @@ export function slideStageKey(trace: ToolCallRecord[] | undefined): string {
   if (!last) return "stage.warmup";
   const t = last.tool.toLowerCase();
   if (t.includes("resolve")) return "stage.resolve";
+  if (t.includes("reading")) return "stage.reading";
+  if (t.includes("planning") || t.includes("outline")) return "stage.planning";
   if (t.includes("understand")) return "stage.understand";
   if (t.includes("narrate")) return "stage.narrate";
   if (t.includes("draft")) return "stage.draft";
   if (t.includes("coherence")) return "stage.coherence";
   if (t.includes("assemble") || t.includes("verify")) return "stage.figures";
-  if (t.includes("compile")) return "stage.compile";
+  if (t.includes("compil")) return "stage.compile";
   if (t.includes("notes")) return "stage.notes";
   return "stage.building";
 }

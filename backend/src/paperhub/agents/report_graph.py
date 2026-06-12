@@ -28,10 +28,11 @@ F4.5 cleanup.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import shutil
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,64 @@ _QA_UNAVAILABLE = (
 def _pdflatex_available() -> bool:
     """Return True if ``pdflatex`` is discoverable on PATH."""
     return bool(shutil.which("pdflatex"))
+
+
+def _emit_stage(
+    writer: Any,
+    run_id: int | None,
+    tool: str,
+    *,
+    elapsed_s: float = 0.0,
+    step_index: int = -1,
+) -> None:
+    """Emit a synthetic 'stage' tool_step so the frontend trace tail keeps
+    advancing during otherwise-silent phases (digest / planning / drafting /
+    compile). Live-only — not persisted, not on replay. No-op without a writer."""
+    if writer is None or run_id is None:
+        return
+    writer({"event": "tool_step", "record": {
+        "run_id": run_id,
+        "branch": "",
+        "step_index": step_index,
+        "parent_step": None,
+        "agent": "report",
+        "tool": tool,
+        "model": "",
+        "args_redacted_json": None,
+        "result_summary_json": {"stage": True, "elapsed_s": round(elapsed_s, 1)},
+        "latency_ms": 0,
+        "token_in": 0,
+        "token_out": 0,
+        "status": "ok",
+        "error": None,
+    }})
+
+
+@contextlib.asynccontextmanager
+async def _stage_heartbeat(
+    writer: Any,
+    run_id: int | None,
+    tool: str,
+    *,
+    every: float = 15.0,
+) -> AsyncIterator[None]:
+    """While the wrapped block runs, emit a ``tool`` stage event immediately and
+    then every ``every`` seconds with an elapsed counter, so a long phase never
+    goes silent. The beat task is cancelled + awaited on exit."""
+    async def _beat() -> None:
+        n = 0
+        while True:
+            _emit_stage(writer, run_id, tool, elapsed_s=n * every, step_index=-(n + 1))
+            await asyncio.sleep(every)
+            n += 1
+
+    task = asyncio.create_task(_beat())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 _FRAMETITLE_RE = re.compile(r"\\frametitle\{([^}]*)\}")
@@ -715,37 +774,39 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         # says) instead of the slow full-paper gather. The blind Stage-1 gather
         # above still produces the bundles that drive the drafter; here we only
         # feed the OUTLINE.
+        run_id = state.get("run_id")
         _bundle_by_paper_id: dict[int, PaperContextBundle] = {b.paper_id: b for b in bundles}
         _digests: list[PaperDigest] = []
-        for _idx, p in enumerate(papers):
-            source_dir_raw = p.get("source_dir")
-            if not source_dir_raw:
-                continue
-            source_dir = Path(str(source_dir_raw))
-            if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
-                continue
-            asset = await asyncio.to_thread(read_paper_asset, source_dir)
-            digest = await get_or_build_digest(
-                paper_id=int(p["id"]),
-                conn=deps.conn,
-                asset=asset,
-                adapter=deps.adapter,
-                model=deps.section_model,
-            )
-            # Override the digest's figures with the deck-namespaced bundle
-            # figures so the outline's figure keys match the drafter's
-            # figure_inventory (which is namespaced by paper_idx).
-            _b = _bundle_by_paper_id.get(int(p["id"]))
-            figs = (
-                [
-                    SeedFigure(key=f.key, caption=f.one_line_interpretation[:120])
-                    for f in _b.key_figures
-                ]
-                if _b
-                else []
-            )
-            digest = digest.model_copy(update={"figures": figs})
-            _digests.append(digest)
+        async with _stage_heartbeat(writer, run_id, "report:reading"):
+            for _idx, p in enumerate(papers):
+                source_dir_raw = p.get("source_dir")
+                if not source_dir_raw:
+                    continue
+                source_dir = Path(str(source_dir_raw))
+                if not source_dir.exists():  # noqa: ASYNC240 — fast metadata check before the to_thread read
+                    continue
+                asset = await asyncio.to_thread(read_paper_asset, source_dir)
+                digest = await get_or_build_digest(
+                    paper_id=int(p["id"]),
+                    conn=deps.conn,
+                    asset=asset,
+                    adapter=deps.adapter,
+                    model=deps.section_model,
+                )
+                # Override the digest's figures with the deck-namespaced bundle
+                # figures so the outline's figure keys match the drafter's
+                # figure_inventory (which is namespaced by paper_idx).
+                _b = _bundle_by_paper_id.get(int(p["id"]))
+                figs = (
+                    [
+                        SeedFigure(key=f.key, caption=f.one_line_interpretation[:120])
+                        for f in _b.key_figures
+                    ]
+                    if _b
+                    else []
+                )
+                digest = digest.model_copy(update={"figures": figs})
+                _digests.append(digest)
 
         # Read closure — called by sl_outline when it needs a slide's exact
         # evidence. A cheap deterministic SQL fetch (no LLM); flush after each
@@ -762,34 +823,36 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             _budget.target_slide_count if _budget is not None else 15
         )
 
-        outline_result = await run_sl_outline(
-            digests=_digests,
-            task_description=effective_query(state) or state.get("user_message", ""),
-            response_language=lang,
-            target_slides=_target_slides,
-            adapter=deps.adapter,
-            tracer=deps.tracer,
-            model=deps.plan_model,
-            read_fn=_read_fn,
-        )
+        async with _stage_heartbeat(writer, run_id, "report:planning"):
+            outline_result = await run_sl_outline(
+                digests=_digests,
+                task_description=effective_query(state) or state.get("user_message", ""),
+                response_language=lang,
+                target_slides=_target_slides,
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.plan_model,
+                read_fn=_read_fn,
+            )
         outline = outline_result.outline
         await _flush_steps()
 
-        agent_result = await run_slide_agent(
-            bundles=bundles,
-            task_description=effective_query(state) or state.get("user_message", ""),
-            response_language=lang,
-            resolved_preamble=preamble_with_title,
-            workdir=slides_dir,
-            existing_deck_tex=None,  # GENERATE — no prior deck content
-            figure_inventory=figure_inventory,
-            memory_context=_mem,
-            outline=outline,
-            tracer=deps.tracer,
-            model=deps.plan_model,
-            session_id=int(state["session_id"]),
-            conn=deps.conn,
-        )
+        async with _stage_heartbeat(writer, run_id, "report:drafting"):
+            agent_result = await run_slide_agent(
+                bundles=bundles,
+                task_description=effective_query(state) or state.get("user_message", ""),
+                response_language=lang,
+                resolved_preamble=preamble_with_title,
+                workdir=slides_dir,
+                existing_deck_tex=None,  # GENERATE — no prior deck content
+                figure_inventory=figure_inventory,
+                memory_context=_mem,
+                outline=outline,
+                tracer=deps.tracer,
+                model=deps.plan_model,
+                session_id=int(state["session_id"]),
+                conn=deps.conn,
+            )
         await _flush_steps()
 
         # ---- Stage 3: sl_emit (deterministic finalize) ----
@@ -837,18 +900,19 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                     cstep.mark_error("sl_emit post-audit recompile failed")
             return res
 
-        emit_result = await run_sl_emit(
-            session_id=int(state["session_id"]),
-            run_id=int(state.get("run_id") or 0),
-            deck_tex=agent_result.deck_tex,
-            workdir=slides_dir,
-            page_count=page_count,
-            status=status,
-            contributing_paper_ids=[int(p["id"]) for p in papers],
-            figure_inventory=figure_inventory,
-            conn=deps.conn,
-            recompile=_recompile,
-        )
+        async with _stage_heartbeat(writer, run_id, "report:compiling"):
+            emit_result = await run_sl_emit(
+                session_id=int(state["session_id"]),
+                run_id=int(state.get("run_id") or 0),
+                deck_tex=agent_result.deck_tex,
+                workdir=slides_dir,
+                page_count=page_count,
+                status=status,
+                contributing_paper_ids=[int(p["id"]) for p in papers],
+                figure_inventory=figure_inventory,
+                conn=deps.conn,
+                recompile=_recompile,
+            )
         await _flush_steps()
 
         # Pull the persisted row back so the SSE event mirrors the DB shape
