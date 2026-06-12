@@ -99,7 +99,7 @@ async def _insight_for_section(
 ) -> DigestSection:
     """Return a DigestSection for one named section.
 
-    On ANY model failure, degrades to DigestSection(name=name, insight="")
+    On any model-CALL failure, degrades to DigestSection(name=name, insight="")
     so a single bad section never aborts the whole digest.
     """
     text = await _section_text(paper_id, name, conn)
@@ -112,11 +112,12 @@ async def _insight_for_section(
         )
         # Trust the KNOWN name; only take the model's insight.
         return DigestSection(name=name, insight=str(out.insight).strip())
-    except Exception:  # noqa: BLE001
-        log.debug(
-            "paper_digest: insight call failed for paper=%d section=%r — degrading",
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "paper_digest: insight call failed for paper=%d section=%r — degrading: %s",
             paper_id,
             name,
+            exc,
         )
         return DigestSection(name=name, insight="")
 
@@ -143,13 +144,15 @@ async def build_paper_digest(
     asset: PaperAsset | None,
     adapter: LlmAdapter,
     model: str,
+    _prefetched_row: tuple[str, str, str | None, str | None] | None = None,
 ) -> PaperDigest:
     """Build a fresh :class:`PaperDigest` for *paper_id*.
 
     Steps
     -----
     1. Fetch title / abstract / sections_json / source_dir_path from
-       ``paper_content`` (one query).
+       ``paper_content`` (one query).  Callers that already hold the row may
+       pass it via *_prefetched_row* to avoid a second DB round-trip.
     2. Derive section names from ``sections_json`` or fall back to the
        chunk-derived list.
     3. Run per-section insight calls in parallel (asyncio.gather).
@@ -157,7 +160,7 @@ async def build_paper_digest(
     4. Build figures from the paper asset; equations from *asset* (cap 6).
     5. Return the assembled PaperDigest.
     """
-    row = await _fetch_paper_row(paper_id, conn)
+    row = _prefetched_row if _prefetched_row is not None else await _fetch_paper_row(paper_id, conn)
     if row is None:
         log.warning("paper_digest: paper_id %d not found in paper_content", paper_id)
         return PaperDigest(
@@ -187,9 +190,11 @@ async def build_paper_digest(
         )
         for name in names
     ]
-    # return_exceptions=True so one failure doesn't abort the gather;
-    # _insight_for_section already catches internally, so exceptions here
-    # are truly unexpected — still produce a fallback entry.
+    # return_exceptions=True so one failure doesn't abort the gather.
+    # _insight_for_section's inner try guards only the MODEL call; the
+    # gather-level isinstance(result, BaseException) fallback below covers
+    # unexpected failures including DB-level ones (_section_text is outside
+    # the per-section try and can propagate here).
     results = await asyncio.gather(*section_coros, return_exceptions=True)
     sections: list[DigestSection] = []
     for name, result in zip(names, results, strict=True):
@@ -264,13 +269,16 @@ async def get_or_build_digest(
         asset=asset,
         adapter=adapter,
         model=model,
+        _prefetched_row=row,
     )
 
-    # Write cache when we have an anchor dir
+    # Write cache when we have an anchor dir (atomic: write temp then replace)
     if cache_path is not None:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(digest.model_dump_json(indent=2), encoding="utf-8")
+            tmp = cache_path.with_suffix(".json.tmp")
+            tmp.write_text(digest.model_dump_json(indent=2), encoding="utf-8")
+            tmp.replace(cache_path)
         except Exception:  # noqa: BLE001
             log.debug(
                 "paper_digest: could not write digest cache for paper=%d", paper_id

@@ -298,16 +298,18 @@ async def test_get_or_build_digest_stale_cache_rebuilds(
 # ---------------------------------------------------------------------------
 
 
-def test_build_paper_digest_equations_from_asset(tmp_path: Path) -> None:
-    """key_equations is populated from asset.equations, capped at 6, role=''."""
-    from paperhub.models.slide_domain import DigestEquation
+@pytest.mark.asyncio
+async def test_build_paper_digest_equations_from_asset(
+    conn: aiosqlite.Connection,
+) -> None:
+    """key_equations is capped at 6 and all have role=''.
+
+    If someone removes the [:_EQUATIONS_CAP] slice this test FAILS.
+    """
+    from paperhub.agents.paper_digest import build_paper_digest
     from paperhub.pipelines.paper_asset import EquationAsset, PaperAsset
 
-    eq = DigestEquation(latex=r"\alpha = \beta", role="")
-    assert eq.latex == r"\alpha = \beta"
-    assert eq.role == ""
-
-    # Verify we can build a PaperAsset with 8 equations (over the cap of 6)
+    # Build a PaperAsset with 8 equations — 2 over the cap of 6
     asset = PaperAsset(
         figures=[],
         equations=[
@@ -315,5 +317,18 @@ def test_build_paper_digest_equations_from_asset(tmp_path: Path) -> None:
             for i in range(8)
         ],
     )
-    # The cap logic lives in build_paper_digest — just verify domain types compile
     assert len(asset.equations) == 8
+
+    adapter = StubAdapter()
+    digest = await build_paper_digest(
+        paper_id=10,
+        conn=conn,
+        asset=asset,
+        adapter=adapter,
+        model="test-model",
+    )
+
+    # Cap must be enforced
+    assert len(digest.key_equations) == 6
+    # Every carried equation must have role=""
+    assert all(eq.role == "" for eq in digest.key_equations)
