@@ -71,7 +71,7 @@ from paperhub.models.domain import (
     AgentState,
     DeckCommand,
 )
-from paperhub.models.slide_domain import KeyFigureBundle, PaperContextBundle
+from paperhub.models.slide_domain import KeyFigureBundle, PaperContextBundle, SeedFigure, SeedPaper
 from paperhub.pipelines.paper_asset import PaperAsset, read_paper_asset
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
@@ -703,15 +703,99 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         if title_meta.date:
             preamble_with_title += f"\\date{{{title_meta.date}}}\n"
 
-        outline = await run_sl_outline(
-            bundles=bundles,
+        # Build seed map from papers (sections from DB) + bundles (figures already gathered).
+        # paper_idx matches the order in `papers` which matches `bundles` (same enumeration).
+        _bundle_by_paper_id: dict[int, PaperContextBundle] = {b.paper_id: b for b in bundles}
+        _seeds: list[SeedPaper] = []
+        for idx, p in enumerate(papers):
+            pid = int(p["id"])
+            _b = _bundle_by_paper_id.get(pid)
+            # Sections: prefer DB sections_json (full TOC), fall back to bundle excerpts.
+            try:
+                _secs: list[str] = list(json.loads(p.get("sections_json") or "[]") or [])
+            except (ValueError, TypeError):
+                _secs = []
+            if not _secs and _b is not None:
+                _secs = list({e.section_name for e in _b.section_excerpts})
+            # Figures: from the already-gathered bundle (already probed + namespaced).
+            _figs: list[SeedFigure] = []
+            if _b is not None:
+                _figs = [SeedFigure(key=f.key, caption=f.one_line_interpretation[:120]) for f in _b.key_figures]
+            _is_survey = bool(_b.section_excerpts) and any(
+                kw in (p.get("title") or "").lower()
+                for kw in ("survey", "review", "overview", "taxonomy", "benchmark")
+            ) if _b is not None else False
+            _seeds.append(SeedPaper(
+                paper_id=pid,
+                title=str(p.get("title") or ""),
+                abstract=str(p.get("abstract") or "")[:800],
+                is_survey=_is_survey,
+                sections=_secs,
+                figures=_figs,
+            ))
+
+        # Build gather_fn closure — called by sl_outline when it needs targeted evidence.
+        # Uses the same asset-loading + run_gather_context path as Stage 1.
+        _paper_map: dict[int, dict[str, Any]] = {int(p["id"]): p for p in papers}
+        _paper_idx_map: dict[int, int] = {int(p["id"]): idx for idx, p in enumerate(papers)}
+
+        async def _gather_fn(aim: str, paper_id: int) -> PaperContextBundle:
+            p = _paper_map.get(paper_id)
+            if p is None:
+                raise ValueError(f"gather_fn: paper_id={paper_id} not in deck papers")
+            source_dir_raw = p.get("source_dir")
+            if not source_dir_raw:
+                raise ValueError(f"gather_fn: paper_id={paper_id} has no source_dir")
+            source_dir = Path(str(source_dir_raw))
+            asset: PaperAsset | None = await asyncio.to_thread(read_paper_asset, source_dir)
+            if asset is None:
+                raise ValueError(f"gather_fn: no PaperAsset for paper_id={paper_id}")
+
+            def _read_macros() -> list[str]:
+                add = source_dir / "ADDITIONAL.tex"
+                if not add.exists():
+                    return []
+                raw = add.read_text(encoding="utf-8", errors="replace")
+                return [
+                    ln for ln in raw.splitlines()
+                    if ln.strip().startswith(("\\newcommand", "\\providecommand"))
+                ]
+
+            paper_newcommands = await asyncio.to_thread(_read_macros)
+            paper_idx = _paper_idx_map.get(paper_id, 0)
+            return await run_gather_context(
+                paper_id=paper_id,
+                paper_idx=paper_idx,
+                source_dir=source_dir,
+                paper_title=str(p.get("title") or ""),
+                paper_authors=list(p.get("authors") or []),
+                paper_year=p.get("year"),
+                paper_abstract=str(p.get("abstract") or ""),
+                paper_newcommands=paper_newcommands,
+                asset=asset,
+                conn=deps.conn,
+                tracer=deps.tracer,
+                model=deps.notes_model,
+                response_language=lang,
+                aim=aim,
+            )
+
+        _budget = state.get("report_budget")
+        _target_slides: int = (
+            _budget.target_slide_count if _budget is not None else 15
+        )
+
+        outline_result = await run_sl_outline(
+            seeds=_seeds,
             task_description=effective_query(state) or state.get("user_message", ""),
             response_language=lang,
+            target_slides=_target_slides,
             adapter=deps.adapter,
             tracer=deps.tracer,
             model=deps.plan_model,
-            conn=deps.conn,
+            gather_fn=_gather_fn,
         )
+        outline = outline_result.outline
         await _flush_steps()
 
         agent_result = await run_slide_agent(

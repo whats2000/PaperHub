@@ -135,12 +135,22 @@ class CompileCheckResult(BaseModel):
 
 # --- F6.1: slide narrative outline (the sl_outline stage) ----------------
 
+class ContextRequest(BaseModel):
+    """One aimed gather request emitted by the orchestrator LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    aim: str  # the specific detail to fetch, e.g. "quantitative ablation results for encoder choice"
+    paper_id: int
+
+
 class OutlineSlideDraft(BaseModel):
     """One planned slide as authored by the sl_outline LLM (the draft).
 
-    The LLM never emits raw chunk integers; it names the bundle SECTIONS a
-    slide draws on (`grounding_sections`). sl_outline resolves those to
-    `chunks.id` deterministically (see :class:`OutlineSlide`).
+    The LLM never emits raw chunk integers; it names the aims whose gathered
+    context a slide draws on (`cites_aims`). sl_outline resolves those to
+    `chunks.id` deterministically via the gathered PaperContextBundles
+    (see :class:`OutlineSlide`).
     """
 
     # No extra="forbid": LLM structured output is not schema-strict; ignore unknown keys.
@@ -151,7 +161,8 @@ class OutlineSlideDraft(BaseModel):
     transition_from_prev: str = ""  # the bridge from the previous slide
     paper_id: int | None = None  # paper_content.id this slide is about; None = synthesis/title
     figure_key: str | None = None  # inventory key, if the slide centres on a figure
-    grounding_sections: list[str] = Field(default_factory=list)  # bundle section names this slide draws on
+    grounding_sections: list[str] = Field(default_factory=list)  # legacy: bundle section names (unused in F6.1+)
+    cites_aims: list[str] = Field(default_factory=list)  # the aims whose gathered chunks ground this slide
 
 
 class DeckOutlineDraft(BaseModel):
@@ -164,6 +175,20 @@ class DeckOutlineDraft(BaseModel):
     audience_intent: str  # what the talk should accomplish; e.g. "walk through the references"
     narrative_arc: str  # the throughline: problem framing -> bridges -> synthesis takeaway
     slides: list[OutlineSlideDraft]
+
+
+class RoundAction(BaseModel):
+    """The orchestrator LLM's per-round decision: gather more context or finalize.
+
+    Placed after DeckOutlineDraft to allow the forward reference to resolve.
+    """
+
+    # No extra="forbid": LLM structured output is not schema-strict; ignore unknown keys.
+
+    action: Literal["dispatch", "finalize"]
+    narrative_pattern: str = "synthesis"  # chosen round 1, echoed thereafter
+    requests: list[ContextRequest] = Field(default_factory=list)  # when action == "dispatch"
+    outline: DeckOutlineDraft | None = None  # when action == "finalize"
 
 
 class OutlineSlide(BaseModel):
