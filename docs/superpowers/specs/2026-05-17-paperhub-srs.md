@@ -397,30 +397,31 @@ The pipeline begins with a **cache-lookup gate**: on hit it short-circuits to th
 
 **Why one-shot planning is not enough (lesson from the first F6.1 build).** A first cut ran `gather_context` blindly once (a fixed, shallow per-paper bundle) and then made **one** outline call over those bundles. The live gate exposed the flaw: gathering had **no aim** (it didn't know the outline), so the outline was trapped planning from a thin, generic bundle → an **8-slide deck for 3 survey papers** (≈2 slides/paper) that read as *distinct topic introductions, not a storyline* — shorter and worse than the v2.25 monolith's ~13 slides. Two root causes: (a) the slide/time budget never reached the planner, and (b) gathering and planning never informed each other. The fix is to make planning **drive** gathering, iteratively.
 
-**New topology — a deterministic seed + an orchestrator↔worker planning loop, handing the drafter the outline AND the gathered context.**
+**Why the heavy per-paper gather is ALSO wrong (second lesson, from the live UX gate).** The first build's *worker* was the F4.5 `gather_context` agent — built to read a paper **comprehensively** and emit a whole-paper bundle (summary + 3–6 figures + "≤5 section excerpts, one per major section"). Used as the orchestrator's reader it (a) ran a **blind whole-paper read per paper** up front, and (b) ran a **full flagship read for EVERY dispatched aim** — including empty/duplicate ones — observed live as **8 redundant flagship gathers of ONE paper** (~50 s each), with the frontend **frozen for minutes** (no SSE during the loop + the ~6-min compile). Root cause is a **contract mismatch**: a *"summarize the whole paper"* agent (mis)used as an incremental reader. People don't read a whole paper to plan a talk — they **skim, internalize each part's gist, then re-read the exact detail when writing**. The fix is **context compression + targeted reads + always-on streaming**, and it makes the blind/heavy gather obsolete.
+
+**New topology — compress once (cached), structure from the digest, read targeted for evidence, stream throughout.** (`PaperDigest` supersedes the deterministic `sl_seed`: it is a *richer* seed carrying each section's **insight**, not just its name.)
 
 ```
-report:sl_seed          (DETERMINISTIC, no LLM — per paper: abstract/contribution + section LIST
-        │                + figure inventory (keys + dims). Cheap asset/DB reads. This is the
-        │                orchestrator's high-level map AND its dispatch menu — it can only aim a
-        │                detail request at a section/figure that appears here.)
+ingest (ONCE per paper, CACHED, SMALL model — a paper artifact like the F2 PaperAsset):
+   paper → PaperDigest { abstract; sections:[{name, insight}]; figures:[{key, one_line}];
+                         key_equations:[{latex, role}] }
+   each section compressed to its 1–2 line INSIGHT → full coverage in a tiny payload; map-reduce
+   per section in parallel; reusable by paper_qa / suggest / compare (not just slides).
         ▼
-report:sl_outline       (ORCHESTRATOR LOOP — owns the slide/time budget (parse_slide_budget).
-        │ ⇅              Reasons over the seed map; forms the talk; finds threads needing detail
-        │ │              or grounding; and DISPATCHES targeted detail tasks to the gather worker.
-        │ └─ request_context(aim, paper_scope) → report:gather_context (AGENTIC, TASK-DRIVEN:
-        │                fetches the DETAIL for that aim → targeted excerpts + the chunk IDs read).
-        │                Integrates the returned context; repeats UNTIL the outline is
-        │                well-structured AND every slide is grounded — hard-bounded ≤4 refinement
-        │                rounds (parallel dispatch per round).
-        │   ⇒ FINAL REPORT = DeckOutline { talk_title, audience_intent, narrative_arc, slides[] }
-        │                    + the accumulated GATHERED CONTEXT (per-slide fetched material + chunk IDs)
+report:sl_outline   (ORCHESTRATOR — owns the slide/time budget. STRUCTURES the outline from the
+   │ ⇅               digest's per-section insights: full coverage, ~free, NO per-deck whole-paper read.
+   │ └─ read_section(paper_id, name) → DETERMINISTIC DB fetch of just that section's chunks + chunk_ids,
+   │                 dispatched ONLY for a slide's EXACT evidence (a number, a figure's detail, an
+   │                 equation). No LLM gather agent per read; no blind whole-paper gather. Concept-driven,
+   │                 archetype-shaped, SHOW/SAY split. Each read streams a tool_step the instant it lands.
+   │   ⇒ DeckOutline + per-slide evidence (the read chunks + chunk_ids)
         ▼
-report:slide_agent      (UNCHANGED rendering; writes each slide from its outline goal/message +
-        │                its gathered context; renders the outline 1:1, whole-deck view)
+report:slide_agent  (renders the outline 1:1; writes each slide from its evidence, visually clear)
         ▼
-sl_emit                 (+ persists per-slide grounding_chunk_ids; NO [chunk:N] in tex)
+sl_emit             (+ persists per-slide grounding_chunk_ids; NO [chunk:N] in tex)
 ```
+
+**Always-on event streaming (CRITICAL UX — a deck takes minutes; a frozen frontend reads as broken).** The SSE trace MUST keep moving through the entire turn: (a) each targeted `read_section` flushes a `tool_step` the instant it lands (fast DB fetches stream naturally — vs. the old multi-minute silent gather); (b) a coarse **stage-progress event** opens each phase — *"Reading the papers" → "Planning the talk" → "Drafting slides" → "Compiling the deck (~1 min)"*; (c) the **compile** — one long `pdflatex` off the event loop, the worst silent offender — emits an explicit "compiling…" event + heartbeat so it never looks hung. **Contract: no phase may run silently for more than a few seconds.**
 
 **Narrative-pattern guideline (talk archetype).** The outline's *structure* must fit the talk type, so the orchestrator first selects a **`narrative_pattern`** from paper count + the papers' relationship + the user's intent, then follows that archetype's skeleton when planning slides (this is structural, distinct from F6.3's visual `layout_guideline`). The roster is a **starter set, intentionally extensible** (curated like the theme presets); each pattern is a structural skeleton + guidance the orchestrator's prompt encodes. Starters:
 
@@ -473,7 +474,11 @@ More archetypes can be added without code changes to the loop (they are prompt/s
 
 **Build order** — three sequential, independently-shippable phases, each TDD per task with a real-API gate at phase completion (live `:8000` + read the trace: cross-paper coherence · Sources→Canvas resolution · themed render):
 
-1. **F6.1 — Narrative planning:** the `sl_outline` **orchestrator loop** (high-level seed → budget-aware draft → dispatch `request_context` aims to the task-driven `gather_context` worker → refine, ≤4 rounds) + `DeckOutline` schema + authoritative-1:1 contract + grounding capture (backend only; deck quality improves immediately). *(The first one-shot build of this phase — a single outline call over a blind per-paper gather — shipped a too-thin 8-slide deck at the live gate and was redesigned into this loop before merge.)*
+1. **F6.1 — Narrative planning** (the `sl_outline` orchestrator + `DeckOutline` + authoritative-1:1 + concept-driven, archetype, SHOW/SAY split — **validated** at the live gate: a 19-slide clean, connected, concise deck). **GATED on the gather rework below — not mergeable without it.**
+   1a. **`PaperDigest` (context compression)** — at ingest, cache a per-section **insight** digest + figure/equation one-liners (small model, map-reduce, reusable by qa/suggest/compare). Supersedes `sl_seed` + the blind whole-paper gather.
+   1b. **Targeted reads** — the orchestrator structures from the digest (full coverage) and dispatches **deterministic `read_section`** only for a slide's exact evidence. Removes the heavy per-aim `gather_context` worker (the 8×-redundant-flagship-read bug) — *its absence is why F6.1 is not shippable as-is.*
+   1c. **Always-on streaming (critical UX)** — per-read `tool_step`s + coarse stage-progress events + a compile heartbeat; no phase silent > a few seconds.
+   *(History: the first one-shot build shipped a thin 8-slide deck; the loop fixed narrative quality; the live UX gate then exposed the heavy-gather/no-stream flaws → this digest+targeted+streaming rework.)*
 2. **F6.2 — Chunk traceback:** `grounding_chunk_ids_json` storage + deck-slides API extension + the Sources panel (depends on F6.1's grounding).
 3. **F6.3 — Custom theme:** `layout_guideline` + presets + gallery, threaded into both `sl_outline` and the preamble.
 
