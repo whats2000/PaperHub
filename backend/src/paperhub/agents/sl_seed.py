@@ -46,6 +46,33 @@ def _looks_like_survey(title: str, abstract: str) -> bool:
     return any(tok in haystack for tok in _SURVEY_TOKENS)
 
 
+def section_names_from_json(sections_json_raw: str | None) -> list[str]:
+    """Extract ordered section NAMES from a ``paper_content.sections_json`` value.
+
+    The real column is a JSON list of ``{name, char_start, char_end,
+    token_count, chunk_count}`` dicts; defensively we also accept a list of
+    bare strings (older rows / fixtures). Returns ``[]`` on absent/malformed
+    input so callers can fall back to the chunk-derived sections.
+    """
+    if not sections_json_raw:
+        return []
+    try:
+        parsed = json.loads(sections_json_raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    names: list[str] = []
+    for s in parsed:
+        if isinstance(s, dict):
+            name = s.get("name")
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+        elif isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    return names
+
+
 # ---------------------------------------------------------------------------
 # Figure extraction helpers
 # ---------------------------------------------------------------------------
@@ -122,15 +149,8 @@ async def run_sl_seed(
         _id, title, abstract, sections_json_raw, source_dir_raw = row
 
         # --- sections ---
-        sections: list[str]
-        if sections_json_raw:
-            try:
-                parsed = json.loads(sections_json_raw)
-                sections = [s for s in parsed if isinstance(s, str) and s.strip()]
-            except (json.JSONDecodeError, TypeError):
-                sections = await _chunk_sections(pid)
-        else:
-            sections = await _chunk_sections(pid)
+        names = section_names_from_json(sections_json_raw)
+        sections: list[str] = names if names else await _chunk_sections(pid)
 
         # --- figures ---
         figures = _figures_for_paper(pid, source_dir_raw)

@@ -23,7 +23,10 @@ async def conn(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
             " source_path, source_dir_path, html_path) "
             "VALUES (73, 'k73', 'arxiv', '2301.00001', "
             "'A Survey of Vision-Language Models', 'We review...', "
-            "'[\"Introduction\", \"Taxonomy\", \"Methods\"]', "
+            # real sections_json shape: a list of {name, char_start, ...} dicts
+            "'[{\"name\": \"Introduction\", \"char_start\": 0, \"chunk_count\": 1}, "
+            "{\"name\": \"Taxonomy\", \"char_start\": 10, \"chunk_count\": 2}, "
+            "{\"name\": \"Methods\", \"char_start\": 20, \"chunk_count\": 1}]', "
             "'/p', '/d', '/h')"
         )
 
@@ -88,6 +91,20 @@ def test_looks_like_survey_pure() -> None:
     assert _looks_like_survey("Deep Net", "we present a method") is False
     assert _looks_like_survey("", "a review of recent methods") is True
     assert _looks_like_survey("BERT", "we introduce a model") is False
+
+
+def test_section_names_from_json_handles_real_dict_shape() -> None:
+    from paperhub.agents.sl_seed import section_names_from_json
+    # the real column shape: list of {name, char_start, ...} dicts
+    raw = '[{"name": "Intro", "char_start": 0}, {"name": "Method", "char_start": 9}]'
+    assert section_names_from_json(raw) == ["Intro", "Method"]
+    # back-compat: a bare list of strings still works
+    assert section_names_from_json('["A", "B"]') == ["A", "B"]
+    # malformed / empty → []
+    assert section_names_from_json(None) == []
+    assert section_names_from_json("") == []
+    assert section_names_from_json("not json") == []
+    assert section_names_from_json('{"name": "x"}') == []  # not a list
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,7 @@ from paperhub.agents.report_pipeline import (
 )
 from paperhub.agents.sl_emit import run_sl_emit
 from paperhub.agents.sl_outline import run_sl_outline
+from paperhub.agents.sl_seed import section_names_from_json
 from paperhub.agents.slide_agent import run_slide_agent
 from paperhub.agents.state import effective_query, response_language
 from paperhub.agents.style_resolver import resolve_preamble
@@ -710,11 +711,9 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         for _idx, p in enumerate(papers):
             pid = int(p["id"])
             _b = _bundle_by_paper_id.get(pid)
-            # Sections: prefer DB sections_json (full TOC), fall back to bundle excerpts.
-            try:
-                _secs: list[str] = list(json.loads(p.get("sections_json") or "[]") or [])
-            except (ValueError, TypeError):
-                _secs = []
+            # Sections: prefer DB sections_json (full TOC; a list of {name,...}
+            # dicts — extract the names), fall back to bundle excerpts.
+            _secs: list[str] = section_names_from_json(p.get("sections_json"))
             if not _secs and _b is not None:
                 _secs = list({e.section_name for e in _b.section_excerpts})
             # Figures: from the already-gathered bundle (already probed + namespaced).
