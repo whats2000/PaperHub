@@ -136,6 +136,7 @@ def _resolve_slide(
         key_message=s.key_message,
         content_form=s.content_form,
         transition_from_prev=s.transition_from_prev,
+        speaker_note_hint=s.speaker_note_hint,
         paper_id=paper_id,
         figure_key=figure_key,
         grounding_chunk_ids=sorted(set(chunk_ids)),

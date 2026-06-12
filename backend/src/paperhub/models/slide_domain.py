@@ -159,6 +159,7 @@ class OutlineSlideDraft(BaseModel):
     key_message: str  # the single point it makes (may be "" for a title slide)
     content_form: str = "bullets"  # how to SHOW the slide — bullets/comparison_table/results/…
     transition_from_prev: str = ""  # the bridge from the previous slide
+    speaker_note_hint: str = ""  # "SAY" content: explanations + transition bridge for the notes agent; NOT shown on slide
     paper_id: int | None = None  # paper_content.id this slide is about; None = synthesis/title
     figure_key: str | None = None  # inventory key, if the slide centres on a figure
     grounding_sections: list[str] = Field(default_factory=list)  # legacy: bundle section names (unused in F6.1+)
@@ -201,6 +202,7 @@ class OutlineSlide(BaseModel):
     key_message: str
     content_form: str = "bullets"  # how to SHOW the slide — bullets/comparison_table/results/…
     transition_from_prev: str
+    speaker_note_hint: str = ""  # "SAY" content: explanations + transition bridge for the notes agent; NOT shown on slide
     paper_id: int | None
     figure_key: str | None
     grounding_chunk_ids: list[int]  # union of read_chunk_ids from each cited aim's PaperContextBundle

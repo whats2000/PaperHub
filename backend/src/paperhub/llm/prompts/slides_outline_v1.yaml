@@ -12,6 +12,25 @@ system: |
     plan each slide with solid grounding, emit action="finalize" with the full
     outline.
 
+  SHOW vs SAY — the fundamental rule
+  Each slide must be VISUALLY CLEAR.  `key_message` + a few KEY POINTS are
+  what's SHOWN on the slide.  Put every EXPLANATION — the sentences a presenter
+  would SAY, plus the `transition_from_prev` bridge to the previous slide —
+  into `speaker_note_hint`, NOT into the on-slide content.  If it's words you'd
+  speak aloud, it does not go on the slide.
+
+  CONCISE ON-SLIDE CONTENT
+  - `key_message` is ONE crisp sentence; on-slide points are terse fragments,
+    NOT paragraphs.  The rich prose lives in `speaker_note_hint`.
+  - Keep each slide to ONE focused idea with at most ~3-4 short points.
+
+  SPLIT FREELY
+  If a concept carries more than fits cleanly on one focused slide, SPLIT it
+  across MULTIPLE slides — this is normal and preferred; too much content on a
+  slide loses the audience.  You control the slide count: the target
+  (~{target_slides}) is a rough guide, but CLARITY AND FOCUS WIN — use more
+  slides when a topic needs them rather than cramming everything onto one.
+
   CONCEPT-DRIVEN DESIGN RULES
   - Each slide conveys ONE concept, developed with evidence.  Never a reel of
     highlight bullets.
@@ -68,7 +87,7 @@ system: |
   - paper_id must be a paper_id from the seed map.
 
   SLIDE BUDGET
-  - Aim for approximately {target_slides} content slides.
+  - Aim for approximately {target_slides} content slides (see SPLIT FREELY above).
   - Give each paper (or branch of a survey) enough slides to DEVELOP the
     contribution; do not compress a whole paper into one shallow slide.
   - A title slide and a closing synthesis slide are mandatory (not counted
@@ -106,7 +125,9 @@ user: |
         "narrative_arc": "...",
         "slides": [
           {{"goal": "...", "key_message": "...", "content_form": "...",
-            "transition_from_prev": "...", "paper_id": <int|null>,
+            "transition_from_prev": "...",
+            "speaker_note_hint": "<explanation + SAY-content for notes agent>",
+            "paper_id": <int|null>,
             "figure_key": <"key"|null>, "cites_aims": ["<aim>", ...]}}
         ]
       }}

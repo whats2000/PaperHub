@@ -180,6 +180,7 @@ async def test_dispatch_then_finalize(conn: aiosqlite.Connection) -> None:
                     content_form="comparison_table",
                     paper_id=73,
                     cites_aims=["A"],
+                    speaker_note_hint="Explain how the method works and why it was designed this way.",
                 ),
                 OutlineSlideDraft(
                     goal="Synthesis",
@@ -236,6 +237,8 @@ async def test_dispatch_then_finalize(conn: aiosqlite.Connection) -> None:
     method_slide = outline.slides[1]
     assert method_slide.grounding_chunk_ids == sorted(set(chunk_ids_A))
     assert method_slide.support_excerpts  # non-empty
+    # speaker_note_hint must be carried from draft -> resolved slide
+    assert method_slide.speaker_note_hint == "Explain how the method works and why it was designed this way."
 
     # Synthesis slide cites both A and B
     synth_slide = outline.slides[2]
