@@ -2,6 +2,8 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from paperhub.models.slide_domain import DeckOutline
+
 Intent = Literal[
     "paper_search", "paper_suggest", "paper_qa", "slides", "library_stats", "memory", "chitchat", "clarify",
 ]
@@ -209,3 +211,4 @@ class AgentState(TypedDict, total=False):
     # router's response_language (which is the chat-REPLY language). Empty/unset
     # → fall back to response_language. Consumed by _generate + _edit_slides.
     report_slide_language: str
+    report_outline: DeckOutline  # v2.33 (F6.1): cross-paper narrative plan, rendered 1:1

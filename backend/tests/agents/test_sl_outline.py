@@ -1,3 +1,4 @@
+import inspect
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -6,6 +7,7 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
+import paperhub.agents.report_graph as rg
 from paperhub.agents.sl_outline import run_sl_outline
 from paperhub.db.migrate import apply_schema
 from paperhub.llm.prompts.registry import PromptRegistry
@@ -114,3 +116,11 @@ async def test_unknown_section_is_dropped(conn) -> None:
     assert row is not None
     result = json.loads(row[0])
     assert result["dropped_sections"] == ["73:Nonexistent"]
+
+
+def test_generate_calls_run_sl_outline() -> None:
+    """Guard: the GENERATE node must invoke run_sl_outline and pass an outline
+    into run_slide_agent (the F6.1 wiring)."""
+    src = inspect.getsource(rg)
+    assert "run_sl_outline(" in src
+    assert "outline=" in src

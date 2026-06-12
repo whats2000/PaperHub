@@ -53,6 +53,7 @@ from paperhub.agents.report_pipeline import (
     revise_tex,
 )
 from paperhub.agents.sl_emit import run_sl_emit
+from paperhub.agents.sl_outline import run_sl_outline
 from paperhub.agents.slide_agent import run_slide_agent
 from paperhub.agents.state import effective_query, response_language
 from paperhub.agents.style_resolver import resolve_preamble
@@ -702,6 +703,17 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         if title_meta.date:
             preamble_with_title += f"\\date{{{title_meta.date}}}\n"
 
+        outline = await run_sl_outline(
+            bundles=bundles,
+            task_description=effective_query(state) or state.get("user_message", ""),
+            response_language=lang,
+            adapter=deps.adapter,
+            tracer=deps.tracer,
+            model=deps.plan_model,
+            conn=deps.conn,
+        )
+        await _flush_steps()
+
         agent_result = await run_slide_agent(
             bundles=bundles,
             task_description=effective_query(state) or state.get("user_message", ""),
@@ -711,6 +723,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             existing_deck_tex=None,  # GENERATE — no prior deck content
             figure_inventory=figure_inventory,
             memory_context=_mem,
+            outline=outline,
             tracer=deps.tracer,
             model=deps.plan_model,
             session_id=int(state["session_id"]),
@@ -803,7 +816,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 f"(slide_agent used {agent_result.tool_calls_used} tool calls). "
                 "Check the Trace panel for the last compile_check signals."
             )
-        return {**state, "final_response": final, "report_deck_id": emit_result.deck_id}
+        return {**state, "final_response": final, "report_deck_id": emit_result.deck_id, "report_outline": outline}
 
     async def _notes(state: AgentState) -> AgentState:
         """generate_notes / edit_notes: author or rewrite speaker notes for the

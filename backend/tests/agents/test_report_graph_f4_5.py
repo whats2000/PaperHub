@@ -146,13 +146,23 @@ class _NullAdapter:
     """F4.5 _generate does NOT call LlmAdapter (slide_agent + gather_context own
     their litellm calls). _resolve still calls detect_slide_language via the
     adapter for TargetLanguage; we accept that response_model and return None.
+    F6.1: sl_outline calls adapter.structured with DeckOutlineDraft; return a
+    minimal single-slide outline so the wiring proceeds without an LLM.
     """
 
     async def structured(self, *, response_model, **kw):  # type: ignore[no-untyped-def]
         from paperhub.models.domain import TargetLanguage
+        from paperhub.models.slide_domain import DeckOutlineDraft, OutlineSlideDraft
 
         if response_model is TargetLanguage:
             return TargetLanguage(language=None)
+        if response_model is DeckOutlineDraft:
+            return DeckOutlineDraft(
+                talk_title="Stub Outline",
+                audience_intent="stub",
+                narrative_arc="stub arc",
+                slides=[OutlineSlideDraft(goal="title", key_message="")],
+            )
         raise AssertionError(
             f"_NullAdapter.structured got unexpected response_model: {response_model!r}"
         )
