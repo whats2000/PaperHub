@@ -724,6 +724,45 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         compile_ok = bool(compile_check and compile_check.ok)
         status = "ok" if (agent_result.satisfied and compile_ok) else "error"
 
+        # sl_emit's figure-audit + center-wrap mutate deck.tex AFTER the
+        # slide_agent's last compile, so deck.pdf must be regenerated or it
+        # renders the pre-audit layout (figures uncentered, omitted-key
+        # placeholders unreplaced). Mirror the EDIT path: recompile the audited
+        # tex through the Overfull-aware revise loop. Injected as a callback so
+        # sl_emit stays LLM-agnostic.
+        async def _recompile(audited_tex: str) -> compile_mod.CompileResult:
+            async def _revise(log: str, cur_tex: str) -> str:
+                return await revise_tex(
+                    pdflatex_log=log,
+                    tex=cur_tex,
+                    adapter=deps.adapter,
+                    tracer=deps.tracer,
+                    model=deps.section_model,
+                )
+
+            async with deps.tracer.step(
+                agent="report", tool="report:compile", model=None
+            ) as cstep:
+                cstep.record_args({"description": "sl_emit recompile (post-audit)"})
+                res = await compile_mod.compile_with_revise(
+                    tex=audited_tex,
+                    workdir=slides_dir,
+                    tex_name="deck.tex",
+                    revise=_revise,
+                    max_retries=2,
+                )
+                cstep.record_result(
+                    {
+                        "ok": res.ok,
+                        "attempts": res.attempts,
+                        "page_count": res.page_count,
+                        "log_tail": res.log[-500:] if not res.ok else "",
+                    }
+                )
+                if not res.ok:
+                    cstep.mark_error("sl_emit post-audit recompile failed")
+            return res
+
         emit_result = await run_sl_emit(
             session_id=int(state["session_id"]),
             run_id=int(state.get("run_id") or 0),
@@ -734,6 +773,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             contributing_paper_ids=[int(p["id"]) for p in papers],
             figure_inventory=figure_inventory,
             conn=deps.conn,
+            recompile=_recompile,
         )
         await _flush_steps()
 
