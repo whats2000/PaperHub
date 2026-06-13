@@ -1,6 +1,8 @@
 # Plan E1 — `library_stats` rows as attachable cards (Implementation Plan)
 
-> **STATUS: NOT STARTED.** Plan E follow-up E1. Fulfills the read-and-act intent already specced in SRS §III-3 SQL Agent (prose-only since v2.16). Branch: `fix/followups` (or a dedicated `feat/e1-library-stats-cards`).
+> **STATUS: SUPERSEDED (2026-06-14) by [2026-06-14-paperhub-sql-agent-react.md](2026-06-14-paperhub-sql-agent-react.md).** Tasks 1, 2, 5 + the router nudge shipped (the `search_results` card plumbing + `SearchResultList`→`attachFromLibrary` are reused). The real-API gate showed the emit-EVERY-row approach surfaced coarse `LIKE` false positives as cards; the SQL Agent is being reworked into an intelligent ReAct agent that **curates** the relevant subset (SRS §III-3 v2.34). The prompt-nudge tasks (3, 4) here are replaced by that plan's ReAct agent prompt. Read the ReAct plan for the live work.
+
+> **(original) STATUS: NOT STARTED.** Plan E follow-up E1. Fulfills the read-and-act intent already specced in SRS §III-3 SQL Agent (prose-only since v2.16). Branch: `fix/followups`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
