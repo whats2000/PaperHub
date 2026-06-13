@@ -14,7 +14,7 @@ from typing import Any
 import aiosqlite
 import pytest
 
-from paperhub.agents.research import ToolStepYield
+from paperhub.agents.research import SearchResultsYield, ToolStepYield
 from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.models.sql_domain import SqlPaperPick, SqlRoundAction
@@ -273,3 +273,146 @@ async def test_emits_tool_steps_before_answer(migrated_db: aiosqlite.Connection)
     }
     assert "sql.describe" in tools_before
     assert "sql.query" in tools_before
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — curated library cards from the finalize picks.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_paper_content(
+    conn: aiosqlite.Connection, pcid: int, *, title: str, year: int | None
+) -> None:
+    await conn.execute(
+        "INSERT INTO paper_content "
+        "(id, content_key, kind, arxiv_id, title, year, source_path, "
+        " source_dir_path, html_path) "
+        "VALUES (?, ?, 'arxiv', ?, ?, ?, '/src', '/dir', '/html')",
+        (pcid, f"ck{pcid}", f"2400.{pcid:05d}", title, year),
+    )
+
+
+async def _add_to_session(
+    conn: aiosqlite.Connection, pcid: int, *, session_id: int = 1
+) -> None:
+    await conn.execute(
+        "INSERT INTO papers (session_id, paper_content_id) VALUES (?, ?)",
+        (session_id, pcid),
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_emits_curated_cards_before_answer(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    tracer = await _seed_run(migrated_db)
+    # Two existing papers: 10 is in the session, 20 is not.
+    await _seed_paper_content(migrated_db, 10, title="Alpha Paper", year=2021)
+    await _seed_paper_content(migrated_db, 20, title="Beta Paper", year=2022)
+    await _add_to_session(migrated_db, 10)
+    await migrated_db.commit()
+
+    adapter = _ScriptedAdapter([
+        SqlRoundAction(
+            action="finalize", sql=None, answer="Two relevant papers.",
+            papers=[
+                SqlPaperPick(paper_content_id=10, reason="alpha matches"),
+                SqlPaperPick(paper_content_id=20, reason="beta matches"),
+            ],
+        ),
+    ])
+    reg = _QueryRegistry([{"columns": ["n"], "rows": [[2]]}])
+    items = await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        conn=migrated_db,
+    ))
+
+    yields = [x for x in items if isinstance(x, SearchResultsYield)]
+    assert len(yields) == 1
+    cands = yields[0].candidates
+    # Pick order preserved, library:<id> ids, reason carried, title/year from DB.
+    assert [c.paper_id for c in cands] == ["library:10", "library:20"]
+    assert [c.reason for c in cands] == ["alpha matches", "beta matches"]
+    assert [c.title for c in cands] == ["Alpha Paper", "Beta Paper"]
+    assert [c.year for c in cands] == [2021, 2022]
+    assert [c.already_in_session for c in cands] == [True, False]
+    assert all(c.finalize is False for c in cands)
+
+    # The card is emitted BEFORE the first answer token.
+    card_idx = next(i for i, x in enumerate(items) if isinstance(x, SearchResultsYield))
+    first_token = next(i for i, x in enumerate(items) if isinstance(x, str))
+    assert card_idx < first_token
+    out = "".join(x for x in items if isinstance(x, str))
+    assert "Two relevant papers." in out
+
+
+@pytest.mark.asyncio
+async def test_finalize_aggregate_emits_no_cards(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    tracer = await _seed_run(migrated_db)
+    adapter = _ScriptedAdapter([
+        SqlRoundAction(action="finalize", sql=None, answer="You have 7 papers.", papers=[]),
+    ])
+    reg = _QueryRegistry([{"columns": ["n"], "rows": [[7]]}])
+    items = await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        conn=migrated_db,
+    ))
+    assert not any(isinstance(x, SearchResultsYield) for x in items)
+    out = "".join(x for x in items if isinstance(x, str))
+    assert "You have 7 papers." in out
+
+
+@pytest.mark.asyncio
+async def test_finalize_skips_hallucinated_pcid(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    tracer = await _seed_run(migrated_db)
+    await _seed_paper_content(migrated_db, 10, title="Alpha Paper", year=2021)
+    await migrated_db.commit()
+    adapter = _ScriptedAdapter([
+        SqlRoundAction(
+            action="finalize", sql=None, answer="Here is the real one.",
+            papers=[
+                SqlPaperPick(paper_content_id=999, reason="hallucinated"),
+                SqlPaperPick(paper_content_id=10, reason="real"),
+            ],
+        ),
+    ])
+    reg = _QueryRegistry([{"columns": ["n"], "rows": [[1]]}])
+    items = await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        conn=migrated_db,
+    ))
+    yields = [x for x in items if isinstance(x, SearchResultsYield)]
+    assert len(yields) == 1
+    cands = yields[0].candidates
+    assert [c.paper_id for c in cands] == ["library:10"]
+
+
+@pytest.mark.asyncio
+async def test_active_memory_recall_reaches_model(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """FR-10: a seeded ACTIVE memory with recall_enabled reaches the model's
+    round-1 ``question`` variable (restores the recall coverage Task 5 drops)."""
+    tracer = await _seed_run(migrated_db)
+    await migrated_db.execute(
+        "INSERT INTO memories (scope, session_id, content, status) "
+        "VALUES ('session', 1, 'Always respond in Japanese.', 'active')"
+    )
+    await migrated_db.commit()
+    adapter = _ScriptedAdapter([
+        SqlRoundAction(action="finalize", sql=None, answer="はい。", papers=[]),
+    ])
+    reg = _QueryRegistry([{"columns": ["n"], "rows": [[0]]}])
+    await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="gpt-4o-mini", answer_model="gpt-4o-mini",
+        conn=migrated_db, recall_enabled=True,
+    ))
+    assert "Always respond in Japanese." in str(adapter.calls[0]["question"])

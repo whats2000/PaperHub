@@ -28,7 +28,7 @@ import aiosqlite
 
 from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.agents.memory_recall import build_active_memory_block
-from paperhub.agents.research import SearchResultsYield, ToolStepYield
+from paperhub.agents.research import SearchCandidate, SearchResultsYield, ToolStepYield
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
@@ -136,6 +136,74 @@ def _coerce_finalize(action: SqlRoundAction) -> SqlRoundAction:
     return SqlRoundAction(
         action="finalize", sql=None, answer=answer, papers=action.papers,
     )
+
+
+async def _build_curated_candidates(
+    picks: list[SqlPaperPick],
+    *,
+    conn: aiosqlite.Connection,
+    session_id: int | None,
+) -> list[SearchCandidate]:
+    """Resolve the finalize ``picks`` into ``library:<id>`` ``SearchCandidate``s.
+
+    Two queries total (NOT per-pick): ONE ``SELECT id, title, year FROM
+    paper_content WHERE id IN (...)`` to resolve title/year (and to detect a
+    hallucinated id — one not present is SKIPPED), and ONE membership query
+    ``SELECT paper_content_id FROM papers WHERE session_id = ?`` to set
+    ``already_in_session``. The LLM's pick ORDER is preserved; a duplicate
+    paper_content_id emits at most one card (first wins).
+    """
+    # Dedup pick ids, first-occurrence order preserved.
+    ordered_ids: list[int] = []
+    seen: set[int] = set()
+    for pick in picks:
+        pcid = pick.paper_content_id
+        if pcid in seen:
+            continue
+        seen.add(pcid)
+        ordered_ids.append(pcid)
+    if not ordered_ids:
+        return []
+
+    # ONE query: resolve title/year for every distinct picked id. Ids absent
+    # from the result are hallucinated and get skipped below.
+    placeholders = ", ".join("?" for _ in ordered_ids)
+    resolved: dict[int, tuple[str, int | None]] = {}
+    async with conn.execute(
+        f"SELECT id, title, year FROM paper_content WHERE id IN ({placeholders})",
+        tuple(ordered_ids),
+    ) as cur:
+        for row in await cur.fetchall():
+            year = int(row[2]) if row[2] is not None else None
+            resolved[int(row[0])] = (str(row[1]), year)
+
+    # ONE membership query for already_in_session.
+    in_session: set[int] = set()
+    if session_id is not None:
+        async with conn.execute(
+            "SELECT paper_content_id FROM papers WHERE session_id = ?",
+            (session_id,),
+        ) as cur:
+            in_session = {int(r[0]) for r in await cur.fetchall()}
+
+    # Map picks → candidates in the LLM's order; skip hallucinated ids.
+    reason_by_id = {p.paper_content_id: p.reason for p in picks}
+    candidates: list[SearchCandidate] = []
+    for pcid in ordered_ids:
+        if pcid not in resolved:
+            continue  # hallucinated id — no card
+        title, year = resolved[pcid]
+        candidates.append(
+            SearchCandidate(
+                paper_id=f"library:{pcid}",
+                title=title,
+                year=year,
+                already_in_session=pcid in in_session,
+                reason=reason_by_id.get(pcid, ""),
+                finalize=False,
+            )
+        )
+    return candidates
 
 
 async def sql_agent_stream(
@@ -276,15 +344,19 @@ async def sql_agent_stream(
             answer="I wasn't able to complete the analysis.", papers=[],
         )
 
-    # ── SEAM for Task 4 ────────────────────────────────────────────────────
-    # ``final_action.papers`` (list[SqlPaperPick]) is the curated shortlist the
-    # model chose. Task 4 will resolve each pick to a ``library:<pcid>``
+    # Emit the curated library cards BEFORE the answer tokens so they render
+    # alongside the prose. ``final_action.papers`` (list[SqlPaperPick]) is the
+    # model's curated shortlist; each is resolved to a ``library:<pcid>``
     # SearchCandidate (title/year/already_in_session via ``conn``/``session_id``,
-    # the reason carried through) and yield ONE ``SearchResultsYield`` HERE —
-    # BEFORE the answer tokens below — so the cards render alongside the prose.
-    # Kept available, not emitted, this task:
+    # the reason carried through). The aggregate path (empty picks) emits no
+    # card; a card needs the DB so we skip gracefully when ``conn is None``.
     final_picks: list[SqlPaperPick] = final_action.papers
-    _ = final_picks  # noqa: F841 — handed to Task 4's emission seam.
+    if final_picks and conn is not None:
+        candidates = await _build_curated_candidates(
+            final_picks, conn=conn, session_id=session_id
+        )
+        if candidates:
+            yield SearchResultsYield(candidates=candidates)
 
     # 4. Stream the finalized answer. Wrapped in a tracer step so the trace
     # records the final output text + which round produced it.
