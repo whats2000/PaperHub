@@ -817,6 +817,11 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                 last_emitted_step, item.record["step_index"],
                             )
                             continue
+                        if isinstance(item, SearchResultsYield):
+                            # E1 Task 2 wires the search_results forwarding here;
+                            # for now narrow it out so it is never treated as an
+                            # answer token.
+                            continue
                         sql_chunks.append(item)
                         token_evt = TokenEvent(run_id=run_id, branch="", text=item)
                         yield {"event": "token",

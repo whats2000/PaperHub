@@ -9,7 +9,7 @@ import aiosqlite
 
 from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.agents.memory_recall import build_active_memory_block
-from paperhub.agents.research import ToolStepYield
+from paperhub.agents.research import SearchCandidate, SearchResultsYield, ToolStepYield
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
@@ -71,6 +71,57 @@ async def _plan_sql(
     return sql
 
 
+async def _emit_library_candidates(
+    columns: list[Any],
+    rows: list[Any],
+    *,
+    conn: aiosqlite.Connection | None,
+    session_id: int | None,
+) -> AsyncIterator[SearchResultsYield]:
+    """Map a paper-shaped ``sql.query`` result (one with a ``paper_content_id``
+    column) into a single ``SearchResultsYield`` of ``library:<id>`` candidates.
+
+    ``already_in_session`` is resolved with ONE set-membership query against the
+    session's ``papers`` rows (not per-row). ``title``/``year`` come from the
+    result columns when the SELECT included them, else the dataclass defaults.
+    """
+    pcid_idx = columns.index("paper_content_id")
+    title_idx = columns.index("title") if "title" in columns else None
+    year_idx = columns.index("year") if "year" in columns else None
+
+    in_session: set[int] = set()
+    if conn is not None and session_id is not None:
+        async with conn.execute(
+            "SELECT paper_content_id FROM papers WHERE session_id = ?",
+            (session_id,),
+        ) as cur:
+            in_session = {int(r[0]) for r in await cur.fetchall()}
+
+    candidates: list[SearchCandidate] = []
+    for row in rows:
+        try:
+            pcid = int(row[pcid_idx])
+        except (TypeError, ValueError, IndexError):
+            continue
+        title = str(row[title_idx]) if title_idx is not None and row[title_idx] is not None else ""
+        year: int | None = None
+        if year_idx is not None and row[year_idx] is not None:
+            try:
+                year = int(row[year_idx])
+            except (TypeError, ValueError):
+                year = None
+        candidates.append(
+            SearchCandidate(
+                paper_id=f"library:{pcid}",
+                title=title,
+                year=year,
+                already_in_session=pcid in in_session,
+                finalize=False,
+            )
+        )
+    yield SearchResultsYield(candidates=candidates)
+
+
 async def sql_agent_stream(
     state: AgentState,
     *,
@@ -85,7 +136,7 @@ async def sql_agent_stream(
     conn: aiosqlite.Connection | None = None,
     recall_enabled: bool = True,
     emit_tool_steps: bool = False,
-) -> AsyncIterator[str | ToolStepYield]:
+) -> AsyncIterator[str | ToolStepYield | SearchResultsYield]:
     question = effective_query(state)
     language = response_language(state)
     session_id = state.get("session_id")
@@ -174,6 +225,18 @@ async def sql_agent_stream(
 
     columns = result.get("columns", []) if isinstance(result, dict) else []
     rows = rows or []
+
+    # E1: when the executed SELECT is paper-shaped (it includes a
+    # ``paper_content_id`` column), surface each row as a ``library:<id>``
+    # SearchCandidate so the result is attachable via the Research Agent's
+    # existing ``search_results`` SSE path. Emit BEFORE the answer stream so the
+    # cards render alongside (not after) the prose. Aggregate queries (no
+    # ``paper_content_id`` column) emit nothing.
+    if isinstance(columns, list) and "paper_content_id" in columns:
+        async for cand_ev in _emit_library_candidates(
+            columns, rows, conn=conn, session_id=session_id,
+        ):
+            yield cand_ev
 
     # Build recall-injection block (FR-10). Empty when disabled or no memories.
     # Uses the UNCONDITIONAL active-memory block (not FTS) so a standing
