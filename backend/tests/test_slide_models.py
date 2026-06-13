@@ -16,6 +16,6 @@ def test_slide_plan_parses() -> None:
 
 def test_deck_command_accepts_qa_action() -> None:
     from paperhub.models.domain import DeckCommand
-    cmd = DeckCommand(action="qa")
+    cmd = DeckCommand(action="qa", target_page=None)
     assert cmd.action == "qa"
     assert cmd.target_scope == "all"  # default unchanged

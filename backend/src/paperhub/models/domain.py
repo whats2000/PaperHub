@@ -106,7 +106,19 @@ class DeckCommand(BaseModel):
         "edit_title", "edit_preamble", "regenerate", "qa",
     ]
     target_scope: Literal["current", "page", "all"] = "all"
-    target_page: int | None = None
+    # Required (no default) so the structured-output schema marks it REQUIRED and
+    # the model must emit it. With a default, Gemini's responseSchema treats the
+    # field as droppable and omits it even for "slide 4" — losing the page number
+    # and silently falling back to the on-screen page. The description stays
+    # language-agnostic: the model parses the number the user named in ANY
+    # language; we don't enumerate per-language examples.
+    target_page: int | None = Field(
+        description=(
+            "The 1-based page number the user named (in any language) when "
+            "target_scope='page'; null for 'current'/'all' or when no page "
+            "number was given."
+        ),
+    )
     note_language: str | None = None  # for generate_notes / edit_notes
 
 

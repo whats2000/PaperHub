@@ -20,7 +20,7 @@ from paperhub.models.domain import DeckCommand
 def test_route_qa_goes_to_sl_qa(monkeypatch) -> None:
     from paperhub.agents import report_graph as rg
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
-    state = {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa")}
+    state = {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa", target_page=None)}
     assert rg._route_deck_command(state) == "qa"
 
 
@@ -28,10 +28,10 @@ def test_route_unknown_action_never_edits(monkeypatch) -> None:
     from paperhub.agents import report_graph as rg
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
     assert rg._route_deck_command(
-        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="edit_slides")}
+        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="edit_slides", target_page=None)}
     ) == "edit_slides"
     assert rg._route_deck_command(
-        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa")}
+        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa", target_page=None)}
     ) == "qa"
 
 
@@ -39,7 +39,7 @@ def test_route_qa_answered_even_without_latex(monkeypatch) -> None:
     from paperhub.agents import report_graph as rg
     monkeypatch.setattr(rg, "_pdflatex_available", lambda: False)
     assert rg._route_deck_command(
-        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa")}
+        {"report_papers": [{"id": 1}], "report_command": DeckCommand(action="qa", target_page=None)}
     ) == "qa"
 
 
@@ -63,7 +63,7 @@ async def test_sl_qa_delegates_to_answer_callback(monkeypatch, tmp_path) -> None
     # on a pre-set report_command in state. Both functions run inside asyncio.gather.
     monkeypatch.setattr(
         rg, "classify_deck_command",
-        lambda **_kwargs: _async_return(DeckCommand(action="qa")),
+        lambda **_kwargs: _async_return(DeckCommand(action="qa", target_page=None)),
     )
     monkeypatch.setattr(
         rg, "detect_slide_language",
@@ -115,7 +115,7 @@ async def test_sl_qa_delegates_to_answer_callback(monkeypatch, tmp_path) -> None
         graph = build_report_subgraph(deps)
         state = {"run_id": run_id, "branch": "", "session_id": 1,
                  "user_message": "explain this graph", "current_view_page": 1,
-                 "report_command": DeckCommand(action="qa"),
+                 "report_command": DeckCommand(action="qa", target_page=None),
                  "report_papers": [{"id": 7, "source_dir": "/x"}]}
         final = ""
         async for mode, payload in graph.astream(state, stream_mode=["values"]):
