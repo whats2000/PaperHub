@@ -791,6 +791,16 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         final_content = "".join(qa_chunks)
                 elif intent == "library_stats":
                     registry = request.app.state.mcp_registry
+                    # SearchResultsYield → search_results forwarding (E1 Task 2)
+                    # auto-attaches finalize picks via the same pipeline the
+                    # paper_search branch uses. sql_agent only emits library:<id>
+                    # candidates (already in the corpus), so this is normally a
+                    # no-op attach, but reusing _process_search_results keeps the
+                    # enrichment (already_in_session, papers_id) identical.
+                    stats_pipeline = PaperPipeline(
+                        conn,
+                        papers_cache_dir=settings.papers_cache_dir,
+                    )
                     sql_chunks: list[str] = []
                     sql_stream_kwargs: dict[str, Any] = {}
                     if sql_planner_mock is not None:
@@ -818,9 +828,40 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             )
                             continue
                         if isinstance(item, SearchResultsYield):
-                            # E1 Task 2 wires the search_results forwarding here;
-                            # for now narrow it out so it is never treated as an
-                            # answer token.
+                            # Mirror the paper_search branch: enrich → emit a
+                            # search_results SSE event → persist on the run so it
+                            # replays cross-device. Must NOT append to sql_chunks
+                            # (it must never become answer text).
+                            enriched = await _process_search_results(
+                                item,
+                                pipeline=stats_pipeline,
+                                conn=conn,
+                                session_id=session_id,
+                                unpaywall_email=settings.unpaywall_email,
+                            )
+                            sr_evt = SearchResultsEvent(
+                                run_id=run_id,
+                                candidates=[
+                                    SearchCandidateModel(**asdict(c))
+                                    for c in enriched
+                                ],
+                            )
+                            await conn.execute(
+                                "UPDATE runs SET search_results_json = ? "
+                                "WHERE id = ?",
+                                (
+                                    json.dumps(
+                                        [c.model_dump() for c in sr_evt.candidates],
+                                        separators=(",", ":"),
+                                    ),
+                                    run_id,
+                                ),
+                            )
+                            await conn.commit()
+                            yield {
+                                "event": sr_evt.type,
+                                "data": sr_evt.model_dump_json(exclude={"type"}),
+                            }
                             continue
                         sql_chunks.append(item)
                         token_evt = TokenEvent(run_id=run_id, branch="", text=item)
