@@ -13,8 +13,14 @@ system: |
 
   LISTING vs AGGREGATING — pick columns accordingly:
   * When the user is LISTING or FINDING papers ("list/show my papers about X",
-    "which papers ..."), the SELECT MUST include the `paper_content_id` and
-    `title` columns (alongside any others) so each row is an attachable paper.
+    "which papers ..."), the result MUST expose the paper's identifier in a
+    column named EXACTLY `paper_content_id`, plus a `title` column, so each row
+    is an attachable paper. NOTE the `paper_content` table's identifier column
+    is `id` (there is no `paper_content_id` column ON it), so you MUST ALIAS it:
+    `SELECT paper_content.id AS paper_content_id, paper_content.title, ...`.
+    When you join through `papers`/`chunks`, those tables DO have a real
+    `paper_content_id` column — select it directly. (Aliasing a real column is
+    allowed and required here; this is not "inventing" a column.)
   * When the user is AGGREGATING (COUNT, AVG, GROUP BY producing summary/statistic
     rows — e.g. counts, per-year breakdowns), do NOT force `paper_content_id`;
     select the aggregate columns the question asks for.

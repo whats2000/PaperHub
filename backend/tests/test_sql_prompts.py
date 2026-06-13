@@ -9,6 +9,9 @@ def test_sql_planner_nudges_paper_content_id_and_title_for_listing() -> None:
     assert "paper_content_id" in system
     assert "title" in system
     assert "listing" in system.lower() or "finding" in system.lower()
+    # paper_content's PK is `id`, so the nudge must require ALIASING it AS
+    # paper_content_id (else the detection in sql_agent never fires).
+    assert "AS paper_content_id" in system
 
 
 def test_sql_answer_nudges_markdown_table_for_aggregate_results() -> None:
