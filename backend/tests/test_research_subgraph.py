@@ -359,6 +359,100 @@ async def test_paper_search_emits_every_step_under_out_of_order_completion(
     )
 
 
+async def test_paper_search_dedups_candidates_with_same_paper_id(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Regression: the Resolver can land the SAME paper from two different
+    angles/queries, which previously emitted duplicate cards (3 slots, 2 real
+    papers). _ps_finalize must dedup candidates by paper_id (first wins)."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from paperhub.agents.research_graph import (
+        ResearchDeps,
+        build_paper_search_subgraph,
+    )
+    from paperhub.agents.research_pipeline import (
+        CanonicalIdentity,
+        ParsedRequest,
+        ResolvedPaper,
+    )
+
+    # p0 and p2 resolve to the SAME paper_id (the duplicate); p1 is distinct.
+    paper_id_by_hint = {"p0": "ss:dup", "p1": "ss:unique", "p2": "ss:dup"}
+    requests = [
+        ParsedRequest(hint=h, kind="natural_language") for h in paper_id_by_hint
+    ]
+
+    async def _fake_parse(*_: Any, **__: Any) -> list[ParsedRequest]:
+        return list(requests)
+
+    async def _fake_discover(
+        request: ParsedRequest, *, tracer: Any, model: str, **__: Any,
+    ) -> CanonicalIdentity:
+        async with tracer.step(
+            agent="research", tool="paper_search:discover_plan", model=model,
+        ):
+            await asyncio.sleep(0)
+        return CanonicalIdentity(
+            title=request.hint, author_surname=None, year=2024, confidence="high",
+        )
+
+    async def _fake_resolve(
+        request: ParsedRequest, identity: CanonicalIdentity, *, tracer: Any, **__: Any,
+    ) -> ResolvedPaper:
+        async with tracer.step(
+            agent="research", tool="paper_search:paperhub.search_web", model=None,
+        ):
+            await asyncio.sleep(0)
+        pid = paper_id_by_hint[request.hint]
+        return ResolvedPaper(
+            request=request, identity=identity,
+            paper_id=pid, meta={"title": pid},
+        )
+
+    async def _fake_synth(*_: Any, **__: Any) -> str:
+        return "prose"
+
+    deps = ResearchDeps(
+        adapter=MagicMock(),
+        tracer=fake_tracer,
+        paper_qa_model="stub",
+        conn=migrated_db,
+        pipeline=MagicMock(),
+        mcp_registry=MagicMock(),
+    )
+
+    candidates: list[dict[str, Any]] = []
+    with (
+        patch("paperhub.agents.research_graph.parse_user_message", new=_fake_parse),
+        patch("paperhub.agents.research_graph.discover_canonical", new=_fake_discover),
+        patch("paperhub.agents.research_graph.resolve_via_ss", new=_fake_resolve),
+        patch("paperhub.agents.research_graph.synthesize_prose", new=_fake_synth),
+    ):
+        graph = build_paper_search_subgraph(deps)
+        state: dict[str, Any] = {
+            "run_id": fake_tracer._run_id,  # noqa: SLF001
+            "branch": "",
+            "session_id": 1,
+            "user_message": "find p0 p1 p2",
+            "history": [],
+            "ps_last_step_index": -1,
+        }
+        async for mode, payload in graph.astream(
+            state, stream_mode=["custom", "values"],
+        ):
+            if mode == "custom" and payload.get("event") == "search_results":
+                candidates = payload["candidates"]
+
+    paper_ids = [c.paper_id for c in candidates]
+    assert paper_ids == ["ss:dup", "ss:unique"], (
+        f"Expected deduped [ss:dup, ss:unique] (first occurrence wins), got {paper_ids}"
+    )
+    assert len(paper_ids) == len(set(paper_ids)), f"Duplicate cards emitted: {paper_ids}"
+
+
 async def test_paper_qa_subgraph_all_empty_picks_yields_no_content_message(
     migrated_db: aiosqlite.Connection,
     fake_tracer: Any,

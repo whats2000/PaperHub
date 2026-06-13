@@ -292,7 +292,15 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         # Synthesizer cannot accidentally drop it.
         candidates: list[SearchCandidate] = []
         if resolved:
+            # Dedup by paper_id: the Resolver can land the SAME paper from two
+            # different angles/queries (e.g. a survey resurfaced by two related
+            # topics), which would otherwise emit duplicate cards (3 slots, 2
+            # real papers). First occurrence wins.
+            seen_ids: set[str] = set()
             for r in resolved:
+                if r.paper_id in seen_ids:
+                    continue
+                seen_ids.add(r.paper_id)
                 meta = r.meta if isinstance(r.meta, dict) else {}
                 year_val = meta.get("year")
                 if not isinstance(year_val, int):
