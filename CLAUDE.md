@@ -6,7 +6,7 @@ This file is loaded into every Claude Code session that opens this repo. Read it
 
 PaperHub is a paper-aware chat client with multi-agent tool-routing, an agentic SQLite section-navigation knowledge base (no vector store, v2.27), an in-repo slide pipeline, and a Citation Canvas so every cited chunk traces back to source. It is decomposed from two reference projects (`paper2slides-plus`, `Intro2GenAI-hw1`) — useful utilities are copied + adapted, not run as services.
 
-**Authoritative spec:** [docs/superpowers/specs/2026-05-17-paperhub-srs.md](docs/superpowers/specs/2026-05-17-paperhub-srs.md) (**v2.33.0** latest spec; shipped through **v2.33.0** — **Plan F6.1** slide narrative planning + the PaperDigest/targeted-read gather rework + always-on streaming (v2.33); **Plan G** — UI i18n across 8 namespaces × 4 locales + account menu + a DB-backed runtime Settings panel (v2.31)). 
+**Authoritative spec:** [docs/superpowers/specs/2026-05-17-paperhub-srs.md](docs/superpowers/specs/2026-05-17-paperhub-srs.md) (**v2.34.0** latest spec; shipped through **v2.34.0** — **SQL Agent → intelligent ReAct agent** with curated `library_stats` attachable cards (E1) (v2.34); **Plan F6.1** slide narrative planning + the PaperDigest/targeted-read gather rework + always-on streaming (v2.33); **Plan G** — UI i18n across 8 namespaces × 4 locales + account menu + a DB-backed runtime Settings panel (v2.31)). 
 Any architecture / schema / scope question is answered there before code. 
 The two-layer schema (`paper_content` for unique papers, `papers` for per-session membership) and the deferred slide-rendering framework choice are the two most load-bearing decisions to keep in mind. The full v2.4-v2.33 feature history and rationale live in the SRS Revision History; read it there for any deeper why-does-X question rather than duplicating it here.
 
@@ -175,7 +175,7 @@ npm run build     # Vite production build
 - `backend/scripts/` — operator-facing scripts + `start.ps1` (orchestrates external MCP daemons via `paperhub-mcp-up` + backend) + `run-benchmark.ps1` (benchmark launcher)
 - `workspace/` (gitignored) — runtime data: `paperhub.db`, `papers_cache/`
 - `reference/` — copied source from `paper2slides-plus` and `Intro2GenAI-hw1` (read-only reference; do not edit in place — copy + adapt into `backend/src/`)
-- `docs/superpowers/specs/` — SRS (**v2.33.0 current**; shipped through **v2.33.0**)
+- `docs/superpowers/specs/` — SRS (**v2.34.0 current**; shipped through **v2.34.0**)
 - `docs/superpowers/plans/` — implementation plans
 - `docs/presentation/` — **project introduction deck** build script (`build_deck.js` via `pptxgenjs`) + README. A 17-slide Swiss-modernist deck (Traditional Chinese content) in cobalt + Arial Black + Microsoft JhengHei. Run `cd docs/presentation && npm install && node build_deck.js` to output `PaperHub_專案介紹.pptx` at the repo root (`*.pptx` is gitignored). Screenshots are embedded directly from `docs/screenshots/`. To rework the layout / change colors / change the slide count, edit `build_deck.js` and re-run.
 
@@ -183,7 +183,6 @@ npm run build     # Vite production build
 
 Plans A–G are shipped + merged; closed follow-ups live in the SRS Revision History. Genuinely open, out-of-scope-when-written items (audited 2026-06-13 against `main`):
 
-- **(E) `library_stats` auto-attach is prose-only** — `agents/sql_agent.py` computes `columns`/`rows` and feeds them to the answer prompt as JSON, but streams only prose tokens; no structured card event. v2.32's `chat/SqlCard.tsx` lifts the ```sql block out of the prose but renders SQL text only — the rows themselves are still not attachable like `paper_search` results.
 - **(E) Memory recall is all-active, not semantic** *(deferred by design)* — `build_active_memory_block` (5 live call sites) returns every active memory (≤20); the FTS/semantic `build_memory_context_block` has **zero call sites** (dead code, kept intentionally so a standing directive like "respond in Japanese" always surfaces). Revisit if a user's active set grows large.
 
 ## Plan G review — anything blocking Plan H?
