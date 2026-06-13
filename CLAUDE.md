@@ -185,7 +185,6 @@ Plans A–G are shipped + merged; closed follow-ups live in the SRS Revision His
 
 - **(E) `library_stats` auto-attach is prose-only** — `agents/sql_agent.py` computes `columns`/`rows` and feeds them to the answer prompt as JSON, but streams only prose tokens; no structured card event. v2.32's `chat/SqlCard.tsx` lifts the ```sql block out of the prose but renders SQL text only — the rows themselves are still not attachable like `paper_search` results.
 - **(E) Memory recall is all-active, not semantic** *(deferred by design)* — `build_active_memory_block` (5 live call sites) returns every active memory (≤20); the FTS/semantic `build_memory_context_block` has **zero call sites** (dead code, kept intentionally so a standing directive like "respond in Japanese" always surfaces). Revisit if a user's active set grows large.
-- **(F) Chinese ordinal extraction — prompt only** *(fallback already works)* — `_select_rows` falls back to `current_view_page` when the classifier returns `target_page=null` (`agents/report_graph.py:285`), so "edit this page" always hits the on-screen slide. The `slides_deck_command_v1.yaml` prompt mentions Chinese numerals but has **no few-shot examples**, so named-page edits ("編輯第三頁") can still misfire to the on-screen page. Add few-shot ordinal examples for reliable named-page edits.
 
 ## Plan G review — anything blocking Plan H?
 
