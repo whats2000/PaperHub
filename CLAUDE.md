@@ -190,7 +190,7 @@ Plans A–G are shipped + merged; closed follow-ups live in the SRS Revision His
 
 ## Plan G review — anything blocking Plan H?
 
-**No.** Plan G (i18n + DB-backed Settings panel, v2.31) shipped; its one notable YAGNI cut — *"no live model-availability validation"* — was **closed by the v2.32 readiness gate** (`GET /settings/readiness`). Nothing in G blocks **Plan H** (Compare view + `paperhub.*` MCP + filesystem MCP): H reuses the already-shipped MCP client infra (add one `[[server]]` block to `mcp_servers.toml`). The `RejectionPill` is now wired into the trace render (`chat/TraceInline.tsx`) and verified against a live memory-scope rejection; H's MCP-permission rejections will exercise that same path for real.
+**No.** Plan G (i18n + DB-backed Settings panel, v2.31) shipped; its one notable YAGNI cut — *"no live model-availability validation"* — was **closed by the v2.32 readiness gate** (`GET /settings/readiness`). Nothing in G blocks **Plan H** (Compare view + `paperhub.*` MCP + filesystem MCP): H reuses the already-shipped MCP client infra (add one `[[server]]` block to `mcp_servers.toml`).
 
 ## Restricted operations
 
