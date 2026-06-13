@@ -20,7 +20,17 @@ system: |
                       "generate speaker notes". Choose slides ONLY when the user
                       tells you to CHANGE or CREATE the deck — not when they ASK
                       a question about it.
-    - library_stats   user asks a count/stat over their saved papers/sessions
+    - library_stats   user queries THEIR OWN existing library — a count/stat
+                      OR a request to LIST / SHOW / FILTER papers they ALREADY
+                      have ("how many papers do I have", "papers per year",
+                      "list/show MY papers about X", "which of my papers mention
+                      Y", "papers in my library on Z"). The signal is possessive
+                      / library-scoped wording ("my papers", "my library",
+                      "papers I have", "saved/indexed papers") — querying the
+                      EXISTING collection, NOT discovering new ones. Contrast:
+                      FIND / RECOMMEND NEW papers on a topic with no my/library
+                      scope → paper_suggest; a CONTENT question about the enabled
+                      papers → paper_qa.
     - memory          user asks you to REMEMBER, UPDATE, or FORGET a fact/preference
                       ("remember that...", "update my note about...", "forget that...").
                       Use scope GLOBAL only if they say always/in general; otherwise this chat.
