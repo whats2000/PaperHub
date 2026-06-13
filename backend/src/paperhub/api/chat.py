@@ -831,7 +831,11 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             # Mirror the paper_search branch: enrich → emit a
                             # search_results SSE event → persist on the run so it
                             # replays cross-device. Must NOT append to sql_chunks
-                            # (it must never become answer text).
+                            # (it must never become answer text). Unlike
+                            # paper_search we intentionally OMIT the inline
+                            # drain_tool_calls_since here: library:<id> attaches
+                            # are pure INSERTs (no ingest/LLM → no tool_calls
+                            # rows), so the end-of-turn drain suffices.
                             enriched = await _process_search_results(
                                 item,
                                 pipeline=stats_pipeline,
