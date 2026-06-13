@@ -317,17 +317,23 @@ export function TraceInline({
                   <RowIcon className="h-3 w-3" />
                   [{r.branch || "main"}#{r.step_index}] {r.agent} · {r.tool}{" "}
                   ({r.model ?? "-"}) {r.latency_ms}ms{" "}
-                  {/* A rejection is a deliberate policy stop — surface it as a
-                      RejectionPill (with its reason) rather than raw text. */}
-                  {r.status === "rejected" ? (
-                    <RejectionPill reason={r.error ?? ""} />
-                  ) : (
+                  {/* ok/error stay inline; a rejection's reason can be long, so
+                      it drops to its own line below as a RejectionPill. */}
+                  {r.status !== "rejected" && (
                     <>
                       {r.status}
                       {r.error && ` — ${r.error}`}
                     </>
                   )}
                 </button>
+
+                {/* Rejection — a deliberate policy stop, on its own line so the
+                    full reason reads cleanly instead of wrapping by the metadata. */}
+                {r.status === "rejected" && (
+                  <div className="mt-1 mb-1.5 ml-4">
+                    <RejectionPill reason={r.error ?? ""} />
+                  </div>
+                )}
 
                 {/* Expanded detail */}
                 {isOpen && (
