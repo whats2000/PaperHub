@@ -9,14 +9,20 @@ import { API_BASE_URL } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 
 // Hoisted mock for sonner — toast.success/error/info are no-ops we can spy on.
-const { toastSuccess, toastError, toastInfo } = vi.hoisted(() => ({
+const { toastSuccess, toastError, toastInfo, toastLoading } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
+  toastLoading: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError, info: toastInfo },
+  toast: {
+    success: toastSuccess,
+    error: toastError,
+    info: toastInfo,
+    loading: toastLoading,
+  },
 }));
 
 const server = setupServer();
@@ -29,6 +35,10 @@ beforeEach(() => {
   toastSuccess.mockReset();
   toastError.mockReset();
   toastInfo.mockReset();
+  toastLoading.mockReset();
+  // toast.loading returns the toast id we later resolve by; give it a stable
+  // value so handlers thread `{ id }` into the success/error/info update.
+  toastLoading.mockReturnValue("toast-id");
   // Seed the store with an active session (id=1, backend_session_id=7).
   useChatStore.setState({
     sessions: [
@@ -287,6 +297,7 @@ describe("AttachPaperMenu", () => {
     await waitFor(() => {
       expect(toastInfo).toHaveBeenCalledWith(
         "Session changed; the attached paper was discarded.",
+        expect.objectContaining({ id: "toast-id" }),
       );
     });
 
@@ -453,5 +464,65 @@ describe("AttachPaperMenu", () => {
     expect(
       screen.getByRole("button", { name: /^import$/i }),
     ).toBeDisabled();
+  });
+
+  // Ingestion can run for a while (esp. PDFs), so the user must get progress
+  // feedback: a persistent loading toast that resolves in place, plus an
+  // in-popover spinner while the request is in flight.
+  it("opens a loading toast and resolves it to success by the same id", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(
+          {
+            papers_id: 1,
+            paper_content_id: 2,
+            cache_hit: false,
+            title: "Slow Paper",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.upload(screen.getByLabelText(/pdf file/i), makePdfFile());
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Added",
+        expect.objectContaining({ id: "toast-id", description: "Slow Paper" }),
+      );
+    });
+    // The loading toast was opened exactly once and then updated (not stacked).
+    expect(toastLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an in-popover processing spinner while the attach is in flight", async () => {
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, async () => {
+        await responseGate;
+        return HttpResponse.json({
+          papers_id: 1,
+          paper_content_id: 2,
+          cache_hit: false,
+          title: "X",
+        });
+      }),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.upload(screen.getByLabelText(/pdf file/i), makePdfFile());
+
+    // In-flight: the contextual processing row is visible.
+    expect(await screen.findByText(/^processing…$/i)).toBeInTheDocument();
+
+    releaseResponse();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
   });
 });

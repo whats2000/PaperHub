@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Paperclip } from "lucide-react";
+import { Loader2, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -88,6 +88,10 @@ export function AttachPaperMenu() {
     const activeId = useChatStore.getState().activeSessionId;
     if (activeId === null) return;
     setBusy(true);
+    // A persistent loading toast carries progress even if the popover is
+    // dismissed — ingestion (esp. PDFs) can run for a while. We resolve THIS
+    // toast (by id) to success/error/info so it never lingers as a spinner.
+    const toastId = toast.loading(t("toast.processing"));
     try {
       // Lazy-create the backend session so the FIRST attach in a fresh chat
       // works (no message required). After this, the active session carries
@@ -95,17 +99,19 @@ export function AttachPaperMenu() {
       const startedAt = await ensureBackendSession(activeId);
       const result = await uploadPdf(startedAt, file);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info(t("toast.sessionChanged"));
+        toast.info(t("toast.sessionChanged"), { id: toastId });
         return;
       }
       const ref = buildReference(result, "pdf_upload", null);
       appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
+        id: toastId,
         description: result.title,
       });
       handleOpenChange(false);
     } catch (err) {
       toast.error(t("toast.uploadFailed"), {
+        id: toastId,
         description: err instanceof Error ? err.message : String(err),
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -124,13 +130,15 @@ export function AttachPaperMenu() {
     const activeId = useChatStore.getState().activeSessionId;
     if (activeId === null) return;
     setBusy(true);
+    // Persistent loading toast (see handlePdfChange) resolved by id below.
+    const toastId = toast.loading(t("toast.processing"));
     try {
       // Lazy-create the backend session (see handlePdfChange) so importing a
       // paper works as the very first action in a new chat.
       const startedAt = await ensureBackendSession(activeId);
       const result = await ingestPaper(startedAt, canonical);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info(t("toast.sessionChanged"));
+        toast.info(t("toast.sessionChanged"), { id: toastId });
         return;
       }
       // canonical is "arxiv:<id>" — strip the prefix for ReferenceItem.arxiv_id.
@@ -138,6 +146,7 @@ export function AttachPaperMenu() {
       const ref = buildReference(result, "arxiv", arxivId);
       appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
+        id: toastId,
         description: result.title,
       });
       handleOpenChange(false);
@@ -147,7 +156,7 @@ export function AttachPaperMenu() {
       // the toast keeps the unedited message for parity with PDF uploads.
       const inlineMessage = raw.replace(/^API \d+:\s*/, "");
       setArxivError(inlineMessage);
-      toast.error(t("toast.importFailed"), { description: raw });
+      toast.error(t("toast.importFailed"), { id: toastId, description: raw });
     } finally {
       setBusy(false);
     }
@@ -190,6 +199,13 @@ export function AttachPaperMenu() {
           {!hasActiveSession && (
             <p className="mt-2 text-xs text-muted-foreground">
               {t("attach.needSession")}
+            </p>
+          )}
+
+          {busy && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t("attach.processing")}
             </p>
           )}
 
