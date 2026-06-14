@@ -7,7 +7,13 @@ import pytest_asyncio
 
 from paperhub.agents.sl_emit import EmitResult, run_sl_emit
 from paperhub.db.migrate import apply_schema
-from paperhub.models.slide_domain import FigureDimensions, KeyFigureBundle
+from paperhub.models.slide_domain import (
+    DeckOutline,
+    FigureDimensions,
+    KeyFigureBundle,
+    OutlineSlide,
+    SourceSection,
+)
 
 
 @pytest_asyncio.fixture
@@ -243,6 +249,113 @@ async def test_emit_recompiles_after_audit_so_pdf_matches_finalized_tex(
     ) as cur:
         row = await cur.fetchone()
     assert row is not None and row[0] == 1
+
+
+def _outline_slide(idx: int, *, content_form: str, source_sections: list[SourceSection]) -> OutlineSlide:
+    return OutlineSlide(
+        slide_index=idx,
+        goal="g",
+        key_message="k",
+        content_form=content_form,
+        transition_from_prev="",
+        speaker_note_hint="",
+        paper_id=None,
+        figure_key=None,
+        grounding_chunk_ids=[],
+        support_excerpts=[],
+        source_sections=source_sections,
+    )
+
+
+@pytest.mark.asyncio
+async def test_emit_records_per_slide_source_sections_from_outline(
+    conn: aiosqlite.Connection, tmp_path: Path
+) -> None:
+    """North star: each content deck_slides row records the paper section(s) it
+    was written from, mapped from the outline (content frames -> non-title
+    outline slides, in order). The title frame is dropped by build_deck_slides;
+    a content slide with no grounding records ``[]``."""
+    import json
+
+    deck = (
+        "\\documentclass{beamer}\n\\begin{document}\n"
+        "\\begin{frame}{}\\titlepage\\end{frame}\n"
+        "\\begin{frame}{A}body of A\\end{frame}\n"
+        "\\begin{frame}{B}body of B\\end{frame}\n"
+        "\\end{document}\n"
+    )
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    (workdir / "deck.tex").write_text(deck, encoding="utf-8")
+
+    outline = DeckOutline(
+        talk_title="T",
+        narrative_pattern="synthesis",
+        audience_intent="a",
+        narrative_arc="arc",
+        slides=[
+            _outline_slide(0, content_form="title", source_sections=[]),
+            _outline_slide(
+                1,
+                content_form="bullets",
+                source_sections=[
+                    SourceSection(paper_id=7, section_name="Method", chunk_ids=[3, 4])
+                ],
+            ),
+            _outline_slide(2, content_form="bullets", source_sections=[]),
+        ],
+    )
+
+    result = await run_sl_emit(
+        session_id=1,
+        run_id=1,
+        deck_tex=deck,
+        workdir=workdir,
+        page_count=3,
+        status="ok",
+        contributing_paper_ids=[7],
+        figure_inventory={},
+        conn=conn,
+        outline=outline,
+    )
+
+    async with conn.execute(
+        "SELECT slide_index, source_sections_json FROM deck_slides "
+        "WHERE deck_id=? ORDER BY slide_index",
+        (result.deck_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    # 2 content frames (title dropped).
+    assert [r[0] for r in rows] == [0, 1]
+    # content frame 0 -> first non-title outline slide (paper 7 / Method / [3,4]).
+    assert json.loads(rows[0][1]) == [
+        {"paper_id": 7, "section_name": "Method", "chunk_ids": [3, 4]}
+    ]
+    # content frame 1 -> no-source outline slide.
+    assert rows[1][1] == "[]"
+
+
+@pytest.mark.asyncio
+async def test_emit_records_empty_source_sections_when_no_outline(
+    conn: aiosqlite.Connection, tmp_path: Path
+) -> None:
+    """EDIT/NOTES flows pass no outline; every row gets ``[]`` for shape
+    consistency."""
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    (workdir / "deck.tex").write_text(_DECK, encoding="utf-8")
+    result = await run_sl_emit(
+        session_id=1, run_id=1, deck_tex=_DECK, workdir=workdir,
+        page_count=2, status="ok", contributing_paper_ids=[],
+        figure_inventory={}, conn=conn,
+    )
+    async with conn.execute(
+        "SELECT source_sections_json FROM deck_slides WHERE deck_id=?",
+        (result.deck_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    assert rows
+    assert all(r[0] == "[]" for r in rows)
 
 
 @pytest.mark.asyncio

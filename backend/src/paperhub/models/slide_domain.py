@@ -208,6 +208,21 @@ class RoundAction(BaseModel):
     outline: DeckOutlineDraft | None = None  # when action == "finalize"
 
 
+class SourceSection(BaseModel):
+    """One (paper, section) the slide was grounded in, with the chunk ids read.
+
+    Persisted per slide into ``deck_slides.source_sections_json`` — the
+    traceability north star for slides: every page records the paper
+    section(s) it was written from.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: int
+    section_name: str
+    chunk_ids: list[int]
+
+
 class OutlineSlide(BaseModel):
     """A planned slide after deterministic resolution (grounding + index)."""
 
@@ -223,6 +238,9 @@ class OutlineSlide(BaseModel):
     figure_key: str | None
     grounding_chunk_ids: list[int]  # union of read_chunk_ids from each cited aim's PaperContextBundle
     support_excerpts: list[str] = Field(default_factory=list)  # gathered evidence for the drafter
+    # Per-slide source-section grounding for the deck_slides traceability north
+    # star — one entry per cited (paper, section) with that section's chunk ids.
+    source_sections: list[SourceSection] = Field(default_factory=list)
 
 
 class DeckOutline(BaseModel):

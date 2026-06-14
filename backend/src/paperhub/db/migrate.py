@@ -375,6 +375,21 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
     # -----------------------------------------------------------------------
 
     # -----------------------------------------------------------------------
+    # F6.2: Idempotent column-add for deck_slides.source_sections_json — the
+    # per-slide source-section grounding (JSON list of {paper_id, section_name,
+    # chunk_ids}) that satisfies the traceability north star: each content
+    # slide records the paper section(s) it was written from. NULL for rows
+    # created before this migration; sl_emit writes '[]' when no outline.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(deck_slides)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "source_sections_json" not in cols:
+        await conn.execute(
+            "ALTER TABLE deck_slides ADD COLUMN source_sections_json TEXT"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # F4.5 (v2.25): Drop decks.theme + add decks.current_version_id + create
     # slide_style_overrides (§III-7). Idempotent.
     #

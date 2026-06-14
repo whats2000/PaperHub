@@ -29,7 +29,7 @@ from typing import Protocol
 
 import aiosqlite
 
-from paperhub.models.slide_domain import KeyFigureBundle
+from paperhub.models.slide_domain import DeckOutline, KeyFigureBundle
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
     verify_and_fix_graphics,
@@ -445,6 +445,7 @@ async def run_sl_emit(
     conn: aiosqlite.Connection,
     speaker_notes: dict[int, str] | None = None,  # opt-in NOTES path
     recompile: RecompileFn | None = None,
+    outline: DeckOutline | None = None,  # GENERATE: per-slide source-section grounding
 ) -> EmitResult:
     # 1. Contract #1: figure-key audit.
     inventory_keys: set[str] = set(figure_inventory.keys())
@@ -596,17 +597,34 @@ async def run_sl_emit(
     # and mangled every note via the restore-by-index loop. Unifying both
     # paths on build_deck_slides eliminates the asymmetry.
     inputs = build_deck_slides(audited_tex, page_count)
+    # North-star traceability: map each CONTENT frame to its non-title outline
+    # slide (in order) so the row records the paper section(s) it was written
+    # from. build_deck_slides drops the leading title frame and re-indexes the
+    # remaining content frames 0..N-1, while the outline's slides include the
+    # title slide (content_form == "title") — so we filter the title slides out
+    # of the outline to align indices. A content frame with no matching outline
+    # slide (e.g. a revise-inserted frame) gets []; when no outline is supplied
+    # (EDIT/NOTES flows) every row gets [] for shape consistency.
+    content_outline = (
+        [s for s in outline.slides if s.content_form != "title"] if outline else []
+    )
     for s in inputs:
         note_text = (speaker_notes or {}).get(s.slide_index)
+        src_sections = (
+            content_outline[s.slide_index].source_sections
+            if s.slide_index < len(content_outline)
+            else []
+        )
+        source_sections_json = json.dumps([ss.model_dump() for ss in src_sections])
         await conn.execute(
             """
             INSERT INTO deck_slides (
                 deck_id, slide_index, frame_tex, note_text, note_language,
-                page_start, page_end
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+                page_start, page_end, source_sections_json
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
             """,
             (deck_id, s.slide_index, s.frame_tex, note_text,
-             s.page_start, s.page_end),
+             s.page_start, s.page_end, source_sections_json),
         )
     await conn.commit()
 

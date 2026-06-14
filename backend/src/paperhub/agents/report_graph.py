@@ -954,6 +954,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 figure_inventory=figure_inventory,
                 conn=deps.conn,
                 recompile=_recompile,
+                outline=outline,
             )
         await _flush_steps()
 

@@ -46,6 +46,7 @@ from paperhub.models.slide_domain import (
     PaperDigest,
     ReadRequest,
     RoundAction,
+    SourceSection,
 )
 from paperhub.tracing.tracer import Tracer
 
@@ -145,6 +146,7 @@ def _resolve_slide(
     # --- grounding from cites_reads ---
     chunk_ids: list[int] = []
     support_excerpts: list[str] = []
+    source_sections: list[SourceSection] = []
     for raw in s.cites_reads:
         pid_str, sep, section = raw.partition(":")
         section = section.strip()
@@ -163,6 +165,12 @@ def _resolve_slide(
             continue
         chunk_ids.extend(res.chunk_ids)
         support_excerpts.append(f"[{section}] {res.text[:400]}")
+        # Per-section grounding for the deck_slides traceability north star —
+        # one entry per successfully-resolved cited section (no cross-section
+        # dedup; chunk_ids stay as read).
+        source_sections.append(
+            SourceSection(paper_id=pid, section_name=section, chunk_ids=list(res.chunk_ids))
+        )
 
     # Cap to avoid prompt bloat in downstream drafter
     support_excerpts = support_excerpts[:_MAX_SUPPORT_EXCERPTS]
@@ -178,6 +186,7 @@ def _resolve_slide(
         figure_key=figure_key,
         grounding_chunk_ids=sorted(set(chunk_ids)),
         support_excerpts=support_excerpts,
+        source_sections=source_sections,
     )
 
 
