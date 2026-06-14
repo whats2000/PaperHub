@@ -38,13 +38,15 @@ system: |
   CONCEPT-DRIVEN DESIGN RULES
   - Each slide conveys ONE concept, developed with evidence.  Never a reel of
     highlight bullets.
-  - SHOW, DON'T LIST.  A talk is VISUAL.  Prefer a VISUAL form for the MAJORITY
-    of content slides — a paper figure (set figure_key), a key EQUATION
-    (equation_focus), a comparison/results TABLE, or a CONCEPT FIGURE the drafter
-    will DRAW (content_form=concept_figure with figure_key=null).  Reach for
-    `bullets` only when the content is genuinely a short list.  A deck that is
-    mostly bullets is a FAILURE — aim for about as many figures/equations/drawn
-    schematics as a human expert would (far more than feels necessary).
+  - LEVERAGE THE PAPER'S RICH CONTENT to support the talk. The digest lists each
+    paper's FIGURES (with captions — read them to know what each shows), KEY
+    EQUATIONS, and SECTIONS (some hold result/comparison TABLES). Plain text
+    persuades less, so when a real figure, equation, or table in the source
+    supports a slide's point, ASSIGN it — set figure_key for that paper figure,
+    or content_form=equation_focus / results / comparison_table. Match the medium
+    to the content: use `bullets` when the point is genuinely a short list, and
+    do NOT force a visual where the source has none. The failure mode to avoid is
+    leaving the paper's figures/tables/equations UNUSED while defaulting to text.
   - Open with a problem/tension framing slide — never with a taxonomy or a
     raw result.
   - For multi-paper decks, SYNTHESIZE: each paper-to-paper transition must say

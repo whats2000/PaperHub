@@ -346,6 +346,15 @@ async def test_clamp_bad_paper_figure_read(conn: aiosqlite.Connection) -> None:
                     figure_key="bad-key",             # NOT in digests
                     cites_reads=["73:NeverRead"],     # never fetched
                 ),
+                # A second valid content slide so the degenerate-outline gate
+                # (min 2 content slides) does NOT fire — this test exercises
+                # clamping, not degeneration.
+                OutlineSlideDraft(
+                    goal="Valid slide",
+                    key_message="ok",
+                    content_form="bullets",
+                    paper_id=73,
+                ),
             ],
         ),
     )
@@ -470,3 +479,36 @@ async def test_front_title_not_duplicated(conn: aiosqlite.Connection) -> None:
     assert result.outline.slides[0].content_form == "title"
 
 
+
+
+@pytest.mark.asyncio
+async def test_degenerate_outline_falls_back_to_minimal(conn: aiosqlite.Connection) -> None:
+    """An outline finalized with no content slides (just a title) is degenerate;
+    the gate replaces it with a per-paper minimal outline so base_write can't
+    ship a 2-page deck (live run 574)."""
+    finalize = RoundAction(
+        action="finalize",
+        narrative_pattern="synthesis",
+        outline=DeckOutlineDraft(
+            talk_title="T",
+            narrative_pattern="synthesis",
+            audience_intent="x",
+            narrative_arc="y",
+            slides=[OutlineSlideDraft(goal="Title", key_message="", content_form="title")],
+        ),
+    )
+    result = await run_sl_outline(
+        digests=_digests(), task_description="t", response_language="English",
+        target_slides=8, adapter=_ScriptedAdapter([finalize]), tracer=_tracer(conn),
+        model="m", read_fn=_ReadTracker({}), max_rounds=4,
+    )
+    structural = {"title", "section_divider", "agenda"}
+    content = [s for s in result.outline.slides if s.content_form not in structural]
+    assert len(content) >= 3  # minimal fallback covers both digest papers + synthesis
+
+    async with conn.execute(
+        "SELECT result_summary_json FROM tool_calls ORDER BY step_index DESC LIMIT 1"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert any("outline-degenerate" in d for d in json.loads(row[0])["dropped"])

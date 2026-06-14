@@ -90,12 +90,22 @@ def _format_digest_block(digests: list[PaperDigest]) -> str:
             else ""
         )
         section_lines = "\n".join(f"- {s.name}: {s.insight}" for s in d.sections) or "- (none)"
-        figs = ", ".join(f.key for f in d.figures) or "(none)"
+        # Surface each figure's CAPTION, not just its key — without the caption
+        # the outline can't tell what a figure shows and ignores the paper's
+        # figures entirely (they were opaque keys). The caption lets the outline
+        # leverage the right figure to support each slide.
+        fig_lines = (
+            "\n".join(
+                f"  - {f.key}: {f.caption}" if f.caption else f"  - {f.key}"
+                for f in d.figures
+            )
+            or "  (none)"
+        )
         block = (
             f"### paper_id={d.paper_id}: {d.title}{survey_tag}\n"
             f"Abstract: {d.abstract[:600]}\n"
             f"Section insights:\n{section_lines}\n"
-            f"Figure keys: {figs}"
+            f"Figures (key: what it shows):\n{fig_lines}"
         )
         if d.key_equations:
             eqs = "\n".join(
@@ -463,6 +473,33 @@ async def run_sl_outline(
             known_fig_keys=known_fig_keys,
             narrative_pattern=narrative_pattern,
         )
+
+        # Degenerate-output gate: a finalized outline with almost no CONTENT
+        # slides (just title/divider/agenda) is a failure — base_write renders 1:1,
+        # so it would ship a 2-page deck (live run 574). Fall back to a per-paper
+        # minimal outline that at least covers every paper. The threshold scales
+        # with the target but stays low so it only catches catastrophic
+        # degeneration, never normal variation.
+        _structural = {"title", "section_divider", "agenda"}
+        content_slides = [s for s in outline.slides if s.content_form not in _structural]
+        # Fixed low floor: this is a CATASTROPHIC backstop (run 574 finalized with
+        # ZERO content slides), not a depth enforcer — depth is the prompt's job.
+        # A real talk always has >= 2 content slides; only a degenerate outline
+        # falls below.
+        min_content = 2
+        if len(content_slides) < min_content:
+            dropped.append(
+                f"outline-degenerate:{len(content_slides)}-content"
+                f"<{min_content}:fallback-minimal"
+            )
+            outline, fb_dropped = _resolve_outline(
+                _minimal_outline(digests, task_description),
+                reads_by_key=reads_by_key,
+                known_paper_ids=known_paper_ids,
+                known_fig_keys=known_fig_keys,
+                narrative_pattern="synthesis",
+            )
+            dropped.extend(fb_dropped)
 
         step.record_result(
             {
