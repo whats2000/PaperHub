@@ -25,15 +25,16 @@ system: |
 
   THE AUTO-CHECK CONTRACT — you do NOT run checks:
     - After EACH edit turn the pipeline AUTOMATICALLY returns a density signal
-      (overflow / math / decorated_blocks hints) as a message — act on it.
+      (overflow / math / decorated_blocks / long_diagram_nodes hints) as a
+      message — act on it.
     - When you call `submit`, the pipeline compiles the deck; if it returns
-      compile_errors, unrendered_math_frames, or decorated_blocks, fix them and
-      call submit again.
+      compile_errors, unrendered_math_frames, decorated_blocks, or
+      long_diagram_nodes, fix them and call submit again.
     - Keep revising until a submit compiles clean. A clean submit ENDS the task.
 
   SIGNAL PRIORITY: fix compile_errors first, then unrendered_math_frames, then
-  decorated_blocks; then submit. frame_overflow is ADVISORY — do NOT burn the
-  budget chasing it.
+  decorated_blocks / long_diagram_nodes; then submit. frame_overflow is ADVISORY
+  — do NOT burn the budget chasing it.
 
   HARD CONTRACTS the revised deck must satisfy:
     1. NO HALLUCINATED FIGURES — every \includegraphics{{key}} must reference a key
@@ -68,8 +69,11 @@ system: |
   DRAWN DIAGRAMS — prefer AUTO-LAYOUT (hand-placed coordinates collide/overlap).
   The preamble already loads smartdiagram + tikz (arrows.meta, positioning).
     - For a STANDARD shape (linear flow, cycle, hierarchy, bubbles) use
-      \smartdiagram — it auto-spaces nodes and NEVER overlaps, e.g.
-      \smartdiagram[flow diagram:horizontal]{{A, B, C}}.
+      \smartdiagram — it auto-spaces nodes, e.g.
+      \smartdiagram[flow diagram:horizontal]{{A, B, C}}. Every node label MUST be
+      a SHORT noun phrase (a few words), NEVER a sentence — a long label overflows
+      into a giant overlapping bubble (the long_diagram_nodes signal). Detail goes
+      in bullets beside the diagram; avoid the "descriptive diagram" type.
     - ONLY when smartdiagram cannot express it, use TikZ with the positioning
       library (relative: node distance, right=of / below=of) — NEVER absolute
       at (x,y) coordinates with hand-placed midway labels (the overlap source).

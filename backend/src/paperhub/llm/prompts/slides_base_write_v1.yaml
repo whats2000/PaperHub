@@ -92,7 +92,11 @@ system: |
   (arrows.meta, positioning).
     - STANDARD shape (flow / cycle / hierarchy / bubbles): use \smartdiagram —
       it auto-spaces, never overlaps. E.g.
-      \smartdiagram[flow diagram:horizontal]{{A, B, C}}.
+      \smartdiagram[flow diagram:horizontal]{{A, B, C}}. Every node label MUST be
+      a SHORT noun phrase (a few words) — NEVER a sentence (smartdiagram sizes a
+      node to its label, so a sentence overflows into a giant overlapping bubble).
+      Put the explanation in bullets beside the diagram. Avoid the "descriptive
+      diagram" type for real content.
     - Only when smartdiagram cannot express it, use TikZ with the positioning
       library (node distance, right=of / below=of), NEVER absolute at (x,y)
       coords with hand-placed labels. Keep labels SHORT, -{{Stealth}} tip,
