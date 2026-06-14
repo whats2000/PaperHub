@@ -1,4 +1,9 @@
-"""F4.5 Phase 8.2 — slide_agent tool-call dispatch loop tests."""
+"""F6.2 slide_agent — REVISE-ONLY tool-call dispatch loop tests.
+
+The agent palette is EDIT-only + ``submit``. The pipeline (this loop) runs the
+deterministic checks: density after every edit turn, compile on submit. The
+agent never elects a check tool — the loop feeds it.
+"""
 from __future__ import annotations
 
 import json
@@ -74,39 +79,92 @@ _GOOD_DECK = (
 )
 
 
+def _clean_check() -> CompileCheckResult:
+    return CompileCheckResult(
+        ok=True,
+        page_count=1,
+        compile_errors=[],
+        frame_overflow=[],
+        unrendered_math_frames=[],
+    )
+
+
 def test_default_tool_call_budget_is_30():
     from paperhub.agents.slide_agent import DEFAULT_MAX_TOOL_CALLS
     assert DEFAULT_MAX_TOOL_CALLS == 30
 
 
+def test_tool_palette_is_edit_only_plus_submit() -> None:
+    """The palette must NOT contain the removed must-do step tools; it has the
+    EDIT tools + read_section + submit."""
+    from paperhub.agents.slide_agent import _tool_schemas
+
+    names = {t["function"]["name"] for t in _tool_schemas()}
+    assert names == {
+        "read_section",
+        "replace_frame",
+        "insert_frame_after",
+        "delete_frame",
+        "replace_preamble",
+        "submit",
+    }
+    # The removed must-do steps are guards now, never tools.
+    assert not (
+        names & {"initial_draft", "compile_check", "density_check", "done"}
+    )
+
+
 @pytest.mark.asyncio
-async def test_happy_path_initial_draft_then_compile_then_done(
+async def test_requires_starting_deck() -> None:
+    """Revise-only: an empty / None starting deck is a programmer error."""
+    bundles = [_bundle()]
+    with pytest.raises(ValueError, match="revise-only"):
+        await run_slide_agent(
+            bundles=bundles,
+            task_description="x",
+            response_language="en",
+            resolved_preamble=r"\documentclass{beamer}",
+            workdir=None,  # type: ignore[arg-type]
+            existing_deck_tex=None,
+            figure_inventory={},
+            memory_context="",
+            tracer=None,  # type: ignore[arg-type]
+            model="stub",
+            llm_acompletion=AsyncMock(),
+        )
+
+    with pytest.raises(ValueError, match="revise-only"):
+        await run_slide_agent(
+            bundles=bundles,
+            task_description="x",
+            response_language="en",
+            resolved_preamble=r"\documentclass{beamer}",
+            workdir=None,  # type: ignore[arg-type]
+            existing_deck_tex="   ",
+            figure_inventory={},
+            memory_context="",
+            tracer=None,  # type: ignore[arg-type]
+            model="stub",
+            llm_acompletion=AsyncMock(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_submit_triggers_compile_and_accepts_when_clean(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
 ) -> None:
-    """Agent calls initial_draft → compile_check (ok=True) → done() → returns."""
+    """Agent issues submit → the pipeline compiles → clean → satisfied=True."""
     bundles = [_bundle()]
     workdir = tmp_path / "slides"
     workdir.mkdir()
 
     llm = AsyncMock()
-    llm.side_effect = [
-        _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK}),
-        _tool_call_msg("compile_check", {}),
-        _tool_call_msg("done", {}),
-    ]
+    llm.side_effect = [_tool_call_msg("submit", {})]
 
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
-        return CompileCheckResult(
-            ok=True,
-            page_count=1,
-            compile_errors=[],
-            frame_overflow=[],
-            unrendered_math_frames=[],
-        )
-
-    monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
-    )
+    compile_spy = AsyncMock(return_value=_clean_check())
+    density_spy = AsyncMock(return_value=_clean_check())
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_compile_check", compile_spy)
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_density_check", density_spy)
 
     result = await run_slide_agent(
         bundles=bundles,
@@ -114,7 +172,7 @@ async def test_happy_path_initial_draft_then_compile_then_done(
         response_language="English",
         resolved_preamble=r"\documentclass{beamer}",
         workdir=workdir,
-        existing_deck_tex=None,
+        existing_deck_tex=_GOOD_DECK,
         figure_inventory={},
         memory_context="",
         tracer=fake_tracer,
@@ -124,29 +182,143 @@ async def test_happy_path_initial_draft_then_compile_then_done(
     assert isinstance(result, SlideAgentResult)
     assert result.deck_tex == _GOOD_DECK
     assert result.satisfied is True
-    assert result.tool_calls_used == 3
+    # Compile ran exactly once (on submit); density never ran (no edit turn).
+    assert compile_spy.await_count == 1
+    assert density_spy.await_count == 0
+    assert result.last_compile_check is not None and result.last_compile_check.ok
 
 
 @pytest.mark.asyncio
-async def test_done_rejected_when_unrendered_math_frames_present(
+async def test_density_runs_automatically_after_edit_turn(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
 ) -> None:
-    """compile_check returns unrendered_math; done() is rejected; agent must
-    keep going (here it gives up by emitting a no-tool-calls msg → returns
-    satisfied=False)."""
+    """After an edit turn the pipeline runs density (no agent tool call) and
+    feeds the signals back to the model as a follow-up user message."""
+    bundles = [_bundle()]
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+
+    new_frame = r"\begin{frame}{A}edited\end{frame}"
+    llm = AsyncMock()
+    llm.side_effect = [
+        _tool_call_msg("replace_frame", {"frame_index": 0, "new_frame_tex": new_frame}),
+        _tool_call_msg("submit", {}),
+    ]
+
+    density_spy = AsyncMock(return_value=_clean_check())
+    compile_spy = AsyncMock(return_value=_clean_check())
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_density_check", density_spy)
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_compile_check", compile_spy)
+
+    result = await run_slide_agent(
+        bundles=bundles,
+        task_description="x",
+        response_language="en",
+        resolved_preamble=r"\documentclass{beamer}",
+        workdir=workdir,
+        existing_deck_tex=_GOOD_DECK,
+        figure_inventory={},
+        memory_context="",
+        tracer=fake_tracer,
+        model="stub",
+        llm_acompletion=llm,
+    )
+    # Density ran once (after the edit turn), compile once (on submit).
+    assert density_spy.await_count == 1
+    assert compile_spy.await_count == 1
+    assert result.satisfied is True
+    assert new_frame in result.deck_tex
+
+    # The density signals appeared as a user message between the two LLM calls.
+    second_call_messages = llm.call_args_list[1].kwargs["messages"]
+    assert any(
+        m["role"] == "user" and "density" in (m.get("content") or "")
+        for m in second_call_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_failing_compile_pushes_errors_back_and_continues(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
+) -> None:
+    """submit → compile FAILS (compile_errors) → errors are pushed back as a
+    message, the loop continues (agent gets another turn), satisfied stays
+    False on that submit."""
     bundles = [_bundle()]
     workdir = tmp_path / "slides"
     workdir.mkdir()
 
     llm = AsyncMock()
     llm.side_effect = [
-        _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK}),
-        _tool_call_msg("compile_check", {}),
-        _tool_call_msg("done", {}),  # rejected
-        _final_msg(),  # agent gives up
+        _tool_call_msg("submit", {}),  # first submit → rejected
+        _tool_call_msg(
+            "replace_frame",
+            {"frame_index": 0, "new_frame_tex": r"\begin{frame}{A}fixed\end{frame}"},
+        ),
+        _tool_call_msg("submit", {}),  # second submit → clean
     ]
 
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
+    call_count = {"n": 0}
+
+    async def fake_compile(**kw: Any) -> CompileCheckResult:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return CompileCheckResult(
+                ok=False,
+                page_count=0,
+                compile_errors=["! Undefined control sequence."],
+                frame_overflow=[],
+                unrendered_math_frames=[],
+            )
+        return _clean_check()
+
+    density_spy = AsyncMock(return_value=_clean_check())
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_compile_check", fake_compile)
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_density_check", density_spy)
+
+    result = await run_slide_agent(
+        bundles=bundles,
+        task_description="x",
+        response_language="en",
+        resolved_preamble=r"\documentclass{beamer}",
+        workdir=workdir,
+        existing_deck_tex=_GOOD_DECK,
+        figure_inventory={},
+        memory_context="",
+        tracer=fake_tracer,
+        model="stub",
+        llm_acompletion=llm,
+    )
+    # The agent made a FURTHER LLM call after the failing submit.
+    assert llm.await_count == 3
+    assert result.satisfied is True  # second submit was clean
+    assert "fixed" in result.deck_tex
+
+    # The compile errors were pushed back as a user message after the 1st submit.
+    second_call_messages = llm.call_args_list[1].kwargs["messages"]
+    assert any(
+        m["role"] == "user" and "Undefined control sequence" in (m.get("content") or "")
+        for m in second_call_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_failing_compile_unrendered_math_pushes_back_and_continues(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
+) -> None:
+    """submit → compile reports unrendered_math_frames → pushed back, loop
+    continues (no done acceptance on that submit)."""
+    bundles = [_bundle()]
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+
+    llm = AsyncMock()
+    llm.side_effect = [
+        _tool_call_msg("submit", {}),  # rejected (math)
+        _final_msg(),  # agent gives up → ships imperfect
+    ]
+
+    async def fake_compile(**kw: Any) -> CompileCheckResult:
         return CompileCheckResult(
             ok=False,
             page_count=1,
@@ -164,8 +336,10 @@ async def test_done_rejected_when_unrendered_math_frames_present(
             ],
         )
 
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_compile_check", fake_compile)
     monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
+        "paperhub.agents.slide_agent.run_density_check",
+        AsyncMock(return_value=_clean_check()),
     )
 
     result = await run_slide_agent(
@@ -174,7 +348,7 @@ async def test_done_rejected_when_unrendered_math_frames_present(
         response_language="en",
         resolved_preamble=r"\documentclass{beamer}",
         workdir=workdir,
-        existing_deck_tex=None,
+        existing_deck_tex=_GOOD_DECK,
         figure_inventory={},
         memory_context="",
         tracer=fake_tracer,
@@ -185,80 +359,11 @@ async def test_done_rejected_when_unrendered_math_frames_present(
     assert result.last_compile_check is not None
     assert len(result.last_compile_check.unrendered_math_frames) == 1
 
-
-@pytest.mark.asyncio
-async def test_replace_frame_then_done_resolves_math_violation(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
-) -> None:
-    """Realistic remediation: initial_draft → compile (math missing) →
-    replace_frame → compile (clean) → done() (accepted)."""
-    bundles = [_bundle()]
-    workdir = tmp_path / "slides"
-    workdir.mkdir()
-
-    llm = AsyncMock()
-    llm.side_effect = [
-        _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK}),
-        _tool_call_msg("compile_check", {}),
-        _tool_call_msg(
-            "replace_frame",
-            {
-                "frame_index": 0,
-                "new_frame_tex": r"\begin{frame}{A}\[ \Phi = 1 \]\end{frame}",
-            },
-        ),
-        _tool_call_msg("compile_check", {}),
-        _tool_call_msg("done", {}),
-    ]
-
-    call_count = {"n": 0}
-
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return CompileCheckResult(
-                ok=False,
-                page_count=1,
-                compile_errors=[],
-                frame_overflow=[],
-                unrendered_math_frames=[
-                    UnrenderedMathFrame(
-                        frame_index=0,
-                        frame_title="A",
-                        matched_equation_role="r",
-                        matched_equation_latex=r"\Phi=1",
-                        paper_idx=0,
-                        recommendation="x",
-                    )
-                ],
-            )
-        return CompileCheckResult(
-            ok=True,
-            page_count=1,
-            compile_errors=[],
-            frame_overflow=[],
-            unrendered_math_frames=[],
-        )
-
-    monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
+    second_call_messages = llm.call_args_list[1].kwargs["messages"]
+    assert any(
+        m["role"] == "user" and "unrendered_math" in (m.get("content") or "")
+        for m in second_call_messages
     )
-
-    result = await run_slide_agent(
-        bundles=bundles,
-        task_description="x",
-        response_language="en",
-        resolved_preamble=r"\documentclass{beamer}",
-        workdir=workdir,
-        existing_deck_tex=None,
-        figure_inventory={},
-        memory_context="",
-        tracer=fake_tracer,
-        model="stub",
-        llm_acompletion=llm,
-    )
-    assert result.satisfied is True
-    assert "\\Phi = 1" in result.deck_tex
 
 
 @pytest.mark.asyncio
@@ -266,10 +371,7 @@ async def test_slide_agent_retries_on_transient_gemini_disconnect(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
 ) -> None:
     """First acompletion raises a transient ``Server disconnected`` error →
-    the retry helper kicks in → next call succeeds. Real-API Run 341 / case
-    5 (slides-multi-zh) hit ``litellm.APIConnectionError`` mid-loop; the
-    global ``litellm.num_retries=3`` did not catch it.
-    """
+    the retry helper kicks in → next call succeeds (submit, clean compile)."""
     bundles = [_bundle()]
     workdir = tmp_path / "slides"
     workdir.mkdir()
@@ -281,32 +383,22 @@ async def test_slide_agent_retries_on_transient_gemini_disconnect(
 
     async def flaky_llm(**kwargs: Any) -> Any:
         call_count["n"] += 1
-        # First call: simulate Gemini server disconnect.
         if call_count["n"] == 1:
             raise _Disconnect("Server disconnected")
-        # Second call (the retry): drive a normal happy path.
-        if call_count["n"] == 2:
-            return _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK})
-        if call_count["n"] == 3:
-            return _tool_call_msg("compile_check", {})
-        return _tool_call_msg("done", {})
+        return _tool_call_msg("submit", {})
 
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
-        return CompileCheckResult(
-            ok=True,
-            page_count=1,
-            compile_errors=[],
-            frame_overflow=[],
-            unrendered_math_frames=[],
-        )
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent.run_compile_check",
+        AsyncMock(return_value=_clean_check()),
+    )
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent.run_density_check",
+        AsyncMock(return_value=_clean_check()),
+    )
 
-    # Skip the real backoff so the test is fast.
     async def no_sleep(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
-    )
     monkeypatch.setattr("paperhub.agents.slide_agent.asyncio.sleep", no_sleep)
 
     result = await run_slide_agent(
@@ -315,7 +407,7 @@ async def test_slide_agent_retries_on_transient_gemini_disconnect(
         response_language="en",
         resolved_preamble=r"\documentclass{beamer}",
         workdir=workdir,
-        existing_deck_tex=None,
+        existing_deck_tex=_GOOD_DECK,
         figure_inventory={},
         memory_context="",
         tracer=fake_tracer,
@@ -324,7 +416,6 @@ async def test_slide_agent_retries_on_transient_gemini_disconnect(
     )
 
     assert result.satisfied is True
-    # At least one retry happened (first call raised, second succeeded).
     assert call_count["n"] >= 2
 
 
@@ -332,45 +423,26 @@ async def test_slide_agent_retries_on_transient_gemini_disconnect(
 async def test_tool_call_budget_exhaustion_ships_imperfect(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
 ) -> None:
-    """If the agent burns through the tool-call budget without done(), ship
-    whatever deck state we have."""
+    """If the agent burns through the tool-call budget without a clean submit,
+    ship whatever deck state we have (the starting deck)."""
     bundles = [_bundle()]
     workdir = tmp_path / "slides"
     workdir.mkdir()
 
-    overflow_signal = FrameOverflowSignal(
-        frame_index=0,
-        frame_title="A",
-        page_number=1,
-        matched_layout="text_only",
-        body_token_count=300,
-        text_budget_tokens=100,
-        overage_tokens=200,
-        figure_footprint_cm2=0,
-        layout_aspect_mismatch=False,
-        exceeds_canvas_budget=True,
-        pdflatex_overfull_pt=0.0,
-        recommendation="tighten",
-        split_hint="no_hint",
-    )
-
-    # initial_draft once, then a long parade of compile_check calls.
-    msgs = [_tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK})]
-    msgs.extend([_tool_call_msg("compile_check", {})] * 20)
+    new_frame = r"\begin{frame}{A}edited\end{frame}"
+    msgs = [
+        _tool_call_msg("replace_frame", {"frame_index": 0, "new_frame_tex": new_frame})
+    ] * 20
     llm = AsyncMock()
     llm.side_effect = msgs
 
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
-        return CompileCheckResult(
-            ok=True,
-            page_count=1,
-            compile_errors=[],
-            frame_overflow=[overflow_signal],
-            unrendered_math_frames=[],
-        )
-
     monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
+        "paperhub.agents.slide_agent.run_density_check",
+        AsyncMock(return_value=_clean_check()),
+    )
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent.run_compile_check",
+        AsyncMock(return_value=_clean_check()),
     )
 
     result = await run_slide_agent(
@@ -379,7 +451,7 @@ async def test_tool_call_budget_exhaustion_ships_imperfect(
         response_language="en",
         resolved_preamble=r"\documentclass{beamer}",
         workdir=workdir,
-        existing_deck_tex=None,
+        existing_deck_tex=_GOOD_DECK,
         figure_inventory={},
         memory_context="",
         tracer=fake_tracer,
@@ -387,9 +459,9 @@ async def test_tool_call_budget_exhaustion_ships_imperfect(
         llm_acompletion=llm,
         max_tool_calls=8,
     )
-    # Imperfect-deck-ship at budget exhaustion (frame_overflow is advisory).
+    # No submit → never satisfied; ships the (edited) deck at budget exhaustion.
     assert result.satisfied is False
-    assert result.deck_tex == _GOOD_DECK
+    assert new_frame in result.deck_tex
     assert result.tool_calls_used == 8
 
 
@@ -416,11 +488,8 @@ def _make_fast_retry_helper(max_attempts: int) -> Any:
 async def test_slide_agent_ships_imperfect_when_transient_retry_exhausts(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
 ) -> None:
-    """All retry attempts fail with transient error AFTER a successful
-    initial_draft → ship the imperfect deck (satisfied=False), don't raise.
-    Real-API Run 351 / case 5 burned 183s on Gemini disconnects after a
-    deck was already drafted; this verifies the ship-imperfect fallback.
-    """
+    """All retry attempts fail with transient error → ship the starting deck
+    (satisfied=False), don't raise. The deck always starts non-empty now."""
     bundles = [_bundle()]
     workdir = tmp_path / "slides"
     workdir.mkdir()
@@ -428,31 +497,17 @@ async def test_slide_agent_ships_imperfect_when_transient_retry_exhausts(
     class _Disconnect(Exception):
         pass
 
-    call_count = {"n": 0}
-
     async def flaky_llm(**kwargs: Any) -> Any:
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            # First call: initial_draft succeeds.
-            return _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK})
-        # Every subsequent call fails with a transient error — the retry
-        # helper exhausts its budget and re-raises. The slide_agent's catch
-        # should detect deck_tex != "" and ship imperfect.
         raise _Disconnect("Server disconnected")
 
-    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
-        return CompileCheckResult(
-            ok=True,
-            page_count=1,
-            compile_errors=[],
-            frame_overflow=[],
-            unrendered_math_frames=[],
-        )
-
     monkeypatch.setattr(
-        "paperhub.agents.slide_agent.run_compile_check", fake_compile_check
+        "paperhub.agents.slide_agent.run_compile_check",
+        AsyncMock(return_value=_clean_check()),
     )
-    # Reduce retry budget for fast test execution.
+    monkeypatch.setattr(
+        "paperhub.agents.slide_agent.run_density_check",
+        AsyncMock(return_value=_clean_check()),
+    )
     monkeypatch.setattr(
         "paperhub.agents.slide_agent._acompletion_with_retry",
         _make_fast_retry_helper(max_attempts=2),
@@ -464,7 +519,7 @@ async def test_slide_agent_ships_imperfect_when_transient_retry_exhausts(
         response_language="en",
         resolved_preamble=r"\documentclass{beamer}",
         workdir=workdir,
-        existing_deck_tex=None,
+        existing_deck_tex=_GOOD_DECK,
         figure_inventory={},
         memory_context="",
         tracer=fake_tracer,
@@ -473,45 +528,7 @@ async def test_slide_agent_ships_imperfect_when_transient_retry_exhausts(
     )
 
     assert result.satisfied is False
-    assert result.deck_tex == _GOOD_DECK  # The partial deck survived.
-    assert result.tool_calls_used >= 1
-
-
-@pytest.mark.asyncio
-async def test_slide_agent_raises_when_transient_with_no_deck(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
-) -> None:
-    """Transient error BEFORE any deck state exists (initial_draft never
-    landed) → re-raise (nothing to ship)."""
-    bundles = [_bundle()]
-    workdir = tmp_path / "slides"
-    workdir.mkdir()
-
-    class _Disconnect(Exception):
-        pass
-
-    async def always_fails_llm(**kwargs: Any) -> Any:
-        raise _Disconnect("Server disconnected")
-
-    monkeypatch.setattr(
-        "paperhub.agents.slide_agent._acompletion_with_retry",
-        _make_fast_retry_helper(max_attempts=2),
-    )
-
-    with pytest.raises(Exception, match="Server disconnected"):
-        await run_slide_agent(
-            bundles=bundles,
-            task_description="x",
-            response_language="en",
-            resolved_preamble=r"\documentclass{beamer}",
-            workdir=workdir,
-            existing_deck_tex=None,
-            figure_inventory={},
-            memory_context="",
-            tracer=fake_tracer,
-            model="stub",
-            llm_acompletion=always_fails_llm,
-        )
+    assert result.deck_tex == _GOOD_DECK  # the starting deck survived
 
 
 def test_acompletion_retry_default_attempts_is_5() -> None:
@@ -532,7 +549,7 @@ async def test_read_section_fetches_verbatim_section_text(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     """read_section returns the section's verbatim flattened-LaTeX text + chunk
-    ids so the drafter can copy an exact table/equation."""
+    ids so the agent can copy an exact table/equation."""
     from paperhub.agents import slide_agent as sa
     from paperhub.agents.sl_read import ReadResult
     from paperhub.agents.slide_agent_tools import DeckState
@@ -545,19 +562,18 @@ async def test_read_section_fetches_verbatim_section_text(
     monkeypatch.setattr(sa, "read_section_chunks", fake_read)
 
     state = DeckState(deck_tex="", preamble="", workdir=None)
-    _, result_str, check, done = await sa._dispatch_tool_call(
+    _, result_str, check = await sa._dispatch_tool_call(
         name="read_section",
         args={"paper_id": 1, "section_name": "Results"},
         state=state, bundles=[_bundle()], figure_inventory={},
         workdir=tmp_path, session_id=None, conn=object(), script="",
-        pending_done_check=None,
     )
     payload = json.loads(result_str)
     assert payload["paper_id"] == 1 and payload["section_name"] == "Results"
     assert "tabular" in payload["text"]
     assert payload["chunk_ids"] == [7, 8]
     assert payload["truncated"] is False
-    assert check is None and done is False
+    assert check is None
 
 
 async def test_read_section_rejects_paper_not_in_deck(tmp_path: Any) -> None:
@@ -567,12 +583,34 @@ async def test_read_section_rejects_paper_not_in_deck(tmp_path: Any) -> None:
     from paperhub.agents.slide_agent_tools import DeckState
 
     state = DeckState(deck_tex="", preamble="", workdir=None)
-    _, result_str, check, done = await sa._dispatch_tool_call(
+    _, result_str, check = await sa._dispatch_tool_call(
         name="read_section",
         args={"paper_id": 999, "section_name": "Results"},
         state=state, bundles=[_bundle()], figure_inventory={},
         workdir=tmp_path, session_id=None, conn=object(), script="",
-        pending_done_check=None,
     )
     assert "not in this deck" in json.loads(result_str)["error"]
-    assert check is None and done is False
+    assert check is None
+
+
+async def test_submit_dispatch_returns_neutral_placeholder(tmp_path: Any) -> None:
+    """submit is handled by the loop, not dispatch — dispatch returns a neutral
+    placeholder so the tool-call protocol stays valid."""
+    from paperhub.agents import slide_agent as sa
+    from paperhub.agents.slide_agent_tools import DeckState
+
+    state = DeckState(deck_tex=_GOOD_DECK, preamble="", workdir=tmp_path)
+    new_state, result_str, check = await sa._dispatch_tool_call(
+        name="submit",
+        args={},
+        state=state, bundles=[_bundle()], figure_inventory={},
+        workdir=tmp_path, session_id=None, conn=None, script="",
+    )
+    payload = json.loads(result_str)
+    assert payload.get("submitted") is True
+    assert check is None
+    assert new_state.deck_tex == _GOOD_DECK  # dispatch did NOT compile/mutate
+
+
+# Suppress unused-import lint for FrameOverflowSignal kept for parity helpers.
+_ = FrameOverflowSignal

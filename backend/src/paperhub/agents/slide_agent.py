@@ -1,15 +1,20 @@
-"""F4.5 slide_agent — THE monolithic tool-using agent (stage 2 of 3).
+"""F6.2 slide_agent — the REVISE-ONLY tool-using agent (stage 2 of 3).
 
-Owns the deck across draft AND revise. Receives PaperContextBundles + resolved
-preamble + canvas budget + layout examples; emits the final deck.tex via a
-bounded tool-call loop.
+A deterministic Base Writer drafts the deck first; this agent only REVISES it.
+It requires a non-empty starting deck and receives PaperContextBundles +
+resolved preamble + canvas budget + layout examples; it emits the revised
+deck.tex via a bounded tool-call loop.
 
-Tool-call budget: default 30 calls (initial_draft + 1-2 compile_checks +
-10-20 diff edits + done = ~20-25 calls for a real-API run). Raised from 15
-after the real-API benchmark Run 342-346 saw all 5 cases hit the 15-call
-ceiling without successfully reaching done(). Budget exhaustion ships the
-current deck state with satisfied=False — same fallback posture as the
-existing compile_with_revise's imperfect-deck-shipping.
+The agent's palette is EDIT-only (replace/insert/delete frame, replace
+preamble, read_section) + ``submit``. The must-do verification steps are
+PIPELINE GUARDS, not electable tools: this loop deterministically runs the
+density check after every edit turn and the compile check on ``submit``. The
+agent decides WHAT to edit; the pipeline decides WHEN to verify (always).
+
+Tool-call budget: default 30 calls (10-20 diff edits + submit cycles for a
+real-API run). Budget exhaustion ships the current deck state with
+satisfied=False — same fallback posture as compile_with_revise's
+imperfect-deck-shipping.
 """
 from __future__ import annotations
 
@@ -30,7 +35,6 @@ from paperhub.agents.slide_agent_compile import (
 from paperhub.agents.slide_agent_tools import (
     DeckState,
     apply_delete_frame,
-    apply_initial_draft,
     apply_insert_frame_after,
     apply_replace_frame,
     apply_replace_preamble,
@@ -117,50 +121,6 @@ class SlideAgentResult:
 
 def _tool_schemas() -> list[dict[str, Any]]:
     return [
-        {
-            "type": "function",
-            "function": {
-                "name": "initial_draft",
-                "description": (
-                    "Write the complete deck.tex (preamble + every frame). "
-                    "Call ONCE at start when no deck exists."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"deck_tex": {"type": "string"}},
-                    "required": ["deck_tex"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "compile_check",
-                "description": (
-                    "Run pdflatex + overflow + math-frame audit. Returns "
-                    "structured signals."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "density_check",
-                "description": (
-                    "Run overflow + math audit WITHOUT pdflatex (speculative)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"deck_tex_excerpt": {"type": "string"}},
-                    "required": [],
-                },
-            },
-        },
         {
             "type": "function",
             "function": {
@@ -251,10 +211,12 @@ def _tool_schemas() -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "done",
+                "name": "submit",
                 "description": (
-                    "Signal satisfied. Rejected if compile_errors or "
-                    "unrendered_math_frames are present."
+                    "Signal the deck is complete. The pipeline then compiles "
+                    "it; if there are compile errors or unrendered-math frames, "
+                    "they are returned to you to fix and you continue revising. "
+                    "Only call submit when you believe the deck is done."
                 ),
                 "parameters": {
                     "type": "object",
@@ -384,40 +346,24 @@ async def _dispatch_tool_call(
     session_id: int | None,
     conn: Any,
     script: str,
-    pending_done_check: CompileCheckResult | None,
-) -> tuple[DeckState, str, CompileCheckResult | None, bool]:
-    """Apply one tool call.
+) -> tuple[DeckState, str, CompileCheckResult | None]:
+    """Apply one EDIT tool call (or the ``submit`` placeholder).
 
-    Returns ``(new_state, result_str, compile_check_or_None, accepted_done)``.
-
-    ``accepted_done=True`` ONLY when ``name=='done'`` and the last
-    ``compile_check`` passed the gate (``compile_errors`` empty AND
-    ``unrendered_math_frames`` empty).
+    Returns ``(new_state, result_str, compile_check_or_None)``. The third
+    element is vestigial (always ``None``): the must-do verification steps
+    (compile / density) are pipeline guards owned by the loop, not tool
+    dispatch. ``submit`` is handled by the loop too — dispatch returns a
+    neutral placeholder for it so the per-call tool-response message stays
+    valid.
     """
     try:
-        if name == "initial_draft":
-            state = apply_initial_draft(state, deck_tex=str(args["deck_tex"]))
-            return state, json.dumps({"ok": True, "deck_set": True}), None, False
-        if name == "compile_check":
-            check = await run_compile_check(
-                deck_tex=state.deck_tex,
-                bundles=bundles,
-                figure_inventory=figure_inventory,
-                workdir=workdir,
-                script=script,  # type: ignore[arg-type]
-            )
-            return state, check.model_dump_json(), check, False
-        if name == "density_check":
-            density = await run_density_check(
-                deck_tex=str(args.get("deck_tex_excerpt", state.deck_tex)),
-                bundles=bundles,
-                script=script,  # type: ignore[arg-type]
-                figure_inventory=figure_inventory,
-            )
-            return state, density.model_dump_json(), None, False
+        if name == "submit":
+            # The loop owns submit (it runs the compile guard). Return a neutral
+            # placeholder result so the per-call tool-response message is valid.
+            return state, json.dumps({"ok": True, "submitted": True}), None
         if name == "read_section":
             # Agentic context-gather: pull the VERBATIM flattened-LaTeX text of a
-            # section so the drafter can copy an exact table/equation/number the
+            # section so the agent can copy an exact table/equation/number the
             # bundle only summarizes. Read-only; no state/compile change.
             pid = int(args.get("paper_id", 0))
             section = str(args.get("section_name", "")).strip()
@@ -425,11 +371,11 @@ async def _dispatch_tool_call(
             if pid not in known:
                 return state, json.dumps(
                     {"error": f"paper_id {pid} is not in this deck; known: {sorted(known)}"}
-                ), None, False
+                ), None
             if not section:
-                return state, json.dumps({"error": "section_name is required"}), None, False
+                return state, json.dumps({"error": "section_name is required"}), None
             if conn is None:
-                return state, json.dumps({"error": "no database connection"}), None, False
+                return state, json.dumps({"error": "no database connection"}), None
             res = await read_section_chunks(
                 paper_content_id=pid, section_name=section, conn=conn,
             )
@@ -445,7 +391,7 @@ async def _dispatch_tool_call(
                     "empty": not text,
                 },
                 ensure_ascii=False,
-            ), None, False
+            ), None
         if name == "replace_frame":
             state = apply_replace_frame(
                 state,
@@ -456,7 +402,6 @@ async def _dispatch_tool_call(
                 state,
                 json.dumps({"ok": True, "frame_index": int(args["frame_index"])}),
                 None,
-                False,
             )
         if name == "insert_frame_after":
             state = apply_insert_frame_after(
@@ -468,7 +413,6 @@ async def _dispatch_tool_call(
                 state,
                 json.dumps({"ok": True, "inserted_after": int(args["frame_index"])}),
                 None,
-                False,
             )
         if name == "delete_frame":
             state = apply_delete_frame(state, frame_index=int(args["frame_index"]))
@@ -476,7 +420,6 @@ async def _dispatch_tool_call(
                 state,
                 json.dumps({"ok": True, "deleted": int(args["frame_index"])}),
                 None,
-                False,
             )
         if name == "replace_preamble":
             new_preamble = str(args["new_preamble"])
@@ -489,63 +432,13 @@ async def _dispatch_tool_call(
                     source="agent_inferred",
                     conn=conn,
                 )
-            return state, json.dumps({"ok": True, "persisted": persist}), None, False
-        if name == "done":
-            if pending_done_check is None:
-                return (
-                    state,
-                    json.dumps(
-                        {
-                            "error": (
-                                "done() rejected — call compile_check first to "
-                                "verify contracts"
-                            )
-                        }
-                    ),
-                    None,
-                    False,
-                )
-            if pending_done_check.compile_errors:
-                return (
-                    state,
-                    json.dumps(
-                        {
-                            "error": (
-                                "done() rejected — compile_errors are non-empty; "
-                                "fix them first"
-                            ),
-                            "compile_errors": pending_done_check.compile_errors,
-                        }
-                    ),
-                    None,
-                    False,
-                )
-            if pending_done_check.unrendered_math_frames:
-                return (
-                    state,
-                    json.dumps(
-                        {
-                            "error": (
-                                "done() rejected — contract #2 violated: "
-                                "math-content frames lack math blocks"
-                            ),
-                            "unrendered_math_frames": [
-                                f.model_dump()
-                                for f in pending_done_check.unrendered_math_frames
-                            ],
-                        }
-                    ),
-                    None,
-                    False,
-                )
-            return state, json.dumps({"ok": True, "done_accepted": True}), None, True
-        return state, json.dumps({"error": f"unknown tool {name!r}"}), None, False
+            return state, json.dumps({"ok": True, "persisted": persist}), None
+        return state, json.dumps({"error": f"unknown tool {name!r}"}), None
     except Exception as exc:  # noqa: BLE001 — surface to LLM as a normal error
         return (
             state,
             json.dumps({"error": f"{type(exc).__name__}: {exc}"}),
             None,
-            False,
         )
 
 
@@ -569,6 +462,12 @@ async def run_slide_agent(
     registry: PromptRegistry | None = None,
     llm_acompletion: LlmAcompletion | None = None,
 ) -> SlideAgentResult:
+    # Revise-only: a deterministic Base Writer must have drafted the deck first.
+    # An empty / whitespace starting deck is a programmer error, not something
+    # this agent recovers from (it no longer has an initial_draft tool).
+    if existing_deck_tex is None or not existing_deck_tex.strip():
+        raise ValueError("revise-only: a base deck is required")
+
     reg = registry or PromptRegistry()
     prompt = reg.get("slides_agent/v1")
     if llm_acompletion is None:
@@ -577,10 +476,10 @@ async def run_slide_agent(
         llm_acompletion = litellm.acompletion
 
     state = DeckState(
-        deck_tex=existing_deck_tex or "",
+        deck_tex=existing_deck_tex,
         preamble=resolved_preamble,
         workdir=workdir,
-        dirty=bool(existing_deck_tex),
+        dirty=True,
     )
 
     user = prompt.user_template.format(
@@ -593,12 +492,8 @@ async def run_slide_agent(
         figure_inventory_block=_format_figure_inventory_block(figure_inventory),
         canvas_budget_block=_format_canvas_budget_block(),
         layout_examples_block=_format_layout_examples_block(),
-        deck_state_label=(
-            "EXISTING — diff-edit it"
-            if existing_deck_tex
-            else "EMPTY — call initial_draft first"
-        ),
-        existing_deck_block=existing_deck_tex or "(no deck yet)",
+        deck_state_label="EXISTING — diff-edit it",
+        existing_deck_block=existing_deck_tex,
     )
     system = prompt.system.format(
         response_language=response_language,
@@ -639,11 +534,11 @@ async def run_slide_agent(
                         tool_choice="auto",
                     )
                 except Exception as exc:
-                    # Transient retry exhausted (or non-transient error). If we
-                    # have ANY deck state from a prior tool call, ship it
-                    # imperfect (mirrors the budget-exhaustion ship-imperfect
-                    # path). If the deck is empty (initial_draft never landed),
-                    # re-raise — there's nothing to ship.
+                    # Transient retry exhausted (or non-transient error). The
+                    # deck always starts non-empty (revise-only), so a transient
+                    # failure ships the current deck imperfect (mirrors the
+                    # budget-exhaustion ship-imperfect path). The guard stays as
+                    # defense-in-depth.
                     if _is_transient(exc) and state.deck_tex:
                         tool_call_log.append(
                             {
@@ -659,7 +554,8 @@ async def run_slide_agent(
                 msg = response["choices"][0]["message"]
                 tool_calls = msg.get("tool_calls") or []
                 if not tool_calls:
-                    # Agent gave up without done() — ship current state as imperfect.
+                    # Agent gave up without a clean submit — ship current state
+                    # as imperfect.
                     break
 
                 messages.append(
@@ -669,6 +565,18 @@ async def run_slide_agent(
                         "tool_calls": tool_calls,
                     }
                 )
+
+                # Per-turn signals for the pipeline guards (decided after the
+                # turn, not by the model): did the model request submit, and did
+                # any edit actually land this turn?
+                submit_requested = False
+                edit_applied = False
+                _EDIT_TOOLS = {
+                    "replace_frame",
+                    "insert_frame_after",
+                    "delete_frame",
+                    "replace_preamble",
+                }
 
                 for call in tool_calls:
                     if tool_calls_used >= max_tool_calls:
@@ -680,7 +588,7 @@ async def run_slide_agent(
                     except json.JSONDecodeError:
                         args = {}
 
-                    state, result_str, new_check, this_done = await _dispatch_tool_call(
+                    state, result_str, _ = await _dispatch_tool_call(
                         name=name,
                         args=args,
                         state=state,
@@ -690,10 +598,9 @@ async def run_slide_agent(
                         session_id=session_id,
                         conn=conn,
                         script=script,
-                        pending_done_check=pending_compile_check,
                     )
-                    if new_check is not None:
-                        pending_compile_check = new_check
+                    if name == "submit":
+                        submit_requested = True
                     if name == "replace_preamble":
                         try:
                             parsed = json.loads(result_str)
@@ -701,8 +608,15 @@ async def run_slide_agent(
                             parsed = {}
                         if isinstance(parsed, dict) and parsed.get("persisted"):
                             preamble_persisted = True
-                    if this_done:
-                        accepted_done = True
+                    if name in _EDIT_TOOLS:
+                        # An edit landed iff dispatch reported ok (it surfaces
+                        # apply errors as {"error": ...} without raising).
+                        try:
+                            parsed_edit = json.loads(result_str)
+                        except json.JSONDecodeError:
+                            parsed_edit = {}
+                        if isinstance(parsed_edit, dict) and parsed_edit.get("ok"):
+                            edit_applied = True
 
                     tool_call_log.append(
                         {
@@ -727,10 +641,65 @@ async def run_slide_agent(
                         }
                     )
 
-                    if accepted_done:
-                        break
-                if accepted_done:
+                # Pipeline guards run AFTER the turn — the agent never elects a
+                # check tool; the loop deterministically verifies.
+                if submit_requested:
+                    # Submit → compile guard. The compile is a pipeline run, not
+                    # a model tool call: do NOT increment tool_calls_used.
+                    check = await run_compile_check(
+                        deck_tex=state.deck_tex,
+                        bundles=bundles,
+                        figure_inventory=figure_inventory,
+                        workdir=workdir,
+                        script=script,  # type: ignore[arg-type]
+                    )
+                    pending_compile_check = check
+                    if check.compile_errors or check.unrendered_math_frames:
+                        # Forced revision round: feed the failures back and keep
+                        # going. Do NOT accept done.
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    {
+                                        "submit_rejected": True,
+                                        "reason": (
+                                            "Fix these before submitting again."
+                                        ),
+                                        "compile_errors": check.compile_errors,
+                                        "unrendered_math_frames": [
+                                            f.model_dump()
+                                            for f in check.unrendered_math_frames
+                                        ],
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        )
+                        continue
+                    accepted_done = True
                     break
+                elif edit_applied:
+                    # Edit turn (no submit) → density guard. Also a pipeline run,
+                    # not a model tool call. Feed the signals back automatically
+                    # so the agent sees density feedback without asking.
+                    density = await run_density_check(
+                        deck_tex=state.deck_tex,
+                        bundles=bundles,
+                        script=script,  # type: ignore[arg-type]
+                        figure_inventory=figure_inventory,
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {
+                                    "density_feedback": density.model_dump(),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
         finally:
             # Defense-in-depth: always record the partial trace, even if an
             # unexpected exception escapes the loop body. Without this the
