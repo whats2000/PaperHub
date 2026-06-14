@@ -130,6 +130,22 @@ system: |
   agenda, section_divider, synthesis), compose it from the talk arc and
   talk_title/audience_intent/narrative_arc meta-fields.
 
+  FIGURE-FIRST (load-bearing): a talk SHOWS, it does not list. For EVERY content
+  slide, present the idea VISUALLY when the content suits it, in this order:
+    1. a REAL paper figure from the inventory, if one illustrates the point;
+    2. else the KEY EQUATION in a math block, if the idea is mathematical — use
+       the bundle's key_equations LaTeX VERBATIM (never paraphrase math into prose);
+    3. else an ORIGINAL TikZ schematic that draws the mechanism / architecture /
+       data-flow / relationship.
+  The STANDARD slide shape is VISUAL + MINIMAL TEXT: a figure, equation block,
+  or TikZ schematic as the CENTREPIECE, with at most 2-3 terse supporting
+  fragments. A pure-text bullets slide is a LAST RESORT — use it only when the
+  content is genuinely a short list and none of 1-3 fit; it is bad for ANY
+  presentation. A deck that is mostly text bullets is WRONG: most method,
+  architecture, concept, and comparison slides should be built AROUND a figure,
+  an equation, or a table. Use visuals about as liberally as a human expert
+  would — do NOT settle for ~3x fewer.
+
   Content form: render each slide in its stated form (the [form: ...] tag):
     - comparison_table  -> a real booktabs/tabular table (methods x axes) built
                            from the evidence; rows = methods, columns = metrics.
@@ -138,9 +154,11 @@ system: |
     - equation_focus    -> the equation in a math block + notation legend.
     - problem_statement -> concise 2-4 bullet framing of the problem.
     - concept_figure / method_walkthrough
-                        -> use the slide's figure if one is given; otherwise you
-                           MAY author an original TikZ schematic to illustrate
-                           the concept (see drawn-figure guardrail below).
+                        -> use the slide's paper figure if one is given; OTHERWISE
+                           DRAW an original TikZ schematic illustrating the concept.
+                           A concept_figure with no paper figure is a REQUEST to
+                           draw one — do NOT fall back to a bullets slide (see the
+                           drawn-figure guardrail below).
     - agenda            -> itemize of the talk sections.
     - section_divider   -> a clean transition frame announcing the next section.
     - synthesis         -> integrative prose + 2-3 cross-paper bullets.
@@ -154,11 +172,13 @@ system: |
   that is spoken content for the speaker notes, not the deck. Write terse
   fragments from the Evidence, not paragraphs.
 
-  Drawn-figure guardrail (HARD): an agent-drawn TikZ figure is a CONCEPTUAL
-  SCHEMATIC ONLY — it must NEVER fabricate data, charts, or benchmark numbers.
-  Any measured values (accuracy, latency, counts, percentages) must come from a
-  real paper figure in the figure inventory OR from the slide's Evidence
-  excerpts. If the evidence does not contain a value, omit it.
+  Drawn-figure guardrail: TikZ schematics are ENCOURAGED for concepts,
+  architectures, flows, and relationships — draw them freely. The ONE hard
+  limit: a drawn figure is a CONCEPTUAL SCHEMATIC — it must NEVER fabricate
+  data, charts, or benchmark numbers. Any measured values (accuracy, latency,
+  counts, percentages) must come from a real paper figure in the figure
+  inventory OR from the slide's Evidence excerpts. If the evidence lacks a
+  value, omit it — draw the STRUCTURE, never fake numbers.
 
   ------- TOOL-CALL DISCIPLINE -------
   - Plan your tool calls. Don't compile_check after every tiny edit — batch

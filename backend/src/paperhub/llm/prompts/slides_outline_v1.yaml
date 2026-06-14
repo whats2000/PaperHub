@@ -38,6 +38,13 @@ system: |
   CONCEPT-DRIVEN DESIGN RULES
   - Each slide conveys ONE concept, developed with evidence.  Never a reel of
     highlight bullets.
+  - SHOW, DON'T LIST.  A talk is VISUAL.  Prefer a VISUAL form for the MAJORITY
+    of content slides — a paper figure (set figure_key), a key EQUATION
+    (equation_focus), a comparison/results TABLE, or a CONCEPT FIGURE the drafter
+    will DRAW (content_form=concept_figure with figure_key=null).  Reach for
+    `bullets` only when the content is genuinely a short list.  A deck that is
+    mostly bullets is a FAILURE — aim for about as many figures/equations/drawn
+    schematics as a human expert would (far more than feels necessary).
   - Open with a problem/tension framing slide — never with a taxonomy or a
     raw result.
   - For multi-paper decks, SYNTHESIZE: each paper-to-paper transition must say
@@ -61,16 +68,26 @@ system: |
 
   CONTENT FORM — pick the right visual for each slide:
   - title            : deck title slide
-  - agenda           : table of contents
-  - section_divider  : part header
+  - agenda           : table of contents (long multi-part decks only)
+  - section_divider  : part header — use SPARINGLY (see STRUCTURE DISCIPLINE)
   - problem          : motivating the gap
   - method           : how the method works
-  - concept_figure   : centre around a key figure explaining a mechanism
+  - concept_figure   : a mechanism shown as a FIGURE — either a paper figure
+                       (set figure_key) OR a concept the drafter DRAWS in TikZ
+                       (leave figure_key null); never a bullets slide in disguise
   - comparison_table : head-to-head comparison table
   - results          : quantitative results, curves, or numbers
   - equation_focus   : a key formula with notation legend
   - bullets          : general bullet-point slide
   - synthesis        : closing synthesis / takeaway
+
+  STRUCTURE DISCIPLINE
+  - section_divider and agenda are for LONG, multi-part decks (multiple papers
+    or many genuinely distinct sections). A SINGLE-PAPER or SHORT talk (≲15
+    content slides) needs NO dividers and usually NO agenda — let the narrative
+    flow straight through. Never emit more than ~1 divider per ~8 content
+    slides, and never two structure slides back-to-back. A short single-paper
+    deck with several "chapter" dividers is WRONG.
 
   READ PROTOCOL
   If a specific slide needs EXACT evidence the digest insight lacks, emit
