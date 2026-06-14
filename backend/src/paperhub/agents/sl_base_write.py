@@ -5,14 +5,14 @@ agent (``slide_agent``) then compiles + polishes it. Traced as
 ``report:base_write``.
 
 Reuses the outline/bundle/figure-inventory formatting helpers from
-``slide_agent`` (a direct import — the full DRY extraction is a separate task)
-so the base writer and the revise agent render the same context shape.
+``sl_format`` so the base writer and the revise agent render the same context
+shape from one source of truth.
 """
 from __future__ import annotations
 
 import re
 
-from paperhub.agents.slide_agent import (
+from paperhub.agents.sl_format import (
     _format_bundles_block,
     _format_figure_inventory_block,
     _format_outline_block,
