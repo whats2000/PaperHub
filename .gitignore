@@ -75,6 +75,12 @@ desktop.ini
 *.err
 *.out
 
+# LaTeX build artifacts (editor auto-build of slide_style_default.tex etc.)
+*.fdb_latexmk
+*.fls
+*.aux
+*.synctex.gz
+
 # workspace files
 .*workspace
 workspace*/

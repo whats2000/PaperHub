@@ -113,6 +113,14 @@ try {
     )
     if (-not $NoReload) {
         $uvicornArgs += @("--reload", "--reload-dir", "src")
+        # An editor's LaTeX auto-build (latexmk on slide_style_default.tex) drops
+        # .log/.fdb_latexmk/.fls/.aux/.pdf into src/; exclude them so the reloader
+        # doesn't churn on editor-generated build artifacts.
+        $uvicornArgs += @(
+            "--reload-exclude", "*.log", "--reload-exclude", "*.fdb_latexmk",
+            "--reload-exclude", "*.fls", "--reload-exclude", "*.aux",
+            "--reload-exclude", "*.pdf", "--reload-exclude", "*.synctex.gz"
+        )
     }
 
     Write-Host "Starting backend on ${BindHost}:$BackendPort ..." -ForegroundColor Cyan
