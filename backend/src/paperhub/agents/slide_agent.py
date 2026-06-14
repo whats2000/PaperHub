@@ -416,6 +416,12 @@ async def run_slide_agent(
             }
         )
         tool_call_log: list[dict[str, Any]] = []
+        # Per-turn pipeline-guard feedback the agent received (density after edit
+        # turns, compile after submit). The tool_call_log only records the model's
+        # tool calls — without this we cannot see WHAT signal drove the revise
+        # loop (enrich-then-diagnose: the density/compile feedback is what the
+        # agent reacted to each turn).
+        feedback_log: list[dict[str, Any]] = []
 
         try:
             while tool_calls_used < max_tool_calls:
@@ -517,7 +523,7 @@ async def run_slide_agent(
                             "tool": name,
                             "args_redacted": (
                                 {
-                                    k: (v[:200] if isinstance(v, str) else v)
+                                    k: (v[:500] if isinstance(v, str) else v)
                                     for k, v in args.items()
                                 }
                                 if isinstance(args, dict)
@@ -548,6 +554,25 @@ async def run_slide_agent(
                         script=script,  # type: ignore[arg-type]
                     )
                     pending_compile_check = check
+                    feedback_log.append(
+                        {
+                            "turn_tool_calls": tool_calls_used,
+                            "phase": "submit_compile",
+                            "ok": check.ok,
+                            "page_count": check.page_count,
+                            "compile_errors": check.compile_errors[:5],
+                            "unrendered_math_frames": len(check.unrendered_math_frames),
+                            "decorated_blocks": [b.model_dump() for b in check.decorated_blocks],
+                            "long_diagram_nodes": [n.model_dump() for n in check.long_diagram_nodes],
+                            "frame_overflow": [
+                                {"frame_index": s.frame_index, "frame_title": s.frame_title,
+                                 "overage_tokens": s.overage_tokens,
+                                 "exceeds_canvas_budget": s.exceeds_canvas_budget,
+                                 "recommendation": s.recommendation}
+                                for s in check.frame_overflow
+                            ],
+                        }
+                    )
                     if (
                         check.compile_errors
                         or check.unrendered_math_frames
@@ -607,6 +632,22 @@ async def run_slide_agent(
                         script=script,  # type: ignore[arg-type]
                         figure_inventory=figure_inventory,
                     )
+                    feedback_log.append(
+                        {
+                            "turn_tool_calls": tool_calls_used,
+                            "phase": "edit_density",
+                            "unrendered_math_frames": len(density.unrendered_math_frames),
+                            "decorated_blocks": [b.model_dump() for b in density.decorated_blocks],
+                            "long_diagram_nodes": [n.model_dump() for n in density.long_diagram_nodes],
+                            "frame_overflow": [
+                                {"frame_index": s.frame_index, "frame_title": s.frame_title,
+                                 "overage_tokens": s.overage_tokens,
+                                 "exceeds_canvas_budget": s.exceeds_canvas_budget,
+                                 "recommendation": s.recommendation}
+                                for s in density.frame_overflow
+                            ],
+                        }
+                    )
                     messages.append(
                         {
                             "role": "user",
@@ -634,6 +675,7 @@ async def run_slide_agent(
                         else None
                     ),
                     "tool_call_log": tool_call_log,
+                    "feedback_log": feedback_log,
                 }
             )
 
