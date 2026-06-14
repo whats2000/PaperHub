@@ -190,6 +190,48 @@ def _resolve_slide(
     )
 
 
+def _ensure_front_title(
+    slides: list[OutlineSlide], talk_title: str, dropped: list[str]
+) -> list[OutlineSlide]:
+    """Guarantee the deck opens with a single front title slide.
+
+    The base writer renders 1:1 with the outline (it does NOT add slides), so an
+    outline whose first slide isn't a ``title`` produces a deck with NO
+    ``\\titlepage`` at all — the live run 569 regression. This deterministic
+    guard restores the front title the old all-in-one agent always emitted:
+    prepend a title slide when the first slide isn't one, and demote any
+    LATER ``title`` slide to a ``section_divider`` (an interval title page is a
+    layout smell the user explicitly rejects — single-paper decks want the front
+    title ONLY). Slides are renumbered 0..N-1 to keep the 1:1 deck_slides
+    contract.
+    """
+    if not slides or slides[0].content_form != "title":
+        slides = [
+            OutlineSlide(
+                slide_index=0,
+                goal="Title slide",
+                key_message=talk_title,
+                content_form="title",
+                transition_from_prev="",
+                speaker_note_hint="",
+                paper_id=None,
+                figure_key=None,
+                grounding_chunk_ids=[],
+                support_excerpts=[],
+                source_sections=[],
+            ),
+            *slides,
+        ]
+    # Demote any stray non-front title slide (interval title page).
+    fixed: list[OutlineSlide] = []
+    for i, s in enumerate(slides):
+        if i > 0 and s.content_form == "title":
+            dropped.append(f"slide{i}:interval-title->section_divider")
+            s = s.model_copy(update={"content_form": "section_divider"})
+        fixed.append(s.model_copy(update={"slide_index": i}))
+    return fixed
+
+
 def _resolve_outline(
     draft: DeckOutlineDraft,
     *,
@@ -210,6 +252,7 @@ def _resolve_outline(
         )
         for idx, s in enumerate(draft.slides)
     ]
+    resolved_slides = _ensure_front_title(resolved_slides, draft.talk_title, dropped)
     outline = DeckOutline(
         talk_title=draft.talk_title,
         narrative_pattern=narrative_pattern,
