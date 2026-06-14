@@ -20,6 +20,7 @@ from typing import Literal
 
 from paperhub.agents._canvas_budget import load_canvas_budget
 from paperhub.models.slide_domain import (
+    BareVisualSignal,
     CompileCheckResult,
     DecoratedBlockSignal,
     KeyFigureBundle,
@@ -115,6 +116,72 @@ def detect_long_diagram_nodes(deck_tex: str) -> list[LongDiagramNodeSignal]:
                     frame_title=_frame_title(frame),
                     longest_label_chars=len(longest),
                     sample_label=longest[:120],
+                )
+            )
+    return signals
+
+
+# Bare-visual lint: a figure / table / equation presented with NO caption and
+# essentially NO explanatory text leaves the audience unsure what it means. A
+# visual WITH explanatory side text is fine. Conservative threshold (only flag a
+# visual that is truly alone) so a figure+bullets slide is never flagged.
+_MIN_EXPLAIN_WORDS = 8
+_INCLUDEGRAPHICS_RE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\s*\{[^}]*\}")
+_TABULAR_ENV_RE = re.compile(r"\\begin\{tabular\}.*?\\end\{tabular\}", re.DOTALL)
+_MATH_ENV_RE = re.compile(
+    r"\\\[.*?\\\]|\\begin\{(?:equation|align|align\*|gather|gather\*|equation\*)\}.*?"
+    r"\\end\{(?:equation|align|align\*|gather|gather\*|equation\*)\}",
+    re.DOTALL,
+)
+_CAPTION_RE = re.compile(r"\\caption\s*\{")
+_LATEX_CMD_RE = re.compile(r"\\[a-zA-Z@]+\*?(?:\[[^\]]*\])?")
+
+
+def _explanatory_words(frame_tex: str) -> int:
+    """Count plain-prose words left after removing the visual + LaTeX scaffolding.
+
+    Strips frame title, every visual environment (figure/table/math/diagram), and
+    LaTeX commands/braces; what remains is the explanatory text the audience can
+    read. Inline math ($...$) inside a sentence is kept (it is part of prose).
+    """
+    s = frame_tex
+    s = re.sub(r"\\begin\{frame\}\s*(?:\[[^\]]*\])?\s*\{.*?\}", " ", s, count=1, flags=re.DOTALL)
+    s = re.sub(r"\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}", " ", s, flags=re.DOTALL)
+    s = _TABULAR_ENV_RE.sub(" ", s)
+    s = _MATH_ENV_RE.sub(" ", s)
+    for body in _smartdiagram_bodies(s):
+        s = s.replace(body, " ")
+    s = _SMARTDIAGRAM_RE.sub(" ", s)
+    s = _INCLUDEGRAPHICS_RE.sub(" ", s)
+    s = _LATEX_CMD_RE.sub(" ", s)  # drop remaining commands (\item, \textbf, ...)
+    s = re.sub(r"[{}$&\\]", " ", s)
+    # words = alphabetic tokens of length >= 2 (ignores stray symbols / single letters)
+    return len([w for w in re.findall(r"[A-Za-z][A-Za-z'-]+", s) if len(w) >= 2])
+
+
+def detect_bare_visuals(deck_tex: str) -> list[BareVisualSignal]:
+    """Flag frames whose figure/table/equation has no caption AND no explanation."""
+    signals: list[BareVisualSignal] = []
+    for idx, m in enumerate(_FRAME_SPAN_RE.finditer(deck_tex)):
+        frame = m.group(0)
+        if _CAPTION_RE.search(frame):
+            continue  # a caption already explains the visual
+        if _INCLUDEGRAPHICS_RE.search(frame):
+            kind = "figure"
+        elif _TABULAR_ENV_RE.search(frame):
+            kind = "table"
+        elif _MATH_ENV_RE.search(frame):
+            kind = "equation"
+        else:
+            continue  # no standalone visual element on this frame
+        words = _explanatory_words(frame)
+        if words < _MIN_EXPLAIN_WORDS:
+            signals.append(
+                BareVisualSignal(
+                    frame_index=idx,
+                    frame_title=_frame_title(frame),
+                    kind=kind,
+                    explain_words=words,
                 )
             )
     return signals
@@ -218,6 +285,7 @@ async def run_compile_check(
         unrendered_math_frames=unrendered_math,
         decorated_blocks=detect_decorated_blocks(deck_tex),
         long_diagram_nodes=detect_long_diagram_nodes(deck_tex),
+        bare_visuals=detect_bare_visuals(deck_tex),
     )
 
 
@@ -247,12 +315,14 @@ async def run_density_check(
     unrendered_math = audit_math_frames(deck_tex=deck_tex, bundles=bundles)
     decorated_blocks = detect_decorated_blocks(deck_tex)
     long_diagram_nodes = detect_long_diagram_nodes(deck_tex)
+    bare_visuals = detect_bare_visuals(deck_tex)
     # ok is not meaningful here — there's no compile pass — but we set it to
     # True iff the deterministic checks alone pass, for symmetry.
     ok = (
         len(unrendered_math) == 0
         and len(decorated_blocks) == 0
         and len(long_diagram_nodes) == 0
+        and len(bare_visuals) == 0
         and all(not s.exceeds_canvas_budget for s in frame_overflow)
     )
     return CompileCheckResult(
@@ -263,4 +333,5 @@ async def run_density_check(
         unrendered_math_frames=unrendered_math,
         decorated_blocks=decorated_blocks,
         long_diagram_nodes=long_diagram_nodes,
+        bare_visuals=bare_visuals,
     )

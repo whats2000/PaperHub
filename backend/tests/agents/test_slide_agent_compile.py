@@ -1,6 +1,7 @@
 import pytest
 
 from paperhub.agents.slide_agent_compile import (
+    detect_bare_visuals,
     detect_decorated_blocks,
     detect_long_diagram_nodes,
     run_compile_check,
@@ -140,6 +141,46 @@ def test_detect_long_diagram_nodes_flags_only_sentence_labels() -> None:
 
 def test_detect_long_diagram_nodes_clean_deck() -> None:
     assert detect_long_diagram_nodes(_GOOD_DECK) == []
+
+
+_BARE_DECK = r"""\documentclass{beamer}
+\begin{document}
+\begin{frame}{Bare figure}
+\includegraphics[width=\linewidth]{p0-fig-001}
+\end{frame}
+\begin{frame}{Figure with caption is fine}
+\includegraphics[width=\linewidth]{p0-fig-001}
+\caption{The GRAPE architecture overview.}
+\end{frame}
+\begin{frame}{Figure with explanatory bullets is fine}
+\includegraphics[width=0.6\linewidth]{p0-fig-001}
+\begin{itemize}
+\item The architecture maps positions to rotation matrices end to end.
+\item It recovers RoPE as a constrained special case of the framework.
+\end{itemize}
+\end{frame}
+\begin{frame}{Bare equation}
+\[ E = mc^2 \]
+\end{frame}
+\begin{frame}{Equation with a legend is fine}
+\[ \mathbf{G}(n) = \exp(n\,\omega\,\mathbf{L}) \]
+where the generator rotates each token position by a learned per-head angle omega.
+\end{frame}
+\end{document}
+"""
+
+
+def test_detect_bare_visuals_flags_only_unexplained() -> None:
+    sigs = detect_bare_visuals(_BARE_DECK)
+    flagged = {(s.frame_index, s.kind) for s in sigs}
+    # frame 0 (bare figure) and frame 3 (bare equation) are flagged; the
+    # captioned, bulleted, and legend frames are fine.
+    assert flagged == {(0, "figure"), (3, "equation")}
+
+
+def test_detect_bare_visuals_clean_deck() -> None:
+    # _GOOD_DECK has a single short-bullet frame, no standalone visual.
+    assert detect_bare_visuals(_GOOD_DECK) == []
 
 
 @pytest.mark.asyncio

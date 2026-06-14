@@ -154,6 +154,23 @@ class LongDiagramNodeSignal(BaseModel):
     sample_label: str  # the offending label (truncated)
 
 
+class BareVisualSignal(BaseModel):
+    """A frame whose figure / table / equation is presented BARE — no
+    ``\\caption`` (or notation legend) AND essentially no explanatory text. A
+    standalone visual with nothing telling the audience what it means is bad
+    design (live run 575: a math block with only equations, no legend; figures
+    with no captions). Detected deterministically and fed back so the revise
+    agent adds a caption/legend or a sentence of explanation. A visual that
+    already has explanatory side text is fine and is NOT flagged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frame_index: int  # 0-based over \begin{frame} occurrences
+    frame_title: str
+    kind: str  # "figure" | "table" | "equation"
+    explain_words: int  # explanatory words found outside the visual (for context)
+
+
 class CompileCheckResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -166,6 +183,7 @@ class CompileCheckResult(BaseModel):
     # loop gates ``submit`` on them and feeds them back automatically.
     decorated_blocks: list[DecoratedBlockSignal] = Field(default_factory=list)
     long_diagram_nodes: list[LongDiagramNodeSignal] = Field(default_factory=list)
+    bare_visuals: list[BareVisualSignal] = Field(default_factory=list)
 
 
 # --- F6.1: slide narrative outline (the sl_outline stage) ----------------

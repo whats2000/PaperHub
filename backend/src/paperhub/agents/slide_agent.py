@@ -564,6 +564,7 @@ async def run_slide_agent(
                             "unrendered_math_frames": len(check.unrendered_math_frames),
                             "decorated_blocks": [b.model_dump() for b in check.decorated_blocks],
                             "long_diagram_nodes": [n.model_dump() for n in check.long_diagram_nodes],
+                            "bare_visuals": [b.model_dump() for b in check.bare_visuals],
                             "frame_overflow": [
                                 {"frame_index": s.frame_index, "frame_title": s.frame_title,
                                  "overage_tokens": s.overage_tokens,
@@ -578,6 +579,7 @@ async def run_slide_agent(
                         or check.unrendered_math_frames
                         or check.decorated_blocks
                         or check.long_diagram_nodes
+                        or check.bare_visuals
                     ):
                         # Forced revision round: feed the failures back and keep
                         # going. Do NOT accept done. ``decorated_blocks`` are
@@ -599,7 +601,13 @@ async def run_slide_agent(
                                             " a smartdiagram node holds a "
                                             "sentence — shorten every node to a "
                                             "few-word label and move the detail "
-                                            "into bullets beside the diagram."
+                                            "into bullets beside the diagram. "
+                                            "bare_visuals: a figure/table/"
+                                            "equation stands alone with no "
+                                            "explanation — add a \\caption{...} "
+                                            "(or a notation legend for an "
+                                            "equation), or a sentence of "
+                                            "explanatory text beside it."
                                         ),
                                         "compile_errors": check.compile_errors,
                                         "unrendered_math_frames": [
@@ -613,6 +621,10 @@ async def run_slide_agent(
                                         "long_diagram_nodes": [
                                             n.model_dump()
                                             for n in check.long_diagram_nodes
+                                        ],
+                                        "bare_visuals": [
+                                            b.model_dump()
+                                            for b in check.bare_visuals
                                         ],
                                     },
                                     ensure_ascii=False,
@@ -639,6 +651,7 @@ async def run_slide_agent(
                             "unrendered_math_frames": len(density.unrendered_math_frames),
                             "decorated_blocks": [b.model_dump() for b in density.decorated_blocks],
                             "long_diagram_nodes": [n.model_dump() for n in density.long_diagram_nodes],
+                            "bare_visuals": [b.model_dump() for b in density.bare_visuals],
                             "frame_overflow": [
                                 {"frame_index": s.frame_index, "frame_title": s.frame_title,
                                  "overage_tokens": s.overage_tokens,
