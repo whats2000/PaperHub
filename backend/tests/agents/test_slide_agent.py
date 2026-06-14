@@ -523,3 +523,56 @@ def test_acompletion_retry_default_attempts_is_5() -> None:
 
     sig = inspect.signature(_acompletion_with_retry)
     assert sig.parameters["max_attempts"].default == 5
+
+
+# ---------------------------------------------------------------------------
+# read_section — agentic context gather (fetch verbatim section source)
+# ---------------------------------------------------------------------------
+async def test_read_section_fetches_verbatim_section_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """read_section returns the section's verbatim flattened-LaTeX text + chunk
+    ids so the drafter can copy an exact table/equation."""
+    from paperhub.agents import slide_agent as sa
+    from paperhub.agents.sl_read import ReadResult
+    from paperhub.agents.slide_agent_tools import DeckState
+
+    async def fake_read(*, paper_content_id: int, section_name: str, conn: Any) -> ReadResult:
+        assert paper_content_id == 1
+        assert section_name == "Results"
+        return ReadResult(text=r"\begin{tabular}{cc}a&b\\1&2\end{tabular}", chunk_ids=[7, 8])
+
+    monkeypatch.setattr(sa, "read_section_chunks", fake_read)
+
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    _, result_str, check, done = await sa._dispatch_tool_call(
+        name="read_section",
+        args={"paper_id": 1, "section_name": "Results"},
+        state=state, bundles=[_bundle()], figure_inventory={},
+        workdir=tmp_path, session_id=None, conn=object(), script="",
+        pending_done_check=None,
+    )
+    payload = json.loads(result_str)
+    assert payload["paper_id"] == 1 and payload["section_name"] == "Results"
+    assert "tabular" in payload["text"]
+    assert payload["chunk_ids"] == [7, 8]
+    assert payload["truncated"] is False
+    assert check is None and done is False
+
+
+async def test_read_section_rejects_paper_not_in_deck(tmp_path: Any) -> None:
+    """A paper_id not among the deck's bundles is rejected with a clear error —
+    no read is attempted."""
+    from paperhub.agents import slide_agent as sa
+    from paperhub.agents.slide_agent_tools import DeckState
+
+    state = DeckState(deck_tex="", preamble="", workdir=None)
+    _, result_str, check, done = await sa._dispatch_tool_call(
+        name="read_section",
+        args={"paper_id": 999, "section_name": "Results"},
+        state=state, bundles=[_bundle()], figure_inventory={},
+        workdir=tmp_path, session_id=None, conn=object(), script="",
+        pending_done_check=None,
+    )
+    assert "not in this deck" in json.loads(result_str)["error"]
+    assert check is None and done is False

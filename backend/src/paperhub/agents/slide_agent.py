@@ -22,6 +22,7 @@ from typing import Any, Final
 
 from paperhub.agents._canvas_budget import load_canvas_budget
 from paperhub.agents._layout_examples import load_layout_examples
+from paperhub.agents.sl_read import read_section_chunks
 from paperhub.agents.slide_agent_compile import (
     run_compile_check,
     run_density_check,
@@ -157,6 +158,27 @@ def _tool_schemas() -> list[dict[str, Any]]:
                     "type": "object",
                     "properties": {"deck_tex_excerpt": {"type": "string"}},
                     "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_section",
+                "description": (
+                    "Fetch the VERBATIM source text of one paper section (sliced "
+                    "from the flattened LaTeX). Use it to copy an exact results "
+                    "TABLE, an equation's full form, or a precise number that the "
+                    "bundle only summarizes. Args: paper_id (from the bundle) + "
+                    "section_name (a section listed in that paper's bundle)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "paper_id": {"type": "integer"},
+                        "section_name": {"type": "string"},
+                    },
+                    "required": ["paper_id", "section_name"],
                 },
             },
         },
@@ -393,6 +415,37 @@ async def _dispatch_tool_call(
                 figure_inventory=figure_inventory,
             )
             return state, density.model_dump_json(), None, False
+        if name == "read_section":
+            # Agentic context-gather: pull the VERBATIM flattened-LaTeX text of a
+            # section so the drafter can copy an exact table/equation/number the
+            # bundle only summarizes. Read-only; no state/compile change.
+            pid = int(args.get("paper_id", 0))
+            section = str(args.get("section_name", "")).strip()
+            known = {b.paper_id for b in bundles}
+            if pid not in known:
+                return state, json.dumps(
+                    {"error": f"paper_id {pid} is not in this deck; known: {sorted(known)}"}
+                ), None, False
+            if not section:
+                return state, json.dumps({"error": "section_name is required"}), None, False
+            if conn is None:
+                return state, json.dumps({"error": "no database connection"}), None, False
+            res = await read_section_chunks(
+                paper_content_id=pid, section_name=section, conn=conn,
+            )
+            text = res.text or ""
+            cap = 8000  # enough for a results table; bounds prompt growth
+            return state, json.dumps(
+                {
+                    "paper_id": pid,
+                    "section_name": section,
+                    "chunk_ids": res.chunk_ids,
+                    "text": text[:cap],
+                    "truncated": len(text) > cap,
+                    "empty": not text,
+                },
+                ensure_ascii=False,
+            ), None, False
         if name == "replace_frame":
             state = apply_replace_frame(
                 state,

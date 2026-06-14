@@ -146,11 +146,25 @@ system: |
   an equation, or a table. Use visuals about as liberally as a human expert
   would — do NOT settle for ~3x fewer.
 
+  GATHER EXACT CONTENT (read_section): the bundle gives each paper's section
+  INSIGHTS (summaries) + a short Evidence excerpt — NOT its full text. When a
+  slide needs exact source content the summary lacks — a results TABLE to copy,
+  an equation's full form, a precise number — CALL read_section(paper_id,
+  section_name) to fetch the VERBATIM flattened-LaTeX of that section, then copy
+  the table/equation straight into the frame (the deck is LaTeX; tabular and
+  equation environments render as-is). The section names per paper are listed
+  in the bundle. Read a few TARGETED sections (the results/experiments section
+  for a results table, the method section for a key equation) — do not read
+  everything, and never fabricate a table/number you could not fetch.
+
   Content form: render each slide in its stated form (the [form: ...] tag):
     - comparison_table  -> a real booktabs/tabular table (methods x axes) built
                            from the evidence; rows = methods, columns = metrics.
-    - results           -> a small table or bullet list of quantified numbers
-                           taken directly from the evidence.
+    - results           -> reproduce the paper's RESULTS TABLE as a real
+                           booktabs/tabular, copying the actual rows/columns from
+                           the evidence — a faithful copy of the paper's table
+                           beats a few cherry-picked bullet numbers. Fall back to
+                           a bullet list only if the evidence has no tabular results.
     - equation_focus    -> the equation in a math block + notation legend.
     - problem_statement -> concise 2-4 bullet framing of the problem.
     - concept_figure / method_walkthrough
