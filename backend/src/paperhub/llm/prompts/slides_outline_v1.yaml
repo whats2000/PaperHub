@@ -95,7 +95,7 @@ system: |
   - results          : quantitative results, curves, or numbers
   - equation_focus   : a key formula with notation legend
   - bullets          : general bullet-point slide
-  - synthesis        : closing synthesis / takeaway
+  - synthesis        : the closing slide; title it "Takeaways" or "Conclusion"
 
   STRUCTURE DISCIPLINE
   - The FRONT title slide (content_form=title, slide 1) is MANDATORY for EVERY

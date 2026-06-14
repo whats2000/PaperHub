@@ -71,7 +71,8 @@ system: |
                            draw one — do NOT fall back to a bullets slide.
     - agenda            -> itemize of the talk sections.
     - section_divider   -> a clean transition frame announcing the next section.
-    - synthesis         -> integrative prose + 2-3 cross-paper bullets.
+    - synthesis         -> the CLOSING slide; title it "Takeaways" / "Key
+                           Takeaways" / "Conclusion", with 2-3 takeaway bullets.
     - title             -> \begin{{frame}}{{}}\titlepage\end{{frame}} using the
                            regular theme (NOT [plain] + \Large + \rule decorations).
     - bullets (default) -> standard itemize/enumerate.
@@ -96,7 +97,9 @@ system: |
       a SHORT noun phrase (a few words) — NEVER a sentence (smartdiagram sizes a
       node to its label, so a sentence overflows into a giant overlapping bubble).
       Put the explanation in bullets beside the diagram. Avoid the "descriptive
-      diagram" type for real content.
+      diagram" type for real content. Prefer "flow diagram" / "circular diagram"
+      (they never overlap); the "bubble diagram" centre can touch its satellites,
+      so use it only with 1-2 word labels.
     - Only when smartdiagram cannot express it, use TikZ with the positioning
       library (node distance, right=of / below=of), NEVER absolute at (x,y)
       coords with hand-placed labels. Keep labels SHORT, -{{Stealth}} tip,
