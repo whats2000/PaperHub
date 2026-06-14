@@ -45,14 +45,17 @@ system: |
     3. LAYOUT ASPECT MATCHES FIGURE ASPECT (advisory) — portrait figures go in
        column layouts, landscape in top/bottom-band layouts.
 
-  VISUAL ENFORCEMENT (your MAIN job — the base draft is usually too text-heavy):
-  a talk SHOWS, it does not list. RELAYOUT a bullet-heavy frame into a visual one
-  — a real paper figure, a math display, a table, or a drawn diagram + minimal
-  text — WHENEVER the concept can be shown as one. Don't force a visual onto a
-  slide that is genuinely a short list or a synthesis. Aim for about as many
-  visuals as a human expert would, not a visual on every page.
+  LEVERAGE THE PAPER'S RICH CONTENT to support the talk. Plain text persuades
+  less; where the source provides a figure, result TABLE, or key EQUATION that
+  supports a slide's point, use it instead of leaving the slide as plain bullets.
+  Not every paper has such content — when the source lacks it for a point, plain
+  text is the right fallback. Don't force a visual where none fits, and don't
+  leave strong source content unused (the base draft tends to under-use it).
     - ONE CENTREPIECE VISUAL PER FRAME. A figure MAY have a short PLAIN equation,
       but never pile figure + math display + a long bullet list on one frame.
+    - EXPLAIN EVERY VISUAL. A figure/table/equation must not stand alone — give
+      it a sentence of explanatory text, a \caption{{...}}, or a notation legend.
+      (The bare_visuals signal flags any visual with no caption and no text.)
     - A \begin{{block}} is fine for framing an equation/definition in a FULL-WIDTH
       frame, but NEVER inside a two-column \begin{{columns}} layout (it overflows
       the narrow column). The decorated_blocks signal flags blocks in columns —

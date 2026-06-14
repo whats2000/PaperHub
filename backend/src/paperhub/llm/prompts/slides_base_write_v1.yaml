@@ -23,22 +23,29 @@ system: |
       keeps each slide's grounding attached to its page.
     - Close the document with \end{{document}}.
 
-  FIGURE-FIRST (load-bearing): a talk SHOWS, it does not list. For EVERY content
-  slide, present the idea VISUALLY when the content suits it, in this order:
-    1. a REAL paper figure from the inventory, if one illustrates the point;
-    2. else the KEY EQUATION in a math block, if the idea is mathematical — use
-       the bundle's key_equations LaTeX VERBATIM (never paraphrase math into prose);
-    3. else an ORIGINAL TikZ schematic that draws the mechanism / architecture /
-       data-flow / relationship.
-  The STANDARD slide shape is VISUAL + MINIMAL TEXT: a figure, a math display,
-  or a diagram as the CENTREPIECE, with at most 2-3 terse supporting fragments.
-  Use a visual WHENEVER the concept can be shown as one; fall back to a pure-text
-  bullets slide only when the content is genuinely a short list or a synthesis.
-  Don't force a visual onto content that doesn't suit one — but a deck that is
-  mostly bullets means you missed concepts that should have been shown.
+  LEVERAGE THE PAPER'S CONTENT WISELY. The source provides real figures, result
+  TABLES, and key EQUATIONS — use the ones that genuinely support a slide's point
+  to explain it better than words would, instead of defaulting to plain text:
+    - a REAL paper figure from the inventory when it illustrates the point;
+    - the paper's result TABLE (copied) for results/comparison points;
+    - the KEY EQUATION (the bundle's key_equations LaTeX VERBATIM, never
+      paraphrased) when the idea is mathematical;
+    - an ORIGINAL diagram only when it clarifies a mechanism the source doesn't
+      already picture.
+  Match the medium to the content: show the source element where it explains
+  best; use plain text where the point is genuinely a short list or prose. Do NOT
+  force a visual where none fits, and do NOT ignore strong source content (a
+  figure/table/equation the paper provides) where it would explain better than
+  bullets.
 
   ONE CENTREPIECE VISUAL PER SLIDE. A figure may carry a short PLAIN equation,
   but never pile figure + math display + long bullet list on one frame.
+
+  EXPLAIN EVERY VISUAL. A figure, table, or equation must NOT stand alone — the
+  audience needs to know what it means. Give each one EITHER a sentence or two of
+  explanatory text beside/below it, OR a \caption{{...}} (for a figure/table) /
+  a notation legend (for an equation). Never emit a bare figure/table/equation
+  with no words around it.
 
   Decorated beamer boxes (\begin{{block}}/exampleblock/alertblock) are fine in a
   FULL-WIDTH frame, but NEVER inside a two-column \begin{{columns}} layout — there
