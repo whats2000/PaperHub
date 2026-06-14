@@ -303,6 +303,78 @@ async def test_generate_invokes_three_stages_in_order_and_persists_deck(
 
 
 @pytest.mark.asyncio
+async def test_generate_runs_base_write_before_revise_agent(
+    conn: aiosqlite.Connection,
+    fake_tracer: Tracer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F6.2: _generate must run the deterministic base_write stage BEFORE the
+    revise agent, and pass the base deck to slide_agent as a non-empty
+    ``existing_deck_tex`` (the revise agent never starts from None)."""
+    source_dir = await _seed_paper(conn, tmp_path)
+    assert source_dir.exists()
+
+    order: list[str] = []
+    base_deck_str = (
+        r"\documentclass{beamer}"
+        r"\begin{document}"
+        r"\begin{frame}{base}base body\end{frame}"
+        r"\end{document}"
+    )
+
+    async def fake_base_write(**kw: Any) -> str:
+        order.append("base_write")
+        return base_deck_str
+
+    captured_existing: list[Any] = []
+
+    async def fake_agent(**kw: Any) -> SlideAgentResult:
+        order.append("agent")
+        captured_existing.append(kw["existing_deck_tex"])
+        return SlideAgentResult(
+            deck_tex=(
+                r"\documentclass{beamer}"
+                r"\begin{document}"
+                r"\begin{frame}{x}body\end{frame}"
+                r"\end{document}"
+            ),
+            preamble=r"\documentclass{beamer}",
+            satisfied=True,
+            tool_calls_used=1,
+            last_compile_check=CompileCheckResult(
+                ok=True,
+                page_count=1,
+                compile_errors=[],
+                frame_overflow=[],
+                unrendered_math_frames=[],
+            ),
+            preamble_persisted=False,
+        )
+
+    monkeypatch.setattr(rg, "run_base_write", fake_base_write)
+    monkeypatch.setattr(rg, "run_slide_agent", fake_agent)
+    monkeypatch.setattr(rg, "_pdflatex_available", lambda: True)
+
+    deps = _deps(_NullAdapter(), fake_tracer, conn, tmp_path)
+    state = _state()
+    state["run_id"] = fake_tracer.run_id
+
+    graph = build_report_subgraph(deps)
+    async for _mode, _payload in graph.astream(
+        state, stream_mode=["custom", "values"]
+    ):
+        pass
+
+    # base_write fired, before the revise agent.
+    assert order == ["base_write", "agent"]
+    # The revise agent started from the non-empty base deck, NOT None.
+    assert len(captured_existing) == 1
+    assert captured_existing[0] == base_deck_str
+    assert captured_existing[0]
+
+
+@pytest.mark.asyncio
 async def test_generate_short_circuits_when_no_enabled_papers(
     conn: aiosqlite.Connection,
     fake_tracer: Tracer,

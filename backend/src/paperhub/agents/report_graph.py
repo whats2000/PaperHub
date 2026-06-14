@@ -57,6 +57,7 @@ from paperhub.agents.report_pipeline import (
     parse_slide_budget,
     revise_tex,
 )
+from paperhub.agents.sl_base_write import run_base_write
 from paperhub.agents.sl_emit import run_sl_emit
 from paperhub.agents.sl_outline import run_sl_outline
 from paperhub.agents.sl_read import ReadResult, read_section_chunks
@@ -860,6 +861,24 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         outline = outline_result.outline
         await _flush_steps()
 
+        # Deterministic base draft — one tool-free pass turns the outline +
+        # bundles into a complete deck.tex so the revise agent always starts
+        # from a non-empty base deck instead of an empty document.
+        async with _stage_heartbeat(writer, run_id, "report:base_write"):
+            base_deck = await run_base_write(
+                outline=outline,
+                bundles=bundles,
+                resolved_preamble=preamble_with_title,
+                response_language=lang,
+                adapter=deps.adapter,
+                tracer=deps.tracer,
+                model=deps.section_model,
+                task_description=effective_query(state)
+                or state.get("user_message", ""),
+                figure_inventory=figure_inventory,
+            )
+        await _flush_steps()
+
         async with _stage_heartbeat(writer, run_id, "report:drafting"):
             agent_result = await run_slide_agent(
                 bundles=bundles,
@@ -867,7 +886,7 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
                 response_language=lang,
                 resolved_preamble=preamble_with_title,
                 workdir=slides_dir,
-                existing_deck_tex=None,  # GENERATE — no prior deck content
+                existing_deck_tex=base_deck,  # GENERATE — revise from the base draft
                 figure_inventory=figure_inventory,
                 memory_context=_mem,
                 outline=outline,
