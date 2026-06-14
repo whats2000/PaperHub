@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Paperclip } from "lucide-react";
+import { Loader2, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -57,10 +57,14 @@ export function AttachPaperMenu() {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const sessions = useChatStore((s) => s.sessions);
   const appendReferenceLocal = useChatStore((s) => s.appendReferenceLocal);
+  const ensureBackendSession = useChatStore((s) => s.ensureBackendSession);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const backendSessionId = activeSession?.backend_session_id ?? null;
-  const hasBackendSession = backendSessionId !== null;
+  // Gate on the *active session* existing, NOT on a backend row existing: a
+  // brand-new (unsent) session has no backend_session_id yet, but attaching a
+  // paper must still work — the handlers lazy-create the backend session,
+  // mirroring ReferenceSourcesPanel's "Add from library" path.
+  const hasActiveSession = activeSession !== null;
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -81,25 +85,33 @@ export function AttachPaperMenu() {
   async function handlePdfChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    // Snapshot the active session at the start. If it changes before the
-    // upload resolves, discard the result so we don't poison the wrong bucket.
-    const startedAt = currentBackendSessionId();
-    if (startedAt === null) return;
+    const activeId = useChatStore.getState().activeSessionId;
+    if (activeId === null) return;
     setBusy(true);
+    // A persistent loading toast carries progress even if the popover is
+    // dismissed — ingestion (esp. PDFs) can run for a while. We resolve THIS
+    // toast (by id) to success/error/info so it never lingers as a spinner.
+    const toastId = toast.loading(t("toast.processing"));
     try {
+      // Lazy-create the backend session so the FIRST attach in a fresh chat
+      // works (no message required). After this, the active session carries
+      // `startedAt`; a mid-flight session switch is still caught below.
+      const startedAt = await ensureBackendSession(activeId);
       const result = await uploadPdf(startedAt, file);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info(t("toast.sessionChanged"));
+        toast.info(t("toast.sessionChanged"), { id: toastId });
         return;
       }
       const ref = buildReference(result, "pdf_upload", null);
       appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
+        id: toastId,
         description: result.title,
       });
       handleOpenChange(false);
     } catch (err) {
       toast.error(t("toast.uploadFailed"), {
+        id: toastId,
         description: err instanceof Error ? err.message : String(err),
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -115,15 +127,18 @@ export function AttachPaperMenu() {
       setArxivError(t("attach.invalidArxiv"));
       return;
     }
-    // Snapshot the active session at the start. If it changes before the
-    // request resolves, discard the result.
-    const startedAt = currentBackendSessionId();
-    if (startedAt === null) return;
+    const activeId = useChatStore.getState().activeSessionId;
+    if (activeId === null) return;
     setBusy(true);
+    // Persistent loading toast (see handlePdfChange) resolved by id below.
+    const toastId = toast.loading(t("toast.processing"));
     try {
+      // Lazy-create the backend session (see handlePdfChange) so importing a
+      // paper works as the very first action in a new chat.
+      const startedAt = await ensureBackendSession(activeId);
       const result = await ingestPaper(startedAt, canonical);
       if (currentBackendSessionId() !== startedAt) {
-        toast.info(t("toast.sessionChanged"));
+        toast.info(t("toast.sessionChanged"), { id: toastId });
         return;
       }
       // canonical is "arxiv:<id>" — strip the prefix for ReferenceItem.arxiv_id.
@@ -131,6 +146,7 @@ export function AttachPaperMenu() {
       const ref = buildReference(result, "arxiv", arxivId);
       appendReferenceLocal(startedAt, ref);
       toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
+        id: toastId,
         description: result.title,
       });
       handleOpenChange(false);
@@ -140,7 +156,7 @@ export function AttachPaperMenu() {
       // the toast keeps the unedited message for parity with PDF uploads.
       const inlineMessage = raw.replace(/^API \d+:\s*/, "");
       setArxivError(inlineMessage);
-      toast.error(t("toast.importFailed"), { description: raw });
+      toast.error(t("toast.importFailed"), { id: toastId, description: raw });
     } finally {
       setBusy(false);
     }
@@ -180,9 +196,16 @@ export function AttachPaperMenu() {
             <TabsTrigger value="arxiv">{t("attach.tabArxiv")}</TabsTrigger>
           </TabsList>
 
-          {!hasBackendSession && (
+          {!hasActiveSession && (
             <p className="mt-2 text-xs text-muted-foreground">
               {t("attach.needSession")}
+            </p>
+          )}
+
+          {busy && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t("attach.processing")}
             </p>
           )}
 
@@ -196,7 +219,7 @@ export function AttachPaperMenu() {
                 type="file"
                 accept="application/pdf"
                 onChange={(e) => void handlePdfChange(e)}
-                disabled={busy || !hasBackendSession}
+                disabled={busy || !hasActiveSession}
                 aria-label={t("attach.pdfFileAria")}
                 className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium hover:file:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               />
@@ -217,7 +240,7 @@ export function AttachPaperMenu() {
                     if (arxivError) setArxivError(null);
                   }}
                   placeholder={t("attach.arxivPlaceholder")}
-                  disabled={busy || !hasBackendSession}
+                  disabled={busy || !hasActiveSession}
                   aria-label={t("attach.arxivInputAria")}
                   aria-invalid={arxivError !== null}
                 />
@@ -234,7 +257,7 @@ export function AttachPaperMenu() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={busy || !hasBackendSession || arxivInput.trim() === ""}
+                  disabled={busy || !hasActiveSession || arxivInput.trim() === ""}
                   onClick={() => void handleArxivSubmit()}
                 >
                   {t("attach.import")}

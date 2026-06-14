@@ -9,14 +9,20 @@ import { API_BASE_URL } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 
 // Hoisted mock for sonner — toast.success/error/info are no-ops we can spy on.
-const { toastSuccess, toastError, toastInfo } = vi.hoisted(() => ({
+const { toastSuccess, toastError, toastInfo, toastLoading } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
+  toastLoading: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError, info: toastInfo },
+  toast: {
+    success: toastSuccess,
+    error: toastError,
+    info: toastInfo,
+    loading: toastLoading,
+  },
 }));
 
 const server = setupServer();
@@ -29,6 +35,10 @@ beforeEach(() => {
   toastSuccess.mockReset();
   toastError.mockReset();
   toastInfo.mockReset();
+  toastLoading.mockReset();
+  // toast.loading returns the toast id we later resolve by; give it a stable
+  // value so handlers thread `{ id }` into the success/error/info update.
+  toastLoading.mockReturnValue("toast-id");
   // Seed the store with an active session (id=1, backend_session_id=7).
   useChatStore.setState({
     sessions: [
@@ -287,6 +297,7 @@ describe("AttachPaperMenu", () => {
     await waitFor(() => {
       expect(toastInfo).toHaveBeenCalledWith(
         "Session changed; the attached paper was discarded.",
+        expect.objectContaining({ id: "toast-id" }),
       );
     });
 
@@ -325,24 +336,123 @@ describe("AttachPaperMenu", () => {
     expect(alert.textContent).not.toMatch(/^API \d+:/);
   });
 
-  it("disables both inputs and shows a hint when backend_session_id is null", async () => {
+  // A brand-new session has no backend row until the first chat turn. Attaching
+  // a paper must still work — the menu lazy-creates the backend session, exactly
+  // like the references panel's "Add from library" affordance does.
+  it("lazy-creates the backend session, then uploads, when none exists yet", async () => {
     useChatStore.setState({
       sessions: [
-        {
-          id: 1,
-          title: "No backend yet",
-          messages: [],
-          backend_session_id: null,
-        },
+        { id: 1, title: "Draft", messages: [], backend_session_id: null },
       ],
       activeSessionId: 1,
+      _nextId: 2,
+      referencesBySession: {},
+      composerDraft: "",
     });
+
+    let createdSessions = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/sessions`, () => {
+        createdSessions += 1;
+        return HttpResponse.json({ session_id: 55 }, { status: 201 });
+      }),
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(
+          {
+            papers_id: 42,
+            paper_content_id: 100,
+            cache_hit: false,
+            title: "Fresh Paper",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+
+    // The control is usable even though there's no backend session yet.
+    const fileInput = screen.getByLabelText(/pdf file/i);
+    expect(fileInput).not.toBeDisabled();
+    await userEvent.upload(fileInput, makePdfFile());
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Added",
+        expect.objectContaining({ description: "Fresh Paper" }),
+      );
+    });
+
+    // Exactly one session was created, the draft now carries its id, and the
+    // reference landed under that newly-minted backend id.
+    expect(createdSessions).toBe(1);
+    const state = useChatStore.getState();
+    expect(state.sessions[0]?.backend_session_id).toBe(55);
+    expect(state.referencesBySession[55] ?? []).toHaveLength(1);
+  });
+
+  it("lazy-creates the backend session, then imports an arXiv ID, when none exists yet", async () => {
+    useChatStore.setState({
+      sessions: [
+        { id: 1, title: "Draft", messages: [], backend_session_id: null },
+      ],
+      activeSessionId: 1,
+      _nextId: 2,
+      referencesBySession: {},
+      composerDraft: "",
+    });
+
+    let createdSessions = 0;
+    const receivedBodies: unknown[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/sessions`, () => {
+        createdSessions += 1;
+        return HttpResponse.json({ session_id: 56 }, { status: 201 });
+      }),
+      http.post(`${API_BASE_URL}/papers`, async ({ request }) => {
+        receivedBodies.push(await request.json());
+        return HttpResponse.json({
+          papers_id: 77,
+          paper_content_id: 88,
+          cache_hit: false,
+          title: "Mistral 7B",
+        });
+      }),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.click(screen.getByRole("tab", { name: /paste arxiv id/i }));
+
+    const arxivInput = screen.getByLabelText(/arxiv identifier/i);
+    expect(arxivInput).not.toBeDisabled();
+    await userEvent.type(arxivInput, "2310.06825v3");
+    await userEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Added",
+        expect.objectContaining({ description: "Mistral 7B" }),
+      );
+    });
+
+    expect(createdSessions).toBe(1);
+    expect(receivedBodies[0]).toMatchObject({
+      session_id: 56,
+      paper_id: "arxiv:2310.06825",
+    });
+    expect(useChatStore.getState().referencesBySession[56] ?? []).toHaveLength(1);
+  });
+
+  it("disables inputs and shows a hint only when there is no active session at all", async () => {
+    useChatStore.setState({ sessions: [], activeSessionId: null });
 
     render(<AttachPaperMenu />);
     await openMenu();
 
     expect(
-      screen.getByText(/send a message first to create a session/i),
+      screen.getByText(/start a chat to attach papers/i),
     ).toBeInTheDocument();
 
     const fileInput = screen.getByLabelText(/pdf file/i);
@@ -354,5 +464,65 @@ describe("AttachPaperMenu", () => {
     expect(
       screen.getByRole("button", { name: /^import$/i }),
     ).toBeDisabled();
+  });
+
+  // Ingestion can run for a while (esp. PDFs), so the user must get progress
+  // feedback: a persistent loading toast that resolves in place, plus an
+  // in-popover spinner while the request is in flight.
+  it("opens a loading toast and resolves it to success by the same id", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, () =>
+        HttpResponse.json(
+          {
+            papers_id: 1,
+            paper_content_id: 2,
+            cache_hit: false,
+            title: "Slow Paper",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.upload(screen.getByLabelText(/pdf file/i), makePdfFile());
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Added",
+        expect.objectContaining({ id: "toast-id", description: "Slow Paper" }),
+      );
+    });
+    // The loading toast was opened exactly once and then updated (not stacked).
+    expect(toastLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an in-popover processing spinner while the attach is in flight", async () => {
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/papers/upload`, async () => {
+        await responseGate;
+        return HttpResponse.json({
+          papers_id: 1,
+          paper_content_id: 2,
+          cache_hit: false,
+          title: "X",
+        });
+      }),
+    );
+
+    render(<AttachPaperMenu />);
+    await openMenu();
+    await userEvent.upload(screen.getByLabelText(/pdf file/i), makePdfFile());
+
+    // In-flight: the contextual processing row is visible.
+    expect(await screen.findByText(/^processing…$/i)).toBeInTheDocument();
+
+    releaseResponse();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
   });
 });
