@@ -4,7 +4,7 @@
 
 **Goal:** Replace the all-in-one slide_agent (which both drafts AND revises) with deterministic draft stages + an agentic revise-only loop, so the deck is always drafted (no "0 tool calls" failure) and each stage is small, traceable, and reliable.
 
-**Architecture:** Three focused stages — **Outline** (forms the talk: per-slide form + goal, from the digest), **Base Writer** (deterministically writes each slide's content → a base deck.tex, following the resolved preamble/style), and **Revise Agent** (the existing slide_agent, stripped of `initial_draft`, now revise-only: compile → read_section → replace_frame → … → done, improving visual content). Determinism where a step is always required; the agentic loop only where iteration genuinely adds value (compile-fix + visual polish).
+**Architecture:** Three focused stages — **Outline** (forms the talk: per-slide form + goal, from the digest), **Base Writer** (deterministically writes each slide's content → a base deck.tex, following the resolved preamble/style), and **Revise Agent** (the existing slide_agent, stripped of `initial_draft` AND of the verification tools, now revise-only: it issues EDIT actions + `submit`; the **pipeline** runs the mandatory checks). Determinism where a step is always required (draft + verify); the agentic loop only where iteration genuinely adds value (deciding what to edit).
 
 **Tech Stack:** Python 3.10 + `uv`, litellm tool-calling, LangGraph report subgraph, pytest, the `Tracer` (every internal call recorded), Beamer/pdflatex.
 
@@ -26,12 +26,13 @@ This is the load-bearing decision, so it is recorded here rather than assumed.
 **Decision — HYBRID, not "decompose everything":** make the **always-required** steps deterministic (Outline forms the talk; Base Writer writes the content), and keep the **iteration-shaped** step agentic (Revise improves visuals + compile-fixes, where a fixed pipeline genuinely can't replace a feedback loop). This captures the multi-stage reliability/traceability win without throwing away the one place an agent loop earns its keep. The all-in-one's only real advantage — adaptivity — is retained precisely in the revise loop; its real cost — skipping the mandatory draft — is removed.
 
 **Design principles (the rules this plan obeys):**
-1. **A must-do step is a NODE, never a prompted agent decision.** If a step must always happen (draft the deck), it is a deterministic pipeline node, not an electable tool / instruction the model can skip. Prompting is the LAST resort for control flow, because it is not reliable — the 0-tool-calls failure was a prompted must-do step.
+1. **A must-do step is a NODE/pipeline guard, never an agent tool.** If a step must ALWAYS happen — drafting the deck, AND verifying it compiles — it belongs to the deterministic pipeline, not the agent's tool palette. Exposing a mandatory step as an electable tool (`initial_draft`, `compile_check`, `density_check`) means the model can skip it, waste it, or forget it, and you end up *prompting* to enforce an invariant (e.g. `done` rejected unless the model happened to call `compile_check`) — unreliable. The agent decides WHAT to edit; the pipeline decides WHEN to verify (always). Prompting is the LAST resort for control flow.
 2. **A focused single-purpose agent ≫ one multi-target prompt.** Each stage gets a narrow prompt with one job (write the base deck; or revise visuals). A fat prompt juggling draft + revise + compile-fix + figure-design is strictly worse — more context, more ways to drift. Split by job.
 3. **Trace every internal call.** Each stage is its own `Tracer` step so a failure is localized and visible (this is how the bad design surfaced at all).
 4. **Use the agent loop ONLY where iteration adds value.** Drafting is one-shot deterministic; compile-fix + visual polish is a genuine feedback loop → that, and only that, stays agentic.
+5. **Each stage's prompt must be LEAN.** A multi-purpose prompt with thousands of tokens of mixed instructions degrades performance — the model attends to less of it and drifts. The split's payoff is that the drafting rules (figure-first per-form rendering, layout examples) move to the **base-write** prompt, leaving the **revise** prompt focused and SHORT: revise visuals, the edit tools, compile-safety, `read_section`, submit. Aggressively cut anything a stage doesn't need; measure the token drop.
 
-**Non-goals (YAGNI):** no per-slide micro-agents (over-decomposition; the revise loop already handles per-frame edits); no removing the revise loop (compile-fix needs iteration); the Outline→digest-only simplification is a *separate* redundancy cleanup (Task 6, optional) and not required for this split.
+**Non-goals (YAGNI):** no per-slide micro-agents (over-decomposition; the revise loop already handles per-frame edits); no removing the revise loop (compile-fix needs iteration); the Outline→digest-only simplification is a *separate* redundancy cleanup (Task 6, optional) and not required for this split. **No separate figure / visual-design agent yet** — the revise agent OWNS visual design and DIRECTLY prefers figure-first slides (it already carries the figure-first rules + `read_section` + TikZ compile-safety). Only carve out a dedicated figure agent later IF the revise agent demonstrably struggles with visuals after this split — measure first, decompose second.
 
 ---
 
@@ -209,20 +210,26 @@ async with _stage_heartbeat(writer, run_id, "report:drafting"):
 
 ---
 
-## Task 3: Strip `initial_draft` from slide_agent (revise-only)
+## Task 3: Revise-only agent — strip draft + verification tools; pipeline runs the checks
 
 **Files:**
-- Modify: `backend/src/paperhub/agents/slide_agent.py` (`_tool_schemas()`, `_dispatch_tool_call`, `run_slide_agent`)
+- Modify: `backend/src/paperhub/agents/slide_agent.py` (`_tool_schemas()`, `_dispatch_tool_call`, the `run_slide_agent` loop)
 - Modify: `backend/tests/agents/test_slide_agent.py`
 
-- [ ] **Step 1: Update tests first.** Rewrite the slide_agent tests so every scenario passes a non-empty `existing_deck_tex` and the LLM mock issues `compile_check` / `replace_frame` / `done` (never `initial_draft`). Add `test_run_slide_agent_requires_starting_deck` asserting it raises/*no-ops clearly* when `existing_deck_tex` is empty (revise-only contract).
+The agent's palette becomes **EDIT-only + `submit`**: `replace_frame`, `insert_frame_after`, `delete_frame`, `replace_preamble`, `read_section`, `submit`. **Remove `initial_draft`, `compile_check`, AND `density_check`** from the palette + their dispatch branches — they are mandatory steps, so the pipeline owns them:
+- after a turn's edit calls are applied → the loop runs **`run_density_check`** (cheap, no pdflatex) and appends its overflow/math signals to the messages automatically (the agent never asks);
+- on **`submit`** → the loop runs **`run_compile_check`** (pdflatex, via the existing `slide_agent_compile` path with `-halt-on-error`); if `compile_errors` / `unrendered_math_frames` are non-empty, append them and **CONTINUE** the loop (forced revision round); if clean, accept done.
+
+(`submit` replaces the old `done`; the old `done`-rejected-unless-`compile_check`-passed guard is deleted — the compile now happens deterministically inside `submit`, not as a precondition the model must satisfy.)
+
+- [ ] **Step 1: Update tests first.** Every scenario passes a non-empty `existing_deck_tex`; the LLM mock issues edit tools + `submit` (NEVER `initial_draft`/`compile_check`/`density_check`). Monkeypatch the deterministic checks (`run_compile_check` / `run_density_check`) and assert: (a) density runs automatically after an edit turn; (b) `submit` triggers a compile; (c) a failing compile pushes the errors back and the loop continues (another LLM turn); (d) a passing compile accepts done. Add `test_run_slide_agent_requires_starting_deck` (empty `existing_deck_tex` → `ValueError`).
 
 - [ ] **Step 2: Run, verify the new tests fail.**
 
-- [ ] **Step 3: Implement.** Remove the `initial_draft` entry from `_tool_schemas()`; remove the `if name == "initial_draft":` branch in `_dispatch_tool_call`; in `run_slide_agent` drop the `deck_state_label` "EMPTY — call initial_draft first" path (always "EXISTING — diff-edit it"); guard: if `existing_deck_tex` is empty/None, raise `ValueError("revise-only: a base deck is required")`.
+- [ ] **Step 3: Implement.** Remove the three tool entries from `_tool_schemas()` and their `if name == ...` branches in `_dispatch_tool_call`; add a `submit` tool (no args). In the loop: after dispatching a turn's edit calls, run `run_density_check(...)` and append a `{"role":"tool"...}`/user signal with the result; when a `submit` call appears, run `run_compile_check(...)` — if it fails, append the errors and continue; if it passes, set `accepted_done = True`. Drop the `deck_state_label` "EMPTY" path (always "EXISTING — diff-edit it"); raise `ValueError("revise-only: a base deck is required")` when `existing_deck_tex` is empty/None. Keep the transient-retry + budget-exhaustion ship-imperfect paths.
 
 - [ ] **Step 4: Run slide_agent tests, verify pass.**
-- [ ] **Step 5: Commit** `refactor(slides): slide_agent is revise-only (drop initial_draft tool)`.
+- [ ] **Step 5: Commit** `refactor(slides): revise-only agent; compile/density checks are pipeline guards`.
 
 ---
 
@@ -231,9 +238,9 @@ async with _stage_heartbeat(writer, run_id, "report:drafting"):
 **Files:**
 - Modify: `backend/src/paperhub/llm/prompts/slides_agent_v1.yaml`
 
-- [ ] **Step 1:** Remove the `initial_draft` mention + the "EMPTY — call initial_draft first" framing; reframe the opening as "You are given a BASE deck — REVISE it: compile, fix errors, and improve the VISUAL content (figures, equations, tables) per the figure-first rules." Keep figure-first, per-form rendering, TikZ compile-safety, `read_section`, tool-call discipline. Verify no literal single braces (the system block is `.format`-ed).
-- [ ] **Step 2:** Load-check + slot test: `uv run python -c "from paperhub.llm.prompts.registry import PromptRegistry; PromptRegistry().get('slides_agent/v1')"` and `uv run pytest tests/agents/test_slide_agent.py -q`.
-- [ ] **Step 3: Commit** `docs(slides): revise-only slide_agent prompt`.
+- [ ] **Step 1: TRIM AGGRESSIVELY (principle 5).** This prompt is currently ~11k chars because it did draft + revise + everything. After the split it must be LEAN. MOVE the drafting-only content to the base-write prompt: the detailed per-content-form RENDERING rules, the initial-draft `layout_examples_block`, and any "write the whole deck" guidance. KEEP only what REVISE needs: the figure-first *preference* (short), TikZ compile-safety, `read_section`, the edit-tools + `submit` semantics, and the auto-check contract ("you do NOT run checks — after edits you receive density/overflow signals; on `submit` the deck is compiled and errors return for you to fix"). Remove the `initial_draft`/"EMPTY" framing and all `compile_check`/`density_check` instructions (those tools are gone). Audit `canvas_budget_block` / `layout_examples_block` — keep in revise ONLY if revise genuinely uses them; otherwise drop. Verify no literal single braces (the `system` block is `.format`-ed).
+- [ ] **Step 2: Measure the drop.** `uv run python -c "from paperhub.llm.prompts.registry import PromptRegistry as R; print('revise system chars:', len(R().get('slides_agent/v1').system))"` — record before/after; the revise system block should be MATERIALLY smaller (target: roughly half or less of the pre-split size). Load-check + `uv run pytest tests/agents/test_slide_agent.py -q`.
+- [ ] **Step 3: Commit** `docs(slides): lean revise-only prompt (drafting rules moved to base-write)`.
 
 ---
 
