@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Plus, X } from "lucide-react";
+import { ChevronDown, FileText, Plus, X } from "lucide-react";
 
 import { useCanvasStore } from "@/store/canvas";
 import { getPaperSections } from "@/lib/api";
@@ -187,37 +187,43 @@ function AddSourcePicker({
 
   return (
     <span className="flex items-center gap-1 rounded border border-border bg-card px-1 py-0.5 text-[11px]">
-      <select
-        aria-label={t("sources.selectPaper", "Select paper")}
-        className="max-w-[9rem] rounded bg-background px-1 py-0.5 text-[11px]"
-        value={paperId}
-        onChange={(e) => pickPaper(Number(e.target.value))}
-      >
-        <option value="">{t("sources.selectPaper", "Select paper")}</option>
-        {references.map((r) => (
-          <option key={r.paper_content_id} value={r.paper_content_id}>
-            {r.title}
+      <span className="relative inline-flex items-center">
+        <select
+          aria-label={t("sources.selectPaper", "Select paper")}
+          className="max-w-[10rem] truncate appearance-none rounded bg-background py-0.5 pl-1.5 pr-5 text-[11px]"
+          value={paperId}
+          onChange={(e) => pickPaper(Number(e.target.value))}
+        >
+          <option value="">{t("sources.selectPaper", "Select paper")}</option>
+          {references.map((r) => (
+            <option key={r.paper_content_id} value={r.paper_content_id}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 opacity-60" />
+      </span>
+      <span className="relative inline-flex items-center">
+        <select
+          aria-label={t("sources.selectSection", "Select section")}
+          className="max-w-[10rem] truncate appearance-none rounded bg-background py-0.5 pl-1.5 pr-5 text-[11px] disabled:opacity-50"
+          value={section}
+          onChange={(e) => setSection(e.target.value)}
+          disabled={paperId === "" || loading}
+        >
+          <option value="">
+            {loading
+              ? t("sources.loadingSections", "Loading…")
+              : t("sources.selectSection", "Select section")}
           </option>
-        ))}
-      </select>
-      <select
-        aria-label={t("sources.selectSection", "Select section")}
-        className="max-w-[9rem] rounded bg-background px-1 py-0.5 text-[11px]"
-        value={section}
-        onChange={(e) => setSection(e.target.value)}
-        disabled={paperId === "" || loading}
-      >
-        <option value="">
-          {loading
-            ? t("sources.loadingSections", "Loading…")
-            : t("sources.selectSection", "Select section")}
-        </option>
-        {sections.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>
+          {sections.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 opacity-60" />
+      </span>
       <Button
         type="button"
         size="icon-xs"
