@@ -53,6 +53,19 @@ system: |
   not a structure to follow:
   {case_suggestion}
 
+  COMMON TALK STRUCTURES — SUGGESTIONS you may draw on, mix, or ignore (NOT a
+  required choice):
+  - single paper : a deep-dive into one paper
+  - sequence     : papers that build on each other, in order
+  - comparison   : two+ papers compared head-to-head
+  - synthesis    : multiple papers — walk EACH paper's findings in turn (a
+                   section_divider per distinct paper) and END with a synthesis
+                   that connects them; do NOT fuse the papers into one
+                   undifferentiated argument (that hides which finding is whose)
+  - tutorial     : a step-by-step instructional arc
+  - application  : a method -> how to apply it -> a case study
+  - taxonomy     : a survey / classification of a field
+
   CONTENT FORM — the visual forms available; pick whichever fits each slide
   (these are options to choose from, not a checklist or a quota):
   - title            : the deck's FRONT title page (\titlepage) — ALWAYS the
