@@ -157,6 +157,7 @@ async def fork_session(
         source_session_id=source_session_id,
         new_session_id=new_sid,
         workspace_dir=workspace_dir,
+        fork_run_id=fork_run_id,
     )
 
     return ForkResult(
@@ -194,10 +195,28 @@ async def _copy_deck(
     source_session_id: int,
     new_session_id: int,
     workspace_dir: Path,
+    fork_run_id: int,
 ) -> None:
     """Best-effort: copy the source deck (decks + deck_slides rows + the whole
     slides/ artifact dir) into the fork. On ANY failure, leave the fork deckless
-    — never raise, so a deck problem can't abort an otherwise-good fork."""
+    — never raise, so a deck problem can't abort an otherwise-good fork.
+
+    Only copies the deck if it existed AS OF the fork point: a fork branches the
+    conversation ABOVE ``fork_run_id``, so a deck produced BY that turn (or a
+    later one) did not exist at the branch point and must NOT be carried over —
+    otherwise forking above the very turn that GENERATED the deck wrongly ships a
+    "future" deck the branch never had (and re-running it routes to EDIT instead
+    of a fresh generate). A deck-producing run stamps ``runs.deck_version_id``;
+    copy only when some run STRICTLY BEFORE the fork point did so."""
+    async with conn.execute(
+        "SELECT 1 FROM runs WHERE session_id = ? AND id < ? "
+        "AND deck_version_id IS NOT NULL LIMIT 1",
+        (source_session_id, fork_run_id),
+    ) as cur:
+        deck_existed_at_fork_point = await cur.fetchone() is not None
+    if not deck_existed_at_fork_point:
+        return  # deck was generated AT/AFTER the fork point — branch is deckless
+
     async with conn.execute(
         "SELECT id, run_id, tex_path, pdf_path, speaker_notes_json, plan_json, "
         "page_count, current_version_id, contributing_paper_ids_json, status "

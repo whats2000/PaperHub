@@ -201,6 +201,10 @@ async def _seed_deck(conn, *, session_id, run_id, slides_dir: Path) -> int:
             "INSERT INTO deck_slides (deck_id, slide_index, frame_tex, page_start, "
             "page_end) VALUES (?, ?, ?, ?, ?)",
             (deck_id, i, f"\\begin{{frame}}{{S{i}}}\\end{{frame}}", i + 1, i + 1))
+    # Stamp the deck-producing run so the fork guard sees a deck existed AS OF
+    # this run (the guard only carries a deck if some run < fork_run_id did so).
+    await conn.execute(
+        "UPDATE runs SET deck_version_id = 'version_x' WHERE id = ?", (run_id,))
     await conn.commit()
     return deck_id
 
@@ -270,6 +274,39 @@ async def test_fork_deck_artifact_failure_yields_deckless_fork(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?",
             (res.new_session_id,)) as cur:
             assert (await cur.fetchone())[0] == 2
+
+
+async def test_fork_above_deck_run_is_deckless(tmp_path: Path) -> None:
+    """Forking AT/ABOVE the turn that generated the deck must NOT carry it.
+
+    The deck is a "future" artifact relative to the fork point — the branch
+    never had it. Guard: copy only when a run STRICTLY BEFORE fork_run_id
+    stamped runs.deck_version_id. Here the deck is produced by r2 and we fork
+    at r2, so the fork is deckless even though a decks row exists for the source.
+    """
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions (title) VALUES ('Orig')")
+        await conn.commit()
+        r1 = await _turn(conn, 1, "hello", "hi")  # a plain turn, no deck
+        r2 = await _turn(conn, 1, "make slides", "done",
+                         routing='{"intent":"slides"}')
+        src_slides = tmp_path / "chat_session" / "1" / "slides"
+        # The deck is produced BY r2 (the fork point) — not before it.
+        await _seed_deck(conn, session_id=1, run_id=r2, slides_dir=src_slides)
+
+        # Fork AT r2 (the deck-producing turn): the branch is above the deck.
+        res = await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path)
+
+        async with conn.execute(
+            "SELECT COUNT(*) FROM decks WHERE session_id = ?",
+            (res.new_session_id,)) as cur:
+            assert (await cur.fetchone())[0] == 0, "fork must not carry future deck"
+        # The fork still copies the slice strictly above r2 (i.e. r1's messages).
+        assert r1 is not None
 
 
 # ---------------------------------------------------------------------------
