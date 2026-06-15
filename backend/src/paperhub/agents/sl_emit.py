@@ -29,7 +29,9 @@ from typing import Protocol
 
 import aiosqlite
 
-from paperhub.models.slide_domain import DeckOutline, KeyFigureBundle
+from paperhub.agents.sl_cite import parse_cite
+from paperhub.agents.sl_read import read_section_chunks
+from paperhub.models.slide_domain import DeckOutline, KeyFigureBundle, SourceSection
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
     verify_and_fix_graphics,
@@ -597,24 +599,28 @@ async def run_sl_emit(
     # and mangled every note via the restore-by-index loop. Unifying both
     # paths on build_deck_slides eliminates the asymmetry.
     inputs = build_deck_slides(audited_tex, page_count)
-    # North-star traceability: map each CONTENT frame to its non-title outline
-    # slide (in order) so the row records the paper section(s) it was written
-    # from. build_deck_slides drops the leading title frame and re-indexes the
-    # remaining content frames 0..N-1, while the outline's slides include the
-    # title slide (content_form == "title") — so we filter the title slides out
-    # of the outline to align indices. A content frame with no matching outline
-    # slide (e.g. a revise-inserted frame) gets []; when no outline is supplied
-    # (EDIT/NOTES flows) every row gets [] for shape consistency.
-    content_outline = (
-        [s for s in outline.slides if s.content_form != "title"] if outline else []
-    )
+    # North-star traceability (write-time): each frame carries a "% cite:" marker
+    # the slide agent wrote from the section it actually used. Parse each row's
+    # own frame_tex (self-contained — no index mapping) and resolve its content
+    # cites to chunk_ids. A title/divider/agenda/hallucination/unmarked frame
+    # records []. ``outline`` is no longer used for grounding (kept for API
+    # compatibility); the cite gate already rejected unsourced content frames
+    # before this point.
+    _ = outline  # grounding now comes from per-frame cite markers, not the outline
     for s in inputs:
         note_text = (speaker_notes or {}).get(s.slide_index)
-        src_sections = (
-            content_outline[s.slide_index].source_sections
-            if s.slide_index < len(content_outline)
-            else []
-        )
+        parsed = parse_cite(s.frame_tex)
+        src_sections: list[SourceSection] = []
+        if parsed and parsed[0] == "content":
+            for pid, section in parsed[1]:
+                res = await read_section_chunks(
+                    paper_content_id=pid, section_name=section, conn=conn
+                )
+                src_sections.append(
+                    SourceSection(
+                        paper_id=pid, section_name=section, chunk_ids=list(res.chunk_ids)
+                    )
+                )
         source_sections_json = json.dumps([ss.model_dump() for ss in src_sections])
         await conn.execute(
             """

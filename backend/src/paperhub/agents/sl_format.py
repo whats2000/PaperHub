@@ -93,6 +93,17 @@ def _format_outline_block(outline: DeckOutline | None) -> str:
         msg = f" — {s.key_message}" if s.key_message else ""
         form = f" [form: {s.content_form}]"
         lines.append(f"{s.slide_index + 1}. {s.goal}{msg}{form}{fig}")
+        # Source the base writer transcribes into the slide's "% cite:" marker.
+        # A structural slide cites its kind; a content slide cites its section(s);
+        # a content slide with no resolved source is marked for the revise agent.
+        if s.content_form in {"title", "section_divider", "agenda"}:
+            kind = "divider" if s.content_form == "section_divider" else s.content_form
+            lines.append(f"   Source: {kind}")
+        elif s.source_sections:
+            srcs = "; ".join(f"{ss.paper_id}:{ss.section_name}" for ss in s.source_sections)
+            lines.append(f"   Source: {srcs}")
+        else:
+            lines.append("   Source: hallucination")
         if s.support_excerpts:
             lines.append("   Evidence:")
             for excerpt in s.support_excerpts:

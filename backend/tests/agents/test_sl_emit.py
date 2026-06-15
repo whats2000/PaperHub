@@ -8,7 +8,6 @@ import pytest_asyncio
 from paperhub.agents.sl_emit import EmitResult, run_sl_emit
 from paperhub.db.migrate import apply_schema
 from paperhub.models.slide_domain import (
-    DeckOutline,
     FigureDimensions,
     KeyFigureBundle,
     OutlineSlide,
@@ -268,55 +267,46 @@ def _outline_slide(idx: int, *, content_form: str, source_sections: list[SourceS
 
 
 @pytest.mark.asyncio
-async def test_emit_records_per_slide_source_sections_from_outline(
+async def test_emit_records_per_slide_source_sections_from_cite_markers(
     conn: aiosqlite.Connection, tmp_path: Path
 ) -> None:
-    """North star: each content deck_slides row records the paper section(s) it
-    was written from, mapped from the outline (content frames -> non-title
-    outline slides, in order). The title frame is dropped by build_deck_slides;
-    a content slide with no grounding records ``[]``."""
+    """North star (write-time): each content deck_slides row records the paper
+    section(s) from its own ``% cite:`` marker, resolved to chunk_ids. The title
+    frame is dropped; a structural (divider) frame records ``[]``."""
     import json
+
+    await conn.execute(
+        "INSERT INTO paper_content "
+        "(content_key, kind, arxiv_id, title, authors_json, "
+        "source_path, source_dir_path, html_path) VALUES (?,?,?,?,?,?,?,?)",
+        ("arxiv:emit-cite", "arxiv", "emit-0000.00000", "T", "[]",
+         "/tmp/s.tex", "/tmp", "/tmp/s.html"),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        pid = int((await cur.fetchone())[0])  # type: ignore[index]
+    await conn.execute(
+        "INSERT INTO chunks (paper_content_id, section, text, char_start, char_end) "
+        "VALUES (?,?,?,?,?)",
+        (pid, "Method", "Method chunk text", 0, 16),
+    )
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        chunk_id = int((await cur.fetchone())[0])  # type: ignore[index]
+    await conn.commit()
 
     deck = (
         "\\documentclass{beamer}\n\\begin{document}\n"
-        "\\begin{frame}{}\\titlepage\\end{frame}\n"
-        "\\begin{frame}{A}body of A\\end{frame}\n"
-        "\\begin{frame}{B}body of B\\end{frame}\n"
+        "\\begin{frame}{}\n% cite: title\n\\titlepage\\end{frame}\n"
+        f"\\begin{{frame}}{{A}}\n% cite: {pid}:Method\nbody of A\\end{{frame}}\n"
+        "\\begin{frame}{Part Two}\n% cite: divider\n\\end{frame}\n"
         "\\end{document}\n"
     )
     workdir = tmp_path / "slides"
     workdir.mkdir()
     (workdir / "deck.tex").write_text(deck, encoding="utf-8")
 
-    outline = DeckOutline(
-        talk_title="T",
-        narrative_pattern="synthesis",
-        audience_intent="a",
-        narrative_arc="arc",
-        slides=[
-            _outline_slide(0, content_form="title", source_sections=[]),
-            _outline_slide(
-                1,
-                content_form="bullets",
-                source_sections=[
-                    SourceSection(paper_id=7, section_name="Method", chunk_ids=[3, 4])
-                ],
-            ),
-            _outline_slide(2, content_form="bullets", source_sections=[]),
-        ],
-    )
-
     result = await run_sl_emit(
-        session_id=1,
-        run_id=1,
-        deck_tex=deck,
-        workdir=workdir,
-        page_count=3,
-        status="ok",
-        contributing_paper_ids=[7],
-        figure_inventory={},
-        conn=conn,
-        outline=outline,
+        session_id=1, run_id=1, deck_tex=deck, workdir=workdir, page_count=3,
+        status="ok", contributing_paper_ids=[pid], figure_inventory={}, conn=conn,
     )
 
     async with conn.execute(
@@ -325,13 +315,12 @@ async def test_emit_records_per_slide_source_sections_from_outline(
         (result.deck_id,),
     ) as cur:
         rows = await cur.fetchall()
-    # 2 content frames (title dropped).
-    assert [r[0] for r in rows] == [0, 1]
-    # content frame 0 -> first non-title outline slide (paper 7 / Method / [3,4]).
+    assert [r[0] for r in rows] == [0, 1]  # 2 content frames (title dropped)
+    # content frame 0 (frame A) -> its cite marker resolved to the section's chunks
     assert json.loads(rows[0][1]) == [
-        {"paper_id": 7, "section_name": "Method", "chunk_ids": [3, 4]}
+        {"paper_id": pid, "section_name": "Method", "chunk_ids": [chunk_id]}
     ]
-    # content frame 1 -> no-source outline slide.
+    # content frame 1 (divider) -> structural marker -> []
     assert rows[1][1] == "[]"
 
 

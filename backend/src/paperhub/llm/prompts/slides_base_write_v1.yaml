@@ -21,6 +21,20 @@ system: |
     - Render EXACTLY one \begin{{frame}}…\end{{frame}} per outline slide, in the
       given order. Do NOT add, drop, merge, or split slides — the 1:1 mapping
       keeps each slide's grounding attached to its page.
+    - SOURCE CITE MARKER (the FIRST line inside each frame, right after
+      \begin{{frame}}{{...}}). TRANSCRIBE the source the outline already attributed
+      to that slide — do NOT invent or guess a section (you cannot look sections
+      up; only copy what the outline gives you). Each outline slide lists its
+      "Source:" — copy it verbatim into the marker:
+        * a content slide -> % cite: <paper_id>:<section_name> (copy the slide's
+          listed Source; multiple separated by "; ");
+        * a title slide   -> % cite: title
+        * a divider slide -> % cite: divider
+        * an agenda slide -> % cite: agenda
+      If a content slide's outline entry lists NO Source, do NOT guess a section
+      (guessing is a hallucinated citation). Mark it exactly
+      "% cite: hallucination" — this labels the slide as unsourced so the revise
+      agent (which can read sections) must replace it with a real source.
     - Close the document with \end{{document}}.
 
   LEVERAGE THE PAPER'S CONTENT WISELY. The source provides real figures, result
