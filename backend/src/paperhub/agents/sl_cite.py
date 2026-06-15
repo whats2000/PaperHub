@@ -13,10 +13,12 @@ genuine declaration to chunks.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
-from paperhub.models.slide_domain import CiteViolationSignal
+from paperhub.agents.sl_read import read_section_chunks
+from paperhub.models.slide_domain import CiteViolationSignal, SourceSection
 
 _FRAME_SPAN_RE = re.compile(r"\\begin\{frame\}.*?\\end\{frame\}", re.DOTALL)
 _FRAMETITLE_RE = re.compile(r"\\begin\{frame\}\s*(?:\[[^\]]*\])?\s*\{(.*?)\}", re.DOTALL)
@@ -90,6 +92,34 @@ def parse_cite(frame_tex: str) -> tuple[str, list[tuple[int, str]]] | None:
             continue
         entries.append((pid, section))
     return "content", entries
+
+
+async def frame_grounding(frame_tex: str, conn: Any) -> list[SourceSection]:
+    """Resolve one frame's ``% cite:`` marker to its source sections + chunk ids.
+
+    A content frame's cites resolve to chunks (read_section_chunks, normalized);
+    a structural / hallucination / unmarked frame returns []. Used by BOTH
+    sl_emit (GENERATE) and the edit path so deck_slides grounding is written the
+    same way everywhere and never dropped on an edit."""
+    parsed = parse_cite(frame_tex)
+    if not parsed or parsed[0] != "content":
+        return []
+    out: list[SourceSection] = []
+    for pid, section in parsed[1]:
+        res = await read_section_chunks(
+            paper_content_id=pid, section_name=section, conn=conn
+        )
+        out.append(
+            SourceSection(
+                paper_id=pid, section_name=section, chunk_ids=list(res.chunk_ids)
+            )
+        )
+    return out
+
+
+async def frame_grounding_json(frame_tex: str, conn: Any) -> str:
+    """``frame_grounding`` serialized to the deck_slides.source_sections_json shape."""
+    return json.dumps([ss.model_dump() for ss in await frame_grounding(frame_tex, conn)])
 
 
 def content_cites(deck_tex: str) -> list[tuple[int, list[tuple[int, str]]]]:

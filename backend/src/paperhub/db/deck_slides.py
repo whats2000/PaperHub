@@ -21,6 +21,10 @@ class DeckSlideInput:
     page_end: int
     note_text: str | None = None
     note_language: str | None = None
+    # Per-slide source grounding (north-star traceback). The caller resolves the
+    # frame's "% cite:" marker (sl_cite.frame_grounding_json); defaults to "[]"
+    # so an edit/restore never silently NULLs the column.
+    source_sections_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -42,10 +46,11 @@ async def replace_deck_slides(
     await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
     await conn.executemany(
         "INSERT INTO deck_slides (deck_id, slide_index, frame_tex, note_text, "
-        "note_language, page_start, page_end) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "note_language, page_start, page_end, source_sections_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (deck_id, s.slide_index, s.frame_tex, s.note_text,
-             s.note_language, s.page_start, s.page_end)
+             s.note_language, s.page_start, s.page_end, s.source_sections_json)
             for s in slides
         ],
     )

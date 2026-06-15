@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from paperhub.agents.sl_cite import frame_grounding_json
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.deck_slides import (
@@ -530,10 +532,18 @@ async def restore_deck_version(
         # in-place notes patch write them).
         fresh = await get_deck(conn, session_id=session_id)
         if fresh is not None and compile_ok:
+            # Preserve per-slide source grounding from the restored frames'
+            # "% cite:" markers (don't NULL deck_slides.source_sections_json).
+            _restored = build_deck_slides(result_tex, result_page_count)
+            _grounded = [
+                replace(
+                    s,
+                    source_sections_json=await frame_grounding_json(s.frame_tex, conn),
+                )
+                for s in _restored
+            ]
             await replace_deck_slides(
-                conn,
-                deck_id=fresh.id,
-                slides=build_deck_slides(result_tex, result_page_count),
+                conn, deck_id=fresh.id, slides=_grounded,
             )
             if bundled_notes:
                 for r in await get_deck_slides(conn, deck_id=fresh.id):

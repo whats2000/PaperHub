@@ -29,9 +29,8 @@ from typing import Protocol
 
 import aiosqlite
 
-from paperhub.agents.sl_cite import parse_cite
-from paperhub.agents.sl_read import read_section_chunks
-from paperhub.models.slide_domain import DeckOutline, KeyFigureBundle, SourceSection
+from paperhub.agents.sl_cite import frame_grounding_json
+from paperhub.models.slide_domain import DeckOutline, KeyFigureBundle
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
     verify_and_fix_graphics,
@@ -609,19 +608,7 @@ async def run_sl_emit(
     _ = outline  # grounding now comes from per-frame cite markers, not the outline
     for s in inputs:
         note_text = (speaker_notes or {}).get(s.slide_index)
-        parsed = parse_cite(s.frame_tex)
-        src_sections: list[SourceSection] = []
-        if parsed and parsed[0] == "content":
-            for pid, section in parsed[1]:
-                res = await read_section_chunks(
-                    paper_content_id=pid, section_name=section, conn=conn
-                )
-                src_sections.append(
-                    SourceSection(
-                        paper_id=pid, section_name=section, chunk_ids=list(res.chunk_ids)
-                    )
-                )
-        source_sections_json = json.dumps([ss.model_dump() for ss in src_sections])
+        source_sections_json = await frame_grounding_json(s.frame_tex, conn)
         await conn.execute(
             """
             INSERT INTO deck_slides (

@@ -37,7 +37,7 @@ import json
 import re
 import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +58,7 @@ from paperhub.agents.report_pipeline import (
     revise_tex,
 )
 from paperhub.agents.sl_base_write import run_base_write
+from paperhub.agents.sl_cite import frame_grounding_json
 from paperhub.agents.sl_emit import run_sl_emit
 from paperhub.agents.sl_outline import run_sl_outline
 from paperhub.agents.sl_read import ReadResult, read_section_chunks
@@ -1356,10 +1357,21 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         assert fresh is not None
 
         if result.ok:
+            # Preserve per-slide source grounding on edits: re-parse each frame's
+            # "% cite:" marker (the agent keeps it when rewriting) so an edit
+            # never NULLs deck_slides.source_sections_json.
+            _edited = build_deck_slides(result.tex, result.page_count)
+            _grounded = [
+                replace(
+                    s,
+                    source_sections_json=await frame_grounding_json(
+                        s.frame_tex, deps.conn
+                    ),
+                )
+                for s in _edited
+            ]
             await replace_deck_slides(
-                deps.conn,
-                deck_id=fresh.id,
-                slides=build_deck_slides(result.tex, result.page_count),
+                deps.conn, deck_id=fresh.id, slides=_grounded,
             )
             # Restore notes onto the matching slide_index — but skip the
             # ``wipe`` set (slides whose content was rewritten this turn:
