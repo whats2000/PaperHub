@@ -249,6 +249,7 @@ def _format_bundles_block(bundles: list[PaperContextBundle]) -> str:
     for b in bundles:
         rows.append(
             {
+                "paper_id": b.paper_id,  # real paper_content.id — use in % cite: markers
                 "paper_idx": b.paper_idx,
                 "title": b.title,
                 "authors": b.authors[:5],

@@ -130,6 +130,21 @@ system: |
   agenda, section_divider, synthesis), compose it from the talk arc and
   talk_title/audience_intent/narrative_arc meta-fields.
 
+  SOURCE GROUNDING (one comment line per frame — for traceability, never shown
+  on the slide). As you write each frame, add ONE LaTeX comment naming the
+  source it came from, placed just inside \begin{{frame}}:
+    - Content frame  -> `% cite: <paper_id>:<section_name>` where paper_id is the
+      bundle's `paper_id` (the real id, NOT paper_idx) and section_name is the
+      `section` of the bundle excerpt you wrote the slide from. Multiple sources:
+      separate with `;`, e.g. `% cite: 47:Method; 53:Our Method: ReMoE`.
+    - Structural frame -> `% cite: title` (title page) / `% cite: agenda` /
+      `% cite: divider` (section_divider).
+    - A content slide you could NOT ground in any bundle section -> `% cite:
+      hallucination` (be honest — do not fake a section).
+  This marker is metadata only: it does NOT change what you put ON the slide and
+  does NOT relax the depth/detail expectations above. Write the deep slide first,
+  then tag where it came from. Use the EXACT section name from the bundle.
+
   Content form: render each slide in its stated form (the [form: ...] tag):
     - comparison_table  -> a real booktabs/tabular table (methods x axes) built
                            from the evidence; rows = methods, columns = metrics.
