@@ -409,6 +409,25 @@ class DocumentModeResponse(BaseModel):
     mode: str  # "html" | "pdf"
 
 
+@router.get("/content/{paper_content_id}/sections")
+async def list_paper_sections(paper_content_id: int) -> list[str]:
+    """Return the paper's section names in document order — the deterministic
+    section list for the per-slide Sources editor's picker. Sections with no
+    name (NULL) are skipped; order is by first appearance (``char_start``)."""
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT section FROM chunks WHERE paper_content_id = ? "
+            "AND section IS NOT NULL AND section != '' "
+            "GROUP BY section ORDER BY MIN(char_start)",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        rows = await cur.fetchall()
+    return [str(r[0]) for r in rows]
+
+
 @router.get("/content/{paper_content_id}/document", response_model=DocumentModeResponse)
 async def document_mode(paper_content_id: int) -> DocumentModeResponse:
     """Return whether this paper should be viewed as HTML or PDF.

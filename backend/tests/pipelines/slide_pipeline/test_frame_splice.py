@@ -8,7 +8,11 @@ locates the old frame by exact substring.
 """
 import pytest
 
-from paperhub.pipelines.slide_pipeline.frame_splice import splice_frame
+from paperhub.agents.sl_cite import serialize_cite, strip_cite
+from paperhub.pipelines.slide_pipeline.frame_splice import (
+    set_frame_cite_marker,
+    splice_frame,
+)
 
 _DECK = r"""\documentclass{beamer}
 \begin{document}
@@ -25,6 +29,9 @@ Second frame body.
 
 _OLD_B = "\\begin{frame}{Title B}\nSecond frame body.\n\\end{frame}"
 _NEW_B = "\\begin{frame}{Title B}\nEdited second frame.\n\\end{frame}"
+_OLD_B_INBODY = (
+    "\\begin{frame}{Title B}\n% cite: 7:Introduction\nSecond frame body.\n\\end{frame}"
+)
 
 
 def test_splice_replaces_the_matching_frame() -> None:
@@ -91,3 +98,41 @@ def test_splice_drop_honors_an_in_body_marker_the_user_added() -> None:
     out = splice_frame(_DECK, _OLD_B, new, drop_preceding_cite=True)
     assert "% cite: 9:Method" in out
     assert "% cite: 7:Introduction" not in out
+
+
+# ── strip_cite / serialize_cite / set_frame_cite_marker (structured cites) ──
+
+
+def test_strip_cite_removes_in_body_marker() -> None:
+    out = strip_cite(_OLD_B_INBODY)
+    assert "% cite:" not in out
+    assert out.startswith("\\begin{frame}{Title B}")
+    assert "Second frame body." in out
+
+
+def test_strip_cite_noop_without_marker() -> None:
+    assert strip_cite(_OLD_B) == _OLD_B
+
+
+def test_serialize_cite_roundtrips() -> None:
+    assert serialize_cite([(47, "Introduction")]) == "% cite: 47:Introduction"
+    assert serialize_cite([(47, "Intro"), (53, "Method")]) == (
+        "% cite: 47:Intro; 53:Method"
+    )
+    assert serialize_cite([]) == ""  # unsourced → no marker
+
+
+def test_set_frame_cite_marker_moves_in_body_to_preceding() -> None:
+    deck = "\\begin{document}\n" + _OLD_B_INBODY + "\n\\end{document}\n"
+    new_deck, new_body = set_frame_cite_marker(deck, _OLD_B_INBODY, "% cite: 9:Method")
+    assert "% cite: 9:Method\n\\begin{frame}{Title B}" in new_deck
+    assert "% cite:" not in new_body
+    assert new_body.startswith("\\begin{frame}{Title B}")
+    assert new_deck.count("% cite:") == 1  # no duplicate
+
+
+def test_set_frame_cite_marker_empty_removes_it() -> None:
+    deck = "\\begin{document}\n% cite: 7:Introduction\n" + _OLD_B + "\n\\end{document}\n"
+    new_deck, new_body = set_frame_cite_marker(deck, _OLD_B, "")
+    assert "% cite:" not in new_deck  # removed → unsourced
+    assert new_body == _OLD_B

@@ -109,6 +109,24 @@ async def update_slide_frame(
     await conn.commit()
 
 
+async def update_slide_grounding(
+    conn: aiosqlite.Connection, *, deck_id: int, slide_index: int,
+    frame_tex: str, source_sections_json: str,
+) -> None:
+    """Set one slide's frame_tex + source grounding (the structured Sources
+    editor: a comment-only change — no recompile)."""
+    cur = await conn.execute(
+        "UPDATE deck_slides SET frame_tex = ?, source_sections_json = ? "
+        "WHERE deck_id = ? AND slide_index = ?",
+        (frame_tex, source_sections_json, deck_id, slide_index),
+    )
+    if cur.rowcount == 0:
+        raise ValueError(
+            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+        )
+    await conn.commit()
+
+
 async def rebuild_speaker_notes_json(
     conn: aiosqlite.Connection, *, deck_id: int
 ) -> dict[str, str]:
@@ -135,5 +153,6 @@ async def rebuild_speaker_notes_json(
 
 __all__ = [
     "DeckSlideInput", "DeckSlideRow", "replace_deck_slides", "get_deck_slides",
-    "update_slide_note", "update_slide_frame", "rebuild_speaker_notes_json",
+    "update_slide_note", "update_slide_frame", "update_slide_grounding",
+    "rebuild_speaker_notes_json",
 ]

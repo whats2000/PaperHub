@@ -31,6 +31,27 @@ _CITE_RE = re.compile(
 )
 _STRUCTURAL = {"title", "divider", "agenda"}
 
+# A full ``% cite:`` comment LINE (including its trailing newline), for stripping
+# the marker out of a frame so the content editor shows slide content only.
+_CITE_LINE_RE = re.compile(
+    r"^[ \t]*%[ \t]*cite:[^\n]*\n?", re.MULTILINE | re.IGNORECASE
+)
+
+
+def strip_cite(frame_tex: str) -> str:
+    """Return ``frame_tex`` with every ``% cite:`` comment line removed — the
+    content editor shows slide CONTENT only; citations are managed structurally
+    (the Sources reference editor), never by hand-editing the comment."""
+    return _CITE_LINE_RE.sub("", frame_tex)
+
+
+def serialize_cite(sources: list[tuple[int, str]]) -> str:
+    """Build a ``% cite:`` marker line from ``(paper_id, section_name)`` pairs —
+    the inverse of :func:`parse_cite`. Returns ``""`` when there are no sources
+    (an unsourced / synthesis slide carries no marker)."""
+    parts = [f"{pid}:{section}" for pid, section in sources if section]
+    return f"% cite: {'; '.join(parts)}" if parts else ""
+
 # One Beamer frame plus any ``% cite:`` comment line(s) immediately preceding
 # ``\begin{frame}``. The agent may place the marker INSIDE the frame OR on the
 # line just before it; frame extraction (build_deck_slides) keeps only the
@@ -42,6 +63,20 @@ _FRAME_BLOCK_RE = re.compile(
     r"((?:[ \t]*%[ \t]*cite:[^\n]*\n\s*)?)(\\begin\{frame\}.*?\\end\{frame\})",
     re.DOTALL,
 )
+
+
+def frame_blocks(deck_tex: str) -> dict[str, str]:
+    """Map each frame BODY to its full editable block — the frame plus any
+    ``% cite:`` marker sitting just before ``\\begin{frame}`` (which frame
+    extraction strips out of the stored ``frame_tex``). The per-frame editor
+    loads the block, not the bare body, so the user SEES and CONTROLS the
+    grounding marker (keep / edit / remove) rather than it being applied or
+    dropped silently. An in-body marker is already inside the frame, so it
+    rides along naturally."""
+    return {
+        m.group(2): m.group(1) + m.group(2)
+        for m in _FRAME_BLOCK_RE.finditer(deck_tex)
+    }
 
 
 def parse_cite(frame_tex: str) -> tuple[str, list[tuple[int, str]]] | None:

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import re
 
+from paperhub.agents.sl_cite import strip_cite
+
 # A ``% cite:`` comment line sitting IMMEDIATELY before a frame (the agent often
 # places the grounding marker there, where frame extraction strips it out of
 # ``frame_tex``). Anchored to the end of the pre-frame text so only the marker
@@ -63,4 +65,34 @@ def splice_frame(
     return prefix + new_frame_tex + suffix
 
 
-__all__ = ["splice_frame"]
+def set_frame_cite_marker(
+    deck_tex: str, old_frame_tex: str, marker_line: str
+) -> tuple[str, str]:
+    """Set a frame's ``% cite:`` marker to ``marker_line`` (or remove it when
+    empty), normalizing it to a single PRECEDING comment and leaving the frame
+    body content-only.
+
+    Used by the structured Sources reference editor: it rewrites the grounding
+    comment deterministically (the user never hand-edits it). Returns
+    ``(new_deck_tex, new_frame_body)`` — the new body (cite stripped) is what
+    ``deck_slides.frame_tex`` becomes, so the DB and the deck source stay in
+    sync. A pure-comment change: the compiled PDF is unaffected, so no recompile.
+
+    Raises ``ValueError`` if the frame is absent / ambiguous (as ``splice_frame``).
+    """
+    count = deck_tex.count(old_frame_tex)
+    if count == 0:
+        raise ValueError("frame not found in deck source")
+    if count > 1:
+        raise ValueError(
+            f"frame is ambiguous (matches {count} locations in the deck source)"
+        )
+    new_body = strip_cite(old_frame_tex)
+    idx = deck_tex.index(old_frame_tex)
+    prefix, suffix = deck_tex[:idx], deck_tex[idx + len(old_frame_tex):]
+    prefix = _PRECEDING_CITE_RE.sub("", prefix)  # drop any old preceding marker
+    block = f"{marker_line}\n{new_body}" if marker_line else new_body
+    return prefix + block + suffix, new_body
+
+
+__all__ = ["splice_frame", "set_frame_cite_marker"]

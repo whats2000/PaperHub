@@ -87,6 +87,7 @@ async def test_get_deck_slides_returns_frame_and_parsed_sources(
     app, conn = app_with_db
     slides_dir = tmp_path / "chat_session" / "1" / "slides"
     slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
     await _seed_session(conn, 1)
     await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
 
@@ -104,6 +105,10 @@ async def test_get_deck_slides_returns_frame_and_parsed_sources(
         {"paper_id": 7, "section_name": "Introduction", "chunk_ids": [101, 102]}
     ]
     assert rows[1]["source_sections"] == []
+    # content_tex = the frame with cite markers stripped (editor shows content
+    # only). _FRAME_A / _FRAME_B have no in-body marker, so content_tex == body.
+    assert rows[0]["content_tex"] == _FRAME_A
+    assert rows[1]["content_tex"] == _FRAME_B
 
 
 @pytest.mark.asyncio
@@ -170,36 +175,37 @@ async def test_put_frame_tex_recompiles_and_persists(
 
 
 @pytest.mark.asyncio
-async def test_put_frame_tex_drops_stale_preceding_grounding(
+async def test_put_frame_tex_preserves_grounding_on_content_edit(
     tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
 ) -> None:
-    """A manual frame edit must NOT inherit the old out-of-body % cite: marker —
-    grounding re-resolves from the user's new frame (here: unsourced)."""
+    """Editing slide CONTENT must not change its grounding — the source is
+    managed structurally (the Sources editor), not the LaTeX editor. Slide 0
+    (page 1) is seeded with a real source; a content edit keeps it."""
     app, conn = app_with_db
     slides_dir = tmp_path / "chat_session" / "1" / "slides"
     slides_dir.mkdir(parents=True)
-    # _DECK_TEX has `% cite: 7:Introduction` immediately before frame B (page 2).
     (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
     (slides_dir / "deck.pdf").write_bytes(b"%PDF\n")
     await _seed_session(conn, 1)
     await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
 
-    new_frame = "\\begin{frame}{Title B}\nHand-written, no source.\n\\end{frame}"
+    new_frame = "\\begin{frame}{Title A}\nRewritten content.\n\\end{frame}"
     transport = ASGITransport(app=app)
     with patch("paperhub.api.decks.compile_mod.compile_with_revise", _ok_compile()):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             put = await client.put(
-                "/sessions/1/deck/slides/2/tex",
+                "/sessions/1/deck/slides/1/tex",  # page 1 = slide 0 (has grounding)
                 json={"frame_tex": new_frame},
                 headers=_HDR,
             )
             assert put.status_code == 200, put.text
             slides = (await client.get("/sessions/1/deck/slides", headers=_HDR)).json()
 
-    edited = next(s for s in slides if s["page_start"] <= 2 <= s["page_end"])
-    # Stale `7:Introduction` grounding is gone — the slide is now unsourced.
-    assert edited["source_sections"] == []
-    assert "% cite: 7:Introduction" not in (slides_dir / "deck.tex").read_text()
+    edited = next(s for s in slides if s["page_start"] <= 1 <= s["page_end"])
+    # Grounding carried forward unchanged across the content edit.
+    assert edited["source_sections"] == [
+        {"paper_id": 7, "section_name": "Introduction", "chunk_ids": [101, 102]}
+    ]
 
 
 @pytest.mark.asyncio
@@ -326,6 +332,114 @@ async def test_put_deck_tex_recompiles_whole_deck(
     body = resp.json()
     assert body["ok"] is True
     assert "WHOLE-DECK edited body." in (slides_dir / "deck.tex").read_text()
+
+
+@pytest.mark.asyncio
+async def test_put_slide_sources_sets_grounding_without_recompile(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    """The structured Sources editor sets a slide's grounding deterministically
+    and WITHOUT a recompile — the % cite: marker is rewritten in deck.tex and
+    the DB row updated; compile_with_revise is never called."""
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    deck_id = await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    # Seed two chunks for paper 7 §Introduction so the source resolves to them.
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, title, source_path, "
+        "source_dir_path, html_path, arxiv_id) VALUES "
+        "(7, 'arxiv:p7', 'arxiv', 'P7', '/x/s.tex', '/x', '/x/s.html', 'p7')"
+    )
+    await conn.executemany(
+        "INSERT INTO chunks (id, paper_content_id, section, char_start, char_end, "
+        "text, dom_id, match_text, page, bbox) VALUES (?, 7, 'Introduction', ?, ?, "
+        "?, ?, NULL, NULL, NULL)",
+        [(301, 0, 100, "intro a", "phchunk-1"), (302, 100, 200, "intro b", "phchunk-2")],
+    )
+    await conn.commit()
+
+    fake_compile = AsyncMock()
+    transport = ASGITransport(app=app)
+    with patch("paperhub.api.decks.compile_mod.compile_with_revise", fake_compile):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/sessions/1/deck/slides/2/sources",
+                json={"sources": [{"paper_id": 7, "section_name": "Introduction"}]},
+                headers=_HDR,
+            )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["source_sections"] == [
+        {"paper_id": 7, "section_name": "Introduction", "chunk_ids": [301, 302]}
+    ]
+    fake_compile.assert_not_called()  # comment-only — no recompile
+    # The DB row + deck.tex marker both reflect the new source.
+    async with conn.execute(
+        "SELECT source_sections_json FROM deck_slides WHERE deck_id=? AND slide_index=1",
+        (deck_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None and '"chunk_ids": [301, 302]' in row[0]
+    assert "% cite: 7:Introduction" in (slides_dir / "deck.tex").read_text()
+
+
+@pytest.mark.asyncio
+async def test_put_slide_sources_empty_makes_unsourced(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/sessions/1/deck/slides/1/sources", json={"sources": []}, headers=_HDR
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["source_sections"] == []
+    # Frame A's marker stays absent (it had none); slide 0 now unsourced in DB.
+    slides = None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        slides = (await c.get("/sessions/1/deck/slides", headers=_HDR)).json()
+    s0 = next(s for s in slides if s["page_start"] <= 1 <= s["page_end"])
+    assert s0["source_sections"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_paper_sections_lists_in_document_order(
+    app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, title, source_path, "
+        "source_dir_path, html_path, arxiv_id) VALUES "
+        "(7, 'arxiv:p7', 'arxiv', 'P7', '/x/s.tex', '/x', '/x/s.html', 'p7')"
+    )
+    await conn.executemany(
+        "INSERT INTO chunks (id, paper_content_id, section, char_start, char_end, "
+        "text, dom_id, match_text, page, bbox) VALUES (?, 7, ?, ?, ?, 'x', NULL, "
+        "NULL, NULL, NULL)",
+        [
+            (401, "Introduction", 0, 50),
+            (402, "Introduction", 50, 100),
+            (403, "Method", 100, 150),
+            (404, None, 150, 160),  # NULL section — skipped
+        ],
+    )
+    await conn.commit()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/papers/content/7/sections", headers=_HDR)
+    assert resp.status_code == 200, resp.text
+    # Distinct sections, document order (by first char_start), NULL skipped.
+    assert resp.json() == ["Introduction", "Method"]
 
 
 @pytest.mark.asyncio
