@@ -501,6 +501,15 @@ async def run_sl_outline(
             )
             dropped.extend(fb_dropped)
 
+        # Grounding visibility (north-star traceback): how many CONTENT slides
+        # came back WITHOUT any source_sections. Recorded so an ungrounded deck is
+        # visible in the trace instead of silently shipping untraceable slides.
+        ungrounded = [
+            s.slide_index
+            for s in outline.slides
+            if s.content_form not in _structural and not s.source_sections
+        ]
+
         step.record_result(
             {
                 "talk_title": outline.talk_title,
@@ -513,6 +522,7 @@ async def run_sl_outline(
                 "round_log": round_log,
                 # Per-slide traceback evidence a future Sources UI needs.
                 "reads": {key: res.chunk_ids for key, res in reads_by_key.items()},
+                "ungrounded_content_slides": ungrounded,
                 "dropped": dropped,
             }
         )

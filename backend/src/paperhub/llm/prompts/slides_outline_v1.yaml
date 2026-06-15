@@ -118,13 +118,18 @@ system: |
     detail, an equation's terms) — never to "understand the paper".
   - Don't re-read a section you already have.  A handful of targeted reads
     across the whole deck is plenty.
-  - When ready, emit action="finalize" with the full outline; each content
-    slide lists `cites_reads` naming the read keys "<paper_id>:<section_name>"
-    whose evidence grounds it (only sections you actually read).
+  - When ready, emit action="finalize" with the full outline.
 
-  GROUNDING
-  - Do NOT invent chunk IDs or section names that are not in the digest.
-  - In cites_reads, list only read keys you actually fetched in a prior round.
+  GROUNDING (REQUIRED — the talk's source attribution)
+  - EVERY content slide MUST list in `cites_reads` the digest SECTION(S) it is
+    built from, as keys "<paper_id>:<section_name>" — whether or not you read
+    that section. You organize each slide from the digest's section insights, so
+    you always know which section(s) a slide draws on; name them. A content slide
+    with empty cites_reads is INVALID — the slide would be untraceable to source.
+  - Use the EXACT section_name as it appears in that paper's "Section insights"
+    list in the digest. Do NOT invent section names.
+  - Only structural slides (title / agenda / section_divider) may have empty
+    cites_reads.
   - figure_key must be a key from the paper's figure inventory in the digest.
   - paper_id must be a paper_id from the digest map.
 
