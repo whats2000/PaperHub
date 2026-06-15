@@ -21,7 +21,6 @@ from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import (
     DeckCommand,
     DeckNotesAuthor,
-    SlideBudget,
     TargetLanguage,
 )
 from paperhub.tracing.tracer import Tracer
@@ -30,26 +29,12 @@ from paperhub.tracing.tracer import Tracer
 # optional language tag on the opening fence.
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|\n?```$")
 
-# Budget extraction patterns (F4 — SRS v2.21).
-_SLIDE_RE = re.compile(r"(\d+)[-\s]*(?:slides?|頁|張|投影片)", re.IGNORECASE)
-_MIN_RE = re.compile(r"(\d+)[- ]?(?:min(?:ute)?s?|分鐘|分)", re.IGNORECASE)
-
-
-def parse_slide_budget(text: str) -> SlideBudget:
-    """Extract a slide-count budget from the user's request. Explicit slide
-    count wins; else minutes × 0.75; else default 15. Clamped to [8, 30]."""
-    count: int | None = None
-    m = _SLIDE_RE.search(text)
-    if m:
-        count = int(m.group(1))
-    else:
-        mm = _MIN_RE.search(text)
-        if mm:
-            count = round(int(mm.group(1)) * 0.75)
-    if count is None:
-        count = 15
-    count = max(8, min(30, count))
-    return SlideBudget(target_slide_count=count, depth="standard")
+# NOTE: deck-LENGTH parsing used to live here (a CJK-only regex
+# ``parse_slide_budget``). It was removed: it could not honor non-CJK units
+# ("pages"), ranges, or durations, and silently returned a wrong default that
+# CONTRADICTED the user's task (e.g. "20-30 pages" → 15). The outline now reads
+# the requested length straight from the task (any language), defaulting to ~15
+# only when none is named.
 
 
 # --------------------------------------------------------------------------

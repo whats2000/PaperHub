@@ -1,12 +1,14 @@
-"""Regression tests for two F4 fixes surfaced by the real-API gate:
+"""Regression test for an F4 fix surfaced by the real-API gate:
 
-1. `_select_rows` page-scope with no explicit target_page falls back to the
-   on-screen page (the classifier returned target_scope="page"/target_page=None
-   for the Chinese ordinal "第三頁").
-2. `parse_slide_budget` matches a hyphenated count like "8-slide".
+`_select_rows` page-scope with no explicit target_page falls back to the
+on-screen page (the classifier returned target_scope="page"/target_page=None
+for the Chinese ordinal "第三頁").
+
+(The companion `parse_slide_budget` regex test was removed with that function:
+deck length is no longer parsed by regex — the outline reads the user's
+requested length directly from the task, any language.)
 """
 from paperhub.agents.report_graph import _select_rows
-from paperhub.agents.report_pipeline import parse_slide_budget
 from paperhub.db.deck_slides import DeckSlideRow
 from paperhub.models.domain import DeckCommand
 
@@ -37,8 +39,3 @@ def test_select_rows_page_unresolvable_returns_empty() -> None:
     rows = [_row(0, 1, 1)]
     cmd = DeckCommand(action="edit_slides", target_scope="page", target_page=None, note_language=None)
     assert _select_rows(rows, cmd, current_view_page=9) == []
-
-
-def test_parse_budget_hyphenated_slide_count() -> None:
-    assert parse_slide_budget("Make a concise 8-slide talk").target_slide_count == 8
-    assert parse_slide_budget("a 12-slide deck").target_slide_count == 12

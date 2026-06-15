@@ -260,7 +260,9 @@ async def run_sl_outline(
             section says.  The orchestrator structures the whole deck from these.
         task_description: the user's slide request.
         response_language: language for all human-readable text in the outline.
-        target_slides: target number of content slides (from parse_slide_budget).
+        target_slides: FALLBACK content-slide count used only when the task names
+            no length (configurable PAPERHUB_SLIDE_DEFAULT_LENGTH). The outline
+            honors an explicit length stated in task_description over this.
         adapter: LLM adapter (structured-output interface).
         tracer: open Tracer bound to the current run.
         model: litellm model id.

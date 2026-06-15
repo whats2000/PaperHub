@@ -54,7 +54,6 @@ from paperhub.agents.report_pipeline import (
     edit_frame,
     edit_preamble_block,
     edit_title_block,
-    parse_slide_budget,
     revise_tex,
 )
 from paperhub.agents.sl_cite import with_grounding
@@ -64,6 +63,7 @@ from paperhub.agents.sl_read import ReadResult, read_section_chunks
 from paperhub.agents.slide_agent import run_slide_agent
 from paperhub.agents.state import effective_query, response_language
 from paperhub.agents.style_resolver import resolve_preamble
+from paperhub.config import load_settings
 from paperhub.db.deck_slides import (
     DeckSlideRow,
     get_deck_slides,
@@ -444,7 +444,12 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         deck = await get_deck(deps.conn, session_id=state["session_id"])
         if deck is None:
             # GENERATE: detect an explicit slide-content language (else fall
-            # back to response_language downstream) + the length budget.
+            # back to response_language downstream). Deck LENGTH is NOT parsed
+            # here — the outline reads the user's requested length directly from
+            # the TASK (any language/unit, ranges → the middle) and falls back
+            # to a default (~15) only when the task names none. A regex budget
+            # here produced a WRONG number ("20-30 pages" → silent 15) that
+            # contradicted the task and capped the deck.
             lang = await detect_slide_language(
                 adapter=deps.adapter,
                 tracer=deps.tracer,
@@ -453,7 +458,6 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             )
             if lang:
                 out["report_slide_language"] = lang
-            out["report_budget"] = parse_slide_budget(instruction)
             return out
 
         rows = await get_deck_slides(deps.conn, deck_id=deck.id)
@@ -842,10 +846,12 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             await _flush_steps()
             return res
 
-        _budget = state.get("report_budget")
-        _target_slides: int = (
-            _budget.target_slide_count if _budget is not None else 15
-        )
+        # Deck length: the outline reads the user's requested length straight
+        # from the TASK (any language; a range → the middle) and honors it. This
+        # configurable fallback applies ONLY when the request names no length —
+        # PAPERHUB_SLIDE_DEFAULT_LENGTH (.env or the runtime Settings panel),
+        # read live so a Settings-panel change hot-applies.
+        _target_slides: int = load_settings().slide_default_length
 
         async with _stage_heartbeat(writer, run_id, "report:planning"):
             outline_result = await run_sl_outline(

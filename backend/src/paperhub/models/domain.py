@@ -87,15 +87,6 @@ class SlidePlan(BaseModel):
     sections: list[PlannedSection]
 
 
-class SlideBudget(BaseModel):
-    """Deck length budget (F4 — SRS v2.21). Default 20 min ≈ 15 slides."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    target_slide_count: int = 15
-    depth: str = "standard"  # 'overview' | 'standard' | 'deep'
-
-
 class DeckCommand(BaseModel):
     """How to interpret a slides turn when a deck already exists (F4, v2.21)."""
 
@@ -225,7 +216,6 @@ class AgentState(TypedDict, total=False):
     slide_context: str | None
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
-    report_budget: SlideBudget   # v2.21 (F4): GENERATE length budget
     report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action
     # v2.22: TASK target language for the SLIDE CONTENT, detected from the
     # instruction (e.g. "把簡報換成英文" → "English"), independent of the
