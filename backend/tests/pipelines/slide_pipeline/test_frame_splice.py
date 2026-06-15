@@ -8,10 +8,11 @@ locates the old frame by exact substring.
 """
 import pytest
 
-from paperhub.agents.sl_cite import serialize_cite, strip_cite
+from paperhub.agents.sl_cite import serialize_cite
 from paperhub.pipelines.slide_pipeline.frame_splice import (
     set_frame_cite_marker,
     splice_frame,
+    strip_cite,
 )
 
 _DECK = r"""\documentclass{beamer}
@@ -57,47 +58,6 @@ def test_splice_raises_when_old_frame_ambiguous() -> None:
     dup = _DECK + "\n" + _OLD_B  # the same frame body now appears twice
     with pytest.raises(ValueError, match="ambiguous"):
         splice_frame(dup, _OLD_B, _NEW_B)
-
-
-# ── drop_preceding_cite: a manual frame edit must not inherit the OLD,
-#    out-of-body % cite: marker (it grounded the previous content). ──────────
-
-_FRAME_A = "\\begin{frame}{Title A}\nFirst frame body.\n\\end{frame}"
-
-
-def test_splice_drops_the_preceding_cite_when_requested() -> None:
-    out = splice_frame(_DECK, _OLD_B, _NEW_B, drop_preceding_cite=True)
-    assert _NEW_B in out
-    # The stale auto-marker that sat just before the edited frame is removed,
-    # so grounding re-resolves from the user's new frame (unsourced unless they
-    # added their own in-body % cite:).
-    assert "% cite: 7:Introduction" not in out
-
-
-def test_splice_keeps_the_preceding_cite_by_default() -> None:
-    out = splice_frame(_DECK, _OLD_B, _NEW_B)
-    assert "% cite: 7:Introduction" in out
-
-
-def test_splice_drop_strips_only_the_edited_frames_marker() -> None:
-    deck = (
-        "\\begin{document}\n"
-        "% cite: 1:Background\n" + _FRAME_A + "\n"  # another frame's marker
-        "% cite: 7:Introduction\n" + _OLD_B + "\n"
-        "\\end{document}\n"
-    )
-    out = splice_frame(deck, _OLD_B, _NEW_B, drop_preceding_cite=True)
-    assert "% cite: 1:Background" in out  # untouched — belongs to frame A
-    assert "% cite: 7:Introduction" not in out  # the edited frame's stale marker
-
-
-def test_splice_drop_honors_an_in_body_marker_the_user_added() -> None:
-    # The user's new frame carries its OWN cite — it lives inside the frame body
-    # so it survives (only the preceding out-of-body marker is dropped).
-    new = "\\begin{frame}{Title B}\n% cite: 9:Method\nUser-written body.\n\\end{frame}"
-    out = splice_frame(_DECK, _OLD_B, new, drop_preceding_cite=True)
-    assert "% cite: 9:Method" in out
-    assert "% cite: 7:Introduction" not in out
 
 
 # ── strip_cite / serialize_cite / set_frame_cite_marker (structured cites) ──

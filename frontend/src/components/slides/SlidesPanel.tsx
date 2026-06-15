@@ -136,6 +136,16 @@ export function SlidesPanel({
     for (const r of references ?? []) m.set(r.paper_content_id, r.title);
     return m;
   }, [references]);
+  // The Add-source picker offers only the deck's CONTRIBUTING papers — the
+  // backend rejects grounding to an off-deck paper, so the picker must match.
+  const contributingPapers = useMemo(
+    () =>
+      (deck?.contributing_papers ?? []).map((p) => ({
+        paper_content_id: p.id,
+        title: p.title ?? titleByPaperId.get(p.id) ?? `#${p.id}`,
+      })),
+    [deck, titleByPaperId],
+  );
 
   // Local editor draft + state (the persisted bits — mode + sources — live in
   // the store so a panel remount during Q&A doesn't lose them).
@@ -834,7 +844,7 @@ export function SlidesPanel({
           sources={currentSources}
           titleByPaperId={titleByPaperId}
           editable={editorMode === "frame"}
-          references={references ?? []}
+          references={contributingPapers}
           onSetSources={setCurrentSlideSources}
         />
       )}

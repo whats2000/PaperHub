@@ -31,19 +31,6 @@ _CITE_RE = re.compile(
 )
 _STRUCTURAL = {"title", "divider", "agenda"}
 
-# A full ``% cite:`` comment LINE (including its trailing newline), for stripping
-# the marker out of a frame so the content editor shows slide content only.
-_CITE_LINE_RE = re.compile(
-    r"^[ \t]*%[ \t]*cite:[^\n]*\n?", re.MULTILINE | re.IGNORECASE
-)
-
-
-def strip_cite(frame_tex: str) -> str:
-    """Return ``frame_tex`` with every ``% cite:`` comment line removed — the
-    content editor shows slide CONTENT only; citations are managed structurally
-    (the Sources reference editor), never by hand-editing the comment."""
-    return _CITE_LINE_RE.sub("", frame_tex)
-
 
 def serialize_cite(sources: list[tuple[int, str]]) -> str:
     """Build a ``% cite:`` marker line from ``(paper_id, section_name)`` pairs —

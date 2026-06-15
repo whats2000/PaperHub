@@ -52,7 +52,7 @@ async def _seed_deck_with_slides(
     await conn.execute(
         "INSERT INTO decks (session_id, tex_path, pdf_path, page_count, "
         "current_version_id, contributing_paper_ids_json, status) "
-        "VALUES (?, ?, ?, ?, ?, '[]', 'ok')",
+        "VALUES (?, ?, ?, ?, ?, '[7]', 'ok')",
         (session_id, str(tex_path), str(slides_dir / "deck.pdf"),
          page_count, "version_seed"),
     )
@@ -385,6 +385,58 @@ async def test_put_slide_sources_sets_grounding_without_recompile(
         row = await cur.fetchone()
     assert row is not None and '"chunk_ids": [301, 302]' in row[0]
     assert "% cite: 7:Introduction" in (slides_dir / "deck.tex").read_text()
+
+
+@pytest.mark.asyncio
+async def test_put_slide_sources_rejects_off_deck_paper(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    """A slide may only be grounded to a paper the deck was built from — an
+    off-deck paper_id is rejected (400), never persisted as a hollow source."""
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)  # contributing=[7]
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/sessions/1/deck/slides/1/sources",
+            json={"sources": [{"paper_id": 99, "section_name": "Introduction"}]},
+            headers=_HDR,
+        )
+    assert resp.status_code == 400
+    assert "not part of this deck" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_put_slide_sources_rejects_hollow_grounding(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    """A (paper, section) that resolves to NO chunks is rejected (400) — never
+    persist a source that claims a section but grounds to nothing."""
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, title, source_path, "
+        "source_dir_path, html_path, arxiv_id) VALUES "
+        "(7, 'arxiv:p7', 'arxiv', 'P7', '/x/s.tex', '/x', '/x/s.html', 'p7')"
+    )
+    await conn.commit()  # paper 7 exists but has NO chunks for 'Nowhere'
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/sessions/1/deck/slides/1/sources",
+            json={"sources": [{"paper_id": 7, "section_name": "Nowhere"}]},
+            headers=_HDR,
+        )
+    assert resp.status_code == 400
+    assert "no chunks" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

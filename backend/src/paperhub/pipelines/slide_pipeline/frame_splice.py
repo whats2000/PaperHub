@@ -1,9 +1,11 @@
-"""Replace one frame body in a full deck source (manual "edit current frame").
+"""Frame-tex manipulation for the manual / structured slide editors.
 
 The Slides panel's per-frame editor sends back a single edited
-``\\begin{frame}…\\end{frame}`` block; this splices it into ``deck.tex`` in
-place of the original frame, leaving every other byte — including a preceding
-``% cite:`` grounding marker, which sits OUTSIDE the frame body — untouched.
+``\\begin{frame}…\\end{frame}`` body; :func:`splice_frame` swaps it into
+``deck.tex`` in place of the original frame, leaving every other byte untouched.
+:func:`set_frame_cite_marker` rewrites a frame's grounding ``% cite:`` comment
+deterministically (the structured Sources editor). Both are pure string utils —
+no dependency on the agents layer.
 
 The stored ``deck_slides.frame_tex`` is byte-identical to the frame body in
 ``deck.tex`` (both produced by ``extract_frames_from_beamer``), so the match is
@@ -15,7 +17,11 @@ from __future__ import annotations
 
 import re
 
-from paperhub.agents.sl_cite import strip_cite
+# A full ``% cite:`` comment LINE (incl. its trailing newline), for stripping
+# the marker out of a frame so the content editor shows slide content only.
+_CITE_LINE_RE = re.compile(
+    r"^[ \t]*%[ \t]*cite:[^\n]*\n?", re.MULTILINE | re.IGNORECASE
+)
 
 # A ``% cite:`` comment line sitting IMMEDIATELY before a frame (the agent often
 # places the grounding marker there, where frame extraction strips it out of
@@ -26,23 +32,16 @@ _PRECEDING_CITE_RE = re.compile(
 )
 
 
-def splice_frame(
-    deck_tex: str,
-    old_frame_tex: str,
-    new_frame_tex: str,
-    *,
-    drop_preceding_cite: bool = False,
-) -> str:
+def strip_cite(frame_tex: str) -> str:
+    """Return ``frame_tex`` with every ``% cite:`` comment line removed — the
+    content editor shows slide CONTENT only; grounding is managed structurally
+    (the Sources reference editor), never by hand-editing the comment."""
+    return _CITE_LINE_RE.sub("", frame_tex)
+
+
+def splice_frame(deck_tex: str, old_frame_tex: str, new_frame_tex: str) -> str:
     """Return ``deck_tex`` with the single ``old_frame_tex`` block replaced by
     ``new_frame_tex``.
-
-    ``drop_preceding_cite`` (manual frame edit): also strip a ``% cite:`` marker
-    that sits just BEFORE the frame (outside ``frame_tex``, so invisible in the
-    per-frame editor). That marker grounded the PREVIOUS content; carrying it
-    onto hand-rewritten content would silently mislabel the source. Dropping it
-    makes grounding re-resolve from the user's new frame — an in-body ``% cite:``
-    they wrote is honored; otherwise the slide is correctly unsourced. (A
-    whole-deck edit shows every marker in the raw tex, so it needs no stripping.)
 
     Raises
     ------
@@ -58,11 +57,7 @@ def splice_frame(
         raise ValueError(
             f"frame is ambiguous (matches {count} locations in the deck source)"
         )
-    idx = deck_tex.index(old_frame_tex)
-    prefix, suffix = deck_tex[:idx], deck_tex[idx + len(old_frame_tex):]
-    if drop_preceding_cite:
-        prefix = _PRECEDING_CITE_RE.sub("", prefix)
-    return prefix + new_frame_tex + suffix
+    return deck_tex.replace(old_frame_tex, new_frame_tex, 1)
 
 
 def set_frame_cite_marker(
@@ -95,4 +90,4 @@ def set_frame_cite_marker(
     return prefix + block + suffix, new_body
 
 
-__all__ = ["splice_frame", "set_frame_cite_marker"]
+__all__ = ["splice_frame", "set_frame_cite_marker", "strip_cite"]

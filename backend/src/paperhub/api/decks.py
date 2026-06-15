@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from paperhub.agents.sl_cite import serialize_cite, strip_cite, with_grounding
+from paperhub.agents.sl_cite import serialize_cite, with_grounding
 from paperhub.agents.sl_read import read_section_chunks
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
@@ -47,6 +47,7 @@ from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.frame_splice import (
     set_frame_cite_marker,
     splice_frame,
+    strip_cite,
 )
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
 
@@ -609,6 +610,19 @@ async def edit_deck_slide_sources(
                 status_code=404, detail=f"no slide covering page {page}"
             )
 
+        # Guard: a slide may only be grounded to a paper the deck was built from.
+        # Without this, a client could persist a SourceSection for an off-deck
+        # paper id (the north-star "labeled-but-hollow" failure).
+        contributing = set(deck.contributing_paper_ids)
+        off_deck = sorted(
+            {s.paper_id for s in body.sources if s.paper_id not in contributing}
+        )
+        if off_deck:
+            raise HTTPException(
+                status_code=400,
+                detail=f"paper(s) {off_deck} are not part of this deck",
+            )
+
         # Resolve each (paper, section) to its chunk ids (deterministic — the
         # section comes from the paper's real list, so it grounds to real chunks).
         resolved: list[SourceSection] = []
@@ -624,6 +638,16 @@ async def edit_deck_slide_sources(
                     section_name=src.section_name,
                     chunk_ids=list(res.chunk_ids),
                 )
+            )
+        # Guard: never persist a source that resolves to NO chunks — that is the
+        # exact "claims a section but grounds to nothing" record we must avoid.
+        hollow = [
+            f"{ss.paper_id}:{ss.section_name}" for ss in resolved if not ss.chunk_ids
+        ]
+        if hollow:
+            raise HTTPException(
+                status_code=400,
+                detail=f"no chunks resolved for {', '.join(hollow)}",
             )
         sections_json = json.dumps([ss.model_dump() for ss in resolved])
 
