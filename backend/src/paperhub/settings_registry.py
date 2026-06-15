@@ -217,6 +217,12 @@ SETTINGS_REGISTRY: list[SettingField] = [
     # ── Slides ──────────────────────────────────────────────────────────
     SettingField("PAPERHUB_SLIDE_STYLE_PROFILE", "system", "Slide style profile", "enum",
                  default="default", choices=("default", "metropolis_minimal")),
+    SettingField("PAPERHUB_SLIDE_DEFAULT_LENGTH", "system", "Default deck length (slides)",
+                 "int", default="15", min=5, max=60,
+                 help="Fallback number of content slides, used ONLY when your "
+                      "request doesn't say how long the deck should be. When you "
+                      "DO ask for a length (e.g. \"20-30 pages\"), that always "
+                      "wins — this default is ignored."),
 ]
 
 _BY_KEY = {f.key: f for f in SETTINGS_REGISTRY}

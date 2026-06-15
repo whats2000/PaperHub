@@ -121,6 +121,12 @@ class Settings:
     # (backward-compat with dashboards / API consumers).
     slide_style_profile: str
 
+    # Fallback deck length (content slides) used by the outline ONLY when the
+    # user's request states no length. An explicit count / range in the request
+    # (read by the outline LLM, any language) always overrides this. Configurable
+    # via PAPERHUB_SLIDE_DEFAULT_LENGTH (.env or the runtime Settings panel).
+    slide_default_length: int
+
 
 _SMALL_TIER_DEFAULT = "gemini/gemini-3.1-flash-lite"
 _FLAGSHIP_TIER_DEFAULT = "gemini/gemini-2.5-pro"
@@ -227,5 +233,8 @@ def load_settings() -> Settings:
             os.environ.get("PAPERHUB_SLIDE_STYLE_PROFILE")
             or os.environ.get("PAPERHUB_SLIDE_THEME")
             or _DEFAULT_SLIDE_PROFILE
+        ),
+        slide_default_length=int(
+            os.environ.get("PAPERHUB_SLIDE_DEFAULT_LENGTH", "15")
         ),
     )
