@@ -29,6 +29,7 @@ from typing import Protocol
 
 import aiosqlite
 
+from paperhub.agents.sl_cite import with_grounding
 from paperhub.models.slide_domain import KeyFigureBundle
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
@@ -595,18 +596,20 @@ async def run_sl_emit(
     # drops the title — so a single-page edit shifted every slide_index by 1
     # and mangled every note via the restore-by-index loop. Unifying both
     # paths on build_deck_slides eliminates the asymmetry.
-    inputs = build_deck_slides(audited_tex, page_count)
+    # Resolve per-slide source grounding from each frame's % cite: marker
+    # (north-star traceback). Non-blocking: an unsourced frame persists "[]".
+    inputs = await with_grounding(build_deck_slides(audited_tex, page_count), conn)
     for s in inputs:
         note_text = (speaker_notes or {}).get(s.slide_index)
         await conn.execute(
             """
             INSERT INTO deck_slides (
                 deck_id, slide_index, frame_tex, note_text, note_language,
-                page_start, page_end
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+                page_start, page_end, source_sections_json
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
             """,
             (deck_id, s.slide_index, s.frame_tex, note_text,
-             s.page_start, s.page_end),
+             s.page_start, s.page_end, s.source_sections_json),
         )
     await conn.commit()
 

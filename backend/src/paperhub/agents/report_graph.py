@@ -57,6 +57,7 @@ from paperhub.agents.report_pipeline import (
     parse_slide_budget,
     revise_tex,
 )
+from paperhub.agents.sl_cite import with_grounding
 from paperhub.agents.sl_emit import run_sl_emit
 from paperhub.agents.sl_outline import run_sl_outline
 from paperhub.agents.sl_read import ReadResult, read_section_chunks
@@ -1339,7 +1340,9 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
             await replace_deck_slides(
                 deps.conn,
                 deck_id=fresh.id,
-                slides=build_deck_slides(result.tex, result.page_count),
+                slides=await with_grounding(
+                    build_deck_slides(result.tex, result.page_count), deps.conn
+                ),
             )
             # Restore notes onto the matching slide_index — but skip the
             # ``wipe`` set (slides whose content was rewritten this turn:

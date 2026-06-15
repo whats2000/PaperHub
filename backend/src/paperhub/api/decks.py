@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from paperhub.agents.sl_cite import with_grounding
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.deck_slides import (
@@ -533,7 +534,9 @@ async def restore_deck_version(
             await replace_deck_slides(
                 conn,
                 deck_id=fresh.id,
-                slides=build_deck_slides(result_tex, result_page_count),
+                slides=await with_grounding(
+                    build_deck_slides(result_tex, result_page_count), conn
+                ),
             )
             if bundled_notes:
                 for r in await get_deck_slides(conn, deck_id=fresh.id):

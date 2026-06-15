@@ -15,12 +15,16 @@ visible "unsourced" signal), never an error — generation is never gated on it.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from paperhub.agents.sl_read import read_section_chunks
 from paperhub.models.slide_domain import SourceSection
+
+if TYPE_CHECKING:
+    from paperhub.db.deck_slides import DeckSlideInput
 
 _CITE_RE = re.compile(
     r"^[ \t]*%[ \t]*cite:[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE
@@ -91,3 +95,18 @@ async def frame_grounding_json(frame_tex: str, conn: Any) -> str:
     return json.dumps(
         [ss.model_dump() for ss in await frame_grounding(frame_tex, conn)]
     )
+
+
+async def with_grounding(
+    slides: list[DeckSlideInput], conn: Any
+) -> list[DeckSlideInput]:
+    """Return ``slides`` with each one's ``source_sections_json`` resolved from
+    its frame's ``% cite:`` marker. The single enrich point shared by every
+    deck-write path (sl_emit GENERATE, the EDIT flow, the RESTORE flow) so
+    grounding is computed identically everywhere and never dropped on an edit."""
+    return [
+        dataclasses.replace(
+            s, source_sections_json=await frame_grounding_json(s.frame_tex, conn)
+        )
+        for s in slides
+    ]
