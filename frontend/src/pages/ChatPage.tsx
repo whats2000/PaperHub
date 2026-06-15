@@ -54,6 +54,7 @@ export function ChatPage() {
   const { send } = useChatStream();
 
   const slidesOpen = useSlidesStore((s) => s.open);
+  const slidesEverOpened = useSlidesStore((s) => s.everOpened);
   const openSlides = useSlidesStore((s) => s.openPanel);
   const closeSlides = useSlidesStore((s) => s.closePanel);
 
@@ -163,6 +164,14 @@ export function ChatPage() {
   // and Slides panel. Opening one closes the others; the column width + slide
   // animation is the same for all.
   const rightPanelOpen = canvasOpen || memoryOpen || slidesOpen;
+
+  // Keep the Slides panel MOUNTED once it has been opened (store `everOpened`
+  // latch), so swapping to the Citation Canvas and back doesn't unmount it — an
+  // unmount throws away the parsed+rasterized PDF, so reopening would refetch
+  // and re-render the whole deck (the ~1s "loading" flash on every swap). The
+  // panel then just toggles `hidden`, preserving its rendered pages (mirrors
+  // the always-mounted CitationCanvas above).
+  const slidesMounted = slidesEverOpened && backendSessionId !== null;
 
   // Fetch speaker notes when the Slides panel opens and a backend session
   // exists. Resets when the session changes.
@@ -316,11 +325,18 @@ export function ChatPage() {
             </div>
           )}
 
-          {/* Slides panel: absolutely overlays the right-panel column when
-              slidesOpen is true. Only rendered when a backend session exists
-              (a deck is always session-scoped). */}
-          {slidesOpen && backendSessionId !== null && (
-            <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
+          {/* Slides panel: absolutely overlays the right-panel column. Kept
+              MOUNTED once opened (hidden when slidesOpen=false) so its parsed +
+              rasterized PDF survives a swap to the Canvas and back — no refetch,
+              no re-render, no "loading" flash. Only mounts when a backend
+              session exists (a deck is session-scoped). */}
+          {slidesMounted && backendSessionId !== null && (
+            <div
+              className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden"
+              hidden={!slidesOpen}
+              aria-hidden={!slidesOpen || undefined}
+              {...(!slidesOpen ? { inert: true } : {})}
+            >
               <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
                 {t("panel.slides")}
               </div>

@@ -27,6 +27,7 @@
     },
     "mask": {
       "updating": "Updating slides…",
+      "loading": "Loading slides…",
       "restoring": "Restoring version…"
     },
     "note": {

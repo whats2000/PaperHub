@@ -186,6 +186,10 @@ export function SlidesPanel({
     roRef.current = null;
     if (!el) return;
     const measure = () => {
+      // While the panel is hidden (kept mounted on a Canvas swap) clientWidth is
+      // 0; ignore it and KEEP the last good width so the rasterized pages aren't
+      // re-rendered to 0 and back — the swap stays instant (no reload flash).
+      if (el.clientWidth === 0) return;
       const next = Math.max(0, el.clientWidth - 16);
       // Flap guard: reject a width that bounces back across a scrollbar
       // threshold so the layout can't oscillate forever (issue #6).
@@ -208,6 +212,7 @@ export function SlidesPanel({
     filmRoRef.current = null;
     if (!el) return;
     const measure = () => {
+      if (el.clientWidth === 0) return; // hidden — keep the last width (see main area)
       const next = Math.max(32, el.clientWidth - 12);
       const step = pushWidth(thumbWidthRecent.current, next);
       thumbWidthRecent.current = step.recent;
@@ -298,6 +303,17 @@ export function SlidesPanel({
     !busy && bytes !== null && loadedSid === sessionId && loadedRev !== revision;
   const pdfRendering = file !== null && renderedKey !== fetchKey;
   const masked = busy || restoringVersion || reloading || pdfRendering;
+  // The mask heading reflects WHY it's up: a version restore, a genuine
+  // update/reload (an edit recompiled → new bytes), or just the first-load
+  // parse/raster of an UNCHANGED deck (``pdfRendering`` alone). The last case
+  // is a plain "Loading", not "Updating" — saying "Updating slides…" when
+  // nothing changed is misleading.
+  const updating = busy || reloading;
+  const maskHeading = restoringVersion
+    ? t("panel.mask.restoring")
+    : updating
+      ? t("panel.mask.updating")
+      : t("panel.mask.loading", "Loading slides…");
   // Restore wins as the stage label when both are present so the user knows
   // why the panel masked (version switch vs. chat-turn edit). The chat-turn's
   // ``stage`` prop carries live slide-agent stage names when ``busy`` is set.
@@ -781,9 +797,7 @@ export function SlidesPanel({
               <span className="h-2 w-2 rounded-full bg-muted-foreground motion-safe:animate-pulse [animation-delay:400ms]" />
             </div>
             <span className="text-sm font-medium text-foreground">
-              {restoringVersion
-                ? t("panel.mask.restoring")
-                : t("panel.mask.updating")}
+              {maskHeading}
             </span>
             {stageLabel && !restoringVersion && (
               <span className="px-4 text-center text-xs text-muted-foreground">

@@ -27,6 +27,7 @@
     },
     "mask": {
       "updating": "更新幻灯片中…",
+      "loading": "加载幻灯片中…",
       "restoring": "还原版本中…"
     },
     "note": {

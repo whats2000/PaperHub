@@ -17,6 +17,11 @@ export const NOTE_DEFAULT_HEIGHT = 160;
 
 interface SlidesState {
   open: boolean;
+  /** True once the Slides panel has been opened at least once. ChatPage keeps
+   *  the panel MOUNTED (hidden) thereafter so a Canvas↔Slides swap doesn't
+   *  unmount it (which would refetch + re-rasterize the PDF — the reload flash).
+   *  Ephemeral (resets on reload). */
+  everOpened: boolean;
   deckBySession: Record<number, DeckEventData | undefined>;
   /** Monotonic counter bumped on every `setDeck` (i.e. every `deck` SSE event /
    *  recompile). The Slides panel keys its PDF fetch on this so a completed
@@ -79,6 +84,7 @@ export const useSlidesStore = create<SlidesState>()(
   persist(
     (set) => ({
       open: false,
+      everOpened: false,
       deckBySession: {},
       deckRevisionBySession: {},
       restoringBySession: {},
@@ -144,8 +150,9 @@ export const useSlidesStore = create<SlidesState>()(
         set((s) => ({
           presentingBySession: { ...s.presentingBySession, [sid]: false },
         })),
-      toggleOpen: () => set((s) => ({ open: !s.open })),
-      openPanel: () => set({ open: true }),
+      toggleOpen: () =>
+        set((s) => ({ open: !s.open, everOpened: s.everOpened || !s.open })),
+      openPanel: () => set({ open: true, everOpened: true }),
       closePanel: () => set({ open: false }),
       setFilmstripWidth: (width) => set({ filmstripWidth: width }),
       setNoteHeight: (height) => set({ noteHeight: height }),

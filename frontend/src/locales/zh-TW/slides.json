@@ -27,6 +27,7 @@
     },
     "mask": {
       "updating": "更新投影片中…",
+      "loading": "載入投影片中…",
       "restoring": "還原版本中…"
     },
     "note": {
