@@ -147,6 +147,41 @@ async def get_deck_meta(session_id: int) -> dict[str, Any]:
     }
 
 
+@router.get("/sessions/{session_id}/deck/slides")
+async def get_deck_slides_detail(session_id: int) -> list[dict[str, Any]]:
+    """Return one entry per slide of the current deck — the frame source + the
+    per-slide source grounding — for the manual frame editor AND the per-page
+    Sources strip (F6.2). 404 when the session has no deck.
+
+    Each entry: ``{slide_index, page_start, page_end, frame_tex, source_sections}``
+    where ``source_sections`` is the PARSED ``source_sections_json`` (a list of
+    ``{paper_id, section_name, chunk_ids}``; malformed → ``[]``).
+    """
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        deck = await get_deck(conn, session_id=session_id)
+        if deck is None:
+            raise HTTPException(status_code=404, detail="no deck for this session")
+        rows = await get_deck_slides(conn, deck_id=deck.id)
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            sections = json.loads(r.source_sections_json)
+            if not isinstance(sections, list):
+                sections = []
+        except (ValueError, TypeError):
+            sections = []
+        out.append({
+            "slide_index": r.slide_index,
+            "page_start": r.page_start,
+            "page_end": r.page_end,
+            "frame_tex": r.frame_tex,
+            "source_sections": sections,
+        })
+    return out
+
+
 @router.get("/sessions/{session_id}/deck/pdf")
 async def get_deck_pdf(
     session_id: int, version_id: str | None = None
