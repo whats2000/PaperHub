@@ -136,15 +136,15 @@ export function SlidesPanel({
     for (const r of references ?? []) m.set(r.paper_content_id, r.title);
     return m;
   }, [references]);
-  // The Add-source picker offers only the deck's CONTRIBUTING papers — the
-  // backend rejects grounding to an off-deck paper, so the picker must match.
-  const contributingPapers = useMemo(
+  // The Add-source picker offers the session's papers (its references) — the
+  // reliable, always-populated list. The backend validates the same scope.
+  const pickerPapers = useMemo(
     () =>
-      (deck?.contributing_papers ?? []).map((p) => ({
-        paper_content_id: p.id,
-        title: p.title ?? titleByPaperId.get(p.id) ?? `#${p.id}`,
+      (references ?? []).map((r) => ({
+        paper_content_id: r.paper_content_id,
+        title: r.title,
       })),
-    [deck, titleByPaperId],
+    [references],
   );
 
   // Local editor draft + state (the persisted bits — mode + sources — live in
@@ -844,7 +844,7 @@ export function SlidesPanel({
           sources={currentSources}
           titleByPaperId={titleByPaperId}
           editable={editorMode === "frame"}
-          references={contributingPapers}
+          references={pickerPapers}
           onSetSources={setCurrentSlideSources}
         />
       )}

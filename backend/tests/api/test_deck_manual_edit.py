@@ -353,6 +353,9 @@ async def test_put_slide_sources_sets_grounding_without_recompile(
         "source_dir_path, html_path, arxiv_id) VALUES "
         "(7, 'arxiv:p7', 'arxiv', 'P7', '/x/s.tex', '/x', '/x/s.html', 'p7')"
     )
+    await conn.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, 7, 1)"
+    )
     await conn.executemany(
         "INSERT INTO chunks (id, paper_content_id, section, char_start, char_end, "
         "text, dom_id, match_text, page, bbox) VALUES (?, 7, 'Introduction', ?, ?, "
@@ -388,17 +391,17 @@ async def test_put_slide_sources_sets_grounding_without_recompile(
 
 
 @pytest.mark.asyncio
-async def test_put_slide_sources_rejects_off_deck_paper(
+async def test_put_slide_sources_rejects_off_session_paper(
     tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
 ) -> None:
-    """A slide may only be grounded to a paper the deck was built from — an
-    off-deck paper_id is rejected (400), never persisted as a hollow source."""
+    """A slide may only be grounded to a paper in THIS session — an off-session
+    paper_id is rejected (400), never persisted as a source."""
     app, conn = app_with_db
     slides_dir = tmp_path / "chat_session" / "1" / "slides"
     slides_dir.mkdir(parents=True)
     (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
     await _seed_session(conn, 1)
-    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)  # contributing=[7]
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.put(
@@ -407,7 +410,7 @@ async def test_put_slide_sources_rejects_off_deck_paper(
             headers=_HDR,
         )
     assert resp.status_code == 400
-    assert "not part of this deck" in resp.json()["detail"]
+    assert "not in this session" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -427,7 +430,10 @@ async def test_put_slide_sources_rejects_hollow_grounding(
         "source_dir_path, html_path, arxiv_id) VALUES "
         "(7, 'arxiv:p7', 'arxiv', 'P7', '/x/s.tex', '/x', '/x/s.html', 'p7')"
     )
-    await conn.commit()  # paper 7 exists but has NO chunks for 'Nowhere'
+    await conn.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, 7, 1)"
+    )
+    await conn.commit()  # paper 7 is in-session but has NO chunks for 'Nowhere'
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.put(

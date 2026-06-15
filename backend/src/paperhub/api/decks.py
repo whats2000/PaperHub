@@ -610,17 +610,21 @@ async def edit_deck_slide_sources(
                 status_code=404, detail=f"no slide covering page {page}"
             )
 
-        # Guard: a slide may only be grounded to a paper the deck was built from.
-        # Without this, a client could persist a SourceSection for an off-deck
-        # paper id (the north-star "labeled-but-hollow" failure).
-        contributing = set(deck.contributing_paper_ids)
-        off_deck = sorted(
-            {s.paper_id for s in body.sources if s.paper_id not in contributing}
+        # Guard: a slide may only be grounded to a paper attached to THIS
+        # session (the same set the Add-source picker offers). Blocks grounding
+        # to an arbitrary/off-session paper id from a hand-rolled request.
+        async with conn.execute(
+            "SELECT paper_content_id FROM papers WHERE session_id = ?",
+            (session_id,),
+        ) as cur:
+            session_papers = {int(r[0]) for r in await cur.fetchall()}
+        off_session = sorted(
+            {s.paper_id for s in body.sources if s.paper_id not in session_papers}
         )
-        if off_deck:
+        if off_session:
             raise HTTPException(
                 status_code=400,
-                detail=f"paper(s) {off_deck} are not part of this deck",
+                detail=f"paper(s) {off_session} are not in this session",
             )
 
         # Resolve each (paper, section) to its chunk ids (deterministic — the
