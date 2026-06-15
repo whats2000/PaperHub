@@ -370,6 +370,13 @@ async def run_slide_agent(
     if llm_acompletion is None:
         import litellm
 
+        # Direct litellm.acompletion (not the adapter) — tool-calling isn't
+        # exposed by the adapter's structured/stream, so the flagship->small
+        # DOWNGRADE does NOT apply here; only this loop's own transient retry
+        # does. Timeout IS covered by the litellm.request_timeout backstop set at
+        # app boot, so a dead provider can't hang. On flagship unavailability the
+        # loop ships the base deck unrevised (satisfied=False) — intentional
+        # graceful degradation, not a crash.
         llm_acompletion = litellm.acompletion
 
     state = DeckState(
