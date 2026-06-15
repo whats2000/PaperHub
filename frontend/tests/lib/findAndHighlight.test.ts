@@ -29,6 +29,36 @@ describe("highlightChunkRange", () => {
     expect(highlightChunkRange(doc, "phchunk-9")).toBe(false);
     expect(doc.querySelector(`.${HIGHLIGHT_CLASS}`)).toBeNull();
   });
+
+  it("spans from the first to the last chunk when an endDomId is given", () => {
+    // A section cited as TWO chunks must highlight BOTH, not just the first —
+    // the Sources strip passes (firstChunk.dom_id, lastChunk.dom_id).
+    const doc = docFrom(
+      '<p><span id="phchunk-1"></span>Intro paragraph one.</p>' +
+        '<p><span id="phchunk-2"></span>Intro paragraph two.</p>' +
+        '<p><span id="phchunk-3"></span>Related work starts.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-1", "smooth", "phchunk-2")).toBe(true);
+    const text = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`))
+      .map((n) => n.textContent)
+      .join(" ");
+    expect(text).toContain("Intro paragraph one.");
+    expect(text).toContain("Intro paragraph two."); // the 2nd cited chunk too
+    expect(text).not.toContain("Related work starts."); // stops at the next section
+  });
+
+  it("a single-chunk span (endDomId == domId) behaves like the no-end call", () => {
+    const doc = docFrom(
+      '<p><span id="phchunk-1"></span>Only this chunk.</p>' +
+        '<p><span id="phchunk-2"></span>Next chunk.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-1", "smooth", "phchunk-1")).toBe(true);
+    const text = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`))
+      .map((n) => n.textContent)
+      .join(" ");
+    expect(text).toContain("Only this chunk.");
+    expect(text).not.toContain("Next chunk.");
+  });
 });
 
 describe("highlightChunkRange — full chunk between sentinels", () => {

@@ -304,6 +304,7 @@ export function highlightChunkRange(
   doc: Document,
   domId: string,
   behavior: ScrollBehavior = "smooth",
+  endDomId?: string | null,
 ): boolean {
   const start = doc.getElementById(domId);
   if (!start) return false;
@@ -321,10 +322,21 @@ export function highlightChunkRange(
   // give an EMPTY range (scroll, but nothing highlighted). So advance to the
   // next sentinel that actually has text in between — a clustered table-chunk
   // citation then highlights the table itself.
+  //
+  // ``endDomId`` (optional) extends the range to span MULTIPLE chunks: a slide
+  // that cites a whole SECTION (the Sources strip) highlights from the first
+  // cited chunk's sentinel to the END of the last cited chunk — i.e. the
+  // boundary becomes the sentinel AFTER ``endDomId``, not after ``domId``. When
+  // absent (or equal to ``domId``) this is the original single-chunk behaviour.
   const markers = Array.from(doc.querySelectorAll('[id^="phchunk-"]'));
   const idx = markers.findIndex((m) => m.id === domId);
+  const endIdx =
+    endDomId != null ? markers.findIndex((m) => m.id === endDomId) : idx;
+  // Collect up to the sentinel after whichever cited chunk sits LAST in
+  // document order (guard against an out-of-order / missing end anchor).
+  const boundaryIdx = Math.max(idx, endIdx);
   let nodes: Text[] = [];
-  for (let j = idx + 1; idx >= 0 && j <= markers.length; j++) {
+  for (let j = boundaryIdx + 1; idx >= 0 && j <= markers.length; j++) {
     const next = markers[j] ?? null;
     nodes = collectChunkTextNodes(doc, start, next);
     if (nodes.length > 0 || next === null) break;

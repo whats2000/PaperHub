@@ -46,6 +46,7 @@ export function CitationCanvas() {
   const { t } = useTranslation("canvas");
   const open = useCanvasStore((s) => s.open);
   const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
+  const requestedEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
   const requestNonce = useCanvasStore((s) => s.requestNonce);
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
@@ -74,6 +75,10 @@ export function CitationCanvas() {
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
+  // The dom_id of the LAST chunk of a multi-chunk (section) citation, so the
+  // HTML highlight spans the whole cited section, not just its first chunk.
+  // Null for a single-chunk `[chunk:N]` citation.
+  const [endDomId, setEndDomId] = useState<string | null>(null);
   // Whether the active citation's scroll should animate (smooth) — only when the
   // canvas was already open at click time (see canvas store `requestAnimateScroll`).
   const [scrollAnimate, setScrollAnimate] = useState(false);
@@ -174,8 +179,24 @@ export function CitationCanvas() {
     if (!open || requestedChunkId == null) return;
     let cancelled = false;
     getChunk(requestedChunkId)
-      .then((c) => {
+      .then(async (c) => {
         if (cancelled) return;
+        // For a multi-chunk (section) citation, resolve the LAST chunk's dom_id
+        // BEFORE bumping the highlight nonce, so the span highlights in one
+        // pass (no flash from first-chunk-then-extend). A failed/equal end id
+        // degrades to the single-chunk highlight.
+        let endDom: string | null = null;
+        if (
+          requestedEndChunkId != null &&
+          requestedEndChunkId !== requestedChunkId
+        ) {
+          try {
+            endDom = (await getChunk(requestedEndChunkId)).dom_id;
+          } catch {
+            endDom = null;
+          }
+          if (cancelled) return;
+        }
         // Animate only when NO fresh layout happens: the canvas was already open
         // AND the cited chunk lives in the paper already on screen. A paper
         // switch (or a panel open) reveals a mounted-but-hidden iframe that lays
@@ -187,6 +208,7 @@ export function CitationCanvas() {
         // fetch it on demand so it can be displayed view-only (no-op if cached).
         ensureDoc(c.paper_content_id);
         setActiveChunk(c);
+        setEndDomId(endDom);
         setDisplayedPaperId(c.paper_content_id);
         setScrollAnimate(requestAnimateScroll && samePaper);
         setStale(false);
@@ -437,6 +459,13 @@ export function CitationCanvas() {
                   activeChunk &&
                   activeChunk.paper_content_id === pid
                     ? activeChunk.dom_id
+                    : null
+                }
+                highlightEndDomId={
+                  isActive &&
+                  activeChunk &&
+                  activeChunk.paper_content_id === pid
+                    ? endDomId
                     : null
                 }
                 highlightText={

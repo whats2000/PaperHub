@@ -23,14 +23,15 @@ describe("SourcesStrip", () => {
     expect(chip).toHaveTextContent("Introduction");
   });
 
-  it("opens the Citation Canvas at the first chunk on click", () => {
+  it("opens the Citation Canvas spanning the section's first→last chunk", () => {
     const openSpy = vi.spyOn(useCanvasStore.getState(), "openCitation");
     const sources: SlideSourceSection[] = [
       { paper_id: 7, section_name: "Introduction", chunk_ids: [101, 102] },
     ];
     render(<SourcesStrip sources={sources} titleByPaperId={titleByPaperId} />);
     fireEvent.click(screen.getByRole("button", { name: /Introduction/ }));
-    expect(openSpy).toHaveBeenCalledWith(101);
+    // First + last chunk → the canvas highlights the WHOLE cited section.
+    expect(openSpy).toHaveBeenCalledWith(101, 102);
   });
 
   it("renders an unsourced cite muted + non-clickable", () => {

@@ -16,6 +16,10 @@ interface Props {
   /** Deterministic anchor (`phchunk-N` span) for the cited chunk, when ingest
    *  placed one. Preferred over text-search. */
   highlightDomId: string | null;
+  /** For a MULTI-chunk (section) citation, the LAST cited chunk's anchor — the
+   *  highlight spans from `highlightDomId` to the end of this chunk. Null/equal
+   *  for a single-chunk citation. */
+  highlightEndDomId?: string | null;
   /** Fallback passage text to locate when there's no anchor (or it's absent). */
   highlightText: string | null;
   /** Last-resort: the chunk's section title, to scroll to its heading when the
@@ -48,6 +52,7 @@ export function HtmlView({
   html,
   isDark,
   highlightDomId,
+  highlightEndDomId,
   highlightText,
   sectionTitle,
   onHighlightMiss,
@@ -99,7 +104,12 @@ export function HtmlView({
       // search → section heading (so a citation always lands somewhere useful).
       const found =
         (highlightDomId !== null &&
-          highlightChunkRange(live, highlightDomId, scrollBehavior)) ||
+          highlightChunkRange(
+            live,
+            highlightDomId,
+            scrollBehavior,
+            highlightEndDomId,
+          )) ||
         (highlightText !== null &&
           findAndHighlight(live, highlightText, scrollBehavior)) ||
         (sectionTitle !== null &&
@@ -145,7 +155,7 @@ export function HtmlView({
     apply();
     return () => cancelPending.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, highlightDomId, highlightText, sectionTitle, nonce]);
+  }, [isDark, highlightDomId, highlightEndDomId, highlightText, sectionTitle, nonce]);
 
   return (
     <iframe

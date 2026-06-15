@@ -10,6 +10,10 @@ interface CanvasState {
   /** The chunk the user clicked a citation for. Null when opened via the
    *  References button (browse mode). The component resolves it → paper. */
   requestedChunkId: number | null;
+  /** Optional END chunk for a MULTI-chunk citation (a slide Sources chip cites
+   *  a whole section → highlight from `requestedChunkId` to this one). Null for
+   *  a single-chunk `[chunk:N]` citation. */
+  requestedEndChunkId: number | null;
   /** Bumped on every openCitation so clicking the SAME chunk twice re-triggers
    *  resolution in the component (which keys an effect on this). */
   requestNonce: number;
@@ -35,7 +39,7 @@ interface CanvasState {
   activePaperId: number | null;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
-  openCitation: (chunkId: number) => void;
+  openCitation: (chunkId: number, endChunkId?: number) => void;
   /** Cleared by the canvas once it has resolved the request, so re-opening in
    *  browse mode (References button — no new request) doesn't re-jump to the
    *  last-cited passage even when the canvas remounts. */
@@ -60,21 +64,24 @@ export const useCanvasStore = create<CanvasState>()(
     (set) => ({
       open: false,
       requestedChunkId: null,
+      requestedEndChunkId: null,
       requestNonce: 0,
       requestAnimateScroll: false,
       requestedPaperId: null,
       paperRequestNonce: 0,
       activePaperId: null,
       width: CANVAS_DEFAULT_WIDTH,
-      openCitation: (chunkId) =>
+      openCitation: (chunkId, endChunkId) =>
         set((s) => ({
           // Animate only when the canvas was ALREADY open (see the field doc).
           requestAnimateScroll: s.open,
           open: true,
           requestedChunkId: chunkId,
+          requestedEndChunkId: endChunkId ?? null,
           requestNonce: s.requestNonce + 1,
         })),
-      consumeCitation: () => set({ requestedChunkId: null }),
+      consumeCitation: () =>
+        set({ requestedChunkId: null, requestedEndChunkId: null }),
       openPaper: (paperContentId) =>
         set((s) => ({
           open: true,
