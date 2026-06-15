@@ -13,11 +13,14 @@ connection via ``async with open_db(settings.db_path) as conn``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
+import aiosqlite
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -31,12 +34,13 @@ from paperhub.db.deck_slides import (
     replace_deck_slides,
     update_slide_note,
 )
-from paperhub.db.decks import get_deck
+from paperhub.db.decks import get_deck, upsert_deck
 from paperhub.pipelines.slide_pipeline import compile as compile_mod
 from paperhub.pipelines.slide_pipeline.beamer_helpers import (
     extract_frames_from_beamer,
 )
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
+from paperhub.pipelines.slide_pipeline.frame_splice import splice_frame
 from paperhub.pipelines.slide_pipeline.history import VersionHistory
 
 
@@ -44,6 +48,18 @@ class NoteEdit(BaseModel):
     """Body for a manual speaker-note edit."""
 
     text: str
+
+
+class FrameEdit(BaseModel):
+    """Body for a manual single-frame LaTeX edit."""
+
+    frame_tex: str
+
+
+class DeckEdit(BaseModel):
+    """Body for a manual whole-deck LaTeX edit."""
+
+    tex: str
 
 router = APIRouter(tags=["decks"])
 
@@ -329,6 +345,188 @@ async def edit_deck_note(
         )
         notes = await rebuild_speaker_notes_json(conn, deck_id=deck.id)
     return {"speaker_notes": notes, "has_notes": bool(notes)}
+
+
+# ── F6.2 manual LaTeX editing ────────────────────────────────────────────
+# Two power-user editors (Slides panel): "edit current frame" splices one
+# frame back into deck.tex; "edit all deck" replaces the whole source. Both
+# recompile the WHOLE deck mechanically (the user's LaTeX verbatim — NO LLM,
+# NO figure audit) and share ``_manual_recompile_and_persist``. The candidate
+# compiles under a SCRATCH tex-name so a broken edit never clobbers the
+# last-good deck.tex/deck.pdf; a compile failure returns ``ok=false`` + the
+# pdflatex log (HTTP 200 — a compile error is a normal editor outcome).
+
+_CANDIDATE_STEM = "deck_candidate"
+
+
+async def _identity_revise(_log: str, tex: str) -> str:
+    """No-op revise: a manual edit is applied verbatim (no LLM cleanup)."""
+    return tex
+
+
+def _cleanup_candidate(slides_dir: Path) -> None:
+    """Remove the scratch compile artifacts (best-effort)."""
+    for ext in ("tex", "pdf", "aux", "log", "out", "nav", "snm", "toc"):
+        with contextlib.suppress(OSError):
+            (slides_dir / f"{_CANDIDATE_STEM}.{ext}").unlink()
+
+
+async def _manual_recompile_and_persist(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: int,
+    deck: Any,
+    candidate_tex: str,
+    description: str,
+    preserved_notes: dict[str, str],
+) -> dict[str, Any]:
+    """Compile ``candidate_tex`` under a scratch tex-name; on success promote it
+    to deck.tex/deck.pdf, snapshot a version, upsert the deck, rebuild
+    deck_slides + re-resolve grounding, and reapply ``preserved_notes`` by
+    slide_index. Returns the JSON body the endpoint sends back.
+
+    On compile failure the last-good deck.tex/deck.pdf are untouched (they are
+    never written unless the candidate compiled) and ``{ok:false, ...}`` is
+    returned with the pdflatex log tail.
+    """
+    slides_dir = _slides_workdir(session_id)
+    result = await compile_mod.compile_with_revise(
+        tex=candidate_tex,
+        workdir=slides_dir,
+        tex_name=f"{_CANDIDATE_STEM}.tex",
+        revise=_identity_revise,
+        max_retries=1,
+    )
+    if not result.ok:
+        await asyncio.to_thread(_cleanup_candidate, slides_dir)
+        return {"ok": False, "status": "error", "log": result.log[-4000:]}
+
+    deck_path = slides_dir / "deck.tex"
+    pdf_path = slides_dir / "deck.pdf"
+    candidate_pdf = slides_dir / f"{_CANDIDATE_STEM}.pdf"
+
+    def _promote() -> str | None:
+        deck_path.write_text(result.tex, encoding="utf-8")
+        if candidate_pdf.exists():
+            shutil.copy2(candidate_pdf, pdf_path)
+        version_id = VersionHistory(str(slides_dir)).save_version(
+            result.tex, description, preserved_notes
+        )
+        _cleanup_candidate(slides_dir)
+        return version_id
+
+    new_version_id = await asyncio.to_thread(_promote)
+
+    pdf_ok = await asyncio.to_thread(pdf_path.exists)
+    await upsert_deck(
+        conn,
+        session_id=session_id,
+        run_id=None,
+        tex_path=str(deck_path),
+        pdf_path=str(pdf_path) if pdf_ok else None,
+        speaker_notes=deck.speaker_notes,
+        plan=deck.plan,
+        page_count=result.page_count,
+        contributing_paper_ids=deck.contributing_paper_ids,
+        status="ok",
+        current_version_id=new_version_id or deck.current_version_id,
+    )
+
+    fresh = await get_deck(conn, session_id=session_id)
+    if fresh is not None:
+        await replace_deck_slides(
+            conn,
+            deck_id=fresh.id,
+            slides=await with_grounding(
+                build_deck_slides(result.tex, result.page_count),
+                result.tex,
+                conn,
+            ),
+        )
+        if preserved_notes:
+            for r in await get_deck_slides(conn, deck_id=fresh.id):
+                nt = preserved_notes.get(str(r.slide_index))
+                if nt:
+                    await update_slide_note(
+                        conn,
+                        deck_id=fresh.id,
+                        slide_index=r.slide_index,
+                        note_text=nt,
+                        note_language="",
+                    )
+        await rebuild_speaker_notes_json(conn, deck_id=fresh.id)
+    await conn.commit()
+    return {"ok": True, "status": "ok", "page_count": result.page_count}
+
+
+def _current_notes_by_index(rows: list[Any]) -> dict[str, str]:
+    """Map ``{str(slide_index): note_text}`` for the rows that have a note —
+    the notes carried across a manual recompile (rebuild_deck_slides wipes
+    them, so they are reapplied by slide_index afterwards)."""
+    return {str(r.slide_index): r.note_text for r in rows if r.note_text}
+
+
+@router.put("/sessions/{session_id}/deck/slides/{page}/tex")
+async def edit_deck_frame(
+    session_id: int, page: int, body: FrameEdit
+) -> dict[str, Any]:
+    """Replace the frame occupying ``page`` with the user's edited LaTeX and
+    recompile the whole deck. 404 if no deck / no slide covers the page; a
+    compile failure returns ``{ok:false, status:"error", log}`` (HTTP 200).
+    """
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        deck = await get_deck(conn, session_id=session_id)
+        if deck is None:
+            raise HTTPException(status_code=404, detail="no deck for this session")
+        rows = await get_deck_slides(conn, deck_id=deck.id)
+        target = next(
+            (r for r in rows if r.page_start <= page <= r.page_end), None
+        )
+        if target is None:
+            raise HTTPException(
+                status_code=404, detail=f"no slide covering page {page}"
+            )
+        deck_tex = await asyncio.to_thread(
+            Path(deck.tex_path).read_text, encoding="utf-8"
+        )
+        try:
+            candidate = splice_frame(deck_tex, target.frame_tex, body.frame_tex)
+        except ValueError as exc:
+            # Absent / ambiguous frame — surface as a 409 so the editor can tell
+            # the user to use "Edit all deck" instead of guessing.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return await _manual_recompile_and_persist(
+            conn,
+            session_id=session_id,
+            deck=deck,
+            candidate_tex=candidate,
+            description="manual frame edit",
+            preserved_notes=_current_notes_by_index(rows),
+        )
+
+
+@router.put("/sessions/{session_id}/deck/tex")
+async def edit_deck_tex(session_id: int, body: DeckEdit) -> dict[str, Any]:
+    """Replace the entire deck source with the user's edited LaTeX and
+    recompile. 404 if no deck; a compile failure returns
+    ``{ok:false, status:"error", log}`` (HTTP 200)."""
+    if not body.tex.strip():
+        raise HTTPException(status_code=400, detail="empty deck source")
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        deck = await get_deck(conn, session_id=session_id)
+        if deck is None:
+            raise HTTPException(status_code=404, detail="no deck for this session")
+        rows = await get_deck_slides(conn, deck_id=deck.id)
+        return await _manual_recompile_and_persist(
+            conn,
+            session_id=session_id,
+            deck=deck,
+            candidate_tex=body.tex,
+            description="manual deck edit",
+            preserved_notes=_current_notes_by_index(rows),
+        )
 
 
 # ── F4.5 version history ─────────────────────────────────────────────────

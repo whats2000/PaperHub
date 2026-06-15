@@ -116,3 +116,198 @@ async def test_get_deck_slides_404_without_deck(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/sessions/1/deck/slides", headers=_HDR)
     assert resp.status_code == 404
+
+
+# ── Task 3: PUT /deck/slides/{page}/tex ──────────────────────────────────
+
+
+def _ok_compile(tex: str = _DECK_TEX, page_count: int = 2) -> AsyncMock:
+    """A compile_with_revise stub that 'compiles' by writing the candidate
+    PDF + echoing the tex (matches the real entrypoint's deck.tex/deck.pdf
+    side effects, but for the candidate tex-name)."""
+
+    async def _impl(*, tex: str, workdir: Path, tex_name: str, **_kw: Any) -> CompileResult:
+        # Mimic the real entrypoint: write the candidate pdf so _promote can
+        # copy it to deck.pdf.
+        (workdir / tex_name).write_text(tex, encoding="utf-8")
+        (workdir / "deck_candidate.pdf").write_bytes(b"%PDF-1.4 compiled\n")
+        return CompileResult(ok=True, attempts=1, tex=tex, log="", page_count=page_count)
+
+    return AsyncMock(side_effect=_impl)
+
+
+@pytest.mark.asyncio
+async def test_put_frame_tex_recompiles_and_persists(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    (slides_dir / "deck.pdf").write_bytes(b"%PDF-1.4 original\n")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+
+    new_frame = "\\begin{frame}{Title B}\nEDITED second frame.\n\\end{frame}"
+    transport = ASGITransport(app=app)
+    with patch(
+        "paperhub.api.decks.compile_mod.compile_with_revise", _ok_compile()
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/sessions/1/deck/slides/2/tex",
+                json={"frame_tex": new_frame},
+                headers=_HDR,
+            )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True and body["status"] == "ok"
+    # deck.tex now contains the edited frame; a version snapshot was written.
+    assert "EDITED second frame." in (slides_dir / "deck.tex").read_text()
+    snaps = list((slides_dir / "edit_history").glob("version_*.json"))
+    assert len(snaps) == 1
+
+
+@pytest.mark.asyncio
+async def test_put_frame_tex_compile_failure_keeps_last_good(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    good_tex = _DECK_TEX
+    good_pdf = b"%PDF-1.4 last-good\n"
+    (slides_dir / "deck.tex").write_text(good_tex, encoding="utf-8")
+    (slides_dir / "deck.pdf").write_bytes(good_pdf)
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+
+    fail = AsyncMock(
+        return_value=CompileResult(
+            ok=False, attempts=2, tex="(broken)", log="! Undefined control sequence.",
+            page_count=0,
+        )
+    )
+    transport = ASGITransport(app=app)
+    with patch("paperhub.api.decks.compile_mod.compile_with_revise", fail):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/sessions/1/deck/slides/2/tex",
+                json={"frame_tex": "\\begin{frame}{Title B}\n\\bad\n\\end{frame}"},
+                headers=_HDR,
+            )
+
+    assert resp.status_code == 200, resp.text  # a compile error is a normal outcome
+    body = resp.json()
+    assert body["ok"] is False and body["status"] == "error"
+    assert "Undefined control sequence" in body["log"]
+    # last-good deck.tex / deck.pdf are byte-for-byte unchanged.
+    assert (slides_dir / "deck.tex").read_text() == good_tex
+    assert (slides_dir / "deck.pdf").read_bytes() == good_pdf
+
+
+@pytest.mark.asyncio
+async def test_put_frame_tex_resolves_continuation_page(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    """Editing a continuation page targets the owning slide's frame."""
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    (slides_dir / "deck.pdf").write_bytes(b"%PDF\n")
+    await _seed_session(conn, 1)
+    deck_id = await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    # Widen slide 0 to span pages 1-2 so page 2 is its continuation; slide 1
+    # moves to page 3. (Two rows now overlap on page intent only for the test.)
+    await conn.execute(
+        "UPDATE deck_slides SET page_end = 2 WHERE deck_id = ? AND slide_index = 0",
+        (deck_id,),
+    )
+    await conn.execute(
+        "UPDATE deck_slides SET page_start = 3, page_end = 3 WHERE deck_id = ? "
+        "AND slide_index = 1",
+        (deck_id,),
+    )
+    await conn.commit()
+
+    new_frame = "\\begin{frame}{Title A}\nEDITED owner via continuation.\n\\end{frame}"
+    transport = ASGITransport(app=app)
+    with patch("paperhub.api.decks.compile_mod.compile_with_revise", _ok_compile()):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/sessions/1/deck/slides/2/tex",  # page 2 == slide 0's continuation
+                json={"frame_tex": new_frame},
+                headers=_HDR,
+            )
+    assert resp.status_code == 200, resp.text
+    assert "EDITED owner via continuation." in (slides_dir / "deck.tex").read_text()
+
+
+@pytest.mark.asyncio
+async def test_put_frame_tex_404_when_page_uncovered(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/sessions/1/deck/slides/99/tex",
+            json={"frame_tex": "x"},
+            headers=_HDR,
+        )
+    assert resp.status_code == 404
+
+
+# ── Task 4: PUT /deck/tex ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_put_deck_tex_recompiles_whole_deck(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    (slides_dir / "deck.pdf").write_bytes(b"%PDF original\n")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+
+    new_deck = _DECK_TEX.replace("First frame body.", "WHOLE-DECK edited body.")
+    transport = ASGITransport(app=app)
+    with patch(
+        "paperhub.api.decks.compile_mod.compile_with_revise", _ok_compile(new_deck)
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/sessions/1/deck/tex", json={"tex": new_deck}, headers=_HDR
+            )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert "WHOLE-DECK edited body." in (slides_dir / "deck.tex").read_text()
+
+
+@pytest.mark.asyncio
+async def test_put_deck_tex_rejects_empty(
+    tmp_path: Path, app_with_db: tuple[Any, aiosqlite.Connection]
+) -> None:
+    app, conn = app_with_db
+    slides_dir = tmp_path / "chat_session" / "1" / "slides"
+    slides_dir.mkdir(parents=True)
+    (slides_dir / "deck.tex").write_text(_DECK_TEX, encoding="utf-8")
+    await _seed_session(conn, 1)
+    await _seed_deck_with_slides(conn, session_id=1, slides_dir=slides_dir)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/sessions/1/deck/tex", json={"tex": "   "}, headers=_HDR
+        )
+    assert resp.status_code == 400
