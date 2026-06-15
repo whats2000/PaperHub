@@ -208,6 +208,23 @@ class RoundAction(BaseModel):
     outline: DeckOutlineDraft | None = None  # when action == "finalize"
 
 
+class SourceSection(BaseModel):
+    """One (paper, section) a slide was grounded in, with the chunk ids read.
+
+    Persisted per slide into ``deck_slides.source_sections_json`` — the
+    traceability north star for slides: every page records the paper
+    section(s) it was written from. ``chunk_ids`` is empty when the frame's
+    ``% cite:`` marker named a section that does not resolve to evidence
+    (the non-blocking "unsourced" signal surfaced to the Sources panel).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: int
+    section_name: str
+    chunk_ids: list[int]
+
+
 class OutlineSlide(BaseModel):
     """A planned slide after deterministic resolution (grounding + index)."""
 

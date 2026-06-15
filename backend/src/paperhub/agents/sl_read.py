@@ -26,6 +26,16 @@ class ReadResult(BaseModel):
     """IDs of the chunks that contributed, in ``char_start`` order."""
 
 
+def _norm_section(section: str) -> str:
+    """Whitespace-collapse + lowercase a section name for lenient matching.
+
+    The agent's ``% cite:`` marker may differ from the canonical DB section
+    only by spacing/case; normalizing both lets the resolution succeed instead
+    of shipping an empty (unsourced) grounding for a section that really exists.
+    """
+    return " ".join(section.split()).lower()
+
+
 async def read_section_chunks(
     *,
     paper_content_id: int,
@@ -54,6 +64,29 @@ async def read_section_chunks(
         (paper_content_id, section_name),
     ) as cur:
         rows = await cur.fetchall()
+
+    if not rows:
+        # Normalized fallback: resolve the canonical DB section whose normalized
+        # form matches, so a cite that differs only in spacing/case still
+        # grounds to real chunks rather than shipping empty (unsourced).
+        target = _norm_section(section_name)
+        async with conn.execute(
+            "SELECT DISTINCT section FROM chunks WHERE paper_content_id = ?",
+            (paper_content_id,),
+        ) as cur:
+            sections = [r[0] for r in await cur.fetchall() if r[0] is not None]
+        canonical = next(
+            (s for s in sections if _norm_section(str(s)) == target), None
+        )
+        if canonical is None:
+            return ReadResult(text="", chunk_ids=[])
+        async with conn.execute(
+            "SELECT id, text FROM chunks "
+            "WHERE paper_content_id = ? AND section = ? "
+            "ORDER BY char_start",
+            (paper_content_id, canonical),
+        ) as cur:
+            rows = await cur.fetchall()
 
     if not rows:
         return ReadResult(text="", chunk_ids=[])
