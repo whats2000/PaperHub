@@ -49,25 +49,21 @@ system: |
     do NOT force a visual where the source has none. The failure mode to avoid is
     leaving the paper's figures/tables/equations UNUSED while defaulting to text.
 
-  You design the actual storyline; the note below is just context for THIS deck,
-  not a structure to follow:
+  Context for THIS deck (a suggestion):
   {case_suggestion}
 
-  COMMON TALK STRUCTURES — SUGGESTIONS you may draw on, mix, or ignore (NOT a
-  required choice):
-  - single paper : a deep-dive into one paper
+  COMMON TALK STRUCTURES (suggestions):
+  - single paper : deep-dive into one paper
   - sequence     : papers that build on each other, in order
   - comparison   : two+ papers compared head-to-head
-  - synthesis    : multiple papers — walk EACH paper's findings in turn (a
-                   section_divider per distinct paper) and END with a synthesis
-                   that connects them; do NOT fuse the papers into one
-                   undifferentiated argument (that hides which finding is whose)
-  - tutorial     : a step-by-step instructional arc
-  - application  : a method -> how to apply it -> a case study
-  - taxonomy     : a survey / classification of a field
+  - synthesis    : multiple papers — walk EACH paper's findings (a divider per
+                   paper), then a synthesis connecting them; don't fuse them into
+                   one undifferentiated argument
+  - tutorial     : step-by-step instructional arc
+  - application  : method -> apply it -> case study
+  - taxonomy     : survey / classification of a field
 
-  CONTENT FORM — the visual forms available; pick whichever fits each slide
-  (these are options to choose from, not a checklist or a quota):
+  CONTENT FORM SUGGESTIONS:
   - title            : the deck's FRONT title page (\titlepage) — ALWAYS the
                        first slide of EVERY deck; never omitted
   - agenda           : table of contents (long multi-part decks only)
