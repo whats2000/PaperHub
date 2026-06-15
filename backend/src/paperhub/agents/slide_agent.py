@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from paperhub.agents.sl_cite import detect_cite_violations, load_valid_sections
 from paperhub.agents.sl_format import (
     _format_bundles_block,
     _format_figure_inventory_block,
@@ -399,6 +400,11 @@ async def run_slide_agent(
     ]
     tools_schema = _tool_schemas()
 
+    # Evidence set for the rule-based cite gate: (paper_id, section) pairs that
+    # actually have chunks. A frame's cite is valid only against this set, so a
+    # cite to an unknown paper/section (no evidence) is rejected as a hallucination.
+    valid_sections = await load_valid_sections([b.paper_id for b in bundles], conn)
+
     pending_compile_check: CompileCheckResult | None = None
     preamble_persisted = False
     accepted_done = False
@@ -554,6 +560,7 @@ async def run_slide_agent(
                         script=script,  # type: ignore[arg-type]
                     )
                     pending_compile_check = check
+                    cite_violations = detect_cite_violations(state.deck_tex, valid_sections)
                     feedback_log.append(
                         {
                             "turn_tool_calls": tool_calls_used,
@@ -565,6 +572,7 @@ async def run_slide_agent(
                             "decorated_blocks": [b.model_dump() for b in check.decorated_blocks],
                             "long_diagram_nodes": [n.model_dump() for n in check.long_diagram_nodes],
                             "bare_visuals": [b.model_dump() for b in check.bare_visuals],
+                            "cite_violations": [v.model_dump() for v in cite_violations],
                             "frame_overflow": [
                                 {"frame_index": s.frame_index, "frame_title": s.frame_title,
                                  "overage_tokens": s.overage_tokens,
@@ -580,6 +588,7 @@ async def run_slide_agent(
                         or check.decorated_blocks
                         or check.long_diagram_nodes
                         or check.bare_visuals
+                        or cite_violations
                     ):
                         # Forced revision round: feed the failures back and keep
                         # going. Do NOT accept done. ``decorated_blocks`` are
@@ -607,7 +616,18 @@ async def run_slide_agent(
                                             "explanation — add a \\caption{...} "
                                             "(or a notation legend for an "
                                             "equation), or a sentence of "
-                                            "explanatory text beside it."
+                                            "explanatory text beside it. "
+                                            "cite_violations: EVERY frame needs a "
+                                            "valid '% cite:' marker as its first "
+                                            "line — a content slide cites a REAL "
+                                            "section it was written from "
+                                            "(% cite: <paper_id>:<section>); use "
+                                            "read_section to confirm the source, "
+                                            "then write the exact section name. "
+                                            "title/divider/agenda slides use "
+                                            "% cite: title|divider|agenda. A slide "
+                                            "with no real source is a hallucination "
+                                            "and must be re-sourced."
                                         ),
                                         "compile_errors": check.compile_errors,
                                         "unrendered_math_frames": [
@@ -625,6 +645,9 @@ async def run_slide_agent(
                                         "bare_visuals": [
                                             b.model_dump()
                                             for b in check.bare_visuals
+                                        ],
+                                        "cite_violations": [
+                                            v.model_dump() for v in cite_violations
                                         ],
                                     },
                                     ensure_ascii=False,
@@ -679,6 +702,10 @@ async def run_slide_agent(
                             n.model_dump() for n in density.long_diagram_nodes
                         ],
                         "bare_visuals": [b.model_dump() for b in density.bare_visuals],
+                        "cite_violations": [
+                            v.model_dump()
+                            for v in detect_cite_violations(state.deck_tex, valid_sections)
+                        ],
                     }
                     if any(blocking.values()):
                         note = (

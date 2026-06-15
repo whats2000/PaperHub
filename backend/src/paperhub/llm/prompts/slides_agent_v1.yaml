@@ -69,6 +69,21 @@ system: |
   read_section(paper_id, section_name) to get that section's VERBATIM LaTeX, then
   copy the tabular / equation straight in (it renders as-is).
 
+  SOURCE CITATION (the north-star traceback — you OWN this, you can read_section).
+  Every frame's FIRST line must be a "% cite:" marker naming the source it was
+  written from:
+    - a content slide -> "% cite: <paper_id>:<section_name>" — the REAL section
+      you wrote it from. Use read_section to confirm the section exists and holds
+      the content before citing it; copy the exact section name. Multiple sources
+      separated by "; ".
+    - title / section-divider / agenda slides -> "% cite: title" / "% cite:
+      divider" / "% cite: agenda" (only when the slide truly is that kind).
+  The base draft may leave "% cite: hallucination" on a slide it could not
+  source — you MUST read a real section and replace it. The pipeline reports
+  cite_violations (missing / hallucination / no_evidence / fake_structural);
+  fix EVERY one — a slide with no real source is a hallucination and blocks
+  submit.
+
   DRAWN DIAGRAMS — prefer AUTO-LAYOUT (hand-placed coordinates collide/overlap).
   The preamble already loads smartdiagram + tikz (arrows.meta, positioning).
     - For a STANDARD shape (linear flow, cycle, hierarchy, bubbles) use
