@@ -305,6 +305,32 @@ describe("SlidesPanel", () => {
     expect(screen.getByLabelText("latex-source")).toBeInTheDocument();
   });
 
+  it("the active 'Edit all deck' button toggles the editor closed", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    const deckBtn = await screen.findByRole("button", { name: /Edit all deck/i });
+    fireEvent.click(deckBtn);
+    expect(await screen.findByLabelText("latex-source")).toBeInTheDocument();
+    // Clicking it again (now active) exits the editor.
+    fireEvent.click(deckBtn);
+    await waitFor(() =>
+      expect(screen.queryByLabelText("latex-source")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("frame editor follows the active page when navigating", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this frame/i }));
+    const ta = await screen.findByLabelText("latex-source");
+    expect(ta).toHaveValue("\\begin{frame}{One}a\\end{frame}");
+    // Navigate to the next page → the editor reloads with page 2's frame.
+    fireEvent.click(screen.getByRole("button", { name: /next slide/i }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("latex-source")).toHaveValue(
+        "\\begin{frame}{Two}b\\end{frame}",
+      ),
+    );
+  });
+
   it("renders the Sources strip chip for the current page", async () => {
     render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
     expect(

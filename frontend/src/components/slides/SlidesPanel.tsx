@@ -305,18 +305,35 @@ export function SlidesPanel({
     ? t("panel.mask.restoring")
     : stage;
 
+  // Navigate to a page (clamped). In frame-edit mode the editor FOLLOWS the
+  // active page: it loads that page's frame source, discarding an unsaved draft
+  // (the editor tracks whichever slide you're on). No-op for the draft when not
+  // editing a frame. Shared by the keyboard, the header arrows, and the
+  // filmstrip so every navigation path keeps the editor in sync.
+  const goTo = useCallback(
+    (page: number) => {
+      const clamped = Math.min(Math.max(page, 1), numPages || 1);
+      setCurrentPage(sessionId, clamped);
+      if (editorMode === "frame") {
+        const tgt = (slidesSources ?? []).find(
+          (s) => s.page_start <= clamped && clamped <= s.page_end,
+        );
+        setEditorDraft(tgt?.frame_tex ?? "");
+        setEditorErrorLog(null);
+      }
+    },
+    [numPages, sessionId, editorMode, slidesSources, setCurrentPage],
+  );
+
   // Keyboard navigation.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        setCurrentPage(sessionId, Math.max(1, currentPage - 1));
-      } else if (e.key === "ArrowRight") {
-        setCurrentPage(sessionId, Math.min(numPages || 1, currentPage + 1));
-      }
+      if (e.key === "ArrowLeft") goTo(currentPage - 1);
+      else if (e.key === "ArrowRight") goTo(currentPage + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionId, currentPage, numPages, setCurrentPage]);
+  }, [currentPage, goTo]);
 
   // Draggable vertical divider — mirrors useCanvasResize but on the Y axis.
   const onDividerPointerDown = useCallback(
@@ -369,11 +386,6 @@ export function SlidesPanel({
     },
     [filmstripWidth, setFilmstripWidth],
   );
-
-  const goTo = (page: number) => {
-    const clamped = Math.min(Math.max(page, 1), numPages || 1);
-    setCurrentPage(sessionId, clamped);
-  };
 
   const speakerNote = speakerNotes[String(currentPage)];
 
@@ -528,7 +540,9 @@ export function SlidesPanel({
           aria-label={t("editor.editDeck", "Edit all deck LaTeX")}
           aria-pressed={editorMode === "deck"}
           disabled={!canEdit}
-          onClick={() => void beginEditDeck()}
+          onClick={() =>
+            editorMode === "deck" ? cancelEdit() : void beginEditDeck()
+          }
           title={t("editor.editDeck", "Edit all deck LaTeX")}
         >
           <FileCode className="h-3 w-3" />
