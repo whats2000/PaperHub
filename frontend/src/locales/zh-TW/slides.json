@@ -38,6 +38,21 @@
       "empty": "此投影片沒有演講備註"
     }
   },
+  "editor": {
+    "editFrame": "編輯此張投影片的 LaTeX",
+    "editDeck": "編輯整份簡報的 LaTeX",
+    "scopeFrame": "正在編輯此張投影片",
+    "scopeDeck": "正在編輯整份簡報",
+    "save": "儲存並重新編譯",
+    "cancel": "取消",
+    "compileError": "編譯失敗 — 請修正 LaTeX 後重新儲存"
+  },
+  "sources": {
+    "heading": "來源",
+    "empty": "綜合內容 — 無單一來源",
+    "unsourced": "此章節未解析到來源片段",
+    "openHint": "在引用畫布中開啟此來源"
+  },
   "deckChip": {
     "fallbackTitle": "投影片",
     "slide_one": "{{count}} 張投影片",

@@ -1,9 +1,30 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSlidesStore } from "@/store/slides";
 import { SlidesPanel } from "@/components/slides/SlidesPanel";
 import * as api from "@/lib/api";
+import type { DeckSlideDetail } from "@/types/domain";
+
+// Per-page detail seeded into the store + returned by getDeckSlides (session 7).
+const SLIDES7: DeckSlideDetail[] = [
+  {
+    slide_index: 0,
+    page_start: 1,
+    page_end: 1,
+    frame_tex: "\\begin{frame}{One}a\\end{frame}",
+    source_sections: [
+      { paper_id: 7, section_name: "Introduction", chunk_ids: [101] },
+    ],
+  },
+  {
+    slide_index: 1,
+    page_start: 2,
+    page_end: 2,
+    frame_tex: "\\begin{frame}{Two}b\\end{frame}",
+    source_sections: [],
+  },
+];
 
 vi.mock("react-pdf", () => ({
   pdfjs: { GlobalWorkerOptions: { workerSrc: "" } },
@@ -31,15 +52,39 @@ vi.mock("react-pdf", () => ({
     return <div data-testid={`page-${pageNumber}`}>page {pageNumber}</div>;
   },
 }));
+// CodeMirror → textarea (DOM-layout-free) for the manual editor.
+vi.mock("@uiw/react-codemirror", () => ({
+  default: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange?: (v: string) => void;
+  }) => (
+    <textarea
+      aria-label="latex-source"
+      value={value}
+      onChange={(e) => onChange?.(e.target.value)}
+    />
+  ),
+}));
 vi.mock("@/lib/api", () => ({
   fetchDeckPdfData: vi.fn(() => Promise.resolve(new Uint8Array([1, 2, 3]))),
   deckTexUrl: () => "http://x/tex",
   deckPdfUrl: () => "http://x/pdf",
+  getDeckSlides: vi.fn(() => Promise.resolve([])),
+  getDeckTexText: vi.fn(() => Promise.resolve("\\documentclass{beamer}...")),
+  putFrameTex: vi.fn(() => Promise.resolve({ ok: true, status: "ok", page_count: 5 })),
+  putDeckTex: vi.fn(() => Promise.resolve({ ok: true, status: "ok", page_count: 5 })),
 }));
 
 describe("SlidesPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.getDeckSlides).mockResolvedValue(SLIDES7);
+    vi.mocked(api.getDeckTexText).mockResolvedValue("\\documentclass{beamer}...");
+    vi.mocked(api.putFrameTex).mockResolvedValue({ ok: true, status: "ok", page_count: 5 });
+    vi.mocked(api.putDeckTex).mockResolvedValue({ ok: true, status: "ok", page_count: 5 });
     useSlidesStore.setState({
       open: true,
       deckBySession: {
@@ -55,6 +100,8 @@ describe("SlidesPanel", () => {
       },
       deckRevisionBySession: { 7: 1 },
       currentPageBySession: { 7: 1 },
+      editorModeBySession: {},
+      slidesSourcesBySession: { 7: SLIDES7 },
     });
   });
 
@@ -203,5 +250,65 @@ describe("SlidesPanel", () => {
     await waitFor(() =>
       expect(screen.queryByText(/updating slides/i)).not.toBeInTheDocument(),
     );
+  });
+
+  // ── F6.2 manual editing + Sources strip ──────────────────────────────
+
+  it("renders both edit affordances enabled for an ok deck", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    expect(
+      await screen.findByRole("button", { name: /Edit all deck/i }),
+    ).toBeEnabled();
+    expect(
+      await screen.findByRole("button", { name: /Edit this frame/i }),
+    ).toBeEnabled();
+  });
+
+  it("frame toggle opens the editor with the current frame; modes are exclusive", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this frame/i }));
+    expect(await screen.findByLabelText("latex-source")).toHaveValue(
+      "\\begin{frame}{One}a\\end{frame}",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Edit all deck/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/Editing the whole deck/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Editing this frame/i)).not.toBeInTheDocument();
+  });
+
+  it("saving a frame edit recompiles and exits the editor, staying on the page", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this frame/i }));
+    await screen.findByLabelText("latex-source");
+    fireEvent.click(screen.getByRole("button", { name: /save & recompile/i }));
+    await waitFor(() =>
+      expect(api.putFrameTex).toHaveBeenCalledWith(7, 1, expect.any(String)),
+    );
+    await waitFor(() =>
+      expect(screen.queryByLabelText("latex-source")).not.toBeInTheDocument(),
+    );
+    expect(useSlidesStore.getState().currentPageBySession[7]).toBe(1);
+  });
+
+  it("a compile failure keeps the editor open with the log", async () => {
+    vi.mocked(api.putFrameTex).mockResolvedValue({
+      ok: false,
+      status: "error",
+      log: "! Undefined control sequence.",
+    });
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this frame/i }));
+    await screen.findByLabelText("latex-source");
+    fireEvent.click(screen.getByRole("button", { name: /save & recompile/i }));
+    expect(await screen.findByText(/Undefined control sequence/)).toBeInTheDocument();
+    expect(screen.getByLabelText("latex-source")).toBeInTheDocument();
+  });
+
+  it("renders the Sources strip chip for the current page", async () => {
+    render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+    expect(
+      await screen.findByRole("button", { name: /Introduction/ }),
+    ).toBeInTheDocument();
   });
 });

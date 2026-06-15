@@ -38,6 +38,21 @@
       "empty": "No speaker note for this slide"
     }
   },
+  "editor": {
+    "editFrame": "Edit this frame's LaTeX",
+    "editDeck": "Edit all deck LaTeX",
+    "scopeFrame": "Editing this frame",
+    "scopeDeck": "Editing the whole deck",
+    "save": "Save & recompile",
+    "cancel": "Cancel",
+    "compileError": "Compile failed — fix the LaTeX and save again"
+  },
+  "sources": {
+    "heading": "Sources",
+    "empty": "Synthesis — no single source",
+    "unsourced": "No source chunks resolved for this section",
+    "openHint": "Open this source in the Citation Canvas"
+  },
   "deckChip": {
     "fallbackTitle": "Slides",
     "slide_one": "{{count}} slide",

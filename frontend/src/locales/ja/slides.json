@@ -38,6 +38,21 @@
       "empty": "このスライドには発表者ノートがありません"
     }
   },
+  "editor": {
+    "editFrame": "このフレームの LaTeX を編集",
+    "editDeck": "デッキ全体の LaTeX を編集",
+    "scopeFrame": "このフレームを編集中",
+    "scopeDeck": "デッキ全体を編集中",
+    "save": "保存して再コンパイル",
+    "cancel": "キャンセル",
+    "compileError": "コンパイルに失敗しました — LaTeX を修正して再保存してください"
+  },
+  "sources": {
+    "heading": "出典",
+    "empty": "総合 — 単一の出典なし",
+    "unsourced": "このセクションの出典チャンクは解決されませんでした",
+    "openHint": "引用キャンバスでこの出典を開く"
+  },
   "deckChip": {
     "fallbackTitle": "スライド",
     "slide_one": "{{count}} 枚のスライド",
