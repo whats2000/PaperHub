@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { DeckEventData } from "@/types/domain";
+import type { DeckEventData, DeckSlideDetail } from "@/types/domain";
+
+/** Manual-editor mode for a session's deck (F6.2): off / editing the current
+ *  frame / editing the whole deck source. Mutually exclusive. */
+export type EditorMode = "off" | "frame" | "deck";
 
 /** Filmstrip rail width bounds (px). */
 export const FILMSTRIP_MIN_WIDTH = 56;
@@ -42,6 +46,18 @@ interface SlidesState {
    *  `presentingBySession[sid]` is true, and `startPresenting` re-stamps it on
    *  every start), so consumers MUST gate on the presenting flag first. */
   presentStartedAtBySession: Record<number, number>;
+  /** Per-session manual-editor mode (F6.2). Ephemeral (not persisted) — closing
+   *  the panel exits the editor. */
+  editorModeBySession: Record<number, EditorMode>;
+  setEditorMode: (sid: number, mode: EditorMode) => void;
+  /** Per-session per-slide detail (frame source + grounding) for the editor +
+   *  Sources strip. Ephemeral; refetched on deck load / revision bump. */
+  slidesSourcesBySession: Record<number, DeckSlideDetail[]>;
+  setSlidesSources: (sid: number, slides: DeckSlideDetail[]) => void;
+  /** Bump a session's deck revision WITHOUT replacing deck metadata — used
+   *  after a manual recompile to force a cache-busted PDF refetch (the SSE
+   *  ``deck`` event path uses ``setDeck`` instead). */
+  bumpDeckRevision: (sid: number) => void;
   /** Draggable filmstrip rail width (px). Persisted. */
   filmstripWidth: number;
   /** Draggable speaker-note pane height (px). Persisted. */
@@ -70,11 +86,28 @@ export const useSlidesStore = create<SlidesState>()(
       slideAttachedBySession: {},
       presentingBySession: {},
       presentStartedAtBySession: {},
+      editorModeBySession: {},
+      slidesSourcesBySession: {},
       filmstripWidth: FILMSTRIP_DEFAULT_WIDTH,
       noteHeight: NOTE_DEFAULT_HEIGHT,
       setDeck: (sid, deck) =>
         set((s) => ({
           deckBySession: { ...s.deckBySession, [sid]: deck },
+          deckRevisionBySession: {
+            ...s.deckRevisionBySession,
+            [sid]: (s.deckRevisionBySession[sid] ?? 0) + 1,
+          },
+        })),
+      setEditorMode: (sid, mode) =>
+        set((s) => ({
+          editorModeBySession: { ...s.editorModeBySession, [sid]: mode },
+        })),
+      setSlidesSources: (sid, slides) =>
+        set((s) => ({
+          slidesSourcesBySession: { ...s.slidesSourcesBySession, [sid]: slides },
+        })),
+      bumpDeckRevision: (sid) =>
+        set((s) => ({
           deckRevisionBySession: {
             ...s.deckRevisionBySession,
             [sid]: (s.deckRevisionBySession[sid] ?? 0) + 1,
