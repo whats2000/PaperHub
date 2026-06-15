@@ -39,7 +39,8 @@ export function SourcesStrip({ sources, titleByPaperId }: Props) {
       </span>
       {sources.map((s, i) => {
         const title = titleByPaperId.get(s.paper_id) ?? `#${s.paper_id}`;
-        const grounded = s.chunk_ids.length > 0;
+        const firstChunk = s.chunk_ids[0];
+        const grounded = firstChunk !== undefined;
         const label = (
           <>
             <FileText className="h-3 w-3 shrink-0 opacity-70" />
@@ -64,7 +65,7 @@ export function SourcesStrip({ sources, titleByPaperId }: Props) {
           <button
             key={`${s.paper_id}:${s.section_name}:${i}`}
             type="button"
-            onClick={() => openCitation(s.chunk_ids[0])}
+            onClick={() => openCitation(firstChunk)}
             title={t("sources.openHint", "Open this source in the Citation Canvas")}
             className="flex items-center gap-1 rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-foreground transition-colors hover:border-primary hover:bg-primary/10"
           >
