@@ -196,6 +196,11 @@ async def _seed_deck(conn, *, session_id, run_id, slides_dir: Path) -> int:
         (session_id, run_id, str(slides_dir / "deck.tex"), str(slides_dir / "deck.pdf")),
     )
     deck_id = int(cur.lastrowid)
+    # Mark the deck-producing run (mirrors sl_emit) so the fork's
+    # "did the deck exist at/before the fork point?" check sees it.
+    await conn.execute(
+        "UPDATE runs SET deck_version_id = 'version_x' WHERE id = ?", (run_id,)
+    )
     for i in range(2):
         await conn.execute(
             "INSERT INTO deck_slides (deck_id, slide_index, frame_tex, page_start, "
