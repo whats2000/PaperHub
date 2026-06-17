@@ -41,6 +41,8 @@ it cannot live on a client connection.
 | D4 | **Cancel ONLY via explicit Stop** → `POST /chat/cancel`. A bare disconnect never cancels. | Core requirement #3. |
 | D5 | **On backend startup, mark any leftover `running` run as `interrupted`** (the in-memory broker did not survive the restart). | No ghost spinners; the returning client sees a clean interrupted turn it can retry. |
 | D6 | **Single backend worker** (uvicorn `--reload` / no `--workers N`) is assumed and required. | The broker is process-local; cross-device cancel/poll only works if every request hits the same process. Already true in `start.ps1`. |
+| D7 | **Reattach is high-fidelity** — the poll returns raw SSE **event deltas** (cursor-based) replayed through the same reducer as the live SSE, so trace + deck + citations + text all rebuild, not just the answer text. | User's call ("if possible reattach"). The handle already buffers every event, so deltas are free; one reducer serves both transports. |
+| D8 | **`interrupted` is a distinct UI state** with a **Retry** affordance (not the plain error bubble). | User's call ("yep"). A restart-interrupted turn is recoverable; Retry re-sends the original user message. |
 
 ## 3. Architecture
 
@@ -78,9 +80,9 @@ RunBroker: dict[int, RunHandle]            # run_id -> handle; the single source
   newly-subscribing SSE replay from the start.
 - `subscribers: set[asyncio.Queue]` — live SSE listeners; each emitted event is appended to
   `events` **and** put on every subscriber queue.
-- `snapshot` — derived, cheap-to-read state for the **poll** endpoint:
-  `{ status, partial_text, routing, search_results, last_step_index, final_message_id }`.
-  `partial_text` is the running concatenation of `token` event text.
+- The **poll** endpoint reads directly from `events` (cursor-based deltas) — no separate
+  snapshot needed; `events` IS the replayable state. (A `status` + `final_message_id` are kept
+  for the terminal/DB-fallback path.)
 - `status: 'running' | 'ok' | 'error' | 'cancelled' | 'interrupted'` and `done: asyncio.Event`.
 - `evict_at: float | None` — set when terminal; GC after a short TTL (≈60 s) so the connected
   SSE and any in-flight poll observe the terminal state before the handle disappears.
@@ -101,10 +103,14 @@ buffer + fan out + update snapshot). It still:
   return `EventSourceResponse` of a thin subscriber generator
   (`replay handle.events, then drain a fresh subscriber queue until terminal`). **Client
   disconnect unsubscribes only.** The `run_id` is still emitted in the first `session` event.
-- `GET /chat/runs/{run_id}/state` — reattach poll. If the handle exists, return its snapshot.
-  If not (evicted after completion, or lost to a restart), **fall back to the DB**: read
-  `runs.status` + the persisted assistant message → return an equivalent terminal snapshot.
-  This makes the poll robust regardless of broker presence.
+- `GET /chat/runs/{run_id}/events?since={cursor}` — reattach poll, **high-fidelity** (D7). If
+  the handle exists, return `{ status, events: handle.events[cursor:], next_cursor }` — the
+  raw SSE event deltas (`session`/`routing_decision`/`tool_step`/`token`/`search_results`/
+  `deck`/`final`/`error`). The client replays them through the **same reducer the live SSE
+  uses**, so the Trace panel, Slides/deck, citations, and answer text all rebuild on reattach —
+  not just the text. If the handle is absent (evicted after completion, or lost to a restart),
+  **fall back to the DB**: return a terminal `status` and a synthetic single `final`/`error`
+  event built from the persisted assistant message, so the client converges to the final state.
 - `POST /chat/cancel {run_id}` — the **only** cancel path. `handle.task.cancel()` if present;
   then DB retract **guarded on `status='running'`** (delete the turn's messages + set
   `status='cancelled'`) so a Stop that races completion can't delete a finished answer. Works
@@ -125,12 +131,14 @@ to the composer (the explicit-Stop behavior from the old Part A is **kept**).
 `GET /sessions/{id}/messages`, which now also returns each row's run `status`):
 1. Render the pair as **user message + processing placeholder** (pair invariant; no bare user
    message).
-2. Start a **poller**: `GET /chat/runs/{run_id}/state` every ~1 s.
-   - while `status==='running'`: update the assistant bubble with `snapshot.partial_text` (and
-     routing/steps if present) — the answer visibly builds.
-   - on `status==='ok'`: stop polling; render the final answer (refetch
-     `/sessions/{id}/messages` for the canonical row incl. deck/citations).
-   - on `status` in `error|interrupted`: stop polling; show the error/interrupted bubble.
+2. Start a **poller**: `GET /chat/runs/{run_id}/events?since={cursor}` every ~1 s, replaying each
+   returned event through the **same reducer the live SSE uses** (so trace/deck/citations/text
+   all rebuild — high-fidelity, D7). Advance `cursor` by `next_cursor` each poll.
+   - while `status==='running'`: keep replaying deltas — the answer + trace + deck visibly build.
+   - on `status==='ok'`: replay the final `final` event, stop polling; optionally refetch
+     `/sessions/{id}/messages` to settle the canonical row.
+   - on `status` in `error|interrupted`: stop polling; show the error / **interrupted** bubble
+     (interrupted is a distinct state with a Retry affordance — D8).
    - on `status==='cancelled'`: stop polling; remove the placeholder (the run was retracted on
      another tab).
 3. The **Stop button still works** on a reattached turn — it resolves the `run_id` from the
@@ -155,29 +163,26 @@ right messages. (Exact status taxonomy is an open item — see §5.)
 | Run completes while user away | Task finishes, persists final, handle evicted after TTL → later poll falls back to DB → returning client sees the final answer. |
 | Two tabs of the same user | Originating tab streams live; the other tab polls; both converge. |
 
-## 5. Open items to settle before/while writing the task plan
+## 5. Resolved items (decisions for the task plan)
 
-1. **Status taxonomy.** Backend `runs.status` gains `interrupted` (D5) on top of the new
-   `cancelled`. Frontend `ChatMessage.status` currently `"streaming" | "ok" | "error"`; we
-   likely add `"processing"` (reattach placeholder) and a render path for `interrupted`.
-   Confirm whether `interrupted` renders as a distinct state or reuses the `error` bubble.
-2. **Poll cadence & stop conditions.** ~1 s while `running`; stop on terminal, on session
-   switch, and on tab hide (`visibilitychange`) to avoid background polling. Confirm interval.
-3. **Reattach payload richness.** Does the poll snapshot carry `tool_step`/trace + `deck`
-   events (so the Trace panel and Slides panel rebuild on reattach), or just `partial_text` +
-   `status` (trace/deck come from the `/messages` refetch on completion)? Leaning: snapshot
-   carries `partial_text + routing + status`; full trace/deck via `/messages` on completion.
-4. **Buffer/eviction memory bounds.** Per-run event buffer is unbounded in principle (a very
-   long answer). Cap or stream-trim? For single-user self-host this is small; default: keep
-   full buffer, evict handle ≈60 s after terminal.
-5. **`run_agent` lifecycle ownership.** Tasks are `create_task`'d detached; ensure they're
-   tracked so they aren't GC'd mid-flight and are cancelled on app shutdown. A module-level set
-   of live tasks (like the existing MCP daemon pattern) covers this.
-6. **Does the originating SSE also need the buffer-replay path,** or only live tail? Replay is
-   cheap insurance against a race where the task emits an event between handle-registration and
-   the subscriber attaching; default: subscriber replays `events` then tails.
-7. **Tracing.** All existing `tool_calls` tracing is inside `run_agent` and is unaffected
-   (it writes to the DB as today); the broker only mirrors the SSE event stream, not the trace.
+1. **Status taxonomy — RESOLVED.** Backend `runs.status` ∈ `running | ok | error | cancelled |
+   interrupted`. Frontend `ChatMessage.status` gains `"processing"` (reattach placeholder, drives
+   the poller + Stop) and `"interrupted"` (distinct state with **Retry**, per D8). `"streaming"`
+   stays the *live local SSE* marker so the two never both poll.
+2. **Reattach fidelity — RESOLVED (D7).** Poll returns raw event **deltas** replayed through the
+   live-SSE reducer → trace + deck + citations + text all rebuild. No separate snapshot shape.
+3. **Poll cadence & stop conditions.** ~1 s while `running`; stop on terminal status, on session
+   switch, and on tab hide (`visibilitychange`) to avoid background polling. (Interval tunable;
+   1 s is the default.)
+4. **Buffer/eviction memory bounds.** Per-run event buffer kept in full; handle evicted ≈60 s
+   after terminal. Small for single-user self-host; revisit only if it ever bites.
+5. **`run_agent` lifecycle ownership.** Background tasks `create_task`'d and held in a
+   module-level live-task set (mirrors the MCP-daemon pattern) so they aren't GC'd mid-flight and
+   are cancelled on app shutdown.
+6. **Originating SSE replay.** The subscriber replays `handle.events` then tails — cheap
+   insurance against the register→subscribe race; same code path the poll reattach uses.
+7. **Tracing unaffected.** All `tool_calls` tracing stays inside `run_agent`, writing to the DB as
+   today; the broker only mirrors the SSE event stream, not the trace.
 
 ## 6. Impact on the existing plan
 
