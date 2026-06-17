@@ -122,7 +122,15 @@ async def cancel_run(req: CancelRequest) -> dict[str, str]:
         task.cancel()
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
-        await conn.execute("DELETE FROM messages WHERE run_id = ?", (req.run_id,))
+        # Guard BOTH writes on the run still being 'running'. A Stop click can
+        # race a just-completed turn (the `final` event in flight); without the
+        # guard the DELETE would nuke a valid completed answer while leaving its
+        # run 'ok'. Only an orphaned in-flight turn is removed.
+        await conn.execute(
+            "DELETE FROM messages WHERE run_id = ? AND run_id IN "
+            "(SELECT id FROM runs WHERE id = ? AND status = 'running')",
+            (req.run_id, req.run_id),
+        )
         await conn.execute(
             "UPDATE runs SET finished_at = datetime('now'), status = 'cancelled' "
             "WHERE id = ? AND status = 'running'",
@@ -136,6 +144,7 @@ async def cancel_run(req: CancelRequest) -> dict[str, str]:
 - `cancel_run` cancels a registered task (an `asyncio.sleep(30)` stand-in) — assert `task.cancelled()`.
 - `cancel_run` deletes the run's messages and sets `runs.status='cancelled'` (seed a `running` run + a user message, call it, assert).
 - A `running` run that is NOT cancelled stays `running` (no endpoint call).
+- **Race guard:** calling `cancel_run` on an already-`ok` run (seed an `ok` run + its user+assistant messages) leaves BOTH messages intact and `status='ok'` — the guard prevents nuking a just-completed answer.
 
 **Step 5 — live test** (`scripts/live_abort_test.py`): open a real `/chat` SSE against `:8000`, capture the `run_id` from the `session` event, `POST /chat/cancel` ~4s in (mid-generation). Assert ALL of:
 - the stream stops promptly (server closes within ~1s of the cancel);
@@ -600,19 +609,19 @@ Create `frontend/src/changelog/changelog.json` (newest-first; en source-of-truth
     "date": "2026-06-16",
     "highlights": {
       "en": [
-        "Stop button — cancel an in-flight answer; the partial reply is kept and marked Stopped.",
+        "Stop button — instantly cancel an in-flight answer; your question drops back into the composer so you can edit and resend.",
         "What's New + version awareness — this changelog, a one-time toast after you update, and an optional 'update available' notice with the upgrade command."
       ],
       "zh-TW": [
-        "停止按鈕 — 可中止生成中的回答；已產生的部分內容會保留並標示為「已停止」。",
+        "停止按鈕 — 可立即中止生成中的回答；您的問題會退回輸入框，方便修改後重新送出。",
         "更新資訊 — 此更新紀錄、更新後的一次性提示，以及可選的「有新版本」通知與升級指令。"
       ],
       "zh-CN": [
-        "停止按钮 — 可中止生成中的回答；已生成的部分内容会保留并标记为“已停止”。",
+        "停止按钮 — 可立即中止生成中的回答；你的问题会退回输入框，便于修改后重新发送。",
         "更新信息 — 此更新日志、更新后的一次性提示，以及可选的“有新版本”通知与升级命令。"
       ],
       "ja": [
-        "停止ボタン — 生成中の回答を中断できます。途中までの内容は保持され「停止しました」と表示されます。",
+        "停止ボタン — 生成中の回答を即座に中断できます。質問は入力欄に戻るので、修正して再送信できます。",
         "更新情報 — この変更履歴、更新後の一度きりの通知、そして任意の「アップデートあり」通知とアップグレードコマンド。"
       ]
     }
@@ -1461,19 +1470,19 @@ Expected: all green; production build succeeds.
 
 1. Confirm `:8000` is live (`curl -s -m 3 http://127.0.0.1:8000/health`); if not, ASK the user to start it — do not boot your own.
 2. **FR-16:** `curl -s http://127.0.0.1:8000/version` → confirm `{current, latest, update_available, ...}`; toggle `PAPERHUB_UPDATE_CHECK=0` via Settings → `latest` becomes `null`.
-3. **FR-15:** `POST /sessions` → `POST /chat` with a long-running prompt (e.g. a `slides` or `paper_qa` turn), then drop the connection mid-stream; query `SELECT status FROM runs ORDER BY id DESC LIMIT 1` → expect `cancelled` (not `running`/`error`); confirm a partial assistant message row exists if tokens streamed.
-4. ASK the user to confirm visually in the frontend: the Stop button appears while streaming and leaves a "Stopped" partial; the "What's New" modal opens from the account menu; the update dot shows when a newer release exists.
+3. **FR-15:** `POST /sessions` → `POST /chat` with a long-running prompt (e.g. a `slides` or `paper_qa` turn), capture the `run_id` from the `session` event, then `POST /chat/cancel {run_id}` mid-stream (this is the explicit Stop — a *bare* disconnect deliberately does NOT cancel). Assert: the stream closes promptly, `SELECT status FROM runs WHERE id=?` is `cancelled`, and `SELECT COUNT(*) FROM messages WHERE run_id=?` is `0` (the orphaned turn was deleted — no partial row is kept). This is also what `scripts/live_abort_test.py` automates.
+4. ASK the user to confirm visually in the frontend: one Stop click makes the assistant bubble AND the user message vanish instantly with the question restored to the composer (no "Stopped" bubble — the turn is removed); a reload mid-turn shows *user + processing*, not a bare orphan; the "What's New" modal opens from the account menu; the update dot shows when a newer release exists.
 
 ---
 
 ## Self-Review
 
-**Spec coverage (FR-15):** Stop button (A4) ✓; client abort → cancel without error (A3) ✓; `runs.status='cancelled'` + partial persist + re-raise (A1) ✓; "Stopped" marker, not error card (A2 status + A5 render) ✓; distinguish deliberate Stop from implicit abort-on-new-send via `userStoppedRef` (A3) ✓; no new endpoint (A1 uses the disconnect path) ✓; FR-09 cross-ref made true (A1) ✓.
+**Spec coverage (FR-15):** Stop button (A4) ✓; synchronous client retract on click — abort the stream + remove the in-flight pair, swallowing the abort error (A2+A3) ✓; explicit `POST /chat/cancel` cancels the running asyncio task, marks `runs.status='cancelled'` (only while `running`), and DELETEs the orphan turn's messages so it never reappears (A1) ✓; the question is restored to the composer, the turn is REMOVED (no "Stopped" bubble; MessageBubble untouched) ✓; distinguish deliberate Stop from a bare disconnect via the explicit endpoint — a disconnect stays `running` (A1) ✓; pair invariant on reload/cross-device via processing placeholder + run_id-resolved Stop (A6) ✓.
 
 **Spec coverage (FR-16):** bundled localized `changelog.json` outside the t() namespaces (B3) ✓; `about` chrome namespace × 4 locales (B5) ✓; `GET /version` cached GitHub check, failure-swallowing, repo-slug env override, toggle-gated default-on (B1+B2) ✓; nginx proxy (B2) ✓; About→`ChangelogModal` + update dot (B8+B9) ✓; one-time announce toast w/ localStorage `lastSeen`, silent first-load (B7) ✓; `update_available` row w/ copy-paste command + release link, no in-app execution (B8) ✓; merge-prep step (B10) ✓.
 
-**Placeholder scan:** every code step contains complete code; the two "inspect the existing file" steps (A5 MessageBubble, B8 Dialog shell) are read-then-integrate with the exact snippet + i18n key provided — not placeholders.
+**Placeholder scan:** every code step contains complete code; the one "inspect the existing file" step (B8 Dialog shell) is read-then-integrate with the exact snippet + i18n key provided. MessageBubble is NOT touched (the turn is removed, never rendered as "stopped").
 
-**Type consistency:** `cancelMessage(sessionId, run_id)` / `cancelPendingAssistant(sessionId)` consistent across A2↔A3; `VersionInfo` fields identical across domain.ts (B3), api (B4), store (B6), endpoint (B2); `semverGt`/`localizedHighlights`/`CHANGELOG` consistent across B3↔B7↔B8; `useVersionStore` shape `{info, changelogOpen, fetchVersion, openChangelog, closeChangelog}` consistent across B6↔B7↔B8↔B9; `composer.stop`/`composer.stopped` keys consistent across A4↔A5.
+**Type consistency:** `retractTurn(sessionId): string` consistent across A2↔A3; `cancelRun(runId)` consistent across A1 (endpoint `{run_id}`)↔A3 (client); `VersionInfo` fields identical across domain.ts (B3), api (B4), store (B6), endpoint (B2); `semverGt`/`localizedHighlights`/`CHANGELOG` consistent across B3↔B7↔B8; `useVersionStore` shape `{info, changelogOpen, fetchVersion, openChangelog, closeChangelog}` consistent across B6↔B7↔B8↔B9; `composer.stop`/`composer.stopTooltip` keys consistent across A4↔A5.
 
 **Known integration notes (not gaps):** A1 Step 5 enumerates 6 token-yield sites by branch — the implementer appends one line at each; the test exercises the chitchat branch. A5/B8/B9 require reading sibling files for exact JSX shell conventions (MessageBubble status block, SettingsModal Dialog, App.tsx root) — the substantive code is specified.
