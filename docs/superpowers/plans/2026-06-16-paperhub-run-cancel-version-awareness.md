@@ -32,6 +32,7 @@
 - `frontend/src/components/chat/Composer.tsx` (modify) — Send→Stop (square, `type="button"`, tooltip + aria-label) while streaming.
 - `frontend/src/pages/ChatPage.tsx` (modify) — wire `isStreaming` + `onStop={stop}`.
 - `frontend/src/locales/{en,zh-TW,zh-CN,ja}/chat.json` (modify) — `composer.stop`, `composer.stopTooltip`.
+- **Pair invariant on reload/cross-device (A6):** `backend/src/paperhub/api/sessions.py` (modify — `GET …/messages` returns each row's run `status`); `frontend/src/store/chat.ts` (`hydrateSessionMessages` appends a processing placeholder for a trailing `running` user message); `frontend/src/hooks/useChatStream.ts` (`stop()` resolves `run_id` from the streaming message when there's no live `runIdRef`).
 - (NOT touched: `MessageBubble.tsx`, `ChatMessage.status` — the cancelled turn is removed, never rendered.)
 
 **Part B — Version / changelog / update-check:**
@@ -59,6 +60,16 @@
 # Part A — Run Cancellation (Stop)
 
 **Design (per the Lessons above): the click does everything synchronously on the client; the backend kills the run + removes the orphan turn. No "cancelled" message is shown — the turn is *removed*.**
+
+**PAIR INVARIANT (hard rule, drives A1/A3/A6).** A user message must NEVER be displayed alone. Every user message is paired with an assistant element in exactly one of three states:
+1. **error** — the assistant message holds an error (run `error`);
+2. **valid response** — the assistant message holds the answer (run `ok`);
+3. **processing** — a live "generating" placeholder (run `running`), which is **itself abortable**, including from a *different device/tab* (Stop → `POST /chat/cancel {run_id}`).
+
+Consequences:
+- Same-tab Stop → retract removes BOTH (no orphan), `/chat/cancel` deletes the server rows (no orphan on reload).
+- Reload / second device while a turn is `running` → hydrate as *user message + processing placeholder* (state 3), NOT a bare user message — and the Stop button must work on it via its `run_id` (Task A6).
+- The live abort test must assert the LLM stack actually stops: **zero token events after the cancel AND zero new `tool_calls` rows for the run in the seconds after** (not merely that the stream closed).
 
 ### Task A1: Backend — `POST /chat/cancel` (kill the task + delete the orphan turn)
 
@@ -126,7 +137,13 @@ async def cancel_run(req: CancelRequest) -> dict[str, str]:
 - `cancel_run` deletes the run's messages and sets `runs.status='cancelled'` (seed a `running` run + a user message, call it, assert).
 - A `running` run that is NOT cancelled stays `running` (no endpoint call).
 
-**Step 5 — live test** (`scripts/live_abort_test.py`): open a real `/chat` SSE against `:8000`, capture the `run_id` from the `session` event, `POST /chat/cancel` ~4s in (mid-generation), and assert the stream stops promptly (close within ~1s) and the run is `cancelled`. This is the REQUIRED proof — pytest does not exercise the real LLM stack.
+**Step 5 — live test** (`scripts/live_abort_test.py`): open a real `/chat` SSE against `:8000`, capture the `run_id` from the `session` event, `POST /chat/cancel` ~4s in (mid-generation). Assert ALL of:
+- the stream stops promptly (server closes within ~1s of the cancel);
+- **zero token events arrive after the cancel** (the LLM output stopped);
+- **the LLM stack actually halts**: snapshot `SELECT COUNT(*) FROM tool_calls WHERE run_id=?` right after the cancel, wait ~5s, snapshot again — the count must be **unchanged** (no new agent/LLM steps fired after the abort);
+- `runs.status='cancelled'` and `SELECT COUNT(*) FROM messages WHERE run_id=?` is `0` (the orphan turn was deleted).
+
+This is the REQUIRED proof — pytest does not exercise the real LLM stack.
 
 Gates: `uv run pytest tests/test_chat_cancel.py`, `uv run ruff check src tests`, `uv run mypy src`.
 Commit: `feat(chat): POST /chat/cancel kills the run + deletes the orphaned turn (FR-15)`.
@@ -234,10 +251,30 @@ Commit: `feat(chat): Composer Stop button + tooltip while streaming (FR-15)`.
 
 Commit: `feat(chat): wire the Stop control through ChatPage (FR-15)`.
 
-### Part A verification (REQUIRED — do all three before "done")
-1. **Unit**: `test_chat_cancel.py` + `retractTurn`/`stop`/`ComposerStop` tests green; backend ruff+mypy, frontend typecheck+lint clean.
-2. **LIVE** (`uv run python scripts/live_abort_test.py` against the user's `:8000`): cancel mid-LLM-call → stream stops promptly + run `cancelled`.
-3. **Browser** (the gate that actually matters): long turn → **one** Stop click → the assistant bubble AND the user message vanish instantly, the sentence is back in the input, the composer is idle; the backend stops generating; a second click cannot resend; a reload shows no orphan user message. Ask the user to confirm this visually.
+### Task A6: Pair invariant on reload / cross-device (processing state + abortable)
+
+**Why:** the live store always appends `[user, assistant(streaming)]` together, so a same-tab turn never orphans. The orphan only appears on **hydration from the DB** (`GET /sessions/{id}/messages`): a `running` run has a user row but no assistant row yet. Per the PAIR INVARIANT it must render as *user + processing placeholder* (state 3), abortable.
+
+**Files:** Modify `backend/src/paperhub/api/sessions.py` (the `GET …/messages` handler) + `frontend/src/store/chat.ts` (`hydrateSessionMessages`) + `frontend/src/hooks/useChatStream.ts` (`stop()` run_id resolution); Tests alongside.
+
+1. **Backend** — `GET …/messages` already returns each message's `run_id`. Add the run's `status` to the payload (join `runs`), so the client can tell `running` (→ processing) from a finished run. (Backend already inserts an assistant `error` row for failed runs via `_finalise(status="error")`, satisfying state 1; `ok` runs have the assistant row, state 2.)
+
+2. **Frontend `hydrateSessionMessages`** — when the LAST mapped message is a `user` whose `run_id`'s run is `running` and has no following assistant row, append a synthetic assistant placeholder `{ role:"assistant", content:"", run_id, status:"streaming" }`. This satisfies the invariant (no bare user message) and makes `isStreaming` true so the Stop button shows.
+
+3. **Frontend `stop()` run_id resolution** — a hydrated/cross-device processing turn has no live `runIdRef`. `stop()` resolves the run to cancel as `runIdRef.current ?? <run_id of the trailing streaming assistant message in the active session>`. With that id it calls `cancelRun(rid)` (kills the backend task + deletes the rows) and retracts locally. (`abortRef.current?.abort()` is a harmless no-op when there is no live stream.)
+
+Tests: hydrating a session whose last user message belongs to a `running` run yields a trailing streaming placeholder (not a bare user message); `stop()` with `runIdRef=null` but a streaming message present still calls `cancelRun` with that message's run_id.
+
+Commit: `feat(chat): hydrate running turns as processing + abort across reload/device (FR-15)`.
+
+### Part A verification (REQUIRED — do all before "done")
+1. **Unit**: `test_chat_cancel.py` + `retractTurn`/`stop`/`ComposerStop`/hydration tests green; backend ruff+mypy, frontend typecheck+lint clean.
+2. **LIVE** (`uv run python scripts/live_abort_test.py` against `:8000`): cancel mid-LLM-call → stream closes ≤1s, **zero tokens after cancel**, **`tool_calls` count unchanged 5s later** (LLM stack halted), run `cancelled`, messages deleted.
+3. **Browser** (the gate that actually matters):
+   - long turn → **one** Stop click → assistant bubble AND user message vanish instantly, the sentence is back in the input, composer idle, backend stops generating, a second click can't resend;
+   - **reload** mid-turn → the turn shows as *user + processing* (state 3), not a bare orphan, and Stop still cancels it;
+   - a cancelled turn does NOT reappear on reload (no orphan user message anywhere).
+   Ask the user to confirm visually.
 
 ---
 # Part B — Version / Changelog / Update-check
