@@ -14,6 +14,7 @@ broker deterministic under test.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -101,3 +102,18 @@ class RunBroker:
         ]
         for run_id in expired:
             del self._handles[run_id]
+
+
+async def _broker_eviction_loop(
+    broker: RunBroker, *, interval: float = 60.0
+) -> None:
+    """Periodically evict expired terminal :class:`RunHandle` objects.
+
+    Sleeps ``interval`` seconds, then calls :meth:`RunBroker.evict_expired`
+    with ``time.monotonic()`` as the current time. Designed to be run as a
+    background ``asyncio.Task`` and cancelled on shutdown (the
+    ``CancelledError`` propagates naturally).
+    """
+    while True:
+        await asyncio.sleep(interval)
+        broker.evict_expired(time.monotonic())

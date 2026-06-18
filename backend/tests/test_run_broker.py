@@ -10,11 +10,17 @@ these tests are deterministic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import pytest
 
-from paperhub.api.run_broker import EVICT_TTL_SECONDS, RunBroker, RunHandle
+from paperhub.api.run_broker import (
+    EVICT_TTL_SECONDS,
+    RunBroker,
+    RunHandle,
+    _broker_eviction_loop,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -136,3 +142,37 @@ async def test_evict_expired_drops_only_expired_terminal_handles() -> None:
     assert broker.get(1) is running  # running handle untouched
     assert broker.get(2) is None  # expired → dropped
     assert broker.get(3) is later  # not yet expired
+
+
+async def test_broker_eviction_loop_evicts_past_due_handle_in_one_pass() -> None:
+    """The eviction loop body evicts a past-due terminal handle on one pass.
+
+    Strategy: cancel the loop task after a single iteration using a tiny
+    interval (0 s) so it yields control immediately, then verify the expired
+    handle was evicted. ``time.monotonic`` is monkeypatched to return a value
+    far beyond the handle's ``evict_at`` so the first eviction pass drops it.
+    """
+    import unittest.mock as mock
+
+    broker = RunBroker()
+    handle = broker.register(1)
+    # Mark terminal with now=0 → evict_at == EVICT_TTL_SECONDS.
+    handle.mark_terminal("ok", now=0.0)
+
+    # Fake monotonic returns a time well past evict_at so the first
+    # evict_expired call drops the handle.
+    far_future = EVICT_TTL_SECONDS + 1.0
+
+    with mock.patch("paperhub.api.run_broker.time.monotonic", return_value=far_future):
+        # Run the loop with interval=0 so it barely sleeps, then cancel
+        # after one iteration via wait_for.
+        task = asyncio.create_task(_broker_eviction_loop(broker, interval=0.0))
+        # Give it one event-loop turn to execute sleep(0) + evict_expired.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    # After the first loop body (sleep → evict), the handle must be gone.
+    assert broker.get(1) is None

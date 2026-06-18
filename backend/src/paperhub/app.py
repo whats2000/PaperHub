@@ -27,6 +27,7 @@ from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.api import settings as settings_api
 from paperhub.api import version as version_api
+from paperhub.api.run_broker import _broker_eviction_loop
 from paperhub.config import load_settings
 from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import (
@@ -146,9 +147,24 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         _announce_ready(settings, app), name="paperhub-ready-banner",
     )
 
+    # Periodic eviction of expired terminal RunHandles (FR-15). Without this,
+    # every completed run's buffer stays in broker._handles for the process
+    # lifetime → unbounded memory growth. Runs every 60 s; cancelled on
+    # shutdown below alongside the other background tasks.
+    app.state.broker_eviction_task = asyncio.create_task(
+        _broker_eviction_loop(chat.broker),
+        name="paperhub-broker-eviction",
+    )
+
     try:
         yield
     finally:
+        # Cancel the broker eviction loop.
+        eviction_task = getattr(app.state, "broker_eviction_task", None)
+        if eviction_task is not None and not eviction_task.done():
+            eviction_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await eviction_task
         # Cancel the ready banner if boot was so fast it hasn't fired yet.
         ready_task = getattr(app.state, "ready_banner_task", None)
         if ready_task is not None and not ready_task.done():
