@@ -577,3 +577,48 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
                 "deck_version_id, started_at, finished_at, status FROM runs"
             ),
         )
+
+
+async def reconcile_interrupted_runs(conn: aiosqlite.Connection) -> None:
+    """Mark any leftover `running` runs as `interrupted` on startup (FR-15).
+
+    At boot there are no in-flight runs — every run still marked `running` was
+    left by a previous process that died. Reconcile in one transaction:
+
+    1. **Pair invariant**: insert an empty assistant placeholder for every
+       `running` run whose user message has no paired assistant message yet.
+       The NOT EXISTS guard prevents a duplicate if an assistant row already
+       exists (idempotent).
+    2. **Status**: flip every `running` run to `interrupted` with
+       ``finished_at = datetime('now')``.
+
+    Uses INSERT + UPDATE only (no DDL), so this is NOT subject to the
+    FK-rebuild hazard and does not need ``PRAGMA foreign_keys = OFF``.
+    """
+    await conn.execute("BEGIN")
+    try:
+        # Step 1: pair invariant — give each orphaned running run a placeholder
+        # assistant row when it has a user message but no assistant message yet.
+        await conn.execute(
+            """
+            INSERT INTO messages (session_id, run_id, role, content, created_at)
+            SELECT m.session_id, m.run_id, 'assistant', '', datetime('now')
+            FROM messages m
+            JOIN runs r ON r.id = m.run_id
+            WHERE r.status = 'running'
+              AND m.role = 'user'
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages a
+                  WHERE a.run_id = m.run_id AND a.role = 'assistant'
+              )
+            """
+        )
+        # Step 2: flip all running runs to interrupted.
+        await conn.execute(
+            "UPDATE runs SET status = 'interrupted', finished_at = datetime('now') "
+            "WHERE status = 'running'"
+        )
+        await conn.execute("COMMIT")
+    except Exception:
+        await conn.execute("ROLLBACK")
+        raise

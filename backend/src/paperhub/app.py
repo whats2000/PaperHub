@@ -32,6 +32,7 @@ from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import (
     apply_schema,
     purge_deleted_sessions,
+    reconcile_interrupted_runs,
     sweep_orphan_session_folders,
 )
 from paperhub.mcp import (
@@ -70,6 +71,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
+        await reconcile_interrupted_runs(conn)
         await apply_settings_overlay_at_boot(conn)
         # Re-read settings AFTER the overlay so restart_required vars
         # (PAPERHUB_LOG_LEVEL, PAPERHUB_MARKER_URL, PAPERHUB_INPROCESS_MARKER,
