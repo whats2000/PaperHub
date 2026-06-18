@@ -31,7 +31,7 @@ describe("ChangelogModal", () => {
     });
     render(<ChangelogModal />);
     expect(screen.getByText(/update available: v2\.38\.0/i)).toBeInTheDocument();
-    expect(screen.getByText(/docker compose pull/i)).toBeInTheDocument();
+    expect(screen.getByText(/git pull && docker compose up -d --build/i)).toBeInTheDocument();
   });
 
   it("renders nothing when closed", () => {

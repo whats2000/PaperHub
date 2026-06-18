@@ -6,7 +6,10 @@ import { Copy, Check, ExternalLink, X } from "lucide-react";
 import { useVersionStore } from "@/store/version";
 import { CHANGELOG, localizedHighlights } from "@/lib/changelog";
 
-const UPDATE_COMMAND = "docker compose pull && docker compose up -d";
+// PaperHub's compose file builds from source (no registry images for the
+// self-hosted install), so the upgrade path is: refresh the source, then
+// rebuild + restart — matching the README's `docker compose up -d --build`.
+const UPDATE_COMMAND = "git pull && docker compose up -d --build";
 
 export function ChangelogModal() {
   const { t, i18n } = useTranslation("about");
