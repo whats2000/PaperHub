@@ -245,3 +245,20 @@ export interface MemoryItem {
   supersedes: number | null;
   superseded_by: number | null;
 }
+
+/** One in-app changelog entry (FR-16). `highlights` is keyed by locale; the
+ *  loader falls back to `en` for any locale missing an entry. */
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  highlights: Record<string, string[]>;
+}
+
+/** GET /version payload (FR-16). */
+export interface VersionInfo {
+  current: string;
+  latest: string | null;
+  update_available: boolean;
+  html_url: string | null;
+  checked_at: string | null;
+}

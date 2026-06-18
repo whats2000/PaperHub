@@ -1,0 +1,42 @@
+[
+  {
+    "version": "2.37.0",
+    "date": "2026-06-16",
+    "highlights": {
+      "en": [
+        "What's New + version awareness — an in-app changelog and an optional 'update available' notice with the one-line upgrade command."
+      ],
+      "zh-TW": [
+        "更新資訊 — 內建更新紀錄，以及可選的「有新版本」通知與一行升級指令。"
+      ],
+      "zh-CN": [
+        "更新信息 — 内置更新日志，以及可选的\"有新版本\"通知与一行升级命令。"
+      ],
+      "ja": [
+        "更新情報 — アプリ内の変更履歴と、任意の「アップデートあり」通知＋ワンライナーのアップグレードコマンド。"
+      ]
+    }
+  },
+  {
+    "version": "2.36.0",
+    "date": "2026-06-16",
+    "highlights": {
+      "en": [
+        "Slide source grounding — every slide traces back to the paper sections it was written from, shown in a Sources strip that opens the Citation Canvas.",
+        "Manual slide editing — edit a frame or the whole deck's LaTeX and recompile, with a deterministic per-slide citation editor."
+      ],
+      "zh-TW": [
+        "投影片來源溯源 — 每張投影片都能追溯其依據的論文章節，並在「來源」列開啟引用畫布。",
+        "手動編輯投影片 — 可編輯單張或整份投影片的 LaTeX 並重新編譯，並提供逐張的引用編輯器。"
+      ],
+      "zh-CN": [
+        "幻灯片来源溯源 — 每张幻灯片都能追溯其依据的论文章节，并在\"来源\"栏打开引用画布。",
+        "手动编辑幻灯片 — 可编辑单张或整份幻灯片的 LaTeX 并重新编译，并提供逐张的引用编辑器。"
+      ],
+      "ja": [
+        "スライドの出典トレース — 各スライドが依拠した論文セクションまで遡れ、Sources 列から引用キャンバスを開けます。",
+        "スライドの手動編集 — フレーム単位またはデッキ全体の LaTeX を編集して再コンパイルでき、スライドごとの引用エディタも備えます。"
+      ]
+    }
+  }
+]
