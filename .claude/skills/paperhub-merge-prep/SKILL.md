@@ -138,11 +138,26 @@ Edit `docs/superpowers/specs/2026-05-17-paperhub-srs.md`:
     scope for this round — future-you will read this changelog when
     diagnosing the next bug.
 
+## 4b — Prepend the in-app changelog entry (FR-16)
+
+`frontend/src/changelog/changelog.json` is the user-facing changelog the
+`ChangelogModal` renders. Prepend ONE new entry (newest-first) for this
+version:
+
+- `version` = the new X.Y.Z (no `v`), `date` = today (YYYY-MM-DD).
+- `highlights` = 1–3 SHORT, user-facing bullets per locale (`en`, `zh-TW`,
+  `zh-CN`, `ja`) — what the user can now DO, not the dense SRS prose. `en` is
+  source-of-truth; translate the others (en-fallback is tolerated but prefer
+  real translations to match the i18n posture).
+
+This is distinct from the SRS Revision-History row (internal/engineering).
+Stage `frontend/src/changelog/changelog.json` with the release commit in §5.
+
 ## 5 — Commit as one release bump
 
-Stage every file changed in steps 3 and 4 — typically **twelve files**:
+Stage every file changed in steps 3, 4, and 4b — typically **thirteen files**:
 the three manifests, the three lockfiles, the **four README language
-files**, CLAUDE.md, and the SRS. Then commit:
+files**, CLAUDE.md, the SRS, and the in-app `changelog.json`. Then commit:
 
 ```
 chore(release): vX.Y.Z
