@@ -15,6 +15,7 @@ import type {
   SlideSourceSection,
   ToolCallRecord,
   ForkResult,
+  VersionInfo,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -617,4 +618,11 @@ export interface SettingsModelOptions {
  * Best-effort — the model name stays free text, so this never blocks. */
 export async function getModelOptions(): Promise<SettingsModelOptions> {
   return apiFetch<SettingsModelOptions>("/settings/model-options");
+}
+
+// ── Version (FR-16) ──────────────────────────────────────────────────────────
+
+/** Fetch the running backend version and update-availability status. */
+export async function getVersion(): Promise<VersionInfo> {
+  return apiFetch<VersionInfo>("/version");
 }
