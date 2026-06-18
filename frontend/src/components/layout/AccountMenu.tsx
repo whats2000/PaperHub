@@ -8,6 +8,7 @@ import {
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "../../lib/i18n";
+import { useVersionStore } from "@/store/version";
 
 interface Props {
   collapsed: boolean;
@@ -36,6 +37,8 @@ const APP_VERSION = __APP_VERSION__;
 export function AccountMenu({ collapsed, onOpenSettings }: Props) {
   const { t, i18n } = useTranslation("common");
   const { theme, setTheme } = useTheme();
+  const openChangelog = useVersionStore((s) => s.openChangelog);
+  const updateAvailable = useVersionStore((s) => s.info?.update_available ?? false);
 
   return (
     <Menu.Root>
@@ -43,8 +46,12 @@ export function AccountMenu({ collapsed, onOpenSettings }: Props) {
         aria-label={t("account")}
         className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm outline-none hover:bg-accent/50"
       >
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted">
+        <span className="relative grid size-7 shrink-0 place-items-center rounded-full bg-muted">
           <User className="size-4" />
+          {updateAvailable && (
+            <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-amber-500"
+                  aria-label={t("updateBadge")} />
+          )}
         </span>
         {!collapsed && <span className="truncate">{t("account")}</span>}
       </Menu.Trigger>
@@ -108,9 +115,14 @@ export function AccountMenu({ collapsed, onOpenSettings }: Props) {
               {t("settings")}
             </Menu.Item>
 
-            <Menu.Item className={`${ITEM_CLASS} gap-2`} disabled>
+            <Menu.Item className={`${ITEM_CLASS} gap-2`} onClick={openChangelog}>
               {t("about")} · v{APP_VERSION}
             </Menu.Item>
+            {updateAvailable && (
+              <Menu.Item className={`${ITEM_CLASS} gap-2 text-amber-600 dark:text-amber-400`} onClick={openChangelog}>
+                {t("about:update")}
+              </Menu.Item>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

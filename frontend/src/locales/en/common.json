@@ -10,5 +10,6 @@
   "account": "Account",
   "save": "Save",
   "cancel": "Cancel",
-  "close": "Close"
+  "close": "Close",
+  "updateBadge": "Update available"
 }
