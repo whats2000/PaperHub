@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal
@@ -37,6 +39,7 @@ from paperhub.agents.style_commands import (
     classify_style_command,
     handle_style_command,
 )
+from paperhub.api.run_broker import RunBroker, RunHandle
 from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
@@ -61,6 +64,16 @@ from paperhub.tracing.redactor import redact
 from paperhub.tracing.tracer import Tracer
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Resumable streaming (FR-15): a chat turn runs as a backend-owned background
+# ``asyncio.Task`` whose SSE events are buffered in a per-run ``RunHandle``;
+# ``POST /chat`` returns a thin SUBSCRIBER stream. A client disconnect does NOT
+# cancel the run (only the explicit Stop endpoint, A3, cancels).
+# ---------------------------------------------------------------------------
+broker = RunBroker()
+_live_tasks: set[asyncio.Task[Any]] = set()
+"""Strong refs to in-flight run tasks so they are not GC'd mid-run."""
 
 
 # ---------------------------------------------------------------------------
@@ -568,21 +581,32 @@ _NULL_PIPELINE: Any = _NullPipeline()
 _NULL_REGISTRY: Any = _NullRegistry()
 
 
-@router.post("/chat")
-async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceResponse:
-    settings = load_settings()
-    adapter = LiteLlmAdapter()
-    router_mock = os.environ.get("PAPERHUB_ROUTER_MOCK")
-    chitchat_mock = os.environ.get("PAPERHUB_CHITCHAT_MOCK")
-    memory_op_mock = os.environ.get("PAPERHUB_MEMORY_OP_MOCK")
+async def run_agent(
+    handle: RunHandle,
+    session_id: int,
+    run_id: int,
+    req: ChatRequest,
+    settings: Settings,
+    adapter: LiteLlmAdapter,
+    router_mock: str | None,
+    chitchat_mock: str | None,
+    memory_op_mock: str | None,
+    mcp_registry: Any,
+) -> None:
+    """Execute one chat turn as a backend-owned background task (FR-15).
 
-    async def stream_events() -> AsyncIterator[dict[str, Any]]:
-        async with open_db(settings.db_path) as conn:
-            session_id = await _ensure_session(conn, req.session_id)
-            run_id = await _new_run(conn, session_id)
+    The body is the former ``stream_events`` generator with every
+    ``yield {"event": E, "data": D}`` replaced by ``handle.emit({...})`` and
+    ``request.app.state.mcp_registry`` replaced by the passed ``mcp_registry``.
+    The run survives a client disconnect: it always runs to a terminal status
+    and persists the assistant message. Only the explicit Stop endpoint (A3)
+    cancels it (via ``CancelledError``, re-raised here for that endpoint to own
+    the DB cleanup + ``mark_terminal("cancelled")``).
+    """
+    async with open_db(settings.db_path) as conn:
             sess_evt = SessionEvent(run_id=run_id, session_id=session_id)
-            yield {"event": sess_evt.type,
-                   "data": sess_evt.model_dump_json(exclude={"type"})}
+            handle.emit({"event": sess_evt.type,
+                   "data": sess_evt.model_dump_json(exclude={"type"})})
             # Resolve history BEFORE persisting the current user message so it is
             # not double-counted. Falls back to DB-reconstructed history for a
             # freshly forked/cross-device session whose client store hasn't
@@ -617,8 +641,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     model=settings.router_model, **router_kwargs,
                 )
                 for rec in await drain_tool_calls_since(conn, run_id, last_emitted_step):
-                    yield {"event": "tool_step",
-                           "data": json.dumps({"record": rec}, separators=(',', ':'))}
+                    handle.emit({"event": "tool_step",
+                           "data": json.dumps({"record": rec}, separators=(',', ':'))})
                     last_emitted_step = rec["step_index"]
                 # Slide-aware QA: build the active-slide context ONLY when the
                 # composer chip is attached (deterministic). Both the paper_qa
@@ -636,8 +660,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                 }
                 decision = state["routing_decision"]
                 evt = RoutingDecisionEvent(run_id=run_id, branch="", decision=decision)
-                yield {"event": evt.type,
-                       "data": evt.model_dump_json(exclude={"type"})}
+                handle.emit({"event": evt.type,
+                       "data": evt.model_dump_json(exclude={"type"})})
 
                 intent = decision.intent
                 if intent == "chitchat":
@@ -651,8 +675,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     ):
                         chunks.append(token)
                         token_evt = TokenEvent(run_id=run_id, branch="", text=token)
-                        yield {"event": "token",
-                               "data": token_evt.model_dump_json(exclude={"type"})}
+                        handle.emit({"event": "token",
+                               "data": token_evt.model_dump_json(exclude={"type"})})
                     final_content = "".join(chunks)
                 elif intent == "clarify":
                     # The router (which sees history) judged the turn
@@ -662,14 +686,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     # already captured in the router tracer row + runs table.
                     final_content = decision.resolved_query or CLARIFY_FALLBACK
                     token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
-                    yield {"event": "token",
-                           "data": token_evt.model_dump_json(exclude={"type"})}
+                    handle.emit({"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})})
                 elif intent in ("paper_search", "paper_suggest"):
                     pipeline = PaperPipeline(
                         conn,
                         papers_cache_dir=settings.papers_cache_dir,
                     )
-                    mcp_registry: MCPRegistry = request.app.state.mcp_registry
                     final_content = ""
                     # paper_search is module-level so monkeypatch can swap.
                     # suggest=True selects the topic-recommendation prompt slots.
@@ -680,13 +703,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         suggest=(intent == "paper_suggest"),
                     ):
                         if isinstance(ps_item, ToolStepYield):
-                            yield {
+                            handle.emit({
                                 "event": "tool_step",
                                 "data": json.dumps(
                                     {"record": ps_item.record},
                                     separators=(',', ':'),
                                 ),
-                            }
+                            })
                             # max(), not assign: set-based emission in
                             # _ps_process can surface indices out of order;
                             # the watermark must be the high-water mark so the
@@ -724,23 +747,23 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                 ),
                             )
                             await conn.commit()
-                            yield {
+                            handle.emit({
                                 "event": sr_evt.type,
                                 "data": sr_evt.model_dump_json(exclude={"type"}),
-                            }
+                            })
                             # Auto-attach may have produced new tool_calls rows
                             # (e.g. via pipeline.ingest). Drain so the client
                             # sees them in order.
                             for rec in await drain_tool_calls_since(
                                 conn, run_id, last_emitted_step,
                             ):
-                                yield {
+                                handle.emit({
                                     "event": "tool_step",
                                     "data": json.dumps(
                                         {"record": rec},
                                         separators=(',', ':'),
                                     ),
-                                }
+                                })
                                 last_emitted_step = rec["step_index"]
                         elif isinstance(ps_item, FinalOnlyMessage):
                             final_content = ps_item.content
@@ -758,13 +781,13 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             # (resolve / map / synthesize). Forward immediately
                             # so the trace panel surfaces progress in real time
                             # instead of waiting for end-of-turn drain.
-                            yield {
+                            handle.emit({
                                 "event": "tool_step",
                                 "data": json.dumps(
                                     {"record": item.record},
                                     separators=(',', ':'),
                                 ),
-                            }
+                            })
                             # max(): paper_qa's set-based dispatch drain can
                             # also surface indices out of order (see
                             # _pq_dispatch). High-water mark prevents the
@@ -781,14 +804,14 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             token_evt = TokenEvent(
                                 run_id=run_id, branch="", text=item,
                             )
-                            yield {
+                            handle.emit({
                                 "event": "token",
                                 "data": token_evt.model_dump_json(exclude={"type"}),
-                            }
+                            })
                     if not final_only_seen:
                         final_content = "".join(qa_chunks)
                 elif intent == "library_stats":
-                    registry = request.app.state.mcp_registry
+                    registry = mcp_registry
                     # SearchResultsYield → search_results forwarding (E1 Task 2)
                     # auto-attaches finalize picks via the same pipeline the
                     # paper_search branch uses. sql_agent only emits library:<id>
@@ -811,9 +834,9 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             # Forward each agent step as it commits so the trace
                             # panel fills progressively instead of all-at-end via
                             # the post-stream drain (matches paper_search/qa).
-                            yield {"event": "tool_step",
+                            handle.emit({"event": "tool_step",
                                    "data": json.dumps({"record": item.record},
-                                                      separators=(',', ':'))}
+                                                      separators=(',', ':'))})
                             last_emitted_step = max(
                                 last_emitted_step, item.record["step_index"],
                             )
@@ -853,18 +876,18 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                                 ),
                             )
                             await conn.commit()
-                            yield {
+                            handle.emit({
                                 "event": sr_evt.type,
                                 "data": sr_evt.model_dump_json(exclude={"type"}),
-                            }
+                            })
                             continue
                         sql_chunks.append(item)
                         token_evt = TokenEvent(run_id=run_id, branch="", text=item)
-                        yield {"event": "token",
-                               "data": token_evt.model_dump_json(exclude={"type"})}
+                        handle.emit({"event": "token",
+                               "data": token_evt.model_dump_json(exclude={"type"})})
                     final_content = "".join(sql_chunks)
                 elif intent == "memory":
-                    registry = request.app.state.mcp_registry
+                    registry = mcp_registry
                     memory_kwargs: dict[str, Any] = {}
                     if memory_op_mock is not None:
                         memory_kwargs["op_mock"] = memory_op_mock
@@ -875,8 +898,8 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     )
                     final_content = result_state.get("final_response", "")
                     token_evt = TokenEvent(run_id=run_id, branch="", text=final_content)
-                    yield {"event": "token",
-                           "data": token_evt.model_dump_json(exclude={"type"})}
+                    handle.emit({"event": "token",
+                           "data": token_evt.model_dump_json(exclude={"type"})})
                 elif intent == "slides":
                     # F4.5 v2.25: deterministic style-command intercepts.
                     #
@@ -899,10 +922,10 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                         token_evt = TokenEvent(
                             run_id=run_id, branch="", text=final_content,
                         )
-                        yield {
+                        handle.emit({
                             "event": "token",
                             "data": token_evt.model_dump_json(exclude={"type"}),
-                        }
+                        })
                         # Don't fall through to the LangGraph; final/drain
                         # below in the shared epilogue still fires.
                     else:
@@ -913,29 +936,29 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                             settings=settings,
                         ):
                             if isinstance(rs_item, ToolStepYield):
-                                yield {
+                                handle.emit({
                                     "event": "tool_step",
                                     "data": json.dumps(
                                         {"record": rs_item.record},
                                         separators=(',', ':'),
                                     ),
-                                }
+                                })
                                 last_emitted_step = max(
                                     last_emitted_step, rs_item.record["step_index"],
                                 )
                             elif isinstance(rs_item, DeckYield):
-                                yield {
+                                handle.emit({
                                     "event": "deck",
                                     "data": json.dumps(rs_item.deck, separators=(',', ':')),
-                                }
+                                })
                             elif isinstance(rs_item, FinalOnlyMessage):
                                 final_content = rs_item.content
                 else:
                     final_content = await stub_response(state, intent=intent)
 
                 for rec in await drain_tool_calls_since(conn, run_id, last_emitted_step):
-                    yield {"event": "tool_step",
-                           "data": json.dumps({"record": rec}, separators=(',', ':'))}
+                    handle.emit({"event": "tool_step",
+                           "data": json.dumps({"record": rec}, separators=(',', ':'))})
                     last_emitted_step = rec["step_index"]
 
                 message_id = await _finalise(
@@ -945,19 +968,76 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
                     run_id=run_id, branch="",
                     message_id=message_id, content=final_content,
                 )
-                yield {"event": final_evt.type,
-                       "data": final_evt.model_dump_json(exclude={"type"})}
+                handle.emit({"event": final_evt.type,
+                       "data": final_evt.model_dump_json(exclude={"type"})})
+                handle.final_message_id = message_id
+                handle.mark_terminal("ok", now=time.monotonic())
+            except asyncio.CancelledError:
+                # Explicit Stop (A3) cancels this task. The cancel endpoint owns
+                # the DB cleanup (retracting the partial assistant message) AND
+                # calls mark_terminal("cancelled", ...). Do NOT _finalise or
+                # mark_terminal here — just re-raise so the cancel propagates.
+                raise
             except Exception as exc:
                 safe_msg = redact(str(exc))
                 await _finalise(conn, run_id, session_id, safe_msg, status="error")
                 err_evt = ErrorEvent(run_id=run_id, branch="", message=safe_msg)
-                yield {"event": err_evt.type,
-                       "data": err_evt.model_dump_json(exclude={"type"})}
+                handle.emit({"event": err_evt.type,
+                       "data": err_evt.model_dump_json(exclude={"type"})})
+                handle.mark_terminal("error", now=time.monotonic())
             finally:
-                # Reset before the async-generator returns; otherwise the
-                # contextvar would leak into the next request that happens
-                # to run on the same asyncio task (FastAPI workers pool
-                # tasks). Reset is cheap and idempotent.
+                # Reset before the task returns; otherwise the contextvar would
+                # leak into the next request that happens to run on the same
+                # asyncio task (FastAPI workers pool tasks). Reset is cheap and
+                # idempotent. Do NOT push a subscriber sentinel here —
+                # mark_terminal already closes subscriber queues on the
+                # ok/error paths, and the cancel endpoint does it for cancelled.
                 reset_client_headers_context(headers_token)
 
-    return EventSourceResponse(stream_events())
+
+@router.post("/chat")
+async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceResponse:
+    settings = load_settings()
+    adapter = LiteLlmAdapter()
+    router_mock = os.environ.get("PAPERHUB_ROUTER_MOCK")
+    chitchat_mock = os.environ.get("PAPERHUB_CHITCHAT_MOCK")
+    memory_op_mock = os.environ.get("PAPERHUB_MEMORY_OP_MOCK")
+    mcp_registry = request.app.state.mcp_registry
+
+    # Create the run id up front (the broker keys on it), then spawn the agent
+    # as a backend-owned background task. A client disconnect detaches the
+    # subscriber but never cancels the task (FR-15 / D4).
+    async with open_db(settings.db_path) as conn:
+        session_id = await _ensure_session(conn, req.session_id)
+        run_id = await _new_run(conn, session_id)
+
+    handle = broker.register(run_id)
+    handle.task = asyncio.create_task(
+        run_agent(
+            handle, session_id, run_id, req, settings, adapter,
+            router_mock, chitchat_mock, memory_op_mock, mcp_registry,
+        ),
+    )
+    _live_tasks.add(handle.task)
+    handle.task.add_done_callback(_live_tasks.discard)
+
+    async def subscriber() -> AsyncIterator[dict[str, Any]]:
+        q = handle.subscribe()
+        # SNAPSHOT immediately after subscribe with NO await in between: emit()
+        # is synchronous, so nothing can interleave in this window. `replay`
+        # holds everything emitted before the snapshot; `q` holds everything
+        # emitted after — a clean partition with no duplicate and no gap.
+        replay = list(handle.events)
+        try:
+            for past in replay:
+                yield past
+            while True:
+                evt = await q.get()
+                if evt is None:  # terminal sentinel from mark_terminal
+                    break
+                yield evt
+        finally:
+            # DISCONNECT = unsubscribe only; the background task keeps running.
+            handle.unsubscribe(q)
+
+    return EventSourceResponse(subscriber())
