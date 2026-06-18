@@ -995,6 +995,30 @@ async def run_agent(
                 reset_client_headers_context(headers_token)
 
 
+class CancelRequest(BaseModel):
+    run_id: int
+
+
+@router.post("/chat/cancel")
+async def cancel_run(req: CancelRequest) -> dict[str, str]:
+    handle = broker.get(req.run_id)
+    if handle is not None and handle.task is not None and not handle.task.done():
+        handle.task.cancel()
+        handle.mark_terminal("cancelled", now=time.monotonic())
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        # guard BOTH writes on still-'running' so a Stop racing completion can't nuke a real answer
+        await conn.execute(
+            "DELETE FROM messages WHERE run_id = ? AND run_id IN "
+            "(SELECT id FROM runs WHERE id = ? AND status = 'running')",
+            (req.run_id, req.run_id))
+        await conn.execute(
+            "UPDATE runs SET finished_at=datetime('now'), status='cancelled' "
+            "WHERE id = ? AND status = 'running'", (req.run_id,))
+        await conn.commit()
+    return {"status": "cancelled", "run_id": str(req.run_id)}
+
+
 @router.post("/chat")
 async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceResponse:
     settings = load_settings()
