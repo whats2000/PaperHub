@@ -346,4 +346,88 @@ describe("hydrateSessionMessages", () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0]!.role).toBe("user");
   });
+
+  // ── A10: processing placeholder + interrupted status mapping ────────────────
+
+  it("appends a processing placeholder when trailing user has run_status=running and no assistant follows", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "compute something", run_id: 88, created_at: "t1", run_status: "running" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]!.role).toBe("assistant");
+    expect(msgs[1]!.status).toBe("processing");
+    expect(msgs[1]!.run_id).toBe(88);
+    expect(msgs[1]!.content).toBe("");
+  });
+
+  it("does NOT append a placeholder when the trailing user has run_status=running but an assistant row already follows", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "hello", run_id: 99, created_at: "t1", run_status: "running" },
+      { role: "assistant", content: "hi there", run_id: 99, created_at: "t2" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]!.status).toBe("ok");
+  });
+
+  it("does NOT append a placeholder when the trailing user has no run_status=running", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "hello", run_id: null, created_at: "t1" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.role).toBe("user");
+  });
+
+  it("maps run_status=interrupted to status: interrupted on an assistant message", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "hi", run_id: 10, created_at: "t1" },
+      { role: "assistant", content: "partial", run_id: 10, created_at: "t2", run_status: "interrupted" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.status).toBe("interrupted");
+  });
+
+  it("maps run_status=error to status: error on an assistant message", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "hi", run_id: 11, created_at: "t1" },
+      { role: "assistant", content: "", run_id: 11, created_at: "t2", run_status: "error" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.status).toBe("error");
+  });
+
+  it("keeps status: ok for normal completed assistant messages (no run_status)", () => {
+    useChatStore.setState({
+      sessions: [{ id: 1, title: "S", messages: [], backend_session_id: 7 }],
+      _nextId: 2,
+    });
+    useChatStore.getState().hydrateSessionMessages(1, [
+      { role: "user", content: "hi", run_id: 5, created_at: "t1" },
+      { role: "assistant", content: "answer", run_id: 5, created_at: "t2" },
+    ]);
+    const msgs = useChatStore.getState().sessions[0]!.messages;
+    expect(msgs[1]!.status).toBe("ok");
+  });
 });

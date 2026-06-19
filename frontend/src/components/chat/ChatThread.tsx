@@ -88,7 +88,7 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
         {session.messages.map((msg, i) => {
           // For error assistant messages, find the preceding user message for retry.
           let retryHandler: (() => void) | undefined;
-          if (msg.role === "assistant" && msg.status === "error") {
+          if (msg.role === "assistant" && (msg.status === "error" || msg.status === "interrupted")) {
             let userContent: string | undefined;
             for (let j = i - 1; j >= 0; j--) {
               if (session.messages[j]?.role === "user") {

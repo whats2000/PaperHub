@@ -56,8 +56,9 @@ export function MessageBubble({
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isOk = message.status === "ok" || (isAssistant && message.status === undefined);
-  const isStreaming = message.status === "streaming";
+  const isStreaming = message.status === "streaming" || message.status === "processing";
   const isError = message.status === "error";
+  const isInterrupted = message.status === "interrupted";
   const isStreamingEmpty = isStreaming && !message.content;
   const isStreamingWithContent = isStreaming && !!message.content;
   // Copy is offered on completed assistant messages AND on the user's own
@@ -100,6 +101,23 @@ export function MessageBubble({
           {isError ? (
             <div className="space-y-2">
               <p className="text-destructive">{message.error}</p>
+              {onRetry && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRetry}
+                  className="gap-2"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t("bubble.retry")}
+                </Button>
+              )}
+            </div>
+          ) : isInterrupted ? (
+            <div className="space-y-2">
+              <p className="text-muted-foreground italic">
+                {t("bubble.interrupted", "Generation was interrupted.")}
+              </p>
               {onRetry && (
                 <Button
                   size="sm"

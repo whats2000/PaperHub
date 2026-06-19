@@ -16,6 +16,7 @@ import type {
   ToolCallRecord,
   ForkResult,
   VersionInfo,
+  RunEventsResponse,
 } from "@/types/domain";
 
 export const API_BASE_URL: string =
@@ -618,6 +619,26 @@ export interface SettingsModelOptions {
  * Best-effort — the model name stays free text, so this never blocks. */
 export async function getModelOptions(): Promise<SettingsModelOptions> {
   return apiFetch<SettingsModelOptions>("/settings/model-options");
+}
+
+// ── Run cancel + event replay (FR-15) ────────────────────────────────────────
+
+/** Fire-and-forget cancel for an in-flight run. Safe to call after the stream
+ *  is already done — the backend no-ops on a finished run. */
+export async function cancelRun(runId: number): Promise<void> {
+  await apiFetch<{ status: string }>(`/chat/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ run_id: runId }),
+  });
+}
+
+/** Poll for recorded SSE events after a reconnect (A10 reattach path).
+ *  `since` is the last `next_cursor` value (0 on first call). */
+export async function fetchRunEvents(
+  runId: number,
+  since: number,
+): Promise<RunEventsResponse> {
+  return apiFetch<RunEventsResponse>(`/chat/runs/${runId}/events?since=${since}`);
 }
 
 // ── Version (FR-16) ──────────────────────────────────────────────────────────

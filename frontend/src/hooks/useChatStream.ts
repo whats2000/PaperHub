@@ -6,7 +6,7 @@ import type {
   DeckEventData,
 } from "@/types/domain";
 import { streamChat } from "@/lib/sse";
-import { listSessionReferences } from "@/lib/api";
+import { cancelRun, listSessionReferences } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { useSlidesStore } from "@/store/slides";
 
@@ -23,11 +23,17 @@ interface SearchResultsData {
 
 export function useChatStream() {
   const abortRef = useRef<AbortController | null>(null);
+  const userStoppedRef = useRef(false);
+  const runIdRef = useRef<number | null>(null);
+  const sessionIdRef = useRef<number | null>(null);
   const store = useChatStore;
 
   const send = useCallback(async (sessionId: number, userMessage: string, opts?: { skipUserAppend?: boolean }) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    userStoppedRef.current = false;
+    runIdRef.current = null;
+    sessionIdRef.current = sessionId;
 
     // Snapshot prior turns BEFORE we append the new user + assistant placeholder.
     const currentSession = store.getState().sessions.find((s) => s.id === sessionId);
@@ -84,12 +90,14 @@ export function useChatStream() {
               store.getState().patchSessionBackendId(sessionId, s.session_id);
               if (runId === null) {
                 runId = s.run_id;
+                runIdRef.current = runId;
                 store.getState().patchAssistantRunId(sessionId, runId);
               }
             } else if (event === "tool_step") {
               const rec = (data as ToolStepData).record;
               if (runId === null) {
                 runId = rec.run_id;
+                runIdRef.current = runId;
                 store.getState().patchAssistantRunId(sessionId, runId);
               }
               store.getState().appendTrace(sessionId, rec.run_id, rec);
@@ -97,6 +105,7 @@ export function useChatStream() {
               const d = data as RoutingData;
               if (runId === null) {
                 runId = d.run_id;
+                runIdRef.current = runId;
                 store.getState().patchAssistantRunId(sessionId, runId);
               }
               store.getState().setRouting(sessionId, d.run_id, d.decision);
@@ -107,6 +116,7 @@ export function useChatStream() {
               const s = data as SearchResultsData;
               if (runId === null) {
                 runId = s.run_id;
+                runIdRef.current = runId;
                 store.getState().patchAssistantRunId(sessionId, runId);
               }
               store
@@ -166,6 +176,9 @@ export function useChatStream() {
         abortRef.current.signal,
       );
     } catch (err) {
+      // User clicked Stop: the turn was already retracted synchronously on the
+      // click. Swallow regardless of whether the lib rejected or resolved.
+      if (userStoppedRef.current) return;
       // fetchEventSource may throw synchronously before onerror fires
       // (e.g. CORS preflight reject, immediate connection refused). In that
       // case onError didn't run; runId is still null; treat as pre-event.
@@ -181,5 +194,34 @@ export function useChatStream() {
     }
   }, [store]);
 
-  return { send };
+  const stop = useCallback(() => {
+    // SYNCHRONOUS + IMMEDIATE — react in this same tick; do NOT await the abort.
+    userStoppedRef.current = true;
+    // Resolve sid: prefer the ref set by send(); fall back to activeSessionId
+    // so Stop works on a reattached/refreshed turn where send() never ran.
+    const sid = sessionIdRef.current ?? store.getState().activeSessionId;
+    let rid = runIdRef.current;
+    if (rid === null && sid !== null) {
+      // No live ref: use the trailing streaming/processing assistant's run_id.
+      // "processing" covers the reattach case (hydrateSessionMessages injects
+      // a processing placeholder whose run_id points at the in-flight backend run).
+      const sess = store.getState().sessions.find((s) => s.id === sid);
+      const last = sess?.messages[sess.messages.length - 1];
+      if (
+        last?.role === "assistant" &&
+        (last.status === "streaming" || last.status === "processing") &&
+        last.run_id != null
+      ) {
+        rid = last.run_id;
+      }
+    }
+    abortRef.current?.abort();                        // 1) cut the stream
+    if (sid !== null) {                               // 2) retract the pair + restore text
+      const restored = store.getState().retractTurn(sid);
+      if (restored) store.getState().requestComposerText(restored);
+    }
+    if (rid !== null) void cancelRun(rid).catch(() => undefined);  // 3) kill the backend run
+  }, [store]);
+
+  return { send, stop };
 }

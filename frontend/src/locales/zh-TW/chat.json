@@ -14,6 +14,8 @@
     "memoryTooltip": "管理此工作階段的記憶",
     "slides": "投影片",
     "slidesTooltip": "切換投影片面板",
+    "stop": "停止",
+    "stopTooltip": "停止生成",
     "compare": "比較",
     "compareTooltip": "Plan G 即將推出 — 將同一提示分發給兩個模型"
   },
@@ -70,6 +72,7 @@
   },
   "bubble": {
     "retry": "重試",
+    "interrupted": "生成已中斷",
     "copy": "複製訊息",
     "fork": "從此訊息分支",
     "forkTitle": "從此處分支 — 開新對話並編輯此訊息"

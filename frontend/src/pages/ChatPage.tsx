@@ -17,6 +17,7 @@ import { useSessionsSync } from "@/hooks/useSessionsSync";
 import { useDeckSync } from "@/hooks/useDeckSync";
 import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
 import { useCanvasResize } from "@/hooks/useCanvasResize";
+import { useRunReattach } from "@/hooks/useRunReattach";
 import { getDeck, updateDeckNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +45,7 @@ export function ChatPage() {
   useSessionsSync();
   useReferencesSync();
   useDeckSync();
+  useRunReattach();
   const canvasOpen = useCanvasStore((s) => s.open);
   const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
@@ -51,7 +53,7 @@ export function ChatPage() {
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
-  const { send } = useChatStream();
+  const { send, stop } = useChatStream();
 
   const slidesOpen = useSlidesStore((s) => s.open);
   const slidesEverOpened = useSlidesStore((s) => s.everOpened);
@@ -115,7 +117,9 @@ export function ChatPage() {
   const backendSessionId = activeSession?.backend_session_id ?? null;
 
   const isStreaming =
-    activeSession?.messages.some((m) => m.status === "streaming") ?? false;
+    activeSession?.messages.some(
+      (m) => m.status === "streaming" || m.status === "processing",
+    ) ?? false;
 
   // First-run gate: lock the composer only on a definitive config problem
   // (missing / rejected key) — NOT on a transient readiness blip (e.g. the
@@ -264,6 +268,8 @@ export function ChatPage() {
         <Composer
           onSubmit={handleSubmit}
           disabled={isStreaming || setupRequired}
+          isStreaming={isStreaming}
+          onStop={stop}
           setupRequired={setupRequired}
           onOpenSettings={openSettings}
           memoryOpen={memoryOpen}

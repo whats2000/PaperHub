@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT,
     status TEXT NOT NULL DEFAULT 'running'
-        CHECK (status IN ('running', 'ok', 'error', 'cancelled'))
+        CHECK (status IN ('running', 'ok', 'error', 'cancelled', 'interrupted'))
 );
 
 CREATE TABLE IF NOT EXISTS tool_calls (

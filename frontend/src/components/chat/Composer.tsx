@@ -7,6 +7,7 @@ import {
   Presentation,
   Columns2,
   Send,
+  Square,
 } from "lucide-react";
 
 import { SlideContextChip } from "@/components/chat/SlideContextChip";
@@ -50,6 +51,11 @@ interface Props {
    *  hides the chip. Content (page) tracks the active slide; attached is the
    *  sticky toggle. */
   slideChip?: { page: number; attached: boolean; onToggle: () => void } | null;
+  /** Whether the assistant is currently streaming a response. When true, the
+   *  Send button is replaced by a Stop button so the user can cancel the turn. */
+  isStreaming?: boolean;
+  /** Called when the user clicks the Stop button during streaming. */
+  onStop?: () => void;
 }
 
 interface Capability {
@@ -79,6 +85,8 @@ export function Composer({
   slidesOpen = false,
   onToggleSlides,
   slideChip = null,
+  isStreaming = false,
+  onStop,
 }: Props) {
   const { t } = useTranslation("chat");
   const draft = useChatStore((s) => s.composerDraft);
@@ -348,15 +356,36 @@ export function Composer({
                     </TooltipContent>
                   </Tooltip>
                 )}
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={disabled || value.trim().length === 0}
-                  aria-label={t("composer.send")}
-                  className="h-8 w-8 rounded-full"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
+                {isStreaming ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span tabIndex={0} className="inline-flex" />}
+                    >
+                      <Button
+                        type="button"
+                        size="icon"
+                        onClick={onStop}
+                        aria-label={t("composer.stop")}
+                        className="h-8 w-8 rounded-full"
+                      >
+                        <Square className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>{t("composer.stopTooltip")}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={disabled || value.trim().length === 0}
+                    aria-label={t("composer.send")}
+                    className="h-8 w-8 rounded-full"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
           </TooltipProvider>

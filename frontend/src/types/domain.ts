@@ -179,7 +179,7 @@ export interface ChatMessage {
   run_id: number | null;
   routing_decision?: RoutingDecision;
   trace?: ToolCallRecord[];
-  status?: "streaming" | "ok" | "error";
+  status?: "streaming" | "processing" | "ok" | "error" | "interrupted";
   error?: string;
   search_results?: SearchResultCandidate[];
   deck?: DeckEventData;
@@ -229,6 +229,9 @@ export interface BackendMessage {
    *  replayed so the in-chat DeckChip survives a refresh (null for non-slide
    *  turns). On replay `contributing_papers` entries are `{id}` only. */
   deck?: DeckEventData | null;
+  /** A10: The run's terminal status (or "running" if still in progress).
+   *  Drives interrupted/error status mapping on hydrate + processing placeholder. */
+  run_status?: string | null;
 }
 
 export type MemoryStatus = "active" | "superseded";
@@ -261,4 +264,11 @@ export interface VersionInfo {
   update_available: boolean;
   html_url: string | null;
   checked_at: string | null;
+}
+
+/** GET /chat/runs/{id}/events?since={cursor} payload (FR-15). */
+export interface RunEventsResponse {
+  status: string;
+  events: { event: string; data: string }[];
+  next_cursor: number;
 }

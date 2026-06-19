@@ -14,6 +14,8 @@
     "memoryTooltip": "Manage memory for this session",
     "slides": "Slides",
     "slidesTooltip": "Toggle the slide deck panel",
+    "stop": "Stop",
+    "stopTooltip": "Stop generating",
     "compare": "Compare",
     "compareTooltip": "Coming in Plan G — fan out the same prompt to two models"
   },
@@ -70,6 +72,7 @@
   },
   "bubble": {
     "retry": "Retry",
+    "interrupted": "Generation was interrupted.",
     "copy": "Copy message",
     "fork": "Fork from this message",
     "forkTitle": "Fork from here — branch a new chat and edit this message"

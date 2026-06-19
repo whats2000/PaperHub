@@ -214,4 +214,48 @@ describe("chat store", () => {
     expect(after.filter((r) => r.step_index < 0)).toHaveLength(0); // beat stripped
     expect(after.filter((r) => r.step_index >= 0)).toHaveLength(1); // step kept
   });
+
+  // -------------------------------------------------------------------------
+  // applyRunEvent — tool_step unwrap regression (FR-15 A10)
+  // -------------------------------------------------------------------------
+  it("applyRunEvent tool_step: unwraps data.record and appends trace (reattach fidelity)", () => {
+    // The SSE wire shape for tool_step is { record: ToolCallRecord }, NOT flat.
+    // applyRunEvent must unwrap data.record — previously it read data.run_id
+    // (undefined) and silently dropped the event; this test catches that regression.
+    const id = seedAssistant(); // assistant message with run_id=1 already present
+    const toolStepPayload = JSON.stringify({
+      record: {
+        run_id: 1,
+        branch: "",
+        step_index: 0,
+        parent_step: null,
+        agent: "research",
+        tool: "paper_qa:subagent",
+        model: null,
+        args_redacted_json: null,
+        result_summary_json: { chunks_cited: [42] },
+        latency_ms: 123,
+        token_in: null,
+        token_out: null,
+        status: "ok",
+        error: null,
+      },
+    });
+    useChatStore.getState().applyRunEvent(id, { event: "tool_step", data: toolStepPayload });
+    const trace = traceOf(id);
+    expect(trace).toHaveLength(1);
+    expect(trace[0]!.tool).toBe("paper_qa:subagent");
+    expect(trace[0]!.step_index).toBe(0);
+    expect(trace[0]!.run_id).toBe(1);
+  });
+
+  it("applyRunEvent tool_step: no-ops when record is absent (malformed event)", () => {
+    // A flat (un-wrapped) payload must not crash and must leave the trace empty.
+    const id = seedAssistant();
+    const flatPayload = JSON.stringify({
+      run_id: 1, step_index: 0, tool: "paper_qa:subagent",
+    });
+    useChatStore.getState().applyRunEvent(id, { event: "tool_step", data: flatPayload });
+    expect(traceOf(id)).toHaveLength(0);
+  });
 });

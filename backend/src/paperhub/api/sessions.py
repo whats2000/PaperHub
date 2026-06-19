@@ -82,6 +82,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     run_id: int | None
+    run_status: str | None = None
     created_at: str
     routing_decision: RoutingDecisionOut | None = None
     search_results: list[SearchCandidateModel] | None = None
@@ -177,7 +178,8 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                    r.routing_decision_json, r.search_results_json,
                    r.deck_version_id,
                    d.id, d.run_id, d.page_count, d.plan_json, d.status,
-                   d.speaker_notes_json, d.contributing_paper_ids_json
+                   d.speaker_notes_json, d.contributing_paper_ids_json,
+                   r.status
             FROM messages m
             LEFT JOIN runs r ON r.id = m.run_id
             LEFT JOIN decks d ON d.session_id = m.session_id
@@ -204,6 +206,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
         deck_status,
         deck_notes_json,
         deck_paper_ids_json,
+        run_status,
     ) in rows:
         decision: RoutingDecisionOut | None = None
         cards: list[SearchCandidateModel] | None = None
@@ -248,6 +251,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                 role=str(role),
                 content=str(content),
                 run_id=int(run_id) if run_id is not None else None,
+                run_status=str(run_status) if run_status is not None else None,
                 created_at=str(created_at),
                 routing_decision=decision,
                 search_results=cards,

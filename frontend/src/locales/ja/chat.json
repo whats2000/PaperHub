@@ -14,6 +14,8 @@
     "memoryTooltip": "このセッションのメモリを管理",
     "slides": "スライド",
     "slidesTooltip": "スライドデッキのパネルを切り替え",
+    "stop": "停止",
+    "stopTooltip": "生成を停止",
     "compare": "比較",
     "compareTooltip": "Plan Gで提供予定 — 同じプロンプトを2つのモデルに展開"
   },
@@ -70,6 +72,7 @@
   },
   "bubble": {
     "retry": "再試行",
+    "interrupted": "生成が中断されました。",
     "copy": "メッセージをコピー",
     "fork": "このメッセージからフォーク",
     "forkTitle": "ここからフォーク — 新しいチャットに分岐してこのメッセージを編集"
