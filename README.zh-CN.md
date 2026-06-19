@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-1293%20backend%20%2B%20541%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.37.0%20(SRS%20v2.37.0)-success)
+![Tests](https://img.shields.io/badge/tests-1297%20backend%20%2B%20541%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.37.1%20(SRS%20v2.37.1)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · [日本語](README.ja.md) · [繁體中文](README.zh-TW.md) · **简体中文**
@@ -336,7 +336,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 文档
 
-- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.37.0**）。
+- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.37.1**）。
 - **[实现计划](docs/superpowers/plans/)**——每个子项目一份，均通过 TDD 执行。
 - **[后端开发者文档](backend/README.md)**——后端专属说明。
 
@@ -352,7 +352,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.37.0}
+  version = {2.37.1}
 }
 ```
 

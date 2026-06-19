@@ -1,5 +1,23 @@
 [
   {
+    "version": "2.37.1",
+    "date": "2026-06-19",
+    "highlights": {
+      "en": [
+        "Stability & security — hardened the slide pipeline's LaTeX processing against malformed input. Normal slide generation is unchanged."
+      ],
+      "zh-TW": [
+        "穩定性與安全性 — 強化投影片流程對異常 LaTeX 輸入的處理；正常投影片生成不受影響。"
+      ],
+      "zh-CN": [
+        "稳定性与安全性 — 强化幻灯片流程对异常 LaTeX 输入的处理；正常幻灯片生成不受影响。"
+      ],
+      "ja": [
+        "安定性とセキュリティ — スライド生成の LaTeX 処理を不正な入力に対して強化しました。通常のスライド生成には影響しません。"
+      ]
+    }
+  },
+  {
     "version": "2.37.0",
     "date": "2026-06-18",
     "highlights": {
