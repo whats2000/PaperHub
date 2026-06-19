@@ -1,18 +1,22 @@
 [
   {
     "version": "2.37.0",
-    "date": "2026-06-16",
+    "date": "2026-06-18",
     "highlights": {
       "en": [
+        "Stop button — instantly cancel an in-flight answer; your question returns to the composer to edit and resend. Refresh mid-answer and the turn reattaches and finishes on screen.",
         "What's New + version awareness — an in-app changelog and an optional 'update available' notice with the one-line upgrade command."
       ],
       "zh-TW": [
+        "停止按鈕 — 可立即中止生成中的回答，問題會退回輸入框方便修改後重送；生成途中重新整理也會自動接續並在畫面上完成。",
         "更新資訊 — 內建更新紀錄，以及可選的「有新版本」通知與一行升級指令。"
       ],
       "zh-CN": [
+        "停止按钮 — 可立即中止生成中的回答，问题会退回输入框便于修改后重发；生成途中刷新也会自动接续并在画面上完成。",
         "更新信息 — 内置更新日志，以及可选的\"有新版本\"通知与一行升级命令。"
       ],
       "ja": [
+        "停止ボタン — 生成中の回答を即座に中断でき、質問は入力欄に戻るので修正して再送信できます。生成中に再読み込みしても自動的に再接続して画面上で完了します。",
         "更新情報 — アプリ内の変更履歴と、任意の「アップデートあり」通知＋ワンライナーのアップグレードコマンド。"
       ]
     }
