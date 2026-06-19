@@ -153,6 +153,22 @@ version:
 This is distinct from the SRS Revision-History row (internal/engineering).
 Stage `frontend/src/changelog/changelog.json` with the release commit in §5.
 
+**This `en` block is ALSO the GitHub Release note.** `release.yml` reads
+`changelog.json` at tag-push time and composes the tagged version's `en`
+highlights into the Release body (then GitHub appends its auto-generated
+"What's Changed" PR list). So the in-app ChangelogModal and the GitHub
+Release page render the **same** user-facing changelog from ONE source —
+there is no second place to author release notes. Consequences:
+
+- Write the `en` highlights release-quality (they are public on the
+  Release page), and make sure the entry's `version` EXACTLY matches the
+  tag minus its `v` (e.g. tag `v2.37.1` ↔ entry `"2.37.1"`) — a mismatch
+  silently drops the curated notes and the Release falls back to header +
+  image refs + the auto PR list.
+- A tag with **no** matching `changelog.json` entry still releases
+  cleanly (the highlights section is just omitted), but the curated notes
+  are then missing — so never tag a version you skipped here.
+
 ## 5 — Commit as one release bump
 
 Stage every file changed in steps 3, 4, and 4b — typically **thirteen files**:
@@ -204,6 +220,16 @@ git tag -a vX.Y.Z <branch-name> -m "Release vX.Y.Z"
 git push origin main
 git push origin vX.Y.Z                 # the specific tag — NEVER --tags
 ```
+
+When you surface this, tell the user what the **tag push** triggers so the
+publish is not a surprise: `release.yml` fires on `v*`, **builds + pushes
+the three GHCR images** (`paperhub-backend/frontend/marker:X.Y.Z` + `latest`)
+and **cuts a GitHub Release** whose notes are composed from the `vX.Y.Z`
+`changelog.json` entry's `en` highlights (§4b) plus GitHub's auto-generated
+PR list. `push origin main` separately runs `ci.yml`. (The push to `main`
+is what makes the Release notes' source available at the tagged commit, so
+the tag must point at a commit that already contains the §4b changelog
+entry — the `chore(release)` commit does.)
 
 **⚠️ Never tag the merge commit — tag-triggered CD does not fire on it.**
 A deploy pipeline keyed on `on: push: tags` will NOT run for a tag that
