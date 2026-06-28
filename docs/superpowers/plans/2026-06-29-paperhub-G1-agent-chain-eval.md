@@ -34,8 +34,11 @@
 | `replay.py` | `ReplayOutput` + `replay_stage()` — render via the adapter, count prompt tokens, call the stage's slot/version, return the structured output. |
 | `grade.py` | `CaseScore` + `score_case()` (deterministic first, scalar-judge fallback) + `judge_scalar`/`judge_pairwise` (temp-0, normalized 0..1). |
 | `experiment.py` | `ExperimentMeta`/`ExperimentResult` + `run_experiment()` — corpus × reps → replay → grade → aggregate. |
-| `cli.py` | `argparse` subcommands `harvest | run | compare | list | golden`; wires everything; resolves git commit + timestamp. |
-| `corpus/router.seed.jsonl` | Committed hand-labeled router corpus (the pilot dataset). |
+| `eval_config.py` | TOML loader for a per-agent eval config: `[eval]` (stage, model, reps, judge_model, store, variants) + `[[testsets]]` (name, corpus). The human/Claude-editable declaration of "which prompts × which test sets." |
+| `sweep.py` | Orchestrate the variants × test-sets grid over `run_experiment`, persist every cell as its own experiment, and render the matrix Markdown report (Δ vs baseline + ⚠ regression marker). |
+| `cli.py` | `argparse` subcommands `harvest | run | sweep | compare | list | golden`; wires everything; resolves git commit + timestamp. |
+| `corpus/router.{core,regression,edge}.jsonl` | Committed hand-labeled router corpora split by bucket (target behaviour / side-effect guard / ambiguous). Harvested real failures land in the gitignored `router.harvest.jsonl`. |
+| `router.eval.toml` | Committed sweep config for the router: `variants` (`["v1"]`; add `"v2"` when you write it) × the three committed test-set buckets. |
 | `README.md` | The loop, the CLI verbs, the cascade methodology pointer to SRS §III-9. |
 
 **One `src` change:** `backend/src/paperhub/llm/litellm_adapter.py` — add a thin public `build_messages()` (Task 4) so replay can count prompt tokens against the exact rendered messages without re-implementing rendering.
@@ -1609,30 +1612,389 @@ git commit -m "feat(eval): paperhub-eval CLI (harvest/run/compare/list/golden) +
 
 ---
 
-## Task 9: Router corpus seed, README, and the real-API pilot gate
+## Task 9: Config-driven sweep — variants × test-set buckets
 
 **Files:**
-- Create: `backend/benchmark/agent/corpus/router.seed.jsonl`
-- Create: `backend/benchmark/agent/README.md`
+- Create: `backend/benchmark/agent/eval_config.py`
+- Create: `backend/benchmark/agent/sweep.py`
+- Modify: `backend/benchmark/agent/cli.py` (add the `sweep` verb)
+- Test: `backend/tests/benchmark_agent/test_sweep.py`
 
-**Interfaces:** none (data + docs + the one-time real-API verification).
+**Interfaces:**
+- Consumes: `run_experiment`/`to_store_payload` (Task 6), `store` (Task 1), `get_stage` (Task 2), `load_corpus` (Task 3).
+- Produces:
+  - `eval_config.py`: `TestSet(name: str, corpus: str)`; `EvalConfig(stage, model, variants: list[str], testsets: list[TestSet], reps=1, judge_model: str | None = None, store="benchmark/eval.db")`; `load_eval_config(path) -> EvalConfig`.
+  - `sweep.py`: `SweepCell(variant: str, testset: str, experiment_id: int, mean_score: float | None, mean_tokens_in: float | None)`; `async run_sweep(cfg, *, adapter, store_conn, git_commit, created_at, count_tokens=None) -> list[SweepCell]`; `matrix_report(cfg, cells) -> str`.
+  - `cli.py`: `sweep --config <toml> [--out <md>] [--env <.env>]`.
 
-- [ ] **Step 1: Write a small hand-labeled router corpus**
+- [ ] **Step 1: Write the failing test**
 
-Create `backend/benchmark/agent/corpus/router.seed.jsonl` — one JSON object per line. Cover the target behavior AND regression buckets (multiple intents + a language case + an anaphora case), per `writing-agent-prompts` (a change with no regression queries is untested). `enabled_refs_count`/`slide_attached` reflect the realistic session state for each intent:
+```python
+# backend/tests/benchmark_agent/test_sweep.py
+import pytest
 
-```jsonl
-{"case_id": "seed-qa-mha", "stage": "router", "variables": {"user_message": "How does multi-head attention differ from single-head?", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_qa"}, "rubric": "content question about an enabled paper -> paper_qa", "source_run_id": null, "observed": null}
-{"case_id": "seed-search-named", "stage": "router", "variables": {"user_message": "Find the paper 'Attention Is All You Need'", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "paper_search"}, "rubric": "resolve a named paper -> paper_search", "source_run_id": null, "observed": null}
-{"case_id": "seed-suggest", "stage": "router", "variables": {"user_message": "Recommend a few papers on mixture-of-experts routing", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_suggest"}, "rubric": "topic recommendation -> paper_suggest", "source_run_id": null, "observed": null}
-{"case_id": "seed-slides", "stage": "router", "variables": {"user_message": "Make a 10-slide deck about these papers", "enabled_refs_count": 2, "slide_attached": false}, "expect": {"intent": "slides"}, "rubric": "deck command -> slides", "source_run_id": null, "observed": null}
-{"case_id": "seed-libstats", "stage": "router", "variables": {"user_message": "List my papers about diffusion models", "enabled_refs_count": 3, "slide_attached": false}, "expect": {"intent": "library_stats"}, "rubric": "library-scoped possessive listing -> library_stats", "source_run_id": null, "observed": null}
-{"case_id": "seed-memory", "stage": "router", "variables": {"user_message": "Remember that I always want answers in Traditional Chinese", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "memory"}, "rubric": "explicit remember -> memory", "source_run_id": null, "observed": null}
-{"case_id": "seed-chitchat", "stage": "router", "variables": {"user_message": "Hi there, how are you?", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "chitchat"}, "rubric": "greeting -> chitchat", "source_run_id": null, "observed": null}
-{"case_id": "seed-qa-noref-to-search", "stage": "router", "variables": {"user_message": "What does the transformer paper say about positional encodings?", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "paper_search"}, "rubric": "content question with NO refs attached -> router rewrites to paper_search (regression guard)", "source_run_id": null, "observed": null}
+from paperhub.models.domain import RoutingDecision
+
+from benchmark.agent import store
+from benchmark.agent.eval_config import load_eval_config
+from benchmark.agent.sweep import matrix_report, run_sweep
+
+
+class _VersionStub:
+    """Returns paper_qa for v1, slides for v2 — so the two variants diverge."""
+    def build_messages(self, slot, variables, history=None):
+        return [{"role": "user", "content": variables["user_message"]}]
+
+    async def structured(self, *, slot, variables, response_model, model, history=None, **kw):
+        intent = "slides" if slot.endswith("/v2") else "paper_qa"
+        return RoutingDecision(intent=intent, model_tier="small", confidence=0.9,
+                               reasoning="x", resolved_query=variables["user_message"], response_language="English")
+
+
+def _write(path, lines):
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_load_eval_config(tmp_path):
+    core = tmp_path / "core.jsonl"
+    _write(core, ['{"case_id":"a","stage":"router","variables":{"user_message":"q","enabled_refs_count":1,"slide_attached":false},"expect":{"intent":"paper_qa"}}'])
+    toml = tmp_path / "router.eval.toml"
+    toml.write_text(
+        '[eval]\nstage="router"\nmodel="gemini/gemini-2.5-flash"\nreps=2\nvariants=["v1","v2"]\n'
+        f'store="{(tmp_path / "eval.db").as_posix()}"\n\n'
+        f'[[testsets]]\nname="core"\ncorpus="{core.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(toml)
+    assert cfg.stage == "router" and cfg.reps == 2
+    assert cfg.variants == ["v1", "v2"]
+    assert len(cfg.testsets) == 1 and cfg.testsets[0].name == "core"
+
+
+@pytest.mark.asyncio
+async def test_run_sweep_grid_and_matrix_report(tmp_path):
+    core = tmp_path / "core.jsonl"
+    _write(core, ['{"case_id":"a","stage":"router","variables":{"user_message":"q","enabled_refs_count":1,"slide_attached":false},"expect":{"intent":"paper_qa"}}'])
+    reg = tmp_path / "regression.jsonl"
+    _write(reg, ['{"case_id":"b","stage":"router","variables":{"user_message":"deck","enabled_refs_count":1,"slide_attached":false},"expect":{"intent":"slides"}}'])
+    toml = tmp_path / "router.eval.toml"
+    toml.write_text(
+        '[eval]\nstage="router"\nmodel="m"\nreps=1\nvariants=["v1","v2"]\n'
+        f'store="{(tmp_path / "eval.db").as_posix()}"\n\n'
+        f'[[testsets]]\nname="core"\ncorpus="{core.as_posix()}"\n\n'
+        f'[[testsets]]\nname="regression"\ncorpus="{reg.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(toml)
+    conn = store.connect(cfg.store)
+    cells = await run_sweep(cfg, adapter=_VersionStub(), store_conn=conn,
+                            git_commit="abc", created_at="2026-06-29T10:00:00",
+                            count_tokens=lambda model, msgs: 100)
+    assert len(cells) == 4  # 2 variants × 2 testsets
+    assert len(store.list_experiments(conn)) == 4
+    md = matrix_report(cfg, cells)
+    assert "router/v1" in md and "router/v2" in md
+    assert "core" in md and "regression" in md
+    # v1 predicts paper_qa (core hit, regression miss); v2 predicts slides (core miss, regression hit).
+    assert "-1.00" in md and "⚠" in md   # core regressed v1 -> v2
+    assert "+1.00" in md                  # regression improved v1 -> v2
 ```
 
-- [ ] **Step 2: Write the README**
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd backend; uv run pytest tests/benchmark_agent/test_sweep.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'benchmark.agent.eval_config'`.
+
+- [ ] **Step 3a: Write the config loader**
+
+```python
+# backend/benchmark/agent/eval_config.py
+"""Per-agent eval config (SRS §III-9): which prompt VARIANTS to compare over
+which TEST-SET buckets. Edited by a human or by Claude — the declarative front
+end to a sweep. TOML, matching the existing ``benchmark/cases.*.toml`` idiom.
+"""
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class TestSet:
+    name: str
+    corpus: str
+
+
+@dataclass
+class EvalConfig:
+    stage: str
+    model: str
+    variants: list[str]
+    testsets: list[TestSet]
+    reps: int = 1
+    judge_model: str | None = None
+    store: str = "benchmark/eval.db"
+
+
+def load_eval_config(path: str | Path) -> EvalConfig:
+    with Path(path).open("rb") as fh:
+        raw = tomllib.load(fh)
+    ev = raw.get("eval", {})
+    if "stage" not in ev or "model" not in ev:
+        raise ValueError("eval config: [eval] must set 'stage' and 'model'")
+    variants = [str(v) for v in ev.get("variants", [])]
+    if not variants:
+        raise ValueError("eval config: [eval].variants must be a non-empty list")
+    testsets = [
+        TestSet(name=str(t["name"]), corpus=str(t["corpus"]))
+        for t in raw.get("testsets", [])
+    ]
+    if not testsets:
+        raise ValueError("eval config: at least one [[testsets]] is required")
+    return EvalConfig(
+        stage=str(ev["stage"]), model=str(ev["model"]), variants=variants, testsets=testsets,
+        reps=int(ev.get("reps", 1)),
+        judge_model=(str(ev["judge_model"]) if ev.get("judge_model") else None),
+        store=str(ev.get("store", "benchmark/eval.db")),
+    )
+```
+
+- [ ] **Step 3b: Write the sweep orchestrator + matrix report**
+
+```python
+# backend/benchmark/agent/sweep.py
+"""Run the variants × test-sets grid and report it (SRS §III-9).
+
+Each cell (variant, bucket) is its own persisted experiment, keyed to
+git_commit/stage/version/model + the bucket name. The matrix report puts
+variants in columns and buckets in rows, with a Δ-vs-baseline column that
+flags any bucket REGRESSION (⚠) — the "fix A breaks B/C" signal, made visible.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from benchmark.agent import corpus as corpus_mod
+from benchmark.agent import store as store_mod
+from benchmark.agent.eval_config import EvalConfig
+from benchmark.agent.experiment import run_experiment, to_store_payload
+from benchmark.agent.stages import get_stage
+
+
+@dataclass
+class SweepCell:
+    variant: str            # full slot, e.g. 'router/v1'
+    testset: str
+    experiment_id: int
+    mean_score: float | None
+    mean_tokens_in: float | None
+
+
+async def run_sweep(
+    cfg: EvalConfig, *, adapter: Any, store_conn: Any,
+    git_commit: str, created_at: str,
+    count_tokens: Callable[[str, list[dict[str, str]]], int | None] | None = None,
+) -> list[SweepCell]:
+    spec = get_stage(cfg.stage)
+    cells: list[SweepCell] = []
+    for ts in cfg.testsets:
+        corpus = corpus_mod.load_corpus(ts.corpus)
+        for variant in cfg.variants:
+            result = await run_experiment(
+                spec, variant, corpus, adapter=adapter, model=cfg.model, reps=cfg.reps,
+                judge_model=cfg.judge_model, count_tokens=count_tokens,
+                git_commit=git_commit, created_at=created_at, corpus_name=ts.name,
+                notes=f"sweep:{ts.name}",
+            )
+            meta, rows = to_store_payload(result)
+            exp_id = store_mod.record_experiment(store_conn, meta=meta, scores=rows)
+            cells.append(SweepCell(
+                variant=result.meta.prompt_version, testset=ts.name,
+                experiment_id=exp_id, mean_score=result.mean_score,
+                mean_tokens_in=result.mean_tokens_in,
+            ))
+    return cells
+
+
+def _fscore(x: float | None) -> str:
+    return "—" if x is None else f"{x:.2f}"
+
+
+def _ftok(x: float | None) -> str:
+    return "—" if x is None else f"{x:.0f}"
+
+
+def matrix_report(cfg: EvalConfig, cells: list[SweepCell]) -> str:
+    spec = get_stage(cfg.stage)
+    full = [f"{spec.slot_base}/{v}" for v in cfg.variants]
+    baseline = full[0]
+    by = {(c.testset, c.variant): c for c in cells}
+
+    lines = [
+        f"# Eval sweep: {cfg.stage}", "",
+        f"- model: `{cfg.model}` · reps: {cfg.reps} · variants: {', '.join(full)}",
+        "- cell = mean_score / mean_tokens_in · Δ = score vs baseline (⚠ = regression)", "",
+    ]
+    header = ["test set"] + [f"{v} (score/tok)" for v in full]
+    header += [f"Δ {v} vs {baseline}" for v in full[1:]]
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|" + "|".join(["---"] * len(header)) + "|")
+    for ts in cfg.testsets:
+        base = by.get((ts.name, baseline))
+        row = [ts.name]
+        for v in full:
+            c = by.get((ts.name, v))
+            row.append(f"{_fscore(c.mean_score if c else None)} / {_ftok(c.mean_tokens_in if c else None)}")
+        for v in full[1:]:
+            c = by.get((ts.name, v))
+            if c and base and c.mean_score is not None and base.mean_score is not None:
+                d = c.mean_score - base.mean_score
+                row.append(f"{d:+.2f}{' ⚠' if d < 0 else ''}")
+            else:
+                row.append("—")
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+```
+
+- [ ] **Step 3c: Add the `sweep` verb to `cli.py`**
+
+In `backend/benchmark/agent/cli.py`, add these imports next to the other `benchmark.agent` imports:
+
+```python
+from benchmark.agent.eval_config import load_eval_config
+from benchmark.agent.sweep import matrix_report, run_sweep
+```
+
+Add the command handler (next to `_cmd_run`):
+
+```python
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    _load_env(args.env)
+    cfg = load_eval_config(args.config)
+    adapter = _make_adapter()
+    conn = store.connect(cfg.store)
+    cells = asyncio.run(run_sweep(
+        cfg, adapter=adapter, store_conn=conn,
+        git_commit=_git_commit(), created_at=datetime.now().isoformat(timespec="seconds"),
+        count_tokens=_token_counter,
+    ))
+    report = matrix_report(cfg, cells)
+    out = args.out or f"benchmark/results/{cfg.stage}-sweep-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(report, encoding="utf-8")
+    print(report)
+    print(f"\nWrote {out}")
+    return 0
+```
+
+Register the subparser (between the `run` and `golden` parsers in `main`):
+
+```python
+    sw = sub.add_parser("sweep", help="run a variants x test-sets grid from a TOML config")
+    sw.add_argument("--config", required=True)
+    sw.add_argument("--out", default="")
+    sw.add_argument("--env", default=".env")
+    sw.set_defaults(fn=_cmd_sweep)
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd backend; uv run pytest tests/benchmark_agent/test_sweep.py tests/benchmark_agent/test_cli.py -v`
+Expected: PASS (test_sweep: 2 passed; test_cli still green).
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd backend && uv run ruff check tests/benchmark_agent/test_sweep.py
+git add benchmark/agent/eval_config.py benchmark/agent/sweep.py benchmark/agent/cli.py tests/benchmark_agent/test_sweep.py
+git commit -m "feat(eval): config-driven sweep — variants x test-set buckets + matrix report"
+```
+
+---
+
+## Task 10: Router corpus buckets, sweep config, README, and the real-API pilot gate
+
+**Files:**
+- Create: `backend/benchmark/agent/corpus/router.core.jsonl`
+- Create: `backend/benchmark/agent/corpus/router.regression.jsonl`
+- Create: `backend/benchmark/agent/corpus/router.edge.jsonl`
+- Create: `backend/benchmark/agent/router.eval.toml`
+- Create: `backend/benchmark/agent/README.md`
+
+**Interfaces:** none (data + config + docs + the one-time real-API verification).
+
+- [ ] **Step 1: Write the `core` bucket (target behaviour — one clean case per intent)**
+
+Create `backend/benchmark/agent/corpus/router.core.jsonl` — one JSON object per line. `enabled_refs_count`/`slide_attached` reflect the realistic session state for each intent:
+
+```jsonl
+{"case_id": "core-qa-mha", "stage": "router", "variables": {"user_message": "How does multi-head attention differ from single-head?", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_qa"}, "rubric": "content question about an enabled paper -> paper_qa", "source_run_id": null, "observed": null}
+{"case_id": "core-search-named", "stage": "router", "variables": {"user_message": "Find the paper 'Attention Is All You Need'", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "paper_search"}, "rubric": "resolve a named paper -> paper_search", "source_run_id": null, "observed": null}
+{"case_id": "core-suggest", "stage": "router", "variables": {"user_message": "Recommend a few papers on mixture-of-experts routing", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_suggest"}, "rubric": "topic recommendation -> paper_suggest", "source_run_id": null, "observed": null}
+{"case_id": "core-slides", "stage": "router", "variables": {"user_message": "Make a 10-slide deck about these papers", "enabled_refs_count": 2, "slide_attached": false}, "expect": {"intent": "slides"}, "rubric": "deck command -> slides", "source_run_id": null, "observed": null}
+{"case_id": "core-libstats", "stage": "router", "variables": {"user_message": "List my papers about diffusion models", "enabled_refs_count": 3, "slide_attached": false}, "expect": {"intent": "library_stats"}, "rubric": "library-scoped possessive listing -> library_stats", "source_run_id": null, "observed": null}
+{"case_id": "core-memory", "stage": "router", "variables": {"user_message": "Remember that I always want answers in Traditional Chinese", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "memory"}, "rubric": "explicit remember -> memory", "source_run_id": null, "observed": null}
+{"case_id": "core-chitchat", "stage": "router", "variables": {"user_message": "Hi there, how are you?", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "chitchat"}, "rubric": "greeting -> chitchat", "source_run_id": null, "observed": null}
+```
+
+- [ ] **Step 2: Write the `regression` bucket (side-effect guards)**
+
+Create `backend/benchmark/agent/corpus/router.regression.jsonl` — the behaviours a router prompt change must NOT break (the no-ref rewrite-to-search rule, possessive→library_stats, language stability, named→search, on-screen-deck *question*→paper_qa). Per `writing-agent-prompts`: a change with no regression bucket is untested for side effects.
+
+```jsonl
+{"case_id": "reg-qa-noref-to-search", "stage": "router", "variables": {"user_message": "What does the transformer paper say about positional encodings?", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "paper_search"}, "rubric": "content question with NO refs attached -> router rewrites to paper_search", "source_run_id": null, "observed": null}
+{"case_id": "reg-possessive-libstats", "stage": "router", "variables": {"user_message": "Show me the papers I already have on transformers", "enabled_refs_count": 2, "slide_attached": false}, "expect": {"intent": "library_stats"}, "rubric": "possessive 'papers I have' -> library_stats, NOT paper_suggest", "source_run_id": null, "observed": null}
+{"case_id": "reg-language-stable", "stage": "router", "variables": {"user_message": "多頭注意力和單頭注意力有什麼不同?", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_qa"}, "rubric": "same content question in Traditional Chinese -> intent stays paper_qa (language must not change routing)", "source_run_id": null, "observed": null}
+{"case_id": "reg-named-search-not-suggest", "stage": "router", "variables": {"user_message": "Search for the BERT paper", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "paper_search"}, "rubric": "named paper -> paper_search, NOT paper_suggest", "source_run_id": null, "observed": null}
+{"case_id": "reg-onscreen-deck-qa", "stage": "router", "variables": {"user_message": "What is the second slide about?", "enabled_refs_count": 1, "slide_attached": true}, "expect": {"intent": "paper_qa"}, "rubric": "a QUESTION about the on-screen deck -> paper_qa (deck command vs deck question, v2.29)", "source_run_id": null, "observed": null}
+```
+
+- [ ] **Step 3: Write the `edge` bucket (ambiguous / short / anaphora)**
+
+Create `backend/benchmark/agent/corpus/router.edge.jsonl` — the genuinely hard cases (these labels are debatable on purpose; the eval exists to surface them):
+
+```jsonl
+{"case_id": "edge-bare-followup-suggest", "stage": "router", "variables": {"user_message": "推薦幾篇", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_suggest"}, "rubric": "bare anaphoric follow-up 'recommend a few' -> paper_suggest (resolved against context)", "source_run_id": null, "observed": null}
+{"case_id": "edge-one-word-slides", "stage": "router", "variables": {"user_message": "slides", "enabled_refs_count": 2, "slide_attached": false}, "expect": {"intent": "slides"}, "rubric": "one-word deck command -> slides", "source_run_id": null, "observed": null}
+{"case_id": "edge-anaphora-qa", "stage": "router", "variables": {"user_message": "tell me more about this one", "enabled_refs_count": 1, "slide_attached": false}, "expect": {"intent": "paper_qa"}, "rubric": "anaphoric 'this one' with an enabled ref -> paper_qa", "source_run_id": null, "observed": null}
+{"case_id": "edge-unresolvable-clarify", "stage": "router", "variables": {"user_message": "do the thing", "enabled_refs_count": 0, "slide_attached": false}, "expect": {"intent": "clarify"}, "rubric": "unresolvable with no refs and no antecedent -> clarify", "source_run_id": null, "observed": null}
+```
+
+- [ ] **Step 4: Write the sweep config**
+
+Create `backend/benchmark/agent/router.eval.toml`:
+
+```toml
+# Per-agent eval sweep config (SRS §III-9): variants × test-set buckets.
+# Add a prompt version by writing backend/src/paperhub/llm/prompts/router_vN.yaml
+# then appending "vN" to `variants`; add a bucket by adding a [[testsets]] block
+# (e.g. the harvested production-failures corpus).
+[eval]
+stage    = "router"
+model    = "gemini/gemini-2.5-flash"
+reps     = 3                         # variance — a delta within noise is not a win
+store    = "benchmark/eval.db"
+# judge_model is only used for stages WITHOUT a deterministic score; the router
+# is graded by exact intent match, so it is omitted here.
+variants = ["v1"]                    # add "v2" once router_v2.yaml exists
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/router.core.jsonl"
+
+[[testsets]]
+name   = "regression"
+corpus = "benchmark/agent/corpus/router.regression.jsonl"
+
+[[testsets]]
+name   = "edge"
+corpus = "benchmark/agent/corpus/router.edge.jsonl"
+```
+
+- [ ] **Step 5: Write the README**
 
 Create `backend/benchmark/agent/README.md`:
 
@@ -1642,41 +2004,62 @@ Create `backend/benchmark/agent/README.md`:
 Evaluate ONE agent prompt at a time, precisely, on real recorded inputs —
 replay the stage with a prompt version, score its output (quality + token
 count), and persist each run as a comparable experiment in a local `eval.db`.
-
 In-process: it calls the LLM via the production adapter directly — **no live
 backend needed**, only an LLM API key in `backend/.env`.
 
-## The loop (run from `backend/`)
+## The fast loop — sweep variants × test-set buckets (run from `backend/`)
+
+`router.eval.toml` declares which prompt versions to compare and which test-set
+buckets to run them on. One command runs the whole grid:
 
 ```powershell
-# 1. (optional) harvest a corpus of REAL inputs from the trace DB
+# 1. (optional) harvest REAL inputs from the trace DB into a new bucket
 scripts/run-eval.ps1 harvest --db workspace/paperhub.db --stage router `
   --out benchmark/agent/corpus/router.harvest.jsonl
 
-# 2. baseline: run the current prompt version over a corpus
+# 2. write router_v2.yaml (built to the four principles), add "v2" to
+#    router.eval.toml's `variants`, then sweep the whole grid:
+scripts/run-eval.ps1 sweep --config benchmark/agent/router.eval.toml
+```
+
+The sweep prints + writes a matrix report — variants as columns, buckets as
+rows, with a Δ-vs-baseline column flagging any **regression** (⚠):
+
+```
+# Eval sweep: router
+- model: gemini-2.5-flash · reps: 3 · variants: router/v1, router/v2
+| test set   | router/v1 (score/tok) | router/v2 (score/tok) | Δ router/v2 vs router/v1 |
+|---|---|---|---|
+| core       | 0.86 / 1180           | 0.95 / 910            | +0.09                    |
+| regression | 1.00 / 1180           | 0.80 / 910            | -0.20 ⚠                  |
+| edge       | 0.50 / 1180           | 0.75 / 910            | +0.25                    |
+```
+
+That ⚠ is the whole point: v2 is more concise and fixes edge cases but breaks a
+behaviour the regression bucket guards — adopt nothing until it's clean.
+
+## The primitives (what `sweep` orchestrates)
+
+```powershell
+# one prompt version × one bucket -> one experiment
 scripts/run-eval.ps1 run --stage router --version v1 `
-  --corpus benchmark/agent/corpus/router.seed.jsonl `
-  --model gemini/gemini-2.5-flash --store benchmark/eval.db
-
-# 3. write router_v2.yaml (built to the four principles), then run it
-scripts/run-eval.ps1 run --stage router --version v2 `
-  --corpus benchmark/agent/corpus/router.seed.jsonl `
-  --model gemini/gemini-2.5-flash --store benchmark/eval.db
-
-# 4. did v2 beat v1 without regressions?
+  --corpus benchmark/agent/corpus/router.core.jsonl --model gemini/gemini-2.5-flash
 scripts/run-eval.ps1 list --stage router
 scripts/run-eval.ps1 compare --a 1 --b 2
-
-# 5. freeze the winner -> emit its golden outputs (the next stage's inputs)
+# freeze the winner -> emit golden outputs (the NEXT stage's real inputs)
 scripts/run-eval.ps1 golden --stage router --version v2 `
-  --corpus benchmark/agent/corpus/router.seed.jsonl `
+  --corpus benchmark/agent/corpus/router.core.jsonl `
   --model gemini/gemini-2.5-flash --out benchmark/agent/corpus/router.golden.jsonl
 ```
 
 ## Concepts
 
-- **Corpus** — real stage inputs (template variables) + reference labels. Never
-  synthesized; harvested from `tool_calls` or hand-seeded at the head of the chain.
+- **Test-set buckets** — `core` (target behaviour), `regression` (other
+  intents/languages the same prompt governs — the side-effect guard), `edge`
+  (ambiguous/short/anaphora), and `harvest` (real production failures, promoted
+  in). A change with no regression bucket is untested for side effects.
+- **Variant** — a prompt version = a `router_vN.yaml` file (authored by you or
+  Claude). The config lists which to compare.
 - **Replay** — re-render only this stage's prompt from the recorded input state
   and call the model. The prompt is the only variable.
 - **Two scores** — output quality (`mean_score`, 0..1; deterministic intent match
@@ -1685,43 +2068,44 @@ scripts/run-eval.ps1 golden --stage router --version v2 `
 - **Freeze + propagate** — a frozen winner's golden outputs become the next
   stage's real input set. The cascade rolls down the tree from the router.
 
-`eval.db` and `*.harvest.jsonl` are gitignored; `*.seed.jsonl` is committed.
-See SRS §III-9 for the full methodology and `writing-agent-prompts` for the
-variant→queries→judge discipline this automates.
+`eval.db` + `*.harvest.jsonl` are gitignored; the `core`/`regression`/`edge`
+buckets + `router.eval.toml` are committed. See SRS §III-9 for the full
+methodology and `writing-agent-prompts` for the variant→queries→judge
+discipline this automates.
 ```
 
-- [ ] **Step 3: Run the full new test suite + commit the data/docs**
+- [ ] **Step 6: Run the new test suite + commit the data/config/docs**
 
 Run: `cd backend; uv run pytest tests/benchmark_agent/ -v; uv run ruff check tests/benchmark_agent`
 Expected: all green; ruff clean.
 
 ```bash
 cd backend
-git add benchmark/agent/corpus/router.seed.jsonl benchmark/agent/README.md
-git commit -m "docs(eval): seed router corpus + per-stage eval README"
+git add benchmark/agent/corpus/router.core.jsonl benchmark/agent/corpus/router.regression.jsonl \
+        benchmark/agent/corpus/router.edge.jsonl benchmark/agent/router.eval.toml \
+        benchmark/agent/README.md
+git commit -m "docs(eval): bucketed router corpora + sweep config + README"
 ```
 
-- [ ] **Step 4: Real-API pilot gate (run ONCE — the plan-phase verification)**
+- [ ] **Step 7: Real-API pilot gate (run ONCE — the plan-phase verification)**
 
 This is the correctness gate the unit tests cannot give (per CLAUDE.md "pytest is necessary-but-insufficient"). It needs an LLM API key in `backend/.env` (it does NOT need the `:8000` backend — replay is in-process).
 
 ```powershell
 cd backend
-# Baseline the SHIPPED router prompt against the seed corpus.
-scripts/run-eval.ps1 run --stage router --version v1 `
-  --corpus benchmark/agent/corpus/router.seed.jsonl `
-  --model gemini/gemini-2.5-flash --store benchmark/eval.db
+# Baseline the SHIPPED router prompt (v1) across all three buckets in one sweep.
+scripts/run-eval.ps1 sweep --config benchmark/agent/router.eval.toml
 scripts/run-eval.ps1 list --stage router
 ```
 
 Confirm:
-1. The command prints an `experiment <id> … mean_score=<x> mean_tokens_in=<y>`.
-2. `scripts/run-eval.ps1 list --stage router` shows the row keyed to the git commit + `router/v1`.
-3. Open `benchmark/eval.db` and verify per-case rows: `SELECT case_id, score, tokens_in FROM eval_scores WHERE experiment_id = <id>;` — every seed case scored (1.0 for a correct intent, 0.0 for a miss), and the misses point at genuinely-debatable router prompt behavior (a real finding, not a harness bug).
+1. The sweep prints a matrix report with rows `core`/`regression`/`edge` and a `router/v1 (score/tok)` column, and writes it under `benchmark/results/`.
+2. `scripts/run-eval.ps1 list --stage router` shows **three** experiments (one per bucket) keyed to the git commit + `router/v1`.
+3. Per-bucket rows: `SELECT case_id, score, tokens_in FROM eval_scores WHERE experiment_id = <id>;` — every case scored (1.0 correct intent / 0.0 miss). Any miss points at genuinely-debatable router behaviour (a real finding, not a harness bug).
 
-If a case the router *should* get is scored 0, that is exactly the signal this system exists to surface — note it as the first candidate for a `router_v2.yaml` rewrite (a separate `writing-agent-prompts` task; out of scope for G1's machinery).
+If a case the router *should* get is scored 0, that is exactly the signal this system exists to surface — note it as the first candidate for a `router_v2.yaml` rewrite (a separate `writing-agent-prompts` task: add `"v2"` to `router.eval.toml` and re-sweep to compare; out of scope for G1's machinery).
 
-- [ ] **Step 5: Full backend quality gates (plan-phase completion)**
+- [ ] **Step 8: Full backend quality gates (plan-phase completion)**
 
 Run: `cd backend; uv run pytest -q; uv run ruff check src tests; uv run mypy src`
 Expected: all green (the new tests added; the one `src` change typechecks).
@@ -1731,16 +2115,17 @@ Expected: all green (the new tests added; the one `src` change typechecks).
 ## Self-Review
 
 **Spec coverage (SRS §III-9 → tasks):**
-- "Real-input corpus, never synthesized; failed-run promotion" → Task 3 (`harvest`), Task 9 (seed). ✓
+- "Real-input corpus, never synthesized; failed-run promotion" → Task 3 (`harvest`), Task 10 (bucketed corpora: core/regression/edge + the gitignored harvest bucket). ✓
 - "Per-stage replay harness, in-process, prompt is the only variable" → Task 4 (`replay_stage` + `build_messages`). ✓
-- "≥2 variants × corpus × judge; N-run variance; pairwise" → Task 6 (`reps`), Task 5 (`judge_scalar`/`judge_pairwise`); the variant-vs-variant comparison is `run v1` + `run v2` + `compare` (Task 8). ✓
+- "≥2 variants × corpus × judge; N-run variance; pairwise" → Task 6 (`reps`), Task 5 (`judge_scalar`/`judge_pairwise`); the variant-vs-variant comparison is the config-driven `sweep` (Task 9), or the `run`+`compare` primitives (Task 8). ✓
+- "Configurable prompt-set × test-sets (the human/Claude-editable eval declaration)" → Task 9 (`eval_config.py` + `sweep.py` + `sweep` CLI verb + matrix report) over the bucketed test sets of Task 10. ✓
 - "Two scores: output quality + token count" → Task 5 (`score`) + Task 4 (`tokens_in`), aggregated in Task 6 and stored in Task 1. ✓
 - "Freeze + propagate golden outputs" → Task 7 (`emit_golden`), CLI `golden` (Task 8). ✓
-- "Local-first eval.db keyed to {git_commit, stage, prompt_version, model}; CLI harvest|run|compare|list" → Task 1 (schema) + Task 8 (CLI). ✓
+- "Local-first eval.db keyed to {git_commit, stage, prompt_version, model}; CLI harvest|run|sweep|compare|list|golden" → Task 1 (schema) + Task 8 (5 primitive verbs) + Task 9 (`sweep`). ✓
 - "Reuse judge.py + tracer + writing-agent-prompts" → Task 5 reuses judge discipline + `load_env`; Task 3 reads `tool_calls`; README points at the skill. ✓
-- Acceptance I-8 #7 (replay in isolation, judged variant-vs-baseline with variance, persisted experiment keyed to commit/stage/version/model) → Tasks 4–8. ✓
+- Acceptance I-8 #7 (replay in isolation, judged variant-vs-baseline with variance, persisted experiment keyed to commit/stage/version/model) → Tasks 4–9. ✓
 - Deferred by design (noted, not built in G1): LangSmith `--export`; downstream stages beyond router; four-principle-adherence judge (token count is the G1 prompt-quality metric). Consistent with the §III-9 "Phase-1 + router pilot" scope.
 
 **Placeholder scan:** every code step contains complete, runnable code; every test asserts concrete values; no "TBD"/"handle edge cases"/"similar to Task N". ✓
 
-**Type consistency:** `CorpusCase`, `StageSpec`, `ReplayOutput`, `CaseScore`, `ExperimentMeta`/`ExperimentResult` field names match across Tasks 2–8; `replay_stage`/`score_case`/`run_experiment`/`to_store_payload`/`record_experiment` signatures are used identically by their callers; `build_messages` matches the stub in Task 4's test and the seam in Task 8. ✓
+**Type consistency:** `CorpusCase`, `StageSpec`, `ReplayOutput`, `CaseScore`, `ExperimentMeta`/`ExperimentResult`, `EvalConfig`/`TestSet`/`SweepCell` field names match across Tasks 2–10; `replay_stage`/`score_case`/`run_experiment`/`to_store_payload`/`record_experiment`/`run_sweep`/`matrix_report` signatures are used identically by their callers; `build_messages` matches the stub in Tasks 4/9's tests and the seam in Task 8. ✓
