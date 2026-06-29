@@ -41,7 +41,9 @@ def harvest(
             "FROM tool_calls WHERE agent = ? AND tool = ? AND args_redacted_json IS NOT NULL"
         )
         params: list[Any] = [spec.trace_agent, spec.trace_tool]
-        if run_ids:
+        if run_ids is not None:
+            if not run_ids:
+                return []
             sql += f" AND run_id IN ({','.join('?' * len(run_ids))})"
             params += list(run_ids)
         sql += " ORDER BY run_id DESC, step_index ASC LIMIT ?"
@@ -81,8 +83,12 @@ def save_corpus(path: str | Path, cases: list[CorpusCase]) -> None:
 
 def load_corpus(path: str | Path) -> list[CorpusCase]:
     out: list[CorpusCase] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
+    for lineno, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
             out.append(CorpusCase(**json.loads(line)))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"{path}: malformed corpus line {lineno}: {exc}") from exc
     return out

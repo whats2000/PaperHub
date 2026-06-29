@@ -1,6 +1,8 @@
 import json
 import sqlite3
 
+import pytest
+
 from benchmark.agent import corpus
 from benchmark.agent.corpus import CorpusCase
 
@@ -49,3 +51,20 @@ def test_save_load_roundtrip(tmp_path):
     p = tmp_path / "router.core.jsonl"
     corpus.save_corpus(p, cases)
     assert corpus.load_corpus(p) == cases
+
+
+def test_harvest_run_ids_filter(tmp_path):
+    db = tmp_path / "paperhub.db"
+    _seed(db)
+    assert len(corpus.harvest(db, "router", run_ids=[7])) == 1
+    assert corpus.harvest(db, "router", run_ids=[99]) == []
+    assert corpus.harvest(db, "router", run_ids=[]) == []  # empty list = no matches, not "all"
+
+
+def test_load_corpus_malformed_line_raises(tmp_path):
+    p = tmp_path / "bad.jsonl"
+    p.write_text(
+        '{"case_id":"x","stage":"router","variables":{},"expect":{}}\nNOT JSON\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError):
+        corpus.load_corpus(p)
