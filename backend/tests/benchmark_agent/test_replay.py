@@ -47,3 +47,18 @@ async def test_replay_stage_maps_execresult(tmp_path, monkeypatch):
                       variables={"user_message": "what is MHA?", "enabled_refs_count": 1, "slide_attached": False})
     out = await replay_stage(get_stage("router"), "v1", case, model="m", prompts_dir=tmp_path)
     assert out.output["intent"] == "paper_qa" and out.tokens_in == 33 and out.error is None
+
+
+def test_replay_imports_standalone_before_corpus():
+    # Regression: importing replay FIRST (before corpus) must not trip the
+    # corpus<->replay cycle. A fresh interpreter that imports only replay proves
+    # replay's CorpusCase import is TYPE_CHECKING-only (no runtime corpus import).
+    import subprocess
+    import sys
+
+    code = (
+        "import benchmark.agent.replay; "
+        "from benchmark.agent.replay import render_messages, replay_stage, to_replay_output"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr

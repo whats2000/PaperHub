@@ -7,13 +7,19 @@ lives in experiment.py.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from benchmark.agent.corpus import CorpusCase
 from benchmark.agent.execute import EvalRequest, ExecResult, TokenCounter, execute
 from benchmark.agent.prompts import load_variant
-from benchmark.agent.replay_types import ReplayOutput  # see note
+from benchmark.agent.replay_types import ReplayOutput
 from benchmark.agent.stages import StageSpec
+
+if TYPE_CHECKING:
+    # Type-only import: keep corpus OUT of replay's runtime import graph so that
+    # importing replay before corpus cannot trip the corpus<->replay cycle
+    # (corpus bottom-imports replay_stage for emit_golden). CorpusCase is only a
+    # type hint here, and `from __future__ import annotations` makes it lazy.
+    from benchmark.agent.corpus import CorpusCase
 
 
 def render_messages(system: str, user_template: str, variables: dict[str, Any],
