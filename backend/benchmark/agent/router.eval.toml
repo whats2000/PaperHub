@@ -1,0 +1,25 @@
+# Per-agent eval sweep config (SRS §III-9): variants × test-set buckets.
+# Add a variant: write benchmark/agent/prompts/router/v2.yaml, then append "v2".
+# Add a bucket: add a [[testsets]] block (e.g. the harvested production failures).
+[eval]
+stage       = "router"
+model       = "gemini/gemini-2.5-flash"
+reps        = 3                       # variance — a delta within noise is not a win
+backend     = "auto"                  # provider Batch API where available, else concurrent
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+# judge_model is only used for stages WITHOUT a deterministic score; the router
+# is graded by exact intent match, so it is omitted.
+variants    = ["v1", "v2a"]           # v2a = skill-authored concise + XML-delimited rewrite
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/router.core.jsonl"
+
+[[testsets]]
+name   = "regression"
+corpus = "benchmark/agent/corpus/router.regression.jsonl"
+
+[[testsets]]
+name   = "edge"
+corpus = "benchmark/agent/corpus/router.edge.jsonl"

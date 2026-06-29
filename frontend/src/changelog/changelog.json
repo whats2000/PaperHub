@@ -1,5 +1,23 @@
 [
   {
+    "version": "2.38.0",
+    "date": "2026-06-29",
+    "highlights": {
+      "en": [
+        "Under the hood — a new internal prompt-evaluation harness lets us measure and improve the agents' routing quality against real usage. No change to how you use PaperHub."
+      ],
+      "zh-TW": [
+        "底層改進 — 新增內部提示詞評測工具，依真實使用情境量測並改善代理的路由品質。使用方式不變。"
+      ],
+      "zh-CN": [
+        "底层改进 — 新增内部提示词评测工具，依真实使用场景度量并改善智能体的路由质量。使用方式不变。"
+      ],
+      "ja": [
+        "内部改善 — エージェントのルーティング品質を実利用に照らして測定・改善する内部プロンプト評価ツールを追加しました。利用方法に変更はありません。"
+      ]
+    }
+  },
+  {
     "version": "2.37.1",
     "date": "2026-06-19",
     "highlights": {
