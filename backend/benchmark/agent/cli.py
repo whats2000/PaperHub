@@ -13,6 +13,8 @@ import argparse
 import asyncio
 import json
 import subprocess
+import sys
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -121,6 +123,13 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to a legacy codepage (e.g. cp950) that cannot
+    # encode the matrix report's ⚠ marker; force UTF-8 so printing never crashes
+    # the CLI on its own success output. Guarded: a captured/!reconfigurable
+    # stream (e.g. under pytest capsys) simply skips this.
+    for _stream in (sys.stdout, sys.stderr):
+        with suppress(AttributeError, ValueError):
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = argparse.ArgumentParser(prog="benchmark.agent.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
     stages = sorted(STAGE_REGISTRY)
