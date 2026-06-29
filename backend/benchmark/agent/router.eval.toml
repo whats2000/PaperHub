@@ -10,7 +10,7 @@ store       = "benchmark/agent/results/experiments.jsonl"
 prompts_dir = "benchmark/agent/prompts"
 # judge_model is only used for stages WITHOUT a deterministic score; the router
 # is graded by exact intent match, so it is omitted.
-variants    = ["v1"]                  # add "v2" once prompts/router/v2.yaml exists
+variants    = ["v1", "v2a"]           # v2a = skill-authored concise + XML-delimited rewrite
 
 [[testsets]]
 name   = "core"
