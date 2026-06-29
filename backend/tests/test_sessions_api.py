@@ -241,7 +241,7 @@ async def test_get_session_messages_returns_history(
         await conn.execute(
             "INSERT INTO runs (id, session_id, status, routing_decision_json) "
             "VALUES (1, 1, 'ok', "
-            "'{\"intent\":\"chitchat\",\"model_tier\":\"small\","
+            "'{\"intent\":\"chitchat\","
             "\"confidence\":0.9,\"reasoning\":\"hi\"}')",
         )
         await conn.execute(

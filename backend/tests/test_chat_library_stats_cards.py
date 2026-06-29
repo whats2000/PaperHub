@@ -82,7 +82,7 @@ async def test_library_stats_forwards_search_results_event_and_persists(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"library_stats","model_tier":"small","confidence":0.95,'
+        '{"intent":"library_stats","confidence":0.95,'
         '"reasoning":"list papers"}',
     )
     await _bootstrap_schema()

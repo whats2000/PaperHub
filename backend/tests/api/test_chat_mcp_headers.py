@@ -87,7 +87,7 @@ async def test_chat_endpoint_sets_client_headers_context_for_paper_search(
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search","model_tier":"small",'
+        '{"intent":"paper_search",'
         '"confidence":0.95,"reasoning":"search intent"}',
     )
     await _bootstrap_schema()
@@ -144,7 +144,7 @@ async def test_chat_endpoint_resets_context_on_error(
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search","model_tier":"small",'
+        '{"intent":"paper_search",'
         '"confidence":0.95,"reasoning":"search intent"}',
     )
     await _bootstrap_schema()

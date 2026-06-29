@@ -96,7 +96,7 @@ def _chitchat_env(monkeypatch: Any, tmp_path: Any, reply: str = "Hello there!") 
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small",'
+        '{"intent":"chitchat",'
         '"confidence":0.9,"reasoning":"greeting"}',
     )
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", reply)
@@ -139,7 +139,7 @@ async def test_disconnect_does_not_cancel_run(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small",'
+        '{"intent":"chitchat",'
         '"confidence":0.9,"reasoning":"greeting"}',
     )
     await _bootstrap_schema(tmp_path)

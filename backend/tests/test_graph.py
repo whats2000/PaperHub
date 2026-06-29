@@ -17,7 +17,7 @@ async def test_chitchat_path(migrated_db: aiosqlite.Connection) -> None:
         tracer=tracer,
         router_model="gpt-4o-mini",
         chitchat_model="gpt-4o-mini",
-        router_mock='{"intent":"chitchat","model_tier":"small",'
+        router_mock='{"intent":"chitchat",'
                     '"confidence":0.85,"reasoning":"greeting"}',
         chitchat_mock="Hi there!",
     )
@@ -38,7 +38,7 @@ async def test_router_sets_effective_query_from_resolved(migrated_db: aiosqlite.
     state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "推薦幾篇"}
     out = await router_node(
         state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"paper_search","model_tier":"small","confidence":1.0,'
+        mock_response='{"intent":"paper_search","confidence":1.0,'
                       '"reasoning":"r","resolved_query":"recommend discrete diffusion distillation papers"}',
     )
     assert out["effective_query"] == "recommend discrete diffusion distillation papers"
@@ -52,7 +52,7 @@ async def test_router_effective_query_falls_back_to_raw(migrated_db: aiosqlite.C
     state: AgentState = {"run_id": 1, "branch": "", "session_id": 1, "user_message": "hello"}
     out = await router_node(
         state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"chitchat","model_tier":"small","confidence":0.85,"reasoning":"greeting"}',
+        mock_response='{"intent":"chitchat","confidence":0.85,"reasoning":"greeting"}',
     )
     assert out["effective_query"] == "hello"
 
@@ -71,7 +71,7 @@ async def test_paper_suggest_routes_to_research_path(migrated_db: aiosqlite.Conn
     out = await router_node(
         state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
         mock_response=(
-            '{"intent":"paper_suggest","model_tier":"small","confidence":0.95,'
+            '{"intent":"paper_suggest","confidence":0.95,'
             '"reasoning":"topic",'
             '"resolved_query":"recommend papers on retrieval augmented generation"}'
         ),
@@ -111,7 +111,7 @@ async def test_paper_suggest_routes_to_research_path(migrated_db: aiosqlite.Conn
         router_model="gpt-4o-mini",
         chitchat_model="gpt-4o-mini",
         router_mock=(
-            '{"intent":"paper_suggest","model_tier":"small","confidence":0.95,'
+            '{"intent":"paper_suggest","confidence":0.95,'
             '"reasoning":"topic",'
             '"resolved_query":"recommend papers on retrieval augmented generation"}'
         ),
@@ -131,7 +131,7 @@ async def test_clarify_path(migrated_db: aiosqlite.Connection) -> None:
     deps = GraphDeps(
         adapter=LiteLlmAdapter(), tracer=tracer,
         router_model="gpt-4o-mini", chitchat_model="gpt-4o-mini",
-        router_mock='{"intent":"clarify","model_tier":"small","confidence":0.4,'
+        router_mock='{"intent":"clarify","confidence":0.4,'
                     '"reasoning":"no topic yet","resolved_query":"Which research topic would you like papers on?"}',
     )
     graph = build_graph(deps)
@@ -150,7 +150,7 @@ async def test_memory_route(migrated_db: aiosqlite.Connection) -> None:
     deps = GraphDeps(
         adapter=LiteLlmAdapter(), tracer=tracer,
         router_model="gpt-4o-mini", chitchat_model="gpt-4o-mini",
-        router_mock='{"intent":"memory","model_tier":"small","confidence":0.9,'
+        router_mock='{"intent":"memory","confidence":0.9,'
                     '"reasoning":"user wants to save a note"}',
     )
     graph = build_graph(deps)

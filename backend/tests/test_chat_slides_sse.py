@@ -77,7 +77,7 @@ async def test_chat_sse_slides_emits_deck_event(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides","model_tier":"flagship",'
+        '{"intent":"slides",'
         '"confidence":0.95,"reasoning":"user wants slides"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -158,7 +158,7 @@ async def test_chat_sse_slides_threads_current_view_page(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides","model_tier":"flagship",'
+        '{"intent":"slides",'
         '"confidence":0.95,"reasoning":"user wants slides"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -208,7 +208,7 @@ async def test_chat_sse_slides_tool_step_events_forwarded(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides","model_tier":"flagship",'
+        '{"intent":"slides",'
         '"confidence":0.95,"reasoning":"user wants slides"}',
     )
     await _bootstrap_schema(tmp_path)
