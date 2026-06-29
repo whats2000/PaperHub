@@ -167,10 +167,10 @@ async def _run_batch_api(
         elapsed = 0.0
         status = getattr(batch, "status", "")
         while status not in ("completed", "failed", "cancelled", "expired"):
-            if elapsed > timeout_s:
-                raise TimeoutError(f"batch {batch.id} timed out after {elapsed}s")
             await asyncio.sleep(poll_interval)
             elapsed += max(poll_interval, 0.001)
+            if elapsed > timeout_s:
+                raise TimeoutError(f"batch {batch.id} timed out after {elapsed}s")
             batch = await litellm.aretrieve_batch(batch_id=batch.id, custom_llm_provider=provider)
             status = getattr(batch, "status", "")
         if status != "completed":
@@ -206,6 +206,7 @@ async def execute(
     poll_interval: float = 15.0, timeout_s: float = 86400.0,
 ) -> dict[str, ExecResult]:
     counter = count_tokens or _default_count_tokens
+    poll_interval = max(0.0, poll_interval)
     if not requests:
         return {}
     use_batch = backend == "batch_api" or (
