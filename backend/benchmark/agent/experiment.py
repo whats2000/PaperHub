@@ -56,7 +56,7 @@ async def run_experiment(
     index: list[tuple[CorpusCase, int]] = []
     for case in corpus:
         for rep in range(reps):
-            messages = render_messages(system, user_template, case.variables)
+            messages = render_messages(system, user_template, case.variables, case.history)
             key = f"{case.case_id}#{rep}"
             requests.append(EvalRequest(key=key, messages=messages, response_model=spec.response_model))
             index.append((case, rep))

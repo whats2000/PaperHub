@@ -16,9 +16,16 @@ from benchmark.agent.replay_types import ReplayOutput  # see note
 from benchmark.agent.stages import StageSpec
 
 
-def render_messages(system: str, user_template: str, variables: dict[str, Any]) -> list[dict[str, str]]:
-    return [{"role": "system", "content": system},
-            {"role": "user", "content": user_template.format(**variables)}]
+def render_messages(system: str, user_template: str, variables: dict[str, Any],
+                    history: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    for h in (history or []):
+        role = h.get("role")
+        content = h.get("content", "")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_template.format(**variables)})
+    return messages
 
 
 def to_replay_output(spec: StageSpec, res: ExecResult) -> ReplayOutput:
@@ -32,7 +39,7 @@ async def replay_stage(
     count_tokens: TokenCounter | None = None,
 ) -> ReplayOutput:
     system, user_template = load_variant(spec.key, version, prompts_dir=prompts_dir)
-    messages = render_messages(system, user_template, case.variables)
+    messages = render_messages(system, user_template, case.variables, case.history)
     req = EvalRequest(key=case.case_id, messages=messages, response_model=spec.response_model)
     results = await execute([req], model=model, backend=backend, count_tokens=count_tokens)
     return to_replay_output(spec, results[case.case_id])

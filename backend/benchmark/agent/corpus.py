@@ -26,6 +26,7 @@ class CorpusCase:
     rubric: str = ""
     source_run_id: int | None = None
     observed: dict[str, Any] | None = field(default=None)
+    history: list[dict[str, str]] = field(default_factory=list)
 
 
 def harvest(

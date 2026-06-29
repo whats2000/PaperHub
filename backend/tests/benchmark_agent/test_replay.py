@@ -13,6 +13,20 @@ def test_render_messages():
     assert msgs == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "MSG: hi"}]
 
 
+def test_render_messages_threads_history():
+    history = [{"role": "user", "content": "prior q"},
+               {"role": "assistant", "content": "prior a"},
+               {"role": "system", "content": "DROP ME"},   # non-user/assistant -> filtered
+               {"role": "user", "content": ""}]              # empty content -> filtered
+    msgs = render_messages("SYS", "MSG: {user_message}", {"user_message": "hi"}, history)
+    assert msgs == [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": "prior q"},
+        {"role": "assistant", "content": "prior a"},
+        {"role": "user", "content": "MSG: hi"},
+    ]
+
+
 def _seed_variant(tmp_path):
     d = tmp_path / "router"
     d.mkdir(parents=True)

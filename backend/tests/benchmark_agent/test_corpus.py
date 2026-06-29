@@ -53,6 +53,19 @@ def test_save_load_roundtrip(tmp_path):
     assert corpus.load_corpus(p) == cases
 
 
+def test_save_load_roundtrip_with_history(tmp_path):
+    history = [{"role": "user", "content": "x"}]
+    cases = [CorpusCase(case_id="x2", stage="router",
+                        variables={"user_message": "推薦幾篇", "enabled_refs_count": 1, "slide_attached": False},
+                        expect={"intent": "paper_suggest"}, rubric="anaphoric suggest",
+                        history=history)]
+    p = tmp_path / "router.edge.jsonl"
+    corpus.save_corpus(p, cases)
+    loaded = corpus.load_corpus(p)
+    assert len(loaded) == 1
+    assert loaded[0].history == history
+
+
 def test_harvest_run_ids_filter(tmp_path):
     db = tmp_path / "paperhub.db"
     _seed(db)

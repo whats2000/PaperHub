@@ -57,6 +57,13 @@ scripts/run-eval.ps1 golden --stage router --version v2 `
   editable. `v1` is seeded from the shipped registry prompt (the baseline).
 - **Test-set buckets** — `core` (target), `regression` (side-effect guard),
   `edge` (ambiguous/short), `harvest` (real production failures, promoted in).
+  Hand-authored corpus cases may include a `history` field (a list of prior
+  `{role, content}` turns) that is threaded into the prompt before the current
+  user message, enabling anaphora-resolution cases like "推薦幾篇" or "tell me
+  more about this one" to be evaluated with proper context. Harvested cases
+  currently carry no history because the production router's trace does not
+  record prior turns yet — so harvested anaphoric cases are replayed without
+  context (a future tracer enrichment, gated by the no-deploy-change rule).
 - **Two scores** — output quality (`mean_score`, 0..1; deterministic intent match
   for the router, judge otherwise) + prompt quality (`mean_tokens_in`).
 - **Reps** — N times per case for variance, so a delta is signal not noise.
