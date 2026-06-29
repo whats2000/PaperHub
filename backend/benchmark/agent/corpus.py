@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from benchmark.agent.stages import get_stage
+from benchmark.agent.stages import StageSpec, get_stage
 
 
 @dataclass
@@ -92,3 +92,22 @@ def load_corpus(path: str | Path) -> list[CorpusCase]:
         except (json.JSONDecodeError, TypeError) as exc:
             raise ValueError(f"{path}: malformed corpus line {lineno}: {exc}") from exc
     return out
+
+
+async def emit_golden(
+    spec: StageSpec, version: str, corpus: list[CorpusCase], *,
+    model: str, prompts_dir: Any, backend: str = "auto", count_tokens: Any = None,
+) -> list[dict[str, Any]]:
+    """Run the FROZEN winning variant over the corpus and return its golden
+    outputs — the cascade hinge (SRS §III-9): these become the next stage's real
+    input set, never synthesized."""
+    out: list[dict[str, Any]] = []
+    for case in corpus:
+        r = await replay_stage(spec, version, case, model=model, prompts_dir=prompts_dir,
+                               backend=backend, count_tokens=count_tokens)
+        out.append({"case_id": case.case_id, "source_run_id": case.source_run_id,
+                    "variables": case.variables, "output": r.output})
+    return out
+
+
+from benchmark.agent.replay import replay_stage  # noqa: E402, I001 — bottom import breaks the import cycle
