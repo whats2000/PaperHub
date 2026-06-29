@@ -23,5 +23,5 @@ def test_list_variants(tmp_path):
 
 
 def test_missing_variant_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match=r"router.*v9"):
         prompts.load_variant("router", "v9", prompts_dir=tmp_path)
