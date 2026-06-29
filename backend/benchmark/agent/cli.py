@@ -18,9 +18,11 @@ from pathlib import Path
 
 from benchmark.agent import corpus as corpus_mod
 from benchmark.agent import store
+from benchmark.agent.eval_config import load_eval_config
 from benchmark.agent.experiment import run_experiment as _run_experiment
 from benchmark.agent.experiment import to_store_payload
 from benchmark.agent.stages import STAGE_REGISTRY, get_stage
+from benchmark.agent.sweep import matrix_report, run_sweep
 
 _emit_golden = corpus_mod.emit_golden
 
@@ -102,6 +104,21 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    _load_env(args.env)
+    cfg = load_eval_config(args.config)
+    cells = asyncio.run(run_sweep(cfg, store_path=cfg.store, git_commit=_git_commit(),
+                                  created_at=datetime.now().isoformat(timespec="seconds"),
+                                  count_tokens=_token_counter))
+    report = matrix_report(cfg, cells)
+    out = args.out or f"benchmark/agent/results/{cfg.stage}-sweep-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(report, encoding="utf-8")
+    print(report)
+    print(f"\nWrote {out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="benchmark.agent.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -151,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     li.add_argument("--store", default=DEFAULT_STORE)
     li.add_argument("--stage", default="")
     li.set_defaults(fn=_cmd_list)
+
+    sw = sub.add_parser("sweep", help="run a variants x test-sets grid from a TOML config")
+    sw.add_argument("--config", required=True)
+    sw.add_argument("--out", default="")
+    sw.add_argument("--env", default=".env")
+    sw.set_defaults(fn=_cmd_sweep)
 
     args = ap.parse_args(argv)
     return int(args.fn(args))
