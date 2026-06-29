@@ -42,7 +42,7 @@ async def run_sweep(
                 corpus_name=ts.name, notes=f"sweep:{ts.name}")
             meta, rows = to_store_payload(result)
             exp_id = store_mod.record_experiment(store_path, meta=meta, scores=rows)
-            cells.append(SweepCell(variant=result.meta.prompt_version, testset=ts.name,
+            cells.append(SweepCell(variant=f"{spec.key}/{variant}", testset=ts.name,
                                    experiment_id=exp_id, mean_score=result.mean_score,
                                    mean_tokens_in=result.mean_tokens_in))
     return cells

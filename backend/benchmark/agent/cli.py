@@ -107,11 +107,12 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_sweep(args: argparse.Namespace) -> int:
     _load_env(args.env)
     cfg = load_eval_config(args.config)
+    now = datetime.now()
     cells = asyncio.run(run_sweep(cfg, store_path=cfg.store, git_commit=_git_commit(),
-                                  created_at=datetime.now().isoformat(timespec="seconds"),
+                                  created_at=now.isoformat(timespec="seconds"),
                                   count_tokens=_token_counter))
     report = matrix_report(cfg, cells)
-    out = args.out or f"benchmark/agent/results/{cfg.stage}-sweep-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    out = args.out or f"benchmark/agent/results/{cfg.stage}-sweep-{now.strftime('%Y%m%d-%H%M%S')}.md"
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(report, encoding="utf-8")
     print(report)

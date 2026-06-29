@@ -52,3 +52,21 @@ async def test_run_sweep_grid_and_matrix(tmp_path, monkeypatch):
     assert "router/v1" in md and "router/v2" in md and "core" in md and "regression" in md
     assert "-1.00" in md and "⚠" in md   # core regressed v1->v2
     assert "+1.00" in md                  # regression improved v1->v2
+
+
+def test_load_eval_config_rejects_invalid(tmp_path):
+    # missing model
+    bad1 = tmp_path / "bad1.toml"
+    bad1.write_text('[eval]\nstage="router"\nvariants=["v1"]\n\n[[testsets]]\nname="c"\ncorpus="x"\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_eval_config(bad1)
+    # empty variants
+    bad2 = tmp_path / "bad2.toml"
+    bad2.write_text('[eval]\nstage="router"\nmodel="m"\nvariants=[]\n\n[[testsets]]\nname="c"\ncorpus="x"\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_eval_config(bad2)
+    # no testsets
+    bad3 = tmp_path / "bad3.toml"
+    bad3.write_text('[eval]\nstage="router"\nmodel="m"\nvariants=["v1"]\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_eval_config(bad3)
