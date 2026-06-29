@@ -16,6 +16,7 @@ from benchmark.agent.execute import EvalRequest, TokenCounter, execute
 from benchmark.agent.grade import CaseScore, JudgeFn, score_case
 from benchmark.agent.prompts import load_variant
 from benchmark.agent.replay import render_messages, to_replay_output
+from benchmark.agent.replay_types import ReplayOutput
 from benchmark.agent.stages import StageSpec
 
 
@@ -65,16 +66,20 @@ async def run_experiment(
 
     scores: list[CaseScore] = []
     for (case, rep), req in zip(index, requests, strict=True):
-        replay = to_replay_output(spec, results[req.key])
+        res = results.get(req.key)
+        if res is None:
+            replay = ReplayOutput(output={}, tokens_in=None, error="missing result from executor")
+        else:
+            replay = to_replay_output(spec, res)
         scores.append(await score_case(spec, case, replay, rep,
                                        judge_model=judge_model, judge_fn=judge_fn))
 
     mean_score = _mean([s.score for s in scores if s.score is not None])
-    mean_tokens = _mean([float(s.tokens_in) for s in scores if s.tokens_in is not None])
+    mean_tokens_in = _mean([float(s.tokens_in) for s in scores if s.tokens_in is not None])
     meta = ExperimentMeta(git_commit=git_commit, stage=spec.key,
                           prompt_version=f"{spec.key}/{version}", model=model,
                           corpus=corpus_name, reps=reps, created_at=created_at, notes=notes)
-    return ExperimentResult(meta=meta, scores=scores, mean_score=mean_score, mean_tokens_in=mean_tokens)
+    return ExperimentResult(meta=meta, scores=scores, mean_score=mean_score, mean_tokens_in=mean_tokens_in)
 
 
 def to_store_payload(result: ExperimentResult) -> tuple[dict[str, Any], list[dict[str, Any]]]:
