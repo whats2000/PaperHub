@@ -1,12 +1,17 @@
 ---
 name: writing-agent-prompts
 description: >-
-  Use when writing or editing any PaperHub agent/LLM prompt — a
-  backend/src/paperhub/llm/prompts/*_v1.yaml system/user template, a new
-  agent/router/synthesizer/subagent stage, or any change to how a model is
-  instructed. Fires whenever you are tempted to hand-write one prompt and ship
-  it, tweak a single prompt line "obviously," or adopt a rewrite without
-  comparing it against the current one across multiple queries.
+  Use when writing or editing ANY PaperHub agent/LLM prompt YAML — BOTH a
+  DEPLOYMENT prompt (backend/src/paperhub/llm/prompts/*.yaml system/user
+  template) AND an EVAL/EXPERIMENT variant
+  (backend/benchmark/agent/prompts/<stage>/<version>.yaml driven by the agent
+  benchmark sweep) — a new agent/router/synthesizer/subagent stage, or any
+  change to how a model is instructed. Fires whenever you are tempted to
+  hand-write one prompt and ship it, tweak a single prompt line "obviously,"
+  or adopt a rewrite without comparing it against the current one across
+  multiple queries. Experiment/benchmark variants are NOT exempt: they get the
+  SAME discipline (>=2 variants x query set x judged comparison; concise,
+  direct, minimal-token rewrites), never a one-off draft.
 ---
 
 # Writing Agent Prompts (PaperHub)
