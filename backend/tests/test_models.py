@@ -77,7 +77,9 @@ def test_effective_query_falls_back_when_empty_or_missing() -> None:
 
 
 def test_router_prompt_mentions_resolved_query_and_clarify() -> None:
-    p = PromptRegistry().get("router/v1")
+    # Production router slot is router/v2 (Plan G2); assert on the live prompt,
+    # not the kept-as-history router/v1.
+    p = PromptRegistry().get("router/v2")
     assert "resolved_query" in p.system
     assert "clarify" in p.system
 
@@ -89,7 +91,7 @@ def test_routing_decision_accepts_paper_suggest_intent():
 
 
 def test_router_prompt_distinguishes_search_and_suggest():
-    p = PromptRegistry().get("router/v1")
+    p = PromptRegistry().get("router/v2")
     assert "paper_suggest" in p.system
     assert "paper_search" in p.system
 
