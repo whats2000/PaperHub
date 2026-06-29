@@ -44,3 +44,16 @@ def test_compare(tmp_path):
     assert cmp["mean_delta"] == 1.0
     per = {x["case_id"]: x for x in cmp["per_case"]}
     assert per["r1"]["a_score"] == 0.0 and per["r1"]["b_score"] == 1.0 and per["r1"]["delta"] == 1.0
+
+
+def test_empty_store_returns_empty(tmp_path):
+    p = tmp_path / "missing.jsonl"
+    assert store.list_experiments(p) == []
+    assert store.get_scores(p, 1) == []
+
+
+def test_list_experiments_unfiltered(tmp_path):
+    p = tmp_path / "experiments.jsonl"
+    store.record_experiment(p, meta=_meta(), scores=_scores())
+    store.record_experiment(p, meta=_meta(prompt_version="router/v2"), scores=_scores())
+    assert len(store.list_experiments(p)) == 2  # no stage filter

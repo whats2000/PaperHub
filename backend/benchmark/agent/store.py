@@ -37,6 +37,8 @@ def record_experiment(
     p.parent.mkdir(parents=True, exist_ok=True)
     existing = _read_all(p)
     exp_id = max((int(e.get("id", 0)) for e in existing), default=0) + 1
+    # `id` is always the assigned monotonic value, never taken from `meta`;
+    # `_META_KEYS` keeps `id` only so list_experiments() summaries include it.
     record = {"id": exp_id}
     record.update({k: meta.get(k) for k in _META_KEYS if k != "id"})
     record["scores"] = scores
@@ -69,6 +71,11 @@ def _case_means(scores: list[dict[str, Any]]) -> dict[str, float]:
     return {cid: sum(v) / len(v) for cid, v in by_case.items() if v}
 
 
+def _flat_mean(scores: list[dict[str, Any]]) -> float | None:
+    vals = [float(s["score"]) for s in scores if s.get("score") is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
 def compare(path: str | Path, exp_a: int, exp_b: int) -> dict[str, Any]:
     a_means = _case_means(get_scores(path, exp_a))
     b_means = _case_means(get_scores(path, exp_b))
@@ -78,8 +85,8 @@ def compare(path: str | Path, exp_a: int, exp_b: int) -> dict[str, Any]:
         b = b_means.get(cid)
         delta = (b - a) if (a is not None and b is not None) else None
         per_case.append({"case_id": cid, "a_score": a, "b_score": b, "delta": delta})
-    a_mean = sum(a_means.values()) / len(a_means) if a_means else None
-    b_mean = sum(b_means.values()) / len(b_means) if b_means else None
+    a_mean = _flat_mean(get_scores(path, exp_a))
+    b_mean = _flat_mean(get_scores(path, exp_b))
     mean_delta = (b_mean - a_mean) if (a_mean is not None and b_mean is not None) else None
     return {"a": exp_a, "b": exp_b, "a_mean": a_mean, "b_mean": b_mean,
             "mean_delta": mean_delta, "per_case": per_case}
