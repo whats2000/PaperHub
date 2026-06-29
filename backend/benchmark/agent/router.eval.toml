@@ -10,7 +10,10 @@ store       = "benchmark/agent/results/experiments.jsonl"
 prompts_dir = "benchmark/agent/prompts"
 # judge_model is only used for stages WITHOUT a deterministic score; the router
 # is graded by exact intent match, so it is omitted.
-variants    = ["v1", "v2a"]           # v2a = skill-authored concise + XML-delimited rewrite
+# v2a = current verified winner (Plan G1). v3 (Plan G2) = v2a with model_tier
+# dropped + an explicit multi-intent priority rule. v3 is benchmarked AGAINST
+# v2a (the baseline), not v1.
+variants    = ["v2a", "v3", "v3b"]
 
 [[testsets]]
 name   = "core"
@@ -23,3 +26,9 @@ corpus = "benchmark/agent/corpus/router.regression.jsonl"
 [[testsets]]
 name   = "edge"
 corpus = "benchmark/agent/corpus/router.edge.jsonl"
+
+# Plan G2: compound messages that carry >1 intent. v3's priority rule should
+# resolve these deterministically; v2a (no rule) is expected to be inconsistent.
+[[testsets]]
+name   = "multiintent"
+corpus = "benchmark/agent/corpus/router.multiintent.jsonl"
