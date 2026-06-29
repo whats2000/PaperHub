@@ -75,6 +75,10 @@ async def score_case(
     spec: StageSpec, case: CorpusCase, replay: ReplayOutput, rep: int, *,
     judge_model: str | None = None, judge_fn: JudgeFn | None = None,
 ) -> CaseScore:
+    """Score one replayed case. Deterministic check first; if it returns None
+    and judge_model is set, call judge_fn (default judge_scalar). A custom
+    judge_fn MUST accept the keyword args (request, rubric, output_text, model)
+    and return (score_0_to_1, rationale)."""
     if replay.error:
         return CaseScore(case.case_id, rep, 0.0, replay.tokens_in,
                          f"replay errored: {replay.error[:160]}", replay.output, replay.error)

@@ -41,3 +41,21 @@ async def test_judge_scalar_normalizes(monkeypatch):
     monkeypatch.setattr(grade.litellm, "acompletion", _fake)
     score, rationale = await grade.judge_scalar(request="q", rubric="r", output_text="ans", model="m")
     assert score == 0.8 and rationale == "good"
+
+
+@pytest.mark.asyncio
+async def test_judge_pairwise_maps_winner(monkeypatch):
+    async def _fake(**kw):
+        return {"choices": [{"message": {"content": '{"winner": "B", "rationale": "clearer"}'}}]}
+    monkeypatch.setattr(grade.litellm, "acompletion", _fake)
+    w = await grade.judge_pairwise(request="q", rubric="r", output_a="a", output_b="b", model="m")
+    assert w == "B"
+
+
+@pytest.mark.asyncio
+async def test_judge_pairwise_defaults_to_tie(monkeypatch):
+    async def _fake(**kw):
+        return {"choices": [{"message": {"content": '{"winner": "neither clearly", "rationale": "x"}'}}]}
+    monkeypatch.setattr(grade.litellm, "acompletion", _fake)
+    w = await grade.judge_pairwise(request="q", rubric="r", output_a="a", output_b="b", model="m")
+    assert w == "tie"
