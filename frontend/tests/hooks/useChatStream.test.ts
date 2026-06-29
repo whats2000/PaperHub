@@ -43,7 +43,7 @@ const midStreamFailure = http.post(`${API_BASE_URL}/chat`, () => {
         chunk("routing_decision", {
           run_id: 7, branch: "",
           decision: {
-            intent: "chitchat", model_tier: "small",
+            intent: "chitchat",
             confidence: 0.9, reasoning: "x",
           },
         }),
@@ -157,7 +157,7 @@ describe("useChatStream", () => {
             controller.enqueue(
               sseChunk2("routing_decision", {
                 run_id: runId, branch: "",
-                decision: { intent: "chitchat", model_tier: "small", confidence: 0.9, reasoning: "x" },
+                decision: { intent: "chitchat", confidence: 0.9, reasoning: "x" },
               }),
             );
             controller.enqueue(sseChunk2("token", { run_id: runId, branch: "", text: "A reply" }));
@@ -226,7 +226,7 @@ describe("useChatStream", () => {
             controller.enqueue(
               sseChunk2("routing_decision", {
                 run_id: runId, branch: "",
-                decision: { intent: "chitchat", model_tier: "small", confidence: 0.9, reasoning: "x" },
+                decision: { intent: "chitchat", confidence: 0.9, reasoning: "x" },
               }),
             );
             controller.enqueue(sseChunk2("token", { run_id: runId, branch: "", text: "Reply" }));
@@ -298,7 +298,7 @@ describe("useChatStream", () => {
               sseChunk("routing_decision", {
                 run_id: 1, branch: "",
                 decision: {
-                  intent: "slides", model_tier: "flagship",
+                  intent: "slides",
                   confidence: 0.95, reasoning: "generate slides",
                 },
               }),
@@ -396,7 +396,7 @@ describe("useChatStream", () => {
               sseChunk("routing_decision", {
                 run_id: 1, branch: "",
                 decision: {
-                  intent: "paper_search", model_tier: "flagship",
+                  intent: "paper_search",
                   confidence: 0.95, reasoning: "find papers",
                 },
               }),

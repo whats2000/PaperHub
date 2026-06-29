@@ -3,7 +3,7 @@ import { CHANGELOG, localizedHighlights } from "@/lib/changelog";
 
 describe("changelog loader", () => {
   it("exposes newest-first entries", () => {
-    expect(CHANGELOG[0]!.version).toBe("2.37.1");
+    expect(CHANGELOG[0]!.version).toBe("2.38.0");
   });
 
   it("returns locale highlights, falling back to en", () => {

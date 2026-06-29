@@ -28,7 +28,7 @@ export const chitchatHappyPath = http.post(`${API_BASE_URL}/chat`, () => {
         sseChunk("routing_decision", {
           run_id: 1, branch: "",
           decision: {
-            intent: "chitchat", model_tier: "small",
+            intent: "chitchat",
             confidence: 0.9, reasoning: "greeting",
           },
         }),

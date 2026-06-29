@@ -166,7 +166,6 @@ describe("hydrateSessionMessages", () => {
       created_at: "t2",
       routing_decision: {
         intent: "chitchat",
-        model_tier: "small",
         confidence: 0.9,
         reasoning: "qa",
       },

@@ -29,7 +29,7 @@ export function RoutingBadge({ decision }: { decision: RoutingDecision }) {
             {t(`routing.${decision.intent}`)}
           </Badge>
           <span className="text-muted-foreground">
-            {Math.round(conf * 100)}% · {decision.model_tier}
+            {Math.round(conf * 100)}%
           </span>
         </TooltipTrigger>
         <TooltipContent>

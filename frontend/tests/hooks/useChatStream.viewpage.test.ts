@@ -38,7 +38,6 @@ function captureBodyHandler(captured: { body?: Record<string, unknown> }) {
             branch: "",
             decision: {
               intent: "slides",
-              model_tier: "flagship",
               confidence: 0.95,
               reasoning: "x",
             },
