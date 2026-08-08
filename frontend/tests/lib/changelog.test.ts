@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { CHANGELOG, localizedHighlights } from "@/lib/changelog";
 
 describe("changelog loader", () => {
-  it("exposes newest-first entries", () => {
-    expect(CHANGELOG[0]!.version).toBe("2.37.1");
+  // Anchored to the app version (Vite `define`, sourced from package.json) rather
+  // than a literal: merge-prep bumps package.json and prepends the changelog entry
+  // in the same release, so a hardcoded version silently goes stale between them.
+  it("leads with the shipped app version", () => {
+    expect(CHANGELOG[0]!.version).toBe(__APP_VERSION__);
   });
 
   it("returns locale highlights, falling back to en", () => {
