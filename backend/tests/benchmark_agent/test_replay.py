@@ -4,8 +4,7 @@ from benchmark.agent import replay
 from benchmark.agent.corpus import CorpusCase
 from benchmark.agent.execute import ExecResult
 from benchmark.agent.replay import render_messages, replay_stage
-from benchmark.agent.stages import get_stage
-from paperhub.models.domain import RoutingDecision
+from benchmark.agent.stages import RouterEvalOutput, get_stage
 
 
 def test_render_messages():
@@ -38,8 +37,8 @@ async def test_replay_stage_maps_execresult(tmp_path, monkeypatch):
     _seed_variant(tmp_path)
 
     async def _fake_execute(requests, **kw):
-        d = RoutingDecision(intent="paper_qa", model_tier="small", confidence=0.8,
-                            reasoning="x", resolved_query="q", response_language="English")
+        d = RouterEvalOutput(intent="paper_qa", confidence=0.8,
+                             reasoning="x", resolved_query="q", response_language="English")
         return {requests[0].key: ExecResult(requests[0].key, d, 33, None, "concurrent")}
 
     monkeypatch.setattr(replay, "execute", _fake_execute)

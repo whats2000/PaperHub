@@ -20,7 +20,7 @@ _ROUTER_VARS = {"user_message": "find papers on MoE", "enabled_refs_count": 0,
                 "slide_attached": False}
 
 _VALID_DECISION = (
-    '{"intent":"paper_search","model_tier":"small",'
+    '{"intent":"paper_search",'
     '"confidence":0.9,"reasoning":"asks to find papers"}'
 )
 
@@ -62,7 +62,7 @@ async def test_structured_output_parses_into_model() -> None:
                    "enabled_refs_count": 0, "slide_attached": False},
         response_model=RoutingDecision,
         model="gpt-4o-mini",
-        mock_response='{"intent":"paper_search","model_tier":"small",'
+        mock_response='{"intent":"paper_search",'
                       '"confidence":0.91,"reasoning":"asks to find papers"}',
     )
     assert decision.intent == "paper_search"
@@ -429,7 +429,7 @@ async def test_structured_with_history_builds_correct_messages() -> None:
         response_model=RoutingDecision,
         model="gpt-4o-mini",
         history=history,
-        mock_response='{"intent":"chitchat","model_tier":"small",'
+        mock_response='{"intent":"chitchat",'
                       '"confidence":0.9,"reasoning":"follow-up"}',
     )
 

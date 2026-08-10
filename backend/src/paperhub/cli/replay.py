@@ -29,7 +29,6 @@ async def replay_run(conn: aiosqlite.Connection, *, run_id: int) -> str:
     lines: list[str] = [
         f"run {run_id} (session {session_id}, status={status})",
         f"  intent={decision.get('intent','?')} "
-        f"tier={decision.get('model_tier','?')} "
         f"conf={decision.get('confidence','?')}",
     ]
     for branch, step_index, agent, tool, model, st, latency_ms, error in steps:

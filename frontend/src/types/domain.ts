@@ -8,13 +8,11 @@ export type Intent =
   | "clarify"
   | "chitchat";
 
-export type ModelTier = "small" | "flagship";
 export type ToolStatus = "ok" | "error" | "rejected";
 export type Branch = "" | "A" | "B";
 
 export interface RoutingDecision {
   intent: Intent;
-  model_tier: ModelTier;
   confidence: number;
   reasoning: string;
 }

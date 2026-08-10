@@ -159,7 +159,7 @@ def _state() -> dict[str, Any]:
         "effective_query": "Make a deck.",
         "response_language": "English",
         "routing_decision": RoutingDecision(
-            intent="slides", model_tier="flagship", confidence=0.9, reasoning="x"
+            intent="slides", confidence=0.9, reasoning="x"
         ),
     }
 

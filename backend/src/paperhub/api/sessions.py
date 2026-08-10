@@ -51,7 +51,6 @@ class SessionSummary(BaseModel):
 
 class RoutingDecisionOut(BaseModel):
     intent: str
-    model_tier: str
     confidence: float
     reasoning: str
 

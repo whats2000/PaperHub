@@ -10,7 +10,7 @@ async def test_replay_reconstructs_step_sequence(
     await migrated_db.execute(
         "INSERT INTO runs (session_id, routing_decision_json, status) "
         "VALUES (1, ?, 'ok')",
-        ('{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"x"}',),
+        ('{"intent":"chitchat","confidence":0.9,"reasoning":"x"}',),
     )
     await migrated_db.commit()
     for idx, (agent, tool) in enumerate([("router", "classify"), ("chitchat", "generate")]):

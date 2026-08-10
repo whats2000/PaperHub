@@ -76,7 +76,7 @@ def _route_slides(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the router to land on the slides intent (no real LLM call)."""
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides","model_tier":"small",'
+        '{"intent":"slides",'
         '"confidence":0.95,"reasoning":"slide intent"}',
     )
 

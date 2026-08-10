@@ -1,5 +1,27 @@
 [
   {
+    "version": "2.39.0",
+    "date": "2026-08-10",
+    "highlights": {
+      "en": [
+        "Smarter request routing — compound messages like \"find the Mamba paper and make slides\" or \"remember this and also recommend related papers\" now pick the right first action, consistently across phrasings.",
+        "Cleaner routing badge — removed the internal model-tier label (it didn't reflect the model actually used); the badge now shows just the intent and confidence."
+      ],
+      "zh-TW": [
+        "更聰明的請求路由 — 像「找 Mamba 論文並做成投影片」或「記住這點並推薦相關論文」這類複合指令，現在會正確地先執行對的動作，且對不同措辭更一致。",
+        "更簡潔的路由標籤 — 移除了內部的模型層級標示（它並未反映實際使用的模型），現在只顯示意圖與信心分數。"
+      ],
+      "zh-CN": [
+        "更智能的请求路由 — 像“找 Mamba 论文并做成幻灯片”或“记住这点并推荐相关论文”这类复合指令，现在会正确地先执行对的动作，且对不同措辞更一致。",
+        "更简洁的路由标签 — 移除了内部的模型层级标识（它并未反映实际使用的模型），现在只显示意图与置信度。"
+      ],
+      "ja": [
+        "よりスマートなルーティング — 「Mamba の論文を探してスライドを作って」「これを覚えて、関連論文も薦めて」といった複合指示でも、正しい最初のアクションを一貫して選ぶようになりました。",
+        "ルーティングバッジを簡潔化 — 実際に使用したモデルを反映していなかった内部のモデルティア表示を削除し、意図と確信度のみを表示します。"
+      ]
+    }
+  },
+  {
     "version": "2.38.0",
     "date": "2026-06-29",
     "highlights": {

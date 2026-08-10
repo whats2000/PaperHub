@@ -27,7 +27,7 @@ async def test_router_node_returns_routing_decision(
         adapter=adapter,
         tracer=tracer,
         model="gpt-4o-mini",
-        mock_response='{"intent":"paper_search","model_tier":"small",'
+        mock_response='{"intent":"paper_search",'
                       '"confidence":0.91,"reasoning":"asks to find"}',
     )
     assert updated["routing_decision"].intent == "paper_search"
@@ -49,7 +49,7 @@ async def test_router_propagates_response_language(
     adapter = LiteLlmAdapter()
     updated = await router_node(
         state, adapter=adapter, tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"paper_suggest","model_tier":"small",'
+        mock_response='{"intent":"paper_suggest",'
                       '"confidence":0.9,"reasoning":"topic recs",'
                       '"resolved_query":"recommend papers on MoE routing",'
                       '"response_language":"Traditional Chinese"}',
@@ -73,7 +73,7 @@ async def test_router_response_language_defaults_empty(
     adapter = LiteLlmAdapter()
     updated = await router_node(
         state, adapter=adapter, tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"chitchat","model_tier":"small",'
+        mock_response='{"intent":"chitchat",'
                       '"confidence":0.8,"reasoning":"greeting"}',
     )
     assert updated["routing_decision"].response_language == ""
@@ -93,7 +93,7 @@ async def test_router_persists_decision_on_run(
     adapter = LiteLlmAdapter()
     await router_node(
         state, adapter=adapter, tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"chitchat","model_tier":"small",'
+        mock_response='{"intent":"chitchat",'
                       '"confidence":0.8,"reasoning":"greeting"}',
     )
     async with migrated_db.execute(
@@ -116,7 +116,7 @@ async def test_router_writes_tool_call_row(
     }
     await router_node(
         state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
-        mock_response='{"intent":"chitchat","model_tier":"small",'
+        mock_response='{"intent":"chitchat",'
                       '"confidence":0.8,"reasoning":"greeting"}',
     )
     async with migrated_db.execute(
@@ -144,7 +144,7 @@ async def test_router_classifies_memory_intent(
         adapter=adapter,
         tracer=tracer,
         model="gpt-4o-mini",
-        mock_response='{"intent":"memory","model_tier":"small",'
+        mock_response='{"intent":"memory",'
                       '"confidence":0.95,"reasoning":"user asks to store a preference"}',
     )
     assert updated["routing_decision"].intent == "memory"
@@ -183,7 +183,7 @@ async def test_deck_followups_route_to_slides(
             tracer=tracer,
             model="gpt-4o-mini",
             mock_response=json.dumps({
-                "intent": "slides", "model_tier": "flagship",
+                "intent": "slides",
                 "confidence": 0.95, "reasoning": "deck follow-up",
                 "resolved_query": msg,
                 "response_language": "Traditional Chinese" if "繁體" in msg or "改" in msg else "English",
@@ -219,7 +219,7 @@ async def test_routing_accuracy_at_least_80_percent(
         kwargs: dict[str, object] = {}
         if not os.environ.get("PAPERHUB_ROUTER_LIVE"):
             kwargs["mock_response"] = json.dumps({
-                "intent": row["expected"], "model_tier": "small",
+                "intent": row["expected"],
                 "confidence": 0.9, "reasoning": "fixture",
             })
         result = await router_node(
@@ -244,7 +244,7 @@ async def test_router_surfaces_slide_attached_variable(migrated_db, fake_tracer)
         async def structured(self, *, slot, variables, response_model, model, **__):
             captured.update(variables)
             return response_model(
-                intent="paper_qa", model_tier="flagship", confidence=1.0,
+                intent="paper_qa", confidence=1.0,
                 reasoning="x", resolved_query="explain this graph",
                 response_language="English")
 
@@ -264,7 +264,7 @@ async def test_router_slide_attached_defaults_false(migrated_db, fake_tracer) ->
         async def structured(self, *, slot, variables, response_model, model, **__):
             captured.update(variables)
             return response_model(
-                intent="chitchat", model_tier="small", confidence=1.0,
+                intent="chitchat", confidence=1.0,
                 reasoning="x", resolved_query="hi", response_language="English")
 
     # State intentionally omits slide_attached — bool(state.get(...)) must yield False.

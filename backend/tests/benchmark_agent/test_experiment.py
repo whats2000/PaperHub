@@ -4,8 +4,7 @@ from benchmark.agent import experiment, store
 from benchmark.agent.corpus import CorpusCase
 from benchmark.agent.execute import ExecResult
 from benchmark.agent.experiment import run_experiment, to_store_payload
-from benchmark.agent.stages import get_stage
-from paperhub.models.domain import RoutingDecision
+from benchmark.agent.stages import RouterEvalOutput, get_stage
 
 
 def _seed_variant(tmp_path):
@@ -28,8 +27,8 @@ async def test_run_experiment_aggregates_and_persists(tmp_path, monkeypatch):
     _seed_variant(tmp_path)
 
     async def _fake_execute(requests, **kw):
-        d = RoutingDecision(intent="paper_qa", model_tier="small", confidence=0.9,
-                            reasoning="x", resolved_query="q", response_language="English")
+        d = RouterEvalOutput(intent="paper_qa", confidence=0.9,
+                             reasoning="x", resolved_query="q", response_language="English")
         return {r.key: ExecResult(r.key, d, 100, None, "concurrent") for r in requests}
 
     monkeypatch.setattr(experiment, "execute", _fake_execute)
@@ -54,8 +53,8 @@ async def test_run_experiment_missing_result_becomes_error(tmp_path, monkeypatch
     _seed_variant(tmp_path)
 
     async def _partial_execute(requests, **kw):
-        d = RoutingDecision(intent="paper_qa", model_tier="small", confidence=0.9,
-                            reasoning="x", resolved_query="q", response_language="English")
+        d = RouterEvalOutput(intent="paper_qa", confidence=0.9,
+                             reasoning="x", resolved_query="q", response_language="English")
         # Drop the LAST request's key to simulate a partial executor failure.
         return {r.key: ExecResult(r.key, d, 100, None, "concurrent") for r in requests[:-1]}
 

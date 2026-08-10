@@ -7,7 +7,6 @@ from paperhub.models.slide_domain import DeckOutline
 Intent = Literal[
     "paper_search", "paper_suggest", "paper_qa", "slides", "library_stats", "memory", "chitchat", "clarify",
 ]
-ModelTier = Literal["small", "flagship"]
 ToolStatus = Literal["ok", "error", "rejected"]
 Branch = Literal["", "A", "B"]
 PaperQaStrategy = Literal["compare", "find"]
@@ -30,7 +29,6 @@ class SectionEntry(BaseModel):
 class RoutingDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     intent: Intent
-    model_tier: ModelTier
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     # v2.11: self-contained, anaphora-free rewrite of the user's latest

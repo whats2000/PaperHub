@@ -85,7 +85,7 @@ async def _consume_sse(stream: AsyncIterator[bytes]) -> list[tuple[str, dict]]:
 async def test_chat_sse_chitchat_round_trip(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_ROUTER_MOCK",
-                       '{"intent":"chitchat","model_tier":"small",'
+                       '{"intent":"chitchat",'
                        '"confidence":0.9,"reasoning":"greeting"}')
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "Hello there!")
     await _bootstrap_schema(tmp_path)
@@ -113,7 +113,7 @@ async def test_chat_sse_paper_search_one_shot(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search","model_tier":"flagship",'
+        '{"intent":"paper_search",'
         '"confidence":0.95,"reasoning":"add paper"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -160,7 +160,7 @@ async def test_chat_sse_paper_qa_streams(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_qa","model_tier":"flagship",'
+        '{"intent":"paper_qa",'
         '"confidence":0.97,"reasoning":"asks about paper content"}',
     )
 
@@ -237,7 +237,7 @@ async def test_chat_sse_paper_qa_empty_refs_no_double_emit(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_qa","model_tier":"flagship",'
+        '{"intent":"paper_qa",'
         '"confidence":0.97,"reasoning":"asks about paper"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -289,7 +289,7 @@ async def test_chat_emits_session_event_first(tmp_path: Any, monkeypatch: Any) -
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small","confidence":1.0,"reasoning":"x"}',
+        '{"intent":"chitchat","confidence":1.0,"reasoning":"x"}',
     )
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hi")
     await _bootstrap_schema(tmp_path)
@@ -321,7 +321,7 @@ async def test_chat_reuses_session_when_session_id_provided(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small","confidence":1.0,"reasoning":"x"}',
+        '{"intent":"chitchat","confidence":1.0,"reasoning":"x"}',
     )
     monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "hello")
     await _bootstrap_schema(tmp_path)
@@ -372,7 +372,7 @@ async def test_chat_sse_exception_text_is_redacted(tmp_path: Any, monkeypatch: A
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+        '{"intent":"chitchat","confidence":0.9,"reasoning":"hi"}',
     )
     await _bootstrap_schema(tmp_path)
 
@@ -423,7 +423,7 @@ async def test_chat_sse_emits_error_event_on_router_failure(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+        '{"intent":"chitchat","confidence":0.9,"reasoning":"hi"}',
     )
     await _bootstrap_schema(tmp_path)
 
@@ -472,7 +472,7 @@ async def test_chat_sse_cancellation_finalises_run(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat","model_tier":"small","confidence":0.9,"reasoning":"hi"}',
+        '{"intent":"chitchat","confidence":0.9,"reasoning":"hi"}',
     )
     await _bootstrap_schema(tmp_path)
 
@@ -525,7 +525,7 @@ async def test_paper_search_streams_tool_step_events_incrementally(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search","model_tier":"flagship",'
+        '{"intent":"paper_search",'
         '"confidence":0.95,"reasoning":"find papers"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -637,7 +637,7 @@ async def _setup_paper_search_test(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search","model_tier":"flagship",'
+        '{"intent":"paper_search",'
         '"confidence":0.95,"reasoning":"find papers"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -1004,7 +1004,7 @@ async def test_chat_sse_paper_suggest_runs_pipeline(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_suggest","model_tier":"small","confidence":0.95,'
+        '{"intent":"paper_suggest","confidence":0.95,'
         '"reasoning":"topic","resolved_query":"recommend papers on retrieval augmented generation"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -1054,7 +1054,7 @@ async def test_chat_sse_library_stats_streams_tokens(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"library_stats","model_tier":"small","confidence":0.95,'
+        '{"intent":"library_stats","confidence":0.95,'
         '"reasoning":"count papers"}',
     )
     await _bootstrap_schema(tmp_path)
@@ -1111,7 +1111,7 @@ async def test_chat_sse_memory_intent_persists_row_and_emits_final(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"memory","model_tier":"small","confidence":0.95,'
+        '{"intent":"memory","confidence":0.95,'
         '"reasoning":"user wants to store a preference"}',
     )
 
@@ -1192,7 +1192,7 @@ async def test_chat_sse_clarify_surfaces_question_no_pipeline(
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv(
         "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"clarify","model_tier":"small","confidence":0.4,'
+        '{"intent":"clarify","confidence":0.4,'
         '"reasoning":"ambiguous","resolved_query":"Which topic do you mean?"}',
     )
     await _bootstrap_schema(tmp_path)

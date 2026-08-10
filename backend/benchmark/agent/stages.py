@@ -11,9 +11,30 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from paperhub.models.domain import RoutingDecision
+
+class RouterEvalOutput(BaseModel):
+    """Eval-local router output — the graded fields only, **tolerant** of
+    ``model_tier`` being present (``v1``/``v2a`` emit it) OR absent (``v3``
+    drops it).
+
+    Deliberately decoupled from the production ``RoutingDecision`` (which is
+    ``extra="forbid"`` and still REQUIRES ``model_tier`` until Plan G2's deploy
+    cleanup lands): a strict prod-schema parse would reject ``v3`` (missing
+    field) before G2 and reject ``v1``/``v2a`` (extra field) after, so the two
+    sides of the model_tier-removal boundary could never be swept head-to-head.
+    Pydantic v2 ignores unknown fields by default; ``extra="ignore"`` is set
+    explicitly so an emitted ``model_tier`` is dropped, not an error. Router
+    grading is exact-intent-match, so the dropped field never affects a score.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    intent: str
+    confidence: float = 0.0
+    reasoning: str = ""
+    resolved_query: str | None = None
+    response_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,7 +57,7 @@ def _router_variables(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _router_output(obj: Any) -> dict[str, Any]:
-    d = obj if isinstance(obj, RoutingDecision) else RoutingDecision.model_validate(obj)
+    d = obj if isinstance(obj, RouterEvalOutput) else RouterEvalOutput.model_validate(obj)
     return {"intent": d.intent, "resolved_query": d.resolved_query,
             "response_language": d.response_language, "confidence": d.confidence}
 
@@ -50,7 +71,7 @@ def _router_score(expect: dict[str, Any], output: dict[str, Any]) -> float | Non
 
 ROUTER = StageSpec(
     key="router", trace_agent="router", trace_tool="classify",
-    response_model=RoutingDecision, variables_from_args=_router_variables,
+    response_model=RouterEvalOutput, variables_from_args=_router_variables,
     output_summary=_router_output, deterministic_score=_router_score,
 )
 
