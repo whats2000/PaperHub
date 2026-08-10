@@ -4,7 +4,7 @@
 [eval]
 stage       = "router"
 model       = "gemini/gemini-3.1-flash-lite"
-reps        = 3                       # variance — a delta within noise is not a win
+reps        = 5                       # >=5 reps: router multi-intent tie-breaks are subtle (writing-agent-prompts)
 backend     = "auto"                  # provider Batch API where available, else concurrent
 store       = "benchmark/agent/results/experiments.jsonl"
 prompts_dir = "benchmark/agent/prompts"
@@ -13,7 +13,7 @@ prompts_dir = "benchmark/agent/prompts"
 # v2a = current verified winner (Plan G1). v3 (Plan G2) = v2a with model_tier
 # dropped + an explicit multi-intent priority rule. v3 is benchmarked AGAINST
 # v2a (the baseline), not v1.
-variants    = ["v2a", "v3", "v3b", "v3c"]
+variants    = ["v1", "v2a", "v3c"]     # incumbent v1 (old deploy) vs prior-best v2a vs shipped v3c
 
 [[testsets]]
 name   = "core"
