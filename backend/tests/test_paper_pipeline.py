@@ -80,7 +80,7 @@ class _FakeMarker:
 
 
 # ---------------------------------------------------------------------------
-# Fake ArxivResult (returned by mocked search_arxiv)
+# Fake ArxivResult (returned by mocked fetch_arxiv_by_id)
 # ---------------------------------------------------------------------------
 
 _FAKE_ARXIV_RESULT = ArxivResult(
@@ -187,8 +187,8 @@ def _make_fake_download(source_dir: Path) -> MagicMock:
     return mock
 
 
-def _fake_search_arxiv(query: str, max_results: int = 10) -> list[ArxivResult]:
-    return [_FAKE_ARXIV_RESULT]
+def _fake_fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
+    return _FAKE_ARXIV_RESULT
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +219,8 @@ async def test_ingest_arxiv_cache_miss_creates_paper_content_and_chunks(
             side_effect=fake_download,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
     ):
         result = await pipeline.ingest(
@@ -298,8 +298,8 @@ async def test_ingest_arxiv_renders_from_flattened_source(
             side_effect=_make_fake_download(_ARXIV_SAMPLE),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
         patch(
             "paperhub.pipelines.paper_pipeline.render_html",
@@ -341,8 +341,8 @@ async def test_ingest_arxiv_cache_hit_skips_pipeline(
             new=download_mock,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
     ):
         # First call — cache miss.
@@ -597,8 +597,8 @@ async def test_paper_pipeline_persists_sections_json_at_ingest(
             side_effect=fake_download,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
     ):
         result = await pipeline.ingest(
@@ -727,8 +727,8 @@ async def test_latex_ingest_persists_dom_ids(
             side_effect=_make_fake_download(src_dir),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
         patch(
             "paperhub.pipelines.paper_pipeline.render_html",
@@ -928,8 +928,8 @@ async def test_arxiv_latex_ingest_asset_status_is_latex(
             side_effect=_make_fake_download(_ARXIV_SAMPLE),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
     ):
         res = await pipeline.ingest(
@@ -1010,8 +1010,8 @@ Some body text here is present in the introduction section of this document.
             side_effect=fake_dl,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.search_arxiv",
-            side_effect=_fake_search_arxiv,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            side_effect=_fake_fetch_arxiv_by_id,
         ),
     ):
         res = await pipeline.ingest(
@@ -1135,3 +1135,48 @@ async def test_concurrent_writes_serialise_through_write_transaction(
     assert len(set(papers_ids)) == 3, (
         f"expected 3 distinct papers row ids, got {papers_ids}"
     )
+
+
+# ---------------------------------------------------------------------------
+# arXiv metadata API unavailable (HTTP 429 / 503) must NOT fail the ingest:
+# the title falls back to the downloaded LaTeX source's \title{}.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ingest_arxiv_metadata_unavailable_uses_latex_title(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    pipeline, conn, _cache_root = pipeline_env
+    await conn.execute("INSERT INTO chat_sessions (title) VALUES ('t')")
+    await conn.commit()
+    async with conn.execute("SELECT last_insert_rowid()") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    session_id = int(row[0])
+
+    with (
+        patch(
+            "paperhub.pipelines.paper_pipeline.download_arxiv_source",
+            side_effect=_make_fake_download(_ARXIV_SAMPLE),
+        ),
+        patch(
+            # fetch_arxiv_by_id returns None on any API error (429/503).
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            return_value=None,
+        ),
+    ):
+        result = await pipeline.ingest(
+            IngestRequest(session_id=session_id, arxiv_id=_FIXTURE_ARXIV_ID)
+        )
+
+    assert result.cache_hit is False
+    assert result.title == "A Tiny Test Paper on Mixture of Experts"
+    async with conn.execute(
+        "SELECT title FROM paper_content WHERE id = ?",
+        (result.paper_content_id,),
+    ) as cur:
+        pc = await cur.fetchone()
+    assert pc is not None
+    assert pc[0] == "A Tiny Test Paper on Mixture of Experts"
