@@ -15,9 +15,7 @@
     "slides": "スライド",
     "slidesTooltip": "スライドデッキのパネルを切り替え",
     "stop": "停止",
-    "stopTooltip": "生成を停止",
-    "compare": "比較",
-    "compareTooltip": "Plan Gで提供予定 — 同じプロンプトを2つのモデルに展開"
+    "stopTooltip": "生成を停止"
   },
   "slideChip": {
     "label": "スライド {{page}}",

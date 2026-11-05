@@ -60,7 +60,7 @@ describe("Composer", () => {
     expect(textbox.value).toBe("");
   });
 
-  it("renders the AttachPaperMenu trigger, enabled References/Memory/Slides toggles, and 1 disabled capability button", () => {
+  it("renders the AttachPaperMenu trigger, enabled References/Memory/Slides toggles, and no Compare placeholder", () => {
     render(<Composer onSubmit={() => {}} disabled={false} />);
     // The paperclip is now an enabled AttachPaperMenu popover trigger.
     const attach = screen.getByRole("button", { name: /attach paper/i });
@@ -71,9 +71,8 @@ describe("Composer", () => {
     expect(screen.getByRole("button", { name: /^memory$/i })).toBeEnabled();
     // Slides button is now an active toggle (Plan F) — no longer disabled.
     expect(screen.getByRole("button", { name: /^slides$/i })).toBeEnabled();
-    // Only Compare remains as a disabled placeholder capability.
-    const compareBtn = screen.getByRole("button", { name: "Compare" });
-    expect(compareBtn).toBeDisabled();
+    // The Compare placeholder is gone — FR-04 Compare view was dropped.
+    expect(screen.queryByRole("button", { name: "Compare" })).toBeNull();
   });
 
   it("Slides toggle button calls onToggleSlides and reflects slidesOpen state", async () => {
