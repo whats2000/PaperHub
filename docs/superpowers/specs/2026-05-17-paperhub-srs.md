@@ -917,7 +917,11 @@ Markers: **[user]** = decided by the user in the 2026-11-05 design session; **[c
 - **Data-visualisation components are exempt from the neutral-UI palette** [user]: a chart/graph should encode information visually and may use categorical colour, size, shape and direction — but every categorical palette is checked with the dataviz validator against the app's light and dark surfaces, and text in a chart wears text tokens, not series colours.
 - **Never mix colours in a hue space** (`color-mix(in oklch, …)`): an achromatic token has hue 0, so the mix drifts toward red. Mix in `oklab` / `srgb` if mixing is needed.
 - **Motion reuses existing patterns** [user]: popover/menu enter = fade + zoom-in-95 (~150 ms); collapse/expand = height animation ~200 ms ease-out (shadcn Collapsible); drawers slide with `transform` only — **never animate a width that content flows in** (it reflows text every frame).
+- **Motion follows what the user expects from the action** [user]: ←/→ navigation slides in its direction (never a fade); a dropdown grows from its trigger and shrinks back into it; an inline expander opens downward and collapses toward its header so content below glides. **Every exit animates too** — cancel, close, Escape, outside-click — never an instant unmount where the user can see it go. Content that expands out of view is scrolled into view (smoothly; instant under `prefers-reduced-motion`). Recorded as a CLAUDE.md convention.
 - **A drawer overlays** (fixed width, slides over the content) instead of squeezing it; controls and reference panels it would cover move aside or are sized for the drawer-open width so opening/closing never reflows them.
+- **Drawer vs master–detail** [user]: an on-demand detail (an idea in the graph) is an overlay drawer; when the detail *is* the page's core task (a selected stage's cases on the Feedback page) it is a **permanent master–detail pane with a preselected item** — never a reserved-but-empty column.
+- **Stay in the page** [user]: a task started on a page (confirming feedback, dismissing an idea) completes inline on that page — no navigation to a separate screen and back.
+- **Layout fills by flex, never by another component's hard-coded height** [user]: the app is a 100 vh flex column with exactly one scroll container per region (no outer + inner double scrollbars); the sidebar header and every page header share one height token so their bottom rules align.
 - Implementation lessons from the prototype: the `hidden` attribute must not be defeated by a component's own `display` rule; mode/state class names must be component-scoped (a generic `.side` collided across two components).
 
 ### III-10.1 H1 — Bilingual reading (FR-17, issue #36)
@@ -984,13 +988,23 @@ Markers: **[user]** = decided by the user in the 2026-11-05 design session; **[c
 
 **Storage** [call]. New table `feedback`: run id, message id, kind (explicit / implicit), polarity, reasons, other text, correction text, reviewer verdict and status, timestamps. H2 also ships the `paper_content` private flag and its upload checkbox (§III-10.3), since the export's private-document option is its first consumer.
 
-**Feedback page (FR-19)** — a sidebar entry above the chat list, alongside Ideas [user approved the preview]
-- KPIs: answers with feedback, approval rate (explicit), confirmed implicit flags, items needing confirmation.
-- Negative reasons as bars per stage, explicit and implicit shaded separately.
-- Recent feedback with filters (explicit / implicit / needs confirmation / agent); each item links to its session and run trace; queue items have confirm / reject.
-- "Other reason" texts are listed for manual promotion into the presets — no automatic promotion [call].
-- Export panel and the G1 action below.
-- **Ideation feedback panel** (H3 → flywheel): save rate, "worked" rate after trying, dismissal reasons; an action writes them to the G1 inbox as the **ideation-stage eval data** (§III-10.3 *Idea management*).
+**Feedback page (FR-19)** — a sidebar entry above the chat list, alongside Ideas, with a count badge of items needing confirmation [user approved the interactive prototype]. Laid out around **three user moments**, top to bottom:
+
+1. **"Only you can answer this" — confirm uncertain implicit flags** (shown only while the queue is non-empty)
+   - A one-line banner ("N items need your confirmation — the reviewer can't tell whether you were pointing out an error") with **Start confirming**.
+   - Starting expands the card **in place and takes the full page body**: it grows to fill the view and pushes the analysis below out (flex-grow transition); **Collapse** returns it. Inside, the header (question, the reviewer's doubt, ‹ › and progress dots, progress bar) and the submit row stay fixed; **only the conversation scrolls** [user].
+   - **Full conversation context** [user — "without context I can't tell whether it was a misjudgement"]: session title, papers and run id; the earlier turns (shown, collapsible in place); the questioned answer; the flagged user message (outlined); and **the system's next reply** (it often shows whether the system already took it as a correction). Long assistant answers are **clamped** (2 lines for context turns, 3 for the questioned answer) with an in-place "show full text" toggle that appears only when the text is actually truncated; opening an item scrolls the conversation to the questioned exchange.
+   - Per item: reason chips (the preset list, the reviewer's guess pre-selected as "system guess") and **Yes, the answer was wrong (Y)** / **No, I was adding detail or changing topic (N)**.
+   - **Draft, then submit** [user]: answers are a draft — answering auto-advances to the next unanswered item; ‹ › / ← → / clicking a dot goes back to revise (dots show ✓ / ✗ / number); **Submit N** (Ctrl + Enter) commits only the answered items; unanswered ones stay queued. The analysis below changes only on submit. Item changes **slide horizontally in the navigation direction** [user].
+   - When the queue empties: a short inline "all done" message that fades out.
+2. **"Where does the system go wrong?" — stage analysis (master–detail)**
+   - KPI row: answers with feedback, approval rate (explicit), negatives (explicit · implicit), idea save rate.
+   - Left: one row per agent stage — stacked explicit/implicit bar, total, 4-week sparkline and week-over-week delta; the **top stage is preselected**.
+   - Right (permanent pane): the selected stage's cases (question, explicit/implicit, run, "view conversation" / "view trace"), checkboxes, and **Send to G1 to-label (N)** — the G1 bridge below.
+   - "Other reason" texts with counts, each with **promote to preset** — manual only, no automatic promotion [call].
+3. **"How good are the ideas?" — ideation feedback** (a separate block, H3 → flywheel): save rate, "worked" rate after trying, dismissal reasons; **Write to ideation eval data** sends them to the G1 inbox (§III-10.3 *Idea management*).
+
+- **Export training data** is a header action opening a dialog: options (below) with a **live summary** of what will be exported (counts per format, whether private documents are included) before writing.
 - Charts on this page follow the dataviz rules: the explicit-vs-implicit stacked bars use two categorical colours that pass the validator on both surfaces (all-pairs), with a legend, direct totals, hover values and a table view.
 
 **Export (Hugging Face)**
