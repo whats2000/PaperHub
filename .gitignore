@@ -108,3 +108,6 @@ marker_service/*.local.*
 
 # benchmark results
 results/
+
+# superpowers skill scratch (brainstorm / sdd)
+.superpowers/

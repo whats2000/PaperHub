@@ -24,7 +24,7 @@ interface Props {
  * Inline panel rendering the active session's reference list.  Designed to
  * live inside the left Sidebar's References tab; carries no drawer chrome of
  * its own.  The right edge of the screen is reserved for Plan D's Citation
- * Canvas, Plan F's Slide Preview, and Plan G's Compare Split.
+ * Canvas and Plan F's Slide Preview.
  */
 export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
   const { t } = useTranslation("references");

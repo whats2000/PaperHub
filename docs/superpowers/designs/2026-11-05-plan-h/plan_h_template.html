@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaperHub Plan H 設計稿</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.0.1/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<style>
+/* ===== tokens: verbatim from frontend/src/index.css ===== */
+:root { --head-h:57px; --background:oklch(1 0 0); --foreground:oklch(0.145 0 0); --card:oklch(1 0 0); --popover:oklch(1 0 0); --popover-foreground:oklch(0.145 0 0);
+  --primary:oklch(0.205 0 0); --primary-foreground:oklch(0.985 0 0); --secondary:oklch(0.97 0 0); --muted:oklch(0.97 0 0); --muted-foreground:oklch(0.556 0 0);
+  --accent:oklch(0.97 0 0); --accent-foreground:oklch(0.205 0 0); --destructive:oklch(0.577 0.245 27.325); --border:oklch(0.922 0 0); --input:oklch(0.922 0 0);
+  --ring:oklch(0.708 0 0); --sidebar:oklch(0.985 0 0); --sidebar-accent:oklch(0.97 0 0); --sidebar-border:oklch(0.922 0 0); --radius:0.625rem;
+  /* data-viz only (validated: dataviz skill, light surface #ffffff, all-pairs PASS) */
+  --viz-1:#2a78d6; --viz-2:#eb6834;
+  --d-llm:#2a78d6; --d-rea:#eda100; --d-rob:#1baf7a; --d-cv:#eb6834; --d-ir:#6250d6; --hull-a:.12;
+  /* paper surfaces: HTML view follows theme (HtmlView injects dark css); PDF page is always white */
+  --paper-bg:#ffffff; --paper-fg:#111; --canvas-bg:#f5f5f5;
+  --shadow-md:0 4px 6px -1px rgb(0 0 0 / .1), 0 2px 4px -2px rgb(0 0 0 / .1);
+  --shadow-lg:0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1);
+  --glow:0 0 0 1px oklch(0 0 0 / 8%), 0 0 16px 2px oklch(0 0 0 / 14%), 0 4px 12px oklch(0 0 0 / 12%); }
+html[data-theme="dark"] { --background:oklch(0.145 0 0); --foreground:oklch(0.985 0 0); --card:oklch(0.205 0 0); --popover:oklch(0.205 0 0); --popover-foreground:oklch(0.985 0 0);
+  --primary:oklch(0.922 0 0); --primary-foreground:oklch(0.205 0 0); --secondary:oklch(0.269 0 0); --muted:oklch(0.269 0 0); --muted-foreground:oklch(0.708 0 0);
+  --accent:oklch(0.269 0 0); --accent-foreground:oklch(0.985 0 0); --destructive:oklch(0.704 0.191 22.216); --border:oklch(1 0 0 / 10%); --input:oklch(1 0 0 / 15%);
+  --ring:oklch(0.556 0 0); --sidebar:oklch(0.205 0 0); --sidebar-accent:oklch(0.269 0 0); --sidebar-border:oklch(1 0 0 / 10%);
+  --viz-1:#3987e5; --viz-2:#d95926;
+  --d-llm:#3987e5; --d-rea:#c98500; --d-rob:#199e70; --d-cv:#d95926; --d-ir:#9085e9; --hull-a:.2;
+  --paper-bg:#0f1115; --paper-fg:#e6e6e6; --canvas-bg:#171717;
+  --glow:0 0 0 1px oklch(1 0 0 / 12%), 0 0 18px 2px oklch(1 0 0 / 14%), 0 4px 14px oklch(0 0 0 / 60%); }
+/* highlight variants (decision under review) */
+html[data-hl="gray"] { --hl-hover:rgb(0 0 0 / 9%); --hl-pin:rgb(0 0 0 / 16%); }
+html[data-hl="yellow"] { --hl-hover:rgb(253 224 71 / 30%); --hl-pin:rgb(253 224 71 / 45%); }
+
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }  /* author display rules (e.g. .cards-grid {display:grid}) must not defeat the hidden attribute */
+body { height:100vh; display:flex; flex-direction:column; overflow:hidden; margin:0; background:var(--background); color:var(--foreground); font:14px/1.5 "Geist Variable","Geist",system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif; transition:background-color .2s, color .2s; }
+svg.i { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:0 0 auto; }
+svg.i.s { width:14px; height:14px; }
+button { font:inherit; color:inherit; }
+.muted { color:var(--muted-foreground); }
+.xs { font-size:12px; } .sm { font-size:13px; }
+
+/* ===== demo bar (outside the app) ===== */
+.demo { flex:0 0 auto; display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:8px 14px; border-bottom:1px solid var(--border); font-size:12px; color:var(--muted-foreground); background:var(--background); position:sticky; top:0; z-index:50; }
+.demo b { color:var(--foreground); font-weight:600; }
+.seg { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.seg button { border:0; background:transparent; padding:3px 9px; cursor:pointer; color:var(--muted-foreground); font-size:12px; }
+.seg button.on { background:var(--accent); color:var(--foreground); }
+.demo .note { margin-left:auto; }
+
+/* ===== shared components (shadcn equivalents) ===== */
+.btn { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 10px; border-radius:calc(var(--radius) * .8); border:1px solid transparent; background:transparent; cursor:pointer; font-size:13px; white-space:nowrap; transition:background-color .15s, color .15s; }
+.btn.ghost:hover { background:var(--muted); }
+.btn.outline { border-color:var(--border); background:var(--background); } .btn.outline:hover { background:var(--muted); }
+.btn.primary { background:var(--primary); color:var(--primary-foreground); } .btn.primary:hover { opacity:.88; }
+.btn.icon { width:32px; padding:0; justify-content:center; }
+.btn.icon.sm { width:26px; height:26px; }
+.btn.on { background:var(--accent); color:var(--foreground); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.badge { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:6px; font-size:11px; font-weight:500; border:1px solid var(--border); color:var(--foreground); white-space:nowrap; }
+.badge.secondary { background:var(--secondary); border-color:transparent; }
+.badge.dashed { border-style:dashed; color:var(--muted-foreground); }
+.input { height:32px; border:1px solid var(--input); border-radius:calc(var(--radius) * .8); background:transparent; color:var(--foreground); padding:0 10px; font:inherit; font-size:13px; outline:none; width:100%; }
+.input:focus { border-color:var(--ring); box-shadow:0 0 0 3px oklch(from var(--ring) l c h / 30%); }
+textarea.input { height:auto; padding:8px 10px; resize:none; }
+.pop { background:var(--popover); color:var(--popover-foreground); border:1px solid var(--border); border-radius:calc(var(--radius) * .8); box-shadow:var(--shadow-md); }
+.anim { animation:popIn .15s ease-out; }
+@keyframes popIn { from { opacity:0; transform:scale(.95); } to { opacity:1; transform:none; } }
+.anim-out { animation:popOut .12s ease-in forwards; pointer-events:none; }
+@keyframes popOut { from { opacity:1; transform:none; } to { opacity:0; transform:scale(.95); } }
+.collapse-out { overflow:hidden; transition:height .2s ease-out, opacity .15s ease-out; }
+@media (prefers-reduced-motion: reduce) { .anim, .anim-out { animation-duration:1ms; } .collapse-out { transition-duration:1ms; } }
+.tip { position:fixed; z-index:90; background:var(--foreground); color:var(--background); font-size:12px; padding:5px 10px; border-radius:calc(var(--radius) * .8); pointer-events:none; opacity:0; transform:scale(.96); transition:opacity .12s, transform .12s; max-width:260px; }
+.tip.show { opacity:1; transform:none; }
+.check { width:16px; height:16px; border:1px solid var(--input); border-radius:4px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 16px; cursor:pointer; background:transparent; }
+.check.on { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+.check.on svg { width:12px; height:12px; stroke-width:3; }
+.switch { width:32px; height:18px; border-radius:9px; background:var(--input); position:relative; cursor:pointer; flex:0 0 32px; transition:background-color .15s; }
+.switch::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:var(--background); transition:transform .15s; box-shadow:0 1px 2px rgb(0 0 0 / .2); }
+.switch.on { background:var(--primary); } .switch.on::after { transform:translateX(14px); }
+.toast { position:fixed; right:20px; bottom:20px; z-index:95; min-width:260px; padding:12px 14px; font-size:13px; display:none; }
+.toast.show { display:block; animation:popIn .15s ease-out; }
+.spin { display:inline-block; width:11px; height:11px; border:2px solid var(--muted-foreground); border-top-color:transparent; border-radius:50%; animation:sp .8s linear infinite; vertical-align:-1px; margin-right:6px; }
+@keyframes sp { to { transform:rotate(360deg); } }
+
+/* ===== app frame ===== */
+/* the app fills whatever the demo bar leaves: no hard-coded bar height, no outer scrollbar */
+.app { position:relative; display:flex; flex:1 1 auto; min-height:0; overflow:hidden; }
+.sb { width:256px; flex:0 0 256px; background:var(--sidebar); border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; }
+.sb-head { display:flex; align-items:center; height:var(--head-h); box-sizing:border-box; padding:0 16px; flex:none; border-bottom:1px solid var(--border); font-size:18px; font-weight:600; }
+.sb-nav { padding:8px; display:flex; flex-direction:column; gap:2px; }
+.sb-item { display:flex; align-items:center; gap:9px; height:34px; padding:0 10px; border-radius:calc(var(--radius) * .8); cursor:pointer; font-size:13.5px; color:var(--foreground); }
+.sb-item:hover { background:var(--sidebar-accent); }
+.sb-item.on { background:var(--sidebar-accent); font-weight:500; }
+.sb-item .count { margin-left:auto; font-size:11px; color:var(--muted-foreground); }
+.sb-tabs { display:flex; border-bottom:1px solid var(--border); margin-top:4px; }
+.sb-tabs span { flex:1; text-align:center; padding:8px 0; font-size:13px; color:var(--muted-foreground); border-bottom:2px solid transparent; }
+.sb-tabs span.on { color:var(--foreground); border-bottom-color:var(--foreground); }
+.sb-list { flex:1; overflow:auto; padding:6px 8px; }
+.sb-chat { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:calc(var(--radius) * .8); font-size:13px; cursor:pointer; color:var(--foreground); }
+.sb-chat:hover { background:var(--sidebar-accent); } .sb-chat.on { background:var(--sidebar-accent); }
+.sb-chat span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sb-foot { border-top:1px solid var(--border); padding:8px; }
+.main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; position:relative; }
+.view { display:none; flex:1; min-height:0; }
+.view.on { display:flex; }
+
+/* ===== chat ===== */
+.chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+.thread { flex:1; overflow:auto; padding:22px 26px 10px; }
+.msg-u { margin:0 0 16px auto; max-width:72%; width:fit-content; background:var(--muted); border-radius:16px; padding:9px 14px; font-size:14px; }
+.msg-a { max-width:92%; font-size:14px; line-height:1.7; margin-bottom:6px; }
+.cite { margin:0 2px; padding:0 4px; border-radius:4px; font-size:.72em; font-weight:500; color:var(--primary); cursor:pointer; }
+.cite:hover { background:color-mix(in srgb, var(--primary) 10%, transparent); text-decoration:underline; }
+.acts { display:flex; gap:2px; color:var(--muted-foreground); margin-bottom:18px; position:relative; }
+.acts .btn.icon { width:28px; height:28px; }
+.acts .btn.voted { color:var(--foreground); }
+.acts .btn.voted svg { fill:currentColor; fill-opacity:.15; }
+.fb { position:absolute; top:34px; left:56px; width:360px; padding:12px; z-index:20; }
+.fb h5 { margin:0 0 8px; font-size:13px; font-weight:600; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 10px; border:1px solid var(--border); border-radius:999px; font-size:12.5px; cursor:pointer; background:transparent; transition:background-color .12s; }
+.chip:hover { background:var(--muted); }
+.chip.on { background:var(--accent); border-color:var(--foreground); }
+.chip .guess { font-size:10.5px; color:var(--muted-foreground); }
+.fb .row { display:flex; align-items:center; gap:8px; margin-top:10px; }
+.ctx { border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:16px; background:var(--card); }
+.ctx .t { display:flex; gap:8px; align-items:center; font-weight:600; font-size:13.5px; margin-bottom:6px; }
+.composer { margin:0 26px 18px; border:1px solid var(--border); border-radius:calc(var(--radius) * 1.4); background:var(--background); box-shadow:var(--shadow-md); }
+.composer textarea { width:100%; border:0; outline:none; resize:none; background:transparent; color:var(--foreground); font:inherit; font-size:14px; padding:12px 14px 4px; height:52px; }
+.composer .bar { display:flex; align-items:center; gap:2px; padding:4px 8px 8px; position:relative; }
+.composer .bar .sp { flex:1; }
+.attach { position:absolute; bottom:44px; left:8px; width:340px; padding:12px; z-index:30; }
+.attach .sec { font-size:12px; color:var(--muted-foreground); margin:2px 0 6px; }
+.drop { border:1px dashed var(--border); border-radius:calc(var(--radius) * .8); padding:14px; text-align:center; font-size:12.5px; color:var(--muted-foreground); margin-bottom:10px; }
+.lbl-row { display:flex; gap:9px; align-items:flex-start; font-size:13px; cursor:pointer; }
+.lbl-row small { display:block; color:var(--muted-foreground); font-size:12px; margin-top:1px; }
+
+/* ===== canvas ===== */
+.split { flex:0 0 5px; cursor:col-resize; background:transparent; border-left:1px solid var(--border); }
+.split:hover, .split.drag { background:var(--ring); }
+.canvas { flex:0 0 auto; display:flex; flex-direction:column; min-width:280px; background:var(--card); border-left:1px solid var(--border); position:relative; }
+.cv-head { display:flex; align-items:center; gap:4px; padding:4px 8px; border-bottom:1px solid var(--border); }
+.cv-tab { padding:4px 8px; border-radius:6px; font-size:12px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1 1 0; min-width:0; color:var(--muted-foreground); cursor:pointer; display:flex; gap:6px; align-items:center; }
+.cv-tab.on { background:var(--accent); color:var(--foreground); }
+.reader { flex:1; overflow:auto; position:relative; }
+.reader.html { background:var(--paper-bg); color:var(--paper-fg); }
+.reader.pdf { background:var(--canvas-bg); }
+.paper { max-width:640px; margin:0 auto; padding:26px 30px 90px; font:15.5px/1.6 "Times New Roman",Georgia,serif; }
+.paper h2 { font-size:26px; margin:6px 0 14px; }
+.paper .p { margin:0 0 14px; }
+.paper .tr { overflow:hidden; max-height:0; opacity:0; margin:0; font:14px/1.75 "Geist Variable",system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif; color:var(--muted-foreground);
+  border-left:2px solid var(--border); padding-left:12px; transition:max-height .35s ease, opacity .3s ease, margin .35s ease; }
+.paper.on .tr { max-height:260px; opacity:1; margin:-6px 0 16px; }
+.pcv { position:relative; margin:0 auto; }
+.pgimg { position:absolute; left:0; box-shadow:0 1px 6px rgb(0 0 0 / .25); }
+.pno { position:absolute; width:100%; text-align:center; font-size:11px; color:var(--muted-foreground); }
+.z { position:absolute; border-radius:2px; cursor:pointer; transition:background-color .12s; }
+.z.on { background:var(--hl-hover); } .z.pin { background:var(--hl-pin); }
+/* pill */
+.pillw { position:absolute; right:18px; bottom:16px; z-index:12; }
+.pill { height:34px; display:flex; flex-direction:row-reverse; align-items:center; border-radius:17px; overflow:hidden; background:var(--popover); color:var(--popover-foreground);
+  box-shadow:var(--glow); white-space:nowrap; font-size:12.5px; max-width:34px; opacity:.5;
+  transition:max-width .32s cubic-bezier(.3,.7,.2,1), opacity .18s ease, background-color .2s; }
+.pillw:hover .pill, .pillw:focus-within .pill, .pillw.open .pill { opacity:1; }
+.pill.on { max-width:280px; background:var(--accent); }
+.pill .ico { flex:0 0 34px; height:34px; line-height:34px; text-align:center; font-weight:600; cursor:pointer; font-size:12.5px; }
+.pill.on .ico { border-left:1px solid var(--border); }
+.pill .lab { padding:0 8px 0 12px; height:34px; line-height:34px; cursor:pointer; opacity:0; transition:opacity .15s; display:flex; gap:4px; align-items:center; }
+.pill.on .lab { opacity:1; transition-delay:.15s; }
+.pill .ico:hover, .pill .lab:hover { background:var(--muted); }
+.lmenu { position:absolute; right:0; bottom:42px; width:250px; padding:4px; display:none; }
+.lmenu.open { display:block; animation:popIn .15s ease-out; transform-origin:bottom right; }
+.lmenu .lbl { font-size:11.5px; color:var(--muted-foreground); padding:6px 8px 2px; }
+.lmenu .it { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+.lmenu .it:hover { background:var(--muted); } .lmenu .it.sel { background:var(--accent); }
+.lmenu .sep { border-top:1px solid var(--border); margin:4px -4px; }
+.lmenu .input { margin:2px 0 4px; }
+.hint { position:absolute; right:18px; bottom:58px; z-index:11; background:var(--foreground); color:var(--background); font-size:12px; padding:6px 10px; border-radius:calc(var(--radius) * .8); opacity:0; transform:translateY(4px); transition:opacity .2s, transform .2s; pointer-events:none; }
+.hint.show { opacity:1; transform:none; }
+/* translation card (popover surface) */
+.tcard { position:absolute; z-index:40; width:320px; padding:10px 12px 9px; display:flex; flex-direction:column; opacity:0; transform:scale(.95); pointer-events:none;
+  transition:opacity .15s ease, transform .15s ease, top .2s cubic-bezier(.2,.8,.2,1), left .2s cubic-bezier(.2,.8,.2,1); }
+.tcard.show { opacity:1; transform:none; pointer-events:auto; }
+.tcard .hd { display:flex; align-items:center; justify-content:space-between; margin:-2px -4px 4px 0; font-size:12px; color:var(--muted-foreground); }
+.tcard .bd { overflow-y:auto; font-size:13.5px; line-height:1.75; transition:opacity .15s; }
+.tcard .bd.swap { opacity:0; }
+.tcard .cont { display:block; margin:8px 0; font-size:11.5px; color:var(--muted-foreground); text-align:center; border-top:1px solid var(--border); padding-top:5px; }
+.tcard .ft { font-size:11.5px; color:var(--muted-foreground); margin-top:6px; }
+.tcard details { margin-top:8px; border-top:1px solid var(--border); padding-top:6px; font:13px/1.6 "Times New Roman",serif; }
+.tcard summary { cursor:pointer; font:11.5px "Geist Variable",system-ui,sans-serif; color:var(--muted-foreground); }
+.tcard .arrow { position:absolute; width:10px; height:10px; background:var(--popover); border:1px solid var(--border); transform:rotate(45deg); }
+html[data-arrow="off"] .tcard .arrow { display:none; }
+.tcard.at-side .arrow { right:-6px; top:var(--ay,16px); border-left:0; border-bottom:0; }
+.tcard.at-below .arrow { top:-6px; left:var(--ax,20px); border-right:0; border-bottom:0; }
+
+/* ===== ideas ===== */
+.page { flex:1; display:flex; flex-direction:column; min-width:0; }
+.page-h { display:flex; align-items:center; gap:10px; height:var(--head-h); box-sizing:border-box; padding:0 20px; border-bottom:1px solid var(--border); flex:none; }
+.page-h h1 { margin:0; font-size:18px; font-weight:600; display:flex; gap:8px; align-items:center; }
+.page-h .sp { flex:1; }
+.ask { display:flex; gap:8px; padding:12px 20px 4px; }
+.probsw { position:relative; flex:0 0 auto; }
+.probsw > .btn { max-width:300px; }
+.probsw > .btn span.t { overflow:hidden; text-overflow:ellipsis; }
+.pmenu { position:absolute; top:38px; left:0; width:360px; padding:4px; z-index:30; display:none; }
+.pmenu.open { display:block; animation:popIn .15s ease-out; transform-origin:top left; }
+.pmenu .lbl { font-size:11.5px; color:var(--muted-foreground); padding:6px 8px 2px; }
+.pmenu .it { display:flex; gap:8px; align-items:flex-start; padding:7px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+.pmenu .it:hover { background:var(--muted); } .pmenu .it.sel { background:var(--accent); }
+.pmenu .it .tx { flex:1; min-width:0; } .pmenu .it small { display:block; color:var(--muted-foreground); font-size:11.5px; }
+.pmenu .sep { border-top:1px solid var(--border); margin:4px -4px; }
+.stfilter { display:flex; gap:6px; flex-wrap:wrap; padding:8px 20px 0; }
+.stfilter button { display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 10px; border:1px solid var(--border); border-radius:999px; background:transparent; cursor:pointer; font-size:12.5px; color:var(--muted-foreground); }
+.stfilter button:hover { background:var(--muted); } .stfilter button.on { background:var(--accent); color:var(--foreground); border-color:var(--foreground); }
+.stfilter button .n { font-size:11px; color:var(--muted-foreground); }
+.e-idea.st-saved, .e-idea.st-trying, .e-idea.st-worked { stroke-dasharray:none; stroke-opacity:.8; }
+.e-idea.st-failed, .e-idea.st-dismissed { stroke-dasharray:1.5 4; stroke-opacity:.4; }
+.stg { cursor:pointer; } .stg circle { fill:var(--background); stroke:var(--border); stroke-width:1; }
+.stg .gi * { fill:none; stroke:var(--foreground); stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+.stg.dim { opacity:.3; }
+.stseg { display:flex; flex-wrap:wrap; gap:6px; }
+.stseg button { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 9px; border:1px solid var(--border); border-radius:calc(var(--radius) * .8); background:transparent; cursor:pointer; font-size:12.5px; }
+.stseg button:hover { background:var(--muted); } .stseg button.on { background:var(--accent); border-color:var(--foreground); }
+.acts3 { display:flex; gap:8px; margin-top:14px; } .acts3 .btn.primary { flex:1; justify-content:center; }
+.banner { display:flex; align-items:center; gap:8px; border:1px dashed var(--border); border-radius:calc(var(--radius) * .8); padding:8px 10px; font-size:12.5px; color:var(--muted-foreground); }
+.banner .btn { margin-left:auto; height:26px; font-size:12px; }
+.saved-hint { font-size:11px; color:var(--muted-foreground); height:14px; margin-top:3px; }
+.kcol { min-width:0; } .kcol h5 { display:flex; align-items:center; gap:6px; margin:0 0 8px; font-size:12.5px; font-weight:600; }
+.kcol h5 .n { color:var(--muted-foreground); font-weight:400; }
+.kcol .icard { margin-bottom:10px; } .kcol .empty { border:1px dashed var(--border); border-radius:var(--radius); padding:14px; text-align:center; font-size:12px; color:var(--muted-foreground); }
+.icard .note { margin-top:6px; font-size:12px; color:var(--muted-foreground); border-left:2px solid var(--border); padding-left:8px; }
+.prob { cursor:pointer; } .prob.sel rect { stroke:var(--foreground); stroke-width:3; stroke-opacity:.35; }
+.ideas-body { flex:1; display:flex; min-height:0; }
+.graph { flex:1; min-width:0; position:relative; }
+.graph svg { width:100%; height:100%; display:block; }
+.hull { fill-opacity:var(--hull-a); stroke-opacity:.55; stroke-width:1.2; }
+.hull-l { font-size:11.5px; fill:var(--foreground); font-weight:600; cursor:pointer; }
+.hull-l:hover { fill:var(--foreground); text-decoration:underline; }
+.e-cite { stroke:var(--muted-foreground); stroke-opacity:.45; stroke-width:1; }
+.e-idea { stroke:var(--foreground); stroke-opacity:.6; stroke-width:1.5; stroke-dasharray:5 4; fill:none; }
+.e-hit { stroke:transparent; stroke-width:14; cursor:pointer; fill:none; }
+.e-idea.sel { stroke-opacity:1; stroke-width:2.6; stroke-dasharray:none; }
+#arrowhead path, #arrowheadSel path { fill:var(--foreground); }
+.e-idea.dim { opacity:.3; }
+.nd .c { stroke:var(--background); stroke-width:2; cursor:pointer; }
+.nd .ring { fill:none; stroke:var(--foreground); stroke-width:2.5; }
+.nd .rl { font-size:9.5px; font-weight:600; fill:var(--foreground); }
+.nd text { font-size:11px; fill:var(--foreground); pointer-events:none; }
+.nd .lk { stroke:var(--muted-foreground); fill:none; stroke-width:1.6; }
+.nd.dim, .e-cite.dim, .hull-g.dim { opacity:.3; }
+
+
+.prob rect { fill:var(--foreground); } .prob text { fill:var(--background); font-size:11px; font-weight:600; }
+.graph svg { cursor:grab; touch-action:none; } .graph svg.panning { cursor:grabbing; }
+.zoomctl { position:absolute; right:14px; top:12px; display:flex; align-items:center; gap:4px; background:var(--background); border:1px solid var(--border); border-radius:calc(var(--radius) * .8); padding:3px; box-shadow:var(--shadow-md); }
+.zoomctl .pct { font-size:12px; color:var(--muted-foreground); min-width:40px; text-align:center; font-variant-numeric:tabular-nums; }
+.legend-old { position:absolute; left:16px; bottom:12px; display:flex; gap:14px; font-size:11.5px; color:var(--muted-foreground); background:var(--background); padding:4px 8px; border-radius:6px; border:1px solid var(--border); }
+/* legend: vertical card, grouped by encoding; idle semi-transparent, hover/focus solid */
+.legend { position:absolute; left:14px; bottom:14px; width:206px; background:var(--popover); color:var(--popover-foreground);
+  border:1px solid var(--border); border-radius:calc(var(--radius) * .8); box-shadow:var(--shadow-md); font-size:12px; z-index:5;
+  opacity:.55; transition:opacity .18s ease; }
+.legend:hover, .legend:focus-within { opacity:1; }
+.legend .lg-h { display:flex; align-items:center; justify-content:space-between; padding:6px 6px 6px 10px; font-weight:600; font-size:12px; cursor:pointer; user-select:none; }
+.legend .lg-h svg { transition:transform .18s ease; }
+.legend.collapsed .lg-h svg { transform:rotate(-90deg); }
+.legend .lg-bw { display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .2s ease-out, opacity .2s ease-out; }
+.legend .lg-b { overflow:hidden; min-height:0; }
+.legend .lg-pad { padding:0 10px 8px; }
+.legend.collapsed .lg-bw { grid-template-rows:0fr; opacity:0; }
+.legend .lg-h svg { transition:transform .2s ease-out; }
+.legend .lg-g { margin-top:6px; } .legend .lg-g:first-child { margin-top:0; }
+.legend .lg-t { font-size:11px; color:var(--muted-foreground); margin:0 0 3px; }
+.legend .lg-i { display:flex; align-items:center; gap:7px; line-height:1.9; white-space:nowrap; }
+.legend .lg-i .dot { margin:0; }
+.legend .lg-2 { display:grid; grid-template-columns:1fr 1fr; }
+.legend .lg-i .sw { width:22px; display:inline-flex; justify-content:center; flex:0 0 22px; }
+/* detail drawer: fixed width, overlays the graph/cards, slides with transform only (content never reflows) */
+.ideas-body { position:relative; overflow:hidden; }
+.zoomctl { transition:right .24s cubic-bezier(.2,.8,.2,1); }
+.ideas-body.drawer-open .zoomctl { right:354px; }
+#vp { transition:transform .3s cubic-bezier(.2,.8,.2,1); }
+.graph svg.panning #vp { transition:none; }
+.cards-grid { transition:padding-right .24s cubic-bezier(.2,.8,.2,1); }
+.ideas-body.drawer-open .cards-grid { padding-right:360px; }
+.side { position:absolute; top:0; right:0; bottom:0; width:340px; z-index:15; border-left:1px solid var(--border); padding:16px; overflow:auto;
+  background:var(--background); box-shadow:var(--shadow-lg); transform:translateX(0); visibility:visible;
+  transition:transform .24s cubic-bezier(.2,.8,.2,1), visibility 0s linear 0s; }
+.side.closed { transform:translateX(100%); box-shadow:none; visibility:hidden;
+  transition:transform .2s cubic-bezier(.4,0,.6,1), visibility 0s linear .2s, box-shadow 0s linear .2s; }
+.side .sh { display:flex; align-items:center; justify-content:space-between; margin:-4px -6px 6px 0; }
+.side h3 { margin:0 0 10px; font-size:15px; line-height:1.4; }
+.side .lb { font-size:11.5px; color:var(--muted-foreground); margin:12px 0 5px; }
+.srcb { display:flex; gap:9px; align-items:flex-start; border:1px solid var(--border); border-radius:calc(var(--radius) * .8); padding:8px 10px; font-size:13px; }
+.srcb small { display:block; color:var(--muted-foreground); font-size:12px; }
+.dot { width:9px; height:9px; border-radius:50%; flex:0 0 9px; margin-top:5px; }
+.tags { display:flex; flex-wrap:wrap; gap:6px; }
+.tag { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 4px 0 9px; border-radius:6px; background:var(--secondary); font-size:12px; }
+.tag button { border:0; background:transparent; cursor:pointer; color:var(--muted-foreground); display:flex; padding:2px; border-radius:4px; }
+.tag button:hover { background:var(--muted); color:var(--foreground); }
+.ac { margin-top:4px; padding:4px; }
+.ac .it { padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; } .ac .it:hover { background:var(--muted); }
+.cards-grid { flex:1; overflow:auto; padding:16px 20px; display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px; align-content:start; }
+.icard { border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; background:var(--card); cursor:pointer; }
+.icard:hover { box-shadow:var(--shadow-md); }
+.icard.on { border-color:var(--foreground); }
+.icard h4 { margin:0 0 8px; font-size:14px; }
+.pair { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; margin-bottom:8px; }
+
+/* ===== feedback ===== */
+.fb-body { flex:1; overflow:auto; padding:16px 20px; display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(300px, 1fr); gap:14px; align-content:start; }
+.kpis { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+.kpi { border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; background:var(--card); }
+.kpi .n { font-size:26px; font-weight:600; letter-spacing:-.01em; }
+.kpi .l { font-size:12px; color:var(--muted-foreground); }
+.panel { border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; background:var(--card); min-width:0; }
+.panel h4 { margin:0 0 10px; font-size:14px; display:flex; align-items:center; gap:8px; }
+.panel h4 .sp { flex:1; }
+.bars .r { display:grid; grid-template-columns:118px 1fr 30px; align-items:center; gap:10px; margin:9px 0; font-size:12.5px; }
+.bars .tr { height:14px; display:flex; gap:2px; position:relative; }
+.bars .seg2 { height:100%; border-radius:0 4px 4px 0; cursor:pointer; }
+.bars .seg2.a { border-radius:0; } .bars .seg2.a:last-child { border-radius:0 4px 4px 0; }
+.bars .n { text-align:right; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.vlegend { display:flex; gap:14px; font-size:12px; color:var(--muted-foreground); margin-top:8px; }
+.vlegend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+.vtable { width:100%; border-collapse:collapse; font-size:12.5px; display:none; }
+.vtable.on { display:table; } .vtable th, .vtable td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--border); }
+.vtable td.n { text-align:right; font-variant-numeric:tabular-nums; }
+.tabs { display:inline-flex; background:var(--muted); border-radius:calc(var(--radius) * .8); padding:3px; gap:2px; }
+.tabs button { border:0; background:transparent; border-radius:6px; padding:3px 10px; font-size:12.5px; cursor:pointer; color:var(--muted-foreground); }
+.tabs button.on { background:var(--background); color:var(--foreground); box-shadow:0 1px 2px rgb(0 0 0 / .08); }
+.fitem { display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--border); font-size:13px; }
+.fitem:first-of-type { border-top:0; }
+.fitem .body { flex:1; min-width:0; }
+.fitem .meta { font-size:12px; color:var(--muted-foreground); margin-top:3px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.fitem .meta a { color:var(--muted-foreground); text-decoration:underline; cursor:pointer; }
+.fitem .acts2 { display:flex; gap:6px; margin-top:7px; }
+.orow { display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-top:1px solid var(--border); font-size:13px; }
+.orow:first-of-type { border-top:0; }
+.orow .n { margin-left:auto; color:var(--muted-foreground); font-size:12px; white-space:nowrap; }
+
+/* ===== feedback page (by user moment) ===== */
+.fbq { margin:12px 20px 0; }
+.fbq .bn { display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); font-size:13px; }
+.fbq .bn .c { min-width:22px; height:22px; border-radius:11px; background:var(--primary); color:var(--primary-foreground); display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; padding:0 6px; }
+.fbq .bn .sp { flex:1; }
+.fb-main { flex:1 1 0; position:relative; overflow:hidden; display:flex; min-height:0; transition:flex-grow .28s ease-out; }
+#fbBanner { flex:0 1 auto; min-height:0; display:flex; flex-direction:column; transition:flex-grow .28s ease-out, padding-bottom .28s ease-out; }
+.page.rv-full #fbBanner { flex-grow:1; padding-bottom:20px; } .page.rv-full .fb-main { flex-grow:0; }
+.fbq .card2 { flex:0 1 auto; min-height:0; display:flex; flex-direction:column; }
+.fbq .card2 .bn { flex:none; }
+.page.rv-full .fbq .card2 { flex-grow:1; }
+.fbq .exp { flex:1 1 auto; min-height:0; }
+.fbq .rvin { height:100%; box-sizing:border-box; display:flex; flex-direction:column; }
+.fbq .rvin .swap { flex:1; min-height:0; display:flex; flex-direction:column; width:100%; }
+.fbq #rvHead, .fbq #rvFoot { flex:none; }
+.fbq .rvbody { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; }
+.fbq .rvbody > .slide { flex:1; min-width:0; display:flex; flex-direction:column; }
+.fbq .rvin .convo { flex:0 1 auto; min-height:0; overflow-y:auto; }
+.fbq .rvin .why, .fbq .rvin .btns { flex:none; }
+.fb-scroll { flex:1; min-width:0; overflow:auto; padding:14px 20px 20px; display:flex; flex-direction:column; gap:14px; }
+/* drill-down is the core task here -> permanent master-detail column, not an overlay drawer */
+.kpis4 { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+.kpis4 .kpi { padding:10px 14px; } .kpis4 .kpi .n { font-size:22px; }
+.stages .row { display:grid; grid-template-columns:170px 1fr 34px 88px 64px; align-items:center; gap:12px; padding:8px 8px; border-radius:calc(var(--radius) * .8); cursor:pointer; font-size:13px; }
+.stages .row:hover { background:var(--muted); } .stages .row.on { background:var(--accent); }
+.stages .row .nm { display:flex; align-items:center; gap:6px; }
+.stages .row .tr { height:14px; display:flex; gap:2px; }
+.stages .row .sg { height:100%; } .stages .row .sg:last-child { border-radius:0 4px 4px 0; }
+.stages .row .n { text-align:right; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.stages .row .dl { font-size:12px; color:var(--muted-foreground); text-align:right; white-space:nowrap; }
+.stages .row .dl b { color:var(--foreground); font-weight:600; }
+.stages .sep { border-top:1px solid var(--border); margin:6px 0; }
+.fdrawer { flex:0 0 400px; width:400px; border-left:1px solid var(--border); background:var(--background); padding:16px; overflow:auto; position:relative; }
+.fdrawer .swap { transition:opacity .15s ease; } .fdrawer .swap.fade { opacity:0; }
+.fdrawer h3 { margin:0 0 4px; font-size:15px; }
+.case { border:1px solid var(--border); border-radius:calc(var(--radius) * .8); padding:9px 11px; margin-bottom:8px; font-size:13px; }
+.case .meta { margin-top:4px; font-size:12px; color:var(--muted-foreground); display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.case .meta a { color:var(--muted-foreground); text-decoration:underline; cursor:pointer; }
+.case .chk { float:right; }
+.fdrawer .foot { position:sticky; bottom:-16px; background:var(--background); padding:12px 0 2px; border-top:1px solid var(--border); margin-top:10px; }
+.fbq .card2 { border:1px solid var(--border); border-radius:var(--radius); background:var(--card); overflow:hidden; }
+.fbq .card2 .bn { border:0; border-radius:0; background:transparent; }
+.fbq .exp { display:grid; grid-template-rows:0fr; transition:grid-template-rows .22s ease-out; }
+.fbq .exp.open { grid-template-rows:1fr; }
+.fbq .exp > div { overflow:hidden; min-height:0; }
+.fbq .rvin { padding:2px 16px 16px; border-top:1px solid var(--border); }
+.fbq .rvin .swap { max-width:820px; }
+.fbq .slide { transition:transform .18s ease-out, opacity .18s ease-out; }
+.fbq .slide.out-l { transform:translateX(-32px); opacity:0; } .fbq .slide.out-r { transform:translateX(32px); opacity:0; }
+.fbq .slide.in-r { transform:translateX(32px); opacity:0; transition:none; } .fbq .slide.in-l { transform:translateX(-32px); opacity:0; transition:none; }
+.fbq .nav { display:inline-flex; align-items:center; gap:4px; }
+.fbq .dots { display:inline-flex; gap:6px; margin:0 6px; }
+.fbq .dots button { width:22px; height:22px; border-radius:11px; border:1px solid var(--border); background:transparent; cursor:pointer; font-size:11px; color:var(--muted-foreground); display:inline-flex; align-items:center; justify-content:center; padding:0; }
+.fbq .dots button.cur { border-color:var(--foreground); color:var(--foreground); font-weight:600; }
+.fbq .dots button.yes, .fbq .dots button.no { background:var(--accent); color:var(--foreground); }
+.fbq .dots button svg { width:12px; height:12px; }
+.fbq .btns .btn.sel { outline:2px solid var(--ring); outline-offset:2px; }
+.fbq .subrow { display:flex; align-items:center; gap:10px; margin-top:14px; padding-top:12px; border-top:1px solid var(--border); font-size:12.5px; }  /* keep the conversation readable like a chat column */
+.fbq .done-msg { display:flex; align-items:center; gap:8px; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius); font-size:13px; color:var(--muted-foreground); transition:opacity .4s ease; }
+.review { display:none; }
+.fbq .rvin .top { display:flex; align-items:center; gap:10px; margin:12px 0 8px; font-size:13px; }
+.fbq .rvin .top .sp { flex:1; }
+.fbq .prog { height:3px; background:var(--muted); border-radius:2px; overflow:hidden; margin:0 0 12px; }
+.fbq .prog i { display:block; height:100%; background:var(--primary); transition:width .25s ease; }
+.fbq .rvin .convo { border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; background:var(--card); }
+.fbq .rvin .convo .u { margin:0 0 10px auto; max-width:80%; width:fit-content; background:var(--muted); border-radius:14px; padding:7px 12px; font-size:13.5px; }
+.fbq .rvin .convo .a { font-size:13.5px; line-height:1.7; color:var(--muted-foreground); margin-bottom:10px; }
+.fbq .rvin .convo .u.hl { outline:2px solid var(--ring); outline-offset:2px; }
+.fbq .rvin .convo .chead { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted-foreground); margin:-2px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.fbq .rvin .convo .chead b { color:var(--foreground); font-weight:600; }
+.fbq .rvin .convo .a { color:var(--foreground); }
+.fbq .rvin .convo .a.old, .fbq .rvin .convo .u.old { opacity:.72; }
+.fbq .rvin .convo .a.after { color:var(--muted-foreground); border-left:2px solid var(--border); padding-left:10px; margin:12px 0 0; }
+.fbq .rvin .convo .lbl { font-size:11.5px; color:var(--muted-foreground); margin:0 0 4px; }
+.fbq .rvin .convo .lbl.r { text-align:right; }
+.fbq .rvin .convo .more { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin:0 0 12px; padding:6px; border:1px dashed var(--border); border-radius:calc(var(--radius) - 2px); background:transparent; color:var(--muted-foreground); font:inherit; font-size:12px; cursor:pointer; }
+.fbq .rvin .convo .more svg { transform:rotate(90deg); transition:transform .2s ease-out; }
+.fbq .rvin .convo .more:hover { background:var(--accent); color:var(--foreground); }
+.fbq .rvin .convo .earlier { display:grid; grid-template-rows:0fr; transition:grid-template-rows .22s ease-out; }
+.fbq .rvin .convo .earlier.open { grid-template-rows:1fr; } .fbq .rvin .convo .earlier > div { overflow:hidden; }
+.fbq .rvin .convo .clamp .tx { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:var(--lines,2); overflow:hidden; }
+.fbq .rvin .convo .clamp.open .tx { display:block; }
+.fbq .rvin .convo .tog { border:0; background:transparent; padding:0; margin-top:2px; font:inherit; font-size:12px; color:var(--muted-foreground); cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+.fbq .rvin .convo .tog:hover { color:var(--foreground); }
+.fbq .rvin .convo sup { font-size:10.5px; color:var(--muted-foreground); }
+.fbq .rvin .why { margin:12px 0; font-size:13px; }
+.fbq .rvin .btns { display:flex; gap:8px; margin-top:16px; }
+.fbq .rvin .btns .btn { height:36px; } .fbq kbd { font-size:11px; border:1px solid var(--border); border-bottom-width:2px; border-radius:4px; padding:0 5px; margin-left:6px; color:var(--muted-foreground); }
+
+.ideafb { display:grid; grid-template-columns:repeat(3, 1fr) auto; gap:12px; align-items:center; }
+.ideafb .m .n { font-size:18px; font-weight:600; } .ideafb .m .l { font-size:12px; color:var(--muted-foreground); }
+.dlg { width:560px; max-width:calc(100vw - 32px); padding:18px 20px; border-radius:var(--radius); }
+.dlg h3 { margin:0 0 4px; font-size:16px; }
+.dlg .grp { margin-top:14px; } .dlg .grp .t { font-size:12px; color:var(--muted-foreground); margin-bottom:6px; }
+.dlg .sum { margin-top:14px; padding:10px 12px; background:var(--muted); border-radius:calc(var(--radius) * .8); font-size:13px; }
+/* ===== settings modal ===== */
+.overlay { position:fixed; inset:0; background:rgb(0 0 0 / .5); z-index:80; display:none; align-items:center; justify-content:center; }
+.overlay.on { display:flex; }
+.modal { width:720px; max-width:calc(100vw - 32px); height:520px; display:flex; overflow:hidden; border-radius:var(--radius); }
+.modal .nav { width:180px; border-right:1px solid var(--border); padding:10px; }
+.modal .nav div { padding:7px 10px; border-radius:6px; font-size:13px; color:var(--muted-foreground); }
+.modal .nav div.on { background:var(--accent); color:var(--foreground); }
+.modal .ct { flex:1; padding:18px 20px; overflow:auto; }
+.modal h3 { margin:0 0 4px; font-size:16px; }
+.field { padding:12px 0; border-bottom:1px solid var(--border); }
+.field .t { display:flex; align-items:center; gap:10px; font-size:13.5px; font-weight:500; }
+.field .h { font-size:12px; color:var(--muted-foreground); margin:3px 0 8px; }
+.field code { font-size:11.5px; color:var(--muted-foreground); }
+.tex .katex { font-size:1.02em; }
+</style>
+</head>
+<body>
+<div class="demo">
+  <span><b>Plan H 設計稿</b>（可互動；PDF 頁面、Marker 段落、兩段含公式譯文為真實資料，其餘為示意）</span>
+  <span>主題 <span class="seg" id="thm"><button data-v="light">淺色</button><button data-v="dark">深色</button><button data-v="system">跟隨系統</button></span></span>
+  <span>段落高亮：<b>中性灰</b>（已定案，與引用的黃色高亮區分）<span class="seg" id="hlv" hidden><button data-v="gray">中性灰</button></span></span>
+  <span>卡片箭頭：<b>有</b>（已定案）<span class="seg" id="arv" hidden><button data-v="on">有</button></span></span>
+</div>
+
+<div class="app" id="app">
+  <!-- ================= sidebar ================= -->
+  <aside class="sb">
+    <div class="sb-head">PaperHub</div>
+    <div class="sb-nav">
+      <div class="sb-item" data-go="newchat"><svg class="i" data-i="plus"></svg>新聊天</div>
+      <div class="sb-item" data-go="ideas"><svg class="i" data-i="bulb"></svg>發想<span class="count" id="ideaCount">4</span></div>
+      <div class="sb-item" data-go="feedback"><svg class="i" data-i="chart"></svg>回饋<span class="count" id="fbCount" title="待你確認">3</span></div>
+    </div>
+    <div class="sb-tabs"><span class="on">聊天</span><span>參考文獻</span></div>
+    <div class="sb-list" id="chatList"></div>
+    <div class="sb-foot"><div class="sb-item" data-go="settings"><svg class="i" data-i="gear"></svg>設定</div></div>
+  </aside>
+
+  <!-- ================= main ================= -->
+  <section class="main" id="main">
+    <!-- chat view -->
+    <div class="view on" id="v-chat">
+      <div class="chat" id="chatCol">
+        <div class="thread" id="thread"></div>
+        <div class="composer">
+          <textarea placeholder="詢問你的論文…"></textarea>
+          <div class="bar">
+            <button class="btn icon ghost" id="attachBtn" title="加入論文"><svg class="i" data-i="clip"></svg></button>
+            <button class="btn icon on" id="refBtn" title="參考文獻（Citation Canvas）"><svg class="i" data-i="bookopen"></svg></button>
+            <button class="btn icon ghost" title="記憶"><svg class="i" data-i="brain"></svg></button>
+            <button class="btn icon ghost" title="投影片"><svg class="i" data-i="slides"></svg></button>
+            <span class="sp"></span>
+            <button class="btn icon ghost" title="語音輸入"><svg class="i" data-i="mic"></svg></button>
+            <button class="btn icon primary" title="送出"><svg class="i" data-i="send"></svg></button>
+            <div class="attach pop anim" id="attach" hidden>
+              <div class="sec">從文獻庫加入</div>
+              <input class="input" placeholder="搜尋文獻庫…" style="margin-bottom:10px">
+              <div class="sec">arXiv ID 或網址</div>
+              <input class="input" placeholder="例如 2510.21771" style="margin-bottom:10px">
+              <div class="sec">上傳 PDF</div>
+              <div class="drop"><svg class="i" data-i="upload"></svg><div>拖曳 PDF 到這裡，或點擊選擇檔案</div></div>
+              <label class="lbl-row" id="privRow"><span class="check" id="privChk"></span><span><span style="display:inline-flex;gap:6px;align-items:center">私密文件 <svg class="i s muted" data-i="lock"></svg></span><small>公司內部的技術文件。在發想圖譜上以鎖頭標示；匯出微調資料時預設會納入。</small></span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="split" id="split"></div>
+      <div class="canvas" id="canvas" style="width:620px">
+        <div class="cv-head">
+          <div class="cv-tab" data-tab="html"><svg class="i s" data-i="file"></svg><span style="overflow:hidden;text-overflow:ellipsis">Mixture-of-Experts with Expert Choice Routing</span></div>
+          <div class="cv-tab on" data-tab="pdf"><svg class="i s" data-i="file"></svg><span style="overflow:hidden;text-overflow:ellipsis">AI models collapse when trained on recursively generated data</span></div>
+          <button class="btn icon sm ghost" title="關閉"><svg class="i s" data-i="x"></svg></button>
+        </div>
+        <div class="reader html" id="rHtml" hidden>
+          <div class="paper" id="paper">
+            <h2>Introduction</h2>
+            <p class="p">Scaling up model capacity, dataset size, and training time has demonstrated huge success in enhancing the performance of computer vision architectures as well as neural language models. The final model quality has been found to have a power-law relationship with the amount of data, model size, and compute time.</p>
+            <div class="tr" data-k="0"></div>
+            <p class="p">Sparsely gated mixture-of-experts (MoE) provides an effective way to scale model capacity given a fixed computational cost. Recent work has implemented sparse routing via <span class="tex" data-tex="k"></span>-means clustering, linear assignment to maximize token-expert affinities, or hashing. Many of the prior work use a routing strategy concerning the <i>token choice</i>, where each token selects the best one or two experts.</p>
+            <div class="tr" data-k="1"></div>
+            <p class="p">We set the expert capacity <span class="tex" data-tex="k"></span> as <span class="tex" data-tex="k = \frac{n \times c}{e}"></span>, where <span class="tex" data-tex="n"></span> is the total number of tokens in the input batch, <span class="tex" data-tex="c"></span> is the capacity factor, and <span class="tex" data-tex="e"></span> is the number of experts.</p>
+            <div class="tr" data-k="2"></div>
+            <p class="p">We argue that the independent token choice of prior work often leads to an imbalanced load of experts, which causes training inefficiency and sub-optimal training of the model.</p>
+            <div class="tr" data-k="3"></div>
+          </div>
+        </div>
+        <div class="reader pdf" id="rPdf"><div class="pcv" id="pcv"></div></div>
+        <div class="hint" id="hint">滑過段落即可看到譯文，點一下固定</div>
+        <div class="pillw" id="pillw">
+          <div class="lmenu pop" id="lmenu">
+            <div class="lbl">譯文語言</div>
+            <div id="langs"></div>
+            <div class="sep"></div>
+            <div class="lbl">自訂（任何語言描述，按 Enter）</div>
+            <input class="input" id="customLang" placeholder="例如：한국어、保留英文術語的繁中">
+          </div>
+          <div class="pill" id="pill"><span class="ico" id="pico" tabindex="0" title="開關翻譯">文A</span><span class="lab" id="plab" tabindex="0"><span id="plabT">繁體中文</span><svg class="i s" data-i="chev"></svg></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ideas view -->
+    <div class="view" id="v-ideas">
+      <div class="page">
+        <div class="page-h">
+          <h1><svg class="i" data-i="bulb"></svg>發想</h1>
+          <span class="muted xs">文獻庫 58 份（含 3 份私密文件）</span>
+          <span class="sp"></span>
+          <div class="tabs" id="ideaMode"><button class="on" data-v="graph"><svg class="i s" data-i="network" style="vertical-align:-2px"></svg> 圖譜</button><button data-v="cards"><svg class="i s" data-i="grid" style="vertical-align:-2px"></svg> 卡片</button></div>
+        </div>
+        <div class="ask">
+          <div class="probsw"><button class="btn outline" id="probBtn"><svg class="i s" data-i="target"></svg><span class="t" id="probBtnT">自由探索</span><svg class="i s muted" data-i="chev"></svg></button><div class="pmenu pop" id="pmenu"></div></div>
+          <input class="input" id="probIn" placeholder="描述新的問題：卡在哪裡、限制條件、已經試過的方法">
+          <button class="btn primary" id="probGo">找跨領域 idea</button>
+        </div>
+        <div class="stfilter" id="stFilter"></div>
+        <div class="ideas-body">
+          <div class="graph" id="graphWrap"><svg id="gsvg" viewBox="0 0 760 520" preserveAspectRatio="xMidYMid meet"></svg><div class="zoomctl"><button class="btn icon sm ghost" id="zOut" data-tip="縮小"><svg class="i s" data-i="zout"></svg></button><span class="pct" id="zPct">100%</span><button class="btn icon sm ghost" id="zIn" data-tip="放大"><svg class="i s" data-i="zin"></svg></button><button class="btn icon sm ghost" id="zFit" data-tip="回到全圖"><svg class="i s" data-i="fit"></svg></button></div>
+            <div class="legend" id="legend" tabindex="0" aria-label="圖例"></div>
+          </div>
+          <div class="cards-grid" id="cardsGrid" hidden></div>
+          <div class="side closed" id="side"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- feedback view -->
+    <div class="view" id="v-feedback">
+      <div class="page" style="position:relative">
+        <div class="page-h"><h1><svg class="i" data-i="chart"></svg>回饋</h1>
+          <span class="muted xs">最近 30 天 · 所有模型</span><span class="sp"></span>
+          <button class="btn outline" id="expOpen"><svg class="i s" data-i="download"></svg>匯出訓練資料</button></div>
+        <div class="fbq" id="fbBanner"></div>
+        <div class="fb-main" id="fbMain">
+          <div class="fb-scroll">
+            <div class="kpis4">
+              <div class="kpi"><div class="n">186</div><div class="l">有回饋的回答</div></div>
+              <div class="kpi"><div class="n">78%</div><div class="l">好評率（明確回饋）</div></div>
+              <div class="kpi"><div class="n">49</div><div class="l">負評（明確 32 · 隱性 17）</div></div>
+              <div class="kpi"><div class="n">32%</div><div class="l">idea 收藏率</div></div>
+            </div>
+            <div class="panel">
+              <h4>哪個環節最常出錯<span class="sp"></span>
+                <button class="btn ghost" id="tblBtn" style="height:26px;font-size:12px"><svg class="i s" data-i="table"></svg>表格</button></h4>
+              <div class="muted xs" style="margin:-4px 0 10px">點一個環節，查看具體案例並決定怎麼處理。</div>
+              <div class="stages" id="stages"></div>
+              <table class="vtable" id="vtable"><thead><tr><th>環節</th><th>明確</th><th>隱性</th><th>合計</th><th>近 4 週</th></tr></thead><tbody></tbody></table>
+              <div class="vlegend"><span><i style="background:var(--viz-1)"></i>明確倒讚</span><span><i style="background:var(--viz-2)"></i>隱性（reviewer 確認）</span><span><svg width="26" height="10" style="vertical-align:-1px;margin-right:5px"><polyline points="1,8 9,6 17,4 25,2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>近 4 週趨勢</span></div>
+            </div>
+            <div class="panel">
+              <h4><svg class="i s" data-i="bulb"></svg>發想回饋<span class="sp"></span><a class="muted xs" id="goIdeas" style="cursor:pointer;text-decoration:underline">到發想頁管理 idea</a></h4>
+              <div class="muted xs" style="margin:-4px 0 12px">在發想頁收藏、標記嘗試結果或排除 idea，就是在回饋發想品質；這些資料用來評估與改進發想。</div>
+              <div class="ideafb">
+                <div class="m"><div class="n">32%</div><div class="l">收藏率（6 / 19）</div></div>
+                <div class="m"><div class="n">1 / 2</div><div class="l">嘗試後有效</div></div>
+                <div class="m"><div class="n">4</div><div class="l">排除：類比不成立 2 · 已試過 1 · 不夠新 1</div></div>
+                <div style="display:flex;gap:8px"><button class="btn outline" id="ideaDetail">查看 idea</button><button class="btn primary" id="ideaToEval"><svg class="i s" data-i="flask"></svg>送進發想評估集</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="fdrawer" id="fdrawer"></div>
+        </div>
+        <div class="review" id="review" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="tcard pop" id="tcard"><span class="arrow"></span><div class="hd"><span id="tcLang">繁體中文</span><button class="btn icon sm ghost" id="tcX" title="關閉"><svg class="i s" data-i="x"></svg></button></div><div class="bd" id="tcBody"></div><div class="ft" id="tcFt"></div></div>
+</div>
+
+<!-- settings -->
+<div class="overlay" id="settings">
+  <div class="modal pop anim">
+    <div class="nav"><div>模型與供應商</div><div>系統</div><div class="on">翻譯</div><div>外部服務</div></div>
+    <div class="ct">
+      <h3>翻譯</h3>
+      <div class="muted xs" style="margin-bottom:6px">Citation Canvas 雙語閱讀</div>
+      <div class="field"><div class="t">翻譯模型</div><div class="h">翻譯段落使用的模型。公式多、小模型失敗時會自動改用旗艦模型重試。</div><input class="input" value="gemini/gemini-3.5-flash-lite" style="max-width:360px"><div><code>PAPERHUB_TRANSLATE_MODEL</code> · 預設：小模型</div></div>
+      <div class="field"><div class="t"><span class="switch on" id="fullSw"></span>背景翻譯整篇論文</div><div class="h">先翻畫面上的段落，再在背景翻完整篇；關閉後只翻你讀到附近的段落，較省費用。</div><code>PAPERHUB_TRANSLATE_FULL_PAPER</code></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button class="btn outline" id="setX">取消</button><button class="btn primary" id="setOk">儲存</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="expDlg">
+  <div class="dlg pop anim">
+    <h3>匯出訓練資料</h3>
+    <div class="muted xs">Hugging Face 格式（JSONL + dataset card），輸出到 <code>workspace/exports/&lt;時間&gt;/</code></div>
+    <div class="grp"><div class="t">資料類型</div><div id="expTypes"></div></div>
+    <div class="grp"><div class="t">篩選</div><div id="expFilters"></div></div>
+    <div class="sum" id="expSum"></div>
+    <div class="muted xs" style="margin-top:10px">資料含文件原文；勾選私密文件時，上傳到組織外前請確認授權。Agent 步驟資料需在開發環境以 <code>paperhub-eval</code> 匯出。</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button class="btn outline" id="expX">取消</button><button class="btn primary" id="expGo"><svg class="i s" data-i="download"></svg>匯出</button></div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast pop" id="toast"></div>
+
+<script>
+/* ---------------- icons (lucide) ---------------- */
+const I = {
+ plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',
+ bulb:'<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+ chart:'<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+ msg:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+ gear:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+ copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+ undo:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+ up:'<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+ down:'<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
+ x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+ check:'<path d="M20 6 9 17l-5-5"/>',
+ lock:'<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+ clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+ upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+ send:'<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+ bookopen:'<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+ brain:'<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>',
+ slides:'<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
+ mic:'<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>',
+ network:'<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+ grid:'<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+ download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+ table:'<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>',
+ file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+ chev:'<path d="m6 9 6 6 6-6"/>',
+ arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+ zin:'<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/>',
+ zout:'<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/>',
+ fit:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+ target:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+ star:'<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
+ ccheck:'<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+ cx:'<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+ eyeoff:'<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+ dotc:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>',
+ flask:'<path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/>'
+};
+const svg = (n, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
+function paintIcons(root = document) { root.querySelectorAll('svg[data-i]').forEach(s => { s.setAttribute('viewBox', '0 0 24 24'); s.innerHTML = I[s.dataset.i]; }); }
+paintIcons();
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+function renderTex(root) { if (!window.katex) return; root.querySelectorAll('.tex').forEach(el => { if (el.dataset.done) return; try { katex.render(el.dataset.tex, el, { throwOnError:false }); el.dataset.done = 1; } catch (e) { el.textContent = el.dataset.tex; } }); }
+function toast(html) { const t = $('#toast'); t.innerHTML = html; t.classList.remove('show'); void t.offsetWidth; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2800); }
+const tip = $('#tip');
+document.addEventListener('mouseover', e => { const el = e.target.closest('[data-tip]'); if (!el) { tip.classList.remove('show'); return; } tip.textContent = el.dataset.tip; const r = el.getBoundingClientRect(); tip.style.left = Math.min(innerWidth - 270, r.left) + 'px'; tip.style.top = (r.top - 34) + 'px'; tip.classList.add('show'); });
+
+/* ---------------- demo controls ---------------- */
+const mq = matchMedia('(prefers-color-scheme: dark)');
+let THEME = 'light';
+function applyTheme() { document.documentElement.dataset.theme = THEME === 'system' ? (mq.matches ? 'dark' : 'light') : THEME; $$('#thm button').forEach(b => b.classList.toggle('on', b.dataset.v === THEME)); }
+$$('#thm button').forEach(b => b.onclick = () => { THEME = b.dataset.v; applyTheme(); });
+mq.addEventListener('change', () => THEME === 'system' && applyTheme());
+function segBind(id, attr, init) { document.documentElement.dataset[attr] = init; $$(`#${id} button`).forEach(b => { b.classList.toggle('on', b.dataset.v === init); b.onclick = () => { document.documentElement.dataset[attr] = b.dataset.v; $$(`#${id} button`).forEach(x => x.classList.toggle('on', x === b)); }; }); }
+applyTheme(); segBind('hlv', 'hl', 'gray'); segBind('arv', 'arrow', 'on');
+
+/* ---------------- sidebar + navigation ---------------- */
+let sessions = [
+  { id:'s1', title:'Model collapse 的成因', kind:'chat' },
+  { id:'s2', title:'MoE routing 比較', kind:'chat' },
+  { id:'s3', title:'GR00T N1 投影片', kind:'chat' },
+  { id:'s4', title:'V-JEPA 2 planning 問答', kind:'chat' }
+];
+let curSession = 's1', view = 'chat';
+function renderChats() {
+  $('#chatList').innerHTML = sessions.map(s => `<div class="sb-chat ${s.id === curSession && view === 'chat' ? 'on' : ''}" data-s="${s.id}">${svg(s.kind === 'idea' ? 'bulb' : 'msg', 'i s')}<span>${s.title}</span></div>`).join('');
+  $$('#chatList .sb-chat').forEach(el => el.onclick = () => { curSession = el.dataset.s; go('chat'); });
+}
+function go(v) {
+  if (v === 'settings') { $('#settings').classList.add('on'); return; }
+  if (v === 'newchat') { v = 'chat'; }
+  view = v;
+  $$('.view').forEach(x => x.classList.toggle('on', x.id === 'v-' + v));
+  $$('.sb-item[data-go]').forEach(x => x.classList.toggle('on', x.dataset.go === v));
+  hideCard(); renderChats();
+  if (v === 'chat') renderThread();
+  if (v === 'ideas') { drawGraph(); renderSide(); }
+}
+$$('.sb-item[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
+$('#settings').onclick = e => { if (e.target.id === 'settings') $('#settings').classList.remove('on'); };
+$('#setX').onclick = () => $('#settings').classList.remove('on');
+$('#setOk').onclick = () => { $('#settings').classList.remove('on'); toast('設定已儲存'); };
+$('#fullSw').onclick = e => e.currentTarget.classList.toggle('on');
+
+/* ---------------- chat thread + feedback ---------------- */
+const REASONS = ['路由錯了', '找錯論文或段落', '引用不對', '事实錯誤', '答非所問', '語言或格式不對', '其他原因'].map(r => r.replace('事实', '事實'));
+let votes = {};
+function renderThread() {
+  const s = sessions.find(x => x.id === curSession);
+  let h = '';
+  if (s.kind === 'idea') {
+    h += `<div class="ctx"><div class="t">${svg('bulb', 'i s')}從 idea 開始的對話</div><div class="sm" style="margin-bottom:8px">${s.idea.t}</div>
+      <div class="pair"><span class="dot" style="background:${endColor(s.idea.a)};margin:0"></span>${s.idea.from}<span class="muted">${s.idea.fromSec}</span><svg class="i s muted" viewBox="0 0 24 24">${I.arrow}</svg><span class="dot" style="background:${endColor(s.idea.b)};margin:0"></span>${s.idea.to}<span class="muted">${s.idea.toSec}</span></div>
+      <div class="muted xs">已附加兩篇論文到這個對話。可以問：「這個類比哪裡不成立？」「要怎麼設計實驗？」</div></div>`;
+  } else {
+    h += `<div class="msg-u">model collapse 主要是由哪些誤差造成的？</div>
+      <div class="msg-a">論文把 model collapse 歸因於三種誤差的累積：<b>統計近似誤差</b>（有限樣本導致低機率事件逐代消失）<span class="cite">[chunk:86142]</span>、<b>函數表達力誤差</b><span class="cite">[chunk:86143]</span>，以及<b>函數近似誤差</b>（例如 SGD 的結構性偏差）<span class="cite">[chunk:86145]</span>。在理論分析中，第 <i>i</i> 代的資料由 <span class="tex" data-tex="p_{i+1} = \\alpha_i p_{\\theta_{i+1}} + \\beta_i p_i + \\gamma_i p_0"></span> 抽樣而得<span class="cite">[chunk:86151]</span>。</div>
+      ${acts('m1')}
+      <div class="msg-u">不對，我是問 V-JEPA 2 的 planning 為什麼會失敗</div>
+      <div class="msg-a">抱歉理解錯了。V-JEPA 2 在長時程規劃上的主要限制是…<span class="cite">[chunk:41207]</span></div>
+      ${acts('m2')}`;
+  }
+  $('#thread').innerHTML = h; renderTex($('#thread'));
+  bindActs();
+}
+function acts(id) {
+  const v = votes[id] || {};
+  return `<div class="acts" data-m="${id}">
+    <button class="btn icon ghost" data-tip="複製">${svg('copy', 'i s')}</button>
+    <button class="btn icon ghost" data-tip="從這裡分支">${svg('undo', 'i s')}</button>
+    <button class="btn icon ghost ${v.p === 'up' ? 'voted' : ''}" data-a="up" data-tip="好回答">${svg('up', 'i s')}</button>
+    <button class="btn icon ghost ${v.p === 'down' ? 'voted' : ''}" data-a="down" data-tip="不好的回答">${svg('down', 'i s')}</button>
+  </div>`;
+}
+function bindActs() {
+  $$('.acts').forEach(a => {
+    const id = a.dataset.m;
+    a.querySelector('[data-a="up"]').onclick = () => { votes[id] = votes[id]?.p === 'up' ? {} : { p:'up' }; closeFb(); renderThread(); };
+    a.querySelector('[data-a="down"]').onclick = e => { e.stopPropagation(); openFb(a, id); };
+  });
+}
+function exitThen(el, done) {           // play popOut, then finish (fallback if animationend never fires)
+  if (!el || el.classList.contains('anim-out')) return;
+  let fin = false; const end = () => { if (fin) return; fin = true; el.classList.remove('anim-out'); done(); };
+  el.classList.remove('anim'); void el.offsetWidth; el.classList.add('anim-out');
+  el.addEventListener('animationend', end, { once:true }); setTimeout(end, 200);
+}
+function collapseThen(el, done) {        // shrink height to 0 so the layout below glides up
+  if (!el || el.classList.contains('collapse-out')) return;
+  el.style.height = el.scrollHeight + 'px'; el.classList.add('collapse-out'); void el.offsetWidth;
+  el.style.height = '0px'; el.style.opacity = '0';
+  setTimeout(() => { el.classList.remove('collapse-out'); el.style.height = el.style.opacity = ''; done(); }, 220);
+}
+function closeFb() { $$('.fb').forEach(x => exitThen(x, () => x.remove())); }
+function openFb(a, id) {
+  closeFb();
+  const guess = id === 'm1' ? '引用不對' : '答非所問';
+  const sel = new Set(votes[id]?.r || [guess]);
+  const box = document.createElement('div'); box.className = 'fb pop anim';
+  const draw = () => {
+    box.innerHTML = `<h5>哪裡不對？<span class="muted xs" style="font-weight:400">（可複選）</span></h5>
+      <div class="chips">${REASONS.map(r => `<span class="chip ${sel.has(r) ? 'on' : ''}" data-r="${r}">${sel.has(r) ? svg('check', 'i s') : ''}${r}${r === guess ? '<span class="guess">系統推測</span>' : ''}</span>`).join('')}</div>
+      ${sel.has('其他原因') ? '<textarea class="input" rows="2" style="margin-top:8px" placeholder="說明其他原因…"></textarea>' : ''}
+      <details style="margin-top:8px"><summary class="muted xs" style="cursor:pointer">提供正確答案（選填）</summary><textarea class="input" rows="2" style="margin-top:6px" placeholder="正確的回答應該是…"></textarea></details>
+      <div class="row"><span class="muted xs" style="flex:1">${guess === '引用不對' ? '系統推測：[chunk:86145] 的內容沒有提到 SGD。' : '系統推測：路由信心偏低。'}</span><button class="btn ghost" data-x>取消</button><button class="btn primary" data-ok>送出</button></div>`;
+    paintIcons(box);
+    box.querySelectorAll('.chip').forEach(c => c.onclick = () => { sel.has(c.dataset.r) ? sel.delete(c.dataset.r) : sel.add(c.dataset.r); draw(); });
+    box.querySelector('[data-x]').onclick = closeFb;
+    box.querySelector('[data-ok]').onclick = () => { votes[id] = { p:'down', r:[...sel] }; closeFb(); renderThread(); toast('已記錄回饋，會連同這次的 trace 一起保存。'); };
+  };
+  draw(); a.appendChild(box);
+}
+document.addEventListener('click', e => { if (!e.target.closest('.fb') && !e.target.closest('[data-a="down"]')) closeFb(); });
+$('#attachBtn').onclick = e => { e.stopPropagation(); const p = $('#attach'); if (p.hidden) { p.hidden = false; p.classList.remove('anim'); void p.offsetWidth; p.classList.add('anim'); } else exitThen(p, () => p.hidden = true); };
+document.addEventListener('click', e => { if (!e.target.closest('#attach') && !e.target.closest('#attachBtn') && !$('#attach').hidden) exitThen($('#attach'), () => $('#attach').hidden = true); });
+$('#privRow').onclick = e => { e.preventDefault(); $('#privChk').classList.toggle('on'); $('#privChk').innerHTML = $('#privChk').classList.contains('on') ? svg('check') : ''; };
+$('#refBtn').onclick = () => { const c = $('#canvas'), on = c.style.display !== 'none'; c.style.display = on ? 'none' : ''; $('#split').style.display = on ? 'none' : ''; $('#refBtn').classList.toggle('on', !on); hideCard(); };
+
+/* ---------------- canvas: tabs, resize ---------------- */
+let tab = 'pdf';
+$$('.cv-tab').forEach(t => t.onclick = () => { tab = t.dataset.tab; $$('.cv-tab').forEach(x => x.classList.toggle('on', x === t)); $('#rHtml').hidden = tab !== 'html'; $('#rPdf').hidden = tab !== 'pdf'; hideCard(); syncPill(); layoutPdf(); });
+let dragX = null, dragW = 0;
+$('#split').onmousedown = e => { dragX = e.clientX; dragW = $('#canvas').offsetWidth; $('#split').classList.add('drag'); e.preventDefault(); };
+addEventListener('mousemove', e => { if (dragX === null) return; const w = Math.max(300, Math.min(innerWidth - 256 - 160, dragW - (e.clientX - dragX))); $('#canvas').style.width = w + 'px'; layoutPdf(); });
+addEventListener('mouseup', () => { dragX = null; $('#split').classList.remove('drag'); });
+
+/* ---------------- translation state + pill ---------------- */
+const FILL = { '繁體中文':'這是此段落的譯文示意，正式版由模型翻譯，公式與引用原樣保留在正確位置。', '简体中文':'这是此段落的译文示意，正式版由模型翻译，公式与引用原样保留在正确位置。', '日本語':'これはこの段落の翻訳サンプルです。本番ではモデルが翻訳し、数式と引用はそのまま残します。', '繁體中文（香港）':'呢段係呢個段落嘅譯文示意，正式版會由模型翻譯，公式同引用會原樣保留喺正確位置。' };
+const HTML_TR = {
+  '繁體中文': ['擴大模型容量、資料集規模與訓練時間，已大幅提升電腦視覺架構與神經語言模型的效能。研究發現，最終模型品質與資料量、模型大小及運算時間呈冪律關係。',
+    '稀疏門控混合專家（MoE）能在固定計算成本下有效擴大模型容量。近期研究以 <span class="tex" data-tex="k"></span>-means 分群、最大化詞元與專家親和度的線性指派或雜湊實作稀疏路由。許多先前研究採用以 <i>token choice</i> 為主的路由策略，即每個詞元選擇最適合的一或兩個專家。',
+    '我們將專家容量 <span class="tex" data-tex="k"></span> 設為 <span class="tex" data-tex="k = \\frac{n \\times c}{e}"></span>，其中 <span class="tex" data-tex="n"></span> 為輸入批次的詞元總數，<span class="tex" data-tex="c"></span> 為容量係數，<span class="tex" data-tex="e"></span> 為專家數。',
+    '我們認為先前研究中各詞元獨立選擇專家，常導致專家負載不平衡，造成訓練效率低落與模型訓練不佳。']
+};
+let LANGS = ['繁體中文', '简体中文', '日本語'], RECENT = ['繁體中文（香港）'], LANG = '繁體中文';
+const trOn = { html:false, pdf:false }, cached = new Set(['繁體中文']), pending = new Set();
+let hinted = false;
+function syncPill() { $('#pill').classList.toggle('on', trOn[tab]); $('#plabT').textContent = LANG; }
+function renderLangs() {
+  const row = l => `<div class="it ${l === LANG ? 'sel' : ''}" data-l="${l}"><span>${l}${l === '繁體中文' ? ' <span class="muted xs">介面語言</span>' : ''}</span>${l === LANG ? svg('check', 'i s') : (cached.has(l) ? '<span class="muted xs">已快取</span>' : '')}</div>`;
+  $('#langs').innerHTML = LANGS.map(row).join('') + (RECENT.length ? '<div class="lbl">最近用過</div>' + RECENT.map(row).join('') : '');
+  $$('#langs .it').forEach(r => r.onclick = e => { e.stopPropagation(); pick(r.dataset.l); });
+}
+function setMenu(open) { $('#lmenu').classList.toggle('open', open); $('#pillw').classList.toggle('open', open); if (open) renderLangs(); }
+function pick(l) {
+  if (!l) return;
+  if (!LANGS.includes(l) && !RECENT.includes(l)) RECENT.unshift(l);
+  LANG = l; setMenu(false); syncPill();
+  if (!cached.has(l)) { pending.add(l); refreshAll(); setTimeout(() => { pending.delete(l); cached.add(l); refreshAll(); }, 1200); } else refreshAll();
+}
+function refreshAll() { if (tab === 'html') fillHtml(false); refreshCard(); }
+$('#pico').onclick = e => {
+  e.stopPropagation(); trOn[tab] = !trOn[tab]; setMenu(false); syncPill();
+  if (tab === 'html') { $('#paper').classList.toggle('on', trOn.html); if (trOn.html) fillHtml(true); }
+  if (!trOn[tab]) { pinned = false; hideCard(); }
+  else if (tab === 'pdf' && !hinted) { hinted = true; $('#hint').classList.add('show'); setTimeout(() => $('#hint').classList.remove('show'), 2800); }
+};
+$('#pico').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#pico').click(); } };
+$('#plab').onclick = e => { e.stopPropagation(); if (!trOn[tab]) return; setMenu(!$('#lmenu').classList.contains('open')); };
+$('#customLang').onkeydown = e => { if (e.key === 'Enter') { pick(e.target.value.trim()); e.target.value = ''; } };
+document.addEventListener('click', e => { if (!e.target.closest('#pillw')) setMenu(false); });
+function fillText(lang, n) { const f = FILL[lang] || FILL['繁體中文']; return f.repeat(Math.ceil(n / f.length + 1)).slice(0, n); }
+function fillHtml(progressive) {
+  $$('#paper .tr').forEach((el, i) => {
+    const done = () => {
+      if (pending.has(LANG)) { el.innerHTML = '<span class="spin"></span>翻譯中…'; return; }
+      el.innerHTML = (HTML_TR[LANG] || [])[i] || (FILL[LANG] ? fillText(LANG, 70) : `<span class="muted">〔示意只準備四種語言；正式版會以「${LANG}」翻譯〕</span>`);
+      renderTex(el);
+    };
+    if (progressive) { el.innerHTML = '<span class="spin"></span>翻譯中…'; setTimeout(done, 350 + i * 380); } else done();
+  });
+}
+renderTex($('#paper'));
+
+/* ---------------- PDF reader + floating card ---------------- */
+const PAGES = __PAGES__, P = __PARAS__;
+const pcv = $('#pcv'), rPdf = $('#rPdf'), card = $('#tcard'), tcBody = $('#tcBody');
+let pageTops = [], pageK = [], active = null, activeFrag = 0, pinned = false, hideT = null;
+PAGES.forEach(p => { const im = document.createElement('img'); im.className = 'pgimg'; im.src = 'data:image/png;base64,' + p.src; pcv.appendChild(im); p.el = im; const no = document.createElement('div'); no.className = 'pno'; no.textContent = '第 ' + p.no + ' 頁'; pcv.appendChild(no); p.noEl = no; });
+P.forEach((p, i) => p.frags.forEach((f, j) => {
+  const z = document.createElement('div'); z.className = 'z';
+  z.onmouseenter = () => { if (!trOn.pdf) return; clearTimeout(hideT); if (!pinned) show(i, j); };
+  z.onmouseleave = () => { if (!pinned) hideT = setTimeout(hideCard, 250); };
+  z.onclick = e => { if (!trOn.pdf) return; e.stopPropagation(); if (pinned && active === i) { pinned = false; hideCard(); } else { pinned = true; show(i, j); } };
+  pcv.appendChild(z); f.el = z;
+}));
+function layoutPdf() {
+  if (tab !== 'pdf') return;
+  const ratio = rPdf.scrollTop / Math.max(1, pcv.offsetHeight);
+  const pw = Math.max(200, Math.min(rPdf.clientWidth - 24, 900)); pcv.style.width = pw + 'px';
+  let top = 12;
+  PAGES.forEach((p, i) => { const k = pw / p.w; pageK[i] = k; pageTops[i] = top; Object.assign(p.el.style, { top:top + 'px', width:pw + 'px', height:p.h * k + 'px' }); p.noEl.style.top = (top + p.h * k + 2) + 'px'; top += p.h * k + 22; });
+  pcv.style.height = top + 'px';
+  P.forEach(p => p.frags.forEach(f => { const k = pageK[f.p]; f.x = f.x0 * k; f.y = pageTops[f.p] + f.y0 * k; f.w = (f.x1 - f.x0) * k; f.h = (f.y1 - f.y0) * k; Object.assign(f.el.style, { left:f.x + 'px', top:f.y + 'px', width:f.w + 'px', height:f.h + 'px' }); }));
+  rPdf.scrollTop = ratio * pcv.offsetHeight;
+  place();
+}
+function buildTr(i) {
+  const p = P[i];
+  if (pending.has(LANG)) return '<span class="spin"></span>翻譯中…';
+  return p.frags.map((f, j) => {
+    let seg;
+    if (f.real && f.real[LANG]) seg = f.real[LANG];
+    else if (FILL[LANG]) seg = fillText(LANG, Math.round(f.n * 0.5));
+    else seg = `<span class="muted">〔示意只準備四種語言；正式版會以「${LANG}」翻譯〕</span>`;
+    return (j ? `<span class="cont">${p.wh[j - 1]}</span>` : '') + seg;
+  }).join('') + (p.frags.some(f => f.src) ? '<details><summary>原文（公式已還原）</summary>' + p.frags.filter(f => f.src).map(f => f.src).join(' ') + '</details>' : '');
+}
+function show(i, j) {
+  $$('.z.on,.z.pin').forEach(z => z.classList.remove('on', 'pin'));
+  const switching = card.classList.contains('show') && active !== null && active !== i;
+  active = i; activeFrag = j;
+  P[i].frags.forEach(f => f.el.classList.add(pinned ? 'pin' : 'on'));
+  $('#tcLang').textContent = LANG;
+  $('#tcFt').textContent = pinned ? '已固定 · 捲動時會跟著 · Esc 或 ✕ 關閉' : '點一下段落可固定';
+  const fill = () => { tcBody.innerHTML = buildTr(i); renderTex(tcBody); card.classList.add('show'); place(); tcBody.classList.remove('swap'); };
+  if (switching) { tcBody.classList.add('swap'); setTimeout(fill, 140); } else fill();
+}
+function refreshCard() { if (active === null) return; $('#tcLang').textContent = LANG; tcBody.classList.add('swap'); setTimeout(() => { tcBody.innerHTML = buildTr(active); renderTex(tcBody); place(); tcBody.classList.remove('swap'); }, 140); }
+function hideCard() { card.classList.remove('show'); $$('.z.on,.z.pin').forEach(z => z.classList.remove('on', 'pin')); active = null; }
+function place() {
+  if (active === null || tab !== 'pdf') return;
+  const app = $('#app').getBoundingClientRect(), rr = rPdf.getBoundingClientRect(), chat = $('#chatCol').getBoundingClientRect();
+  const vh = rPdf.clientHeight, st = rPdf.scrollTop, p = P[active], fr = p.frags[activeFrag];
+  const visTop = Math.max(fr.y, st), visBot = Math.min(fr.y + fr.h, st + vh);
+  if (visBot <= visTop) { const o = p.frags.findIndex(f => Math.min(f.y + f.h, st + vh) > Math.max(f.y, st)); if (o >= 0 && o !== activeFrag) { activeFrag = o; return place(); } if (!pinned) hideCard(); else card.classList.remove('show'); return; }
+  card.classList.add('show');
+  const sideRoom = chat.width - 24;
+  const rTop = rr.top - app.top, pageLeft = rr.left - app.left + pcv.offsetLeft - rPdf.scrollLeft;
+  if (sideRoom >= 260) {
+    card.classList.add('at-side'); card.classList.remove('at-below');
+    const w = Math.min(460, sideRoom); card.style.width = w + 'px';
+    card.style.left = (chat.right - app.left - w - 12) + 'px';
+    tcBody.style.maxHeight = (vh - 90) + 'px';
+    const ch = card.offsetHeight; const top = Math.min(Math.max(rTop + 8, rTop + fr.y - st), rTop + vh - ch - 8);
+    card.style.top = top + 'px';
+    card.style.setProperty('--ay', Math.min(Math.max(10, rTop + (visTop + visBot) / 2 - st - top - 6), ch - 22) + 'px');
+  } else {
+    card.classList.add('at-below'); card.classList.remove('at-side');
+    const w = Math.min(Math.max(fr.w, 260), rr.width - 24); card.style.width = w + 'px';
+    let left = Math.max(rr.left - app.left + 12, Math.min(pageLeft + fr.x, rr.right - app.left - w - 12)); card.style.left = left + 'px';
+    tcBody.style.maxHeight = Math.max(90, vh * .45) + 'px';
+    const ch = card.offsetHeight; let top = rTop + visBot - st + 10; if (top + ch > rTop + vh - 8) top = Math.max(rTop + 8, rTop + vh - ch - 8);
+    card.style.top = top + 'px'; card.style.setProperty('--ax', Math.min(Math.max(14, pageLeft + fr.x + 20 - left), w - 30) + 'px');
+  }
+  const range = tcBody.scrollHeight - tcBody.clientHeight;
+  if (range > 0) { let lo = 0, hi = range; const cs = [...tcBody.querySelectorAll('.cont')].map(c => Math.min(range, Math.max(0, c.offsetTop - tcBody.offsetTop - 6))); if (cs.length) { lo = activeFrag === 0 ? 0 : cs[activeFrag - 1]; hi = activeFrag < cs.length ? cs[activeFrag] : range; } tcBody.scrollTop = lo + (hi - lo) * Math.min(1, Math.max(0, (st + vh * .35 - fr.y) / fr.h)); }
+}
+$('#tcX').onclick = e => { e.stopPropagation(); pinned = false; hideCard(); };
+card.onmouseenter = () => clearTimeout(hideT);
+card.onmouseleave = () => { if (!pinned) hideT = setTimeout(hideCard, 250); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { pinned = false; hideCard(); setMenu(false); closeFb(); $('#settings').classList.remove('on'); } });
+rPdf.addEventListener('scroll', place);
+addEventListener('resize', () => { layoutPdf(); });
+PAGES[0].el.onload = layoutPdf;
+
+/* ---------------- ideas ---------------- */
+const DOMAINS = [
+  { id:'llm', name:'LLM 架構 / MoE', cx:150, cy:120, r:105 },
+  { id:'rob', name:'機器人 / VLA', cx:600, cy:130, r:110 },
+  { id:'rea', name:'LLM 推理', cx:380, cy:70, r:52 },
+  { id:'cv', name:'電腦視覺', cx:250, cy:385, r:110 },
+  { id:'ir', name:'資訊檢索', cx:430, cy:385, r:105 }
+];
+const DOCS = [
+  { id:'sw', t:'Switch Transformer', x:95, y:100, d:['llm'] },
+  { id:'ec', t:'Expert Choice', x:180, y:85, d:['llm'] },
+  { id:'re', t:'ReMoE', x:140, y:170, d:['llm'] },
+  { id:'gpt', t:'GPT-3 (ICL)', x:380, y:75, d:['rea'] },
+  { id:'gr', t:'GR00T N1', x:570, y:95, d:['rob'] },
+  { id:'vj', t:'V-JEPA 2', x:650, y:175, d:['rob'] },
+  { id:'xv', t:'X-VLA', x:560, y:185, d:['rob'] },
+  { id:'mem', t:'內部：手臂控制器設計 v3', x:665, y:85, d:['rob'], priv:true },
+  { id:'fr', t:'Faster R-CNN', x:195, y:345, d:['cv'] },
+  { id:'an', t:'Anchor box 互動設計', x:210, y:430, d:['cv'] },
+  { id:'cir', t:'CIR（組合式圖像檢索）', x:340, y:395, d:['cv', 'ir'] },
+  { id:'rr', t:'Image reranker', x:470, y:350, d:['ir'] },
+  { id:'dr', t:'內部：檢索系統評測報告', x:475, y:440, d:['ir'], priv:true }
+];
+const CITES = [['sw','ec'],['sw','re'],['ec','re'],['gr','xv'],['gr','vj'],['xv','vj'],['fr','an'],['cir','fr'],['cir','rr'],['rr','dr']];
+let IDEAS = [
+  { prob:'explore', id:'i1', status:'trying', note:'已和指導教授討論，下週在模擬環境做小規模實驗。', t:'用示範影像當 prompt，讓 VLA 不用微調就學新任務', a:'gpt', b:'gr', from:'GPT-3 (ICL)', fromSec:'§2 Approach', to:'GR00T N1', toSec:'§3 Model', m:'在輸入裡放幾個示範，模型照著做，不改權重。對應到 VLA：把示範換成影像序列，放進觀測輸入。', chats:1 },
+  { prob:'explore', id:'i2', status:'saved', t:'用一組參考錨點重新評分圖像檢索的候選', a:'an', b:'rr', from:'Anchor box 互動設計', fromSec:'§4 Interaction', to:'Image reranker', toSec:'§3 Method', m:'先準備一組先驗參考，候選與參考比較後評分並修正。對應到檢索：以查詢的多個錨點視角重新排序候選。', chats:0 },
+  { prob:'explore', id:'i3', status:'new', t:'讓專家挑選觀測：Expert Choice 用於多感測器融合', a:'ec', b:'vj', from:'Expert Choice', fromSec:'§3 Method', to:'V-JEPA 2', toSec:'§4 Planning', m:'反轉路由方向，由容量固定的專家挑輸入，負載天然平衡。對應：各感測器分支依容量挑選最相關的觀測片段。', chats:0 },
+  { prob:'explore', id:'i4', status:'dismissed', reason:'類比不成立', note:'控制器的技能切換本來就是離散事件，連續化沒有意義。', t:'可微分的技能組合：以 ReLU 路由取代離散技能選擇', a:'re', b:'mem', from:'ReMoE', fromSec:'§3 ReLU routing', to:'內部：手臂控制器設計 v3', toSec:'§2 技能切換', m:'用連續、可微的閘門取代 top-k 離散選擇。對應：把控制器的技能切換改成可微加權，端到端訓練。', chats:0 }
+];
+IDEAS.push(
+  { prob:'p1', id:'p1a', status:'saved', t:'用示範影像當條件輸入，取代每個新任務的微調', a:'gpt', b:'prob', from:'GPT-3 (ICL)', fromSec:'§2 Approach', to:'你的問題', toSec:'', m:'你的問題可抽象為「不改權重適應新任務」。ICL 只靠輸入中的示範就能做到；對應到 VLA：把新任務的示範影像序列當成條件輸入。', chats:0 },
+  { prob:'p1', id:'p1b', status:'new', t:'以 soft prompt 承載任務差異，凍結主幹', a:'xv', b:'prob', from:'X-VLA', fromSec:'§3 Soft prompts', to:'你的問題', toSec:'', m:'X-VLA 用每個 embodiment 一組可學的 soft prompt 吸收差異、主幹共用。對應：每個新任務只學一組 prompt，比 LoRA 參數更少、更穩定。', chats:0 },
+  { prob:'p1', id:'p1c', status:'new', t:'讓容量固定的專家挑選要用的示範片段', a:'ec', b:'prob', from:'Expert Choice', fromSec:'§3 Method', to:'你的問題', toSec:'', m:'示範太多時，由容量固定的模組挑最相關的片段，避免輸入爆長。', chats:0 },
+  { prob:'p2', id:'p2a', status:'worked', note:'在內部資料集上 mAP +3.1，已寫進評測報告。', t:'以多個參考錨點重新評分細粒度候選', a:'an', b:'prob', from:'Anchor box 互動設計', fromSec:'§4 Interaction', to:'你的問題', toSec:'', m:'只看全域特徵時細粒度差異被平均掉；用一組錨點（局部區域）分別比對再彙總，可放大細部差異。', chats:0 },
+  { prob:'p2', id:'p2b', status:'failed', reason:'', note:'使用者不習慣輸入文字修飾，實測使用率低。', t:'用文字修飾補足查詢圖片表達不出的細粒度差異', a:'cir', b:'prob', from:'CIR（組合式圖像檢索）', fromSec:'§3 Method', to:'你的問題', toSec:'', m:'CIR 讓使用者用「這張圖，但顏色改成…」的方式查詢；細粒度差異可以由文字明確指出，而不是全靠圖片特徵。', chats:0 }
+);
+let PROBLEMS = [
+  { id:'explore', t:'自由探索', sub:'文獻庫內的跨領域組合' },
+  { id:'p1', t:'VLA 換新任務成本太高', q:'VLA 換新任務要重新收資料、重新微調，成本太高。', tried:'LoRA 微調（效果不穩）', at:'11/05' },
+  { id:'p2', t:'細粒度圖像檢索排序不準', q:'圖像檢索在細粒度類別上排序不準，重排序模型只看全域特徵。', tried:'加大重排序模型', at:'11/02' }
+];
+let curProb = 'explore', stFilter = 'active';
+const ST = { new:{ l:'新的', i:'dotc' }, saved:{ l:'收藏', i:'star' }, trying:{ l:'嘗試中', i:'flask' }, worked:{ l:'有效', i:'ccheck' }, failed:{ l:'無效', i:'cx' }, dismissed:{ l:'已排除', i:'eyeoff' } };
+const FILTERS = [['active', '進行中', s => s !== 'dismissed'], ['saved', '收藏', s => s === 'saved'], ['trying', '嘗試中', s => s === 'trying'], ['done', '有結果', s => s === 'worked' || s === 'failed'], ['dismissed', '已排除', s => s === 'dismissed']];
+const DISMISS_REASONS = ['已試過', '不可行', '類比不成立', '不夠新', '其他'];
+const PROB_POS = { x:530, y:275 };
+const inProb = () => IDEAS.filter(i => i.prob === curProb);
+const visibleIdeas = () => { const f = FILTERS.find(F => F[0] === stFilter)[2]; return inProb().filter(i => f(i.status)); };
+function renderStFilter() {
+  $('#stFilter').innerHTML = FILTERS.map(([k, l, f]) => `<button class="${k === stFilter ? 'on' : ''}" data-f="${k}">${k === 'active' ? '' : svg(ST[k === 'done' ? 'worked' : k].i, 'i s')}${l}<span class="n">${inProb().filter(i => f(i.status)).length}</span></button>`).join('');
+  $$('#stFilter [data-f]').forEach(b => b.onclick = () => { stFilter = b.dataset.f; if (selIdea && !visibleIdeas().some(i => i.id === selIdea)) selIdea = null; refreshIdeas(); });
+}
+function refreshIdeas() { renderStFilter(); drawGraph(); if (ideaMode === 'cards') renderCards(); renderSide(); }
+const probOf = id => PROBLEMS.find(p => p.id === id);
+let selIdea = null, selDoc = null, selProb = false, problem = null, ideaMode = 'graph';
+const docById = id => DOCS.find(d => d.id === id);
+const domColor = id => `var(--d-${id})`;
+const endColor = id => id === 'prob' ? 'var(--foreground)' : domColor(docById(id).d[0]);
+const ideaCount = id => visibleIdeas().filter(i => i.a === id || i.b === id).length;
+let legendCollapsed = false;
+function renderLegend() {
+  const L = $('#legend'); L.classList.toggle('collapsed', legendCollapsed);
+  const item = (sw, label) => `<div class="lg-i"><span class="sw">${sw}</span>${label}</div>`;
+  const line = dash => `<svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="currentColor" stroke-width="1.6" ${dash ? `stroke-dasharray="${dash}" stroke-linecap="round"` : ''}/></svg>`;
+  L.innerHTML = `<div class="lg-h" id="lgH" role="button" tabindex="0" aria-expanded="${!legendCollapsed}">圖例${svg('chev', 'i s')}</div><div class="lg-bw"><div class="lg-b"><div class="lg-pad">
+    <div class="lg-g"><div class="lg-t">領域（顏色）</div>${DOMAINS.map(D => item(`<span class="dot" style="background:${domColor(D.id)}"></span>`, D.name)).join('')}</div>
+    <div class="lg-g"><div class="lg-t">關係</div>${item(`<svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="var(--muted-foreground)" stroke-width="1"/></svg>`, '引用')}${item(`<svg width="22" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M15 0 L22 4 L15 8 Z" fill="currentColor"/></svg>`, 'idea：來源 → 目標')}</div>
+    <div class="lg-g"><div class="lg-t">idea 狀態</div>${item(line(''), '收藏／嘗試中／有效')}${item(line('1.5 4'), '無效／已排除')}<div class="lg-2">${item(svg('star', 'i s'), '收藏')}${item(svg('flask', 'i s'), '嘗試中')}${item(svg('ccheck', 'i s'), '有效')}${item(svg('cx', 'i s'), '無效')}</div></div>
+    <div class="lg-g"><div class="lg-t">文件</div>${item('<svg width="22" height="14"><circle cx="5" cy="7" r="4" fill="var(--muted-foreground)"/><circle cx="16" cy="7" r="6" fill="var(--muted-foreground)"/></svg>', '大小 = 相關 idea 數')}${item(svg('lock', 'i s'), '私密文件')}</div>
+  </div></div></div>`;
+  const tgl = () => { legendCollapsed = !legendCollapsed; L.classList.toggle('collapsed', legendCollapsed); $('#lgH').setAttribute('aria-expanded', String(!legendCollapsed)); };
+  $('#lgH').onclick = tgl;
+  $('#lgH').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tgl(); } };
+}
+function drawGraph() {
+  const s = $('#gsvg'); const I_ = IDEAS.find(x => x.id === selIdea);
+  const focus = I_ ? new Set([I_.a, I_.b]) : (selDoc ? new Set([selDoc]) : null);
+  let h = '';
+  DOMAINS.forEach(d => { const dim = focus && ![...focus].some(id => (docById(id) || {}).d?.includes(d.id)); h += `<g class="hull-g ${dim ? 'dim' : ''}"><circle class="hull" cx="${d.cx}" cy="${d.cy}" r="${d.r}" fill="${domColor(d.id)}" stroke="${domColor(d.id)}"/><text class="hull-l" data-dom="${d.id}" x="${d.cx}" y="${d.cy - d.r + 17}" text-anchor="middle">${d.name}</text></g>`; });
+  CITES.forEach(([a, b]) => { const A = docById(a), B = docById(b); h += `<line class="e-cite ${focus ? 'dim' : ''}" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"/>`; });
+  h = `<defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z"/></marker>`
+    + `<marker id="arrowheadSel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z"/></marker></defs>` + h;
+  const rad = d => d && d.x !== undefined && d.d ? 6 + Math.min(3, ideaCount(d.id)) * 2.5 + (d.d.length > 1 ? 1 : 0) : 13;
+  const pt = id => id === 'prob' ? PROB_POS : docById(id);
+  const ends = (I_) => [pt(I_.a), pt(I_.b)];
+  visibleIdeas().forEach(x => {
+    const [A, B] = ends(x); if (!A || !B) return;
+    const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2 - 40;
+    const tx = B.x - mx, ty = B.y - my, tl = Math.hypot(tx, ty) || 1;
+    const rb = x.b === 'prob' ? Math.min(52 / Math.max(Math.abs(tx / tl), .01), 17 / Math.max(Math.abs(ty / tl), .01)) + 4 : rad(B) + (x.id === selIdea ? 7 : 3);
+    const bx = B.x - tx / tl * rb, by = B.y - ty / tl * rb;
+    const d = `M${A.x},${A.y} Q${mx},${my} ${bx},${by}`, dHit = `M${A.x},${A.y} Q${mx},${my} ${B.x},${B.y}`;
+    const dimc = x.id !== selIdea && (selIdea || selDoc) ? 'dim' : '';
+    h += `<path class="e-idea st-${x.status} ${x.id === selIdea ? 'sel' : dimc}" d="${d}" marker-end="url(#${x.id === selIdea ? 'arrowheadSel' : 'arrowhead'})"/><path class="e-hit" data-idea="${x.id}" d="${dHit}"><title>${x.t}（${x.from} → ${x.to}）· ${ST[x.status].l}</title></path>`;
+    if (x.status !== 'new') { const gx = (A.x + 2 * mx + bx) / 4, gy = (A.y + 2 * my + by) / 4;
+      h += `<g class="stg ${dimc}" data-idea="${x.id}" transform="translate(${gx - 9},${gy - 9})"><circle cx="9" cy="9" r="9"/><g class="gi" transform="translate(3,3) scale(.5)">${I[ST[x.status].i]}</g><title>${ST[x.status].l}</title></g>`; }
+  });
+  const P_ = probOf(curProb);
+  if (curProb !== 'explore') { const label = P_.t.length > 12 ? P_.t.slice(0, 12) + '…' : P_.t;
+    h += `<g class="prob ${selProb ? 'sel' : ''}" data-prob="1"><rect x="${PROB_POS.x - 52}" y="${PROB_POS.y - 17}" width="104" height="34" rx="8"/><text x="${PROB_POS.x}" y="${PROB_POS.y - 2}" text-anchor="middle">你的問題</text><text x="${PROB_POS.x}" y="${PROB_POS.y + 11}" text-anchor="middle" style="font-size:9.5px;font-weight:500">${label}</text><title>${P_.q}</title></g>`; }
+  renderLegend();
+  DOCS.forEach(d => {
+    const cls = ['nd']; if (I_ && I_.a === d.id) cls.push('src'); if (I_ && I_.b === d.id) cls.push('tgt'); if (selDoc === d.id) cls.push('selnode'); if (focus && !focus.has(d.id)) cls.push('dim');
+    const r = rad(d);
+    const body = d.d.length > 1
+      ? `<path class="c" d="M${d.x},${d.y - r} A${r},${r} 0 0 0 ${d.x},${d.y + r} Z" fill="${domColor(d.d[0])}"/><path class="c" d="M${d.x},${d.y - r} A${r},${r} 0 0 1 ${d.x},${d.y + r} Z" fill="${domColor(d.d[1])}"/>`
+      : `<circle class="c" cx="${d.x}" cy="${d.y}" r="${r}" fill="${domColor(d.d[0])}"/>`;
+    const role = I_ && I_.a === d.id ? '來源' : I_ && I_.b === d.id ? '目標' : (selDoc === d.id ? ' ' : '');
+    const ring = role ? `<circle class="ring" cx="${d.x}" cy="${d.y}" r="${r + 4}"/>${role.trim() ? `<text class="rl" x="${d.x}" y="${d.y - r - 9}" text-anchor="middle">${role}</text>` : ''}` : '';
+    h += `<g class="${cls.join(' ')}" data-doc="${d.id}">${ring}${body}${d.priv ? `<g transform="translate(${d.x + r - 2},${d.y - r - 10}) scale(.5)"><rect class="lk" width="18" height="11" x="3" y="11" rx="2"/><path class="lk" d="M7 11V7a5 5 0 0 1 10 0v4"/></g>` : ''}<text x="${d.x}" y="${d.y + r + 13}" text-anchor="middle">${d.t}</text><title>${d.t} · ${d.d.map(x => DOMAINS.find(D => D.id === x).name).join(' + ')}${d.priv ? ' · 私密文件' : ''}</title></g>`;
+  });
+  s.innerHTML = `<g id="vp" transform="translate(${VIEW.x},${VIEW.y}) scale(${VIEW.k})">${h}</g>`;
+  s.querySelectorAll('[data-idea]').forEach(e => e.onclick = ev => { ev.stopPropagation(); delete $('#side').dataset.dom; selIdea = e.dataset.idea; selDoc = null; selProb = false; drawGraph(); renderSide(); });
+  s.querySelectorAll('[data-doc]').forEach(e => e.onclick = ev => { ev.stopPropagation(); delete $('#side').dataset.dom; selDoc = e.dataset.doc; selIdea = null; selProb = false; drawGraph(); renderSide(); });
+  s.querySelectorAll('[data-dom]').forEach(e => e.onclick = ev => { ev.stopPropagation(); renderDomain(e.dataset.dom); });
+  s.querySelectorAll('[data-prob]').forEach(e => e.onclick = ev => { ev.stopPropagation(); delete $('#side').dataset.dom; selProb = true; selIdea = null; selDoc = null; drawGraph(); renderSide(); });
+  s.onclick = () => { if (justPanned) { justPanned = false; return; } delete $('#side').dataset.dom; selIdea = null; selDoc = null; selProb = false; drawGraph(); renderSide(); };
+}
+const VIEW = { x:0, y:0, k:1 };
+let justPanned = false;
+function applyView() { const vp = document.getElementById('vp'); if (vp) vp.setAttribute('transform', `translate(${VIEW.x},${VIEW.y}) scale(${VIEW.k})`); $('#zPct').textContent = Math.round(VIEW.k * 100) + '%'; }
+function svgPoint(evt) { const s = $('#gsvg'), pt = s.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY; return pt.matrixTransform(s.getScreenCTM().inverse()); }
+function zoomAt(px, py, factor) {
+  const k = Math.min(3, Math.max(.5, VIEW.k * factor)); const f = k / VIEW.k;
+  VIEW.x = px - (px - VIEW.x) * f; VIEW.y = py - (py - VIEW.y) * f; VIEW.k = k; applyView();
+}
+(() => {
+  const s = $('#gsvg'); let start = null;
+  s.addEventListener('wheel', e => { e.preventDefault(); const p = svgPoint(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive:false });
+  s.addEventListener('pointerdown', e => {
+    if (e.target.closest('[data-idea],[data-doc],[data-dom],[data-prob]')) return;
+    const p = svgPoint(e); start = { px:p.x, py:p.y, x:VIEW.x, y:VIEW.y, moved:false }; s.setPointerCapture(e.pointerId);
+  });
+  s.addEventListener('pointermove', e => {
+    if (!start) return; const p = svgPoint(e); const dx = p.x - start.px, dy = p.y - start.py;
+    if (!start.moved && Math.hypot(dx, dy) < 3) return;
+    start.moved = true; s.classList.add('panning');
+    VIEW.x = start.x + dx; VIEW.y = start.y + dy; applyView();
+    start.px = p.x - (VIEW.x - start.x) + (VIEW.x - start.x); start.py = p.y - (VIEW.y - start.y) + (VIEW.y - start.y);
+    start.px = p.x; start.py = p.y; start.x = VIEW.x; start.y = VIEW.y;
+  });
+  const end = () => { if (start && start.moved) justPanned = true; start = null; s.classList.remove('panning'); };
+  s.addEventListener('pointerup', end); s.addEventListener('pointercancel', end);
+  s.addEventListener('dblclick', e => { if (e.target.closest('[data-idea],[data-doc],[data-dom]')) return; const p = svgPoint(e); zoomAt(p.x, p.y, 1.6); });
+  $('#zIn').onclick = () => zoomAt(380, 260, 1.25);
+  $('#zOut').onclick = () => zoomAt(380, 260, 1 / 1.25);
+  $('#zFit').onclick = () => { VIEW.x = 0; VIEW.y = 0; VIEW.k = 1; applyView(); };
+})();
+function ensureVisible() {
+  const x = IDEAS.find(i => i.id === selIdea); const vp = document.getElementById('vp');
+  if (!x || !vp) return;
+  const pts = [x.a, x.b].map(id => id === 'prob' ? PROB_POS : docById(id)).filter(Boolean);
+  const wrap = $('#graphWrap').getBoundingClientRect(), m = vp.getScreenCTM();
+  const visRight = wrap.right - 340 - 110, visLeft = wrap.left + 110;   // margin covers the node label width
+  const xs = pts.map(pt => pt.x * m.a + m.e);
+  const over = Math.max(...xs) - visRight, under = visLeft - Math.min(...xs);
+  if (over <= 0 && under <= 0) return;
+  const shiftPx = over > 0 ? -over : under;
+  const k = $('#gsvg').getScreenCTM().a;        // px per viewBox unit
+  VIEW.x += shiftPx / k; applyView();
+}
+function renderSide() {
+  const side = $('#side'); const x = IDEAS.find(i => i.id === selIdea);
+  side.classList.toggle('closed', !x && !selDoc && !selProb && !side.dataset.dom);
+  document.querySelector('.ideas-body').classList.toggle('drawer-open', !side.classList.contains('closed'));
+  if (selIdea && ideaMode === 'graph') requestAnimationFrame(ensureVisible);
+  const head = (label) => `<div class="sh"><span class="muted xs">${label}</span><button class="btn icon sm ghost" id="sideX" data-tip="關閉">${svg('x', 'i s')}</button></div>`;
+  if (x) {
+    side.innerHTML = `${head('跨領域 idea · ' + ST[x.status].l)}<h3>${x.t}</h3>
+      <div class="lb">機制來源</div><div class="srcb"><span class="dot" style="background:${endColor(x.a)}"></span><div>${x.from}<small>${x.fromSec} · 可點開原文段落</small></div></div>
+      <div class="lb">應用目標</div><div class="srcb"><span class="dot" style="background:${endColor(x.b)}"></span><div>${x.b === 'prob' ? probOf(x.prob).t : x.to}${x.b === 'mem' ? ' ' + svg('lock', 'i s muted') : ''}<small>${x.b === 'prob' ? '你描述的問題' : x.toSec}</small></div></div>
+      <div class="lb">為什麼搭得上</div><div class="sm" style="line-height:1.7">${x.m}</div>
+      ${x.status === 'dismissed'
+        ? `<div class="lb">狀態</div><div class="banner">${svg('eyeoff', 'i s')}已排除 · ${x.reason || '未填原因'}<button class="btn outline" id="undoDismiss">復原</button></div>`
+        : `<div class="lb">狀態</div><div class="stseg">${['new', 'saved', 'trying', 'worked', 'failed'].map(k => `<button class="${x.status === k ? 'on' : ''}" data-st="${k}">${svg(ST[k].i, 'i s')}${ST[k].l}</button>`).join('')}</div>`}
+      <div class="lb">筆記</div><textarea class="input" id="ideaNote" rows="2" placeholder="例如：已和指導教授討論，下週做小規模實驗">${x.note || ''}</textarea><div class="saved-hint" id="noteHint"></div>
+      <div class="acts3"><button class="btn primary" id="openChat">${svg('msg', 'i s')}${x.chats ? '繼續對話' : '開聊天深入'}</button>${x.status === 'dismissed' ? '' : `<button class="btn outline" id="dismissBtn">${svg('eyeoff', 'i s')}排除</button>`}</div>
+      <div id="dismissBox"></div>`;
+    $('#openChat').onclick = () => openIdeaChat(x);
+    side.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { x.status = b.dataset.st; toast(`狀態改為「${ST[x.status].l}」，已記錄為發想回饋`); if (!visibleIdeas().some(i => i.id === x.id)) { stFilter = 'active'; } refreshIdeas(); });
+    let nt; $('#ideaNote').oninput = e => { x.note = e.target.value; clearTimeout(nt); $('#noteHint').textContent = '儲存中…'; nt = setTimeout(() => $('#noteHint').textContent = '已儲存', 500); };
+    const ud = $('#undoDismiss'); if (ud) ud.onclick = () => { x.status = x.prev || 'new'; refreshIdeas(); };
+    const db = $('#dismissBtn'); if (db) db.onclick = () => {
+      const sel = new Set();
+      const draw = (first) => {
+        $('#dismissBox').innerHTML = `<div class="pop ${first ? 'anim' : ''}" style="padding:12px;margin-top:10px"><div class="sm" style="font-weight:600;margin-bottom:8px">為什麼不適用？</div>
+          <div class="chips">${DISMISS_REASONS.map(r => `<span class="chip ${sel.has(r) ? 'on' : ''}" data-r="${r}">${sel.has(r) ? svg('check', 'i s') : ''}${r}</span>`).join('')}</div>
+          <textarea class="input" rows="2" id="dismissNote" placeholder="補充說明（選填）" style="margin-top:8px"></textarea>
+          <div class="muted xs" style="margin:6px 0 8px">排除原因會用來改進發想，同一個問題不會再推薦類似的 idea。</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="dmX">取消</button><button class="btn primary" id="dmOk">確認排除</button></div></div>`;
+        $$('#dismissBox [data-r]').forEach(c => c.onclick = () => { sel.has(c.dataset.r) ? sel.delete(c.dataset.r) : sel.add(c.dataset.r); const n = $('#dismissNote').value; draw(); $('#dismissNote').value = n; });
+        $('#dmX').onclick = () => { const b = $('#dismissBox'); collapseThen(b, () => { b.innerHTML = ''; }); };
+        $('#dmOk').onclick = () => {
+          x.prev = x.status; x.status = 'dismissed'; x.reason = [...sel].join('、'); const n = $('#dismissNote').value.trim(); if (n) x.note = n;
+          if (stFilter !== 'dismissed') selIdea = null;
+          refreshIdeas();
+          toast(`已排除「${x.t.slice(0, 14)}…」<button class="btn ghost" id="toastUndo" style="height:24px;margin-left:8px">復原</button>`);
+          $('#toastUndo').onclick = () => { x.status = x.prev || 'new'; selIdea = x.id; refreshIdeas(); $('#toast').classList.remove('show'); };
+        };
+      };
+      draw(true);
+      // reveal what just opened: bring the whole reason form into view inside the side panel
+      requestAnimationFrame(() => $('#dismissBox').scrollIntoView({ block: 'end', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+    };
+  } else if (selProb && curProb !== 'explore') {
+    const P_ = probOf(curProb);
+    side.innerHTML = `${head('你的問題 · ' + P_.at)}<h3>${P_.t}</h3><div class="sm" style="line-height:1.7">${P_.q}</div>
+      <div class="lb">已試過（不會再推薦）</div><div class="sm">${P_.tried}</div>
+      <div class="lb">這個問題的 idea（${visibleIdeas().length}）</div>${visibleIdeas().map(i => `<div class="srcb" style="margin-bottom:6px;cursor:pointer" data-goi="${i.id}"><span class="dot" style="background:${endColor(i.a)}"></span><div>${i.t}<small>來自 ${i.from}</small></div></div>`).join('')}`;
+    side.querySelectorAll('[data-goi]').forEach(e => e.onclick = () => { selIdea = e.dataset.goi; selProb = false; drawGraph(); if (ideaMode === 'cards') renderCards(); renderSide(); });
+  } else if (selDoc) {
+    const d = docById(selDoc);
+    const tags = () => d.d.map(id => `<span class="tag">${DOMAINS.find(D => D.id === id).name}<button data-rm="${id}" title="移除">${svg('x', 'i s')}</button></span>`).join('');
+    side.innerHTML = `${head('文件' + (d.priv ? ' · 私密' : ''))}<h3>${d.t} ${d.priv ? svg('lock', 'i s muted') : ''}</h3>
+      <div class="lb">領域標籤（手動修改後，重新分析不會覆蓋）</div><div class="tags" id="tags">${tags()}</div>
+      <input class="input" id="addDom" placeholder="＋ 加入領域…" style="margin-top:8px"><div class="ac pop" id="ac" hidden></div>
+      <div class="lb">相關 idea（目前的問題）</div>${visibleIdeas().filter(i => i.a === d.id || i.b === d.id).map(i => `<div class="srcb" style="margin-bottom:6px;cursor:pointer" data-goi="${i.id}">${svg('bulb', 'i s')}<div>${i.t}</div></div>`).join('') || '<div class="muted sm">尚無</div>'}`;
+    side.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { if (d.d.length > 1) { d.d = d.d.filter(z => z !== b.dataset.rm); drawGraph(); renderSide(); toast('已移除領域標籤（手動修改會保留）'); } else toast('每份文件至少要有一個領域'); });
+    const inp = $('#addDom'), ac = $('#ac');
+    inp.oninput = () => { const q = inp.value.trim(); const opts = DOMAINS.filter(D => !d.d.includes(D.id) && D.name.includes(q)); ac.hidden = !q && false; ac.innerHTML = opts.map(D => `<div class="it" data-add="${D.id}">${D.name}</div>`).join('') + (q && !DOMAINS.some(D => D.name === q) ? `<div class="it" data-new="${q}">建立新領域「${q}」</div>` : ''); ac.hidden = !ac.innerHTML; ac.querySelectorAll('[data-add]').forEach(it => it.onclick = () => { d.d.push(it.dataset.add); drawGraph(); renderSide(); }); ac.querySelectorAll('[data-new]').forEach(it => it.onclick = () => toast('示意：會建立新領域並加入標籤')); };
+    inp.onfocus = inp.oninput;
+    side.querySelectorAll('[data-goi]').forEach(e => e.onclick = () => { selIdea = e.dataset.goi; selDoc = null; drawGraph(); renderSide(); });
+  }
+  const sx = $('#sideX'); if (sx) sx.onclick = () => { selIdea = null; selDoc = null; selProb = false; delete side.dataset.dom; drawGraph(); if (ideaMode === 'cards') renderCards(); renderSide(); };
+}
+function renderDomain(id) {
+  const D = DOMAINS.find(x => x.id === id); const side = $('#side'); side.dataset.dom = id; side.classList.remove('closed'); document.querySelector('.ideas-body').classList.add('drawer-open');
+  side.innerHTML = `<div class="sh"><span class="muted xs">領域</span><button class="btn icon sm ghost" id="sideX" data-tip="關閉">${svg('x', 'i s')}</button></div><h3>${D.name}</h3><div class="lb">改名</div><input class="input" value="${D.name}" id="domName"><div class="lb">合併到</div>
+    <div style="display:flex;gap:8px"><select class="input" id="domMerge">${DOMAINS.filter(x => x.id !== id).map(x => `<option value="${x.id}">${x.name}</option>`).join('')}</select><button class="btn outline" id="domMergeBtn">合併</button></div>
+    <button class="btn primary" id="domSave" style="width:100%;justify-content:center;margin-top:14px">儲存</button>`;
+  $('#domSave').onclick = () => { D.name = $('#domName').value || D.name; drawGraph(); renderSide(); toast('已更新領域名稱'); };
+  $('#domMergeBtn').onclick = () => toast('示意：合併後兩個領域的文件會歸到同一區');
+  $('#sideX').onclick = () => { delete side.dataset.dom; selIdea = null; selDoc = null; drawGraph(); renderSide(); };
+}
+function renderCards() {
+  const P_ = probOf(curProb);
+  const cols = stFilter === 'dismissed' ? [['dismissed', '已排除', ['dismissed']]]
+    : [['new', '新的', ['new']], ['saved', '收藏', ['saved']], ['trying', '嘗試中', ['trying']], ['done', '有結果', ['worked', 'failed']]];
+  const shown = visibleIdeas();
+  const card = x => `<div class="icard ${x.id === selIdea ? 'on' : ''}" data-c="${x.id}"><h4>${x.t}</h4><div class="pair"><span class="dot" style="background:${endColor(x.a)};margin:0"></span>${x.from}<svg class="i s muted" viewBox="0 0 24 24">${I.arrow}</svg><span class="dot" style="background:${endColor(x.b)};margin:0"></span>${x.b === 'prob' ? '你的問題' : x.to}</div>`
+    + `<div class="muted xs" style="display:flex;gap:6px;align-items:center">${svg(ST[x.status].i, 'i s')}${ST[x.status].l}${x.reason ? '：' + x.reason : ''}${x.chats ? ' · 已開 ' + x.chats + ' 個對話' : ''}</div>`
+    + (x.note ? `<div class="note">${x.note}</div>` : '') + `</div>`;
+  $('#cardsGrid').style.gridTemplateColumns = `repeat(${cols.length}, minmax(220px, 1fr))`;
+  $('#cardsGrid').innerHTML = `<div style="grid-column:1/-1" class="muted sm">${curProb === 'explore' ? '自由探索：文獻庫內的跨領域組合' : '針對問題：' + P_.q}</div>`
+    + cols.map(([k, l, sts]) => { const items = shown.filter(x => sts.includes(x.status));
+        return `<div class="kcol"><h5>${svg(ST[k === 'done' ? 'worked' : k].i, 'i s')}${l}<span class="n">${items.length}</span></h5>${items.map(card).join('') || '<div class="empty">沒有 idea</div>'}</div>`; }).join('');
+  $$('#cardsGrid .icard').forEach(c => c.onclick = () => { selIdea = c.dataset.c; selDoc = null; selProb = false; delete $('#side').dataset.dom; renderCards(); renderSide(); });
+}
+function setIdeaMode(m) {
+  ideaMode = m; $$('#ideaMode button').forEach(x => x.classList.toggle('on', x.dataset.v === m));
+  $('#graphWrap').hidden = m !== 'graph'; $('#cardsGrid').hidden = m !== 'cards';
+  if (m === 'cards') renderCards(); else drawGraph();
+}
+$$('#ideaMode button').forEach(b => b.onclick = () => setIdeaMode(b.dataset.v));
+function renderProbMenu() {
+  const cnt = id => IDEAS.filter(i => i.prob === id && i.status !== 'dismissed').length;
+  const row = P => `<div class="it ${P.id === curProb ? 'sel' : ''}" data-p="${P.id}">${svg(P.id === 'explore' ? 'network' : 'target', 'i s')}<div class="tx">${P.t}<small>${P.id === 'explore' ? P.sub : P.at} · ${cnt(P.id)} 個 idea</small></div>${P.id === curProb ? svg('check', 'i s') : ''}</div>`;
+  $('#pmenu').innerHTML = row(PROBLEMS[0]) + '<div class="sep"></div><div class="lbl">你的問題</div>' + PROBLEMS.slice(1).map(row).join('')
+    + '<div class="sep"></div><div class="it" data-new="1">' + svg('plus', 'i s') + '<div class="tx">描述新問題</div></div>';
+  $$('#pmenu [data-p]').forEach(r => r.onclick = e => { e.stopPropagation(); switchProb(r.dataset.p); });
+  $('#pmenu [data-new]').onclick = e => { e.stopPropagation(); $('#pmenu').classList.remove('open'); $('#probIn').focus(); };
+}
+function switchProb(id) {
+  curProb = id; selIdea = null; selDoc = null; selProb = id !== 'explore'; delete $('#side').dataset.dom;
+  $('#probBtnT').textContent = probOf(id).t; $('#pmenu').classList.remove('open');
+  VIEW.x = 0; VIEW.y = 0; VIEW.k = 1;
+  refreshIdeas();
+}
+$('#probBtn').onclick = e => { e.stopPropagation(); const m = $('#pmenu'); m.classList.toggle('open'); if (m.classList.contains('open')) renderProbMenu(); };
+document.addEventListener('click', e => { if (!e.target.closest('.probsw')) $('#pmenu').classList.remove('open'); });
+$('#probGo').onclick = () => {
+  const q = $('#probIn').value.trim() || '機械手臂抓取透明物體成功率低，深度感測失準';
+  $('#probGo').innerHTML = '<span class="spin"></span>分析中…'; $('#probGo').disabled = true;
+  setTimeout(() => {
+    const id = 'p' + (PROBLEMS.length + 1);
+    PROBLEMS.push({ id, t:q.length > 16 ? q.slice(0, 16) + '…' : q, q, tried:'（未填寫）', at:'剛剛' });
+    IDEAS.push(
+      { prob:id, status:'new', id:id + 'a', t:'把需求拆成可重用的先驗參考，再逐一比對修正', a:'an', b:'prob', from:'Anchor box 互動設計', fromSec:'§4 Interaction', to:'你的問題', toSec:'', m:'示意：系統會把你的問題抽象成機制層級的描述，再到文獻庫中比對結構相同的解法。', chats:0 },
+      { prob:id, status:'new', id:id + 'b', t:'用可微分的軟性選擇取代硬性切換', a:'re', b:'prob', from:'ReMoE', fromSec:'§3 ReLU routing', to:'你的問題', toSec:'', m:'示意：連續、可微的選擇機制可以端到端訓練。', chats:0 });
+    $('#probIn').value = ''; $('#probGo').innerHTML = '找跨領域 idea'; $('#probGo').disabled = false; $('#ideaCount').textContent = IDEAS.length;
+    switchProb(id);
+  }, 1100);
+};
+function openIdeaChat(x) {
+  let s = sessions.find(z => z.ideaId === x.id);
+  if (!s) { s = { id:'s' + Date.now(), title:x.t.slice(0, 18) + '…', kind:'idea', ideaId:x.id, idea:x }; sessions.unshift(s); x.chats = (x.chats || 0) + 1; }
+  curSession = s.id; go('chat');
+}
+refreshIdeas();
+
+/* ---------------- feedback page (by user moment) ---------------- */
+const STAGES = [
+  { id:'cite', n:'引用不對', ex:11, im:6, tr:[9, 12, 15, 17] },
+  { id:'src', n:'找錯論文或段落', ex:8, im:4, tr:[10, 12, 13, 12] },
+  { id:'off', n:'答非所問', ex:4, im:5, tr:[7, 8, 9, 9] },
+  { id:'fact', n:'事實錯誤', ex:4, im:1, tr:[6, 5, 5, 5] },
+  { id:'route', n:'路由錯了', ex:2, im:1, tr:[4, 3, 3, 3] },
+  { id:'other', n:'其他原因', ex:2, im:0, tr:[1, 2, 2, 2] },
+  { id:'lang', n:'語言或格式', ex:1, im:0, tr:[2, 1, 1, 1] },
+  { id:'idea', n:'發想（排除／無效）', ex:5, im:0, tr:[2, 3, 4, 5], ideation:true }
+];
+const CASES = {
+  cite: [['model collapse 主要是由哪些誤差造成的？', 'ex', 61, '[chunk:86145] 沒有提到 SGD'], ['Expert Choice 的 capacity factor 怎麼設？', 'im', 57, '數字引用到錯的表格'], ['GR00T N1 的動作頻率是多少？', 'ex', 53, '引用段落沒有 50 Hz']],
+  src: [['「我是問第二篇論文」', 'im', 49, '找了第一篇'], ['V-JEPA 2 的 planning 怎麼做？', 'ex', 45, '讀到 V-JEPA 1 的段落']],
+  off: [['「不對，我是問 V-JEPA 2 的 planning 為什麼會失敗」', 'im', 62, '問失敗原因，答了方法'], ['ReMoE 跟 Switch 差在哪？', 'ex', 40, '只講了 ReMoE']],
+  fact: [['「錯了，表格裡是 71.4 不是 74.1」', 'im', 58, '數字抄錯']],
+  route: [['幫我把剛剛那篇做成投影片', 'ex', 38, '被路由到 paper_qa']],
+  other: [['MoE 負載平衡有哪些作法？', 'ex', 36, '表格數字抄錯（其他原因）'], ['GR00T N1 投影片第 3 頁在講什麼？', 'ex', 33, '把投影片內容當成論文內容']],
+  lang: [['用日文說明 Expert Choice', 'ex', 31, '回答混了中文']],
+  idea: [['可微分的技能組合：以 ReLU 路由取代離散技能選擇', 'ex', 0, '排除：類比不成立'], ['用文字修飾補足細粒度差異', 'ex', 0, '無效：使用者不習慣輸入文字修飾'], ['讓專家挑選觀測', 'ex', 0, '排除：不夠新']]
+};
+const OTHER_TEXTS = [['表格數字抄錯', 5], ['把投影片內容當成論文內容回答', 2], ['回答太長', 1]];
+let QUEUE = [
+  { run:62, title:'V-JEPA 2 世界模型', papers:'V-JEPA 2', why:'使用者可能是在轉換話題，而不是指出錯誤', guess:'答非所問',
+    hist:[
+      ['u', 'V-JEPA 2 的世界模型是怎麼訓練的？'],
+      ['a', 'V-JEPA 2 分兩階段訓練：先在超過一百萬小時的網路影片上做自監督的 mask-denoising 預訓練，學習在表徵空間預測被遮住的時空區塊 [1]；接著凍結 encoder，用約 62 小時的 DROID 機器人影片訓練一個以動作為條件的預測器 V-JEPA 2-AC [2]。'],
+      ['u', '那它是怎麼拿來做規劃的？'],
+      ['a', 'V-JEPA 2-AC 以目標影像的表徵作為目標，用 CEM 在動作空間取樣、以預測器 rollout 後與目標表徵的 L1 距離為成本，每一步只執行最佳序列的第一個動作（MPC）[3]。實驗中規劃視野設為 1 步、每次取樣 800 條動作序列並迭代 10 輪，單步規劃約需 16 秒 [3]；作者也比較了 Cosmos 等基於像素生成的世界模型，V-JEPA 2-AC 在相同任務上速度快約 15 倍、成功率更高 [4]。'],
+    ],
+    q:'V-JEPA 2 在長時程規劃上有什麼限制？',
+    a:'V-JEPA 2 以 latent 空間的預測做 planning，主要用 CEM 在動作空間搜尋。論文指出幾個限制：(1) 對相機位置敏感，需要手動調整視角 [4]；(2) 目前需要以影像指定目標，尚不支援語言目標 [5]；(3) 長時程任務需拆成子目標逐一規劃 [5]。此外，CEM 的取樣成本隨規劃視野成長，作者僅以 1 步視野做實驗；在 pick-and-place 任務中需要人工提供多張子目標影像，例如抓取前、抓取後與放置後的畫面 [5]。作者認為以語言指定目標、以及階層式的規劃是未來的方向 [6]。',
+    f:'不對，我是問 V-JEPA 2 的 planning 為什麼會失敗',
+    next:'了解，你想知道的是失敗的原因。論文的失敗分析指出：預測器在長 rollout 下誤差會累積，導致 CEM 的成本函數在遠期步驟失去鑑別力 [6]…' },
+  { run:49, title:'機器人資料集比較', papers:'OpenVLA · π0', why:'同一則訊息中也新增了需求', guess:'找錯論文或段落',
+    hist:[
+      ['u', '比較一下這兩篇的模型架構'],
+      ['a', 'OpenVLA 以 Prismatic VLM（SigLIP + DINOv2 視覺編碼、Llama 2 7B）為骨幹，把動作離散成 256 個 bin 當作 token 輸出 [1]。π0 則以 PaliGemma 為骨幹，另接一個 flow matching 的 action expert，輸出連續的動作區塊 [2]。前者沿用 LLM 的 next-token 預測，推論時一次產生一個維度；後者以 flow matching 一次產生 50 步的動作區塊，控制頻率可達 50 Hz，更適合靈巧操作 [2]。兩者都以大規模多機器人資料預訓練，再針對下游任務微調 [1][2]。'],
+    ],
+    q:'這兩篇論文的資料集一樣嗎？',
+    a:'兩篇都使用 Open X-Embodiment。OpenVLA 從中挑選並重新加權約 97 萬條軌跡 [3]；第一篇另外加入了 DROID 資料做為部分實驗的補充 [4]。資料前處理上，OpenVLA 只保留含第三人稱相機、單臂末端控制的資料集，並依資料集多樣性重新加權取樣比例 [3]；也排除了品質較差或動作空間不一致的子集 [3]。',
+    f:'我是問第二篇論文',
+    next:'抱歉，π0 的預訓練混合了 Open X-Embodiment 的子集與他們自行收集、涵蓋 7 種機器人組態與 68 項任務的資料 [5]…' },
+  { run:44, title:'Transformer 架構細節', papers:'Attention Is All You Need', why:'前後兩題主題相近，可能只是補充', guess:'答非所問',
+    hist:[
+      ['u', 'encoder 的層數與 hidden size 是多少？'],
+      ['a', 'Base 模型的 encoder 由 N = 6 個相同的層堆疊而成，d_model = 512，FFN 內層維度 2048，8 個 attention head [1]。'],
+    ],
+    q:'decoder 的層數是多少？',
+    a:'Encoder 使用 6 層，hidden size 512，每層包含 multi-head self-attention 與 position-wise FFN 兩個子層，並以 residual 連接加 layer normalization [1]。所有子層與 embedding 的輸出維度都是 512，以便 residual 相加；FFN 由兩層線性轉換與中間的 ReLU 組成，內層維度 2048 [2]。Big 模型則把 d_model 提高到 1024、head 數提高到 16 [3]。',
+    f:'wrong, I asked about the decoder',
+    next:'You are right — the decoder is also a stack of N = 6 identical layers, with a third sub-layer that attends over the encoder output and masked self-attention [2]…' }
+];
+let selStage = 'cite', qIdx = 0, qDone = 0;
+const fbMax = Math.max(...STAGES.filter(x => !x.ideation).map(x => x.ex + x.im));
+function spark(tr) {
+  const w = 60, h = 18, mx = Math.max(...tr), mn = Math.min(...tr), rg = Math.max(1, mx - mn);
+  const pts = tr.map((v, i) => `${(i / (tr.length - 1) * (w - 4) + 2).toFixed(1)},${(h - 2 - (v - mn) / rg * (h - 4)).toFixed(1)}`).join(' ');
+  const last = pts.split(' ').pop().split(',');
+  return `<svg width="${w}" height="${h}"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="${last[0]}" cy="${last[1]}" r="2" fill="currentColor"/></svg>`;
+}
+function renderStages() {
+  const row = x => { const d = x.tr[3] - x.tr[2];
+    return `<div class="row ${x.id === selStage ? 'on' : ''}" data-st="${x.id}"><span class="nm">${x.ideation ? svg('bulb', 'i s') : ''}${x.n}</span>
+      <span class="tr"><span class="sg" style="width:${x.ex / fbMax * 100}%;background:var(--viz-1)" data-tip="${x.n} · 明確 ${x.ex}"></span>${x.im ? `<span class="sg" style="width:${x.im / fbMax * 100}%;background:var(--viz-2)" data-tip="${x.n} · 隱性 ${x.im}"></span>` : ''}</span>
+      <span class="n">${x.ex + x.im}</span><span class="dl" data-tip="近 4 週：${x.tr.join(' → ')}">${spark(x.tr)}</span><span class="dl">${d > 0 ? '<b>↑' + d + '</b> 上週' : d < 0 ? '↓' + (-d) + ' 上週' : '持平'}</span></div>`; };
+  $('#stages').innerHTML = STAGES.filter(x => !x.ideation).map(row).join('');
+  $$('#stages .row').forEach(r => r.onclick = () => { if (selStage === r.dataset.st) return; selStage = r.dataset.st; renderStages(); renderDrawer(true); });
+  $('#vtable tbody').innerHTML = STAGES.map(x => `<tr><td>${x.n}</td><td class="n">${x.ex}</td><td class="n">${x.im}</td><td class="n">${x.ex + x.im}</td><td class="n">${x.tr.join(' → ')}</td></tr>`).join('');
+}
+function renderDrawer(animate) {
+  const d = $('#fdrawer'), x = STAGES.find(z => z.id === selStage); if (!x) return;
+  if (animate && d.firstElementChild) { d.firstElementChild.classList.add('fade'); setTimeout(() => renderDrawer(false), 130); return; }
+  const cases = CASES[x.id] || [];
+  d.innerHTML = `<div class="swap"><div class="muted xs" style="margin-bottom:6px">${x.ideation ? '發想環節' : '負評環節'} · ${x.ex + x.im} 筆${x.id === STAGES[0].id ? ' · 最常出錯' : ''}</div>
+    <h3>${x.n}</h3><div class="muted xs" style="margin-bottom:12px">近 4 週：${x.tr.join(' → ')}</div>
+    ${x.id === 'other' ? `<div class="lb" style="font-size:11.5px;color:var(--muted-foreground);margin:4px 0 6px">使用者寫的原因（重複出現的可以升級為預設選項）</div>${OTHER_TEXTS.map(([t, n]) => `<div class="orow"><span>${t}</span><span class="n">${n} 次</span><button class="btn outline" style="height:24px;font-size:12px" data-up="${t}">升級為選項</button></div>`).join('')}<div style="height:10px"></div>` : ''}
+    <div style="font-size:11.5px;color:var(--muted-foreground);margin:4px 0 6px">${x.ideation ? 'idea' : '案例'}（勾選要送進 G1 的）</div>
+    ${cases.map(([q, k, run, why], i) => `<div class="case"><span class="check on chk" data-c="${i}">${svg('check')}</span><div>${q}</div><div class="meta">${x.ideation ? '' : `<span class="badge ${k === 'im' ? 'dashed' : 'secondary'}">${k === 'im' ? '隱性' : '倒讚'}</span>`}<span>${why}</span>${x.ideation ? '' : `<span>run #${run}</span><a>查看對話</a><a>查看 trace</a>`}</div></div>`).join('')}
+    <div class="foot"><button class="btn primary" id="toG1" style="width:100%;justify-content:center">${svg('flask', 'i s')}${x.ideation ? '送進發想評估集' : '送進 G1 待標註'}（<span id="g1n">${cases.length}</span> 筆）</button>
+      <div class="muted xs" style="margin-top:6px">${x.ideation ? '排除原因與嘗試結果會成為發想 prompt 的評估資料。' : '標註預期結果後，會成為「' + x.n + '」相關環節的回歸測試。'}</div></div></div>`;
+  paintIcons(d);
+  $$('#fdrawer [data-c]').forEach(c => c.onclick = () => { c.classList.toggle('on'); c.innerHTML = c.classList.contains('on') ? svg('check') : ''; $('#g1n').textContent = $$('#fdrawer [data-c].on').length; });
+  $$('#fdrawer [data-up]').forEach(b => b.onclick = () => { toast(`已把「${b.dataset.up}」加入預設原因`); b.disabled = true; b.textContent = '已加入'; });
+  $('#toG1').onclick = () => toast(`已寫入 <code>workspace/exports/g1-inbox.jsonl</code>（${$('#g1n').textContent} 筆待標註）`);
+}
+let reviewing = false;
+function renderBanner() {
+  const n = QUEUE.length; $('#fbCount').textContent = n || '';
+  const box = $('#fbBanner'); setFull(reviewing && n > 0);
+  if (!n) { if (reviewing) { reviewing = false; box.innerHTML = `<div class="done-msg">${svg('ccheck', 'i s')}全部處理完了，確認的負評已加入分析與訓練資料。</div>`; setTimeout(() => { const m = box.querySelector('.done-msg'); if (m) m.style.opacity = 0; setTimeout(() => { if (!QUEUE.length) box.innerHTML = ''; }, 400); }, 2200); } else box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="card2"><div class="bn"><span class="c">${n}</span><span><b>${n} 筆回饋等你確認</b><span class="muted">　reviewer 不確定你當時是不是在指出錯誤，只有你知道。</span></span><span class="sp"></span>
+    <button class="btn ${reviewing ? 'outline' : 'primary'}" id="startReview">${reviewing ? '收起' : '開始確認'}</button></div>
+    <div class="exp ${reviewing ? 'open' : ''}" id="rvExp"><div><div class="rvin" id="rvin"></div></div></div></div>`;
+  $('#startReview').onclick = () => { reviewing = !reviewing; setFull(reviewing); $('#rvExp').classList.toggle('open', reviewing); $('#startReview').textContent = reviewing ? '收起' : '開始確認'; $('#startReview').className = 'btn ' + (reviewing ? 'outline' : 'primary'); if (reviewing) { qIdx = Math.max(0, QUEUE.findIndex(q => !q.ans)); renderReview(0); } };
+  if (reviewing) renderReview();
+}
+function openReview() { reviewing = true; qIdx = qDone; renderBanner(); }
+function closeReview() { reviewing = false; renderBanner(); }
+QUEUE.forEach(it => { it.ans = null; it.rs = new Set([it.guess]); it.open = true; });
+function focusFlagged() { const b = $('#rvin .convo'), l = $('#rvin .lbl'); if (b && l) b.scrollTop = Math.max(0, l.getBoundingClientRect().top - b.getBoundingClientRect().top + b.scrollTop - 140); }
+function setFull(on) { $('#v-feedback .page').classList.toggle('rv-full', on); }
+function answeredCount() { return QUEUE.filter(it => it.ans).length; }
+function goItem(i, dir) { const to = (i + QUEUE.length) % QUEUE.length; if (to === qIdx) return; if (dir === undefined) dir = to > qIdx ? 1 : -1; qIdx = to; renderReview(dir); }
+function reviewHead() {
+  const it = QUEUE[qIdx], n = answeredCount();
+  return `<div class="top"><b>你這句話是在說回答錯了嗎？</b><span class="muted">reviewer 的疑慮：${it.why}</span><span class="sp"></span>
+      <span class="nav"><button class="btn icon sm ghost" id="rvPrev" data-tip="上一筆（←）"><svg class="i s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+      <span class="dots">${QUEUE.map((q, i) => `<button class="${i === qIdx ? 'cur' : ''} ${q.ans || ''}" data-go="${i}" data-tip="第 ${i + 1} 筆：${q.ans === 'yes' ? '是，回答錯了' : q.ans === 'no' ? '不是' : '尚未作答'}">${q.ans === 'yes' ? svg('check', 'i s') : q.ans === 'no' ? svg('x', 'i s') : i + 1}</button>`).join('')}</span>
+      <button class="btn icon sm ghost" id="rvNext" data-tip="下一筆（→）"><svg class="i s" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button></span></div>
+    <div class="prog"><i style="width:${n / QUEUE.length * 100}%"></i></div>`;
+}
+function reviewBody() {
+  const it = QUEUE[qIdx];
+  const cite = t => t.replace(/\[(\d+)\]/g, '<sup>[$1]</sup>');
+  const LONG = 70;
+  const ans = (t, cls, lines) => t.length > LONG
+    ? `<div class="a clamp ${cls}" style="--lines:${lines}"><div class="tx">${cite(t)}</div><button class="tog" data-clamp>展開全文</button></div>`
+    : `<div class="a ${cls}">${cite(t)}</div>`;
+  const msg = ([r, t], cls = '') => r === 'u' ? `<div class="u ${cls}">${t}</div>` : ans(t, cls, 2);
+  const nOld = it.hist.length;
+  return `<div class="convo">
+      <div class="chead">${svg('msg', 'i s')}<b>${it.title}</b><span>· ${it.papers}</span><span style="flex:1"></span><span>run #${it.run}</span></div>
+      ${nOld ? `<button class="more" data-more>${svg('chev', 'i s')}<span>${it.open ? '收起' : '顯示'}前面 ${nOld} 則訊息</span></button>
+        <div class="earlier ${it.open ? 'open' : ''}"><div>${it.hist.map(m => msg(m, 'old')).join('')}</div></div>` : ''}
+      ${msg(['u', it.q])}<div class="lbl">被質疑的回答</div>${ans(it.a, '', 3)}
+      <div class="lbl r">使用者接著說</div>${msg(['u', it.f], 'hl')}
+      <div class="lbl">系統的下一則回覆</div>${ans(it.next, 'after', 2)}</div>
+    <div class="why">如果是，錯在哪裡？<div class="chips" style="margin-top:8px">${REASONS.map(x => `<span class="chip ${it.rs.has(x) ? 'on' : ''}" data-r="${x}">${it.rs.has(x) ? svg('check', 'i s') : ''}${x}${x === it.guess ? '<span class="guess">系統推測</span>' : ''}</span>`).join('')}</div></div>
+    <div class="btns"><button class="btn ${it.ans === 'yes' ? 'primary sel' : 'outline'}" id="rvYes">是，回答錯了<kbd>Y</kbd></button><button class="btn ${it.ans === 'no' ? 'primary sel' : 'outline'}" id="rvNo">不是，我只是在補充或換話題<kbd>N</kbd></button></div>`;
+}
+function reviewFoot() {
+  const n = answeredCount();
+  return `<div class="subrow"><span class="muted">已作答 ${n} / ${QUEUE.length}${n < QUEUE.length ? '，未作答的會留著下次處理' : ''}　·　← → 切換，Y / N 作答，Ctrl + Enter 提交</span><span style="flex:1"></span>
+      <button class="btn primary" id="rvSubmit" ${n ? '' : 'disabled'}>提交 ${n} 筆</button></div>`;
+}
+function bindReview() {
+  const it = QUEUE[qIdx];
+  $$('#rvin [data-go]').forEach(b => b.onclick = () => goItem(+b.dataset.go));
+  $('#rvPrev').onclick = () => goItem(qIdx - 1, -1);
+  $('#rvNext').onclick = () => goItem(qIdx + 1, 1);
+  $$('#rvin [data-r]').forEach(c => c.onclick = () => { const x = c.dataset.r; it.rs.has(x) ? it.rs.delete(x) : it.rs.add(x); $('#rvin .slide').innerHTML = reviewBody(); bindReview(); });
+  const answer = a => {
+    it.ans = a;
+    const nextOpen = QUEUE.findIndex((q, i) => i > qIdx && !q.ans), anyOpen = QUEUE.findIndex(q => !q.ans);
+    const to = nextOpen >= 0 ? nextOpen : anyOpen;
+    if (to >= 0 && to !== qIdx) goItem(to, 1);
+    else { $('#rvHead').innerHTML = reviewHead(); $('#rvFoot').innerHTML = reviewFoot(); $('#rvin .slide').innerHTML = reviewBody(); bindReview(); }
+  };
+  $('#rvYes').onclick = () => answer('yes'); $('#rvNo').onclick = () => answer('no');
+  $('#rvSubmit').onclick = submitReview;
+  $$('#rvin .clamp:not(.open) .tx').forEach(tx => { tx.parentElement.querySelector('.tog').hidden = tx.scrollHeight <= tx.clientHeight + 1; });
+  $$('#rvin [data-clamp]').forEach(b => b.onclick = () => { const c = b.parentElement.classList.toggle('open'); b.textContent = c ? '收合' : '展開全文'; });
+  const mb = $('#rvin [data-more]'); if (mb) mb.onclick = () => { it.open = !it.open; $('#rvin .earlier').classList.toggle('open', it.open); mb.querySelector('span').textContent = (it.open ? '收起' : '顯示') + '前面 ' + it.hist.length + ' 則訊息'; mb.querySelector('svg').style.transform = it.open ? 'rotate(-90deg)' : 'rotate(90deg)'; };
+}
+function renderReview(dir) {
+  const r = $('#rvin'); if (!r || !QUEUE.length) return;
+  const old = r.querySelector('.slide');
+  if (!dir || !old) {
+    r.innerHTML = `<div class="swap"><div id="rvHead">${reviewHead()}</div><div class="rvbody"><div class="slide">${reviewBody()}</div></div><div id="rvFoot">${reviewFoot()}</div></div>`;
+    bindReview(); requestAnimationFrame(focusFlagged); return;
+  }
+  $('#rvHead').innerHTML = reviewHead(); $('#rvFoot').innerHTML = reviewFoot();   // fixed parts: update in place
+  old.classList.add(dir > 0 ? 'out-l' : 'out-r');
+  setTimeout(() => {
+    old.innerHTML = reviewBody();
+    old.classList.remove('out-l', 'out-r'); old.classList.add(dir > 0 ? 'in-r' : 'in-l');
+    void old.offsetWidth;
+    old.classList.remove('in-r', 'in-l');
+    bindReview(); focusFlagged();
+  }, 160);
+  bindReview();
+}
+function submitReview() {
+  const done = QUEUE.filter(it => it.ans), yes = done.filter(it => it.ans === 'yes');
+  if (!done.length) return;
+  yes.forEach(it => [...it.rs].forEach(rn => { const st = STAGES.find(x => x.n === rn || x.n.startsWith(rn.slice(0, 2))); if (st) st.im++; }));
+  QUEUE = QUEUE.filter(it => !it.ans); qIdx = 0; qDone = 0;
+  renderStages(); renderDrawer(false);
+  toast(`已提交 ${done.length} 筆（${yes.length} 筆確認為負評）`);
+  renderBanner();
+}
+document.addEventListener('keydown', e => {
+  if (!reviewing || view !== 'feedback' || /input|textarea/i.test(e.target.tagName) || !QUEUE.length) return;
+  const k = e.key;
+  if (k === 'ArrowLeft') { e.preventDefault(); $('#rvPrev')?.click(); }
+  else if (k === 'ArrowRight') { e.preventDefault(); $('#rvNext')?.click(); }
+  else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitReview(); }
+  else if (k.toLowerCase() === 'y') $('#rvYes')?.click();
+  else if (k.toLowerCase() === 'n') $('#rvNo')?.click();
+});
+$('#goIdeas').onclick = () => go('ideas');
+$('#ideaDetail').onclick = () => go('ideas');
+$('#ideaToEval').onclick = () => toast('已寫入發想階段的評估資料（收藏 6 · 排除 4 · 有結果 2）');
+$('#tblBtn').onclick = () => { const on = $('#vtable').classList.toggle('on'); $('#stages').style.display = on ? 'none' : ''; $('#tblBtn').classList.toggle('on', on); };
+const EXP_T = [['sft', '微調資料（SFT）', '好評回答，含引用段落', 145, true], ['dpo', '偏好資料（DPO）', '同一題好壞兩版', 11, true]];
+const EXP_F = [['im', '納入隱性回饋（reviewer 確認）', 24, false], ['priv', '納入引用私密文件的對話', 38, true], ['cite', '只含有引用出處的回答', 0, false]];
+function renderExp() {
+  const ck = (on, attr) => `<span class="check ${on ? 'on' : ''}" ${attr}>${on ? svg('check') : ''}</span>`;
+  $('#expTypes').innerHTML = EXP_T.map(([k, t, d, n, on], i) => `<label class="lbl-row" style="padding:5px 0;align-items:center" data-t="${i}">${ck(on)}<span style="flex:1">${t}<small>${d}</small></span><span class="muted xs">${n} 筆</span></label>`).join('');
+  $('#expFilters').innerHTML = EXP_F.map(([k, t, n, on], i) => `<label class="lbl-row" style="padding:5px 0;align-items:center" data-f="${i}">${ck(on)}<span style="flex:1">${t}</span><span class="muted xs">${n ? (k === 'priv' ? '' : '+') + n : ''}</span></label>`).join('');
+  const sft = EXP_T[0][4] ? 145 + (EXP_F[0][3] ? 24 : 0) - (EXP_F[1][3] ? 0 : 38) : 0, dpo = EXP_T[1][4] ? 11 : 0;
+  $('#expSum').innerHTML = `將匯出 <b>${sft}</b> 筆 SFT、<b>${dpo}</b> 對 DPO${EXP_F[1][3] ? '（含私密文件內容）' : ''}`;
+  $$('#expTypes [data-t]').forEach(l => l.onclick = e => { e.preventDefault(); EXP_T[l.dataset.t][4] = !EXP_T[l.dataset.t][4]; renderExp(); });
+  $$('#expFilters [data-f]').forEach(l => l.onclick = e => { e.preventDefault(); EXP_F[l.dataset.f][3] = !EXP_F[l.dataset.f][3]; renderExp(); });
+}
+$('#expOpen').onclick = () => { renderExp(); $('#expDlg').classList.add('on'); };
+$('#expX').onclick = () => $('#expDlg').classList.remove('on');
+$('#expDlg').onclick = e => { if (e.target.id === 'expDlg') $('#expDlg').classList.remove('on'); };
+$('#expGo').onclick = () => { $('#expDlg').classList.remove('on'); toast('已匯出到 <code>workspace/exports/20261105-1530/</code>（sft.jsonl、dpo.jsonl、README.md）'); };
+renderStages(); renderDrawer(false); renderBanner();
+
+/* ---------------- init ---------------- */
+renderChats(); renderThread(); syncPill(); renderLangs();
+setTimeout(layoutPdf, 50);
+/* test hook for headless screenshots: #card / #card-dark */
+if (location.hash.startsWith('#card')) setTimeout(() => {
+  if (location.hash.endsWith('dark')) { THEME = 'dark'; applyTheme(); }
+  $('#pico').click();
+  const i = P.findIndex(p => p.frags.some(f => f.real));
+  rPdf.scrollTop = P[i].frags[0].y - 60; pinned = true; show(i, 0);
+}, 600);
+</script>
+</body>
+</html>

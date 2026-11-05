@@ -5,7 +5,6 @@ import {
   BrainCircuit,
   Mic,
   Presentation,
-  Columns2,
   Send,
   Square,
 } from "lucide-react";
@@ -57,21 +56,6 @@ interface Props {
   /** Called when the user clicks the Stop button during streaming. */
   onStop?: () => void;
 }
-
-interface Capability {
-  icon: typeof BookOpen;
-  /** i18n key under chat:composer for the label + tooltip. */
-  labelKey: string;
-  tooltipKey: string;
-}
-
-const CAPABILITIES: Capability[] = [
-  {
-    icon: Columns2,
-    labelKey: "composer.compare",
-    tooltipKey: "composer.compareTooltip",
-  },
-];
 
 export function Composer({
   onSubmit,
@@ -301,27 +285,6 @@ export function Composer({
                     <p>{t("composer.slidesTooltip")}</p>
                   </TooltipContent>
                 </Tooltip>
-                {CAPABILITIES.map(({ icon: Icon, labelKey, tooltipKey }) => (
-                  <Tooltip key={labelKey}>
-                    <TooltipTrigger
-                      render={<span tabIndex={0} className="inline-flex" />}
-                    >
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        disabled
-                        className="h-8 w-8 pointer-events-none text-muted-foreground"
-                        aria-label={t(labelKey)}
-                      >
-                        <Icon className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>{t(tooltipKey)}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
               </div>
               {/* Right cluster: voice + send — input actions, set apart from
                   the left-side panel toggles. */}

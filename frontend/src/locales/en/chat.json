@@ -15,9 +15,7 @@
     "slides": "Slides",
     "slidesTooltip": "Toggle the slide deck panel",
     "stop": "Stop",
-    "stopTooltip": "Stop generating",
-    "compare": "Compare",
-    "compareTooltip": "Coming in Plan G — fan out the same prompt to two models"
+    "stopTooltip": "Stop generating"
   },
   "slideChip": {
     "label": "Slide {{page}}",
