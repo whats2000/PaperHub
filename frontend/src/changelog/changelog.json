@@ -1,5 +1,23 @@
 [
   {
+    "version": "2.40.1",
+    "date": "2026-11-05",
+    "highlights": {
+      "en": [
+        "Author lists from arXiv are now cleaned up: names that arXiv split into pieces (for example \"Mojtaba\" and \"Komeili\") are joined back into one name, stray punctuation is removed, and papers already in your library are fixed automatically."
+      ],
+      "zh-TW": [
+        "arXiv 的作者清單現在會自動整理：被 arXiv 拆開的名字（例如「Mojtaba」與「Komeili」）會合併回同一個人，多餘的標點會移除，資料庫中既有的論文也會自動修正。"
+      ],
+      "zh-CN": [
+        "arXiv 的作者列表现在会自动整理：被 arXiv 拆开的名字（例如“Mojtaba”与“Komeili”）会合并回同一个人，多余的标点会移除，文献库中已有的论文也会自动修正。"
+      ],
+      "ja": [
+        "arXiv の著者リストが自動で整えられるようになりました。arXiv で分割された名前（例：「Mojtaba」と「Komeili」）は 1 人の名前に結合され、余分な句読点は削除され、ライブラリ内の既存の論文も自動で修正されます。"
+      ]
+    }
+  },
+  {
     "version": "2.40.0",
     "date": "2026-11-05",
     "highlights": {

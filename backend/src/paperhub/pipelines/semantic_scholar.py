@@ -25,6 +25,8 @@ from typing import Any, Literal
 
 import httpx
 
+from paperhub.pipelines.author_names import clean_author_names
+
 API_BASE = "https://api.semanticscholar.org/graph/v1"
 _TIMEOUT = httpx.Timeout(10.0)
 
@@ -174,7 +176,9 @@ def _coerce(item: dict[str, Any]) -> RelatedPaper:
         title=item.get("title") or "",
         abstract=item.get("abstract") or "",
         year=item.get("year"),
-        authors=[a["name"] for a in item.get("authors") or [] if a.get("name")],
+        authors=clean_author_names(
+            [a["name"] for a in item.get("authors") or [] if a.get("name")],
+        ),
         arxiv_id=(item.get("externalIds") or {}).get("ArXiv"),
     )
 
@@ -187,7 +191,9 @@ def _coerce_hit(item: dict[str, Any]) -> SemanticScholarHit:
         title=item.get("title") or "",
         abstract=item.get("abstract"),
         year=item.get("year"),
-        authors=[a["name"] for a in item.get("authors") or [] if a.get("name")],
+        authors=clean_author_names(
+            [a["name"] for a in item.get("authors") or [] if a.get("name")],
+        ),
         arxiv_id=external_ids.get("ArXiv"),
         open_access_pdf_url=open_pdf.get("url") if isinstance(open_pdf, dict) else None,
         doi=external_ids.get("DOI"),
