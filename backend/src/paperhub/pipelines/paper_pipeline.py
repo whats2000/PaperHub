@@ -37,7 +37,7 @@ from paperhub.pipelines.arxiv_client import (
     TarballCorrupt,
     download_arxiv_pdf,
     download_arxiv_source,
-    fetch_arxiv_by_id,
+    fetch_arxiv_by_ids,
 )
 from paperhub.pipelines.chunker import (
     Chunk,
@@ -1021,18 +1021,19 @@ class PaperPipeline:
     ) -> dict[str, object]:
         """Fetch title/authors/year from the arXiv API by exact id.
 
-        Runs off the event loop (the arxiv client's 429/503 retries can take
-        minutes). Never fails the ingest: when the API is unavailable (e.g.
-        rate-limited — ``fetch_arxiv_by_id`` returns ``None``), the title
+        A single request off the event loop (no retries: arXiv's rate limit
+        lasts long). Never fails the ingest: when the API is unavailable or
+        doesn't know the id, the title
         comes from the already-downloaded source via ``fallback_title``
         (LaTeX ``\\title{}`` / PDF metadata), else the bare arxiv id.
         """
-        r = await asyncio.to_thread(fetch_arxiv_by_id, arxiv_id)
+        found = await asyncio.to_thread(fetch_arxiv_by_ids, [arxiv_id])
+        r = found.get(arxiv_id) if found else None
         if r is None:
             title = fallback_title() or arxiv_id
             logger.warning(
                 "arXiv metadata unavailable for %s; using source-derived "
-                "title %r (authors/year left empty)",
+                "title %r; authors/year left for the background backfill",
                 arxiv_id, title,
             )
             return {"title": title, "authors": [], "year": None}

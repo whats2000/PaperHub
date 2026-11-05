@@ -80,7 +80,7 @@ class _FakeMarker:
 
 
 # ---------------------------------------------------------------------------
-# Fake ArxivResult (returned by mocked fetch_arxiv_by_id)
+# Fake ArxivResult (returned by mocked fetch_arxiv_by_ids)
 # ---------------------------------------------------------------------------
 
 _FAKE_ARXIV_RESULT = ArxivResult(
@@ -187,8 +187,8 @@ def _make_fake_download(source_dir: Path) -> MagicMock:
     return mock
 
 
-def _fake_fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
-    return _FAKE_ARXIV_RESULT
+def _fake_fetch_arxiv_by_ids(arxiv_ids: list[str]) -> dict[str, ArxivResult]:
+    return {aid: _FAKE_ARXIV_RESULT for aid in arxiv_ids}
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +219,8 @@ async def test_ingest_arxiv_cache_miss_creates_paper_content_and_chunks(
             side_effect=fake_download,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
     ):
         result = await pipeline.ingest(
@@ -298,8 +298,8 @@ async def test_ingest_arxiv_renders_from_flattened_source(
             side_effect=_make_fake_download(_ARXIV_SAMPLE),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
         patch(
             "paperhub.pipelines.paper_pipeline.render_html",
@@ -341,8 +341,8 @@ async def test_ingest_arxiv_cache_hit_skips_pipeline(
             new=download_mock,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
     ):
         # First call — cache miss.
@@ -597,8 +597,8 @@ async def test_paper_pipeline_persists_sections_json_at_ingest(
             side_effect=fake_download,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
     ):
         result = await pipeline.ingest(
@@ -727,8 +727,8 @@ async def test_latex_ingest_persists_dom_ids(
             side_effect=_make_fake_download(src_dir),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
         patch(
             "paperhub.pipelines.paper_pipeline.render_html",
@@ -928,8 +928,8 @@ async def test_arxiv_latex_ingest_asset_status_is_latex(
             side_effect=_make_fake_download(_ARXIV_SAMPLE),
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
     ):
         res = await pipeline.ingest(
@@ -1010,8 +1010,8 @@ Some body text here is present in the introduction section of this document.
             side_effect=fake_dl,
         ),
         patch(
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
-            side_effect=_fake_fetch_arxiv_by_id,
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_fake_fetch_arxiv_by_ids,
         ),
     ):
         res = await pipeline.ingest(
@@ -1162,8 +1162,8 @@ async def test_ingest_arxiv_metadata_unavailable_uses_latex_title(
             side_effect=_make_fake_download(_ARXIV_SAMPLE),
         ),
         patch(
-            # fetch_arxiv_by_id returns None on any API error (429/503).
-            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_id",
+            # fetch_arxiv_by_ids returns None on any API error (429/503).
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
             return_value=None,
         ),
     ):

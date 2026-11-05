@@ -45,6 +45,7 @@ from paperhub.mcp import (
     mount_paperhub_papers_on,
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
+from paperhub.pipelines.arxiv_metadata_backfill import run_backfill as run_arxiv_backfill
 from paperhub.pipelines.marker_worker import build_worker_pipeline
 from paperhub.pipelines.marker_worker import run_worker as run_marker_worker
 
@@ -137,6 +138,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         _LOG.info("marker worker started")
 
+    # Background arXiv metadata backfill: papers ingested while the arXiv API
+    # was rate-limited carry a source-derived title + empty authors/year; this
+    # fills them in later with one batched request per pass and exponential
+    # backoff while arXiv stays unavailable. DB-queued (survives restarts),
+    # own connection. Disabled with PAPERHUB_ARXIV_BACKFILL=0 (tests).
+    app.state.arxiv_backfill_task = None
+    app.state.arxiv_backfill_stop = None
+    app.state.arxiv_backfill_conn = None
+    if os.environ.get("PAPERHUB_ARXIV_BACKFILL", "1") != "0":
+        backfill_conn = await aiosqlite.connect(settings.db_path)
+        await configure_connection(backfill_conn)
+        backfill_stop = asyncio.Event()
+        app.state.arxiv_backfill_conn = backfill_conn
+        app.state.arxiv_backfill_stop = backfill_stop
+        app.state.arxiv_backfill_task = asyncio.create_task(
+            run_arxiv_backfill(backfill_conn, stop=backfill_stop),
+            name="paperhub-arxiv-backfill",
+        )
+
     # The dense-vector RAG stack (embedder + reranker + Chroma) was removed, so
     # there is no model pre-warm to wait on. Defer the "ready" banner to a
     # background task so it lands AFTER uvicorn logs "Application startup
@@ -187,6 +207,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if worker_conn is not None:
             with contextlib.suppress(Exception):
                 await worker_conn.close()
+        # Stop the arXiv metadata backfill (an in-flight request is a single
+        # short HTTP call; cancel if it doesn't finish promptly).
+        backfill_stop = app.state.arxiv_backfill_stop
+        backfill_task = app.state.arxiv_backfill_task
+        if backfill_stop is not None and backfill_task is not None:
+            backfill_stop.set()
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(backfill_task, timeout=5.0)
+            if not backfill_task.done():
+                backfill_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await backfill_task
+        backfill_conn = app.state.arxiv_backfill_conn
+        if backfill_conn is not None:
+            with contextlib.suppress(Exception):
+                await backfill_conn.close()
         await app.state.mcp_registry.shutdown()
 
 
