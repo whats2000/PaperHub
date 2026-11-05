@@ -82,6 +82,12 @@ from paperhub.pipelines.title_extract import llm_extract_title
 logger = logging.getLogger(__name__)
 
 _PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+# Upper bound on the ingest-time arXiv metadata lookup. The arxiv library sets
+# no HTTP timeout and a rate-limited API has been observed taking ~110 s just to
+# answer 429; past this bound ingest proceeds with the source-derived title and
+# the background backfill fills authors/year later. The worker thread is left
+# to finish on its own (threads can't be cancelled) — harmless, it only returns.
+_ARXIV_METADATA_TIMEOUT_S = 15.0
 _PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
 # Shared tiktoken encoder — hoisted to module level so repeated calls to
 # _build_sections_json don't pay the (cached but misleading) per-call cost.
@@ -1022,12 +1028,22 @@ class PaperPipeline:
         """Fetch title/authors/year from the arXiv API by exact id.
 
         A single request off the event loop (no retries: arXiv's rate limit
-        lasts long). Never fails the ingest: when the API is unavailable or
+        lasts long), bounded by ``_ARXIV_METADATA_TIMEOUT_S``. Never fails the ingest: when the API is unavailable or
         doesn't know the id, the title
         comes from the already-downloaded source via ``fallback_title``
         (LaTeX ``\\title{}`` / PDF metadata), else the bare arxiv id.
         """
-        found = await asyncio.to_thread(fetch_arxiv_by_ids, [arxiv_id])
+        try:
+            found = await asyncio.wait_for(
+                asyncio.to_thread(fetch_arxiv_by_ids, [arxiv_id]),
+                timeout=_ARXIV_METADATA_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.warning(
+                "arXiv metadata lookup for %s exceeded %.0fs; not waiting",
+                arxiv_id, _ARXIV_METADATA_TIMEOUT_S,
+            )
+            found = None
         r = found.get(arxiv_id) if found else None
         if r is None:
             title = fallback_title() or arxiv_id

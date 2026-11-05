@@ -1180,3 +1180,38 @@ async def test_ingest_arxiv_metadata_unavailable_uses_latex_title(
         pc = await cur.fetchone()
     assert pc is not None
     assert pc[0] == "A Tiny Test Paper on Mixture of Experts"
+
+
+@pytest.mark.asyncio
+async def test_lookup_arxiv_metadata_times_out_to_fallback(
+    pipeline_env: tuple[PaperPipeline, aiosqlite.Connection, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """arXiv can take ~2 min to even answer 429; the ingest-time lookup is
+    bounded and falls back to the source-derived title on timeout."""
+    import threading
+    import time as _time
+
+    from paperhub.pipelines import paper_pipeline as pp
+
+    pipeline, _conn, _cache_root = pipeline_env
+    release = threading.Event()
+
+    def _hang(arxiv_ids: list[str]) -> dict[str, ArxivResult]:
+        release.wait(5)
+        return {}
+
+    monkeypatch.setattr(pp, "_ARXIV_METADATA_TIMEOUT_S", 0.2)
+    started = _time.monotonic()
+    try:
+        with patch(
+            "paperhub.pipelines.paper_pipeline.fetch_arxiv_by_ids",
+            side_effect=_hang,
+        ):
+            meta = await pipeline._lookup_arxiv_metadata(
+                "2510.21771", fallback_title=lambda: "Source Title",
+            )
+    finally:
+        release.set()
+    assert _time.monotonic() - started < 2
+    assert meta == {"title": "Source Title", "authors": [], "year": None}
