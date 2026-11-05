@@ -20,6 +20,11 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 _client = arxiv.Client()
+# Metadata lookups (ingest + background backfill) make ONE request per call:
+# arXiv's API rate limit (429) lasts a long time and the library's per-call
+# retries only prolong it while stalling the caller. On failure the caller
+# falls back (source-derived title) and the backfill retries much later.
+_metadata_client = arxiv.Client(num_retries=0)
 
 # Tarballs can be 30+ MB and export.arxiv.org sometimes throttles to a few
 # hundred KB/s. 120 s total read budget covers ~50 MB at 400 KB/s with margin;
@@ -159,6 +164,41 @@ def fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
             arxiv_id, type(exc).__name__, exc,
         )
     return None
+
+
+def fetch_arxiv_by_ids(arxiv_ids: list[str]) -> dict[str, ArxivResult] | None:
+    """Batched exact-ID metadata lookup in ONE ``id_list`` request, no retries.
+
+    Returns ``{bare_arxiv_id: ArxivResult}`` for the ids arXiv knows (unknown
+    ids are simply absent), ``{}`` for empty input (no request made), or
+    ``None`` when the API is unavailable (HTTP 429/503, network error) so the
+    caller can fall back now and retry later.
+    """
+    if not arxiv_ids:
+        return {}
+    out: dict[str, ArxivResult] = {}
+    try:
+        search = arxiv.Search(id_list=list(arxiv_ids), max_results=len(arxiv_ids))
+        for r in _metadata_client.results(search):
+            try:
+                rid = _id_from_entry_id(r.entry_id)
+            except ValueError:
+                continue
+            out[rid] = ArxivResult(
+                arxiv_id=rid,
+                title=r.title.strip(),
+                authors=[a.name for a in r.authors],
+                year=getattr(r.published, "year", None),
+                abstract=r.summary.strip(),
+                pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,
+            )
+    except Exception as exc:  # noqa: BLE001 — unavailable → caller falls back
+        logger.warning(
+            "fetch_arxiv_by_ids(%d ids) failed (%s: %s); arXiv API unavailable",
+            len(arxiv_ids), type(exc).__name__, exc,
+        )
+        return None
+    return out
 
 
 def _download_with_resume(url: str, target_path: Path) -> None:

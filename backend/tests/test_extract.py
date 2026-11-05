@@ -419,3 +419,40 @@ def test_extract_pdf_metadata_prefers_metadata_title_over_page1_when_both_presen
     )
     md = _extract_pdf_metadata(p)
     assert md["title"] == "Title From Metadata"  # metadata wins
+
+
+# ---------------------------------------------------------------------------
+# extract_latex_title — source-derived title fallback when the arXiv API is
+# unavailable (rate-limited) during ingest.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_latex_title_simple() -> None:
+    from paperhub.pipelines.extract import extract_latex_title
+
+    tex = r"\documentclass{article}" "\n" r"\title{A Tiny Test Paper}" "\n" r"\begin{document}"
+    assert extract_latex_title(tex) == "A Tiny Test Paper"
+
+
+def test_extract_latex_title_strips_markup_thanks_and_linebreaks() -> None:
+    from paperhub.pipelines.extract import extract_latex_title
+
+    tex = (
+        r"% \title{Commented Out}" "\n"
+        r"\title[Short]{\textbf{Fast} Pruning\\ for {VLMs}"
+        r"\thanks{Work done at X.}}" "\n"
+    )
+    assert extract_latex_title(tex) == "Fast Pruning for VLMs"
+
+
+def test_extract_latex_title_ignores_titlepage() -> None:
+    from paperhub.pipelines.extract import extract_latex_title
+
+    assert extract_latex_title(r"\titlepage" "\n" r"\title{Real}") == "Real"
+
+
+def test_extract_latex_title_missing_returns_empty() -> None:
+    from paperhub.pipelines.extract import extract_latex_title
+
+    assert extract_latex_title(r"\begin{document}hi\end{document}") == ""
+    assert extract_latex_title(r"\title{") == ""

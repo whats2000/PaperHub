@@ -14,6 +14,10 @@ os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
 # spawn on every app lifespan and dial the (non-running) Marker service. The
 # dedicated worker test enables it explicitly via run_worker.
 os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
+# Same for the arXiv metadata backfill loop (would hit the real arXiv API).
+os.environ.setdefault("PAPERHUB_ARXIV_BACKFILL", "0")
+# And the persistent log file (would write into the real workspace).
+os.environ.setdefault("PAPERHUB_LOG_FILE", "0")
 
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402

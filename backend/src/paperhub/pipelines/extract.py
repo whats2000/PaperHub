@@ -19,6 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pymupdf
+from pylatexenc.latex2text import LatexNodes2Text
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +436,65 @@ def _extract_pdf_title_from_page1_doc(doc: pymupdf.Document) -> str:
     joined = " ".join(pieces)
     cleaned = _WHITESPACE_RUN.sub(" ", joined).strip()
     return _sanitise_pdf_title(cleaned)
+
+
+# First uncommented ``\title{`` (optionally ``\title[short]{``). Requires the
+# opening brace, so ``\titlepage`` / ``\titlefont`` never match.
+_TITLE_START = re.compile(r"(?m)^(?:[^%\n]|\\%)*?\\title\s*(?:\[[^\]]*\])?\s*\{")
+# Title-attached notes whose argument is NOT part of the title text.
+_TITLE_NOTE_CMD = re.compile(r"\\(?:thanks|footnote|footnotetext)\s*\{")
+# Forced line break inside a title: ``\\`` or ``\\[2pt]``.
+_TITLE_LINEBREAK = re.compile(r"\\\\(?:\[[^\]]*\])?")
+
+
+def _balanced_close(text: str, open_idx: int) -> int:
+    """Index of the ``}`` closing the ``{`` at ``open_idx``, or -1 if unbalanced.
+    Escaped braces (``\\{`` / ``\\}``) do not count."""
+    depth = 0
+    i = open_idx
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def extract_latex_title(tex: str) -> str:
+    """Plain-text paper title from the first ``\\title{...}`` in ``tex``.
+
+    The source-derived fallback for arXiv ingest when the arXiv metadata API
+    is unavailable (e.g. HTTP 429 rate limiting). Drops ``\\thanks`` /
+    ``\\footnote`` arguments, turns ``\\\\`` line breaks into spaces, and
+    converts remaining markup to text via pylatexenc. Returns ``""`` when no
+    usable title is found.
+    """
+    m = _TITLE_START.search(tex)
+    if m is None:
+        return ""
+    open_idx = m.end() - 1
+    close_idx = _balanced_close(tex, open_idx)
+    if close_idx < 0:
+        return ""
+    inner = tex[open_idx + 1 : close_idx]
+    while (note := _TITLE_NOTE_CMD.search(inner)) is not None:
+        end = _balanced_close(inner, note.end() - 1)
+        inner = inner[: note.start()] + ("" if end < 0 else inner[end + 1 :])
+        if end < 0:
+            break
+    inner = _TITLE_LINEBREAK.sub(" ", inner)
+    try:
+        text = LatexNodes2Text().latex_to_text(inner)
+    except Exception:  # noqa: BLE001 — malformed markup: best-effort fallback
+        text = inner
+    return _sanitise_pdf_title(_WHITESPACE_RUN.sub(" ", text))
 
 
 def _extract_pdf_title_from_page1(pdf_path: Path) -> str:

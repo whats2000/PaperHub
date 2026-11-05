@@ -115,7 +115,13 @@ try {
         $uvicornArgs += @("--reload", "--reload-dir", "src")
     }
 
+    # Per-run log file id: the backend writes this run's log to
+    # workspace/logs/paperhub-<id>.log (--reload workers inherit the env, so
+    # hot reloads keep appending to the same file). Old logs self-clean
+    # (14-day retention + ~200 MB cap) — see src/paperhub/logfile.py.
+    $env:PAPERHUB_LOG_SESSION = Get-Date -Format "yyyyMMdd-HHmmss"
     Write-Host "Starting backend on ${BindHost}:$BackendPort ..." -ForegroundColor Cyan
+    Write-Host "  log: workspace\logs\paperhub-$($env:PAPERHUB_LOG_SESSION).log" -ForegroundColor DarkGray
     & uv @uvicornArgs
 } finally {
     & $cleanup

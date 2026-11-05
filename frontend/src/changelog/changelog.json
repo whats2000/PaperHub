@@ -1,5 +1,27 @@
 [
   {
+    "version": "2.40.0",
+    "date": "2026-11-05",
+    "highlights": {
+      "en": [
+        "Adding an arXiv paper no longer fails when arXiv is rate-limiting requests — the paper is added right away with its title taken from the paper itself, and authors and year are filled in automatically once arXiv is reachable again.",
+        "The backend now keeps a log file per run (self-cleaning after 14 days), making problems easier to diagnose."
+      ],
+      "zh-TW": [
+        "arXiv 限流時加入 arXiv 論文不會再失敗 — 論文會立即加入，標題取自論文本身，作者與年份會在 arXiv 恢復後自動補上。",
+        "後端現在每次執行都會保留一份日誌檔（14 天後自動清理），更容易排查問題。"
+      ],
+      "zh-CN": [
+        "arXiv 限流时添加 arXiv 论文不会再失败 — 论文会立即添加，标题取自论文本身，作者与年份会在 arXiv 恢复后自动补上。",
+        "后端现在每次运行都会保留一份日志文件（14 天后自动清理），更容易排查问题。"
+      ],
+      "ja": [
+        "arXiv がレート制限中でも arXiv 論文の追加が失敗しなくなりました — 論文はすぐに追加され、タイトルは論文本体から取得し、著者と年は arXiv の復旧後に自動で補完されます。",
+        "バックエンドが実行ごとにログファイルを保存するようになりました（14 日後に自動削除）。問題の調査が容易になります。"
+      ]
+    }
+  },
+  {
     "version": "2.39.0",
     "date": "2026-08-10",
     "highlights": {

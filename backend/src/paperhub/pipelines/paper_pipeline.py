@@ -7,10 +7,11 @@ Stages:
 4. On miss: download → extract → chunk → render HTML → persist
    paper_content row + chunks rows → insert papers row.
 
-NOTE (sync-in-async): ``download_arxiv_source`` and ``search_arxiv`` are
-synchronous network calls invoked inside ``async`` methods.  This blocks the
-event loop for the duration of the download/search.  For Plan C scope this
-is accepted; wrapping in ``asyncio.to_thread`` is deferred.
+NOTE (sync-in-async): ``download_arxiv_source`` is a synchronous network
+call invoked inside ``async`` methods and blocks the event loop for the
+duration of the download.  The arXiv metadata lookup runs via
+``asyncio.to_thread`` because the API's rate-limit retries can stall for
+minutes.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
@@ -35,7 +37,7 @@ from paperhub.pipelines.arxiv_client import (
     TarballCorrupt,
     download_arxiv_pdf,
     download_arxiv_source,
-    search_arxiv,
+    fetch_arxiv_by_ids,
 )
 from paperhub.pipelines.chunker import (
     Chunk,
@@ -45,6 +47,7 @@ from paperhub.pipelines.chunker import (
 from paperhub.pipelines.extract import (
     _extract_pdf_metadata,
     extract_latex,
+    extract_latex_title,
     extract_pdf_page1_text,
     extract_pdf_with_headings,
 )
@@ -79,6 +82,12 @@ from paperhub.pipelines.title_extract import llm_extract_title
 logger = logging.getLogger(__name__)
 
 _PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+# Upper bound on the ingest-time arXiv metadata lookup. The arxiv library sets
+# no HTTP timeout and a rate-limited API has been observed taking ~110 s just to
+# answer 429; past this bound ingest proceeds with the source-derived title and
+# the background backfill fills authors/year later. The worker thread is left
+# to finish on its own (threads can't be cancelled) — harmless, it only returns.
+_ARXIV_METADATA_TIMEOUT_S = 15.0
 _PDF_USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
 # Shared tiktoken encoder — hoisted to module level so repeated calls to
 # _build_sections_json don't pay the (cached but misleading) per-call cost.
@@ -379,7 +388,13 @@ class PaperPipeline:
         metadata: dict[str, object] = (
             asdict(req.metadata_override)
             if req.metadata_override is not None
-            else self._lookup_arxiv_metadata(arxiv_id)
+            else await self._lookup_arxiv_metadata(
+                # \title{} usually lives in the preamble, not the body.
+                arxiv_id,
+                fallback_title=lambda: extract_latex_title(
+                    ext.preamble + "\n" + full_text,
+                ),
+            )
         )
 
         # Compute section TOC for paper_qa subagent (v2.10-2).
@@ -451,7 +466,10 @@ class PaperPipeline:
         metadata: dict[str, object] = (
             asdict(req.metadata_override)
             if req.metadata_override is not None
-            else self._lookup_arxiv_metadata(arxiv_id)
+            else await self._lookup_arxiv_metadata(
+                arxiv_id,
+                fallback_title=lambda: str(_extract_pdf_metadata(pdf_path)["title"]),
+            )
         )
 
         boundaries = self._pdf_boundaries(headings, str(metadata.get("title", "")))
@@ -1001,12 +1019,40 @@ class PaperPipeline:
                 chunk_ids.append(int(cid_row[0]))
         return paper_content_id, chunk_ids
 
-    def _lookup_arxiv_metadata(self, arxiv_id: str) -> dict[str, object]:
-        """Fetch title/authors/year from arXiv API (sync call — see module docstring)."""
-        results = search_arxiv(arxiv_id, max_results=1)
-        if not results:
-            return {"title": arxiv_id, "authors": [], "year": None}
-        r = results[0]
+    async def _lookup_arxiv_metadata(
+        self,
+        arxiv_id: str,
+        *,
+        fallback_title: Callable[[], str],
+    ) -> dict[str, object]:
+        """Fetch title/authors/year from the arXiv API by exact id.
+
+        A single request off the event loop (no retries: arXiv's rate limit
+        lasts long), bounded by ``_ARXIV_METADATA_TIMEOUT_S``. Never fails the ingest: when the API is unavailable or
+        doesn't know the id, the title
+        comes from the already-downloaded source via ``fallback_title``
+        (LaTeX ``\\title{}`` / PDF metadata), else the bare arxiv id.
+        """
+        try:
+            found = await asyncio.wait_for(
+                asyncio.to_thread(fetch_arxiv_by_ids, [arxiv_id]),
+                timeout=_ARXIV_METADATA_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.warning(
+                "arXiv metadata lookup for %s exceeded %.0fs; not waiting",
+                arxiv_id, _ARXIV_METADATA_TIMEOUT_S,
+            )
+            found = None
+        r = found.get(arxiv_id) if found else None
+        if r is None:
+            title = fallback_title() or arxiv_id
+            logger.warning(
+                "arXiv metadata unavailable for %s; using source-derived "
+                "title %r; authors/year left for the background backfill",
+                arxiv_id, title,
+            )
+            return {"title": title, "authors": [], "year": None}
         return {
             "title": r.title,
             "authors": r.authors,
