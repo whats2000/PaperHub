@@ -12,7 +12,7 @@ The two-layer schema (`paper_content` for unique papers, `papers` for per-sessio
 
 ## Implementation plan
 
-The SRS is decomposed into 7 sequential plans, each producing working/testable software:
+The SRS is decomposed into sequential plans (sub-plans like F6.1 / G1 extend a lettered plan), each producing working/testable software:
 
 | Plan | Status | Document |
 | --- | --- | --- |
@@ -21,12 +21,16 @@ The SRS is decomposed into 7 sequential plans, each producing working/testable s
 | C — Paper Pipeline + Research Agent | **complete** | [2026-05-18-paperhub-C-paper-pipeline-research-agent.md](docs/superpowers/plans/2026-05-18-paperhub-C-paper-pipeline-research-agent.md) |
 | D — Search results + Reference Sources + Citation Canvas | **complete** | [2026-05-21-paperhub-D-citation-canvas.md](docs/superpowers/plans/2026-05-21-paperhub-D-citation-canvas.md) |
 | E — SQL Agent + sqlite MCP + session/global memory governance | **complete** | [2026-05-22-paperhub-E-library-intelligence.md](docs/superpowers/plans/2026-05-22-paperhub-E-library-intelligence.md) |
+| E1 — `library_stats` attachable rows (SQL Agent → ReAct) | **complete** (v2.34) | [2026-06-13-paperhub-E1-library-stats-attachable-rows.md](docs/superpowers/plans/2026-06-13-paperhub-E1-library-stats-attachable-rows.md) |
 | F — Slide Pipeline + Report Agent | **complete** | [F1](docs/superpowers/plans/2026-05-23-paperhub-F1-slide-generation-viewing.md) · [F2.1](docs/superpowers/plans/2026-05-24-paperhub-F2.1-async-marker-upgrade.md) · [F4](docs/superpowers/plans/2026-05-25-paperhub-F4-slide-decoupling-editing.md) · [F4.2](docs/superpowers/plans/2026-05-27-paperhub-F4.2-slide-style-customization.md) · [F4.3](docs/superpowers/plans/2026-05-29-paperhub-F4.3-non-arxiv-pdf-ingestion.md) · [F5](docs/superpowers/plans/2026-06-05-paperhub-F5-presentation-voice.md) |
-| F6 — Slide narrative planning + grounding traceback + theme | **F6.1 complete** (planning + PaperDigest/targeted-read gather rework + streaming); F6.2 (Sources panel) · F6.3 (theme) pending | [F6.1](docs/superpowers/plans/2026-06-12-paperhub-F6.1-slide-narrative-planning.md) |
+| F6 — Slide narrative planning + grounding traceback + theme | **F6.1 complete** (v2.33 — planning + PaperDigest/targeted-read gather rework + streaming) · **F6.2 complete** (v2.36 — per-slide `% cite:` grounding + Sources strip + manual/citation editing; the more-agentic draft/revise split was reverted) · F6.3 (custom theme) pending | [F6.1](docs/superpowers/plans/2026-06-12-paperhub-F6.1-slide-narrative-planning.md) · [F6.2](docs/superpowers/plans/2026-06-15-paperhub-F6.2-manual-editing-sources-strip.md) |
 | G — Frontend UI i18n + account menu + DB-backed runtime Settings panel | **complete** | [2026-06-09-paperhub-G-i18n-settings-panel.md](docs/superpowers/plans/2026-06-09-paperhub-G-i18n-settings-panel.md) |
-| H — Compare view + paperhub.* MCP + filesystem MCP | pending (deferred behind G) | not yet written |
+| G1 — Agent prompt evaluation (cascade per-stage eval) | **complete** (v2.38) | [2026-06-29-paperhub-G1-agent-chain-eval.md](docs/superpowers/plans/2026-06-29-paperhub-G1-agent-chain-eval.md) |
+| G2 — Router cleanup + multi-intent priority | **complete** (v2.39) | [2026-06-29-paperhub-G2-router-cleanup-priority.md](docs/superpowers/plans/2026-06-29-paperhub-G2-router-cleanup-priority.md) |
+| H — Bilingual reading ([#36](https://github.com/whats2000/PaperHub/issues/36)) + citation graph layer 1 ([#38](https://github.com/whats2000/PaperHub/issues/38)) + HF fine-tuning export ([#40](https://github.com/whats2000/PaperHub/issues/40)) | **next** — pending | not yet written |
+| I — PaperHub as a plugin: external knowledge-base MCP ([#37](https://github.com/whats2000/PaperHub/issues/37)) + skills & packaging ([#39](https://github.com/whats2000/PaperHub/issues/39)) + filesystem MCP | pending (deferred behind H; replaces the old Plan H — its Compare view (FR-04) is **dropped**) | not yet written |
 
-When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The next plan to write is the one whose dependencies are met (see each plan's "depends on" row in the SRS).
+When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The next plan to write is **H**: its three features are independent of each other and of I. I's graph MCP tools build on H's citation graph (#38) — H ships the graph inside the app first; I exposes it to external agents.
 
 ## Conventions
 
@@ -186,13 +190,19 @@ npm run build     # Vite production build
 
 ## Known follow-ups (open items only)
 
-Plans A–G are shipped + merged; closed follow-ups live in the SRS Revision History. Genuinely open, out-of-scope-when-written items (audited 2026-06-13 against `main`):
+Plans A–G (incl. E1, F6.1/F6.2, G1, G2) are shipped + merged; closed follow-ups live in the SRS Revision History. Genuinely open, out-of-scope-when-written items (audited 2026-11-05 against `main`):
 
 - **(E) Memory recall is all-active, not semantic** *(deferred by design)* — `build_active_memory_block` (5 live call sites) returns every active memory (≤20); the FTS/semantic `build_memory_context_block` has **zero call sites** (dead code, kept intentionally so a standing directive like "respond in Japanese" always surfaces). Revisit if a user's active set grows large.
 
-## Plan G review — anything blocking Plan H?
+## Roadmap — Plan H next, Plan I after (re-planned 2026-11-05)
 
-**No.** Plan G (i18n + DB-backed Settings panel, v2.31) shipped; its one notable YAGNI cut — *"no live model-availability validation"* — was **closed by the v2.32 readiness gate** (`GET /settings/readiness`). Nothing in G blocks **Plan H** (Compare view + `paperhub.*` MCP + filesystem MCP): H reuses the already-shipped MCP client infra (add one `[[server]]` block to `mcp_servers.toml`).
+**Nothing blocks Plan H.** It bundles the three lowest-difficulty items from the 2026-11-05 feature evaluation, each self-contained:
+
+- **Bilingual reading (#36)** — translation is an overlay keyed to `phchunk-N` anchors and cached per `paper_content` × language; `source.html` / `chunks` must stay byte-identical (render-change rule above).
+- **Citation graph, layer 1 (#38)** — SQLite edges from the already-wrapped Semantic Scholar `/references` + `/citations`. The LLM concept graph (layer 2) is deferred: it needs a G1 eval set first.
+- **HF fine-tuning export (#40)** — `messages` JSONL now; agent-step samples reconstruct prompts from recorded state via the G1 replay harness (never record rendered prompts). Training is deferred until enough runs accumulate.
+
+**Plan I** (replaces the old Plan H, moved back) is the plugin + MCP stage: it turns PaperHub into an attachable plugin — external knowledge-base MCP (#37, superseding the old vague "`paperhub.*` MCP") + skills/packaging (#39) + filesystem MCP. It reuses the shipped MCP client/mount infra and exposes H's citation graph as MCP tools. The old H's **Compare view (FR-04) is dropped** — not deferred; see the SRS FR-04 row.
 
 ## Restricted operations
 
@@ -230,6 +240,6 @@ One-liners — the full version lives in the SRS (its Revision History is author
 - **First-run config gate + tour (v2.32)** → `GET /settings/readiness` pre-flights a 1-token ping per gate model; composer locks + tour fire only on a *definitive* failure (`hasBlockingConfigIssue`); verified config cached in localStorage. SRS v2.32.
 - **Citation Canvas click resolution** → SRS FR-03 + §III-5.1 "Render to HTML".
 - **Citation Canvas scroll/crash (v2.23)** → `scrollIntoViewStable` eases scrollTop to a moving target; defer wrap+scroll to a macrotask. SRS v2.23.
-- **Compare-mode tracing** → one `run_id`, `branch='A'|'B'` on `tool_calls`. SRS §III-7 + FR-04.
+- **Compare view (FR-04) dropped (2026-11-05)** → compare models with G1 agent-eval sweeps / `backend/benchmark/`, not a UI pane; `tool_calls.branch` is kept but always `''`. SRS FR-04 + §III-7.
 - **`:8080` empty after `docker compose` rebuild (v2.24)** → nginx caches the backend IP at startup → 502; fix = embedded DNS resolver + variable `proxy_pass` in `frontend/nginx.conf`. SRS v2.24.
 - **Figures for slides after the cache split** → SRS §III-5.3 step 4a.
