@@ -910,6 +910,8 @@ Markers: **[user]** = decided by the user in the 2026-11-05 design session; **[c
 - New env flags land in `backend/.env.example`; user-facing runtime settings go through the FR-14 Settings registry.
 - Privacy for confidential documents needs no special data path: pointing the configured models at a local LiteLLM provider (e.g. Ollama) keeps all processing on the machine [user].
 
+**Visual design base.** The signed-off interactive prototype — [`docs/superpowers/designs/2026-11-05-plan-h/`](../designs/2026-11-05-plan-h/README.md) (source + build scripts; viewable as a private artifact linked there) — is the visual reference every H1–H3 plan builds against: layout, states and motion follow it; where it and this section disagree, this section wins.
+
 **UI rules (settled in the interactive design review, 2026-11-05)** — every Plan H surface follows the existing design language: shadcn `neutral` tokens from `frontend/src/index.css`, Geist, lucide icons, the Popover surface (`bg-popover` + `border` + `shadow-md` + `rounded-md`) for secondary content, the inverted Tooltip for short hints, `bg-accent` for on/selected states.
 - **Floating elements over a reading or graph surface** [user]: *controls and reference info* (the translate pill, the graph legend) are **semi-transparent when idle (≈50–55 %) and opaque on hover / focus / while their menu is open**; *content being read* (translation card, menus, the detail drawer, popovers, toasts) is **always opaque**.
 - **Glow only on the translate pill** — a border did not fit the UI there; every other surface keeps the standard border + shadow [user].
