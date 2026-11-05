@@ -17,6 +17,8 @@ import arxiv
 import httpx
 from pydantic import BaseModel
 
+from paperhub.pipelines.author_names import clean_author_names
+
 logger = logging.getLogger(__name__)
 
 _client = arxiv.Client()
@@ -126,7 +128,7 @@ def search_arxiv(query: str, max_results: int = 10) -> list[ArxivResult]:
             ArxivResult(
                 arxiv_id=_id_from_entry_id(r.entry_id),
                 title=r.title.strip(),
-                authors=[a.name for a in r.authors],
+                authors=clean_author_names([a.name for a in r.authors]),
                 year=getattr(r.published, "year", None),
                 abstract=r.summary.strip(),
                 pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,
@@ -153,7 +155,7 @@ def fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
             return ArxivResult(
                 arxiv_id=_id_from_entry_id(r.entry_id),
                 title=r.title.strip(),
-                authors=[a.name for a in r.authors],
+                authors=clean_author_names([a.name for a in r.authors]),
                 year=getattr(r.published, "year", None),
                 abstract=r.summary.strip(),
                 pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,
@@ -187,7 +189,7 @@ def fetch_arxiv_by_ids(arxiv_ids: list[str]) -> dict[str, ArxivResult] | None:
             out[rid] = ArxivResult(
                 arxiv_id=rid,
                 title=r.title.strip(),
-                authors=[a.name for a in r.authors],
+                authors=clean_author_names([a.name for a in r.authors]),
                 year=getattr(r.published, "year", None),
                 abstract=r.summary.strip(),
                 pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,

@@ -47,6 +47,7 @@ from paperhub.mcp import (
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
 from paperhub.pipelines.arxiv_metadata_backfill import run_backfill as run_arxiv_backfill
+from paperhub.pipelines.author_names import repair_author_lists
 from paperhub.pipelines.marker_worker import build_worker_pipeline
 from paperhub.pipelines.marker_worker import run_worker as run_marker_worker
 
@@ -85,6 +86,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
         await reconcile_interrupted_runs(conn)
+        # Fix author lists stored with arXiv fragment artifacts (idempotent).
+        await repair_author_lists(conn)
         await apply_settings_overlay_at_boot(conn)
         # Re-read settings AFTER the overlay so restart_required vars
         # (PAPERHUB_LOG_LEVEL, PAPERHUB_MARKER_URL, PAPERHUB_INPROCESS_MARKER,
