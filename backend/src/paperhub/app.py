@@ -36,6 +36,7 @@ from paperhub.db.migrate import (
     reconcile_interrupted_runs,
     sweep_orphan_session_folders,
 )
+from paperhub.logfile import install_file_logging
 from paperhub.mcp import (
     MCPRegistry,
     build_paperhub_memory_server,
@@ -71,6 +72,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     litellm.num_retries = 3
 
     settings = load_settings()
+    # Mirror the console log to <workspace>/logs/paperhub.log (flushed per
+    # record; size + per-start.ps1-run rotation, capped at ~60 MB total) so a
+    # debugging session can read what the server logged. First thing in the
+    # lifespan so boot errors land in the file too. PAPERHUB_LOG_FILE=0 disables.
+    if os.environ.get("PAPERHUB_LOG_FILE", "1") != "0":
+        log_path = install_file_logging(
+            settings.workspace_dir / "logs",
+            session=os.environ.get("PAPERHUB_LOG_SESSION") or None,
+        )
+        _LOG.info("logging to %s", log_path)
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
         await reconcile_interrupted_runs(conn)
