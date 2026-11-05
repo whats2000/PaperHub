@@ -27,7 +27,7 @@ The SRS is decomposed into sequential plans (sub-plans like F6.1 / G1 extend a l
 | G — Frontend UI i18n + account menu + DB-backed runtime Settings panel | **complete** | [2026-06-09-paperhub-G-i18n-settings-panel.md](docs/superpowers/plans/2026-06-09-paperhub-G-i18n-settings-panel.md) |
 | G1 — Agent prompt evaluation (cascade per-stage eval) | **complete** (v2.38) | [2026-06-29-paperhub-G1-agent-chain-eval.md](docs/superpowers/plans/2026-06-29-paperhub-G1-agent-chain-eval.md) |
 | G2 — Router cleanup + multi-intent priority | **complete** (v2.39) | [2026-06-29-paperhub-G2-router-cleanup-priority.md](docs/superpowers/plans/2026-06-29-paperhub-G2-router-cleanup-priority.md) |
-| H — Bilingual reading ([#36](https://github.com/whats2000/PaperHub/issues/36)) + citation graph layer 1 ([#38](https://github.com/whats2000/PaperHub/issues/38)) + HF fine-tuning export ([#40](https://github.com/whats2000/PaperHub/issues/40)) | **next** — pending | not yet written |
+| H — **H1** bilingual reading ([#36](https://github.com/whats2000/PaperHub/issues/36)) → **H2** feedback flywheel + HF export ([#40](https://github.com/whats2000/PaperHub/issues/40), rescoped) → **H3** cross-domain ideation ([#38](https://github.com/whats2000/PaperHub/issues/38), rescoped) — designed in SRS §III-10 | **next** — spec written, plans pending | not yet written |
 | I — PaperHub as a plugin: external knowledge-base MCP ([#37](https://github.com/whats2000/PaperHub/issues/37)) + skills & packaging ([#39](https://github.com/whats2000/PaperHub/issues/39)) + filesystem MCP | pending (deferred behind H; replaces the old Plan H — its Compare view (FR-04) is **dropped**) | not yet written |
 
 When a plan is in flight, it has a corresponding `feat/plan-X-...` branch. The next plan to write is **H**: its three features are independent of each other and of I. I's graph MCP tools build on H's citation graph (#38) — H ships the graph inside the app first; I exposes it to external agents.
@@ -196,11 +196,13 @@ Plans A–G (incl. E1, F6.1/F6.2, G1, G2) are shipped + merged; closed follow-up
 
 ## Roadmap — Plan H next, Plan I after (re-planned 2026-11-05)
 
-**Nothing blocks Plan H.** It bundles the three lowest-difficulty items from the 2026-11-05 feature evaluation, each self-contained:
+**Nothing blocks Plan H.** Its design (SRS §III-10, settled through an interactive design review on 2026-11-05) splits into three independent sub-plans, each with its own plan doc, branch and release:
 
-- **Bilingual reading (#36)** — translation is an overlay keyed to `phchunk-N` anchors and cached per `paper_content` × language; `source.html` / `chunks` must stay byte-identical (render-change rule above).
-- **Citation graph, layer 1 (#38)** — SQLite edges from the already-wrapped Semantic Scholar `/references` + `/citations`. The LLM concept graph (layer 2) is deferred: it needs a G1 eval set first.
-- **HF fine-tuning export (#40)** — `messages` JSONL now; agent-step samples reconstruct prompts from recorded state via the G1 replay harness (never record rendered prompts). Training is deferred until enough runs accumulate.
+- **H1 — Bilingual reading (#36)** — HTML papers: translation under each paragraph, an overlay that keeps `source.html` / `chunks` byte-identical (render-change rule). PDF documents: layout untouched, hover/pin translation card left of the reader, paragraph geometry from persisted Marker blocks, inline math via Marker `redo_inline_math`.
+- **H2 — Feedback flywheel (#40, rescoped)** — explicit + implicit (reviewer-agent) answer feedback, a Feedback page, HF export (`messages` JSONL / DPO), and a G1 to-label inbox; agent-step samples are reconstructed from recorded state, never stored prompts.
+- **H3 — Cross-domain ideation (#38, rescoped)** — mechanism cards matched across domains, problem-scoped ideas, an idea lifecycle that feeds the G1 ideation eval set; Ideas page with graph + kanban views. Its prompts need that eval set before shipping.
+
+Plan H UI follows the "UI rules" block in SRS §III-10 (floating-element opacity rule, fixed colour semantics with yellow reserved for citations, dataviz exemption with validated palettes, motion patterns, overlay drawers).
 
 **Plan I** (replaces the old Plan H, moved back) is the plugin + MCP stage: it turns PaperHub into an attachable plugin — external knowledge-base MCP (#37, superseding the old vague "`paperhub.*` MCP") + skills/packaging (#39) + filesystem MCP. It reuses the shipped MCP client/mount infra and exposes H's citation graph as MCP tools. The old H's **Compare view (FR-04) is dropped** — not deferred; see the SRS FR-04 row.
 
