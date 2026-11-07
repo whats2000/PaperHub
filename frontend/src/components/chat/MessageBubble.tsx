@@ -97,7 +97,9 @@ export function MessageBubble({
         <div
           className={
             isUser
-              ? "rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert bg-primary text-primary-foreground"
+              ? // A soft grey, as chat UIs do: the primary colour is near-white in
+                // dark mode and near-black in light, the loudest block on screen.
+                "rounded-2xl px-4 py-2 prose prose-sm dark:prose-invert bg-secondary text-secondary-foreground"
               : // Assistant: full-width, no bubble — markdown, cards and traces get
                 // the whole reading column (ChatGPT/Claude convention).
                 "prose prose-sm max-w-none dark:prose-invert"
