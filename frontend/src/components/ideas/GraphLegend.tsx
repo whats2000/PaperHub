@@ -46,20 +46,13 @@ const STATUS_ICONS: [IdeaStatus, LucideIcon, string][] = [
 /**
  * The graph legend: a vertical card pinned bottom-left, grouped by encoding.
  * Semi-transparent while idle, opaque on hover or focus; it never moves when
- * the drawer opens.
+ * the drawer opens. Only the reader folds or opens it: the drawer does not.
  */
-export function GraphLegend({ domains, drawerOpen = false }: { domains: GraphDomain[]; drawerOpen?: boolean }) {
+export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
   const { t } = useTranslation("ideas");
   const [open, setOpen] = useState(true);
   // The "Other" row lists the domains it folds together while hovered, focused or clicked.
   const [otherOpen, setOtherOpen] = useState(false);
-  // An open drawer folds the legend to its title so it never covers the nodes
-  // the drawer is about; the reader can still open it again.
-  const [seenDrawer, setSeenDrawer] = useState(drawerOpen);
-  if (seenDrawer !== drawerOpen) {
-    setSeenDrawer(drawerOpen);
-    setOpen(!drawerOpen);
-  }
   const colored = domains.filter((d) => d.color_index !== null).sort((a, b) => (a.color_index ?? 0) - (b.color_index ?? 0));
   const others = domains.filter((d) => d.color_index === null);
   const hasOther = others.length > 0;

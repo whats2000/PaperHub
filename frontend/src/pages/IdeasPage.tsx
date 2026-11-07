@@ -394,7 +394,7 @@ export function IdeasPage() {
                 onFit={fitAll}
                 shifted={drawerOpen}
               />
-              <GraphLegend domains={graph.domains} drawerOpen={drawerOpen} />
+              <GraphLegend domains={graph.domains} />
             </>
           )}
         </ViewSlot>

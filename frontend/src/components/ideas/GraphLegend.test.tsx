@@ -25,12 +25,15 @@ describe("GraphLegend", () => {
     ]);
   });
 
-  it("folds itself to its title while the drawer is open", () => {
+  it("stays folded once the reader folds it, until the reader opens it again", async () => {
+    // Folding is the reader's call alone; nothing else on the page reopens it.
     const { rerender } = render(<GraphLegend domains={domains} />);
-    expect(screen.getByRole("button", { name: "Legend" })).toHaveAttribute("aria-expanded", "true");
-    rerender(<GraphLegend domains={domains} drawerOpen />);
-    expect(screen.getByRole("button", { name: "Legend" })).toHaveAttribute("aria-expanded", "false");
-    rerender(<GraphLegend domains={domains} />);
-    expect(screen.getByRole("button", { name: "Legend" })).toHaveAttribute("aria-expanded", "true");
+    const toggle = () => screen.getByRole("button", { name: "Legend" });
+    await userEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    rerender(<GraphLegend domains={[...domains]} />);
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
   });
 });
