@@ -90,6 +90,16 @@ class MarkerClient:
             merged.extend(batch.blocks)
         return MarkerDoc(blocks=merged)
 
+    def inline_math_llm(self) -> bool:
+        """True when the service reports an LLM (``/health`` ``llm_model``), i.e.
+        Marker's ``redo_inline_math`` ran. Any failure reads as False."""
+        try:
+            resp = self._client.get(f"{self._base_url}/health", timeout=10.0)
+            resp.raise_for_status()
+            return bool(resp.json().get("llm_model"))
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return False
+
     def _extract_one(
         self, pdf_bytes: bytes, *, page_range: list[int] | None,
     ) -> MarkerDoc:

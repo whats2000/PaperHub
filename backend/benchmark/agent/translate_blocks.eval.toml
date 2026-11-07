@@ -1,0 +1,15 @@
+# Per-agent eval sweep config (SRS §III-9) for the H1 block-translation prompt.
+# Deterministic grade = placeholders intact on every item AND key set == input
+# set; fidelity/fluency is judged afterwards with the `pairwise` command.
+[eval]
+stage       = "translate_blocks"
+model       = "gemini/gemini-3.5-flash-lite"   # deploy small tier (PAPERHUB_MODEL_SMALL)
+reps        = 3
+backend     = "auto"
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+variants    = ["v4", "v7", "v8", "v9"]   # fix round 1 contenders (14-block corpus); v9 shipped — see prompts/translate_blocks/README.md
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/translate_blocks.core.jsonl"

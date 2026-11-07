@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { applyIframeTheme } from "@/lib/applyIframeTheme";
@@ -8,6 +8,10 @@ import {
   highlightChunkRange,
   scrollToSection,
 } from "@/lib/findAndHighlight";
+import {
+  attachHtmlTranslation,
+  type HtmlTranslationHandle,
+} from "@/lib/htmlTranslation";
 
 interface Props {
   /** The paper's rendered HTML, embedded via `srcdoc` (same-origin). */
@@ -39,6 +43,22 @@ interface Props {
    *  resolved (absolute) URL + alt text — the parent opens a zoom/pan lightbox.
    *  Omitted disables the affordance. */
   onImageActivate?: (src: string, alt: string) => void;
+  /** Plan H1 bilingual reading: show a translation under each paragraph.
+   *  Omitted or `enabled: false` keeps the overlay fully inert. */
+  translation?: HtmlTranslationProps;
+}
+
+export interface HtmlTranslationProps {
+  enabled: boolean;
+  language: string;
+  /** The paper's `paper_content_id` (the translation cache key). */
+  paperId: number;
+  /** Server config: translate the whole paper, not just the look-ahead. */
+  fullPaper: boolean;
+  /** Bumped to re-translate the visible stale blocks with current terminology. */
+  retranslateNonce?: number;
+  /** Whether a visible translation predates the current terminology memory. */
+  onStaleChange?: (stale: boolean) => void;
 }
 
 /**
@@ -59,6 +79,7 @@ export function HtmlView({
   nonce,
   scrollBehavior = "smooth",
   onImageActivate,
+  translation,
 }: Props) {
   const { t } = useTranslation("canvas");
   const ref = useRef<HTMLIFrameElement>(null);
@@ -76,6 +97,15 @@ export function HtmlView({
   // Cancels a still-queued deferred highlight (see apply): set when one is
   // scheduled, called to drop it before scheduling another or on unmount.
   const cancelPending = useRef<(() => void) | null>(null);
+  // The document of the last iframe load: each srcdoc load is a fresh
+  // document, so the translation overlay re-attaches to it (a repeated load
+  // event for the SAME document keeps the existing overlay). It is paired with
+  // the `html` it was loaded from: a new `html` navigates the iframe
+  // asynchronously (contentDocument can still be the old document), so until
+  // the new load fires the old document must not be (re)attached.
+  const [loaded, setLoaded] = useState<{ doc: Document; html: string } | null>(
+    null,
+  );
 
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
@@ -135,6 +165,14 @@ export function HtmlView({
   const handleLoad = (): void => {
     loadedRef.current = true;
     apply();
+    const loadedDoc = ref.current?.contentDocument ?? null;
+    setLoaded((prev) =>
+      prev?.doc === loadedDoc && prev.html === html
+        ? prev
+        : loadedDoc
+          ? { doc: loadedDoc, html }
+          : null,
+    );
     ref.current?.contentDocument?.addEventListener("click", handleDocClick);
   };
 
@@ -156,6 +194,53 @@ export function HtmlView({
     return () => cancelPending.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDark, highlightDomId, highlightEndDomId, highlightText, sectionTitle, nonce]);
+
+  // Translation overlay (overlay only: inserts `div.ph-tr` siblings, never
+  // edits the paper's nodes). Re-attaches when the document, paper, language
+  // or full-paper switch changes; detaching collapses the translations away.
+  const trEnabled = translation?.enabled === true;
+  const trLanguage = translation?.language;
+  const trPaperId = translation?.paperId;
+  const trFullPaper = translation?.fullPaper === true;
+  const trRetranslate = translation?.retranslateNonce ?? 0;
+  const handleRef = useRef<HtmlTranslationHandle | null>(null);
+  const onStaleRef = useRef(translation?.onStaleChange);
+  useEffect(() => {
+    onStaleRef.current = translation?.onStaleChange;
+  }, [translation?.onStaleChange]);
+  useEffect(() => {
+    if (!trEnabled || trLanguage === undefined || trPaperId === undefined) return;
+    // Never attach to a superseded document: a paper/language change can race
+    // a new `html` whose load hasn't fired yet.
+    if (!loaded || loaded.html !== html) return;
+    const { doc } = loaded;
+    if (!doc.body) return;
+    const handle = attachHtmlTranslation(doc, {
+      paperId: trPaperId,
+      language: trLanguage,
+      fullPaper: trFullPaper,
+      labels: {
+        pending: t("translation.pending", "Translating…"),
+        unavailable: t("translation.unavailable", "Translation unavailable"),
+        retry: t("translation.retry", "Retry"),
+      },
+      onStaleChange: (stale) => onStaleRef.current?.(stale),
+    });
+    handleRef.current = handle;
+    return () => {
+      if (handleRef.current === handle) handleRef.current = null;
+      handle();
+      onStaleRef.current?.(false);
+    };
+  }, [trEnabled, trLanguage, trPaperId, trFullPaper, loaded, html, t]);
+
+  // A bump (never the initial value) re-translates the stale visible blocks.
+  const seenRetranslate = useRef(trRetranslate);
+  useEffect(() => {
+    if (seenRetranslate.current === trRetranslate) return;
+    seenRetranslate.current = trRetranslate;
+    handleRef.current?.retranslate();
+  }, [trRetranslate]);
 
   return (
     <iframe

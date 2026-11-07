@@ -34,5 +34,22 @@
     "addPaperFailed": "この論文を参考文献に追加できませんでした",
     "passageNotFoundHtml": "この箇所を論文内で見つけられませんでした",
     "passageNotFoundPdf": "この箇所を PDF 内で見つけられませんでした"
+  },
+  "translation": {
+    "pending": "翻訳中…",
+    "unavailable": "翻訳できませんでした",
+    "retry": "再試行"
+  },
+  "translationCard": {
+    "label": "翻訳",
+    "pin": "翻訳を固定",
+    "unpin": "固定を解除",
+    "close": "翻訳を閉じる",
+    "retry": "再試行",
+    "hintHover": "段落をクリックして固定",
+    "hintPinned": "固定中 · Esc または ✕ で閉じる",
+    "continuedPage": "{{page}} ページに続く",
+    "continuedColumn": "右の段に続く",
+    "firstUseHint": "段落にカーソルを合わせると翻訳が表示されます"
   }
 }

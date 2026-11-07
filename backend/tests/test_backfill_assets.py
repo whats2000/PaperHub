@@ -368,3 +368,110 @@ async def test_run_backfill_enqueue_only_latex_still_builds_sync(tmp_path: Path)
         row = await cur.fetchone()
     assert row is not None
     assert row[0] == "latex"
+
+
+def _snapshot(cache_dir: Path) -> dict[str, bytes]:
+    return {
+        p.name: p.read_bytes()
+        for p in (paper_asset_dir(cache_dir)).glob("*.json")
+    }
+
+
+@pytest.mark.asyncio
+async def test_blocks_only_writes_only_blocks_json(tmp_path: Path) -> None:
+    """--blocks-only on a paper with an existing asset: adds blocks.json, nothing else moves."""
+    from paperhub.pipelines.paper_asset import read_block_assets
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True)
+    pdf_path = cache_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+    db_path = tmp_path / "test.db"
+    pcid = await _make_db_with_paper(
+        db_path, kind="pdf_upload", source_path=str(pdf_path),
+        source_dir_path=str(cache_dir),
+    )
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE chunks (id INTEGER PRIMARY KEY, paper_content_id INT, "
+            "char_start INT, char_end INT, text TEXT)")
+        await conn.execute(
+            "INSERT INTO chunks (paper_content_id, char_start, char_end, text) "
+            "VALUES (?, 0, 5, 'hello')", (pcid,))
+        await conn.commit()
+        # Normal backfill first, to have a figures.json / asset_status to protect.
+        await run_backfill(_args(paper_content_id=pcid), conn=conn,
+                           marker_client=_marker_client_from_fixture(), max_pages=None)
+        (paper_asset_dir(cache_dir) / "blocks.json").unlink()  # simulate a pre-H1 paper
+        before_files = _snapshot(cache_dir)
+        async with conn.execute("SELECT * FROM chunks") as cur:
+            before_chunks = await cur.fetchall()
+        async with conn.execute("SELECT * FROM paper_content") as cur:
+            before_pc = await cur.fetchall()
+
+        args = _args(paper_content_id=pcid)
+        args.blocks_only = True
+        counts = await run_backfill(args, conn=conn,
+                                    marker_client=_marker_client_from_fixture(),
+                                    max_pages=None)
+        assert counts == {"written": 1}
+
+        async with conn.execute("SELECT * FROM chunks") as cur:
+            assert await cur.fetchall() == before_chunks
+        async with conn.execute("SELECT * FROM paper_content") as cur:
+            assert await cur.fetchall() == before_pc
+
+    after_files = _snapshot(cache_dir)
+    assert set(after_files) - set(before_files) == {"blocks.json"}
+    for name, data in before_files.items():
+        assert after_files[name] == data
+    got = read_block_assets(cache_dir)
+    assert got is not None and len(got[0]) > 0
+
+    # Idempotent: a second run skips (blocks.json exists) without calling Marker.
+    def _raise(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("Marker must not be called when blocks.json exists")
+    async with aiosqlite.connect(db_path) as conn:
+        counts = await run_backfill(
+            args, conn=conn,
+            marker_client=MarkerClient("http://m", transport=httpx.MockTransport(_raise)),
+            max_pages=None)
+    assert counts == {"skipped_exists": 1}
+
+
+def test_blocks_only_skips_latex_sources(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    shutil.copytree(_ARXIV_SAMPLE, cache_dir / "source")
+    res = build_asset_for_paper(
+        kind="arxiv", source_path=str(cache_dir / "source" / "main.tex"),
+        source_dir_path=str(cache_dir), title="S", marker_client=None,
+        max_pages=None, force=False, dry_run=False, blocks_only=True,
+    )
+    assert res.status == "skipped_not_pdf"
+    assert not (paper_asset_dir(cache_dir) / "blocks.json").exists()
+
+
+def test_blocks_only_treats_corrupt_blocks_json_as_missing(tmp_path: Path) -> None:
+    from paperhub.pipelines.paper_asset import read_block_assets
+
+    cache_dir = tmp_path / "cache"
+    (cache_dir / "asset").mkdir(parents=True)
+    (cache_dir / "asset" / "blocks.json").write_text("{trunc", encoding="utf-8")
+    pdf = cache_dir / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    res = build_asset_for_paper(
+        kind="pdf_upload", source_path=str(pdf), source_dir_path=str(cache_dir),
+        title="T", marker_client=_marker_client_from_fixture(), max_pages=None,
+        force=False, dry_run=False, blocks_only=True,
+    )
+    assert res.status == "written"
+    assert read_block_assets(cache_dir) is not None
+
+
+def test_blocks_only_no_source_path_is_skipped_no_source(tmp_path: Path) -> None:
+    res = build_asset_for_paper(
+        kind="pdf_upload", source_path=None, source_dir_path=str(tmp_path),
+        title="T", marker_client=None, max_pages=None,
+        force=False, dry_run=False, blocks_only=True,
+    )
+    assert res.status == "skipped_no_source"

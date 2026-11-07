@@ -65,3 +65,35 @@ def test_real_fixture_maps(tmp_path: Path) -> None:
     names = [s.name for s in asset.sections]
     assert "Attention Is All You Need" in names
     assert "3 Model Architecture" in names
+
+
+def test_real_fixture_writes_blocks_json(tmp_path: Path) -> None:
+    from paperhub.pipelines.paper_asset import read_block_assets
+
+    doc = _parse(json.loads(_FIXTURE.read_text(encoding="utf-8")))
+    marker_doc_to_asset(doc, source_dir=tmp_path, inline_math_llm=True)
+    got = read_block_assets(tmp_path)
+    assert got is not None
+    blocks, llm = got
+    assert llm is True
+    assert len(blocks) == len(doc.blocks)  # nothing filtered here (Task 8 filters)
+    assert [b.block_id for b in blocks] == [b.block_id or "" for b in doc.blocks]
+    assert any(b.block_type == "SectionHeader" for b in blocks)
+    assert all(len(b.bbox) == 4 for b in blocks)
+    assert any(b.section for b in blocks)
+
+
+def test_page_chrome_blocks_are_kept(tmp_path: Path) -> None:
+    from paperhub.pipelines.paper_asset import read_block_assets
+
+    doc = MarkerDoc(blocks=[
+        MarkerBlock(block_type="PageHeader", html="Header", block_id="/page/0/PageHeader/0",
+                    page=0, bbox=[0, 0, 10, 10]),
+        MarkerBlock(block_type="PageFooter", html="3", block_id="/page/0/PageFooter/9",
+                    page=0, bbox=[0, 90, 10, 100]),
+    ])
+    marker_doc_to_asset(doc, source_dir=tmp_path)
+    got = read_block_assets(tmp_path)
+    assert got is not None
+    assert [b.block_type for b in got[0]] == ["PageHeader", "PageFooter"]
+    assert got[1] is False

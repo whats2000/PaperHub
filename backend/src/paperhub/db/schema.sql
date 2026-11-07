@@ -217,3 +217,14 @@ AFTER UPDATE ON paper_content BEGIN
     INSERT INTO paper_content_fts(rowid, title, abstract)
     VALUES (new.id, new.title, new.abstract);
 END;
+
+-- Plan H1: bilingual-reading translation cache. One row per
+-- (paper, block key, language); no user column (single user).
+CREATE TABLE IF NOT EXISTS translations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paper_content_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    block_key TEXT NOT NULL, language TEXT NOT NULL,
+    source_hash TEXT NOT NULL, memory_hash TEXT NOT NULL,
+    text TEXT NOT NULL, model TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (paper_content_id, block_key, language));

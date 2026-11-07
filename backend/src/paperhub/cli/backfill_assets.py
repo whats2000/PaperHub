@@ -41,8 +41,13 @@ from paperhub.config import load_settings
 from paperhub.pipelines.extract import extract_latex
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
 from paperhub.pipelines.marker_client import MarkerClient, get_marker_client
-from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
-from paperhub.pipelines.paper_asset import read_paper_asset, write_paper_asset
+from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, marker_doc_to_blocks
+from paperhub.pipelines.paper_asset import (
+    read_block_assets,
+    read_paper_asset,
+    write_block_assets,
+    write_paper_asset,
+)
 
 _LOG = logging.getLogger("paperhub.backfill_assets")
 
@@ -72,6 +77,39 @@ class BackfillResult:
     sections: int = 0
 
 
+def _build_blocks_only(
+    *,
+    source_path: str | None,
+    cache_dir: Path,
+    kind: str | None,
+    marker_client: MarkerClient | None,
+    max_pages: int | None,
+    force: bool,
+    dry_run: bool,
+) -> BackfillResult:
+    """Plan H1: re-run Marker for a PDF source and write ONLY ``asset/blocks.json``.
+
+    Never touches chunks, figures/equations/structure json, figure images or the
+    DB (additive overlay; CLAUDE.md render-change rule).
+    """
+    if source_path is None:
+        return BackfillResult("skipped_no_source")
+    if not _is_pdf_source(kind, source_path):
+        return BackfillResult("skipped_not_pdf")
+    if not force and read_block_assets(cache_dir) is not None:
+        return BackfillResult("skipped_exists")
+    pdf_path = Path(source_path)
+    if not pdf_path.exists():
+        return BackfillResult("skipped_no_source")
+    if dry_run:
+        return BackfillResult("dry_run")
+    client = marker_client if marker_client is not None else get_marker_client()
+    doc = client.extract(pdf_path.read_bytes(), max_pages=max_pages)
+    write_block_assets(
+        cache_dir, marker_doc_to_blocks(doc), inline_math_llm=client.inline_math_llm())
+    return BackfillResult("written")
+
+
 def build_asset_for_paper(
     *,
     kind: str | None,
@@ -82,6 +120,7 @@ def build_asset_for_paper(
     max_pages: int | None,
     force: bool,
     dry_run: bool,
+    blocks_only: bool = False,
 ) -> BackfillResult:
     """Build + write the PaperAsset for one paper_content row.
 
@@ -92,6 +131,13 @@ def build_asset_for_paper(
     if source_dir_path is None:
         return BackfillResult("skipped_no_source")
     cache_dir = Path(source_dir_path)
+
+    if blocks_only:
+        return _build_blocks_only(
+            source_path=source_path, cache_dir=cache_dir, kind=kind,
+            marker_client=marker_client, max_pages=max_pages,
+            force=force, dry_run=dry_run,
+        )
 
     # Idempotency: figures.json present → already backfilled (an empty figure
     # list still writes the file, so a figure-less paper is correctly "done").
@@ -116,7 +162,8 @@ def build_asset_for_paper(
             return BackfillResult("dry_run")
         client = marker_client if marker_client is not None else get_marker_client()
         doc = client.extract(pdf_path.read_bytes(), max_pages=max_pages)
-        asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+        asset = marker_doc_to_asset(
+            doc, source_dir=cache_dir, inline_math_llm=client.inline_math_llm())
     else:
         # LaTeX path. The source dir (where figure files live) is the directory
         # CONTAINING the main .tex — robust across cache layout + flat fixtures,
@@ -174,6 +221,7 @@ async def run_backfill(
             ids = [int(r[0]) for r in await cur.fetchall()]
     _LOG.info("backfilling assets for %d paper(s)...", len(ids))
 
+    blocks_only = bool(getattr(args, "blocks_only", False))
     counts: dict[str, int] = {}
     for pcid in ids:
         async with conn.execute(
@@ -194,7 +242,7 @@ async def run_backfill(
 
         # --enqueue-only: defer PDF papers to the background worker; build
         # LaTeX papers synchronously (cheap + high quality, no point deferring).
-        if args.enqueue_only and is_pdf:
+        if args.enqueue_only and is_pdf and not blocks_only:
             if args.dry_run:
                 _LOG.info(
                     "pcid=%d (%s): [dry-run] would mark marker_pending %s",
@@ -222,13 +270,14 @@ async def run_backfill(
                 max_pages=max_pages,
                 force=args.force,
                 dry_run=args.dry_run,
+                blocks_only=blocks_only,
             )
         except Exception as exc:  # noqa: BLE001 — per-paper recovery (e.g. OOM)
             _LOG.exception("pcid=%d (%s) failed: %s", pcid, kind, exc)
             counts["error"] = counts.get("error", 0) + 1
             # For PDF failures, record the failure status so the worker can retry.
             # For LaTeX failures there is no Marker stage; leave asset_status NULL.
-            if is_pdf and not args.dry_run:
+            if is_pdf and not args.dry_run and not blocks_only:
                 await conn.execute(
                     "UPDATE paper_content SET asset_status = 'marker_failed' WHERE id = ?",
                     (pcid,),
@@ -244,7 +293,7 @@ async def run_backfill(
         )
 
         # Update asset_status in the DB based on outcome.
-        if res.status == "written" and not args.dry_run:
+        if res.status == "written" and not args.dry_run and not blocks_only:
             new_status = "marker_ready" if is_pdf else "latex"
             await conn.execute(
                 "UPDATE paper_content SET asset_status = ? WHERE id = ?",
@@ -282,6 +331,15 @@ async def _amain() -> int:
             "drain them. LaTeX-source papers (arxiv/latex_upload with a .tex source) "
             "are still built synchronously (fast, no GPU required). Combine with "
             "--dry-run to preview which papers would be enqueued."
+        ),
+    )
+    parser.add_argument(
+        "--blocks-only",
+        action="store_true",
+        help=(
+            "Plan H1: for PDF-source papers lacking asset/blocks.json, re-run Marker "
+            "and write ONLY blocks.json (no chunks/figures/DB changes). Sequential. "
+            "--force rewrites an existing blocks.json."
         ),
     )
     args = parser.parse_args()

@@ -19,11 +19,13 @@ from pathlib import Path
 
 from paperhub.pipelines.marker_client import MarkerBlock, MarkerDoc
 from paperhub.pipelines.paper_asset import (
+    BlockAsset,
     EquationAsset,
     FigureAsset,
     PaperAsset,
     SectionAsset,
     paper_asset_dir,
+    write_block_assets,
 )
 
 _TAG = re.compile(r"<[^>]+>")
@@ -67,7 +69,33 @@ def _resolve_section(block: MarkerBlock, name_map: dict[str, str]) -> str | None
     return name_map.get(str(deepest_ref))
 
 
-def marker_doc_to_asset(doc: MarkerDoc, *, source_dir: Path) -> PaperAsset:
+def _clean(s: str) -> str:
+    """Drop lone UTF-16 surrogates (bad OCR) that UTF-8 JSON output cannot encode."""
+    return s.encode("utf-8", "ignore").decode("utf-8")
+
+
+def marker_doc_to_blocks(doc: MarkerDoc) -> list[BlockAsset]:
+    """Every Marker block in reading order (page chrome included; filtered later)."""
+    name_map = _build_section_name_map(doc.blocks)
+    out: list[BlockAsset] = []
+    for b in doc.blocks:
+        raw = [float(v) for v in (b.bbox or [])[:4]]
+        bbox = (raw[0], raw[1], raw[2], raw[3]) if len(raw) == 4 else (0.0, 0.0, 0.0, 0.0)
+        out.append(BlockAsset(
+            block_id=b.block_id or "",
+            block_type=b.block_type,
+            page=b.page if b.page is not None else 0,
+            bbox=bbox,
+            html=_clean(b.html),
+            section=_resolve_section(b, name_map),
+        ))
+    return out
+
+
+def marker_doc_to_asset(
+    doc: MarkerDoc, *, source_dir: Path, inline_math_llm: bool = False,
+) -> PaperAsset:
+    write_block_assets(source_dir, marker_doc_to_blocks(doc), inline_math_llm=inline_math_llm)
     figs_dir = paper_asset_dir(source_dir) / "figures"
     figs_dir.mkdir(parents=True, exist_ok=True)
 

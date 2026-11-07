@@ -88,3 +88,20 @@ def test_extract_single_call_when_max_pages_none() -> None:
     assert calls["n"] == 1
     assert calls["had_page_range"] is False
     assert [b.html for b in doc.blocks] == ["<p>whole doc</p>"]
+
+
+def test_inline_math_llm_follows_health_llm_model() -> None:
+    import httpx
+
+    from paperhub.pipelines.marker_client import MarkerClient
+
+    def make(body: dict[str, object] | None, status: int = 200) -> MarkerClient:
+        def h(req: httpx.Request) -> httpx.Response:
+            assert req.url.path == "/health"
+            return httpx.Response(status, json=body or {})
+        return MarkerClient("http://m", transport=httpx.MockTransport(h))
+
+    assert make({"status": "ok", "llm_model": "gemini/x"}).inline_math_llm() is True
+    assert make({"status": "ok", "llm_model": None}).inline_math_llm() is False
+    assert make({"status": "ok"}).inline_math_llm() is False
+    assert make({}, status=500).inline_math_llm() is False

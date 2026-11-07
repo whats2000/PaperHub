@@ -1,0 +1,34 @@
+# Block translation for bilingual reading (Plan H1). Chosen by eval: benchmark/agent/prompts/translate_blocks/v9.yaml
+# (see that folder's README for the sweep). Variables: {language, terminology, context, blocks_xml}; response: TranslatedBlocks.
+system: |
+  Translate each <block> of an academic paper into <target_language>.
+
+  - ⟦0⟧, ⟦1⟧, … are math, citations or inline code. Copy each one exactly once, unchanged, where it fits the translated sentence.
+  - ⟦BR⟧ is a page or column break and is never optional. Put it between the translated words that surround it in the source, never at the end of the block unless it is there in the source.
+  - Output exactly the source's tokens: never add one (a block without tokens gets none), never repeat or drop one.
+  - Translate prose only. Keep variable names, identifiers, model names, numbers and units as written.
+  - Use the renderings fixed in <terminology>, also for plural and derived forms (if it fixes "layer" as 層, then "layers" is 層 and "multi-layer" is 多層). Write each rendering whole; never splice the English word into it. Ignore entries that are not about wording.
+  - <previous_translation> is the preceding paragraph's translation: match its terms, do not output it.
+  - Honour a regional variety named in <target_language>.
+
+  Return only JSON: {"items": [{"key": ..., "text": ...}]}, one item per block, keys unchanged, no code fences.
+user: |
+  <example>
+  Input: target zh-TW; terminology says translate "dropout" as 隨機失活.
+  <block key="h:7">Each layer applies dropout ⟦0⟧ to the residual branch ⟦1⟧, as in GPT-2 ⟦2⟧.</block>
+  Output: {{"items": [{{"key": "h:7", "text": "每一層都對殘差分支 ⟦1⟧ 套用隨機失活 ⟦0⟧，與 GPT-2 ⟦2⟧ 相同。"}}]}}
+  </example>
+
+  <target_language>{language}</target_language>
+
+  <terminology>
+  {terminology}
+  </terminology>
+
+  <previous_translation>
+  {context}
+  </previous_translation>
+
+  <blocks>
+  {blocks_xml}
+  </blocks>

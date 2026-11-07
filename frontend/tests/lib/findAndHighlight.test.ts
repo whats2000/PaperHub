@@ -242,3 +242,34 @@ describe("findAndHighlight", () => {
     expect(doc.querySelectorAll("#ph-cite-hl-style").length).toBe(1);
   });
 });
+
+describe("translation overlay (Plan H1) is invisible to citation highlight", () => {
+  it("a multi-block chunk range never wraps the inserted translation", () => {
+    const doc = docFrom(
+      '<p><span id="phchunk-1"></span>First paragraph.</p>' +
+        '<div class="ph-tr"><div class="ph-tr-inner">第一段。</div></div>' +
+        "<p>Second paragraph.</p>" +
+        '<p><span id="phchunk-2"></span>Next chunk.</p>',
+    );
+    expect(highlightChunkRange(doc, "phchunk-1")).toBe(true);
+    const texts = Array.from(doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`)).map(
+      (e) => e.textContent,
+    );
+    expect(texts).toEqual(["First paragraph.", "Second paragraph."]);
+    expect(doc.querySelector(".ph-tr .ph-tr-inner")!.innerHTML).toBe("第一段。");
+  });
+
+  it("text-search spans paragraphs as if the translation were absent", () => {
+    const doc = docFrom(
+      "<p>Transformers are widely</p>" +
+        '<div class="ph-tr"><div class="ph-tr-inner">翻譯</div></div>' +
+        "<p>adopted in natural language processing.</p>",
+    );
+    expect(
+      findAndHighlight(
+        doc,
+        "Transformers are widely adopted in natural language processing.",
+      ),
+    ).toBe(true);
+  });
+});

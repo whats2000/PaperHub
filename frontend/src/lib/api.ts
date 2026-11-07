@@ -17,6 +17,12 @@ import type {
   VersionInfo,
   RunEventsResponse,
 } from "@/types/domain";
+import type {
+  ParagraphsResponse,
+  TranslateConfig,
+  TranslateRequest,
+  TranslateResponse,
+} from "@/types/translation";
 
 export const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
@@ -647,4 +653,30 @@ export async function fetchRunEvents(
 /** Fetch the running backend version and update-availability status. */
 export async function getVersion(): Promise<VersionInfo> {
   return apiFetch<VersionInfo>("/version");
+}
+
+// ── Bilingual reading (Plan H1) ──────────────────────────────────────────────
+
+/** Translate 1..5 adjacent blocks (placeholders already substituted). */
+export async function translateBlocks(
+  req: TranslateRequest,
+): Promise<TranslateResponse> {
+  return apiFetch<TranslateResponse>("/translations", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Server-side translation switches (e.g. whether the full paper is translated). */
+export async function getTranslateConfig(): Promise<TranslateConfig> {
+  return apiFetch<TranslateConfig>("/translations/config");
+}
+
+/** PDF paragraphs (text + math + page geometry) for a paper's bilingual view. */
+export async function getPdfParagraphs(
+  paperContentId: number,
+): Promise<ParagraphsResponse> {
+  return apiFetch<ParagraphsResponse>(
+    `/papers/content/${paperContentId}/paragraphs`,
+  );
 }

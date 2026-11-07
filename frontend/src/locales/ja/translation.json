@@ -1,0 +1,19 @@
+{
+  "pill": {
+    "toggle": "論文を翻訳",
+    "language": "翻訳先の言語：{{language}}"
+  },
+  "menu": {
+    "heading": "翻訳先の言語",
+    "uiLanguage": "表示言語",
+    "recent": "最近使った言語",
+    "custom": "カスタム（任意の言語を入力して Enter）",
+    "customPlaceholder": "任意の言語（例：繁體中文（香港））",
+    "retranslate": "現在の用語で再翻訳"
+  },
+  "disabled": {
+    "no_blocks": "この PDF にはまだ段落レイアウトがありません",
+    "no_inline_math_llm": "この PDF の数式を読み取れなかったため、翻訳はオフです。Marker の LLM モデルを設定し、この PDF を再処理してください。",
+    "load_failed": "この論文を読み込めなかったため、翻訳できません"
+  }
+}

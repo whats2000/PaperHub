@@ -88,6 +88,10 @@
       "label": "记忆冲突检测器",
       "help": "检查新记忆是否与已有记忆冲突。默认使用小型层级。"
     },
+    "PAPERHUB_TRANSLATE_MODEL": {
+      "label": "翻译模型",
+      "help": "用于双语阅读的论文翻译。默认使用小型层级。"
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "幻灯片解析器",
       "help": "解析已启用的论文并分类幻灯片指令。默认使用小型层级。"
@@ -112,6 +116,10 @@
     },
     "PAPERHUB_MARKER_MAX_PAGES": {
       "label": "每次 /extract 调用的 Marker 页数"
+    },
+    "PAPERHUB_TRANSLATE_FULL_PAPER": {
+      "label": "翻译整篇论文",
+      "help": "翻译完可见部分后，在后台继续翻译论文其余内容。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "注入回忆的记忆",

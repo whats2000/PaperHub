@@ -846,7 +846,9 @@ class PaperPipeline:
         )
 
         # Overwrite the PyMuPDF baseline asset with Marker quality in place.
-        asset = marker_doc_to_asset(doc, source_dir=cache_dir)
+        inline_math_llm = await asyncio.to_thread(client.inline_math_llm)
+        asset = marker_doc_to_asset(
+            doc, source_dir=cache_dir, inline_math_llm=inline_math_llm)
         write_paper_asset(asset, cache_dir)
 
         # Re-chunk from Marker's block structure via the block-anchored

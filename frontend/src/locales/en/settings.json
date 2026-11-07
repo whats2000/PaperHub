@@ -88,6 +88,10 @@
       "label": "Memory conflict detector",
       "help": "Checks whether a new memory contradicts an existing one. Defaults to the small tier."
     },
+    "PAPERHUB_TRANSLATE_MODEL": {
+      "label": "Translation model",
+      "help": "Translates papers for bilingual reading. Defaults to the small tier."
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "Slide resolver",
       "help": "Resolves enabled papers + classifies deck commands. Defaults to the small tier."
@@ -112,6 +116,10 @@
     },
     "PAPERHUB_MARKER_MAX_PAGES": {
       "label": "Marker pages per /extract call"
+    },
+    "PAPERHUB_TRANSLATE_FULL_PAPER": {
+      "label": "Translate the whole paper",
+      "help": "After the visible part, translate the rest of the paper in the background."
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "Inject recalled memories",

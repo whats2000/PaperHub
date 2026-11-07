@@ -1,0 +1,19 @@
+{
+  "pill": {
+    "toggle": "Translate paper",
+    "language": "Translation language: {{language}}"
+  },
+  "menu": {
+    "heading": "Translate into",
+    "uiLanguage": "Interface language",
+    "recent": "Recent",
+    "custom": "Custom (any language, press Enter)",
+    "customPlaceholder": "Any language, e.g. 繁體中文（香港）",
+    "retranslate": "Re-translate with current terminology"
+  },
+  "disabled": {
+    "no_blocks": "This PDF has no paragraph layout yet",
+    "no_inline_math_llm": "Formulas in this PDF couldn't be read; translation is off. Set a Marker LLM model and re-process this PDF.",
+    "load_failed": "This paper didn't load, so it can't be translated"
+  }
+}

@@ -34,5 +34,22 @@
     "addPaperFailed": "无法将这篇论文加入参考文献",
     "passageNotFoundHtml": "在论文中找不到这个段落",
     "passageNotFoundPdf": "在 PDF 中找不到这个段落"
+  },
+  "translation": {
+    "pending": "翻译中…",
+    "unavailable": "无法翻译",
+    "retry": "重试"
+  },
+  "translationCard": {
+    "label": "翻译",
+    "pin": "固定翻译",
+    "unpin": "取消固定",
+    "close": "关闭翻译",
+    "retry": "重试",
+    "hintHover": "点击段落即可固定",
+    "hintPinned": "已固定 · Esc 或 ✕ 关闭",
+    "continuedPage": "接续第 {{page}} 页",
+    "continuedColumn": "接续右栏",
+    "firstUseHint": "将鼠标移到段落上即可看到译文"
   }
 }

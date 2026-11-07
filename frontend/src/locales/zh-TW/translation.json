@@ -1,0 +1,19 @@
+{
+  "pill": {
+    "toggle": "翻譯論文",
+    "language": "譯文語言：{{language}}"
+  },
+  "menu": {
+    "heading": "譯文語言",
+    "uiLanguage": "介面語言",
+    "recent": "最近用過",
+    "custom": "自訂（任何語言描述，按 Enter）",
+    "customPlaceholder": "任何語言，例如：繁體中文（香港）",
+    "retranslate": "以目前的術語重新翻譯"
+  },
+  "disabled": {
+    "no_blocks": "此 PDF 尚無段落版面資訊",
+    "no_inline_math_llm": "此 PDF 的公式無法讀取，已關閉翻譯。請設定 Marker LLM 模型後重新處理此 PDF。",
+    "load_failed": "此論文載入失敗，無法翻譯"
+  }
+}

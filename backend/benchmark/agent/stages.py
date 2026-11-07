@@ -13,6 +13,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from paperhub.translation.models import TranslatedBlocks
+from paperhub.translation.placeholders import br_position_intact, placeholders_intact
+
 
 class RouterEvalOutput(BaseModel):
     """Eval-local router output — the graded fields only, **tolerant** of
@@ -75,7 +78,63 @@ ROUTER = StageSpec(
     output_summary=_router_output, deterministic_score=_router_score,
 )
 
-STAGE_REGISTRY: dict[str, StageSpec] = {ROUTER.key: ROUTER}
+
+
+# --- translate_blocks (Plan H1) -------------------------------------------
+# Production has no traced translate step (a translation batch is a pipeline
+# call, not a chat turn), so this stage is driven by hand-authored corpus cases
+# only. ``expect.blocks`` maps each input key to its source text.
+
+def _translate_variables(args: dict[str, Any]) -> dict[str, Any]:
+    return {k: args.get(k, "") for k in ("language", "terminology", "context", "blocks_xml")}
+
+
+def _translate_output(obj: Any) -> dict[str, Any]:
+    d = obj if isinstance(obj, TranslatedBlocks) else TranslatedBlocks.model_validate(obj)
+    return {"items": [{"key": i.key, "text": i.text} for i in d.items]}
+
+
+def translate_failures(expect: dict[str, Any], output: dict[str, Any]) -> list[str]:
+    """Deterministic contract violations (empty list = pass): the key list must
+    equal the input key set with no duplicates; every item must keep its
+    source's placeholders exactly and keep a mid-paragraph ``⟦BR⟧`` off the
+    edges. Optional ``expect.require`` / ``expect.forbid`` map a key to terms
+    that must / must not appear in its translation (terminology adherence)."""
+    source: dict[str, str] = expect.get("blocks") or {}
+    require: dict[str, list[str]] = expect.get("require") or {}
+    forbid: dict[str, list[str]] = expect.get("forbid") or {}
+    items = output.get("items") or []
+    keys = [str(i.get("key")) for i in items]
+    fails: list[str] = []
+    if len(keys) != len(set(keys)):
+        fails.append("duplicate keys")
+    if set(keys) != set(source):
+        fails.append(f"key set {sorted(set(keys))} != {sorted(source)}")
+    for i in items:
+        k = str(i.get("key"))
+        text = str(i.get("text", ""))
+        if k in source and not placeholders_intact(source[k], text):
+            fails.append(f"placeholders broken in {k}")
+        if k in source and not br_position_intact(source[k], text):
+            fails.append(f"BR moved to an edge in {k}")
+        fails += [f"missing term {t!r} in {k}" for t in require.get(k, []) if t not in text]
+        fails += [f"forbidden term {t!r} in {k}" for t in forbid.get(k, []) if t in text]
+    return fails
+
+
+def _translate_score(expect: dict[str, Any], output: dict[str, Any]) -> float | None:
+    if "blocks" not in expect:
+        return None
+    return 0.0 if translate_failures(expect, output) else 1.0
+
+
+TRANSLATE_BLOCKS = StageSpec(
+    key="translate_blocks", trace_agent="translation", trace_tool="translate_blocks",
+    response_model=TranslatedBlocks, variables_from_args=_translate_variables,
+    output_summary=_translate_output, deterministic_score=_translate_score,
+)
+
+STAGE_REGISTRY: dict[str, StageSpec] = {ROUTER.key: ROUTER, TRANSLATE_BLOCKS.key: TRANSLATE_BLOCKS}
 
 
 def get_stage(key: str) -> StageSpec:

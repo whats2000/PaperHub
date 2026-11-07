@@ -239,3 +239,20 @@ async def test_migration_adds_is_private_to_existing_db(tmp_path: Path) -> None:
         # The migrated column must carry the same CHECK as a fresh schema.
         with pytest.raises(aiosqlite.IntegrityError):
             await conn.execute("UPDATE paper_content SET is_private = 2")
+
+
+@pytest.mark.asyncio
+async def test_translations_table_exists_and_apply_schema_idempotent_translation(
+    tmp_path: Path,
+) -> None:
+    """H1: the translations cache table exists; re-applying the schema is a no-op."""
+    async with aiosqlite.connect(tmp_path / "tr.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await apply_schema(conn)
+        async with conn.execute("PRAGMA table_info(translations)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+    assert {
+        "id", "paper_content_id", "block_key", "language",
+        "source_hash", "memory_hash", "text", "model", "created_at",
+    } <= cols

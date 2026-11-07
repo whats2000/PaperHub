@@ -227,3 +227,27 @@ def test_memory_conflict_model_specific_override_wins(
     monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "openai/gpt-4o-mini")
     monkeypatch.setenv("PAPERHUB_MEMORY_CONFLICT_MODEL", "pinned/model")
     assert load_settings().memory_conflict_model == "pinned/model"
+
+
+# ---------------------------------------------------------------------------
+# Translation settings (Plan H1)
+# ---------------------------------------------------------------------------
+
+
+def test_translate_model_defaults_to_small_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PAPERHUB_TRANSLATE_MODEL", raising=False)
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "x/small")
+    assert load_settings().translate_model == "x/small"
+    monkeypatch.setenv("PAPERHUB_TRANSLATE_MODEL", "")
+    assert load_settings().translate_model == "x/small"
+    monkeypatch.setenv("PAPERHUB_TRANSLATE_MODEL", "x/pinned")
+    assert load_settings().translate_model == "x/pinned"
+
+
+def test_translate_full_paper_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PAPERHUB_TRANSLATE_FULL_PAPER", raising=False)
+    assert load_settings().translate_full_paper is True
+    monkeypatch.setenv("PAPERHUB_TRANSLATE_FULL_PAPER", "0")
+    assert load_settings().translate_full_paper is False
+    monkeypatch.setenv("PAPERHUB_TRANSLATE_FULL_PAPER", "1")
+    assert load_settings().translate_full_paper is True

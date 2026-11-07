@@ -1,0 +1,19 @@
+{
+  "pill": {
+    "toggle": "翻译论文",
+    "language": "译文语言：{{language}}"
+  },
+  "menu": {
+    "heading": "译文语言",
+    "uiLanguage": "界面语言",
+    "recent": "最近使用",
+    "custom": "自定义（任意语言描述，按 Enter）",
+    "customPlaceholder": "任意语言，例如：繁體中文（香港）",
+    "retranslate": "使用当前术语重新翻译"
+  },
+  "disabled": {
+    "no_blocks": "此 PDF 尚无段落版面信息",
+    "no_inline_math_llm": "此 PDF 的公式无法读取，已关闭翻译。请设置 Marker LLM 模型后重新处理此 PDF。",
+    "load_failed": "此论文加载失败，无法翻译"
+  }
+}

@@ -1,3 +1,4 @@
+import contextlib
 from pathlib import Path
 
 from paperhub.pipelines.paper_asset import (
@@ -32,3 +33,52 @@ def test_roundtrip(tmp_path: Path) -> None:
 
 def test_read_missing_returns_none(tmp_path: Path) -> None:
     assert read_paper_asset(tmp_path) is None
+
+
+def test_block_assets_round_trip(tmp_path: Path) -> None:
+    from paperhub.pipelines.paper_asset import (
+        BlockAsset,
+        read_block_assets,
+        write_block_assets,
+    )
+
+    assert read_block_assets(tmp_path) is None
+    blocks = [
+        BlockAsset("/page/0/Text/1", "Text", 0, (1.0, 2.0, 3.0, 4.5), "<p>hi</p>", "Intro"),
+        BlockAsset("/page/1/PageFooter/2", "PageFooter", 1, (0.0, 0.0, 1.0, 1.0), "2", None),
+    ]
+    write_block_assets(tmp_path, blocks, inline_math_llm=True)
+    assert read_block_assets(tmp_path) == (blocks, True)
+    write_block_assets(tmp_path, [], inline_math_llm=False)
+    assert read_block_assets(tmp_path) == ([], False)
+
+
+def test_truncated_blocks_json_reads_as_missing(tmp_path: Path) -> None:
+    from paperhub.pipelines.paper_asset import paper_asset_dir, read_block_assets
+
+    d = paper_asset_dir(tmp_path)
+    d.mkdir(parents=True)
+    (d / "blocks.json").write_text('{"inline_math_llm": tr', encoding="utf-8")
+    assert read_block_assets(tmp_path) is None
+
+
+def test_write_block_assets_is_atomic(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import os
+
+    from paperhub.pipelines.paper_asset import (
+        BlockAsset,
+        paper_asset_dir,
+        read_block_assets,
+        write_block_assets,
+    )
+
+    b = [BlockAsset("a", "Text", 0, (0.0, 0.0, 1.0, 1.0), "x", None)]
+    write_block_assets(tmp_path, b, inline_math_llm=False)
+
+    def boom(src, dst):  # type: ignore[no-untyped-def]
+        raise OSError("killed")
+    monkeypatch.setattr(os, "replace", boom)
+    with contextlib.suppress(OSError):
+        write_block_assets(tmp_path, [], inline_math_llm=True)
+    assert read_block_assets(tmp_path) == (b, False)  # old file intact
+    assert [p.name for p in paper_asset_dir(tmp_path).iterdir()] == ["blocks.json"]

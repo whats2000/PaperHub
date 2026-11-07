@@ -88,6 +88,10 @@
       "label": "記憶衝突偵測器",
       "help": "檢查新記憶是否與既有記憶衝突。預設使用小型層級。"
     },
+    "PAPERHUB_TRANSLATE_MODEL": {
+      "label": "翻譯模型",
+      "help": "用於雙語閱讀的論文翻譯。預設使用小型層級。"
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "投影片解析器",
       "help": "解析已啟用的論文並分類投影片指令。預設使用小型層級。"
@@ -112,6 +116,10 @@
     },
     "PAPERHUB_MARKER_MAX_PAGES": {
       "label": "每次 /extract 呼叫的 Marker 頁數"
+    },
+    "PAPERHUB_TRANSLATE_FULL_PAPER": {
+      "label": "翻譯整篇論文",
+      "help": "翻譯完可見部分後，在背景繼續翻譯論文其餘內容。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "注入回想的記憶",

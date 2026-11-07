@@ -81,6 +81,17 @@ function scheduleClear(doc: Document, fn: () => void): void {
   setTimeoutFn(fn, HIGHLIGHT_MS);
 }
 
+/** Plan H1's translation overlay (`div.ph-tr`) is not paper text: citation
+ *  highlight and text-search walk past it as if it weren't there. */
+function textWalker(doc: Document, root: Node): TreeWalker {
+  return doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) =>
+      n.parentElement?.closest(".ph-tr")
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  });
+}
+
 /**
  * Collect the text nodes that fall strictly between two chunk sentinels —
  * `start` (this chunk's `<span id="phchunk-N">`) and `next` (the next sentinel
@@ -94,7 +105,7 @@ function collectChunkTextNodes(
   next: Element | null,
 ): Text[] {
   const root = next ? doc.body : (start.closest("section") ?? doc.body);
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const walker = textWalker(doc, root);
   const nodes: Text[] = [];
   let node = walker.nextNode();
   while (node) {
@@ -237,7 +248,7 @@ export function findAndHighlight(
   clearHighlight(doc);
 
   // Build a concatenated normalized string with a node->offset index.
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const walker = textWalker(doc, doc.body);
   const spans: NodeSpan[] = [];
   let combined = "";
   let cursor: Node | null = walker.nextNode();

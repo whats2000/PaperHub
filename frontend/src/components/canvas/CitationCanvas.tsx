@@ -9,11 +9,16 @@ import { useChatStore } from "@/store/chat";
 import {
   getChunk,
   getDocumentMode,
+  getPdfParagraphs,
+  getTranslateConfig,
   fetchPaperHtml,
   fetchPaperPdfData,
   toggleReference,
   API_BASE_URL,
 } from "@/lib/api";
+import { useSettingsStore } from "@/store/settings";
+import { useTranslationStore } from "@/store/translation";
+import type { ParagraphsResponse, PdfParagraph } from "@/types/translation";
 import {
   withBaseHref,
   stripDeadCdnScripts,
@@ -31,9 +36,17 @@ import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
 import { ImageLightbox } from "@/components/canvas/ImageLightbox";
+import {
+  TranslatePill,
+  type TranslateDisabledReason,
+} from "@/components/canvas/TranslatePill";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
 const MAX_VISIBLE_TABS = 3;
+/** Stable "no paragraphs" for a PDF that isn't ready (keeps the layer's memos). */
+const NO_PARAGRAPHS: PdfParagraph[] = [];
+/** Minimum gap between re-checks of why the pill is disabled. */
+const RECHECK_MS = 5000;
 
 interface DocEntry {
   mode: "pdf" | "html";
@@ -162,6 +175,135 @@ export function CitationCanvas() {
     validDisplayedId ?? firstEnabledRef?.paper_content_id ?? null;
   const activeDoc =
     effectivePaperId != null ? (docByPaper[effectivePaperId] ?? null) : null;
+
+  // Plan H1 bilingual reading. On/off and the language live in the persisted
+  // translation store (per paper); the rest is per canvas session.
+  const translationLanguage = useTranslationStore((s) => s.language);
+  const translationEnabledByPaper = useTranslationStore((s) => s.enabledByPaper);
+  const [fullPaper, setFullPaper] = useState(false);
+  // PDF paragraph geometry per paper: its status gates the pill (a PDF
+  // without blocks stays disabled) and the layer reuses the paragraphs.
+  // Absent = loading; "failed" = the layer's own fetch is the fallback;
+  // "load_failed" = the layer's fetch failed too (the pill says why).
+  const [paragraphsByPaper, setParagraphsByPaper] = useState<
+    Record<number, ParagraphsResponse | "failed" | "load_failed">
+  >({});
+  // Only a "ready" status is final; anything else is re-checked (Marker may
+  // write blocks.json later) when the paper becomes active again or the
+  // disabled pill is hovered/focused (throttled).
+  const readyParagraphs = useRef<Set<number>>(new Set());
+  const paragraphsInFlight = useRef<Set<number>>(new Set());
+  const lastRecheck = useRef<Map<number, number>>(new Map());
+  const [staleByPaper, setStaleByPaper] = useState<Record<number, boolean>>({});
+  const [retranslateByPaper, setRetranslateByPaper] = useState<
+    Record<number, number>
+  >({});
+
+  // Re-read whenever the Settings config is (re)fetched, e.g. after a save,
+  // so the full-paper switch applies without remounting the canvas.
+  const settingsConfig = useSettingsStore((s) => s.config);
+  useEffect(() => {
+    let cancelled = false;
+    getTranslateConfig().then(
+      (c) => {
+        if (!cancelled) setFullPaper(c.full_paper);
+      },
+      () => undefined, // keep the look-ahead default
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsConfig]);
+
+  const activePdfId =
+    effectivePaperId != null && activeDoc?.mode === "pdf" ? effectivePaperId : null;
+  const checkParagraphs = useCallback((pid: number) => {
+    if (
+      readyParagraphs.current.has(pid) ||
+      paragraphsInFlight.current.has(pid)
+    ) {
+      return;
+    }
+    paragraphsInFlight.current.add(pid);
+    getPdfParagraphs(pid)
+      .then(
+        (res) => {
+          if (res.status === "ready") readyParagraphs.current.add(pid);
+          setParagraphsByPaper((prev) => ({ ...prev, [pid]: res }));
+        },
+        // Failed: hand the fetch to the layer, which retries on each enable.
+        // A re-check that fails keeps the last known status.
+        () =>
+          setParagraphsByPaper((prev) =>
+            pid in prev ? prev : { ...prev, [pid]: "failed" },
+          ),
+      )
+      .finally(() => paragraphsInFlight.current.delete(pid));
+  }, []);
+  useEffect(() => {
+    if (activePdfId !== null) checkParagraphs(activePdfId);
+  }, [activePdfId, checkParagraphs]);
+
+  // The layer fetched on its own (the canvas fetch had failed).
+  const onLayerParagraphs = useCallback(
+    (pid: number, res: ParagraphsResponse | null) =>
+      setParagraphsByPaper((prev) => ({ ...prev, [pid]: res ?? "load_failed" })),
+    [],
+  );
+  const onStaleChange = useCallback((pid: number, stale: boolean) => {
+    setStaleByPaper((prev) =>
+      !!prev[pid] === stale ? prev : { ...prev, [pid]: stale },
+    );
+  }, []);
+  // Only the shown paper translates: hidden (kept-mounted) HTML papers stay
+  // inert, and switching back re-attaches from the server cache.
+  const translationFor = (pid: number) => ({
+    enabled: !!translationEnabledByPaper[pid] && pid === effectivePaperId,
+    language: translationLanguage,
+    paperId: pid,
+    fullPaper,
+    retranslateNonce: retranslateByPaper[pid] ?? 0,
+    onStaleChange: (stale: boolean) => onStaleChange(pid, stale),
+  });
+  const activeParagraphs =
+    activePdfId !== null ? paragraphsByPaper[activePdfId] : undefined;
+  const paragraphsReady =
+    typeof activeParagraphs === "object" ? activeParagraphs : null;
+  const translateDisabledReason: TranslateDisabledReason | null =
+    activeDoc?.status === "error" || activeParagraphs === "load_failed"
+      ? "load_failed"
+      : paragraphsReady && paragraphsReady.status !== "ready"
+        ? paragraphsReady.status
+        : // Ready but nothing to hover (no paragraph with geometry and text).
+          paragraphsReady &&
+            !paragraphsReady.paragraphs.some(
+              (p) => p.fragments.length > 0 && p.text.trim() !== "",
+            )
+          ? "no_blocks"
+          : null;
+  // Whether the shown paper can translate isn't known yet: its document is
+  // still loading, or its PDF paragraphs are in flight.
+  const translatePending =
+    activeDoc == null ||
+    (activePdfId !== null && activeParagraphs === undefined);
+  // Hovering or focusing the disabled pill re-checks why (at most every 5 s).
+  const recheckDisabled = () => {
+    const pid = effectivePaperId;
+    if (pid == null) return;
+    const last = lastRecheck.current.get(pid);
+    if (last !== undefined && Date.now() - last < RECHECK_MS) return;
+    lastRecheck.current.set(pid, Date.now());
+    if (activeDoc?.status === "error") ensureDoc(pid);
+    else if (activePdfId !== null) checkParagraphs(pid);
+  };
+  // Loading → none, so the layer doesn't race the canvas fetch; failed →
+  // undefined (the layer fetches); not ready → none (never garbled formulas).
+  const pdfParagraphs: PdfParagraph[] | undefined =
+    activeParagraphs === "failed"
+      ? undefined
+      : paragraphsReady?.status === "ready"
+        ? paragraphsReady.paragraphs
+        : NO_PARAGRAPHS; // loading, not ready, or load_failed
 
   // The displayed paper when it is NOT an enabled reference — reached by
   // clicking a citation whose source the user toggled off. Shown view-only via
@@ -486,6 +628,7 @@ export function CitationCanvas() {
                   toast.message(t("toast.passageNotFoundHtml"))
                 }
                 onImageActivate={(src, alt) => setLightbox({ src, alt })}
+                translation={translationFor(pid)}
               />
             </div>
           );
@@ -524,9 +667,35 @@ export function CitationCanvas() {
                 onHighlightMiss={() =>
                   toast.message(t("toast.passageNotFoundPdf"))
                 }
+                translation={{
+                  ...translationFor(effectivePaperId),
+                  paragraphs: pdfParagraphs,
+                  onParagraphsLoaded: (res) =>
+                    onLayerParagraphs(effectivePaperId, res),
+                }}
               />
             </DeferredRemount>
           )}
+
+        {/* Floating translate control (HTML and PDF). */}
+        {effectivePaperId != null && (
+          <TranslatePill
+            paperId={effectivePaperId}
+            disabledReason={translateDisabledReason}
+            pending={translatePending}
+            onDisabledInteract={recheckDisabled}
+            staleTerminology={
+              !!translationEnabledByPaper[effectivePaperId] &&
+              !!staleByPaper[effectivePaperId]
+            }
+            onRetranslate={() =>
+              setRetranslateByPaper((prev) => ({
+                ...prev,
+                [effectivePaperId]: (prev[effectivePaperId] ?? 0) + 1,
+              }))
+            }
+          />
+        )}
       </div>
 
       {/* Full-screen figure previewer (portals to body, covers the viewport). */}

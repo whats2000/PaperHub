@@ -6,6 +6,7 @@ needed (calls the LLM via litellm directly); needs an LLM API key in backend/.en
     uv run python -m benchmark.agent.cli compare --a 1 --b 2
     uv run python -m benchmark.agent.cli list --stage router
     uv run python -m benchmark.agent.cli golden --stage router --version v2 --corpus <c> --model <m> --out <g.jsonl>
+    uv run python -m benchmark.agent.cli pairwise --stage translate_blocks --a 1 --b 2 --corpus <c> --judge-model <m>
 """
 from __future__ import annotations
 
@@ -98,6 +99,24 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pairwise(args: argparse.Namespace) -> int:
+    from benchmark.agent.pairwise import pairwise_compare
+    _load_env(args.env)
+    spec = get_stage(args.stage)
+    cases = corpus_mod.load_corpus(args.corpus)
+    meta = {e["id"]: e for e in store.list_experiments(args.store)}
+    labels = [f"{meta.get(x, {}).get('prompt_version', '?')} (exp {x})" for x in (args.a, args.b)]
+    rep = asyncio.run(pairwise_compare(
+        spec, cases, store.get_scores(args.store, args.a), store.get_scores(args.store, args.b),
+        label_a=labels[0], label_b=labels[1], judge_model=args.judge_model))
+    md = rep.to_markdown()
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     for e in store.list_experiments(args.store, stage=(args.stage or None)):
         print(f"  [{e['id']}] {e['created_at']} {e['prompt_version']} model={e['model']} "
@@ -173,6 +192,17 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--a", type=int, required=True)
     c.add_argument("--b", type=int, required=True)
     c.set_defaults(fn=_cmd_compare)
+
+    pw = sub.add_parser("pairwise", help="judge two experiments head-to-head, case by case")
+    pw.add_argument("--stage", required=True, choices=stages)
+    pw.add_argument("--a", type=int, required=True)
+    pw.add_argument("--b", type=int, required=True)
+    pw.add_argument("--corpus", required=True)
+    pw.add_argument("--judge-model", required=True)
+    pw.add_argument("--store", default=DEFAULT_STORE)
+    pw.add_argument("--out", default="")
+    pw.add_argument("--env", default=".env")
+    pw.set_defaults(fn=_cmd_pairwise)
 
     li = sub.add_parser("list", help="list experiments")
     li.add_argument("--store", default=DEFAULT_STORE)

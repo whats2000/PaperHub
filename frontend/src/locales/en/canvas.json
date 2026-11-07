@@ -34,5 +34,22 @@
     "addPaperFailed": "Couldn't add this paper to references",
     "passageNotFoundHtml": "Couldn't locate this passage in the paper",
     "passageNotFoundPdf": "Couldn't locate this passage in the PDF"
+  },
+  "translation": {
+    "pending": "Translating…",
+    "unavailable": "Translation unavailable",
+    "retry": "Retry"
+  },
+  "translationCard": {
+    "label": "Translation",
+    "pin": "Pin translation",
+    "unpin": "Unpin translation",
+    "close": "Close translation",
+    "retry": "Retry",
+    "hintHover": "Click the paragraph to pin",
+    "hintPinned": "Pinned · Esc or ✕ to close",
+    "continuedPage": "continued on page {{page}}",
+    "continuedColumn": "continued in the right column",
+    "firstUseHint": "Hover a paragraph to see its translation"
   }
 }

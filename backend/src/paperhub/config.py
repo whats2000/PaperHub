@@ -45,6 +45,8 @@ class Settings:
     sql_agent_model: str
     # Memory-add conflict detector (small tier; classifier-shaped).
     memory_conflict_model: str
+    # Bilingual-reading translation (Plan H1; small tier).
+    translate_model: str
 
     # Per-call LLM request timeout (seconds). Bounds EVERY litellm completion so
     # a slow/unavailable provider can't ride the litellm default (~600 s) ×
@@ -57,6 +59,8 @@ class Settings:
     # Maximum number of read_section() calls the subagent makes per paper
     # turn before the loop is force-stopped.
     paper_qa_max_section_reads: int
+    # Translate the rest of the paper in the background after the visible part.
+    translate_full_paper: bool
 
     # Days a soft-deleted chat session is retained before being permanently
     # purged (cascading its messages/runs/papers) at startup.
@@ -186,12 +190,16 @@ def load_settings() -> Settings:
         memory_conflict_model=os.environ.get(
             "PAPERHUB_MEMORY_CONFLICT_MODEL", small,
         ),
+        translate_model=os.environ.get("PAPERHUB_TRANSLATE_MODEL") or small,
         llm_timeout_s=llm_timeout_s(),
 
         # 6. Agent tunables.
         paper_qa_max_section_reads=int(
             os.environ.get("PAPERHUB_PAPER_QA_MAX_SECTION_READS", "8"),
         ),
+        translate_full_paper=os.environ.get(
+            "PAPERHUB_TRANSLATE_FULL_PAPER", "1",
+        ) not in ("0", "", "false", "False"),
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),

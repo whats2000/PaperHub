@@ -21,11 +21,14 @@ from paperhub.agents.research_tools import (
 from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
+from paperhub.pipelines.paper_asset import read_block_assets
 from paperhub.pipelines.paper_pipeline import (
     ArxivMetadata,
     IngestRequest,
     PaperPipeline,
 )
+from paperhub.translation.models import ParagraphsResponse
+from paperhub.translation.pdf_paragraphs import build_paragraphs
 
 _PDF_MIME = "application/pdf"
 
@@ -490,6 +493,30 @@ async def document_mode(paper_content_id: int) -> DocumentModeResponse:
     pdfs = sorted(source_dir.glob("*.pdf"))  # noqa: ASYNC240
     mode = "pdf" if pdfs else "html"
     return DocumentModeResponse(mode=mode)
+
+
+@router.get("/content/{paper_content_id}/paragraphs", response_model=ParagraphsResponse)
+async def pdf_paragraphs(paper_content_id: int) -> ParagraphsResponse:
+    """Translatable PDF paragraphs (with geometry) built from Marker blocks (Plan H1)."""
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT source_dir_path FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    got = read_block_assets(Path(row[0])) if row[0] else None
+    if got is None:
+        return ParagraphsResponse(status="no_blocks", paragraphs=[])
+    blocks, inline_math_llm = got
+    return ParagraphsResponse(
+        status="ready" if inline_math_llm else "no_inline_math_llm",
+        paragraphs=build_paragraphs(blocks),
+    )
 
 
 @router.get("/content/{paper_content_id}/pdf")

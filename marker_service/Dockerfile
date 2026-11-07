@@ -38,7 +38,7 @@ COPY pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r pyproject.toml
 
-COPY app.py .
+COPY app.py llm_config.py ./
 
 # Models are NOT baked into the image — they download ONCE into the /models
 # named volume (see docker-compose.yml) on first /extract and persist across

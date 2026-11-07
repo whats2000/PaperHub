@@ -6,12 +6,17 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
 import { PaperLoading } from "@/components/canvas/PaperLoading";
+import {
+  PdfTranslationLayer,
+  PdfTranslationPage,
+} from "@/components/canvas/PdfTranslationLayer";
 import { locatePassage, type PdfPassageMatch } from "@/lib/pdfHighlight";
 import {
   bboxToRect,
   hasGeometricRegion,
   markerPageToPageNumber,
 } from "@/lib/bboxHighlight";
+import type { ParagraphsResponse, PdfParagraph } from "@/types/translation";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
 // import.meta.url so the worker is bundled + served from the app origin.
@@ -34,6 +39,22 @@ interface HighlightBoxes {
   key: string;
 }
 
+/** PDF hover/pin translation (Plan H1); absent → no translation overlay. */
+export interface PdfTranslationOptions {
+  enabled: boolean;
+  language: string;
+  paperId: number;
+  fullPaper: boolean;
+  /** Paragraphs the caller already fetched; omitted → the layer fetches. */
+  paragraphs?: PdfParagraph[];
+  /** Bumped to re-translate the in-view stale paragraphs. */
+  retranslateNonce?: number;
+  /** Whether an in-view translation predates the current terminology. */
+  onStaleChange?: (stale: boolean) => void;
+  /** The layer's own paragraphs fetch finished (null = failed). */
+  onParagraphsLoaded?: (res: ParagraphsResponse | null) => void;
+}
+
 interface Props {
   /** Raw PDF bytes (fetched same-origin via the API). */
   data: Uint8Array;
@@ -52,6 +73,8 @@ interface Props {
   nonce?: number;
   /** Called when the passage couldn't be located in the PDF text. */
   onHighlightMiss?: () => void;
+  /** Hover/pin translation card for this PDF's paragraphs. */
+  translation?: PdfTranslationOptions;
 }
 
 /**
@@ -72,6 +95,7 @@ export function PdfView({
   bbox,
   nonce = 0,
   onHighlightMiss,
+  translation,
 }: Props) {
   const { t } = useTranslation("canvas");
   // F2.1 A2': a non-null page + a well-formed length-4 bbox means we draw the
@@ -81,6 +105,9 @@ export function PdfView({
   const [width, setWidth] = useState(0);
   const [match, setMatch] = useState<PdfPassageMatch | null>(null);
   const [highlight, setHighlight] = useState<HighlightBoxes | null>(null);
+  // Native page widths (PDF points) by 1-based page number, for scaling the
+  // translation hit-rects' bboxes.
+  const [pageWidths, setPageWidths] = useState<Record<number, number>>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   // Per-document text-item strings, built once and reused across passages.
@@ -229,59 +256,89 @@ export function PdfView({
     }
   }, []);
 
+  const pdfDocument = (
+    <Document
+      file={file}
+      onLoadSuccess={(pdf) => {
+        pdfRef.current = pdf;
+        pageTextRef.current = null;
+        setNumPages(pdf.numPages);
+      }}
+      loading={<PaperLoading label={t("loading.pdf")} />}
+      error={
+        <div className="p-4 text-xs text-destructive">
+          {t("error.renderPdf")}
+        </div>
+      }
+    >
+      {Array.from({ length: numPages }, (_, i) => {
+        const isTarget = highlight?.pageNumber === i + 1;
+        return (
+          <Page
+            key={i}
+            pageNumber={i + 1}
+            width={width > 0 ? width : undefined}
+            className="relative mx-auto mb-3 shadow"
+            renderAnnotationLayer={false}
+            onLoadSuccess={(page) =>
+              setPageWidths((prev) =>
+                prev[i + 1] === page.originalWidth
+                  ? prev
+                  : { ...prev, [i + 1]: page.originalWidth },
+              )
+            }
+          >
+            <PdfTranslationPage
+              pageNumber={i + 1}
+              renderedWidth={width}
+              originalWidth={pageWidths[i + 1] ?? 0}
+            />
+            {isTarget && highlight && (
+              <div
+                key={`${highlight.key}:${nonce}`}
+                ref={scrollHighlightIntoView}
+                className="pointer-events-none absolute inset-0 z-10"
+              >
+                {highlight.rects.map((r, k) => (
+                  <div
+                    key={k}
+                    className="absolute rounded-[2px] bg-yellow-300/45"
+                    style={{
+                      left: r.left,
+                      top: r.top,
+                      width: r.width,
+                      height: r.height,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </Page>
+        );
+      })}
+    </Document>
+  );
+
   return (
     <div
       ref={containerRef}
       className="h-full w-full overflow-auto bg-neutral-100 p-3 dark:bg-neutral-900"
     >
-      <Document
-        file={file}
-        onLoadSuccess={(pdf) => {
-          pdfRef.current = pdf;
-          pageTextRef.current = null;
-          setNumPages(pdf.numPages);
-        }}
-        loading={<PaperLoading label={t("loading.pdf")} />}
-        error={
-          <div className="p-4 text-xs text-destructive">
-            {t("error.renderPdf")}
-          </div>
-        }
+      {/* Always mounted (disabled without `translation`) so toggling
+          translation never restructures — and so never reloads — the PDF. */}
+      <PdfTranslationLayer
+        paperId={translation?.paperId ?? 0}
+        language={translation?.language ?? ""}
+        fullPaper={translation?.fullPaper ?? false}
+        enabled={translation?.enabled ?? false}
+        paragraphs={translation?.paragraphs}
+        retranslateNonce={translation?.retranslateNonce}
+        onStaleChange={translation?.onStaleChange}
+        onParagraphsLoaded={translation?.onParagraphsLoaded}
+        readerRef={containerRef}
       >
-        {Array.from({ length: numPages }, (_, i) => {
-          const isTarget = highlight?.pageNumber === i + 1;
-          return (
-            <Page
-              key={i}
-              pageNumber={i + 1}
-              width={width > 0 ? width : undefined}
-              className="relative mx-auto mb-3 shadow"
-              renderAnnotationLayer={false}
-            >
-              {isTarget && highlight && (
-                <div
-                  key={`${highlight.key}:${nonce}`}
-                  ref={scrollHighlightIntoView}
-                  className="pointer-events-none absolute inset-0 z-10"
-                >
-                  {highlight.rects.map((r, k) => (
-                    <div
-                      key={k}
-                      className="absolute rounded-[2px] bg-yellow-300/45"
-                      style={{
-                        left: r.left,
-                        top: r.top,
-                        width: r.width,
-                        height: r.height,
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </Page>
-          );
-        })}
-      </Document>
+        {pdfDocument}
+      </PdfTranslationLayer>
     </div>
   );
 }

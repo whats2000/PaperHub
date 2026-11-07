@@ -42,18 +42,20 @@ from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.renderers.markdown import MarkdownRenderer
 
+from llm_config import marker_llm_config, marker_llm_model
+
 app = FastAPI(title="paperhub-marker")
 
 _models: dict[str, Any] | None = None
 
 
-def _gemini_key() -> str | None:
-    """Gemini key from env (GEMINI_API_KEY preferred, GOOGLE_API_KEY accepted)."""
-    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+def _llm_config() -> dict[str, str] | None:
+    """Marker LLM service config from the PaperHub model env (None = keyless)."""
+    return marker_llm_config(os.environ)
 
 
 def _use_llm() -> bool:
-    return bool(_gemini_key())
+    return _llm_config() is not None
 
 # block id looks like "/page/0/Figure/3" -> page 0
 _PAGE_RE = re.compile(r"/page/(\d+)/")
@@ -121,20 +123,21 @@ def _converter(page_range: list[int] | None = None) -> PdfConverter:
         # (it calls parse_range_str(v) -> v.split(",")); passing a list[int]
         # raises "AttributeError: 'list' object has no attribute 'split'".
         cfg_dict["page_range"] = ",".join(str(p) for p in page_range)
-    # use_llm + a Gemini service materially improves table/math/layout
-    # accuracy. Enabled only when a Gemini API key is present in the env, so
-    # the service still runs keyless (current behavior).
-    key = _gemini_key()
-    if key:
+    # use_llm improves table/math/layout accuracy and, with redo_inline_math,
+    # recovers inline math as LaTeX. The provider follows the PaperHub model
+    # config (gemini / ollama / openai-compatible); keyless -> no LLM pass.
+    llm = _llm_config()
+    if llm:
         cfg_dict["use_llm"] = True
-        cfg_dict["gemini_api_key"] = key
+        cfg_dict["redo_inline_math"] = True
+        cfg_dict.update(llm)
     cfg = ConfigParser(cfg_dict)
     return PdfConverter(
         config=cfg.generate_config_dict(),
         artifact_dict=_ensure_models(),
         renderer=cfg.get_renderer(),
         processor_list=cfg.get_processors(),
-        llm_service=cfg.get_llm_service() if key else None,
+        llm_service=cfg.get_llm_service() if llm else None,
     )
 
 
@@ -226,6 +229,7 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "models_loaded": _models is not None,
         "use_llm": _use_llm(),
+        "llm_model": marker_llm_model(os.environ) if _use_llm() else None,
     }
 
 

@@ -1896,3 +1896,43 @@ async def test_post_from_library_response_carries_stored_is_private_true(
 
     assert r.status_code == 200, r.text
     assert r.json()["is_private"] is True
+
+
+async def test_paragraphs_endpoint_statuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from paperhub.pipelines.paper_asset import BlockAsset, write_block_assets
+
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    dirs = {}
+    for name in ("none", "nollm", "ready"):
+        d = tmp_path / name
+        d.mkdir()
+        dirs[name] = d
+    blk = [BlockAsset("/page/0/Text/1", "Text", 0, (1.0, 2.0, 3.0, 4.0), "<p>Hello.</p>", None)]
+    write_block_assets(dirs["nollm"], blk, inline_math_llm=False)
+    write_block_assets(dirs["ready"], blk, inline_math_llm=True)
+    ids = {}
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        for i, (name, d) in enumerate(dirs.items()):
+            pid = await _seed_paper_content(conn, content_key=f"arxiv:2401.0000{i}", title=name,
+                arxiv_id=f"2401.0000{i}")
+            await conn.execute(
+                "UPDATE paper_content SET source_dir_path = ? WHERE id = ?", (str(d), pid))
+            ids[name] = pid
+        await conn.commit()
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/papers/content/{ids['none']}/paragraphs")
+        assert r.json() == {"status": "no_blocks", "paragraphs": []}
+        r = await c.get(f"/papers/content/{ids['nollm']}/paragraphs")
+        assert r.json()["status"] == "no_inline_math_llm"
+        assert len(r.json()["paragraphs"]) == 1
+        r = await c.get(f"/papers/content/{ids['ready']}/paragraphs")
+        body = r.json()
+        assert body["status"] == "ready"
+        assert body["paragraphs"][0]["key"] == "p:/page/0/Text/1"
+        assert body["paragraphs"][0]["fragments"] == [{"page": 0, "bbox": [1.0, 2.0, 3.0, 4.0]}]
+        assert (await c.get("/papers/content/9999/paragraphs")).status_code == 404
