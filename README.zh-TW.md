@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-1368%20backend%20%2B%20541%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.40.1%20(SRS%20v2.40.1)-success)
+![Tests](https://img.shields.io/badge/tests-2064%20backend%20%2B%201041%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.41.0%20(SRS%20v2.41.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · [日本語](README.ja.md) · **繁體中文** · [简体中文](README.zh-CN.md)
@@ -61,6 +61,20 @@ PaperHub 以 **使用者體驗優先（UX-first）** 打造。每一段檢索到
 | :---: | :---: |
 | [![Citation Canvas highlighting a cited chunk in the rendered paper HTML](docs/screenshots/04-citation-canvas-html.png)](docs/screenshots/04-citation-canvas-html.png) | [![Same citation highlighted in the source PDF via a geometry overlay](docs/screenshots/05-citation-canvas-pdf.png)](docs/screenshots/05-citation-canvas-pdf.png) |
 | 點擊任一 `[chunk]` → 在 LaTeX 彩現後的 HTML 中捲動至 + 標示確切的段落。 | …以及原始 PDF 中的同一段落。沒有無依據的論述。 |
+
+**用你的語言閱讀 — 版面不變。**
+
+| HTML 論文：每段下方附譯文 | PDF：滑過／釘選翻譯卡 |
+| :---: | :---: |
+| [![The paper reader with a Traditional Chinese translation under each paragraph of an HTML paper](docs/screenshots/13-bilingual-html.png)](docs/screenshots/13-bilingual-html.png) | [![A PDF paper with the hover translation card beside the hovered paragraph](docs/screenshots/14-bilingual-pdf.png)](docs/screenshots/14-bilingual-pdf.png) |
+| 一鍵開啟翻譯並選擇任何語言；數學式、引用與程式碼原樣保留。 | PDF 保持原始版面；滑過段落即可閱讀譯文，點一下可釘選。 |
+
+**跨領域 idea + 回饋飛輪。**
+
+| Ideas 圖譜 | 回饋頁面 |
+| :---: | :---: |
+| [![The Ideas graph: library documents grouped by domain with cross-domain idea edges](docs/screenshots/15-ideas-graph.png)](docs/screenshots/15-ideas-graph.png) | [![The Feedback page: where answers go wrong by stage, cases to send to the G1 eval](docs/screenshots/16-feedback-page.png)](docs/screenshots/16-feedback-page.png) |
+| 把一個領域的機制對應到另一個領域的問題，畫在你的文獻庫上；可直接在頁面中打開論文閱讀。 | 讚／倒讚與審查確認的錯誤，依階段統計，可匯出為 SFT/DPO 資料或送入評測集。 |
 
 **會議等級的投影片 — 解耦、可選擇加入的講稿。**
 
@@ -342,7 +356,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 文件
 
-- **[系統需求規格書（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 權威的架構、結構描述、範圍，以及驗收準則（已交付至 **v2.40.1**）。
+- **[系統需求規格書（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 權威的架構、結構描述、範圍，以及驗收準則（已交付至 **v2.41.0**）。
 - **[實作計畫](docs/superpowers/plans/)** — 每個子專案一份，皆透過 TDD 執行。
 - **[後端開發者文件](backend/README.md)** — 後端專屬說明。
 
@@ -358,7 +372,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.40.1}
+  version = {2.41.0}
 }
 ```
 

@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-1368%20backend%20%2B%20541%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.40.1%20(SRS%20v2.40.1)-success)
+![Tests](https://img.shields.io/badge/tests-2064%20backend%20%2B%201041%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.41.0%20(SRS%20v2.41.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · [日本語](README.ja.md) · [繁體中文](README.zh-TW.md) · **简体中文**
@@ -61,6 +61,20 @@ PaperHub 以**用户体验优先**的理念构建。每个被检索到的文本�
 | :---: | :---: |
 | [![Citation Canvas highlighting a cited chunk in the rendered paper HTML](docs/screenshots/04-citation-canvas-html.png)](docs/screenshots/04-citation-canvas-html.png) | [![Same citation highlighted in the source PDF via a geometry overlay](docs/screenshots/05-citation-canvas-pdf.png)](docs/screenshots/05-citation-canvas-pdf.png) |
 | 点击任意 `[chunk]` → 滚动到并高亮 LaTeX 渲染 HTML 中的确切段落。 | ……以及原始 PDF 中的同一段落。没有无依据的论断。 |
+
+**用你的语言阅读——版面不变。**
+
+| HTML 论文：每段下方附译文 | PDF：悬停／固定翻译卡 |
+| :---: | :---: |
+| [![The paper reader with a Traditional Chinese translation under each paragraph of an HTML paper](docs/screenshots/13-bilingual-html.png)](docs/screenshots/13-bilingual-html.png) | [![A PDF paper with the hover translation card beside the hovered paragraph](docs/screenshots/14-bilingual-pdf.png)](docs/screenshots/14-bilingual-pdf.png) |
+| 一键开启翻译并选择任意语言；数学式、引用与代码原样保留。 | PDF 保持原始版面；悬停段落即可阅读译文，点击可固定。 |
+
+**跨领域 idea + 反馈飞轮。**
+
+| Ideas 图谱 | 反馈页面 |
+| :---: | :---: |
+| [![The Ideas graph: library documents grouped by domain with cross-domain idea edges](docs/screenshots/15-ideas-graph.png)](docs/screenshots/15-ideas-graph.png) | [![The Feedback page: where answers go wrong by stage, cases to send to the G1 eval](docs/screenshots/16-feedback-page.png)](docs/screenshots/16-feedback-page.png) |
+| 把一个领域的机制对应到另一个领域的问题，画在你的文献库上；可直接在页面中打开论文阅读。 | 点赞／点踩与审查确认的错误，按阶段统计，可导出为 SFT/DPO 数据或送入评测集。 |
 
 **会议级幻灯片——解耦、可选的备注。**
 
@@ -336,7 +350,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 文档
 
-- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.40.1**）。
+- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.41.0**）。
 - **[实现计划](docs/superpowers/plans/)**——每个子项目一份，均通过 TDD 执行。
 - **[后端开发者文档](backend/README.md)**——后端专属说明。
 
@@ -352,7 +366,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.40.1}
+  version = {2.41.0}
 }
 ```
 
