@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { applyIframeTheme } from "@/lib/applyIframeTheme";
+import { applyIframeTheme, withDarkStyle } from "@/lib/applyIframeTheme";
 import {
   clearHighlight,
   findAndHighlight,
@@ -114,6 +114,16 @@ export function HtmlView({
   // the new load fires the old document must not be (re)attached.
   const [loaded, setLoaded] = useState<{ doc: Document; html: string } | null>(
     null,
+  );
+
+  // The theme a paper first shows in is baked into its srcdoc, so a dark reader
+  // never paints white before onLoad; a later switch goes through
+  // applyIframeTheme and never reloads the paper.
+  const [firstPaint, setFirstPaint] = useState({ html, dark: isDark });
+  if (firstPaint.html !== html) setFirstPaint({ html, dark: isDark });
+  const srcDoc = useMemo(
+    () => (firstPaint.dark ? withDarkStyle(firstPaint.html) : firstPaint.html),
+    [firstPaint],
   );
 
   const apply = (): void => {
@@ -279,7 +289,7 @@ export function HtmlView({
     <iframe
       ref={ref}
       title={t("panel.label")}
-      srcDoc={html}
+      srcDoc={srcDoc}
       onLoad={handleLoad}
       sandbox="allow-scripts allow-same-origin"
       className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
