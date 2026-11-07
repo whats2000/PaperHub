@@ -43,6 +43,7 @@ from paperhub.api.run_broker import RunBroker, RunHandle
 from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
+from paperhub.feedback.review import maybe_review_keyword
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.mcp.client_context import (
     ClientHeadersContext,
@@ -613,6 +614,12 @@ async def run_agent(
             # hydrated yet (SRS v2.30 fork race).
             resolved_history = await _resolve_history(conn, session_id, req.history)
             await _record_user_message(conn, session_id, req.user_message, run_id)
+            # Plan H2: a correction-like message flags the previous answer for a
+            # detached background review (never raises, never awaits the LLM).
+            await maybe_review_keyword(
+                conn, settings=settings, session_id=session_id, run_id=run_id,
+                user_message=req.user_message, llm=adapter,
+            )
             tracer = Tracer(conn, run_id=run_id, branch="")
             state: AgentState = {
                 "run_id": run_id, "branch": "", "session_id": session_id,

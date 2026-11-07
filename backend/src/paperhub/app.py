@@ -22,6 +22,7 @@ from paperhub import settings_overlay as ov
 from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
 from paperhub.api import decks as decks_api
+from paperhub.api import feedback as feedback_api
 from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
@@ -363,6 +364,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_api.router)
     app.include_router(version_api.router)
     app.include_router(translations_api.router)
+    app.include_router(feedback_api.router)
     # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
     # External MCP clients (Claude Desktop, Cursor) and the agent (post
     # Task v2.5-4) reach the three Research Agent tools over the MCP wire

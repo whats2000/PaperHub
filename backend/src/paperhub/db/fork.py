@@ -80,9 +80,9 @@ async def fork_session(
     # --- Core copy: atomic. -------------------------------------------------
     async with write_transaction(conn):
         cur = await conn.execute(
-            "INSERT INTO chat_sessions (title, forked_from_session_id) "
-            "VALUES (?, ?)",
-            (new_title, source_session_id),
+            "INSERT INTO chat_sessions (title, forked_from_session_id, "
+            "forked_from_run_id) VALUES (?, ?, ?)",
+            (new_title, source_session_id, fork_run_id),
         )
         assert cur.lastrowid is not None
         new_sid = int(cur.lastrowid)

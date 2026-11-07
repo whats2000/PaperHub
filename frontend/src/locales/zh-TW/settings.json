@@ -92,6 +92,10 @@
       "label": "翻譯模型",
       "help": "用於雙語閱讀的論文翻譯。預設使用小型層級。"
     },
+    "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
+      "label": "回饋審查模型",
+      "help": "檢查被標記的回答是否真的有誤。預設使用小型層級。"
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "投影片解析器",
       "help": "解析已啟用的論文並分類投影片指令。預設使用小型層級。"
@@ -120,6 +124,14 @@
     "PAPERHUB_TRANSLATE_FULL_PAPER": {
       "label": "翻譯整篇論文",
       "help": "翻譯完可見部分後，在背景繼續翻譯論文其餘內容。"
+    },
+    "PAPERHUB_FEEDBACK_REVIEW": {
+      "label": "審查更正與分支",
+      "help": "請審查代理判斷疑似更正的訊息或從某輪分支對話，是否代表上一則回答有誤。"
+    },
+    "PAPERHUB_FEEDBACK_KEYWORDS": {
+      "label": "更正關鍵字",
+      "help": "以逗號分隔、會將上一則回答標記為待審查的字詞。留空則使用內建的中文／英文／日文清單。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "注入回想的記憶",

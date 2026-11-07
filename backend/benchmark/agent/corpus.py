@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from benchmark.agent.stages import StageSpec, get_stage
 
 
@@ -68,6 +70,8 @@ def harvest(
                     expect = {"intent": observed["intent"]}
             except json.JSONDecodeError:
                 observed = None
+        if isinstance(observed, dict) and "skipped" in observed:
+            continue  # the step never called the model (e.g. a blank answer)
         cases.append(CorpusCase(
             case_id=f"run{r['run_id']}-s{r['step_index']}", stage=stage,
             variables=variables, expect=expect, source_run_id=int(r["run_id"]), observed=observed))
@@ -112,3 +116,93 @@ async def emit_golden(
 
 
 from benchmark.agent.replay import replay_stage  # noqa: E402, I001 — bottom import breaks the import cycle
+
+
+def import_inbox(
+    inbox: str | Path, stage: str,
+) -> tuple[list[CorpusCase], int, int]:
+    """Promote the HUMAN-LABELLED lines of the H2 feedback inbox to corpus cases.
+
+    A line is labelled once its ``expect`` is non-empty; unlabelled (or
+    other-stage) lines are skipped as unlabelled; a labelled line whose JSON or
+    ``variables`` is unusable is skipped as invalid. Returns
+    ``(cases, unlabelled, invalid)``. Note: inbox lines of any ``stage_hint``
+    carry the ROUTER step's variables/observed, so the importer filters by
+    stage; only a router import is meaningful today.
+    ``variables`` is normalised through the stage's own extractor so a recorded
+    router args dict becomes exactly what the harness replays."""
+    spec = get_stage(stage)
+    cases: list[CorpusCase] = []
+    unlabelled = invalid = 0
+    for raw in Path(inbox).read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+            expect = row.get("expect")
+            hint = row.get("stage_hint")
+            if not expect or (hint and hint != stage):
+                unlabelled += 1
+                continue
+            variables = spec.variables_from_args(row.get("variables") or {})
+            cases.append(CorpusCase(
+                case_id=str(row["case_id"]), stage=stage, variables=variables,
+                expect=dict(expect), rubric=str(row.get("correction") or ""),
+                source_run_id=row.get("source_run_id"),
+                observed=row.get("observed") or None))
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            invalid += 1
+    return cases, unlabelled, invalid
+
+
+def merge_corpus(path: str | Path, cases: list[CorpusCase]) -> tuple[int, int]:
+    """Write ``cases`` into ``path`` WITHOUT clobbering it: a same-``case_id``
+    line is replaced, every other existing line is kept. Returns
+    ``(added, replaced)``."""
+    existing = load_corpus(path) if Path(path).exists() else []
+    new_ids = {c.case_id for c in cases}
+    old_ids = {c.case_id for c in existing}
+    save_corpus(path, [c for c in existing if c.case_id not in new_ids] + cases)
+    return len(new_ids - old_ids), len(new_ids & old_ids)
+
+
+def _step_target(spec: StageSpec, observed: dict[str, Any]) -> dict[str, Any]:
+    """The model-output part of a recorded step result: validated through the
+    stage's response model (extra trace keys dropped, unrecorded defaults not
+    invented), else its ``output_summary``. Raises on an invalid output."""
+    if spec.response_model is not None:
+        return spec.response_model.model_validate(observed).model_dump(exclude_unset=True)
+    return spec.output_summary(observed)
+
+
+def export_steps(
+    db_path: str | Path, stage: str, *, version: str, prompts_dir: str | Path,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Agent-step ``messages`` samples reconstructed from RECORDED state: the
+    stage's prompt variant rendered over each run's recorded step input, with
+    the recorded output as the assistant turn (never a stored prompt).
+
+    The assistant turn is the recorded result narrowed to the stage's output
+    (``_step_target``) — the model's own output fields only, not the trace
+    bookkeeping a step records beside it (e.g. a review's ``guessed_reasons``
+    / ids / ``feedback_id``). A step with no recorded output, or one that does
+    not validate as the stage's output, has no target and is dropped."""
+    from benchmark.agent.prompts import load_variant
+    from benchmark.agent.replay import render_messages
+
+    spec = get_stage(stage)
+    system, user = load_variant(stage, version, prompts_dir=prompts_dir)
+    out: list[dict[str, Any]] = []
+    for case in harvest(db_path, stage, limit=limit):
+        if not case.observed:
+            continue
+        try:
+            target = _step_target(spec, case.observed)
+        except (ValidationError, TypeError, KeyError):
+            continue
+        messages = render_messages(system, user, case.variables, case.history)
+        messages.append({"role": "assistant",
+                         "content": json.dumps(target, ensure_ascii=False)})
+        out.append({"messages": messages, "source_run_id": case.source_run_id})
+    return out

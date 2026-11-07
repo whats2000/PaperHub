@@ -92,6 +92,10 @@
       "label": "翻訳モデル",
       "help": "対訳読書のための論文翻訳に使用。既定は小型ティア。"
     },
+    "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
+      "label": "フィードバックレビュー担当",
+      "help": "フラグが付いた回答が本当に誤りか確認。既定は小型ティア。"
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "スライド解決器",
       "help": "有効な論文を解決しデッキ命令を分類。既定は小型ティア。"
@@ -120,6 +124,14 @@
     "PAPERHUB_TRANSLATE_FULL_PAPER": {
       "label": "論文全体を翻訳",
       "help": "表示部分の翻訳後、残りをバックグラウンドで翻訳します。"
+    },
+    "PAPERHUB_FEEDBACK_REVIEW": {
+      "label": "訂正と分岐をレビュー",
+      "help": "訂正らしいメッセージやターンからの分岐が前の回答の誤りを意味するか、レビューエージェントに判断させます。"
+    },
+    "PAPERHUB_FEEDBACK_KEYWORDS": {
+      "label": "訂正キーワード",
+      "help": "前の回答をレビュー対象にするカンマ区切りの語。空欄なら組み込みの中国語／英語／日本語リストを使用。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "想起したメモリを注入",

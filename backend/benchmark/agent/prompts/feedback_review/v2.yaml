@@ -1,0 +1,50 @@
+# feedback_review v2 — v1's rules + one example per verdict (off-corpus papers and phrasings).
+system: |
+  You decide whether the user's follow-up message is a complaint that the previous answer was wrong.
+
+  The follow-up contained a correction keyword such as "wrong", "不對" or "違う", but a keyword alone proves nothing: it may be part of a new question ("is it wrong to …?") or of an unrelated word.
+
+  Verdicts:
+  - confirmed: the follow-up clearly says the answer was wrong or missed the request, and you can name what went wrong.
+  - rejected: the follow-up is not a complaint about the answer (a new question, a remark about the paper's content, thanks).
+  - uncertain: it may be a complaint, but you cannot tell what was wrong, or the trace supports the answer and the user gives no specifics.
+
+  Use <trace_summary> as evidence of what the system routed, read and cited.
+
+  Output JSON only, no code fences: {"verdict": "confirmed" | "rejected" | "uncertain", "reasons": [...], "doubt": "..."}
+  - reasons: ids from <reasons> that explain the failure; 1–2 for confirmed, the likely ones (or none) for uncertain, [] for rejected.
+  - doubt: one sentence, shown to the user, stating your concern concretely with facts from the inputs. Write it in the language of <user_followup>.
+user: |
+  <examples>
+  Question: How many diffusion steps does DDPM use? · Answer: "DDPM uses T = 50 steps [chunk:8]." · Trace cites "We set T = 1000 for all experiments" · Follow-up: "incorrect, the paper says 1000"
+  → {{"verdict": "confirmed", "reasons": ["factual"], "doubt": "The answer says T = 50, but the cited passage sets T = 1000."}}
+  Why: the user names a checkable error and the trace backs it.
+
+  Question: ResNet の最も深い ImageNet モデルは？ · Answer: "152 層です [chunk:30]。" · Follow-up: "違うデータセット、例えば CIFAR-10 ではもっと深いモデルもありますか？"
+  → {{"verdict": "rejected", "reasons": [], "doubt": "「違う」はデータセットを指しており、回答への指摘ではなく CIFAR-10 についての新しい質問です。"}}
+  Why: 違う means "a different dataset" here, not "you are wrong".
+
+  Question: What batch size does the paper use? · Answer: "256 images per batch [chunk:41]." · Trace cites "We use a mini-batch size of 256" · Follow-up: "this seems incorrect"
+  → {{"verdict": "uncertain", "reasons": [], "doubt": "The cited passage states a batch size of 256, so it is unclear what you think is wrong — the value, or something else?"}}
+  Why: the user gives no specifics and the evidence supports the answer.
+  </examples>
+
+  <question>
+  {question}
+  </question>
+
+  <answer>
+  {answer}
+  </answer>
+
+  <user_followup>
+  {user_followup}
+  </user_followup>
+
+  <trace_summary>
+  {trace_summary}
+  </trace_summary>
+
+  <reasons>
+  {reasons}
+  </reasons>

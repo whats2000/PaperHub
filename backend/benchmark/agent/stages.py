@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from paperhub.feedback.models import ReviewVerdict, format_reasons_block
 from paperhub.translation.models import TranslatedBlocks
 from paperhub.translation.placeholders import br_position_intact, placeholders_intact
 
@@ -134,7 +135,45 @@ TRANSLATE_BLOCKS = StageSpec(
     output_summary=_translate_output, deterministic_score=_translate_score,
 )
 
-STAGE_REGISTRY: dict[str, StageSpec] = {ROUTER.key: ROUTER, TRANSLATE_BLOCKS.key: TRANSLATE_BLOCKS}
+# --- feedback_review (Plan H2) --------------------------------------------
+# The reviewer that confirms / rejects a keyword-flagged answer. Driven by the
+# hand-authored labelled corpus (``expect.verdict``); the deterministic grade is
+# verdict accuracy, and the ``doubt`` sentence is judged with ``pairwise``.
+
+_REVIEW_KEYS = ("question", "answer", "user_followup", "trace_summary", "reasons")
+
+
+def _review_variables(args: dict[str, Any]) -> dict[str, Any]:
+    """Corpus rows carry every key; a recorded ``feedback:review`` step omits
+    ``reasons``, which is the static ``format_reasons_block()``."""
+    out = {k: args.get(k, "") for k in _REVIEW_KEYS}
+    if not out["reasons"]:
+        out["reasons"] = format_reasons_block()
+    return out
+
+
+def _review_output(obj: Any) -> dict[str, Any]:
+    d = obj if isinstance(obj, ReviewVerdict) else ReviewVerdict.model_validate(obj)
+    return {"verdict": d.verdict, "reasons": list(d.reasons), "doubt": d.doubt}
+
+
+def _review_score(expect: dict[str, Any], output: dict[str, Any]) -> float | None:
+    want = expect.get("verdict")
+    if want is None:
+        return None
+    return 1.0 if output.get("verdict") == want else 0.0
+
+
+FEEDBACK_REVIEW = StageSpec(
+    key="feedback_review", trace_agent="feedback", trace_tool="feedback:review",
+    response_model=ReviewVerdict, variables_from_args=_review_variables,
+    output_summary=_review_output, deterministic_score=_review_score,
+)
+
+STAGE_REGISTRY: dict[str, StageSpec] = {
+    ROUTER.key: ROUTER, TRANSLATE_BLOCKS.key: TRANSLATE_BLOCKS,
+    FEEDBACK_REVIEW.key: FEEDBACK_REVIEW,
+}
 
 
 def get_stage(key: str) -> StageSpec:

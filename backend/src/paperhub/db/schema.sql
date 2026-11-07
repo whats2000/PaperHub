@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     -- for a normal (non-fork) session. ON DELETE SET NULL so purging the parent
     -- orphans the fork gracefully (it falls back to a top-level row) rather than
     -- cascading. The sidebar groups forks under their parent from this column.
-    forked_from_session_id INTEGER REFERENCES chat_sessions(id) ON DELETE SET NULL
+    forked_from_session_id INTEGER REFERENCES chat_sessions(id) ON DELETE SET NULL,
+    -- Plan H2: the run (answer) this fork branched at; pairs fork siblings for DPO.
+    forked_from_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS paper_content (
@@ -228,3 +230,38 @@ CREATE TABLE IF NOT EXISTS translations (
     text TEXT NOT NULL, model TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (paper_content_id, block_key, language));
+
+-- Plan H2: feedback flywheel. One row per explicit rating (<=1 per run, enforced
+-- by the partial unique index) plus any number of implicit (reviewer) rows.
+-- No user column (single user).
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('explicit','implicit')),
+    polarity TEXT NOT NULL CHECK (polarity IN ('up','down')),
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    other_text TEXT,
+    correction TEXT,
+    trigger TEXT CHECK (trigger IN ('keyword','fork')),
+    verdict TEXT CHECK (verdict IN ('confirmed','rejected','uncertain')),
+    status TEXT NOT NULL DEFAULT 'final'
+        CHECK (status IN ('final','needs_confirmation')),
+    reviewer_rationale TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_explicit_run
+    ON feedback(run_id) WHERE kind = 'explicit';
+CREATE INDEX IF NOT EXISTS idx_feedback_run ON feedback(run_id);
+-- One implicit (reviewer) row per answer and trigger. apply_schema dedupes an
+-- older DB (keeps the newest row) before this runs.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_implicit_run_trigger
+    ON feedback(run_id, trigger) WHERE kind = 'implicit';
+
+CREATE TABLE IF NOT EXISTS feedback_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL UNIQUE,
+    stage TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

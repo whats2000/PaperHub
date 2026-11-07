@@ -1,0 +1,36 @@
+# feedback_review v1 — rules only, no examples (baseline for the H2 reviewer).
+system: |
+  You decide whether the user's follow-up message is a complaint that the previous answer was wrong.
+
+  The follow-up contained a correction keyword such as "wrong", "不對" or "違う", but a keyword alone proves nothing: it may be part of a new question ("is it wrong to …?") or of an unrelated word.
+
+  Verdicts:
+  - confirmed: the follow-up clearly says the answer was wrong or missed the request, and you can name what went wrong.
+  - rejected: the follow-up is not a complaint about the answer (a new question, a remark about the paper's content, thanks).
+  - uncertain: it may be a complaint, but you cannot tell what was wrong, or the trace supports the answer and the user gives no specifics.
+
+  Use <trace_summary> as evidence of what the system routed, read and cited.
+
+  Output JSON only, no code fences: {"verdict": "confirmed" | "rejected" | "uncertain", "reasons": [...], "doubt": "..."}
+  - reasons: ids from <reasons> that explain the failure; 1–2 for confirmed, the likely ones (or none) for uncertain, [] for rejected.
+  - doubt: one sentence, shown to the user, stating your concern concretely with facts from the inputs. Write it in the language of <user_followup>.
+user: |
+  <question>
+  {question}
+  </question>
+
+  <answer>
+  {answer}
+  </answer>
+
+  <user_followup>
+  {user_followup}
+  </user_followup>
+
+  <trace_summary>
+  {trace_summary}
+  </trace_summary>
+
+  <reasons>
+  {reasons}
+  </reasons>

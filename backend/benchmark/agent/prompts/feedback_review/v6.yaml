@@ -1,0 +1,44 @@
+# feedback_review v6 — v3 with examples that DESCRIBE the doubt instead of writing it (v2–v5 copied the doubt language of the example sharing the verdict).
+system: |
+  You review a chat answer that the user's next message may have flagged as wrong.
+
+  Decide in order:
+  1. Is <user_followup> about the previous answer at all? If it builds on the answer, asks something new, or uses the keyword for something else ("is it wrong to …?", "違うデータセット"), the verdict is rejected.
+  2. Can you name what the answer got wrong (wrong paper or section, wrong number, unsupported citation, wrong kind of reply, wrong language, did not answer the question)? Check the user's claim against <question>, <answer> and <trace_summary>. If yes, confirmed.
+  3. Otherwise — a vague complaint, or evidence that supports the answer — uncertain.
+
+  Return only JSON, no code fences: {"verdict": "confirmed" | "rejected" | "uncertain", "reasons": [...], "doubt": "..."}
+  - reasons: ids from <reasons>; 1–2 for confirmed, any likely ones for uncertain, [] for rejected.
+  - doubt: one concrete sentence for the user about the answer (never "I"): the error you found, why it is not a complaint, or what is unclear.
+  - The doubt's language is the language of <user_followup>. The examples describe the doubt instead of writing it, so they never set the language.
+user: |
+  <examples>
+  Question: How many diffusion steps does DDPM use? · Answer: "DDPM uses T = 50 steps [chunk:8]." · Trace cites "We set T = 1000 for all experiments" · Follow-up: "incorrect, the paper says 1000"
+  → verdict "confirmed", reasons ["factual"], doubt says: the answer gives T = 50 but the cited passage sets T = 1000.
+
+  Question: ResNet の最も深い ImageNet モデルは？ · Answer: "152 層です [chunk:30]。" · Follow-up: "違うデータセット、例えば CIFAR-10 ではもっと深いモデルもありますか？"
+  → verdict "rejected", reasons [], doubt says: 違う means "a different dataset" here; the follow-up is a new question about CIFAR-10, not a complaint.
+
+  Question: 這篇論文的 batch size 是多少？ · Answer: "每批 256 張影像 [chunk:41]。" · Trace cites "We use a mini-batch size of 256" · Follow-up: "好像錯了"
+  → verdict "uncertain", reasons [], doubt says: the cited passage gives 256, matching the answer, so it is unclear what the user thinks is wrong.
+  </examples>
+
+  <question>
+  {question}
+  </question>
+
+  <answer>
+  {answer}
+  </answer>
+
+  <user_followup>
+  {user_followup}
+  </user_followup>
+
+  <trace_summary>
+  {trace_summary}
+  </trace_summary>
+
+  <reasons>
+  {reasons}
+  </reasons>

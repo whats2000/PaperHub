@@ -442,3 +442,18 @@ async def test_structured_with_history_builds_correct_messages() -> None:
     assert messages[1]["content"] == "1+1=?"
     assert messages[2]["role"] == "assistant"
     assert messages[3]["role"] == "user"
+
+
+async def test_structured_forwards_max_tokens_on_both_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller's output cap (the feedback reviewer's ``max_tokens``) reaches
+    litellm on the native-schema attempt AND the json_object fallback."""
+    fake = _FakeAcompletion(_VALID_DECISION, reject_schema=True)
+    monkeypatch.setattr(litellm, "supports_response_schema", lambda model: True)
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    await LiteLlmAdapter().structured(
+        slot="router/v1", variables=_ROUTER_VARS, response_model=RoutingDecision,
+        model="deepseek/deepseek-chat", max_tokens=1024,
+    )
+    assert [c.get("max_tokens") for c in fake.calls] == [1024, 1024]

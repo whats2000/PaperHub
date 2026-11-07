@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
 import { SqlCard } from "@/components/chat/SqlCard";
+import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
@@ -66,6 +67,9 @@ export function MessageBubble({
   const canCopy =
     (isAssistant && isOk && !isStreaming) || (isUser && !!message.content);
   const showFork = isUser && !!onFork;
+  // Thumbs feedback (H2) is keyed by run id: completed answers only.
+  const feedbackRunId =
+    isAssistant && isOk && !isStreaming ? message.run_id : null;
   const hasSearchResults =
     isAssistant &&
     message.search_results !== undefined &&
@@ -211,7 +215,7 @@ export function MessageBubble({
             which would imply destructive in-place editing). */}
         {(canCopy || showFork) && (
           <div
-            className={`opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 transition-opacity absolute -bottom-6 flex gap-1 ${
+            className={`opacity-0 group-hover/bubble:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 has-[[aria-pressed=true]]:opacity-100 transition-opacity absolute -bottom-6 flex gap-1 ${
               isUser ? "right-0" : "right-8 sm:right-12"
             }`}
           >
@@ -232,6 +236,7 @@ export function MessageBubble({
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             )}
+            {feedbackRunId !== null && <FeedbackButtons runId={feedbackRunId} />}
             {showFork && (
               <Button
                 type="button"

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,8 +53,17 @@ async def configure_connection(conn: aiosqlite.Connection) -> None:
     the cost is a single function-pointer bind, microseconds.
     """
     await conn.execute("PRAGMA foreign_keys = ON")
-    await conn.execute("PRAGMA journal_mode = WAL")
+    # busy_timeout first. The WAL switch on a not-yet-WAL DB can still raise
+    # SQLITE_BUSY without consulting the busy handler, so retry it briefly.
     await conn.execute("PRAGMA busy_timeout = 30000")
+    for attempt in range(50):
+        try:
+            await conn.execute("PRAGMA journal_mode = WAL")
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or attempt == 49:
+                raise
+            await asyncio.sleep(0.05)
     await conn.create_function("paperhub_norm", 1, norm_for_match)
 
 

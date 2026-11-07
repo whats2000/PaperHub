@@ -462,3 +462,27 @@ async def test_shared_paper_content_restrict_blocks_delete_while_forked(
         with pytest.raises(sqlite3.IntegrityError):
             await conn.execute("DELETE FROM paper_content WHERE id = ?", (pc1,))
         await conn.rollback()
+
+
+async def test_fork_stores_forked_from_run_id(tmp_path: Path) -> None:
+    """Plan H2: the fork records the run it branched at (the export pairs the
+    fork's answer with this run's answer)."""
+    async with aiosqlite.connect(tmp_path / "t.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions (title) VALUES ('Orig')")
+        await conn.commit()
+        await _turn(conn, 1, "first q", "first a")
+        r2 = await _turn(conn, 1, "second q", "second a")
+        res = await fork_session(
+            conn, source_session_id=1, fork_run_id=r2, workspace_dir=tmp_path,
+        )
+        async with conn.execute(
+            "SELECT forked_from_session_id, forked_from_run_id FROM chat_sessions "
+            "WHERE id = ?", (res.new_session_id,),
+        ) as cur:
+            assert await cur.fetchone() == (1, r2)
+        async with conn.execute(
+            "SELECT forked_from_run_id FROM chat_sessions WHERE id = 1",
+        ) as cur:
+            assert (await cur.fetchone())[0] is None

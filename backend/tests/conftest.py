@@ -1,3 +1,4 @@
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,10 +19,26 @@ os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
 os.environ.setdefault("PAPERHUB_ARXIV_BACKFILL", "0")
 # And the persistent log file (would write into the real workspace).
 os.environ.setdefault("PAPERHUB_LOG_FILE", "0")
+# And the background feedback reviewer (would call a real LLM after a keyword
+# turn or a fork); tests that exercise it enable it explicitly.
+os.environ.setdefault("PAPERHUB_FEEDBACK_REVIEW", "0")
 
+from paperhub.db import connection as db_connection  # noqa: E402
 from paperhub.db.migrate import apply_schema  # noqa: E402
 from paperhub.pipelines.paper_pipeline import PaperPipeline  # noqa: E402
 from paperhub.tracing.tracer import Tracer  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _fresh_db_write_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fresh process-wide write lock per test.
+
+    An ``asyncio.Lock`` binds to the event loop of its first contended
+    acquire; each test runs on its own loop, so a lock shared across tests
+    fails the next contended acquire with "bound to a different event loop".
+    The app has one loop, so this is a test-isolation concern only.
+    """
+    monkeypatch.setattr(db_connection, "_DB_WRITE_LOCK", asyncio.Lock())
 
 
 @pytest_asyncio.fixture

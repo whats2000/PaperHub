@@ -28,6 +28,15 @@ STAGE_RUBRICS: dict[str, str] = {
         "grammatically sensible position. Terms in <terminology> must be used as "
         "specified. Identifiers, model names and variable names stay untranslated."
     ),
+    "feedback_review": (
+        "Both outputs already have the correct verdict; judge ONLY the `doubt` "
+        "sentence, which is shown to the user as the reviewer's concern. Better = "
+        "names the concrete problem (or, for a rejection, why the follow-up is not "
+        "a complaint; for uncertain, what is unclear and what to ask) using facts "
+        "from the request's question, answer and trace_summary; invents nothing; "
+        "is exactly one sentence; is written in the language of user_followup. "
+        "Penalise a vague doubt that would fit any case. Ignore `reasons`."
+    ),
 }
 
 

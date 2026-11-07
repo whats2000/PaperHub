@@ -256,3 +256,81 @@ async def test_translations_table_exists_and_apply_schema_idempotent_translation
         "id", "paper_content_id", "block_key", "language",
         "source_hash", "memory_hash", "text", "model", "created_at",
     } <= cols
+
+
+# ---------------------------------------------------------------------------
+# Plan H2: feedback tables + chat_sessions.forked_from_run_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_feedback_tables_and_forked_from_run_id_on_fresh_db(
+    tmp_path: Path,
+) -> None:
+    async with aiosqlite.connect(tmp_path / "f.db") as conn:
+        await apply_schema(conn)
+        await apply_schema(conn)  # idempotent
+        for table in ("feedback", "feedback_presets"):
+            async with conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ) as cur:
+                assert await cur.fetchone() is not None
+        async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
+            assert "forked_from_run_id" in {r[1] for r in await cur.fetchall()}
+
+
+@pytest.mark.asyncio
+async def test_feedback_partial_unique_index_explicit_only(tmp_path: Path) -> None:
+    async with aiosqlite.connect(tmp_path / "f.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions (title) VALUES ('s')")
+        await conn.execute(
+            "INSERT INTO runs (session_id, status) VALUES (1, 'ok')"
+        )
+        await conn.execute(
+            "INSERT INTO feedback (run_id, kind, polarity) "
+            "VALUES (1, 'explicit', 'up')"
+        )
+        with pytest.raises(aiosqlite.IntegrityError):
+            await conn.execute(
+                "INSERT INTO feedback (run_id, kind, polarity) "
+                "VALUES (1, 'explicit', 'down')"
+            )
+        # implicit rows ignore the explicit index: one per (run, trigger)
+        for trigger in ("keyword", "fork"):
+            await conn.execute(
+                "INSERT INTO feedback (run_id, kind, polarity, trigger) "
+                "VALUES (1, 'implicit', 'down', ?)", (trigger,),
+            )
+        with pytest.raises(aiosqlite.IntegrityError):
+            await conn.execute(
+                "INSERT INTO feedback (run_id, kind, polarity, trigger) "
+                "VALUES (1, 'implicit', 'down', 'keyword')"
+            )
+        await conn.commit()
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_forked_from_run_id_to_existing_db(
+    tmp_path: Path,
+) -> None:
+    async with aiosqlite.connect(tmp_path / "old.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await conn.execute(
+            "CREATE TABLE chat_sessions ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+            " title TEXT NOT NULL DEFAULT 'New chat')"
+        )
+        await conn.commit()
+        await apply_schema(conn)
+        await apply_schema(conn)
+        async with conn.execute("PRAGMA foreign_key_list(chat_sessions)") as cur:
+            fks = await cur.fetchall()
+        assert any(
+            r[3] == "forked_from_run_id" and r[2] == "runs"
+            and r[6].upper() == "SET NULL"
+            for r in fks
+        )

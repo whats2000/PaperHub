@@ -15,6 +15,8 @@ from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.fork import fork_session
 from paperhub.db.tool_calls import drain_tool_calls_since
+from paperhub.feedback.review import maybe_review_fork
+from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import SearchCandidateModel
 
@@ -441,6 +443,13 @@ async def fork_session_endpoint(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+    # Plan H2: forking at a turn flags that turn's answer for a background
+    # review (detached; never raises). No adapter is built when it is off.
+    if settings.feedback_review_enabled:
+        maybe_review_fork(
+            settings=settings, session_id=session_id, target_run_id=req.run_id,
+            llm=LiteLlmAdapter(),
+        )
     return ForkSessionResponse(
         session_id=result.new_session_id,
         forked_message=result.forked_message,

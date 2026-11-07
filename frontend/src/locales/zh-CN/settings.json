@@ -92,6 +92,10 @@
       "label": "翻译模型",
       "help": "用于双语阅读的论文翻译。默认使用小型层级。"
     },
+    "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
+      "label": "反馈审查模型",
+      "help": "检查被标记的回答是否真的有误。默认使用小型层级。"
+    },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "幻灯片解析器",
       "help": "解析已启用的论文并分类幻灯片指令。默认使用小型层级。"
@@ -120,6 +124,14 @@
     "PAPERHUB_TRANSLATE_FULL_PAPER": {
       "label": "翻译整篇论文",
       "help": "翻译完可见部分后，在后台继续翻译论文其余内容。"
+    },
+    "PAPERHUB_FEEDBACK_REVIEW": {
+      "label": "审查纠正与分支",
+      "help": "请审查智能体判断疑似纠正的消息或从某轮分支对话，是否意味着上一条回答有误。"
+    },
+    "PAPERHUB_FEEDBACK_KEYWORDS": {
+      "label": "纠正关键词",
+      "help": "以逗号分隔、会将上一条回答标记为待审查的词语。留空则使用内置的中文／英文／日文列表。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "注入回忆的记忆",

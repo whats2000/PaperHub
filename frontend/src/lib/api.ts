@@ -23,6 +23,24 @@ import type {
   TranslateRequest,
   TranslateResponse,
 } from "@/types/translation";
+import type {
+  ExportPreview,
+  ExportRequest,
+  ExportResult,
+  FeedbackCase,
+  FeedbackGuess,
+  FeedbackPut,
+  FeedbackSummary,
+  G1InboxRequest,
+  G1InboxResult,
+  Preset,
+  PresetCreate,
+  QueueItem,
+  QueueSubmit,
+  QueueSubmitResult,
+  RunFeedback,
+  Stage,
+} from "@/types/feedback";
 
 export const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
@@ -679,4 +697,100 @@ export async function getPdfParagraphs(
   return apiFetch<ParagraphsResponse>(
     `/papers/content/${paperContentId}/paragraphs`,
   );
+}
+
+// ── Feedback flywheel (Plan H2) ──────────────────────────────────────────────
+
+/** Save (or clear, with `polarity: null`) the explicit feedback on one answer. */
+export async function putRunFeedback(
+  runId: number,
+  body: FeedbackPut,
+): Promise<void> {
+  await apiFetch<unknown>(`/feedback/runs/${runId}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Reasons the run's trace signals suggest, used to pre-select the chips. */
+export async function getRunFeedbackGuess(runId: number): Promise<FeedbackGuess> {
+  return apiFetch<FeedbackGuess>(`/feedback/runs/${runId}/guess`);
+}
+
+/** Every explicit feedback row of a session, to restore the thumbs on reload. */
+export async function listSessionFeedback(sessionId: number): Promise<RunFeedback[]> {
+  return apiFetch<RunFeedback[]>(`/feedback/runs?session_id=${sessionId}`);
+}
+
+/** Reasons promoted from "other" text into presets. */
+export async function listFeedbackPresets(): Promise<Preset[]> {
+  return apiFetch<Preset[]>("/feedback/presets");
+}
+
+/** Implicit feedback the reviewer was unsure about, with full conversation context. */
+export async function getFeedbackQueue(): Promise<QueueItem[]> {
+  return apiFetch<QueueItem[]>("/feedback/queue");
+}
+
+/** Finalise the answered queue items; unanswered ones stay queued. */
+export async function submitFeedbackQueue(body: QueueSubmit): Promise<QueueSubmitResult> {
+  return apiFetch<QueueSubmitResult>("/feedback/queue/submit", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Aggregates for the Feedback page: KPIs, per-stage counts, "other" texts. */
+export async function getFeedbackSummary(): Promise<FeedbackSummary> {
+  return apiFetch<FeedbackSummary>("/feedback/summary");
+}
+
+/** The negative-feedback cases attributed to one stage. */
+export async function getFeedbackCases(stage: Stage): Promise<FeedbackCase[]> {
+  return apiFetch<FeedbackCase[]>(`/feedback/cases?stage=${encodeURIComponent(stage)}`);
+}
+
+/** Promote a recurring "other" text to a preset reason under a stage. */
+export async function postFeedbackPreset(body: PresetCreate): Promise<{ label: string }> {
+  return apiFetch<{ label: string }>("/feedback/presets", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Append feedback cases to the G1 to-label inbox. */
+export async function postG1Inbox(body: G1InboxRequest): Promise<G1InboxResult> {
+  return apiFetch<G1InboxResult>("/feedback/g1-inbox", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+function exportQuery(opts: ExportRequest): string {
+  const q = new URLSearchParams();
+  q.set("include_implicit", String(opts.include_implicit ?? false));
+  q.set("include_private", String(opts.include_private ?? true));
+  q.set("cited_only", String(opts.cited_only));
+  if (opts.since) q.set("since", opts.since);
+  if (opts.until) q.set("until", opts.until);
+  if (opts.model) q.set("model", opts.model);
+  return q.toString();
+}
+
+/** The counts an export with these options would write; writes nothing. */
+export async function getExportPreview(opts: ExportRequest): Promise<ExportPreview> {
+  return apiFetch<ExportPreview>(`/feedback/export/preview?${exportQuery(opts)}`);
+}
+
+/** Write the Hugging Face SFT/DPO files under the backend's exports dir. */
+export async function postExport(body: ExportRequest): Promise<ExportResult> {
+  return apiFetch<ExportResult>("/feedback/export", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Download URL of one exported file. */
+export function exportFileUrl(dir: string, file: string): string {
+  return `${API_BASE_URL}/feedback/exports/${encodeURIComponent(dir)}/${encodeURIComponent(file)}`;
 }

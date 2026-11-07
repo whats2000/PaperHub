@@ -1,0 +1,15 @@
+# Per-agent eval sweep config (SRS §III-9) for the H2 reviewer prompt.
+# Deterministic grade = verdict accuracy vs the labelled corpus; the `doubt`
+# sentence is judged afterwards with the `pairwise` command.
+[eval]
+stage       = "feedback_review"
+model       = "gemini/gemini-3.5-flash-lite"   # deploy small tier (PAPERHUB_MODEL_SMALL)
+reps        = 3
+backend     = "auto"
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+variants    = ["v1", "v3", "v6", "v9", "v10"]   # v10 shipped; all rounds (v1–v10) in prompts/feedback_review/README.md
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/feedback_review.core.jsonl"

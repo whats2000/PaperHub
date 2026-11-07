@@ -30,6 +30,8 @@ class Settings:
     workspace_dir: Path
     db_path: Path
     papers_cache_dir: Path
+    # Plan H2: Hugging Face SFT/DPO exports (one timestamped dir per export).
+    exports_dir: Path
     max_upload_mb: int
 
     # ── 3. LLM model selection ──────────────────────────────────────────
@@ -47,6 +49,8 @@ class Settings:
     memory_conflict_model: str
     # Bilingual-reading translation (Plan H1; small tier).
     translate_model: str
+    # Plan H2 background reviewer of flagged answers (small tier).
+    feedback_review_model: str
 
     # Per-call LLM request timeout (seconds). Bounds EVERY litellm completion so
     # a slow/unavailable provider can't ride the litellm default (~600 s) ×
@@ -61,6 +65,8 @@ class Settings:
     paper_qa_max_section_reads: int
     # Translate the rest of the paper in the background after the visible part.
     translate_full_paper: bool
+    # Plan H2: review correction-like turns / forks in the background.
+    feedback_review_enabled: bool
 
     # Days a soft-deleted chat session is retained before being permanently
     # purged (cascading its messages/runs/papers) at startup.
@@ -175,6 +181,7 @@ def load_settings() -> Settings:
         workspace_dir=workspace,
         db_path=workspace / "paperhub.db",
         papers_cache_dir=workspace / "papers_cache",
+        exports_dir=workspace / "exports",
         max_upload_mb=int(os.environ.get("PAPERHUB_MAX_UPLOAD_MB", "30")),
 
         # 3. LLM model selection. Each slot's per-slot env var (e.g.
@@ -191,6 +198,7 @@ def load_settings() -> Settings:
             "PAPERHUB_MEMORY_CONFLICT_MODEL", small,
         ),
         translate_model=os.environ.get("PAPERHUB_TRANSLATE_MODEL") or small,
+        feedback_review_model=os.environ.get("PAPERHUB_FEEDBACK_REVIEW_MODEL") or small,
         llm_timeout_s=llm_timeout_s(),
 
         # 6. Agent tunables.
@@ -199,6 +207,9 @@ def load_settings() -> Settings:
         ),
         translate_full_paper=os.environ.get(
             "PAPERHUB_TRANSLATE_FULL_PAPER", "1",
+        ) not in ("0", "", "false", "False"),
+        feedback_review_enabled=os.environ.get(
+            "PAPERHUB_FEEDBACK_REVIEW", "1",
         ) not in ("0", "", "false", "False"),
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),

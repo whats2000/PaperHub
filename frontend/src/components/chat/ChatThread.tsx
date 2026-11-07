@@ -11,6 +11,7 @@ import { TraceInline } from "@/components/chat/TraceInline";
 import { EmptyState } from "@/components/states/EmptyState";
 import { forkSession } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useFeedbackStore } from "@/store/feedback";
 import { useChatStream } from "@/hooks/useChatStream";
 
 export function ChatThread({ session }: { session: ChatSession | null }) {
@@ -21,6 +22,16 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
   const lastMessage = session?.messages[session.messages.length - 1];
   const { send } = useChatStream();
   const requestComposerText = useChatStore((s) => s.requestComposerText);
+  const backendSessionId = session?.backend_session_id ?? null;
+
+  // Restore the thumbs (H2) whenever the active session changes.
+  useEffect(() => {
+    if (backendSessionId === null) return;
+    useFeedbackStore
+      .getState()
+      .hydrate(backendSessionId)
+      .catch(() => undefined); // Thumbs just start unpressed.
+  }, [backendSessionId]);
 
   useEffect(() => {
     if (!endRef.current) return;

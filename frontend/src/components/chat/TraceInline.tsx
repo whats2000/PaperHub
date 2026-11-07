@@ -219,21 +219,26 @@ export function TraceInline({
   trace,
   sessionId,
   runId,
+  embedded = false,
 }: {
   trace: ToolCallRecord[];
   sessionId: number;
   runId: number;
+  /** Under a caller's own toggle (the Feedback page's "View trace"): no
+   *  header, always open, and `trace` is the already-fetched result, so an
+   *  empty one shows the empty state. */
+  embedded?: boolean;
 }) {
   const { t } = useTranslation("chat");
   // Outer toggle: show/hide the whole step list
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   // Per-row toggle: which rows are expanded
   const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Whether a fetch has completed (or the message already carried a trace) —
   // distinguishes "not fetched yet" from "fetched, genuinely empty".
-  const [fetched, setFetched] = useState(trace.length > 0);
+  const [fetched, setFetched] = useState(embedded || trace.length > 0);
   // Records fetched on demand (replayed turn); also cached to the store so a
   // remount sees them via the message's `trace` prop.
   const [records, setRecords] = useState<ToolCallRecord[]>([]);
@@ -284,20 +289,22 @@ export function TraceInline({
   return (
     <div className="mt-2 text-xs">
       {/* Outer toggle — controls visibility of the entire list */}
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-        aria-expanded={open}
-      >
-        <OuterIcon className="h-3 w-3" /> {t("trace.label")}
-        {realCount > 0 && (
-          <>
-            {" "}
-            · {t("trace.step", { count: realCount })}
-          </>
-        )}
-      </button>
+      {!embedded && (
+        <button
+          type="button"
+          onClick={handleToggle}
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          aria-expanded={open}
+        >
+          <OuterIcon className="h-3 w-3" /> {t("trace.label")}
+          {realCount > 0 && (
+            <>
+              {" "}
+              · {t("trace.step", { count: realCount })}
+            </>
+          )}
+        </button>
+      )}
 
       {open && loading && (
         <p className="mt-1 text-muted-foreground">{t("trace.loading")}</p>

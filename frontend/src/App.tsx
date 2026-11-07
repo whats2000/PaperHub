@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { WelcomeModal } from "@/components/settings/WelcomeModal";
 import { Toaster } from "@/components/ui/sonner";
+import { useFeedbackBadge } from "@/hooks/useFeedbackBadge";
 import { ChatPage } from "@/pages/ChatPage";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { IdeasPage } from "@/pages/IdeasPage";
@@ -15,6 +16,8 @@ import { useVersionStore } from "@/store/version";
 
 function App() {
   const page = useNavStore((s) => s.page);
+  // Sidebar Feedback badge = confirmation queue length (mount, each turn, 60 s).
+  useFeedbackBadge();
   // Probe the first-run config gate once on boot — drives the composer lock and
   // the onboarding tour. Uses the verified cache (skips the live ping) when the
   // config was confirmed good recently.

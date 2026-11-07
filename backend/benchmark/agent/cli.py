@@ -3,6 +3,8 @@ needed (calls the LLM via litellm directly); needs an LLM API key in backend/.en
 
     uv run python -m benchmark.agent.cli harvest --db workspace/paperhub.db --stage router --out benchmark/agent/corpus/router.harvest.jsonl
     uv run python -m benchmark.agent.cli run --stage router --version v1 --corpus benchmark/agent/corpus/router.core.jsonl --model gemini/gemini-2.5-flash
+    uv run python -m benchmark.agent.cli import-inbox --inbox workspace/exports/g1-inbox.jsonl --stage router --out benchmark/agent/corpus/router.harvest.jsonl
+    uv run python -m benchmark.agent.cli export-steps --db workspace/paperhub.db --stage router --out workspace/exports/router-steps.jsonl
     uv run python -m benchmark.agent.cli compare --a 1 --b 2
     uv run python -m benchmark.agent.cli list --stage router
     uv run python -m benchmark.agent.cli golden --stage router --version v2 --corpus <c> --model <m> --out <g.jsonl>
@@ -55,6 +57,26 @@ def _cmd_harvest(args: argparse.Namespace) -> int:
     cases = corpus_mod.harvest(args.db, args.stage, run_ids=run_ids, limit=args.limit)
     corpus_mod.save_corpus(args.out, cases)
     print(f"Harvested {len(cases)} {args.stage} case(s) -> {args.out}")
+    return 0
+
+
+def _cmd_import_inbox(args: argparse.Namespace) -> int:
+    cases, unlabelled, invalid = corpus_mod.import_inbox(args.inbox, args.stage)
+    added, replaced = corpus_mod.merge_corpus(args.out, cases)
+    print(f"Imported {len(cases)} labelled {args.stage} case(s) -> {args.out} "
+          f"({added} added, {replaced} replaced; skipped {unlabelled} unlabelled, "
+          f"{invalid} invalid)")
+    return 0
+
+
+def _cmd_export_steps(args: argparse.Namespace) -> int:
+    samples = corpus_mod.export_steps(args.db, args.stage, version=args.version,
+                                      prompts_dir=args.prompts_dir)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    with Path(args.out).open("w", encoding="utf-8") as fh:
+        for s in samples:
+            fh.write(json.dumps(s, ensure_ascii=False) + "\n")
+    print(f"Wrote {len(samples)} {args.stage} sample(s) -> {args.out}")
     return 0
 
 
@@ -161,6 +183,20 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--run-ids", default="")
     h.add_argument("--limit", type=int, default=200)
     h.set_defaults(fn=_cmd_harvest)
+
+    ii = sub.add_parser("import-inbox", help="import human-labelled H2 feedback inbox lines")
+    ii.add_argument("--inbox", required=True)
+    ii.add_argument("--stage", required=True, choices=stages)
+    ii.add_argument("--out", required=True)
+    ii.set_defaults(fn=_cmd_import_inbox)
+
+    es = sub.add_parser("export-steps", help="export agent-step messages samples from recorded state")
+    es.add_argument("--db", required=True)
+    es.add_argument("--stage", required=True, choices=stages)
+    es.add_argument("--out", required=True)
+    es.add_argument("--version", default="v1")
+    es.add_argument("--prompts-dir", default=DEFAULT_PROMPTS)
+    es.set_defaults(fn=_cmd_export_steps)
 
     r = sub.add_parser("run", help="run a variant over a corpus + persist an experiment")
     r.add_argument("--stage", required=True, choices=stages)

@@ -50,3 +50,22 @@ async def test_configure_connection_sets_pragmas(tmp_path: Path) -> None:
             row = await cur.fetchone()
         assert row is not None
         assert row[0] > 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_opens_of_fresh_db_do_not_lock(tmp_path: Path) -> None:
+    """busy_timeout must be set before journal_mode=WAL, else concurrent
+    first opens of a non-WAL DB raise 'database is locked' immediately."""
+    import asyncio
+
+    import aiosqlite
+
+    from paperhub.db.connection import configure_connection
+
+    db = tmp_path / "fresh.db"
+
+    async def one() -> None:
+        async with aiosqlite.connect(db) as conn:
+            await configure_connection(conn)
+
+    await asyncio.gather(*(one() for _ in range(16)))

@@ -204,8 +204,30 @@ async def sweep_orphan_session_folders(
     return removed
 
 
+async def _dedupe_implicit_feedback(conn: aiosqlite.Connection) -> None:
+    """Plan H2: before schema.sql creates the partial unique index
+    ``idx_feedback_implicit_run_trigger``, drop duplicate implicit rows of one
+    ``(run_id, trigger)`` in an existing DB, keeping the newest (highest id).
+    Idempotent; a no-op on a fresh DB, a DB without ``feedback`` or one that
+    already has the index."""
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE name IN "
+        "('feedback', 'idx_feedback_implicit_run_trigger')",
+    ) as cur:
+        names = {str(r[0]) for r in await cur.fetchall()}
+    if "feedback" not in names or "idx_feedback_implicit_run_trigger" in names:
+        return
+    await conn.execute(
+        "DELETE FROM feedback WHERE kind = 'implicit' AND trigger IS NOT NULL "
+        "AND id NOT IN (SELECT MAX(id) FROM feedback WHERE kind = 'implicit' "
+        "AND trigger IS NOT NULL GROUP BY run_id, trigger)",
+    )
+    await conn.commit()
+
+
 async def apply_schema(conn: aiosqlite.Connection) -> None:
     sql = (files("paperhub.db") / "schema.sql").read_text(encoding="utf-8")
+    await _dedupe_implicit_feedback(conn)
     await conn.executescript(sql)
     # executescript auto-commits; no explicit commit needed here.
 
@@ -232,6 +254,17 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE chat_sessions ADD COLUMN forked_from_session_id "
             "INTEGER REFERENCES chat_sessions(id) ON DELETE SET NULL"
+        )
+        await conn.commit()
+
+    # Plan H2: chat_sessions.forked_from_run_id (the answer a fork branched at;
+    # pairs fork siblings for DPO). Nullable FK -> ALTER is allowed.
+    async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "forked_from_run_id" not in cols:
+        await conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN forked_from_run_id "
+            "INTEGER REFERENCES runs(id) ON DELETE SET NULL"
         )
         await conn.commit()
 
