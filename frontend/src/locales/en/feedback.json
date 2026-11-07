@@ -1,7 +1,9 @@
 {
   "thumbs": {
     "up": "Good answer",
-    "down": "Bad answer"
+    "down": "Bad answer",
+    "upPressed": "Marked as a good answer · click to remove",
+    "downPressed": "Marked as a bad answer · click to remove"
   },
   "popover": {
     "title": "What went wrong?",
@@ -24,7 +26,8 @@
   },
   "toast": {
     "saved": "Feedback saved with this answer's trace.",
-    "failed": "Couldn't save the feedback. Try again."
+    "failed": "Couldn't save the feedback. Try again.",
+    "removed": "Feedback removed"
   },
   "queue": {
     "count_one": "{{count}} item needs your confirmation",
