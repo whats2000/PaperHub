@@ -385,8 +385,8 @@ describe("CitationCanvas standalone reader (Ideas page)", () => {
   it("marks the shown paper's tab with the soft grey, not the accent colour", () => {
     render(<CitationCanvas standalone={{ papers: [paper9, { paper_content_id: 8, title: "Paper B" }], onClose: vi.fn() }} />);
     const active = screen.getByRole("button", { name: "Paper C" });
-    expect(active.className).toContain("bg-secondary");
+    expect(active.className).toContain("bg-foreground/10");
     expect(active.className).not.toContain("bg-primary");
-    expect(screen.getByRole("button", { name: "Paper B" }).className).not.toContain("bg-secondary");
+    expect(screen.getByRole("button", { name: "Paper B" }).className).not.toContain("bg-foreground/10");
   });
 });
