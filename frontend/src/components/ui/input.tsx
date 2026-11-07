@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 function Input({
   className,
   ...props
-}: React.ComponentPropsWithoutRef<"input">) {
+}: React.ComponentProps<"input">) {
   return (
     <input
       data-slot="input"

@@ -7,6 +7,7 @@ import enCanvas from "../locales/en/canvas.json";
 import enChat from "../locales/en/chat.json";
 import enCommon from "../locales/en/common.json";
 import enFeedback from "../locales/en/feedback.json";
+import enIdeas from "../locales/en/ideas.json";
 import enMemory from "../locales/en/memory.json";
 import enReferences from "../locales/en/references.json";
 import enSettings from "../locales/en/settings.json";
@@ -18,6 +19,7 @@ import jaCanvas from "../locales/ja/canvas.json";
 import jaChat from "../locales/ja/chat.json";
 import jaCommon from "../locales/ja/common.json";
 import jaFeedback from "../locales/ja/feedback.json";
+import jaIdeas from "../locales/ja/ideas.json";
 import jaMemory from "../locales/ja/memory.json";
 import jaReferences from "../locales/ja/references.json";
 import jaSettings from "../locales/ja/settings.json";
@@ -29,6 +31,7 @@ import zhCNCanvas from "../locales/zh-CN/canvas.json";
 import zhCNChat from "../locales/zh-CN/chat.json";
 import zhCNCommon from "../locales/zh-CN/common.json";
 import zhCNFeedback from "../locales/zh-CN/feedback.json";
+import zhCNIdeas from "../locales/zh-CN/ideas.json";
 import zhCNMemory from "../locales/zh-CN/memory.json";
 import zhCNReferences from "../locales/zh-CN/references.json";
 import zhCNSettings from "../locales/zh-CN/settings.json";
@@ -40,6 +43,7 @@ import zhTWCanvas from "../locales/zh-TW/canvas.json";
 import zhTWChat from "../locales/zh-TW/chat.json";
 import zhTWCommon from "../locales/zh-TW/common.json";
 import zhTWFeedback from "../locales/zh-TW/feedback.json";
+import zhTWIdeas from "../locales/zh-TW/ideas.json";
 import zhTWMemory from "../locales/zh-TW/memory.json";
 import zhTWReferences from "../locales/zh-TW/references.json";
 import zhTWSettings from "../locales/zh-TW/settings.json";
@@ -72,6 +76,7 @@ const resources = {
     states: enStates,
     translation: enTranslation,
     feedback: enFeedback,
+    ideas: enIdeas,
   },
   "zh-TW": {
     about: zhTWAbout,
@@ -85,6 +90,7 @@ const resources = {
     states: zhTWStates,
     translation: zhTWTranslation,
     feedback: zhTWFeedback,
+    ideas: zhTWIdeas,
   },
   "zh-CN": {
     about: zhCNAbout,
@@ -98,6 +104,7 @@ const resources = {
     states: zhCNStates,
     translation: zhCNTranslation,
     feedback: zhCNFeedback,
+    ideas: zhCNIdeas,
   },
   ja: {
     about: jaAbout,
@@ -111,6 +118,7 @@ const resources = {
     states: jaStates,
     translation: jaTranslation,
     feedback: jaFeedback,
+    ideas: jaIdeas,
   },
 } as const;
 
@@ -133,6 +141,7 @@ void i18n
       "states",
       "translation",
       "feedback",
+      "ideas",
     ],
     defaultNS: "common",
     interpolation: { escapeValue: false },

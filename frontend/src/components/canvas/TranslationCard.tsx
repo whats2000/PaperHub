@@ -77,7 +77,9 @@ export function TranslationCard({
   const { t } = useTranslation("canvas");
   const { mounted, state } = usePresence(open && placement !== null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const below = placement?.side === "below";
+  const side = placement?.side;
+  // Under or over the paragraph (inside the reader): the arrow is horizontal.
+  const inReader = side === "below" || side === "above";
 
   // Follow the reader: scroll the content to the active fragment's span, at
   // the share of that fragment already scrolled past the viewport top. Only
@@ -161,7 +163,7 @@ export function TranslationCard({
       }}
       className={cn(
         "fixed z-50 flex max-w-[460px] flex-col rounded-md border border-border bg-popover px-3 pt-2.5 pb-2 text-popover-foreground shadow-md outline-none",
-        below ? "origin-top-left" : "origin-top-right",
+        side === "below" ? "origin-top-left" : side === "above" ? "origin-bottom-left" : "origin-top-right",
         "duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         "motion-reduce:animate-none",
@@ -171,9 +173,13 @@ export function TranslationCard({
         aria-hidden="true"
         className={cn(
           "absolute size-2.5 rotate-45 border border-border bg-popover",
-          below ? "-top-[6px] border-r-0 border-b-0" : "-right-[6px] border-b-0 border-l-0",
+          side === "below"
+            ? "-top-[6px] border-r-0 border-b-0"
+            : side === "above"
+              ? "-bottom-[6px] border-t-0 border-l-0"
+              : "-right-[6px] border-b-0 border-l-0",
         )}
-        style={below ? { left: placement.arrowX } : { top: placement.arrowY }}
+        style={inReader ? { left: placement.arrowX } : { top: placement.arrowY }}
       />
       <div className="-mt-0.5 -mr-1 mb-1 flex shrink-0 items-center justify-between gap-2 text-xs text-muted-foreground">
         <span className="truncate">{language}</span>

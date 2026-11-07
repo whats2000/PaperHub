@@ -1,0 +1,24 @@
+# Per-agent eval sweep config (SRS §III-9) for the H3 mechanism-card prompt.
+# Deterministic grade = the card contract (stages.card_failures: problem and
+# mechanism cite >= 1 section, every cited name is a digest section, >= 1
+# domain); wording is judged with the `pairwise` command (faithfulness +
+# domain-free phrasing). Results: prompts/ideation_card/README.md.
+[eval]
+stage       = "ideation_card"
+model       = "gemini/gemini-3.5-flash-lite"   # deploy small tier (PAPERHUB_MODEL_SMALL)
+reps        = 2
+backend     = "concurrent"
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+variants    = ["v5", "v6", "v7"]   # v1-v4: round 1-2 (README); v6/v7: QA I8 domain rule
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/ideation_card.core.jsonl"
+
+# QA I8: primary-field labels for 16 documents (the 8 core ones plus surveys,
+# sibling VLA papers and singleton fields). Graded on the tags assign_domains
+# stores: canonical names, at most two, primary first.
+[[testsets]]
+name   = "domains"
+corpus = "benchmark/agent/corpus/ideation_card.domains.jsonl"

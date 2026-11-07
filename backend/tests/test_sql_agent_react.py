@@ -37,11 +37,13 @@ class _ScriptedAdapter:
     def __init__(self, actions: list[SqlRoundAction]) -> None:
         self._actions = actions
         self.calls: list[dict[str, Any]] = []
+        self.slots: list[str] = []
 
     async def structured(  # type: ignore[no-untyped-def]
         self, *, slot: str, variables: dict[str, Any], response_model, model: str, **kw: Any
     ) -> Any:
         self.calls.append(variables)
+        self.slots.append(slot)
         assert response_model is SqlRoundAction
         idx = min(len(self.calls) - 1, len(self._actions) - 1)
         return self._actions[idx]
@@ -139,6 +141,8 @@ async def test_one_shot_finalize_runs_no_query(migrated_db: aiosqlite.Connection
     ))
     out = "".join(x for x in items if isinstance(x, str))
     assert "You have 3 papers." in out
+    # sql_agent/v3: v1 + the chat-history rules (background runs are not turns).
+    assert adapter.slots == ["sql_agent/v3"]
     # No sql.query beyond the two schema describes.
     assert reg.query_calls == 0
     assert reg.describe_calls == 2

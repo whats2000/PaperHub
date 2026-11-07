@@ -151,7 +151,10 @@ beforeEach(() => {
 });
 
 /** jsdom doesn't parse `srcdoc`: fill the iframe and fire its load. */
-async function loadHtmlPaper(container: HTMLElement): Promise<Document> {
+async function loadHtmlPaper(
+  container: HTMLElement,
+  body: string = PAPER_BODY,
+): Promise<Document> {
   let iframe: HTMLIFrameElement | null = null;
   await waitFor(() => {
     iframe = container.querySelector<HTMLIFrameElement>(
@@ -160,7 +163,7 @@ async function loadHtmlPaper(container: HTMLElement): Promise<Document> {
     expect(iframe).not.toBeNull();
   });
   const doc = iframe!.contentDocument!;
-  doc.body.innerHTML = PAPER_BODY;
+  doc.body.innerHTML = body;
   act(() => {
     iframe!.dispatchEvent(new Event("load"));
   });
@@ -290,6 +293,24 @@ describe("CitationCanvas bilingual reading (HTML)", () => {
     expect(useTranslationStore.getState().enabledByPaper).toEqual({
       [HTML_PAPER]: true,
     });
+  });
+});
+
+describe("CitationCanvas bilingual reading (HTML, nothing to translate)", () => {
+  it("disables the pill with a reason for a raw <pre> render (QA B2)", async () => {
+    const { container } = render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(HTML_PAPER));
+    await loadHtmlPaper(container, "<pre>\\section{Intro} raw LaTeX</pre>");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Translate paper" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Translate paper" })).toHaveAccessibleDescription(
+      /can't be translated/,
+    );
+    expect(requests).toHaveLength(0);
   });
 });
 

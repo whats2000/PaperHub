@@ -2,6 +2,7 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.agents.router_policy import apply_router_policy
 from paperhub.agents.state import AgentState
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import RoutingDecision
@@ -47,7 +48,7 @@ async def router_node(
             },
         )
         decision = await adapter.structured(
-            slot="router/v2",
+            slot="router/v5",
             variables={
                 "user_message": user_message,
                 "enabled_refs_count": enabled_refs_count,
@@ -58,7 +59,12 @@ async def router_node(
             history=history,
             **adapter_kwargs,
         )
-        step.record_result(decision.model_dump())
+        decision, notes = apply_router_policy(
+            decision, user_message=user_message,
+            enabled_refs_count=enabled_refs_count, slide_attached=slide_attached,
+        )
+        result: dict[str, Any] = {**decision.model_dump(), **notes}
+        step.record_result(result)
     await target_conn.execute(
         "UPDATE runs SET routing_decision_json = ? WHERE id = ?",
         (decision.model_dump_json(), state["run_id"]),

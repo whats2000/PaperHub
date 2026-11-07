@@ -7,6 +7,7 @@ import aiosqlite
 from paperhub.agents.router import router_node
 from paperhub.agents.state import AgentState
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
+from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.tracing.tracer import Tracer
 
 
@@ -273,3 +274,25 @@ async def test_router_slide_attached_defaults_false(migrated_db, fake_tracer) ->
     await router_node(state, adapter=_Cap(), tracer=fake_tracer, model="m",
                       conn=migrated_db)
     assert captured["slide_attached"] is False
+
+
+async def test_router_uses_chat_history_aware_prompt(migrated_db, fake_tracer) -> None:
+    """router/v5 keeps v3's chat-history routing (eval bucket ``history``) and
+    asks for ``also_requested`` and ``subject``, which the in-code rules read."""
+    captured: dict[str, object] = {}
+
+    class _Cap:
+        async def structured(self, *, slot, variables, response_model, model, **__):
+            captured["slot"] = slot
+            return response_model(
+                intent="library_stats", confidence=1.0,
+                reasoning="x", resolved_query="how many chats", response_language="English")
+
+    state = {"run_id": fake_tracer.run_id, "branch": "", "session_id": 1,
+             "user_message": "How many chat sessions do I have?", "history": []}
+    await router_node(state, adapter=_Cap(), tracer=fake_tracer, model="m",
+                      conn=migrated_db)
+    assert captured["slot"] == "router/v5"
+    system = PromptRegistry().get("router/v5").system
+    assert "usage history" in system and "model_tier" not in system
+    assert "also_requested" in system and '"subject"' in system

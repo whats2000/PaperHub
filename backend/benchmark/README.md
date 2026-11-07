@@ -30,6 +30,13 @@ scripts/run-benchmark.ps1 -Config benchmark/my-cases.toml
 scripts/run-benchmark.ps1 -Resume benchmark/results/paperhub-rag-qa-<ts>.json
 ```
 
+## Session cleanup
+
+The runner deletes every chat session it created when it ends, also when a case
+fails or the run is interrupted. Sessions a case reuses through `session_id`
+are left alone. Pass `-KeepSessions` (`--keep-sessions`) to keep them, e.g. to
+review a generated deck in the frontend.
+
 ## Resume
 
 A long sweep writes its `.json` after **every** case, so a crash or network

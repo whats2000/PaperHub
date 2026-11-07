@@ -28,6 +28,11 @@ import httpx
 from paperhub.pipelines.author_names import clean_author_names
 
 API_BASE = "https://api.semanticscholar.org/graph/v1"
+# The Graph API has no "similar papers" endpoint (/paper/<id>/related 404s);
+# similar papers come from the Recommendations API. Its default pool is
+# "recent" (only the last few months), which returns [] for most papers, so
+# find_related asks for the "all-cs" pool.
+RECOMMENDATIONS_BASE = "https://api.semanticscholar.org/recommendations/v1"
 _TIMEOUT = httpx.Timeout(10.0)
 
 # Rate-limit resilience (observed in prod traces — paper_suggest fans out 4
@@ -74,6 +79,8 @@ def _parse_retry_after(value: str | None) -> float | None:
 async def _get_with_retry(
     url: str, params: dict[str, str], headers: dict[str, str],
     timeout_cfg: httpx.Timeout,
+    *,
+    attempts: list[int] | None = None,
 ) -> httpx.Response:
     """GET ``url`` through the shared pacing lock, retrying on HTTP 429.
 
@@ -94,6 +101,8 @@ async def _get_with_retry(
                 resp = await client.get(url, params=params, headers=headers)
             _last_request_ts = time.monotonic()
         if resp.status_code != 429 or attempt == _MAX_ATTEMPTS:
+            if attempts is not None:
+                attempts[:] = [attempt]
             return resp
         retry_after = _parse_retry_after(resp.headers.get("retry-after"))
         backoff = (
@@ -104,10 +113,43 @@ async def _get_with_retry(
         await _sleep(backoff)
     assert resp is not None  # loop runs ≥1 time (_MAX_ATTEMPTS ≥ 1)
     return resp
+async def _get_checked(
+    url: str, params: dict[str, str], diag: dict[str, Any] | None, label: str,
+) -> httpx.Response:
+    """GET with pacing + 429 retry, fill ``diag`` with the transport facts
+    (``url_path``, ``http_status``, ``attempts``, ``retry_after``, plus
+    ``body_head`` on a non-2xx) and raise on failure: a final 429 as
+    SemanticScholarRateLimitError, any other non-2xx as HTTPStatusError whose
+    message carries the body head (S2 explains a 400 there)."""
+    attempts: list[int] = []
+    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT, attempts=attempts)
+    if diag is not None:
+        diag.update({
+            "url_path": httpx.URL(url).path,
+            "http_status": resp.status_code,
+            "attempts": attempts[0] if attempts else 1,
+            "retry_after": resp.headers.get("retry-after"),
+        })
+    if resp.status_code == 429:
+        raise SemanticScholarRateLimitError(f"Semantic Scholar rate-limited {label}")
+    if resp.is_error:
+        body_head = resp.text[:500]
+        if diag is not None:
+            diag["body_head"] = body_head
+        raise httpx.HTTPStatusError(
+            f"Semantic Scholar {label} -> HTTP {resp.status_code}: {body_head}",
+            request=resp.request, response=resp,
+        )
+    return resp
+
+
 # arXiv asks for a contactable User-Agent per their Terms of Use; Semantic Scholar
 # is more permissive but we send the same UA for operator visibility.
 _USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
-_FIELDS = "title,abstract,year,authors.name,externalIds"
+# Graph-navigation fields (/references, /citations). These endpoints reject a
+# nested ``authors.name`` with HTTP 400 ("Unrecognized or unsupported
+# fields: [authors.name]"); a bare ``authors`` returns authorId + name.
+_FIELDS = "title,abstract,year,authors,externalIds"
 # Extended fields used by search_papers / fetch_paper_metadata for the v2.4
 # suggest-with-finalize flow (needs openAccessPdf.url + paperId).
 _SEARCH_FIELDS = "paperId,title,abstract,year,authors.name,externalIds,openAccessPdf"
@@ -219,13 +261,18 @@ async def find_related(
     *,
     mode: Mode,
     max_results: int = 8,
+    diag: dict[str, Any] | None = None,
 ) -> list[RelatedPaper]:
     """Return papers related to the given arXiv ID via Semantic Scholar.
 
     Caller is expected to wrap in tracer.step() — this helper is transport-only.
+    When ``diag`` is given it receives the transport facts (``url_path``,
+    ``http_status``, ``attempts``, ``retry_after``, ``body_head`` on a non-2xx)
+    for the MCP ``_meta`` envelope.
     """
     paper_id = f"arXiv:{arxiv_id}"
     sub_key: str | None
+    params = {"limit": str(max_results), "fields": _FIELDS}
     if mode == "cites":
         url = f"{API_BASE}/paper/{paper_id}/references"
         items_key = "data"
@@ -235,40 +282,32 @@ async def find_related(
         items_key = "data"
         sub_key = "citingPaper"
     else:  # similar
-        url = f"{API_BASE}/paper/{paper_id}/related"
-        items_key = "data"
-        sub_key = None  # similar endpoint returns paper objects directly
+        url = f"{RECOMMENDATIONS_BASE}/papers/forpaper/{paper_id}"
+        items_key = "recommendedPapers"
+        sub_key = None  # recommendations are paper objects directly
+        params["from"] = "all-cs"
 
-    params = {"limit": str(max_results), "fields": _FIELDS}
-    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
-    if resp.status_code == 429:
-        raise SemanticScholarRateLimitError(
-            f"Semantic Scholar rate-limited find_related({mode}) for {arxiv_id}",
-        )
-    resp.raise_for_status()
+    resp = await _get_checked(
+        url, params, diag, f"find_related({mode}) for {arxiv_id}",
+    )
     raw = resp.json().get(items_key) or []
     items = [(r.get(sub_key) if sub_key else r) for r in raw]
     return [_coerce(i) for i in items if i]
 
 
 async def search_papers(
-    query: str, max_results: int = 8,
+    query: str, max_results: int = 8, *, diag: dict[str, Any] | None = None,
 ) -> list[SemanticScholarHit]:
     """Free-text search across Semantic Scholar's ~200M paper corpus.
 
     Returns hits with title, abstract, authors, year, plus ``arxiv_id``
     (when ``externalIds.ArXiv`` is present) and ``open_access_pdf_url``
     (when ``openAccessPdf.url`` is present) so the ``ss:`` ingest branch
-    can choose the cleanest source.
+    can choose the cleanest source. ``diag`` works as in :func:`find_related`.
     """
     url = f"{API_BASE}/paper/search"
     params = {"query": query, "limit": str(max_results), "fields": _SEARCH_FIELDS}
-    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
-    if resp.status_code == 429:
-        raise SemanticScholarRateLimitError(
-            f"Semantic Scholar rate-limited search_papers({query!r})",
-        )
-    resp.raise_for_status()
+    resp = await _get_checked(url, params, diag, f"search_papers({query!r})")
     data = resp.json().get("data") or []
     return [_coerce_hit(item) for item in data if item]
 

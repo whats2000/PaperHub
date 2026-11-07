@@ -1,0 +1,102 @@
+# library_stats (SQL agent) cases: chat-history counts that must skip
+# background runs, plus the library-count questions they must not regress.
+#
+# Background runs are not chat turns: a feedback:review run sits in the user's
+# session with no message (routing_decision_json {"intent": "feedback_review"}),
+# and ideation runs live in the hidden internal session (chat_sessions.internal
+# = 1). The counts move as the sweep itself adds turns, so the history rubrics
+# judge the SQL the answer ends with, not a fixed number.
+#
+# Run (from backend/):  scripts/run-benchmark.ps1 -Config benchmark/cases.library-stats.toml -Judge
+
+[benchmark]
+name = "paperhub-library-stats"
+base_url = "http://127.0.0.1:8000"
+db_path = "workspace/paperhub.db"
+
+[[cases]]
+id = "hist-turns-en"
+expect_intent = "library_stats"
+prompt = "How many chat turns have I had in total, across all my chats?"
+rubric = "Score 1 only if the final SQL counts user messages (messages.role = 'user', or runs that have a message) and keeps only visible sessions (chat_sessions.internal = 0 AND deleted_at IS NULL). Counting every runs row, or not excluding the internal session, is wrong."
+
+[[cases]]
+id = "hist-turns-zh"
+expect_intent = "library_stats"
+prompt = "我總共問過你幾次問題？"
+rubric = "Answer in Chinese. Score 1 only if the final SQL counts user messages (messages.role = 'user') in visible sessions (chat_sessions.internal = 0 AND deleted_at IS NULL). Counting every runs row, or not excluding the internal session, is wrong."
+
+[[cases]]
+id = "hist-sessions-en"
+expect_intent = "library_stats"
+prompt = "How many chat sessions do I have?"
+rubric = "Score 1 only if the final SQL counts chat_sessions rows with internal = 0 AND deleted_at IS NULL. Counting the internal session or soft-deleted sessions is wrong."
+
+[[cases]]
+id = "hist-by-intent-en"
+expect_intent = "library_stats"
+prompt = "Count my chat turns per intent (paper QA, search, slides and so on)."
+rubric = "Score 1 only if the final SQL groups by the routing intent (json_extract(routing_decision_json, '$.intent')) over runs that are chat turns: runs with a user message, in visible sessions (internal = 0 AND deleted_at IS NULL). A 'feedback_review' row, a NULL-intent bucket of background runs, or ideation rows in the result are wrong. Figures as a table."
+
+[[cases]]
+id = "hist-month-ja"
+expect_intent = "library_stats"
+prompt = "今月は何回質問しましたか？"
+rubric = "Answer in Japanese. Score 1 only if the final SQL counts user messages (messages.role = 'user') created this month in visible sessions (chat_sessions.internal = 0 AND deleted_at IS NULL)."
+
+[[cases]]
+id = "lib-count-en"
+expect_intent = "library_stats"
+prompt = "How many papers are in my library in total?"
+rubric = "Score 1 only if the SQL counts paper_content rows (the whole library, not papers WHERE session_id) and the answer states that number."
+
+[[cases]]
+id = "lib-kind-en"
+expect_intent = "library_stats"
+prompt = "How many papers are in my library, and how many are arXiv vs PDF uploads?"
+rubric = "Score 1 only if the SQL queries paper_content and splits the count by kind (arxiv vs pdf); figures as a table."
+
+[[cases]]
+id = "lib-recent-en"
+expect_intent = "library_stats"
+prompt = "What are the 3 most recently added papers in my library?"
+rubric = "Score 1 only if the SQL orders paper_content by its added/created time descending with LIMIT 3 and the answer lists three titles."
+
+[[cases]]
+id = "lib-topic-en"
+expect_intent = "library_stats"
+prompt = "List the papers in my library about diffusion models."
+rubric = "Score 1 only if the SQL searches paper_content title/abstract for diffusion and the answer summarises a curated list instead of dumping rows."
+
+[[cases]]
+id = "lib-session-en"
+expect_intent = "library_stats"
+prompt = "How many papers are attached to this chat?"
+rubric = "This chat has no papers. Score 1 only if the SQL filters papers by this session_id and the answer says 0 / none."
+
+[[cases]]
+id = "lib-month-zh"
+expect_intent = "library_stats"
+prompt = "這個月新增多少 Paper"
+rubric = "Answer in Chinese. Score 1 only if the SQL counts paper_content rows added this month (whole library)."
+
+# The two hist-turns prompts above often route to chitchat (a router issue, not
+# the SQL agent's); these say "chat history" so the SQL agent is always reached.
+[[cases]]
+id = "hist-turns-history-en"
+expect_intent = "library_stats"
+prompt = "Look at my chat history: how many questions have I asked across all my chats?"
+rubric = "Score 1 only if the final SQL counts user messages (messages.role = 'user') in visible sessions (chat_sessions.internal = 0 AND deleted_at IS NULL). Counting every runs row, or not excluding the internal session, is wrong."
+
+[[cases]]
+id = "hist-turns-history-zh"
+expect_intent = "library_stats"
+prompt = "查一下我的聊天紀錄：我在所有對話裡總共問了幾個問題？"
+rubric = "Answer in Chinese. Score 1 only if the final SQL counts user messages (messages.role = 'user') in visible sessions (chat_sessions.internal = 0 AND deleted_at IS NULL). Counting every runs row, or not excluding the internal session, is wrong."
+
+# A compound question (live run 787 filtered the sessions but not the messages).
+[[cases]]
+id = "hist-compound-en"
+expect_intent = "library_stats"
+prompt = "Show me my PaperHub library stats: how many chat sessions do I have, and how many questions have I asked in total?"
+rubric = "Score 1 only if BOTH counts keep only visible sessions: the session count filters chat_sessions internal = 0 AND deleted_at IS NULL, and the question count counts messages.role = 'user' joined to chat_sessions with the same filter. A message count without that join is wrong."

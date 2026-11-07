@@ -15,6 +15,8 @@ from paperhub.feedback.g1_inbox import (
     NotANegative,
     append_inbox,
     build_inbox_lines,
+    case_id,
+    inbox_case_ids,
 )
 from paperhub.feedback.models import (
     ExportPreview,
@@ -44,6 +46,7 @@ from paperhub.feedback.repo import (
     list_explicit_for_session,
     list_presets,
     list_queue,
+    rating_problem,
     run_exists,
     submit_queue,
     upsert_explicit,
@@ -60,8 +63,11 @@ _BAD_PATH_CHARS = ("/", "\\", ":", "\x00")
 async def put_run_feedback(run_id: int, body: FeedbackPut) -> RunFeedback | None:
     """Save the answer's explicit feedback; ``polarity: null`` clears it."""
     async with open_db(load_settings().db_path) as conn:
-        if not await run_exists(conn, run_id):
-            raise HTTPException(404, f"run {run_id} not found")
+        if body.polarity is None:  # clearing needs no valid target
+            if not await run_exists(conn, run_id):
+                raise HTTPException(404, f"run {run_id} not found")
+        elif (problem := await rating_problem(conn, run_id)) is not None:
+            raise HTTPException(*problem)
         allowed = await allowed_reasons(conn)
         unknown = [r for r in body.reasons if r not in allowed]
         if unknown:
@@ -85,6 +91,17 @@ async def get_run_guess(run_id: int) -> FeedbackGuess:
 async def list_session_feedback(session_id: int = Query(...)) -> list[RunFeedback]:
     async with open_db(load_settings().db_path) as conn:
         return await list_explicit_for_session(conn, session_id)
+
+
+@router.get("/sessions/{session_id}/count")
+async def get_session_feedback_count(session_id: int) -> dict[str, int]:
+    """How many feedback rows (thumbs and reviewer rows) hang off the chat's
+    runs: deleting the chat deletes them and any training data from them."""
+    async with open_db(load_settings().db_path) as conn, conn.execute(
+        "SELECT COUNT(*) FROM feedback f JOIN runs r ON r.id = f.run_id "
+        "WHERE r.session_id = ?", (session_id,),
+    ) as cur:
+        return {"count": int((await cur.fetchone() or (0,))[0])}
 
 
 @router.get("/queue", response_model=list[QueueItem])
@@ -121,8 +138,13 @@ async def get_summary() -> FeedbackSummary:
 
 @router.get("/cases", response_model=list[FeedbackCase])
 async def get_cases(stage: Annotated[Stage | None, Query()] = None) -> list[FeedbackCase]:
-    async with open_db(load_settings().db_path) as conn:
-        return await list_cases(conn, stage)
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        cases = await list_cases(conn, stage)
+    sent = await asyncio.to_thread(inbox_case_ids, settings.exports_dir / INBOX_NAME)
+    for c in cases:
+        c.in_g1_inbox = case_id(c.feedback_id, c.run_id) in sent
+    return cases
 
 
 @router.get("/presets", response_model=list[Preset])
@@ -164,7 +186,7 @@ async def post_g1_inbox(body: G1InboxRequest) -> G1InboxResult:
     appended = await asyncio.to_thread(
         append_inbox, settings.exports_dir / INBOX_NAME, lines,
     )
-    return G1InboxResult(appended=appended)
+    return G1InboxResult(appended=appended, already=len(lines) - appended)
 
 
 def _export_query(
@@ -192,6 +214,8 @@ def _validate_days(opts: ExportRequest) -> None:
             raise HTTPException(
                 422, f"{name} must be an ISO date (YYYY-MM-DD, UTC day)",
             ) from None
+    if opts.since and opts.until and utc_day(opts.since) > utc_day(opts.until):
+        raise HTTPException(422, "since must not be after until")
 
 
 @router.get("/export/preview", response_model=ExportPreview)
@@ -216,6 +240,8 @@ async def post_export(body: ExportRequest) -> ExportResult:
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         plan = await build_export(conn, body)
+    if not plan.sft and not plan.dpo:
+        raise HTTPException(422, "nothing to export: no sample matches these options")
     out = await asyncio.to_thread(write_export, plan, settings.exports_dir)
     return ExportResult(
         dir=out.name, files=list(EXPORT_FILES), sft=len(plan.sft), dpo=len(plan.dpo),

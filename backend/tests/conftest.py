@@ -17,6 +17,8 @@ os.environ.setdefault("PAPERHUB_BOOT_BANNER", "0")
 os.environ.setdefault("PAPERHUB_MARKER_WORKER", "0")
 # Same for the arXiv metadata backfill loop (would hit the real arXiv API).
 os.environ.setdefault("PAPERHUB_ARXIV_BACKFILL", "0")
+# And the Semantic Scholar citation-edge loop.
+os.environ.setdefault("PAPERHUB_CITATION_EDGES", "0")
 # And the persistent log file (would write into the real workspace).
 os.environ.setdefault("PAPERHUB_LOG_FILE", "0")
 # And the background feedback reviewer (would call a real LLM after a keyword

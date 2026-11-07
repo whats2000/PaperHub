@@ -3,6 +3,7 @@ import { ChevronDown, MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Collapsible } from "@/components/ui/collapsible";
+import { cleanForPreview } from "@/lib/answerPreview";
 import { CHUNK_MARKER_RE } from "@/lib/chunkCitations";
 import { prefersReducedMotion, revealInScroll } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -65,7 +66,7 @@ function Clamped({
   className,
 }: {
   text: string;
-  lines: 2 | 3;
+  lines: 2 | 3 | 6;
   className?: string;
 }) {
   const { t } = useTranslation("feedback");
@@ -122,10 +123,10 @@ function Clamped({
         ref={tx}
         className={cn(
           "whitespace-pre-wrap",
-          !open && (lines === 2 ? "line-clamp-2" : "line-clamp-3"),
+          !open && (lines === 2 ? "line-clamp-2" : lines === 3 ? "line-clamp-3" : "line-clamp-6"),
         )}
       >
-        {withCites(text)}
+        {withCites(cleanForPreview(text))}
       </div>
       {(truncated || open) && (
         <button
@@ -230,7 +231,7 @@ export function ConversationContext({
         {item.question}
       </div>
       <div className={labelCls}>{t("queue.questioned")}</div>
-      <Clamped text={item.answer} lines={3} className={assistantCls} />
+      <Clamped text={item.answer} lines={6} className={assistantCls} />
 
       {item.flagged !== "" && (
         <>

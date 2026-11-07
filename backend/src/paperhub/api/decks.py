@@ -164,12 +164,19 @@ def _exists(path: str) -> bool:
 
 
 @router.get("/sessions/{session_id}/deck")
-async def get_deck_meta(session_id: int) -> dict[str, Any]:
-    """Return deck metadata for the session, 404 if no deck exists."""
+async def get_deck_meta(session_id: int, optional: bool = False) -> dict[str, Any] | None:
+    """Return deck metadata for the session, 404 if no deck exists.
+
+    With ``optional=true`` a missing deck is ``200 null`` instead: the
+    frontend probes every chat it opens, most have no deck, and a 404 there
+    logs a browser console error for a normal outcome.
+    """
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         deck = await get_deck(conn, session_id=session_id)
     if deck is None:
+        if optional:
+            return None
         raise HTTPException(status_code=404, detail="no deck for this session")
     return {
         "deck_id": deck.id,

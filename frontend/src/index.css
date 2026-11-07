@@ -113,6 +113,17 @@
     /* Feedback stage chart series (dataviz-validated vs --card, all pairs). */
     --viz-explicit: #2a78d6;
     --viz-implicit: #eb6834;
+    /* Ideas-graph domain slots (dataviz reference categorical 1-8; pairs in
+       src/lib/domainPalette.json passed validate_palette.js vs --card). */
+    --domain-1: #2a78d6;
+    --domain-2: #eb6834;
+    --domain-3: #1baf7a;
+    --domain-4: #eda100;
+    --domain-5: #e87ba4;
+    --domain-6: #008300;
+    --domain-7: #6250d6;
+    --domain-8: #e34948;
+    --hull-alpha: .12;
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -150,6 +161,15 @@
     --chart-5: oklch(0.269 0 0);
     --viz-explicit: #3987e5;
     --viz-implicit: #d95926;
+    --domain-1: #3987e5;
+    --domain-2: #d95926;
+    --domain-3: #199e70;
+    --domain-4: #c98500;
+    --domain-5: #d55181;
+    --domain-6: #008300;
+    --domain-7: #9085e9;
+    --domain-8: #e66767;
+    --hull-alpha: .2;
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);

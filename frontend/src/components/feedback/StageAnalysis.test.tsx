@@ -11,7 +11,7 @@ import { useChatStore } from "@/store/chat";
 import { useNavStore } from "@/store/nav";
 import type { FeedbackCase, FeedbackSummary, G1InboxRequest, PresetCreate } from "@/types/feedback";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 // Backend order is the fixed STAGES order; the page ranks by total.
 const summary: FeedbackSummary = {
@@ -32,6 +32,7 @@ const summary: FeedbackSummary = {
     { text: "Copied the table wrong", count: 3 },
     { text: "Too long", count: 1 },
   ],
+  unattributed: { explicit: 2, implicit: 0 },
 };
 
 const cases: Record<string, FeedbackCase[]> = {
@@ -207,6 +208,46 @@ describe("StageAnalysis", () => {
         .getAllByRole("checkbox")
         .every((b) => !(b as HTMLInputElement).checked),
     ).toBe(true);
+  });
+
+  it("marks cases already in the G1 inbox, leaves them out of the count and says when nothing is new", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API_BASE_URL}/feedback/cases`, () =>
+        HttpResponse.json(
+          (cases.citation ?? []).map((c) => ({ ...c, in_g1_inbox: c.feedback_id === 11 })),
+        ),
+      ),
+    );
+    render(<StageAnalysis refreshKey={0} />);
+    await within(await findDetail()).findByText("What causes model collapse?");
+    expect(within(detail()).getAllByText("In G1 inbox")).toHaveLength(1);
+    const boxes = within(detail()).getAllByRole("checkbox");
+    expect(boxes[0]).toBeDisabled();
+    expect((boxes[0] as HTMLInputElement).checked).toBe(false);
+    expect(within(detail()).getByRole("button", { name: /G1 to-label \(1\)/ })).toBeEnabled();
+    server.use(
+      http.post(`${API_BASE_URL}/feedback/g1-inbox`, () =>
+        HttpResponse.json({ appended: 0, already: 1 }),
+      ),
+    );
+    await user.click(within(detail()).getByRole("button", { name: /G1 to-label \(1\)/ }));
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(
+        "Nothing new: these cases are already in the G1 to-label inbox.",
+      ),
+    );
+    // Now both are in the inbox: nothing left to send.
+    expect(within(detail()).getByRole("button", { name: /G1 to-label \(0\)/ })).toBeDisabled();
+  });
+
+  it("counts negatives no stage claims in their own row and explains the counting", async () => {
+    render(<StageAnalysis refreshKey={0} />);
+    const row = await screen.findByTestId("no-stage-row");
+    expect(row).toHaveTextContent("No stage (other / no reason)");
+    expect(row).toHaveTextContent("2");
+    expect(screen.getByText(/counted once in every stage/)).toBeInTheDocument();
+    expect(screen.getByText(/Negative answers \(explicit 12/)).toBeInTheDocument();
   });
 
   it("toasts the appended count the backend reports", async () => {

@@ -46,9 +46,9 @@ async def test_inbox_line_carries_router_state_and_is_idempotent(
     fid, rid = await _seed(conn, ["wrong_route", "factual"])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid]})
-        assert r.status_code == 200 and r.json() == {"appended": 1}
+        assert r.status_code == 200 and r.json() == {"appended": 1, "already": 0}
         r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid, fid]})
-        assert r.json() == {"appended": 0}
+        assert r.json() == {"appended": 0, "already": 1}
     assert _inbox(tmp_path) == [{
         "case_id": f"fb{fid}-run{rid}", "stage_hint": "router",
         "reasons": ["wrong_route", "factual"],
@@ -68,7 +68,7 @@ async def test_unknown_id_is_404_and_writes_nothing(
         assert not (tmp_path / "exports" / "g1-inbox.jsonl").exists()
         # a run with no router step still bridges, with empty recorded state
         r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid]})
-        assert r.json() == {"appended": 1}
+        assert r.json() == {"appended": 1, "already": 0}
     line = _inbox(tmp_path)[0]
     assert line["stage_hint"] == "citation" and line["variables"] == {}
 
@@ -98,7 +98,7 @@ async def test_corrupt_or_empty_reasons_give_null_hint(
     await conn.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid, fid2, fid3]})
-        assert r.status_code == 200 and r.json() == {"appended": 3}
+        assert r.status_code == 200 and r.json() == {"appended": 3, "already": 0}
     lines = _inbox(tmp_path)
     assert [ln["stage_hint"] for ln in lines] == [None, None, None]
     assert lines[2]["reasons"] == []
@@ -143,4 +143,24 @@ async def test_only_counted_negatives_bridge_all_or_nothing(
             assert r.status_code == 422, fid
         assert not (tmp_path / "exports" / "g1-inbox.jsonl").exists()
         r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [good, confirmed]})
-        assert r.json() == {"appended": 2}
+        assert r.json() == {"appended": 2, "already": 0}
+
+
+async def test_cases_say_which_are_already_in_the_inbox(
+    app_with_db: tuple[Any, aiosqlite.Connection], tmp_path: Path,
+) -> None:
+    app, conn = app_with_db
+    fid, _ = await _seed(conn, ["wrong_route"])
+    fid2, _ = await _seed(conn, ["factual"])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        cases = (await c.get("/feedback/cases")).json()
+        assert [x["in_g1_inbox"] for x in cases] == [False, False]
+        r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid]})
+        assert r.json() == {"appended": 1, "already": 0}
+        r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid, fid2]})
+        assert r.json() == {"appended": 1, "already": 1}
+        r = await c.post("/feedback/g1-inbox", json={"feedback_ids": [fid, fid2]})
+        assert r.json() == {"appended": 0, "already": 2}
+        cases = (await c.get("/feedback/cases")).json()
+        assert {x["feedback_id"]: x["in_g1_inbox"] for x in cases} == {
+            fid: True, fid2: True}

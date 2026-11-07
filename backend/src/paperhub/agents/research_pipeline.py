@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 import litellm
 
-from paperhub.agents._mcp_result import normalize_mcp_result
+from paperhub.agents._mcp_result import normalize_mcp_result, split_mcp_result
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.mcp.errors import MCPToolError, MCPUnavailableError
 from paperhub.mcp.registry import MCPRegistry
@@ -697,7 +697,7 @@ async def resolve_via_ss(
                 {"query": query, "request_kind": request.kind, "identity": identity_snapshot},
             )
             try:
-                hits = normalize_mcp_result(
+                hits, ss_meta = split_mcp_result(
                     await mcp_registry.call(
                         "papers.search_semantic_scholar",
                         {"query": query, "max_results": 5},
@@ -705,7 +705,7 @@ async def resolve_via_ss(
                 )
             except (MCPUnavailableError, MCPToolError) as exc:
                 step.mark_error(str(exc))
-                hits = []
+                hits, ss_meta = [], {}
             # SS's `arXiv:<id>` query hits the FREE-TEXT /paper/search endpoint,
             # which keyword-matches "arXiv" and returns junk first hits (e.g. a
             # paper literally titled "arXiv") — NOT an exact id lookup. So we
@@ -727,9 +727,10 @@ async def resolve_via_ss(
             ) if isinstance(hits, list) else None
             if matched is not None:
                 pid = str(matched["paper_id"])
-                step.record_result(
-                    {"hits": len(hits), "picked": pid, "top": hits[:5], "source": "ss_by_arxiv_id"},
-                )
+                step.record_result({
+                    "hits": len(hits), "picked": pid, "top": hits[:5],
+                    "source": "ss_by_arxiv_id", "_meta": ss_meta,
+                })
                 return ResolvedPaper(
                     request=request, identity=identity, paper_id=pid, meta=matched,
                 )
@@ -760,6 +761,7 @@ async def resolve_via_ss(
                 }
                 step.record_result(
                     {
+                        "_meta": ss_meta,
                         "hits": 0,
                         "top": [],
                         "source": "arxiv_id_unverified_emitted",
@@ -782,6 +784,7 @@ async def resolve_via_ss(
             }
             step.record_result(
                 {
+                    "_meta": ss_meta,
                     "hits": 0,
                     "top": [],
                     "source": "verified_via_arxiv_api",
@@ -807,7 +810,7 @@ async def resolve_via_ss(
             {"query": query, "request_kind": request.kind, "identity": identity_snapshot},
         )
         try:
-            hits = normalize_mcp_result(
+            hits, ss_meta = split_mcp_result(
                 await mcp_registry.call(
                     "papers.search_semantic_scholar",
                     {"query": query, "max_results": 5},
@@ -817,18 +820,22 @@ async def resolve_via_ss(
             step.mark_error(str(exc))
             return None
         if not isinstance(hits, list) or not hits:
-            step.record_result({"hits": 0, "top": [], "source": "ss_by_title"})
+            step.record_result(
+                {"hits": 0, "top": [], "source": "ss_by_title", "_meta": ss_meta},
+            )
             return None
         top = hits[0]
         pid = top.get("paper_id")
         if not isinstance(pid, str):
-            step.record_result(
-                {"hits": len(hits), "error": "missing_paper_id", "top": hits[:5]},
-            )
+            step.record_result({
+                "hits": len(hits), "error": "missing_paper_id", "top": hits[:5],
+                "_meta": ss_meta,
+            })
             return None
-        step.record_result(
-            {"hits": len(hits), "picked": pid, "top": hits[:5], "source": "ss_by_title"},
-        )
+        step.record_result({
+            "hits": len(hits), "picked": pid, "top": hits[:5],
+            "source": "ss_by_title", "_meta": ss_meta,
+        })
     return ResolvedPaper(
         request=request, identity=identity, paper_id=pid, meta=top,
     )

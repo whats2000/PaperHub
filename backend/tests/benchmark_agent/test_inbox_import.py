@@ -145,3 +145,25 @@ def test_export_steps_review_target_is_the_verdict_only(tmp_path: Path) -> None:
     assert "Q?" in msgs[1]["content"]
     assert json.loads(msgs[2]["content"]) == {
         "verdict": "confirmed", "reasons": ["factual"], "doubt": "d"}
+
+
+def test_ideation_import_keeps_only_the_latest_outcome_per_idea(tmp_path: Path) -> None:
+    """``idea<id>-<status>`` lines are appended per status change; the LAST
+    line of an idea wins, so a saved line superseded by a later failed one is
+    not imported as a positive."""
+    vars_ = {"problem": "p", "tried": "", "cards_xml": "<card/>", "rejected_xml": "",
+             "mode": "problem"}
+
+    def line(case_id: str, expect: dict) -> str:
+        return json.dumps({"case_id": case_id, "stage_hint": "ideation",
+                           "variables": vars_, "observed": {}, "expect": expect})
+
+    inbox = tmp_path / "inbox.jsonl"
+    inbox.write_text("\n".join([
+        line("idea5-saved", {"source_doc": 1}),
+        line("idea6-saved", {"source_doc": 2}),
+        line("idea5-failed", {}),
+    ]) + "\n", encoding="utf-8")
+    cases, skipped, invalid = corpus.import_inbox(inbox, "ideation")
+    assert [c.case_id for c in cases] == ["idea6-saved"]
+    assert skipped == 2 and invalid == 0  # superseded saved + unlabelled failed

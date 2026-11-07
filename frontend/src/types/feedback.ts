@@ -89,10 +89,16 @@ export interface OtherReason {
   text: string;
   count: number;
 }
+/** Negative answers whose reasons map to no stage (only "other", or none). */
+export interface Unattributed {
+  explicit: number;
+  implicit: number;
+}
 export interface FeedbackSummary {
   kpis: Kpis;
   stages: StageSummary[];
   other_reasons: OtherReason[];
+  unattributed?: Unattributed;
 }
 export interface FeedbackCase {
   feedback_id: number;
@@ -101,6 +107,8 @@ export interface FeedbackCase {
   question: string;
   kind: "explicit" | "implicit";
   created_at: string;
+  /** Already appended to the G1 to-label inbox. */
+  in_g1_inbox?: boolean;
 }
 export interface PresetCreate {
   label: string;
@@ -115,6 +123,8 @@ export interface G1InboxRequest {
 }
 export interface G1InboxResult {
   appended: number;
+  /** Requested cases that were already in the inbox. */
+  already?: number;
 }
 export interface ExportPreview {
   sft: number;
@@ -127,7 +137,7 @@ export interface ExportRequest {
   since?: string | null;
   until?: string | null;
   model?: string | null;
-  cited_only: boolean;
+  cited_only?: boolean;
 }
 export interface ExportResult {
   dir: string;

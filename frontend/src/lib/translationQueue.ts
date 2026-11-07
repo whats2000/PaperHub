@@ -20,12 +20,24 @@ export interface TranslationQueueOptions {
   batchSize?: number;
 }
 
+/** What the reader may want to act on: keys whose last result was
+ *  `unavailable`, and whether the full-paper background run is paused. */
+export interface TranslationQueueStatus {
+  failed: number;
+  paused: boolean;
+}
+
 export interface TranslationQueue {
   setBlocks: (keysInOrder: string[], textByKey: Record<string, string>) => void;
   setVisible: (keys: string[]) => void;
   onResult: (cb: (r: TranslateResult) => void) => () => void;
   /** Release keys so they can be requested again (e.g. after `unavailable`). */
   retry: (keys: string[]) => void;
+  /** Release every key whose last result was `unavailable` (and resume a
+   *  paused background run); returns the released keys. */
+  retryFailed: () => string[];
+  /** Called whenever the failed count or the paused flag changes. */
+  onStatus: (cb: (s: TranslationQueueStatus) => void) => () => void;
   /** Re-send keys with `force: true` (re-translate with current terminology),
    *  ahead of other work. If the forced request fails, the key's last good
    *  result is re-emitted, flagged `stale_terminology`, so text never blanks. */
@@ -64,6 +76,10 @@ export function createTranslationQueue(
   let seq = 0;
   const forcedAfter = new Map<string, number>();
   const listeners = new Set<(r: TranslateResult) => void>();
+  const statusListeners = new Set<(s: TranslationQueueStatus) => void>();
+  // Keys whose last emitted result was unavailable.
+  const failed = new Set<string>();
+  let lastStatus: TranslationQueueStatus = { failed: 0, paused: false };
   let inFlight = 0;
   let disposed = false;
   // Consecutive batches whose every key came back unavailable (or threw).
@@ -123,8 +139,20 @@ export function createTranslationQueue(
     }
   };
 
+  const isPaused = () =>
+    fullPaper && failStreak >= BACKGROUND_FAIL_LIMIT && order.some((k) => !claimed.has(k));
+  const reportStatus = () => {
+    if (disposed) return;
+    const next = { failed: failed.size, paused: isPaused() };
+    if (next.failed === lastStatus.failed && next.paused === lastStatus.paused) return;
+    lastStatus = next;
+    statusListeners.forEach((cb) => cb(next));
+  };
+
   const emit = (r: TranslateResult) => {
     if (disposed) return;
+    if (r.status === "ok" && r.text !== null) failed.delete(r.key);
+    else failed.add(r.key);
     listeners.forEach((cb) => {
       try {
         cb(r);
@@ -176,6 +204,7 @@ export function createTranslationQueue(
       .filter((k) => !got.has(k) && !superseded(k))
       .forEach((k) => emit(settle(unavailable(k), force)));
     pump();
+    reportStatus();
   };
 
   return {
@@ -192,11 +221,26 @@ export function createTranslationQueue(
       }
       visible = keys;
       pump();
+      reportStatus();
     },
     retry(keys) {
       failStreak = 0;
       keys.forEach((k) => claimed.delete(k));
       pump();
+      reportStatus();
+    },
+    retryFailed() {
+      const keys = [...failed];
+      failed.clear();
+      failStreak = 0;
+      keys.forEach((k) => claimed.delete(k));
+      pump();
+      reportStatus();
+      return keys;
+    },
+    onStatus(cb) {
+      statusListeners.add(cb);
+      return () => statusListeners.delete(cb);
     },
     retranslate(keys) {
       keys.forEach((k) => {
@@ -213,6 +257,7 @@ export function createTranslationQueue(
     dispose() {
       disposed = true;
       listeners.clear();
+      statusListeners.clear();
     },
   };
 }

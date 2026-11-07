@@ -31,6 +31,7 @@ from paperhub.feedback.models import (
     RunFeedback,
     Stage,
     StageSummary,
+    Unattributed,
 )
 from paperhub.feedback.signals import guess_reasons
 
@@ -40,11 +41,68 @@ async def run_exists(conn: aiosqlite.Connection, run_id: int) -> bool:
         return await cur.fetchone() is not None
 
 
+async def rating_problem(conn: aiosqlite.Connection, run_id: int) -> tuple[int, str] | None:
+    """Why ``run_id`` cannot be rated, as ``(http status, detail)``; ``None``
+    when it is a finished chat answer with an assistant message. An errored
+    chat run still counts: its stored error reply is what the user saw."""
+    async with conn.execute(
+        "SELECT status, routing_decision_json FROM runs WHERE id = ?", (run_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return 404, f"run {run_id} not found"
+    status, routing_raw = row
+    if status not in ("ok", "error"):
+        return 409, f"run {run_id} has not finished ({status})"
+    try:
+        routing = json.loads(routing_raw) if routing_raw else {}
+    except ValueError:
+        routing = {}
+    if not isinstance(routing, dict):
+        routing = {}
+    if routing.get("intent") == "feedback_review" or "ideation_mode" in routing:
+        return 422, f"run {run_id} is not a chat answer"
+    async with conn.execute(
+        "SELECT 1 FROM messages WHERE run_id = ? AND role = 'assistant' LIMIT 1",
+        (run_id,),
+    ) as cur:
+        if await cur.fetchone() is None:
+            return 422, f"run {run_id} has no assistant answer"
+    return None
+
+
 async def allowed_reasons(conn: aiosqlite.Connection) -> set[str]:
     """Built-in reasons + promoted preset labels + ``"other"``."""
     async with conn.execute("SELECT label FROM feedback_presets") as cur:
         presets = {str(r[0]) for r in await cur.fetchall()}
     return {*REASONS, *presets, "other"}
+
+
+_SUPERSEDE_SET = (
+    "UPDATE feedback SET status = 'final', verdict = 'rejected', "
+    "reasons_json = '[]', updated_at = datetime('now') "
+)
+_SUPERSEDED = (
+    "WHERE kind = 'implicit' AND status = 'needs_confirmation' AND EXISTS "
+    "(SELECT 1 FROM feedback e WHERE e.run_id = feedback.run_id "
+    "AND e.kind = 'explicit')"
+)
+
+
+async def resolve_superseded(conn: aiosqlite.Connection, dry_run: bool = False) -> int:
+    """Close every pending reviewer item whose run the user rated explicitly:
+    the thumbs is the user's answer, so the item leaves the queue as
+    ``final`` + ``rejected`` (never ``confirmed``, which would count as a
+    negative). Idempotent; returns the number of rows closed (or that would
+    be, with ``dry_run``)."""
+    if dry_run:
+        async with conn.execute(
+            "SELECT COUNT(*) FROM feedback " + _SUPERSEDED,
+        ) as cur:
+            return int((await cur.fetchone() or (0,))[0])
+    async with write_transaction(conn):
+        cur2 = await conn.execute(_SUPERSEDE_SET + _SUPERSEDED)
+    return int(cur2.rowcount)
 
 
 async def upsert_explicit(
@@ -67,6 +125,11 @@ async def upsert_explicit(
                 (run_id,),
             )
             return
+        # The thumbs answers any pending reviewer question about this run.
+        await conn.execute(
+            _SUPERSEDE_SET + "WHERE run_id = ? AND kind = 'implicit' "
+            "AND status = 'needs_confirmation'", (run_id,),
+        )
         if polarity == "up":
             reasons, other_text = [], None
         reasons = list(dict.fromkeys(reasons))
@@ -348,6 +411,7 @@ async def build_summary(
     stage_implicit: Counter[str] = Counter()
     weekly: dict[str, list[int]] = {st: [0, 0, 0, 0] for st in STAGES}
     other: Counter[str] = Counter()
+    unattributed = {"explicit": 0, "implicit": 0}
     for run_id, kind, polarity, reasons_json, other_text, created_at in rows:
         runs.add(int(run_id))
         if kind == "explicit":
@@ -364,7 +428,10 @@ async def build_summary(
                 bucket = week_starts.index(m)
         except ValueError:
             pass
-        for st in _row_stages(reasons, presets):
+        stages_hit = _row_stages(reasons, presets)
+        if not stages_hit:
+            unattributed[str(kind)] += 1
+        for st in stages_hit:
             (stage_explicit if kind == "explicit" else stage_implicit)[st] += 1
             if bucket is not None:
                 weekly[st][bucket] += 1
@@ -393,6 +460,7 @@ async def build_summary(
             OtherReason(text=t, count=c)
             for t, c in sorted(other.items(), key=lambda kv: (-kv[1], kv[0]))
         ],
+        unattributed=Unattributed(**unattributed),
     )
 
 

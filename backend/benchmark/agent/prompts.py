@@ -10,6 +10,7 @@ adopting a winner = copy its YAML back into the registry (a separate step).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -24,6 +25,18 @@ def load_variant(stage: str, version: str, *, prompts_dir: str | Path) -> tuple[
             f"or seed it from the registry's {stage}_{version}.yaml")
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return str(data["system"]), str(data["user"])
+
+
+def load_variant_params(stage: str, version: str, *, prompts_dir: str | Path) -> dict[str, Any]:
+    """The variant's optional ``params:`` mapping — extra provider kwargs for
+    every call (e.g. ``reasoning_effort: low``), so a call setting is swept
+    like a prompt variant. ``{}`` when the YAML has none."""
+    path = Path(prompts_dir) / stage / f"{version}.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    params = data.get("params") or {}
+    if not isinstance(params, dict):
+        raise ValueError(f"{path}: params must be a mapping")
+    return dict(params)
 
 
 def list_variants(stage: str, *, prompts_dir: str | Path) -> list[str]:

@@ -23,6 +23,7 @@ import {
   type OtherReason,
   type Stage,
   type StageSummary,
+  type Unattributed,
 } from "@/types/feedback";
 
 const SWAP_MS = 130;
@@ -97,17 +98,45 @@ function Delta({ d }: { d: number }) {
   );
 }
 
+/** The "no stage" row: negatives whose reasons point at no stage. Not a
+ * stage, so it has no cases pane and is not selectable. */
+function NoStageRow({ u, max }: { u: Unattributed; max: number }) {
+  const { t } = useTranslation("feedback");
+  return (
+    <div
+      data-testid="no-stage-row"
+      className="grid grid-cols-[minmax(7rem,10rem)_1fr_2.25rem_auto] items-center gap-3 px-2 py-2 text-[13px] text-muted-foreground sm:grid-cols-[minmax(7rem,10rem)_1fr_2.25rem_60px_5.5rem]"
+    >
+      <span className="truncate" title={t("analysis.noStageHint")}>
+        {t("analysis.noStage")}
+      </span>
+      <div className="py-1">
+        <StackedBar
+          max={max}
+          segments={[
+            { key: "explicit", value: u.explicit, color: VIZ_EXPLICIT },
+            { key: "implicit", value: u.implicit, color: VIZ_IMPLICIT },
+          ]}
+        />
+      </div>
+      <span className="text-right tabular-nums">{u.explicit + u.implicit}</span>
+    </div>
+  );
+}
+
 function StageList({
   stages,
+  unattributed,
   selected,
   onSelect,
 }: {
   stages: StageSummary[];
+  unattributed: Unattributed;
   selected: Stage | undefined;
   onSelect: (s: Stage) => void;
 }) {
   const { t } = useTranslation("feedback");
-  const max = Math.max(1, ...stages.map(total));
+  const max = Math.max(1, ...stages.map(total), unattributed.explicit + unattributed.implicit);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -172,12 +201,19 @@ function StageList({
             </div>
           );
         })}
+        <NoStageRow u={unattributed} max={max} />
       </div>
     </TooltipProvider>
   );
 }
 
-function StageTable({ stages }: { stages: StageSummary[] }) {
+function StageTable({
+  stages,
+  unattributed,
+}: {
+  stages: StageSummary[];
+  unattributed: Unattributed;
+}) {
   const { t } = useTranslation("feedback");
   const th =
     "border-b border-border px-1 py-1.5 text-left font-medium whitespace-nowrap text-muted-foreground";
@@ -206,6 +242,14 @@ function StageTable({ stages }: { stages: StageSummary[] }) {
               <td className={td}>{signed(s.delta)}</td>
             </tr>
           ))}
+          <tr className="text-muted-foreground">
+            <td className="border-b border-border px-1 py-1.5">{t("analysis.noStage")}</td>
+            <td className={td}>{unattributed.explicit}</td>
+            <td className={td}>{unattributed.implicit}</td>
+            <td className={td}>{unattributed.explicit + unattributed.implicit}</td>
+            <td className={td}>—</td>
+            <td className={td}>—</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -372,6 +416,7 @@ export function StageAnalysis({ refreshKey }: { refreshKey: number }) {
   const selected = picked ?? top;
   const detail = useSwap(selected);
   const view = useSwap(table);
+  const unattributed = summary?.unattributed ?? { explicit: 0, implicit: 0 };
   const shownStage = ranked.find((s) => s.stage === detail.shown);
 
   if (!summary) {
@@ -414,11 +459,17 @@ export function StageAnalysis({ refreshKey }: { refreshKey: number }) {
           <div className="mb-2.5 text-xs text-muted-foreground">{t("analysis.hint")}</div>
           <div className={swapClass(view.fading)}>
             {view.shown ? (
-              <StageTable stages={ranked} />
+              <StageTable stages={ranked} unattributed={unattributed} />
             ) : (
-              <StageList stages={ranked} selected={selected} onSelect={setPicked} />
+              <StageList
+                stages={ranked}
+                unattributed={unattributed}
+                selected={selected}
+                onSelect={setPicked}
+              />
             )}
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">{t("analysis.stageNote")}</p>
           <div className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <Swatch color={VIZ_EXPLICIT} />

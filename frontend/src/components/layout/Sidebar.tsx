@@ -24,7 +24,7 @@ import { AccountMenu } from "@/components/layout/AccountMenu";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesPanel";
 import { usePresence } from "@/hooks/usePresence";
-import { deleteBackendSession, restoreBackendSession } from "@/lib/api";
+import { deleteBackendSession, getSessionFeedbackCount, restoreBackendSession } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { groupSessionsByFork } from "@/lib/sessionTree";
 import { useChatStore } from "@/store/chat";
@@ -75,6 +75,12 @@ export function Sidebar() {
     if (!removed) return;
 
     const backendSessionId = removed.backend_session_id;
+    // Deleting a chat takes its feedback (and the training data built from it)
+    // out of the analysis and exports: say so when there is any.
+    const feedbackCount: Promise<number> =
+      backendSessionId != null
+        ? getSessionFeedbackCount(backendSessionId).catch(() => 0)
+        : Promise.resolve(0);
 
     // Delete authoritatively + immediately so the chat is gone on every
     // device right away (empty sessions are hard-deleted server-side; ones
@@ -89,8 +95,17 @@ export function Sidebar() {
       });
     }
 
-    toast(t("sessionToast.deleted"), {
-      description: removed.title,
+    void feedbackCount.then((nFeedback) => toast(t("sessionToast.deleted"), {
+      description:
+        nFeedback > 0 ? (
+          <span>
+            {removed.title}
+            <br />
+            {t("sessionToast.feedbackNote", { count: nFeedback })}
+          </span>
+        ) : (
+          removed.title
+        ),
       action: {
         label: t("sessionToast.undo"),
         onClick: () => {
@@ -109,8 +124,8 @@ export function Sidebar() {
           }
         },
       },
-      duration: 5000,
-    });
+      duration: nFeedback > 0 ? 9000 : 5000,
+    }));
   };
 
   const isMac =
@@ -370,7 +385,19 @@ export function Sidebar() {
                                   aria-hidden
                                 />
                               )}
+                              {s.idea_id != null && (
+                                <Lightbulb
+                                  data-testid={`idea-marker-${s.id}`}
+                                  className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                                  aria-hidden
+                                />
+                              )}
                               <span className="truncate">{s.title}</span>
+                              {s.idea_id != null && (
+                                <span className="sr-only">
+                                  {t("sidebar.fromIdea")}
+                                </span>
+                              )}
                             </span>
                           </button>
                           <button

@@ -1,7 +1,10 @@
 {
   "pill": {
     "toggle": "論文を翻訳",
-    "language": "翻訳先の言語：{{language}}"
+    "language": "翻訳先の言語：{{language}}",
+    "retryFailed_one": "翻訳に失敗した {{count}} 段落を再試行",
+    "retryFailed_other": "翻訳に失敗した {{count}} 段落を再試行",
+    "resume": "論文の残りの翻訳を再開"
   },
   "menu": {
     "heading": "翻訳先の言語",
@@ -14,6 +17,7 @@
   "disabled": {
     "no_blocks": "この PDF にはまだ段落レイアウトがありません",
     "no_inline_math_llm": "この PDF の数式を読み取れなかったため、翻訳はオフです。Marker の LLM モデルを設定し、この PDF を再処理してください。",
-    "load_failed": "この論文を読み込めなかったため、翻訳できません"
+    "load_failed": "この論文を読み込めなかったため、翻訳できません",
+    "no_text": "この論文の本文は段落として組めないため、翻訳できません"
   }
 }

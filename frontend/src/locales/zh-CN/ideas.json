@@ -1,0 +1,216 @@
+{
+  "header": {
+    "library": "文献库 {{count}} 份",
+    "libraryPrivate": "文献库 {{count}} 份（含 {{private}} 份私密文档）"
+  },
+  "view": {
+    "aria": "视图",
+    "graph": "图谱",
+    "cards": "卡片"
+  },
+  "switcher": {
+    "aria": "问题：{{label}}",
+    "menu": "问题",
+    "explore": "自由探索",
+    "exploreSub": "文献库内的跨领域组合",
+    "yourProblems": "你的问题",
+    "ideaCount_one": "{{count}} 个 idea",
+    "ideaCount_other": "{{count}} 个 idea",
+    "generating": "生成中…",
+    "new": "描述新问题",
+    "listFailed": "无法加载问题",
+    "retry": "重试"
+  },
+  "entry": {
+    "label": "问题",
+    "placeholder": "描述新的问题：卡在哪里、限制条件",
+    "tried": "已经试过的方法",
+    "triedPlaceholder": "试过哪些做法、为什么不够好（选填）",
+    "submit": "找跨领域 idea",
+    "failed": "无法创建问题",
+    "counter": "{{count}}/{{max}}"
+  },
+  "filter": {
+    "aria": "按状态筛选 idea",
+    "active": "进行中",
+    "saved": "收藏",
+    "trying": "尝试中",
+    "done": "有结果",
+    "dismissed": "已排除"
+  },
+  "state": {
+    "generating": "正在为你的问题寻找跨领域 idea…",
+    "generatingSub": "正在阅读文献库的机制卡，并跨领域配对。",
+    "failed": "这个问题的 idea 生成失败。",
+    "loadFailed": "无法加载 idea。",
+    "retry": "重试",
+    "emptyExplore": "还没有跨领域组合。",
+    "emptyProblem": "这个问题还没有 idea。",
+    "emptyHint": "文档按领域分组。点击文档即可查看或编辑它的领域。",
+    "summarising": "正在摘要你的文档 — {{ready}}/{{total}}",
+    "retryFailed": "无法重试这个问题",
+    "skipped_one": "有 {{count}} 份文档无法分析",
+    "skipped_other": "有 {{count}} 份文档无法分析",
+    "noRelevant": "你的文献库中没有与这个问题相关的内容。",
+    "noRelevantHint": "请将此主题的论文加入文献库，或换个方式描述问题后再试一次。"
+  },
+  "graph": {
+    "aria": "创意图谱",
+    "source": "来源",
+    "target": "目标",
+    "problem": "你的问题",
+    "private": "私密文件",
+    "ideaLabel": "{{title}}：{{source}} → {{target}}（{{status}}）",
+    "status": {
+      "new": "新的",
+      "saved": "收藏",
+      "trying": "尝试中",
+      "worked": "有效",
+      "failed": "无效",
+      "dismissed": "已排除"
+    }
+  },
+  "drawer": {
+    "aria": "详细信息",
+    "close": "关闭",
+    "ideaKind": "跨领域 idea · {{status}}",
+    "source": "机制来源",
+    "target": "应用目标",
+    "yourProblem": "你描述的问题",
+    "why": "为什么契合",
+    "note": "笔记",
+    "document": "文档",
+    "documentPrivate": "文档 · 私密",
+    "domains": "领域标签",
+    "relatedIdeas": "相关 idea",
+    "none": "暂无",
+    "domain": "领域",
+    "domainDocs": "文档（{{count}}）",
+    "problem": "你的问题",
+    "tried": "已尝试（不会再推荐）",
+    "triedNone": "未填写",
+    "problemIdeas": "这个问题的 idea（{{count}}）",
+    "from": "来自 {{title}}",
+    "missing": "该项目已不在图谱中。"
+  },
+  "zoom": {
+    "aria": "缩放",
+    "in": "放大",
+    "out": "缩小",
+    "fit": "回到全图"
+  },
+  "legend": {
+    "title": "图例",
+    "domains": "领域（颜色）",
+    "other": "其他",
+    "relation": "关系",
+    "citation": "引用",
+    "idea": "idea：来源 → 目标",
+    "status": "idea 状态",
+    "kept": "收藏／尝试中／有效",
+    "ended": "无效／已排除",
+    "document": "文档",
+    "size": "大小 = 相关 idea 数",
+    "otherHint": "前八个领域之外的领域共用此颜色"
+  },
+  "detail": {
+    "sections": "引用段落",
+    "openSection": "打开这个 idea 的对话，并在引用画布显示 {{section}}",
+    "status": "状态",
+    "statusAria": "Idea 状态",
+    "setStatus": {
+      "saved": "收藏",
+      "trying": "尝试中",
+      "worked": "有效",
+      "failed": "无效"
+    },
+    "statusToast": "状态改为「{{status}}」，已记录为构思反馈",
+    "statusFailed": "无法更新 idea",
+    "note": "笔记",
+    "notePlaceholder": "例如：已和导师讨论，下周做小规模实验",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "saveFailed": "笔记保存失败",
+    "openChat": "开聊天深入",
+    "continueChat": "继续对话",
+    "chatFailed": "无法打开对话",
+    "dismiss": "排除",
+    "dismissed": "已排除 · {{reasons}}",
+    "noReason": "未填原因",
+    "undo": "撤销",
+    "undoFailed": "无法撤销排除",
+    "newChat": "新对话",
+    "newChatHint": "就这个 idea 再开一个对话"
+  },
+  "dismiss": {
+    "title": "为什么不适用？",
+    "reasons": {
+      "already_tried": "已试过",
+      "not_feasible": "不可行",
+      "analogy_fails": "类比不成立",
+      "not_novel": "不够新",
+      "other": "其他"
+    },
+    "joiner": "、",
+    "notePlaceholder": "补充说明（选填）",
+    "noteLabel": "排除说明",
+    "hint": "排除原因会用来改进构思，同一个问题不会再推荐类似的 idea。",
+    "cancel": "取消",
+    "confirm": "确认排除",
+    "toast": "已排除「{{title}}」",
+    "failed": "无法排除 idea"
+  },
+  "domainEditor": {
+    "label": "领域标签（手动修改后，重新分析不会覆盖）",
+    "remove": "移除 {{name}}",
+    "openDomain": "改名或合并 {{name}}",
+    "addLabel": "添加领域",
+    "addPlaceholder": "添加领域…",
+    "create": "创建新领域「{{name}}」",
+    "suggestions": "领域建议",
+    "lastDomain": "每份文档至少要有一个领域",
+    "failed": "无法更新领域"
+  },
+  "domain": {
+    "rename": "改名",
+    "save": "保存",
+    "renamed": "已更新领域名称",
+    "mergeInto": "合并到",
+    "merge": "合并",
+    "merged": "已合并到 {{name}}",
+    "mergeHint": "这个领域的文档会归到选定的领域，这个领域会移除。",
+    "failed": "无法更新领域",
+    "nameTaken": "已有名为「{{name}}」的领域，要改为合并到它吗？"
+  },
+  "kanban": {
+    "explore": "自由探索：文献库内的跨领域组合",
+    "problem": "针对问题：{{text}}",
+    "empty": "没有 idea",
+    "to": "到",
+    "chats_one": "已开 {{count}} 个对话",
+    "chats_other": "已开 {{count}} 个对话",
+    "columns": {
+      "new": "新的",
+      "saved": "收藏",
+      "trying": "尝试中",
+      "done": "有结果",
+      "dismissed": "已排除"
+    }
+  },
+  "chat": {
+    "prefillProblem": "我们来深入讨论这个 idea：「{{title}}」。\n机制来源：「{{source}}」的 {{sourceSection}} 段落。\n我的问题：{{problem}}\n为什么可能适用：{{rationale}}\n要怎么把这个机制用到我的问题上？类比可能在哪里不成立？",
+    "prefillExplore": "我们来深入讨论这个 idea：「{{title}}」。\n机制来源：「{{source}}」的 {{sourceSection}} 段落。\n应用目标：「{{target}}」的 {{targetSection}} 段落。\n为什么可能适用：{{rationale}}\n这个机制要怎么移植过去？类比可能在哪里不成立？"
+  },
+  "explore": {
+    "run": "寻找新组合",
+    "running": "寻找中…",
+    "noNew": "这次没有新的组合",
+    "found_one": "找到 {{count}} 个新组合",
+    "found_other": "找到 {{count}} 个新组合",
+    "failed": "自由探索失败",
+    "overlay": "正在文献库中寻找跨领域组合…"
+  },
+  "section": {
+    "fullText": "全文"
+  }
+}

@@ -13,6 +13,7 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 _LOG = logging.getLogger("paperhub.paper_asset")
 
@@ -67,16 +68,60 @@ def write_paper_asset(asset: PaperAsset, source_dir: Path) -> None:
         encoding="utf-8")
 
 
+_FIGURE_FIELDS = ("id", "caption", "page", "section", "image_path")
+
+
+def _load(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+
+def _known_fields(
+    raw: object, fields: tuple[str, ...], origin: Path,
+) -> list[dict[str, Any]]:
+    """The entries of an asset json list, reduced to ``fields``.
+
+    Asset files written by other tools or older/experimental pipeline versions
+    may carry extra keys (``kind``, ``depth``); those are ignored. Entries
+    missing a field are skipped with a warning, so one odd entry never makes
+    the whole asset unreadable.
+    """
+    out: list[dict[str, Any]] = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict) or any(k not in x for k in fields):
+            _LOG.warning("skipping malformed entry in %s: %r", origin, x)
+            continue
+        out.append({k: x[k] for k in fields})
+    return out
+
+
+def _read_figures(raw: object, origin: Path) -> list[FigureAsset]:
+    """Usable figures: known fields only, and imageless figures
+    (``image_path == ""``, a TikZ figure never rasterised) are skipped."""
+    figs: list[FigureAsset] = []
+    for x in _known_fields(raw, _FIGURE_FIELDS, origin):
+        if not x["image_path"]:
+            _LOG.warning("skipping imageless figure %s in %s", x["id"], origin)
+            continue
+        figs.append(FigureAsset(**x))
+    return figs
+
+
 def read_paper_asset(source_dir: Path) -> PaperAsset | None:
     d = paper_asset_dir(source_dir)
     fjson = d / "figures.json"
     if not fjson.exists():
         return None
-    figs = [FigureAsset(**x) for x in json.loads(fjson.read_text(encoding="utf-8"))]
+    figs = _read_figures(json.loads(fjson.read_text(encoding="utf-8")), fjson)
     eqs_p = d / "equations.json"
-    eqs = [EquationAsset(**x) for x in json.loads(eqs_p.read_text(encoding="utf-8"))] if eqs_p.exists() else []
+    eqs = [
+        EquationAsset(**x)
+        for x in _known_fields(_load(eqs_p), ("id", "latex", "section"), eqs_p)
+    ]
     sec_p = d / "structure.json"
-    secs = [SectionAsset(**x) for x in json.loads(sec_p.read_text(encoding="utf-8"))] if sec_p.exists() else []
+    secs = [
+        SectionAsset(**x)
+        for x in _known_fields(_load(sec_p), ("name", "order"), sec_p)
+    ]
     return PaperAsset(figures=figs, equations=eqs, sections=secs)
 
 

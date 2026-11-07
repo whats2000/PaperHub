@@ -354,6 +354,9 @@ async def test_search_semantic_scholar_dispatches_with_http_mock(
     assert hits[0]["paper_id"] == "arxiv:2312.00001"
     assert hits[0]["title"] == "Mamba"
     assert hits[0]["arxiv_id"] == "2312.00001"
+    assert structured["_meta"]["http_status"] == 200
+    assert structured["_meta"]["count"] == 1
+    assert structured["_meta"]["query"] == "mamba state space"
 
 
 @respx.mock
@@ -394,6 +397,14 @@ async def test_find_related_papers_dispatches(
     related = structured["result"]
     assert isinstance(related, list)
     assert related[0]["arxiv_id"] == "2503.00001"
+    # CLAUDE.md meta-in-payload rule: transport facts travel in ``_meta``.
+    meta = structured["_meta"]
+    assert meta["source"] == "semantic_scholar"
+    assert meta["http_status"] == 200
+    assert meta["attempts"] == 1
+    assert meta["count"] == 1
+    assert meta["mode"] == "cited_by"
+    assert meta["url_path"].endswith("/paper/arXiv:2402.99999/citations")
     assert related[0]["title"] == "Follow-up"
 
 

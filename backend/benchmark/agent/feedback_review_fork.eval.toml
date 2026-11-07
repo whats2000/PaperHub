@@ -1,0 +1,16 @@
+# Per-agent eval sweep config (SRS §III-9) for the H2 fork reviewer prompt.
+# A fork review has no follow-up message (user_followup ""). Deterministic grade
+# = verdict accuracy; the `doubt` sentence is judged with the `pairwise` command.
+[eval]
+stage       = "feedback_review_fork"
+model       = "gemini/gemini-3.8-flash"   # deploy reviewer tier: PAPERHUB_FEEDBACK_REVIEW_MODEL defaults to the flagship (Round 4)
+reps        = 5
+backend     = "auto"
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+variants    = ["v11", "v13", "v14", "v15"]   # v11 = feedback_review_fork/v2 (baseline); v15 shipped as feedback_review_fork/v3 (cut passages); see prompts/feedback_review_fork/README.md
+concurrency = 4
+
+[[testsets]]
+name   = "fork"
+corpus = "benchmark/agent/corpus/feedback_review.fork.jsonl"

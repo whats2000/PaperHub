@@ -33,7 +33,6 @@
     "start": "Start confirming",
     "collapse": "Collapse",
     "question": "Were you saying the answer was wrong?",
-    "doubt": "Reviewer's doubt: {{doubt}}",
     "prev": "Previous (←)",
     "next": "Next (→)",
     "dotYes": "Item {{n}}: yes, the answer was wrong",
@@ -61,7 +60,8 @@
     "nextReply": "The system's next reply",
     "run": "run #{{id}}",
     "showFull": "Show full text",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "doubtLabel": "Reviewer's doubt"
   },
   "stage": {
     "router": "Routing",
@@ -76,7 +76,7 @@
     "kpi": {
       "answers": "Answers with feedback",
       "approval": "Approval rate (explicit feedback)",
-      "negatives": "Negatives (explicit {{explicit}} · implicit {{implicit}})",
+      "negatives": "Negative answers (explicit {{explicit}} · implicit {{implicit}})",
       "pending": "Waiting for your confirmation"
     },
     "title": "Where the system goes wrong most",
@@ -134,7 +134,12 @@
     "g1Hint": "Once labelled with the expected result, they become regression cases for \"{{stage}}\".",
     "g1Sent_one": "Added {{count}} case to the G1 to-label inbox.",
     "g1Sent_other": "Added {{count}} cases to the G1 to-label inbox.",
-    "g1Failed": "Couldn't send the cases to G1. Try again."
+    "g1Failed": "Couldn't send the cases to G1. Try again.",
+    "inInbox": "In G1 inbox",
+    "g1NoneNew": "Nothing new: these cases are already in the G1 to-label inbox.",
+    "noStage": "No stage (other / no reason)",
+    "noStageHint": "Negative answers whose reasons point to no stage, such as only \"Other reason\".",
+    "stageNote": "Counts are negative answers. An answer is counted once in every stage its reasons point to, so the stages can add up to more than the negatives total."
   },
   "export": {
     "title": "Export training data",
@@ -160,6 +165,30 @@
     "cancel": "Cancel",
     "go": "Export",
     "open": "Export training data",
-    "failed": "Couldn't export the training data. Try again."
+    "failed": "Couldn't export the training data. Try again.",
+    "rangeInvalid": "\"From\" is after \"To\".",
+    "nothing": "Nothing matches these options, so there is nothing to export."
+  },
+  "ideation": {
+    "title": "How good are the ideas?",
+    "hint": "Share of ideas you saved and of tried ideas that worked, plus why you dismissed the rest.",
+    "saveRate": "Saved",
+    "workedRate": "Worked",
+    "reasonsTitle": "Why ideas were dismissed",
+    "noReasons": "No dismissed ideas yet.",
+    "send": "Write to ideation eval data",
+    "help": "Idea outcomes (saved, worked, failed, dismissed) feed the ideation eval, so future prompt changes are judged on ideas you actually acted on.",
+    "sent": "Added {{count}} cases to the ideation eval data.",
+    "sendFailed": "Couldn't write the ideation eval data. Try again.",
+    "loadFailed": "Couldn't load ideation feedback.",
+    "retry": "Retry",
+    "loading": "Loading…",
+    "reason": {
+      "already_tried": "Already tried",
+      "not_feasible": "Not feasible",
+      "analogy_fails": "Analogy fails",
+      "not_novel": "Not novel",
+      "other": "Other"
+    }
   }
 }

@@ -49,8 +49,12 @@ class Settings:
     memory_conflict_model: str
     # Bilingual-reading translation (Plan H1; small tier).
     translate_model: str
-    # Plan H2 background reviewer of flagged answers (small tier).
+    # Plan H2 background reviewer of flagged answers (flagship tier: the small
+    # tier garbles ~12% of zh/ja doubts, see prompts/feedback_review_fork/README).
     feedback_review_model: str
+    # Plan H3 mechanism-card builder (small tier) + ideation proposer (flagship).
+    ideation_card_model: str
+    ideation_model: str
 
     # Per-call LLM request timeout (seconds). Bounds EVERY litellm completion so
     # a slow/unavailable provider can't ride the litellm default (~600 s) ×
@@ -67,6 +71,12 @@ class Settings:
     translate_full_paper: bool
     # Plan H2: review correction-like turns / forks in the background.
     feedback_review_enabled: bool
+    # Plan H3: reasoning-token cap of a problem-mode ideation call (0 = the
+    # provider default, unbounded — the default). Eval round 7: 2048 keeps
+    # recall but proposes fewer ideas and loses the judged comparison, so it
+    # is an opt-in latency trade; free exploration is never capped (its board
+    # recall collapses under a cap).
+    ideation_problem_thinking_budget: int
 
     # Days a soft-deleted chat session is retained before being permanently
     # purged (cascading its messages/runs/papers) at startup.
@@ -198,7 +208,9 @@ def load_settings() -> Settings:
             "PAPERHUB_MEMORY_CONFLICT_MODEL", small,
         ),
         translate_model=os.environ.get("PAPERHUB_TRANSLATE_MODEL") or small,
-        feedback_review_model=os.environ.get("PAPERHUB_FEEDBACK_REVIEW_MODEL") or small,
+        feedback_review_model=os.environ.get("PAPERHUB_FEEDBACK_REVIEW_MODEL") or flagship,
+        ideation_card_model=os.environ.get("PAPERHUB_IDEATION_CARD_MODEL") or small,
+        ideation_model=os.environ.get("PAPERHUB_IDEATION_MODEL") or flagship,
         llm_timeout_s=llm_timeout_s(),
 
         # 6. Agent tunables.
@@ -211,6 +223,9 @@ def load_settings() -> Settings:
         feedback_review_enabled=os.environ.get(
             "PAPERHUB_FEEDBACK_REVIEW", "1",
         ) not in ("0", "", "false", "False"),
+        ideation_problem_thinking_budget=int(
+            os.environ.get("PAPERHUB_IDEATION_PROBLEM_THINKING_BUDGET") or "0",
+        ),
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),

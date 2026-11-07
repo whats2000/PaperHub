@@ -27,6 +27,7 @@ from paperhub.pipelines.paper_asset import (
     paper_asset_dir,
     write_block_assets,
 )
+from paperhub.pipelines.section_names import is_heading_shaped, is_wrapped_continuation
 
 _TAG = re.compile(r"<[^>]+>")
 
@@ -50,14 +51,47 @@ def _build_section_name_map(blocks: list[MarkerBlock]) -> dict[str, str]:
 
     ``section_hierarchy`` on other blocks points at these ids, so this is how a
     figure/equation block recovers its owning section NAME.
+
+    Marker's layout model also files non-headings as SectionHeader: chart axis
+    tick runs, sub-figure labels ("(b) Reach with Cup"), and the second line
+    of a wrapped heading. A wrapped continuation (lowercase, short, right after
+    another header) is joined onto the header before it; any other text that
+    is not heading-shaped is left out, so its blocks keep the enclosing
+    section (``_resolve_section`` -> None -> the caller keeps the last one).
     """
     out: dict[str, str] = {}
+    prev_header: str | None = None  # id of the header block just before
     for b in blocks:
-        if b.block_type == "SectionHeader" and b.block_id:
-            name = strip_html(b.html)
-            if name:
-                out[b.block_id] = name
+        if b.block_type != "SectionHeader" or not b.block_id:
+            prev_header = None
+            continue
+        name = strip_html(b.html)
+        if not name:
+            prev_header = None
+            continue
+        if prev_header is not None and is_wrapped_continuation(name):
+            joined = f"{out[prev_header]} {name}"
+            for bid, v in list(out.items()):
+                if v == out[prev_header]:
+                    out[bid] = joined
+            out[b.block_id] = joined
+            prev_header = b.block_id
+            continue
+        if is_heading_shaped(name):
+            out[b.block_id] = name
+            prev_header = b.block_id
+        else:
+            prev_header = None
     return out
+
+
+def section_header_name(block: MarkerBlock, name_map: dict[str, str]) -> str | None:
+    """The section NAME a SectionHeader block opens, or None when it is not a
+    real heading (see :func:`_build_section_name_map`)."""
+    if block.block_id:
+        return name_map.get(block.block_id)
+    name = strip_html(block.html)
+    return name if name and is_heading_shaped(name) else None
 
 
 def _resolve_section(block: MarkerBlock, name_map: dict[str, str]) -> str | None:
@@ -110,7 +144,7 @@ def marker_doc_to_asset(
 
     for block in doc.blocks:
         if block.block_type == "SectionHeader":
-            name = strip_html(block.html)
+            name = section_header_name(block, name_map)
             if name and name not in seen_sections:
                 sections.append(SectionAsset(name=name, order=len(sections)))
                 seen_sections.add(name)

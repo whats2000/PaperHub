@@ -1,5 +1,9 @@
+import { HIGHLIGHT_CLASS } from "@/lib/findAndHighlight";
 import { prefersReducedMotion } from "@/lib/motion";
-import { createTranslationQueue } from "@/lib/translationQueue";
+import {
+  createTranslationQueue,
+  type TranslationQueueStatus,
+} from "@/lib/translationQueue";
 import type {
   TranslateRequest,
   TranslateResponse,
@@ -36,6 +40,16 @@ const ANCHOR_REMNANT = /PHCHUNKANCHOR\d+END|(?<![A-Za-z0-9])\d+END/g;
 const COLLAPSE_FALLBACK_MS = 250;
 // A block is worth translating only if it has letters outside placeholders.
 const HAS_LETTER = /\p{L}/u;
+// Front matter and bibliographies: names, addresses and citations, nothing
+// to translate (QA F1). Pandoc's title block, LaTeX's thebibliography,
+// citeproc's reference list.
+const SKIPPED_CONTAINER =
+  ".author, .date, .affiliation, .address, .email, .thebibliography, " +
+  ".references, .csl-bib-body, .ltx_bibliography, #refs, #bibliography";
+// A References heading starts a skipped zone, up to the next heading of the
+// same or a higher level. Mirrors backend `pdf_paragraphs._REFS_HEADING`.
+const REFS_HEADING =
+  /^[^\p{L}\d]*(?:\d+\.?\s*)?(?:supplementary\s+)?(?:references|bibliography|works\s+cited|literature\s+cited|參考文獻|参考文献)[^\p{L}]*$/iu;
 
 export interface HtmlBlock {
   key: string;
@@ -56,8 +70,10 @@ const DEFAULT_LABELS: TranslationLabels = {
   retry: "Retry",
 };
 
-// App tokens (index.css light theme): --muted-foreground and --border. The dark
-// theme's `invert` filter on <html> inverts these with the rest of the page.
+// The translation is what the reader reads, so it is a dark grey (secondary
+// to the paper's near-black text, well above AA contrast); only the pending /
+// unavailable states use the muted --muted-foreground grey. The dark theme's
+// `invert` filter on <html> inverts these with the rest of the page.
 const STYLE = `
 .${TR_CLASS} {
   display: grid; grid-template-rows: 0fr; opacity: 0; margin: 0;
@@ -68,12 +84,15 @@ const STYLE = `
 .${TR_CLASS}[data-open] { grid-template-rows: 1fr; opacity: 1; margin: .25em 0 1em; }
 .ph-tr-inner {
   min-height: 0; overflow: hidden;
-  border-left: 2px solid oklch(0.922 0 0); padding-left: .75em;
-  color: oklch(0.556 0 0);
+  border-left: 2px solid oklch(0.87 0 0); padding-left: .75em;
+  color: oklch(0.4 0 0);
   font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC",
     "Microsoft JhengHei", "PingFang TC", "Noto Sans JP", sans-serif;
-  font-size: .92em; line-height: 1.75;
+  font-size: .95em; line-height: 1.75;
 }
+.${TR_CLASS}[data-ph-tr-state="pending"] .ph-tr-inner,
+.${TR_CLASS}[data-ph-tr-state="unavailable"] .ph-tr-inner { color: oklch(0.556 0 0); }
+.${TR_CLASS}[data-ph-tr-instant] { transition: none; }
 .ph-tr-muted { font-style: italic; }
 .ph-tr-retry {
   margin-left: .5em; padding: 0; border: 0; background: none; cursor: pointer;
@@ -137,6 +156,36 @@ function collect(node: Node, parts: string[], prot: Node[]): void {
   }
 }
 
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const URL_RE = /(?:https?:\/\/|www\.)\S+/gi;
+const DOI = /(?:\bdoi:\s*)?\b10\.\d{4,9}\/\S+/gi;
+const KEYWORDS = /^[^\p{L}]*(?:keywords?|key\s+words|index\s+terms)\b/iu;
+const WORD = /\p{L}+/gu;
+const CONNECTORS = new Set(
+  "and of the for at in de des du la le van von der den und y e da di et al".split(" "),
+);
+
+/**
+ * A byline, affiliation, correspondence, date or DOI/URL/e-mail-only line:
+ * after removing addresses, its words are capitalised apart from connectors
+ * ("of", "and") and at most two (a quarter) others. Keyword lines are content.
+ * Mirrors backend `translation/quality.is_meta_block`.
+ */
+export function isMetaText(text: string): boolean {
+  const bare = text.replace(/⟦\d+⟧/g, " ").trim();
+  if (!bare || KEYWORDS.test(bare)) return false;
+  const stripped = bare.replace(EMAIL, " ").replace(URL_RE, " ").replace(DOI, " ");
+  const hadAddress = stripped !== bare;
+  const words = stripped.match(WORD) ?? [];
+  if (!words.length) return hadAddress;
+  if (words.length > 150) return false;
+  const content = words.filter((w) => !CONNECTORS.has(w.toLowerCase()));
+  if (!content.length || (content.length < 2 && !hadAddress)) return false;
+  // Uppercase test that a caseless script (CJK) fails, so it never matches.
+  const lower = content.filter((w) => w[0] === w[0]!.toLowerCase()).length;
+  return lower <= Math.min(2, Math.floor(content.length / 4));
+}
+
 /** Translatable blocks of a rendered paper, in document order. Keys are
  *  `h:<index>` over candidate blocks (before the empty filter), so a block's
  *  key doesn't depend on whether MathJax has typeset its neighbours yet. */
@@ -148,7 +197,15 @@ export function extractBlocks(doc: Document): HtmlBlock[] {
       el.parentElement?.closest(BLOCK_SELECTOR) == null,
   );
   const blocks: HtmlBlock[] = [];
+  // Level of the References heading whose section we are in, if any.
+  let refsLevel: number | null = null;
   candidates.forEach((el, index) => {
+    const heading = /^H[1-6]$/.test(el.tagName) ? Number(el.tagName[1]) : null;
+    if (heading !== null) {
+      if (refsLevel !== null && heading <= refsLevel) refsLevel = null;
+      if (REFS_HEADING.test((el.textContent ?? "").trim())) refsLevel = heading;
+    }
+    if (refsLevel !== null || el.closest(SKIPPED_CONTAINER) !== null) return;
     const parts: string[] = [];
     const protectedNodes: Node[] = [];
     collect(el, parts, protectedNodes);
@@ -158,9 +215,16 @@ export function extractBlocks(doc: Document): HtmlBlock[] {
       .replace(/\s+/g, " ")
       .trim();
     if (!HAS_LETTER.test(text.replace(/⟦\d+⟧/g, ""))) return;
+    if ((el.tagName === "P" || el.tagName === "LI") && isMetaText(text)) return;
     blocks.push({ key: `h:${index}`, el, text, protectedNodes });
   });
   return blocks;
+}
+
+/** Whether the overlay has anything to translate in `doc` (a raw-LaTeX
+ *  `<pre>` fallback render has none). */
+export function hasTranslatableBlocks(doc: Document): boolean {
+  return extractBlocks(doc).length > 0;
 }
 
 /** The live (not leaving) translation of `block`. A fresh box is always
@@ -254,8 +318,59 @@ function scheduleOpen(box: HTMLElement): void {
   });
 }
 
+/** The cited passage's highlight while it is on screen: the reader's focus,
+ *  so it is what must not move. */
+function highlightInView(doc: Document): Element | null {
+  const hl = doc.querySelector(`.${HIGHLIGHT_CLASS}, [data-ph-cite]`);
+  if (!hl) return null;
+  const r = hl.getBoundingClientRect();
+  const h = doc.defaultView?.innerHeight ?? 0;
+  return r.bottom > 0 && r.top < h ? hl : null;
+}
+
+/** An element at the top of the viewport to hold still, or null (jsdom, or
+ *  only the page background there). */
+function viewportAnchor(doc: Document): Element | null {
+  const win = doc.defaultView;
+  if (!win || typeof doc.elementFromPoint !== "function") return null;
+  const w = win.innerWidth || doc.documentElement.clientWidth || 0;
+  for (const x of [w / 2, w / 3, (2 * w) / 3]) {
+    const el = doc.elementFromPoint(x, 2);
+    if (el && el !== doc.body && el !== doc.documentElement) return el;
+  }
+  return null;
+}
+
+/**
+ * Run `mutate` (which changes heights above the reading position) without
+ * moving what the reader is looking at: the cited highlight when it is on
+ * screen, else the element at the viewport top, is measured before and after,
+ * and the scroll follows it. Measured (not computed from box heights), so it
+ * is a no-op whenever the browser's own scroll anchoring already compensated.
+ */
+function keepScroll(doc: Document, mutate: () => void): void {
+  const anchor = highlightInView(doc) ?? viewportAnchor(doc);
+  const before = anchor?.getBoundingClientRect().top;
+  mutate();
+  if (!anchor || before === undefined || !anchor.isConnected) return;
+  const shift = anchor.getBoundingClientRect().top - before;
+  if (shift !== 0) doc.defaultView?.scrollBy(0, shift);
+}
+
+/** The block ends above the reading position (the top of an on-screen cited
+ *  highlight, else the viewport top), so its translation box would push what
+ *  the reader is looking at down. */
+function aboveViewport(el: Element): boolean {
+  const bottom = el.getBoundingClientRect().bottom;
+  if (bottom < 0) return true;
+  const hl = highlightInView(el.ownerDocument);
+  return hl !== null && !el.contains(hl) && bottom <= hl.getBoundingClientRect().top;
+}
+
 /** Insert or update the translation shown under `block`. `onRetry` adds a
- *  Retry button to the unavailable state. */
+ *  Retry button to the unavailable state. A box above the viewport opens at
+ *  once and the scroll compensates (QA F7: the reading position, e.g. a cited
+ *  passage's highlight, must not drift as boxes above it fill in). */
 export function renderTranslation(
   block: HtmlBlock,
   result: TranslateResult | "pending" | "unavailable",
@@ -264,6 +379,24 @@ export function renderTranslation(
 ): HTMLElement {
   const doc = block.el.ownerDocument;
   ensureTranslationStyle(doc);
+  if (!aboveViewport(block.el)) {
+    return renderBox(doc, block, result, labels, onRetry, false);
+  }
+  let box: HTMLElement | null = null;
+  keepScroll(doc, () => {
+    box = renderBox(doc, block, result, labels, onRetry, true);
+  });
+  return box!;
+}
+
+function renderBox(
+  doc: Document,
+  block: HtmlBlock,
+  result: TranslateResult | "pending" | "unavailable",
+  labels: TranslationLabels,
+  onRetry: (() => void) | undefined,
+  instant: boolean,
+): HTMLElement {
   let box = liveBox(block);
   const fresh = box === null;
   if (!box) {
@@ -308,16 +441,29 @@ export function renderTranslation(
     }
   }
 
-  if (fresh) scheduleOpen(box);
+  if (fresh && instant) {
+    box.setAttribute("data-ph-tr-instant", "");
+    box.setAttribute("data-open", "");
+  } else if (fresh) {
+    scheduleOpen(box);
+  }
   return box;
 }
 
 /** Collapse every translation, then detach it. */
 export function removeTranslations(doc: Document): void {
   const reduced = prefersReducedMotion();
-  doc
-    .querySelectorAll<HTMLElement>(`.${TR_CLASS}:not([data-ph-tr-leaving])`)
+  const boxes = Array.from(
+    doc.querySelectorAll<HTMLElement>(`.${TR_CLASS}:not([data-ph-tr-leaving])`),
+  );
+  // Boxes above the viewport go at once, with the scroll following, so the
+  // text in view doesn't jump up as they collapse (QA F7).
+  const above = new Set(boxes.filter(aboveViewport));
+  if (above.size) keepScroll(doc, () => above.forEach((box) => box.remove()));
+  boxes
+    .filter((box) => !above.has(box))
     .forEach((box) => {
+      box.removeAttribute("data-ph-tr-instant");
       box.setAttribute("data-ph-tr-leaving", "");
       box.removeAttribute("data-open");
       if (reduced) {
@@ -354,6 +500,8 @@ export interface HtmlTranslationOptions {
   /** Whether any visible block's translation predates the current
    *  terminology memory; called on every change. */
   onStaleChange?: (stale: boolean) => void;
+  /** Failed-block count and paused background run, on every change. */
+  onStatusChange?: (status: TranslationQueueStatus) => void;
 }
 
 /** Detach function (collapses the overlay), plus re-translate. */
@@ -361,6 +509,9 @@ export type HtmlTranslationHandle = (() => void) & {
   /** Re-send the visible stale blocks with `force: true`. Their current text
    *  stays on the page until the new one arrives (or the old one comes back). */
   retranslate: () => void;
+  /** Re-request every block whose translation is unavailable (and resume a
+   *  paused full-paper run); each shows its spinner again meanwhile. */
+  retryFailed: () => void;
 };
 
 /**
@@ -412,6 +563,9 @@ export function attachHtmlTranslation(
     renderTranslation(block, r, labels, retry(block));
     reportStale();
   });
+  const unsubscribeStatus = opts.onStatusChange
+    ? queue.onStatus(opts.onStatusChange)
+    : () => undefined;
   queue.setBlocks(
     blocks.map((b) => b.key),
     Object.fromEntries(blocks.map((b) => [b.key, b.text])),
@@ -454,6 +608,7 @@ export function attachHtmlTranslation(
     if (disposed) return;
     disposed = true;
     unsubscribe();
+    unsubscribeStatus();
     queue.dispose();
     observer?.disconnect();
     removeTranslations(doc);
@@ -463,6 +618,15 @@ export function attachHtmlTranslation(
       if (disposed) return;
       const keys = staleVisible();
       if (keys.length) queue.retranslate(keys);
+    },
+    retryFailed: () => {
+      if (disposed) return;
+      for (const key of queue.retryFailed()) {
+        const block = byKey.get(key);
+        if (!block) continue;
+        resolved.delete(key);
+        if (liveBox(block)) renderTranslation(block, "pending", labels);
+      }
     },
   });
 }

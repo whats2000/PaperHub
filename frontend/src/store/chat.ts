@@ -36,6 +36,8 @@ interface ChatState {
     backendId: number,
     title: string,
     forkedFromSessionId?: number | null,
+    /** Set for a chat opened from an idea (Plan H3). */
+    ideaId?: number | null,
   ) => number;
   selectSession: (id: number) => void;
   appendMessage: (sessionId: number, message: ChatMessage) => void;
@@ -170,7 +172,7 @@ export const useChatStore = create<ChatState>()(
       },
 
       // Deliberately does not reset the page: forking only starts from the chat page.
-      addForkedSession: (backendId, title, forkedFromSessionId = null) => {
+      addForkedSession: (backendId, title, forkedFromSessionId = null, ideaId = null) => {
         const existing = get().sessions.find(
           (s) => s.backend_session_id === backendId,
         );
@@ -187,6 +189,7 @@ export const useChatStore = create<ChatState>()(
               messages: [],
               backend_session_id: backendId,
               forked_from_session_id: forkedFromSessionId,
+              idea_id: ideaId,
             },
             ...s.sessions,
           ],
@@ -579,6 +582,7 @@ export const useChatStore = create<ChatState>()(
                     title: summary.title,
                     forked_from_session_id:
                       summary.forked_from_session_id ?? null,
+                    idea_id: summary.idea_id ?? null,
                   }
                 : sess;
             });
@@ -599,6 +603,7 @@ export const useChatStore = create<ChatState>()(
               messages: [],
               backend_session_id: summary.id,
               forked_from_session_id: summary.forked_from_session_id ?? null,
+              idea_id: summary.idea_id ?? null,
             });
             nextId += 1;
           }

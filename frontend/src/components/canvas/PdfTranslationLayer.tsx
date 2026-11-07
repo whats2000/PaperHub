@@ -21,9 +21,13 @@ import {
 import { usePresence } from "@/hooks/usePresence";
 import { getPdfParagraphs } from "@/lib/api";
 import { bboxToRect, markerPageToPageNumber } from "@/lib/bboxHighlight";
-import { describeBreak, placeCard, type CardPlacement } from "@/lib/cardPlacement";
+import { describeBreak, glidesBetween, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { mathToKatexHtml } from "@/lib/pdfTranslation";
-import { createTranslationQueue, type TranslationQueue } from "@/lib/translationQueue";
+import {
+  createTranslationQueue,
+  type TranslationQueue,
+  type TranslationQueueStatus,
+} from "@/lib/translationQueue";
 import { cn } from "@/lib/utils";
 import { useTranslationStore } from "@/store/translation";
 import type {
@@ -104,6 +108,10 @@ interface Props {
   retranslateNonce?: number;
   /** Whether an in-view translation predates the current terminology memory. */
   onStaleChange?: (stale: boolean) => void;
+  /** Bumped to re-request every failed paragraph (and resume a paused run). */
+  retryFailedNonce?: number;
+  /** Failed-paragraph count / paused background run, on every change. */
+  onStatusChange?: (status: TranslationQueueStatus) => void;
   /** This layer's own paragraphs fetch finished: the response, or null on failure. */
   onParagraphsLoaded?: (res: ParagraphsResponse | null) => void;
   children: ReactNode;
@@ -129,6 +137,8 @@ export function PdfTranslationLayer({
   paragraphs: givenParagraphs,
   retranslateNonce = 0,
   onStaleChange,
+  retryFailedNonce = 0,
+  onStatusChange,
   onParagraphsLoaded,
   children,
 }: Props) {
@@ -161,6 +171,7 @@ export function PdfTranslationLayer({
   const hasParagraphsRef = useRef(false);
   // Last (paragraph, fragment, side) placed, and until when moves glide.
   const lastAnchorRef = useRef<string | null>(null);
+  const lastSideRef = useRef<CardPlacement["side"] | null>(null);
   const glideUntilRef = useRef(0);
 
   const cached = givenParagraphs ?? cache[paperId];
@@ -175,6 +186,10 @@ export function PdfTranslationLayer({
   useEffect(() => {
     onLoadedRef.current = onParagraphsLoaded;
   }, [onParagraphsLoaded]);
+  const onStatusRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusRef.current = onStatusChange;
+  }, [onStatusChange]);
 
   useEffect(() => {
     if (!enabled || isCached) return;
@@ -206,6 +221,7 @@ export function PdfTranslationLayer({
     const q = createTranslationQueue({ paperId, language, fullPaper });
     queueRef.current = q;
     const off = q.onResult((r) => setResults((prev) => ({ ...prev, [r.key]: r })));
+    const offStatus = q.onStatus((st) => onStatusRef.current?.(st));
     q.setBlocks(
       paragraphs.map((p) => p.key),
       Object.fromEntries(paragraphs.map((p) => [p.key, p.text])),
@@ -213,9 +229,11 @@ export function PdfTranslationLayer({
     q.setVisible(wantedRef.current);
     return () => {
       off();
+      offStatus();
       q.dispose();
       if (queueRef.current === q) queueRef.current = null;
       setResults({});
+      onStatusRef.current?.({ failed: 0, paused: false });
     };
   }, [paragraphs, paperId, language, fullPaper]);
 
@@ -281,6 +299,19 @@ export function PdfTranslationLayer({
     seenRetranslate.current = retranslateNonce;
     if (staleKeysRef.current.length) queueRef.current?.retranslate(staleKeysRef.current);
   }, [retranslateNonce]);
+  // A bump re-requests every failed paragraph; each shows "Translating…" again.
+  const seenRetryFailed = useRef(retryFailedNonce);
+  useEffect(() => {
+    if (seenRetryFailed.current === retryFailedNonce) return;
+    seenRetryFailed.current = retryFailedNonce;
+    const keys = queueRef.current?.retryFailed() ?? [];
+    if (!keys.length) return;
+    setResults((prev) => {
+      const next = { ...prev };
+      keys.forEach((k) => delete next[k]);
+      return next;
+    });
+  }, [retryFailedNonce]);
 
   const clearHideTimer = useCallback(() => {
     if (hideTimer.current !== null) {
@@ -314,6 +345,10 @@ export function PdfTranslationLayer({
         }))
         .sort((a, b) => a.index - b.index);
       const box = reader.getBoundingClientRect();
+      // Pinned means pinned (QA F5): it docks to the viewport edge rather
+      // than step aside when its paragraph scrolls out of view.
+      const isPinned = pinnedKeyRef.current === key;
+      if (!frags.length && isPinned) return; // page not rendered: stay put
       const next = frags.length
         ? placeCard({
             paraRects: frags.map((f) => f.rect),
@@ -321,6 +356,7 @@ export function PdfTranslationLayer({
             gutter: { left: CARD_GAP, right: box.left - CARD_GAP },
             cardHeight: cardRef.current?.offsetHeight ?? 0,
             reader: { left: box.left, right: box.right },
+            pinned: isPinned,
           })
         : null;
       if (!next) {
@@ -335,8 +371,12 @@ ${fragment}
 ${next.side}`;
       const now = performance.now();
       if (anchor !== lastAnchorRef.current) {
+        // A flip between under and over the paragraph jumps: a glide would sweep
+        // the card across the text, and under the pointer reading it.
+        const glides = glidesBetween(lastSideRef.current, next.side);
         lastAnchorRef.current = anchor;
-        glideUntilRef.current = now + GLIDE_MS;
+        lastSideRef.current = next.side;
+        glideUntilRef.current = glides ? now + GLIDE_MS : 0;
       }
       setPlacement({
         ...next,

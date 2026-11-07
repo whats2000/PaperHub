@@ -252,6 +252,39 @@ async def test_structured_downgrades_to_small_when_flagship_unavailable(
     assert calls == ["flagship/x", "small/y"]  # flagship first, then downgrade
 
 
+async def test_structured_per_call_fallback_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``fallback_model`` on the call overrides the adapter's tier: ``""``
+    means no fallback (the error propagates), a name means that model."""
+    calls: list[str] = []
+
+    async def fake(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["model"])
+        assert "fallback_model" not in kwargs  # never forwarded to litellm
+        if kwargs["model"] == "flagship/x":
+            raise _timeout("flagship/x")
+        return {"choices": [{"message": {"content": _VALID_DECISION}}]}
+
+    monkeypatch.setattr(litellm, "supports_response_schema", lambda model: False)
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    adapter = LiteLlmAdapter(fallback_model="small/y")
+
+    with pytest.raises(litellm.Timeout):
+        await adapter.structured(
+            slot="router/v1", variables=_ROUTER_VARS,
+            response_model=RoutingDecision, model="flagship/x", fallback_model="",
+        )
+    assert calls == ["flagship/x"]
+
+    calls.clear()
+    await adapter.structured(
+        slot="router/v1", variables=_ROUTER_VARS,
+        response_model=RoutingDecision, model="flagship/x", fallback_model="mid/z",
+    )
+    assert calls == ["flagship/x", "mid/z"]
+
+
 async def test_structured_raises_when_both_tiers_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -457,3 +490,45 @@ async def test_structured_forwards_max_tokens_on_both_paths(
         model="deepseek/deepseek-chat", max_tokens=1024,
     )
     assert [c.get("max_tokens") for c in fake.calls] == [1024, 1024]
+
+
+async def test_structured_usage_recorded_on_active_trace_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every structured call inside a tracer step records its token usage
+    (reasoning tokens included) and latency on the step, so a reasoning
+    budget is visible in the trace; the step's token columns sum the calls."""
+    async def fake(**kwargs: Any) -> dict[str, Any]:
+        return {"choices": [{"message": {"content": _VALID_DECISION}}],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 900,
+                          "completion_tokens_details": {"reasoning_tokens": 850}}}
+
+    monkeypatch.setattr(litellm, "supports_response_schema", lambda model: False)
+    monkeypatch.setattr(litellm, "acompletion", fake)
+
+    async with aiosqlite.connect(":memory:") as conn:
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+        await conn.execute("INSERT INTO runs (session_id) VALUES (1)")
+        await conn.commit()
+        tracer = Tracer(conn, run_id=1, branch="")
+        adapter = LiteLlmAdapter(fallback_model="small/y")
+        async with tracer.step(agent="ideation", tool="ideation:propose", model="m/x") as step:
+            for _ in range(2):
+                await adapter.structured(
+                    slot="router/v1", variables=_ROUTER_VARS,
+                    response_model=RoutingDecision, model="m/x",
+                )
+            step.record_result({"kept": 1})
+        async with conn.execute(
+            "SELECT result_summary_json, token_in, token_out FROM tool_calls"
+        ) as cur:
+            row = await cur.fetchone()
+    assert row is not None
+    usage = json.loads(row[0])["_llm_usage"]
+    assert len(usage) == 2
+    assert usage[0]["model"] == "m/x"
+    assert usage[0]["prompt_tokens"] == 120 and usage[0]["completion_tokens"] == 900
+    assert usage[0]["reasoning_tokens"] == 850
+    assert isinstance(usage[0]["latency_ms"], int)
+    assert (row[1], row[2]) == (240, 1800)

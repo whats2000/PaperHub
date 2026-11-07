@@ -20,6 +20,13 @@ from benchmark.agent.stages import StageSpec
 PairwiseFn = Callable[..., Awaitable[str]]
 
 STAGE_RUBRICS: dict[str, str] = {
+    "router": (
+        "Both outputs already route the message to the correct intent; judge the "
+        "rest. Better = `resolved_query` is a faithful, self-contained rewrite of "
+        "the user's message (same request and scope, nothing added or dropped, in "
+        "the message's language) and `response_language` names that language. "
+        "Ignore `confidence`, `reasoning`, `also_requested` and `llm_intent`."
+    ),
     "translate_blocks": (
         "Judge translation quality for each block. Fidelity first: every claim, "
         "number, hedge and negation of the source is carried over, nothing added "
@@ -36,6 +43,50 @@ STAGE_RUBRICS: dict[str, str] = {
         "from the request's question, answer and trace_summary; invents nothing; "
         "is exactly one sentence; is written in the language of user_followup. "
         "Penalise a vague doubt that would fit any case. Ignore `reasons`."
+    ),
+    "feedback_review_fork": (
+        "The user forked the chat at the answer under review, without writing why. "
+        "Both outputs already have the correct verdict; judge ONLY the `doubt` "
+        "sentence, which is shown to the user. Better = names the concrete error "
+        "(for uncertain: what the evidence shows, then asks what they wanted to "
+        "change) using facts from the request's question, answer and "
+        "trace_summary; invents nothing; is exactly one sentence; is written in "
+        "the language of question. Penalise a vague doubt that would fit any "
+        "case, or one that talks about the fork instead of the answer. Ignore "
+        "`reasons`."
+    ),
+    "ideation_card": (
+        "Both cards are mechanism cards for the document in the request (title, "
+        "abstract, per-section digest). Judge, in order: (1) Faithfulness — every "
+        "claim in problem, mechanism, assumptions and limitations is supported by "
+        "the digest or abstract; nothing invented, no wrong mechanism. (2) "
+        "Domain-free phrasing — the problem and mechanism are stated in generic "
+        "terms (data shape, objective, operation) with no field nouns, so an "
+        "engineer from another field would recognise the same problem in theirs; "
+        "jargon such as 'image', 'word', 'robot', 'token', 'protein' or the paper's "
+        "own method name in those two fields is a defect. The mechanism must be the "
+        "paper's core reusable idea, concrete enough to transplant, not a summary "
+        "of results. (3) Citations — each field cites the section(s) that actually "
+        "support it. (4) Concision. Domains are short field names; ignore their order."
+    ),
+    "ideation": (
+        "Both outputs are ranked idea lists for the request (a problem, or free "
+        "exploration when mode is 'explore', plus the library's mechanism cards). "
+        "Judge, in order: (1) Fit — the top ideas' source mechanisms (as stated on "
+        "the cited card) actually remove the problem's bottleneck (in explore mode, "
+        "the target card's problem); an analogy that only shares vocabulary is a "
+        "defect. (2) Cross-domain value — a mechanism borrowed from another field "
+        "that transplants concretely beats an obvious same-field suggestion or a "
+        "repeat of what the user already tried. (3) Grounding — each idea's cited "
+        "section is the card section that holds the borrowed mechanism, and the "
+        "rationale says what the mechanism does in the new setting without "
+        "inventing claims the card does not make. (4) Ranking and variety — the best "
+        "idea is first, and the list is not the same idea repeated. (5) Each "
+        "rationale names the borrowed mechanism and the paper it comes from, and "
+        "titles and rationales are in the response_language (when empty, the "
+        "language the problem is written in). (6) When no card's mechanism removes "
+        "a concrete bottleneck, no ideas plus a short no_fit_reason beats "
+        "confident filler."
     ),
 }
 

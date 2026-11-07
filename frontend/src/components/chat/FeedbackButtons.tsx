@@ -13,6 +13,9 @@ import { useFeedbackStore } from "@/store/feedback";
 import { REASONS, type FeedbackPut, type Preset } from "@/types/feedback";
 
 const OTHER = "other";
+// Mirrors the backend's FeedbackPut caps (feedback/models.py).
+const OTHER_TEXT_MAX = 500;
+const CORRECTION_MAX = 8000;
 // Matches the popover's exit animation (duration-150).
 const EXIT_MS = 150;
 
@@ -196,6 +199,7 @@ export function FeedbackButtons({ runId }: { runId: number }) {
             <div className="pt-2">
               <textarea
                 rows={2}
+                maxLength={OTHER_TEXT_MAX}
                 value={otherText}
                 onChange={(e) => setOtherText(e.target.value)}
                 placeholder={t("popover.otherPlaceholder")}
@@ -222,6 +226,7 @@ export function FeedbackButtons({ runId }: { runId: number }) {
             <div className="pt-1.5">
               <textarea
                 rows={2}
+                maxLength={CORRECTION_MAX}
                 value={correction}
                 onChange={(e) => setCorrection(e.target.value)}
                 placeholder={t("popover.correctionPlaceholder")}

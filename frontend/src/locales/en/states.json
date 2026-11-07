@@ -10,11 +10,14 @@
     "newChat": "New chat",
     "noChats": "No chats yet.",
     "deleteChat": "Delete chat: {{title}}",
-    "forkedFrom": "{{title}} (forked from {{parent}})"
+    "forkedFrom": "{{title}} (forked from {{parent}})",
+    "fromIdea": "Opened from an idea"
   },
   "sessionToast": {
     "deleteFailed": "Failed to delete chat",
     "deleted": "Chat deleted",
+    "feedbackNote_one": "Its {{count}} feedback entry and the training data built from it go too.",
+    "feedbackNote_other": "Its {{count}} feedback entries and the training data built from them go too.",
     "undo": "Undo",
     "restoreFailed": "Couldn't restore this chat on the server"
   },
@@ -48,10 +51,13 @@
     "feedback": "Feedback",
     "feedbackBadge": "{{count}} need your confirmation"
   },
-  "ideasPage": {
-    "empty": "Ideas will appear here."
-  },
   "feedbackPage": {
     "empty": "Feedback will appear here."
+  },
+  "panelLoad": {
+    "title": "This panel couldn't load",
+    "body": "Part of the app failed to download, often after an update. The rest of the app still works.",
+    "retry": "Try again",
+    "reload": "Reload page"
   }
 }

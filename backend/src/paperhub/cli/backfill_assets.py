@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -356,7 +357,18 @@ async def _amain() -> int:
     marker_client = get_marker_client()
 
     async with aiosqlite.connect(settings.db_path) as conn:
-        await run_backfill(args, conn=conn, marker_client=marker_client, max_pages=max_pages)
+        counts = await run_backfill(
+            args, conn=conn, marker_client=marker_client, max_pages=max_pages,
+        )
+    return exit_code(counts)
+
+
+def exit_code(counts: Mapping[str, int]) -> int:
+    """Non-zero when any paper failed: an operator script (reingest_all_papers)
+    judges each step by exit code, and one failed paper is a failed upgrade."""
+    if counts.get("error", 0):
+        _LOG.error("%d paper(s) failed; see the ERROR lines above", counts["error"])
+        return 1
     return 0
 
 

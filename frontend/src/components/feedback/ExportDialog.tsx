@@ -59,7 +59,11 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
     setExporting(false);
   }
   const key = JSON.stringify(opts);
-  const pending = open && previewKey !== key;
+  // An inverted range matches nothing (the backend answers 422): say so and
+  // never ask. A settled count of zero samples would write empty files.
+  const rangeInvalid = !!since && !!until && since > until;
+  const pending = open && !rangeInvalid && previewKey !== key;
+  const nothing = !!preview && !pending && preview.sft + preview.dpo === 0;
 
   // Live summary: debounce 300 ms after the last option change; a stale
   // response (an older request resolving late) is dropped.
@@ -70,6 +74,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
       return;
     }
     const mine = ++seq.current;
+    if (rangeInvalid) return;
     const timer = setTimeout(() => {
       getExportPreview({
         include_implicit: implicit,
@@ -97,7 +102,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
         });
     }, 300);
     return () => clearTimeout(timer);
-  }, [open, implicit, priv, citedOnly, since, until, model]);
+  }, [open, implicit, priv, citedOnly, since, until, model, rangeInvalid]);
 
   // Options changed after an export: its file list no longer matches them.
   const change =
@@ -246,7 +251,11 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 className="mt-4 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-sm"
               >
                 <div className={pending && preview ? "opacity-60 transition-opacity" : "transition-opacity"}>
-                {previewFailed ? (
+                {rangeInvalid ? (
+                  <span className="text-destructive">
+                    {t("feedback:export.rangeInvalid", "“From” is after “To”.")}
+                  </span>
+                ) : previewFailed ? (
                   <span className="text-destructive">
                     {t("feedback:export.previewFailed", "Couldn't count the samples.")}
                   </span>
@@ -255,6 +264,14 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                     {t("feedback:export.willExport", "Will export")} <b>{preview.sft}</b>{" "}
                     {t("feedback:export.sftUnit", "SFT samples")}, <b>{preview.dpo}</b>{" "}
                     {t("feedback:export.dpoUnit", "DPO pairs")}
+                    {nothing && (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {t(
+                          "feedback:export.nothing",
+                          "Nothing matches these options, so there is nothing to export.",
+                        )}
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -313,7 +330,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 {result ? t("common:close") : t("feedback:export.cancel", "Cancel")}
               </Button>
-              <Button onClick={() => void doExport()} disabled={exporting}>
+              <Button onClick={() => void doExport()} disabled={exporting || rangeInvalid || nothing}>
                 {exporting ? <Loader2 className="animate-spin" /> : <Download />}
                 {t("feedback:export.go", "Export")}
               </Button>

@@ -486,3 +486,26 @@ async def test_fork_stores_forked_from_run_id(tmp_path: Path) -> None:
             "SELECT forked_from_run_id FROM chat_sessions WHERE id = 1",
         ) as cur:
             assert (await cur.fetchone())[0] is None
+
+
+async def test_fork_of_an_idea_chat_keeps_the_idea_link(tmp_path: Path) -> None:
+    """Plan H3 (QA I4): the fork still gets the idea context on every turn."""
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        pid = await _seed_paper_content(conn, title="Mamba")
+        await conn.execute("INSERT INTO chat_sessions (title) VALUES ('Idea')")
+        await conn.execute(
+            "INSERT INTO ideas (source_doc, source_section, title) VALUES (?, 'M', 'I')",
+            (pid,))
+        await conn.execute("INSERT INTO idea_sessions (idea_id, session_id) VALUES (1, 1)")
+        await conn.commit()
+        r1 = await _turn(conn, 1, "q", "a")
+        res = await fork_session(conn, source_session_id=1, fork_run_id=r1,
+                                 workspace_dir=tmp_path)
+        async with conn.execute(
+            "SELECT idea_id FROM idea_sessions WHERE session_id = ?",
+            (res.new_session_id,),
+        ) as cur:
+            assert [r[0] for r in await cur.fetchall()] == [1]

@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
 import { useTranslationStore } from "@/store/translation";
+import type { TranslationQueueStatus } from "@/lib/translationQueue";
 import type { ParagraphsResponse, PdfParagraph } from "@/types/translation";
 import {
   withBaseHref,
@@ -198,6 +199,19 @@ export function CitationCanvas() {
   const [retranslateByPaper, setRetranslateByPaper] = useState<
     Record<number, number>
   >({});
+  // Failed translations / a paused full-paper run per paper (QA F2), and a
+  // nonce per paper that re-requests every failed block.
+  const [statusByPaper, setStatusByPaper] = useState<
+    Record<number, TranslationQueueStatus>
+  >({});
+  const [retryFailedByPaper, setRetryFailedByPaper] = useState<
+    Record<number, number>
+  >({});
+  // HTML papers whose loaded document has nothing to translate (a raw-LaTeX
+  // `<pre>` fallback render): the pill is disabled with a reason (QA B2).
+  const [htmlUntranslatable, setHtmlUntranslatable] = useState<
+    Record<number, boolean>
+  >({});
 
   // Re-read whenever the Settings config is (re)fetched, e.g. after a save,
   // so the full-paper switch applies without remounting the canvas.
@@ -255,15 +269,37 @@ export function CitationCanvas() {
       !!prev[pid] === stale ? prev : { ...prev, [pid]: stale },
     );
   }, []);
+  const onStatusChange = useCallback(
+    (pid: number, status: TranslationQueueStatus) => {
+      setStatusByPaper((prev) => {
+        const cur = prev[pid];
+        return cur?.failed === status.failed && cur.paused === status.paused
+          ? prev
+          : { ...prev, [pid]: status };
+      });
+    },
+    [],
+  );
+  const onTranslatableChange = useCallback((pid: number, ok: boolean) => {
+    setHtmlUntranslatable((prev) =>
+      !!prev[pid] === !ok ? prev : { ...prev, [pid]: !ok },
+    );
+  }, []);
   // Only the shown paper translates: hidden (kept-mounted) HTML papers stay
   // inert, and switching back re-attaches from the server cache.
   const translationFor = (pid: number) => ({
-    enabled: !!translationEnabledByPaper[pid] && pid === effectivePaperId,
+    enabled:
+      !!translationEnabledByPaper[pid] &&
+      pid === effectivePaperId &&
+      !htmlUntranslatable[pid],
     language: translationLanguage,
     paperId: pid,
     fullPaper,
     retranslateNonce: retranslateByPaper[pid] ?? 0,
     onStaleChange: (stale: boolean) => onStaleChange(pid, stale),
+    retryFailedNonce: retryFailedByPaper[pid] ?? 0,
+    onStatusChange: (status: TranslationQueueStatus) => onStatusChange(pid, status),
+    onTranslatableChange: (ok: boolean) => onTranslatableChange(pid, ok),
   });
   const activeParagraphs =
     activePdfId !== null ? paragraphsByPaper[activePdfId] : undefined;
@@ -272,7 +308,11 @@ export function CitationCanvas() {
   const translateDisabledReason: TranslateDisabledReason | null =
     activeDoc?.status === "error" || activeParagraphs === "load_failed"
       ? "load_failed"
-      : paragraphsReady && paragraphsReady.status !== "ready"
+      : activeDoc?.mode === "html" &&
+          effectivePaperId != null &&
+          htmlUntranslatable[effectivePaperId]
+        ? "no_text"
+        : paragraphsReady && paragraphsReady.status !== "ready"
         ? paragraphsReady.status
         : // Ready but nothing to hover (no paragraph with geometry and text).
           paragraphsReady &&
@@ -687,6 +727,14 @@ export function CitationCanvas() {
             staleTerminology={
               !!translationEnabledByPaper[effectivePaperId] &&
               !!staleByPaper[effectivePaperId]
+            }
+            failedCount={statusByPaper[effectivePaperId]?.failed ?? 0}
+            paused={statusByPaper[effectivePaperId]?.paused ?? false}
+            onRetryFailed={() =>
+              setRetryFailedByPaper((prev) => ({
+                ...prev,
+                [effectivePaperId]: (prev[effectivePaperId] ?? 0) + 1,
+              }))
             }
             onRetranslate={() =>
               setRetranslateByPaper((prev) => ({

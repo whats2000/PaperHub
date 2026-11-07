@@ -94,7 +94,15 @@
     },
     "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
       "label": "フィードバックレビュー担当",
-      "help": "フラグが付いた回答が本当に誤りか確認。既定は小型ティア。"
+      "help": "フラグが付いた回答が本当に誤りか確認。既定はフラッグシップティア。"
+    },
+    "PAPERHUB_IDEATION_CARD_MODEL": {
+      "label": "メカニズムカード作成担当",
+      "help": "アイデア発想のため各文書の課題と仕組みを要約。既定は小型ティア。"
+    },
+    "PAPERHUB_IDEATION_MODEL": {
+      "label": "アイデア発想モデル",
+      "help": "メカニズムカードから分野横断のアイデアを提案。既定はフラッグシップティア。"
     },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "スライド解決器",
@@ -132,6 +140,10 @@
     "PAPERHUB_FEEDBACK_KEYWORDS": {
       "label": "訂正キーワード",
       "help": "前の回答をレビュー対象にするカンマ区切りの語。空欄なら組み込みの中国語／英語／日本語リストを使用。"
+    },
+    "PAPERHUB_IDEATION_PROBLEM_THINKING_BUDGET": {
+      "label": "アイデア推論予算（課題モード）",
+      "help": "課題に対するアイデア提案 1 回あたりの推論トークン数の上限。0 = 上限なし。自由探索には上限を設けません。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "想起したメモリを注入",

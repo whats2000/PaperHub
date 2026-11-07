@@ -147,39 +147,60 @@ async def _search_library_handler(query: str, max_results: int = 8) -> list[dict
 
 async def _search_semantic_scholar_handler(
     query: str, max_results: int = 8,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     ctx = require_request_context()
     args = {"query": query, "max_results": max_results}
+    diag: dict[str, Any] = {}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.search_semantic_scholar", args,
     ) as step:
-        hits = [
-            asdict(h)
-            for h in await search_semantic_scholar_dispatch(
-                query=query, max_results=max_results,
-            )
-        ]
+        try:
+            hits = [
+                asdict(h)
+                for h in await search_semantic_scholar_dispatch(
+                    query=query, max_results=max_results, diag=diag,
+                )
+            ]
+        except Exception:
+            if step is not None:
+                step.record_result({"_meta": _ss_meta(diag, count=0)})
+            raise
+        meta = _ss_meta(diag, count=len(hits), query=query)
         if step is not None:
-            step.record_result({"count": len(hits)})
-    return hits
+            step.record_result({"count": len(hits), "_meta": meta})
+    return {"result": hits, "_meta": meta}
 
 
 async def _find_related_papers_handler(
     paper_id: str, mode: str, max_results: int = 8,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     ctx = require_request_context()
     args = {"paper_id": paper_id, "mode": mode, "max_results": max_results}
+    diag: dict[str, Any] = {}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.find_related_papers", args,
     ) as step:
         # ``mode`` is a Literal["cites", "cited_by", "similar"] at the dispatcher
         # boundary; FastMCP hands us a plain string. The dispatcher validates.
-        related = await find_related_papers_dispatch(
-            paper_id=paper_id, mode=mode, max_results=max_results,  # type: ignore[arg-type]
-        )
+        try:
+            related = await find_related_papers_dispatch(
+                paper_id=paper_id, mode=mode, max_results=max_results,  # type: ignore[arg-type]
+                diag=diag,
+            )
+        except Exception:
+            if step is not None:
+                step.record_result({"_meta": _ss_meta(diag, count=0)})
+            raise
+        meta = _ss_meta(diag, count=len(related), mode=mode)
         if step is not None:
-            step.record_result({"count": len(related)})
-    return related
+            step.record_result({"count": len(related), "_meta": meta})
+    return {"result": related, "_meta": meta}
+
+
+def _ss_meta(diag: dict[str, Any], *, count: int, **extra: Any) -> dict[str, Any]:
+    """The ``_meta`` of a Semantic Scholar-backed tool (CLAUDE.md MCP
+    meta-in-payload rule): transport facts from the client plus the count."""
+    return {"source": "semantic_scholar", **diag, "count": count, **extra}
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +243,7 @@ def build_paperhub_papers_server() -> FastMCP:
 def _register_tool(
     server: FastMCP,
     name: str,
-    handler: Callable[..., Awaitable[list[dict[str, Any]]]],
+    handler: Callable[..., Awaitable[list[dict[str, Any]] | dict[str, Any]]],
     schemas_by_name: dict[str, dict[str, Any]],
 ) -> None:
     """Register a handler with FastMCP and pin its JSON-schema to _BASE_PAPER_TOOL_SCHEMAS.

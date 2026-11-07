@@ -21,6 +21,7 @@ from paperhub.agents.research_tools import (
 from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
+from paperhub.ideation.domains import assign_color_indices
 from paperhub.pipelines.paper_asset import read_block_assets
 from paperhub.pipelines.paper_pipeline import (
     ArxivMetadata,
@@ -701,6 +702,9 @@ async def delete_library_paper(
             "DELETE FROM paper_content WHERE id = ?", (paper_content_id,),
         )
         await conn.commit()
+        # Its domain tags cascaded away: free their colour slots (Plan H3 —
+        # the ideation graph only reads colours, writes assign them).
+        await assign_color_indices(conn)
 
     # On-disk cache — best-effort. paper_content.source_dir_path stores
     # the per-paper cache dir itself (e.g. workspace/papers_cache/arxiv/

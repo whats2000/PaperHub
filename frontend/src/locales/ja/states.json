@@ -10,11 +10,14 @@
     "newChat": "新しいチャット",
     "noChats": "チャットはまだありません。",
     "deleteChat": "チャットを削除：{{title}}",
-    "forkedFrom": "{{title}}（{{parent}} から分岐）"
+    "forkedFrom": "{{title}}（{{parent}} から分岐）",
+    "fromIdea": "アイデアから開いたチャット"
   },
   "sessionToast": {
     "deleteFailed": "チャットの削除に失敗しました",
     "deleted": "チャットを削除しました",
+    "feedbackNote_one": "このチャットの {{count}} 件のフィードバックと、そこから作られた学習データも削除されます。",
+    "feedbackNote_other": "このチャットの {{count}} 件のフィードバックと、そこから作られた学習データも削除されます。",
     "undo": "元に戻す",
     "restoreFailed": "サーバー上でこのチャットを復元できませんでした"
   },
@@ -48,10 +51,13 @@
     "feedback": "フィードバック",
     "feedbackBadge": "{{count}} 件の確認待ち"
   },
-  "ideasPage": {
-    "empty": "アイデアはここに表示されます。"
-  },
   "feedbackPage": {
     "empty": "フィードバックはここに表示されます。"
+  },
+  "panelLoad": {
+    "title": "このパネルを読み込めませんでした",
+    "body": "アプリの一部をダウンロードできませんでした。更新後によく起こります。ほかの機能は引き続き使えます。",
+    "retry": "再試行",
+    "reload": "ページを再読み込み"
   }
 }

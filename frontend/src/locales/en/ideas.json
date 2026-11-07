@@ -1,0 +1,216 @@
+{
+  "header": {
+    "library": "Library: {{count}} documents",
+    "libraryPrivate": "Library: {{count}} documents ({{private}} private)"
+  },
+  "view": {
+    "aria": "View",
+    "graph": "Graph",
+    "cards": "Cards"
+  },
+  "switcher": {
+    "aria": "Problem: {{label}}",
+    "menu": "Problems",
+    "explore": "Free exploration",
+    "exploreSub": "Cross-domain pairs within your library",
+    "yourProblems": "Your problems",
+    "ideaCount_one": "{{count}} idea",
+    "ideaCount_other": "{{count}} ideas",
+    "generating": "Generating…",
+    "new": "Describe a new problem",
+    "listFailed": "Couldn't load problems",
+    "retry": "Retry"
+  },
+  "entry": {
+    "label": "Problem",
+    "placeholder": "Describe a new problem: where you're stuck, the constraints",
+    "tried": "What I already tried",
+    "triedPlaceholder": "Approaches you've tried and why they fell short (optional)",
+    "submit": "Find cross-domain ideas",
+    "failed": "Couldn't create the problem",
+    "counter": "{{count}}/{{max}}"
+  },
+  "filter": {
+    "aria": "Filter ideas by status",
+    "active": "In progress",
+    "saved": "Saved",
+    "trying": "Trying",
+    "done": "Has result",
+    "dismissed": "Dismissed"
+  },
+  "state": {
+    "generating": "Finding cross-domain ideas for your problem…",
+    "generatingSub": "Reading the mechanism cards of your library and pairing them across domains.",
+    "failed": "Generating ideas for this problem failed.",
+    "loadFailed": "Couldn't load ideas.",
+    "retry": "Retry",
+    "emptyExplore": "No cross-domain pairs yet.",
+    "emptyProblem": "No ideas for this problem yet.",
+    "emptyHint": "Documents are grouped by domain. Click one to see or edit its domains.",
+    "summarising": "Summarising your documents — {{ready}}/{{total}}",
+    "retryFailed": "Couldn't retry this problem",
+    "skipped_one": "{{count}} document couldn't be analysed",
+    "skipped_other": "{{count}} documents couldn't be analysed",
+    "noRelevant": "Nothing in your library is relevant to this problem.",
+    "noRelevantHint": "Add papers on this topic to your library, or describe the problem differently, then try again."
+  },
+  "graph": {
+    "aria": "Idea graph",
+    "source": "Source",
+    "target": "Target",
+    "problem": "Your problem",
+    "private": "Private document",
+    "ideaLabel": "{{title}}: {{source}} → {{target}} ({{status}})",
+    "status": {
+      "new": "New",
+      "saved": "Saved",
+      "trying": "Trying",
+      "worked": "Worked",
+      "failed": "Failed",
+      "dismissed": "Dismissed"
+    }
+  },
+  "drawer": {
+    "aria": "Details",
+    "close": "Close",
+    "ideaKind": "Cross-domain idea · {{status}}",
+    "source": "Mechanism source",
+    "target": "Applied to",
+    "yourProblem": "The problem you described",
+    "why": "Why it fits",
+    "note": "Note",
+    "document": "Document",
+    "documentPrivate": "Document · Private",
+    "domains": "Domains",
+    "relatedIdeas": "Related ideas",
+    "none": "None yet",
+    "domain": "Domain",
+    "domainDocs": "Documents ({{count}})",
+    "problem": "Your problem",
+    "tried": "Already tried (won't be suggested again)",
+    "triedNone": "Nothing listed",
+    "problemIdeas": "Ideas for this problem ({{count}})",
+    "from": "From {{title}}",
+    "missing": "This item is no longer in the graph."
+  },
+  "zoom": {
+    "aria": "Zoom",
+    "in": "Zoom in",
+    "out": "Zoom out",
+    "fit": "Fit to view"
+  },
+  "legend": {
+    "title": "Legend",
+    "domains": "Domain (colour)",
+    "other": "Other",
+    "relation": "Relation",
+    "citation": "Citation",
+    "idea": "Idea: source → target",
+    "status": "Idea status",
+    "kept": "Saved / trying / worked",
+    "ended": "Failed / dismissed",
+    "document": "Document",
+    "size": "Size = related ideas",
+    "otherHint": "Domains beyond the first eight share this colour"
+  },
+  "detail": {
+    "sections": "Cited sections",
+    "openSection": "Opens the idea's chat with {{section}} in the Citation Canvas",
+    "status": "Status",
+    "statusAria": "Idea status",
+    "setStatus": {
+      "saved": "Save",
+      "trying": "Trying",
+      "worked": "Worked",
+      "failed": "Didn't work"
+    },
+    "statusToast": "Status set to “{{status}}”, recorded as ideation feedback",
+    "statusFailed": "Couldn't update the idea",
+    "note": "Note",
+    "notePlaceholder": "e.g. Discussed with my advisor; small experiment next week",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveFailed": "Couldn't save the note",
+    "openChat": "Open a chat",
+    "continueChat": "Continue chat",
+    "chatFailed": "Couldn't open the chat",
+    "dismiss": "Dismiss",
+    "dismissed": "Dismissed · {{reasons}}",
+    "noReason": "No reason given",
+    "undo": "Undo",
+    "undoFailed": "Couldn't undo the dismissal",
+    "newChat": "New chat",
+    "newChatHint": "Start another chat about this idea"
+  },
+  "dismiss": {
+    "title": "Why doesn't it fit?",
+    "reasons": {
+      "already_tried": "Already tried",
+      "not_feasible": "Not feasible",
+      "analogy_fails": "Analogy doesn't hold",
+      "not_novel": "Not novel",
+      "other": "Other"
+    },
+    "joiner": ", ",
+    "notePlaceholder": "Add a note (optional)",
+    "noteLabel": "Dismissal note",
+    "hint": "Reasons improve ideation; similar ideas won't be suggested again for this problem.",
+    "cancel": "Cancel",
+    "confirm": "Dismiss idea",
+    "toast": "Dismissed “{{title}}”",
+    "failed": "Couldn't dismiss the idea"
+  },
+  "domainEditor": {
+    "label": "Domain tags (manual edits survive re-analysis)",
+    "remove": "Remove {{name}}",
+    "openDomain": "Rename or merge {{name}}",
+    "addLabel": "Add a domain",
+    "addPlaceholder": "Add a domain…",
+    "create": "Create domain “{{name}}”",
+    "suggestions": "Domain suggestions",
+    "lastDomain": "A document needs at least one domain",
+    "failed": "Couldn't update the domains"
+  },
+  "domain": {
+    "rename": "Rename",
+    "save": "Save",
+    "renamed": "Domain renamed",
+    "mergeInto": "Merge into",
+    "merge": "Merge",
+    "merged": "Merged into {{name}}",
+    "mergeHint": "Its documents move to the chosen domain, and this domain goes away.",
+    "failed": "Couldn't update the domain",
+    "nameTaken": "A domain named “{{name}}” already exists — merge into it instead?"
+  },
+  "kanban": {
+    "explore": "Free exploration: cross-domain pairs within your library",
+    "problem": "For your problem: {{text}}",
+    "empty": "No ideas",
+    "to": "to",
+    "chats_one": "{{count}} chat",
+    "chats_other": "{{count}} chats",
+    "columns": {
+      "new": "New",
+      "saved": "Saved",
+      "trying": "Trying",
+      "done": "Has result",
+      "dismissed": "Dismissed"
+    }
+  },
+  "chat": {
+    "prefillProblem": "Let's dig into the idea “{{title}}”.\nMechanism source: “{{source}}”, section {{sourceSection}}.\nMy problem: {{problem}}\nWhy it might fit: {{rationale}}\nHow would I apply this mechanism to my problem, and where could the analogy break?",
+    "prefillExplore": "Let's dig into the idea “{{title}}”.\nMechanism source: “{{source}}”, section {{sourceSection}}.\nApplied to: “{{target}}”, section {{targetSection}}.\nWhy it might fit: {{rationale}}\nHow would the mechanism carry over, and where could the analogy break?"
+  },
+  "explore": {
+    "run": "Find new pairs",
+    "running": "Finding pairs…",
+    "noNew": "No new pairs this time",
+    "found_one": "{{count}} new pair",
+    "found_other": "{{count}} new pairs",
+    "failed": "Free exploration failed",
+    "overlay": "Finding cross-domain pairs in your library…"
+  },
+  "section": {
+    "fullText": "Full text"
+  }
+}

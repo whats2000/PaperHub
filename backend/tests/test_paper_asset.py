@@ -82,3 +82,54 @@ def test_write_block_assets_is_atomic(tmp_path: Path, monkeypatch) -> None:  # t
         write_block_assets(tmp_path, [], inline_math_llm=True)
     assert read_block_assets(tmp_path) == (b, False)  # old file intact
     assert [p.name for p in paper_asset_dir(tmp_path).iterdir()] == ["blocks.json"]
+
+
+def test_read_paper_asset_tolerates_unknown_keys_and_imageless_figures(
+    tmp_path: Path,
+) -> None:
+    """A figures.json written by another tool can carry extra keys (e.g.
+    ``kind``) and figures with no rendered image (``image_path == ""``).
+    The reader keeps the usable figures instead of raising TypeError."""
+    import json
+
+    from paperhub.pipelines.paper_asset import FigureAsset, paper_asset_dir, read_paper_asset
+
+    d = paper_asset_dir(tmp_path)
+    d.mkdir(parents=True)
+    (d / "figures.json").write_text(json.dumps([
+        {"id": "fig-001", "caption": "tikz roadmap", "page": None,
+         "section": "Intro", "image_path": "", "kind": "tikz"},
+        {"id": "fig-002", "caption": "MoE", "page": None,
+         "section": "Basics", "image_path": "figures/fig-002.png", "kind": "raster"},
+        {"id": "fig-003", "caption": "missing keys"},
+    ]), encoding="utf-8")
+    asset = read_paper_asset(tmp_path)
+    assert asset is not None
+    assert asset.figures == [
+        FigureAsset("fig-002", "MoE", None, "Basics", "figures/fig-002.png"),
+    ]
+
+
+def test_read_paper_asset_ignores_unknown_section_and_equation_keys(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from paperhub.pipelines.paper_asset import (
+        EquationAsset,
+        SectionAsset,
+        paper_asset_dir,
+        read_paper_asset,
+    )
+
+    d = paper_asset_dir(tmp_path)
+    d.mkdir(parents=True)
+    (d / "figures.json").write_text("[]", encoding="utf-8")
+    (d / "structure.json").write_text(json.dumps(
+        [{"name": "Intro", "order": 0, "depth": 1}]), encoding="utf-8")
+    (d / "equations.json").write_text(json.dumps(
+        [{"id": "eq-1", "latex": "x", "section": None, "label": "e1"}]), encoding="utf-8")
+    asset = read_paper_asset(tmp_path)
+    assert asset is not None
+    assert asset.sections == [SectionAsset("Intro", 0)]
+    assert asset.equations == [EquationAsset("eq-1", "x", None)]

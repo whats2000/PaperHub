@@ -317,7 +317,9 @@ class PaperPipeline:
         # Chunking before rendering lets us inject sentinel tokens at each chunk's
         # start offset in the comment-stripped text, so the rendered HTML carries
         # deterministic <span id="phchunk-N"> anchors for the Citation Canvas.
-        chunks = chunk_text(full_text)
+        chunks = chunk_text(
+            full_text, macros=extract_macros_from_dir(source_path.parent, ext.preamble),
+        )
 
         # Inject chunk-start sentinels into the comment-stripped source, then
         # normalize figures and render to HTML from that sentinel-marked copy.
@@ -535,7 +537,10 @@ class PaperPipeline:
             # us inject sentinel tokens at each chunk's start offset in the
             # comment-stripped text so the rendered HTML gets deterministic
             # <span id="phchunk-N"> anchors for the Citation Canvas.
-            chunks = chunk_text(full_text)
+            chunks = chunk_text(
+                full_text,
+                macros=extract_macros_from_dir(source_path.parent, ext.preamble),
+            )
 
             # Inject sentinels into the comment-stripped flattened source, then
             # normalize figures and render to HTML from the sentinel-marked copy.

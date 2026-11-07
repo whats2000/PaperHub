@@ -267,7 +267,7 @@ async def test_uncertain_verdict_needs_confirmation(tmp_path: Path) -> None:
     await _run(db, run_id, llm)
 
     v = llm.calls[0]
-    assert v["slot"] == "feedback_review/v1"
+    assert v["slot"] == "feedback_review/v4"
     assert v["model"] == "stub-model"
     assert v["variables"]["question"] == "Which datasets does the second paper use?"
     assert v["variables"]["answer"] == "It uses WMT 2014 [chunk:1]."
@@ -290,10 +290,13 @@ async def test_uncertain_verdict_needs_confirmation(tmp_path: Path) -> None:
                          "uncertain", "needs_confirmation",
                          "Which part looks wrong to you?")]
         async with conn.execute(
-            "SELECT id, session_id, status FROM runs WHERE id > ?", (run_id,),
+            "SELECT id, session_id, status, routing_decision_json FROM runs "
+            "WHERE id > ?", (run_id,),
         ) as cur:
-            (review_run, sid, status), = await cur.fetchall()
+            (review_run, sid, status, routing), = await cur.fetchall()
         assert (sid, status) == (1, "ok")
+        # Marked so a runs count can tell it from a chat turn (library_stats).
+        assert json.loads(routing) == {"intent": "feedback_review"}
         async with conn.execute(
             "SELECT agent, tool, model, status, args_redacted_json, result_summary_json "
             "FROM tool_calls WHERE run_id = ?", (review_run,),
@@ -313,6 +316,7 @@ async def test_uncertain_verdict_needs_confirmation(tmp_path: Path) -> None:
         "question": v["variables"]["question"], "answer": v["variables"]["answer"],
         "user_followup": "wrong paper",
         "trace_summary": v["variables"]["trace_summary"],
+        "doubt_language": "the main language of the user's question",
     }
     res = json.loads(result)
     assert res["verdict"] == "uncertain"
@@ -353,7 +357,13 @@ async def test_fork_review_has_empty_followup_and_dedupes(tmp_path: Path) -> Non
     await _run(db, run_id, llm, trigger="fork", followup=None)
     await _run(db, run_id, llm, trigger="fork", followup=None)  # same run again
     assert len(llm.calls) == 1
+    # A fork has no follow-up text, so it gets the dedicated fork reviewer.
+    assert llm.calls[0]["slot"] == "feedback_review_fork/v4"
     assert llm.calls[0]["variables"]["user_followup"] == ""
+    result = json.loads((await _fetchall(
+        db, "SELECT result_summary_json FROM tool_calls WHERE tool = 'feedback:review'",
+    ))[0][0])
+    assert result["slot"] == "feedback_review_fork/v4"
     assert await _fetchall(db, "SELECT trigger FROM feedback") == [("fork",)]
 
 
@@ -460,6 +470,25 @@ async def test_migration_dedupes_implicit_rows_before_the_index(tmp_path: Path) 
     ) == [("idx_feedback_implicit_run_trigger",)]
 
 
+async def test_migration_marks_unmarked_review_runs(tmp_path: Path) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    await _run(db, run_id, _StubLlm(ReviewVerdict(
+        verdict="rejected", reasons=[], doubt="Not a complaint.")))
+    async with aiosqlite.connect(db) as conn:
+        # A review run stored before the marker existed.
+        await conn.execute("UPDATE runs SET routing_decision_json = NULL WHERE id > ?",
+                           (run_id,))
+        await conn.commit()
+        await apply_schema(conn)
+        await apply_schema(conn)  # idempotent
+    rows = await _fetchall(db, "SELECT id, routing_decision_json FROM runs ORDER BY id")
+    assert [json.loads(r[1]) if r[1] else None for r in rows if r[0] > run_id] == [
+        {"intent": "feedback_review"}]
+    # The reviewed chat turn keeps its own routing decision.
+    assert json.loads(dict(rows)[run_id]) == {"intent": "paper_qa"}
+
+
 async def test_run_without_answer_is_skipped(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     run_id = await _seed_target(db)
@@ -510,6 +539,83 @@ async def test_repeated_chunk_prefix_marker_is_cited(tmp_path: Path) -> None:
     assert inputs is not None
     assert inputs.cited_chunk_ids == [1, 7]
     assert "cited: chunk 7 (not found)" in inputs.trace_summary
+
+
+async def _cite_long_chunks(db: Path, texts: list[str]) -> list[int]:
+    """Replace the answer's citation with new chunks of ``texts`` (on P1)."""
+    async with aiosqlite.connect(db) as conn:
+        ids: list[int] = []
+        for t in texts:
+            cur = await conn.execute(
+                "INSERT INTO chunks (paper_content_id, section, char_start, char_end, "
+                "text) VALUES (1, '5 Training', 0, 10, ?)", (t,),
+            )
+            ids.append(int(cur.lastrowid))
+        marks = " ".join(f"[chunk:{i}]" for i in ids)
+        await conn.execute(
+            "UPDATE messages SET content = ? WHERE role = 'assistant'",
+            (f"Dropout is 0.1 {marks}.",),
+        )
+        await conn.commit()
+    return ids
+
+
+async def test_cited_chunk_full_text_reaches_the_reviewer(tmp_path: Path) -> None:
+    """Runs 825/827: the supporting fact sat past the old 200-char head, so the
+    reviewer never saw it. The whole cited passage is now in the summary, and
+    the step records what was shown."""
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    text = ("This section describes the training regime. " * 10
+            + "For the base model, we use a rate of $P_{drop}=0.1$.")
+    (cid,) = await _cite_long_chunks(db, [text])
+    llm = _StubLlm(ReviewVerdict(verdict="uncertain", reasons=[], doubt="d"))
+    await _run(db, run_id, llm, trigger="fork", followup=None)
+
+    summary = llm.calls[0]["variables"]["trace_summary"]
+    assert f'cited: chunk {cid} (P1 §5) "{text}"' in summary
+    (res,) = await _fetchall(
+        db, "SELECT result_summary_json FROM tool_calls WHERE run_id > "
+        f"{run_id} AND tool = 'feedback:review'")
+    assert json.loads(res[0])["cited_passages"] == [
+        {"chunk_id": cid, "chars": len(text), "shown_chars": len(text),
+         "cut": False},
+    ]
+
+
+async def test_cited_passages_share_a_character_budget(tmp_path: Path) -> None:
+    """Past ``CITED_TEXT_BUDGET`` the passage that crosses it is cut and later
+    ones are listed without text; the record says which."""
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    budget = review.CITED_TEXT_BUDGET
+    texts = ["a" * (budget - 100), "b" * 300, "c" * 50]
+    ids = await _cite_long_chunks(db, texts)
+    async with aiosqlite.connect(db) as conn:
+        inputs = await review.load_review_inputs(conn, run_id)
+    assert inputs is not None
+    s = inputs.trace_summary
+    assert f'cited: chunk {ids[0]} (P1 §5) "{texts[0]}"' in s
+    assert f'cited: chunk {ids[1]} (P1 §5) "{"b" * 100}..."' in s
+    assert f"cited: chunk {ids[2]} (P1 §5) [text not shown: passage budget spent]" in s
+    assert inputs.cited_passages == [
+        {"chunk_id": ids[0], "chars": budget - 100, "shown_chars": budget - 100,
+         "cut": False},
+        {"chunk_id": ids[1], "chars": 300, "shown_chars": 100, "cut": True},
+        {"chunk_id": ids[2], "chars": 50, "shown_chars": 0, "cut": True},
+    ]
+
+
+async def test_more_than_six_short_citations_are_all_shown(tmp_path: Path) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    ids = await _cite_long_chunks(db, [f"passage {i}" for i in range(8)])
+    async with aiosqlite.connect(db) as conn:
+        inputs = await review.load_review_inputs(conn, run_id)
+    assert inputs is not None
+    for i, cid in enumerate(ids):
+        assert f'cited: chunk {cid} (P1 §5) "passage {i}"' in inputs.trace_summary
+    assert "more chunks" not in inputs.trace_summary
 
 
 async def test_review_step_is_harvestable_for_the_eval_stage(tmp_path: Path) -> None:
@@ -630,3 +736,150 @@ async def test_review_timeout_is_bounded_and_recorded(
     assert error == "timeout after 1 attempt(s)"
     assert result == {"failure": "timeout", "attempts": 1, "output_head": None}
     assert await _fetchall(db, "SELECT COUNT(*) FROM feedback") == [(0,)]
+
+
+async def test_reviewer_does_not_fall_back_to_the_small_tier_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The small tier garbles zh/ja doubts (~12 %) and scores fork cases worse,
+    so a failing reviewer call gets no fallback unless one is configured:
+    a failed background review is recorded, a garbled verdict would be kept."""
+    good = '{"verdict": "confirmed", "reasons": ["factual"], "doubt": "d"}'
+    monkeypatch.delenv("PAPERHUB_FEEDBACK_REVIEW_FALLBACK_MODEL", raising=False)
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    llm = _SeqLlm(good)
+    await _run(db, run_id, llm)
+    assert llm.calls[0]["fallback_model"] == ""
+
+    monkeypatch.setenv("PAPERHUB_FEEDBACK_REVIEW_FALLBACK_MODEL", "gemini/mid")
+    db2 = tmp_path / "t2.db"
+    run_id2 = await _seed_target(db2)
+    llm2 = _SeqLlm(good)
+    await _run(db2, run_id2, llm2)
+    assert llm2.calls[0]["fallback_model"] == "gemini/mid"
+
+
+async def _add_steps(
+    db: Path, run_id: int, intent: str, steps: list[tuple[str, str, Any, Any]],
+) -> None:
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "UPDATE runs SET routing_decision_json = ? WHERE id = ?",
+            (json.dumps({"intent": intent}), run_id),
+        )
+        await conn.execute(
+            "UPDATE tool_calls SET result_summary_json = ? "
+            "WHERE run_id = ? AND tool = 'classify'",
+            (json.dumps({"intent": intent}), run_id),
+        )
+        base = 10
+        for i, (agent, tool, args, result) in enumerate(steps):
+            await conn.execute(
+                "INSERT INTO tool_calls (run_id, branch, step_index, agent, tool, "
+                "args_redacted_json, result_summary_json, latency_ms, status) "
+                "VALUES (?, '', ?, ?, ?, ?, ?, 1, 'ok')",
+                (run_id, base + i, agent, tool, json.dumps(args), json.dumps(result)),
+            )
+        await conn.commit()
+
+
+async def test_library_stats_summary_carries_the_sql_and_its_rows(
+    tmp_path: Path,
+) -> None:
+    """Run 872: the reviewer said the trace lacked the data although the
+    ``sql.query`` step recorded ``[[61, 21]]``."""
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    await _add_steps(db, run_id, "library_stats", [
+        ("sql", "sql.query", {"sql": "SELECT COUNT(*) AS n FROM paper_content"},
+         {"ok": True, "payload": {"columns": ["n"], "rows": [[61]]}}),
+        ("sql", "sql.query", {"sql": "SELECT bad"},
+         {"ok": False, "error": "no such column: bad"}),
+    ])
+    async with aiosqlite.connect(db) as conn:
+        inputs = await review.load_review_inputs(conn, run_id)
+    assert inputs is not None
+    s = inputs.trace_summary
+    assert "sql: SELECT COUNT(*) AS n FROM paper_content" in s
+    assert "columns=['n'] rows=[[61]]" in s
+    assert "no such column: bad" in s
+
+
+async def test_sql_evidence_is_bounded(tmp_path: Path) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    rows = [[i, "x" * 400] for i in range(100)]
+    await _add_steps(db, run_id, "library_stats", [
+        ("sql", "sql.query", {"sql": "SELECT " + "y" * 3000},
+         {"ok": True, "payload": {"columns": ["a", "b"], "rows": rows}}),
+    ])
+    async with aiosqlite.connect(db) as conn:
+        inputs = await review.load_review_inputs(conn, run_id)
+    assert inputs is not None
+    sql_lines = [ln for ln in inputs.trace_summary.splitlines() if ln.startswith("sql")]
+    assert sum(len(ln) for ln in sql_lines) < 2500
+    assert "100 rows" in inputs.trace_summary
+
+
+async def test_slides_and_search_summaries_carry_what_they_recorded(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    await _add_steps(db, run_id, "slides", [
+        ("report", "report:outline", None,
+         {"talk_title": "Mamba vs Transformer", "narrative_pattern": "compare"}),
+        ("report", "report:compile", None, {"ok": True, "page_count": 9}),
+    ])
+    async with aiosqlite.connect(db) as conn:
+        inputs = await review.load_review_inputs(conn, run_id)
+    assert inputs is not None
+    assert 'deck: "Mamba vs Transformer"' in inputs.trace_summary
+    assert "compiled: ok, 9 pages" in inputs.trace_summary
+
+    db_b = tmp_path / "t_search.db"
+    run2 = await _seed_target(db_b)
+    await _add_steps(db_b, run2, "paper_search", [
+        ("search", "paper_search:finalize", None,
+         {"emitted_candidates": [{"title": "Mamba"}, {"title": "S4"}],
+          "not_found": ["Foo"]}),
+    ])
+    async with aiosqlite.connect(db_b) as conn:
+        inputs2 =await review.load_review_inputs(conn, run2)
+    assert inputs2 is not None
+    assert '"Mamba"' in inputs2.trace_summary and '"S4"' in inputs2.trace_summary
+    assert "not found: Foo" in inputs2.trace_summary
+
+
+async def test_review_of_an_already_rated_run_is_closed_not_queued(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "INSERT INTO feedback (run_id, kind, polarity) VALUES (?, 'explicit', 'up')",
+            (run_id,),
+        )
+        await conn.commit()
+    llm = _StubLlm(ReviewVerdict(verdict="uncertain", reasons=[], doubt="d"))
+    await _run(db, run_id, llm)
+    async with aiosqlite.connect(db) as conn, conn.execute(
+        "SELECT status, verdict FROM feedback WHERE kind = 'implicit'",
+    ) as cur:
+        assert await cur.fetchall() == [("final", "rejected")]
+
+
+async def test_reviewer_is_told_the_ui_language_for_its_doubt(tmp_path: Path) -> None:
+    db = tmp_path / "t.db"
+    run_id = await _seed_target(db)
+    llm = _StubLlm(ReviewVerdict(verdict="uncertain", reasons=[], doubt="d"))
+    review.schedule_review(
+        db_path=db, session_id=1, target_run_id=run_id, followup="wrong",
+        trigger="keyword", llm=llm, model="m", ui_language="zh-TW",  # type: ignore[arg-type]
+    )
+    await _drain()
+    assert llm.calls[0]["variables"]["doubt_language"] == "Traditional Chinese"
+    assert review.doubt_language(None) == "the main language of the user's question"
+    assert review.doubt_language("ja") == "Japanese"

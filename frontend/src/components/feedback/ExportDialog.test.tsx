@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -228,5 +228,33 @@ describe("ExportDialog", () => {
     await user.click(screen.getByRole("button", { name: "reopen" }));
     expect(screen.queryByRole("link", { name: "sft.jsonl" })).toBeNull();
     expect(screen.queryByText("145")).toBeNull();
+  });
+
+  it("disables Export when nothing matches and when From is after To", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server.use(
+      http.get(`${API_BASE_URL}/feedback/export/preview`, ({ request }) => {
+        previewUrls.push(new URL(request.url));
+        return HttpResponse.json({ sft: 0, dpo: 0, includes_private: false });
+      }),
+    );
+    render(<Harness />);
+    await settle();
+    expect(await screen.findByText(/nothing to export/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+
+    const n = previewUrls.length;
+    const from = screen.getByLabelText("From");
+    const to = screen.getByLabelText("To");
+    act(() => {
+      fireEvent.change(from, { target: { value: "2026-12-01" } });
+      fireEvent.change(to, { target: { value: "2026-11-01" } });
+    });
+    await settle();
+    expect(screen.getByText(/is after/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+    // An inverted range is never sent to the backend.
+    expect(previewUrls.every((u) => !(u.searchParams.get("since") === "2026-12-01" && u.searchParams.get("until") === "2026-11-01"))).toBe(true);
+    expect(n).toBeGreaterThan(0);
   });
 });

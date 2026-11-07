@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useChatStore } from "@/store/chat";
 import { useSlidesStore } from "@/store/slides";
-import { getDeck } from "@/lib/api";
+import { getDeckIfAny } from "@/lib/api";
 import type { DeckEventData } from "@/types/domain";
 
 /**
@@ -50,9 +50,15 @@ export function useDeckSync(): void {
     if (sess?.messages.some((m) => m.status === "streaming")) return;
 
     let cancelled = false;
-    getDeck(backendSessionId)
+    getDeckIfAny(backendSessionId)
       .then((d) => {
         if (cancelled) return;
+        if (d === null) {
+          // No deck for this session: clear the slides store so a deckless
+          // session never inherits the previous deck.
+          clearDeck(backendSessionId);
+          return;
+        }
         const event: DeckEventData = {
           deck_id: d.deck_id,
           session_id: d.session_id,
@@ -69,8 +75,7 @@ export function useDeckSync(): void {
         setDeck(backendSessionId, event);
       })
       .catch(() => {
-        // 404 (no deck for this session) or transient error → clear the slides
-        // store so a deckless session never inherits the previous deck.
+        // Transient error → clear the slides store, as for a deckless session.
         if (cancelled) return;
         clearDeck(backendSessionId);
       });

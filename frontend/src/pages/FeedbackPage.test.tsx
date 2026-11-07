@@ -56,6 +56,9 @@ beforeEach(() => {
   summaryCalls = 0;
   useNavStore.setState({ page: "chat", feedbackBadge: 0 });
   server.use(
+    http.get(`${API_BASE_URL}/ideation/feedback-summary`, () =>
+      HttpResponse.json({ save_rate: 0, worked_rate: null, dismiss_reasons: [] }),
+    ),
     http.get(`${API_BASE_URL}/feedback/queue`, () => HttpResponse.json(queue)),
     http.post(`${API_BASE_URL}/feedback/queue/submit`, async ({ request }) => {
       submitted = (await request.json()) as QueueSubmit;
@@ -128,6 +131,9 @@ describe("Feedback flywheel, end to end", () => {
     await waitFor(() => expect(summaryCalls).toBe(2));
     expect(await screen.findByText("41")).toBeInTheDocument();
     await showsItem(3);
-    expect(screen.getByText("1 item needs your confirmation")).toBeInTheDocument();
+    // Item 3 is already on screen (answering item 2 auto-advanced to it); the
+    // banner count drops only when the post-submit slide swaps the items in,
+    // one SLIDE_OUT_MS later — wait for it rather than racing it.
+    expect(await screen.findByText("1 item needs your confirmation")).toBeInTheDocument();
   });
 });

@@ -334,3 +334,50 @@ async def test_migration_adds_forked_from_run_id_to_existing_db(
             and r[6].upper() == "SET NULL"
             for r in fks
         )
+
+
+@pytest.mark.asyncio
+async def test_legacy_citation_http_errors_reset_for_retry(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Rows from the pre-fix 400 (``error:HTTPStatusError``) are re-queued;
+    other statuses are kept."""
+    for i, status in enumerate(
+        ("error:HTTPStatusError", "ok", "not_found", "error:HTTP500"), start=1,
+    ):
+        await migrated_db.execute(
+            "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, source_path, "
+            "source_dir_path, html_path) VALUES (?, ?, 'arxiv', ?, 't', '', '', '')",
+            (i, f"k{i}", f"1111.0000{i}"),
+        )
+        await migrated_db.execute(
+            "INSERT INTO citation_fetch (paper_content_id, status) VALUES (?, ?)",
+            (i, status),
+        )
+    await migrated_db.commit()
+    await apply_schema(migrated_db)
+    async with migrated_db.execute(
+        "SELECT paper_content_id, status FROM citation_fetch ORDER BY 1",
+    ) as cur:
+        rows = [tuple(r) for r in await cur.fetchall()]
+    assert rows == [(2, "ok"), (3, "not_found"), (4, "error:HTTP500")]
+
+
+@pytest.mark.asyncio
+async def test_mechanism_cards_gain_slot_defaulting_to_v1(tmp_path: Path) -> None:
+    """Cards cached before the slot column were built by ideation_card/v1."""
+    db_path = tmp_path / "old.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute("ALTER TABLE mechanism_cards DROP COLUMN slot")
+        await conn.execute(
+            "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES (1, 'k', 'arxiv', '1.1', 't', '', '', '')")
+        await conn.execute(
+            "INSERT INTO mechanism_cards (paper_content_id, card_json, digest_hash, "
+            "model) VALUES (1, '{}', 'h', 'm')")
+        await conn.commit()
+        await apply_schema(conn)
+        async with conn.execute("SELECT slot FROM mechanism_cards") as cur:
+            assert [r[0] for r in await cur.fetchall()] == ["ideation_card/v1"]

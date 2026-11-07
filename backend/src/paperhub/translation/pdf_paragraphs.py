@@ -9,6 +9,17 @@ starts with a reference marker is a footnote Marker mistyped (e.g. an
 affiliation line): it is its own paragraph and bridges an open one. Inline math and
 reference markers become ``⟦n⟧`` placeholders; ``math[n]`` is always LaTeX
 (references are wrapped in ``\text{...}``). A merge boundary is ``⟦BR⟧``.
+
+A merge also needs the layout to say "continued": the next block is on
+another page, in another column (it starts above or right of the open one),
+or past a bridge. Two blocks stacked in one column with nothing between them
+are two paragraphs; this keeps front matter (bylines, affiliations, dates,
+abstract), whose lines never end a sentence, from fusing into one unit.
+
+Not translated at all (no paragraph, so no hover card): the reference list
+(blocks under a References / Bibliography heading or section, up to the next
+heading) and name, affiliation, correspondence, date and DOI lines
+(``quality.is_meta_block``). A skipped meta line bridges like a footnote.
 """
 
 from __future__ import annotations
@@ -18,6 +29,7 @@ import re
 
 from paperhub.pipelines.paper_asset import BlockAsset
 from paperhub.translation.models import PdfFragment, PdfParagraph
+from paperhub.translation.quality import is_meta_block
 
 TRANSLATABLE = frozenset({"Text", "ListItem", "Caption", "Footnote", "TextInlineMath"})
 _MERGEABLE = frozenset({"Text", "TextInlineMath"})
@@ -32,6 +44,13 @@ _TOKEN = re.compile(
 _BREAKS = re.compile(r"<br\s*/?>|</?(?:p|div|li|ul|ol|h[1-6]|tr|td|th)\b[^>]*>", re.I)
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
+_REFS_HEADING = re.compile(
+    r"^\W*(?:\d+\.?\s*)?(?:supplementary\s+)?"
+    r"(?:references|bibliography|works\s+cited|literature\s+cited|參考文獻|参考文献)\W*$",
+    re.I,
+)
+# Points a block may start above the open one's bottom and still be "below" it.
+_STACK_SLOP = 2.0
 _LATEX_TEXT_ESC = {
     "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "%": r"\%", "#": r"\#",
     "&": r"\&", "_": r"\_", "^": r"\^{}", "~": r"\~{}", "$": r"\$",
@@ -96,17 +115,46 @@ def _footnote_like(text: str, items: list[str]) -> bool:
     return text.startswith("⟦0⟧") and bool(items) and items[0].startswith(r"\text{")
 
 
+def is_references_heading(title: str) -> bool:
+    return bool(_REFS_HEADING.match(title.strip()))
+
+
+def _continues(last: PdfFragment | None, nxt: PdfFragment | None) -> bool:
+    """The layout lets ``nxt`` continue the paragraph ending at ``last``: another
+    page, or another column (it starts above or right of ``last``). Without
+    geometry on either side, merging is decided by the text alone."""
+    if last is None or nxt is None:
+        return True
+    if nxt.page != last.page:
+        return True
+    lx0, _ly0, lx1, ly1 = last.bbox
+    nx0, ny0, _nx1, _ny1 = nxt.bbox
+    return ny0 < ly1 - _STACK_SLOP or nx0 >= lx1
+
+
 def build_paragraphs(blocks: list[BlockAsset]) -> list[PdfParagraph]:
     paras: list[PdfParagraph] = []
     cur: PdfParagraph | None = None
     open_para = False  # cur ended mid-sentence and may absorb the next Text block
+    bridged = False  # a bridge block (or skipped line) sits after cur's last block
+    in_refs = False  # under a References heading, up to the next heading
     for b in blocks:
+        if b.block_type == "SectionHeader":
+            in_refs = is_references_heading(_plain(b.html))
         if b.block_type not in TRANSLATABLE:
-            if b.block_type not in _BRIDGE:
+            if b.block_type in _BRIDGE:
+                bridged = True
+            else:
                 open_para = False  # hard break
+            continue
+        if in_refs or (b.section is not None and is_references_heading(b.section)):
+            open_para = False
             continue
         text, items, trailing = _convert(b.html)
         if not text:
+            continue
+        if b.block_type != "Caption" and is_meta_block(text):
+            bridged = True  # like a footnote: the open paragraph may go on past it
             continue
         x0, y0, x1, y1 = b.bbox
         # Task 7 falls back to a zero bbox when Marker gave no geometry.
@@ -117,7 +165,8 @@ def build_paragraphs(blocks: list[BlockAsset]) -> list[PdfParagraph]:
                                       fragments=[frag] if frag else []))
             continue
         mergeable = b.block_type in _MERGEABLE
-        if cur is not None and open_para and mergeable:
+        last = cur.fragments[-1] if cur is not None and cur.fragments else None
+        if cur is not None and open_para and mergeable and (bridged or _continues(last, frag)):
             cur.text = f"{cur.text} ⟦BR⟧ {_shift(text, len(cur.math))}"
             cur.math.extend(items)
             if frag:
@@ -127,4 +176,5 @@ def build_paragraphs(blocks: list[BlockAsset]) -> list[PdfParagraph]:
                                fragments=[frag] if frag else [])
             paras.append(cur)
         open_para = mergeable and not _ends_sentence(text, trailing)
+        bridged = False
     return paras

@@ -559,3 +559,53 @@ async def test_fork_of_fork_copies_of_an_unrated_original_export_once(
     await conn.commit()
     plan = await build_export(conn, _opts())
     assert len(plan.sft) == 1
+
+
+async def test_dpo_applies_the_same_down_rated_history_rule_as_sft(
+    app_with_db: tuple[Any, Any],
+) -> None:
+    """Run 858: a down-rated answer 857 sat inside the DPO ``prompt`` while the
+    same history dropped an SFT sample. One rule for both."""
+    _, conn = app_with_db
+    sid = await _session(conn)
+    bad = await _turn(conn, sid, "q1", "bad answer")
+    await _rate(conn, bad, "down")
+    second = await _turn(conn, sid, "q2", "meh")
+    await _rate(conn, second, "down", correction="better")
+    # a sibling fork pair whose shared history holds the down-rated turn
+    orig = await _turn(conn, sid, "q3", "orig")
+    await _rate(conn, orig, "up")
+    await _rate(conn, await _fork(conn, sid, orig, "q3", "forked"), "down")
+    # control: the same shapes with a clean history are kept
+    sid2 = await _session(conn)
+    await _turn(conn, sid2, "q1", "fine")
+    r = await _turn(conn, sid2, "q2", "meh")
+    await _rate(conn, r, "down", correction="better")
+    await conn.commit()
+    plan = await build_export(conn, _opts())
+    assert [d["chosen"][0]["content"] for d in plan.dpo] == ["better"]
+    assert plan.dpo[0]["prompt"][0]["content"] == "q1"
+    assert plan.dpo[0]["prompt"][1]["content"] == "fine"
+
+
+async def test_export_rejects_an_empty_plan_and_inverted_dates(
+    app_with_db: tuple[Any, Any], tmp_path: Path,
+) -> None:
+    app, conn = app_with_db
+    sid = await _session(conn)
+    await _rate(conn, await _turn(conn, sid, "q", "a"), "up")
+    await conn.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # every field is optional on POST, as on the preview
+        r = await c.post("/feedback/export", json={})
+        assert r.status_code == 200 and r.json()["sft"] == 1
+        r = await c.post("/feedback/export", json={"since": "2026-12-01",
+                                                   "until": "2026-11-01"})
+        assert r.status_code == 422
+        r = await c.get("/feedback/export/preview",
+                        params={"since": "2026-12-01", "until": "2026-11-01"})
+        assert r.status_code == 422
+        before = sorted(p.name for p in (tmp_path / "exports").iterdir())
+        r = await c.post("/feedback/export", json={"model": "no-such-model"})
+        assert r.status_code == 422 and "nothing to export" in r.text
+        assert sorted(p.name for p in (tmp_path / "exports").iterdir()) == before

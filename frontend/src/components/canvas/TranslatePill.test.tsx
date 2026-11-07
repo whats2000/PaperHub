@@ -219,3 +219,69 @@ describe("TranslatePill", () => {
     ).toBe(label);
   });
 });
+
+describe("TranslatePill: retry all failed (QA F2) and untranslatable HTML (QA B2)", () => {
+  beforeEach(() => {
+    useTranslationStore.setState({
+      language: "繁體中文",
+      recent: ["繁體中文"],
+      enabledByPaper: { [PAPER]: true },
+    });
+  });
+
+  it("shows a retry badge with the failed count that retries all at once", async () => {
+    const user = userEvent.setup();
+    const onRetryFailed = vi.fn();
+    const { rerender } = renderPill({ failedCount: 3, onRetryFailed });
+    const badge = screen.getByRole("button", { name: /retry 3 failed translations/i });
+    expect(badge).toHaveAttribute("data-state", "open");
+    await user.click(badge);
+    expect(onRetryFailed).toHaveBeenCalledOnce();
+    rerender(
+      <TranslatePill
+        paperId={PAPER}
+        disabledReason={null}
+        staleTerminology={false}
+        onRetranslate={() => {}}
+        failedCount={0}
+        onRetryFailed={onRetryFailed}
+      />,
+    );
+    // Zooms out (keeping its count) before it unmounts.
+    expect(screen.getByRole("button", { name: /resume translating/i })).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /resume translating/i })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("offers the same action in the language menu", async () => {
+    const user = userEvent.setup();
+    const onRetryFailed = vi.fn();
+    renderPill({ failedCount: 1, onRetryFailed });
+    await user.click(screen.getByRole("button", { name: /translation language/i }));
+    const items = await screen.findAllByRole("button", { name: /retry 1 failed translation$/i });
+    await user.click(items.at(-1)!);
+    expect(onRetryFailed).toHaveBeenCalledOnce();
+  });
+
+  it("offers a resume when only the background run paused", () => {
+    renderPill({ failedCount: 0, paused: true, onRetryFailed: () => {} });
+    expect(screen.getByRole("button", { name: /resume translating/i })).toBeInTheDocument();
+  });
+
+  it("has no badge while translation is off", () => {
+    useTranslationStore.setState({ enabledByPaper: {} });
+    renderPill({ failedCount: 2, onRetryFailed: () => {} });
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it("explains a paper with no paragraphs to translate", () => {
+    renderPill({ disabledReason: "no_text" });
+    expect(screen.getByRole("button", { name: toggleName })).toHaveAccessibleDescription(
+      /can't be translated/i,
+    );
+  });
+});

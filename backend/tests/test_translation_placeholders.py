@@ -24,7 +24,10 @@ def test_placeholders_intact() -> None:
 
 def test_normalize_language() -> None:
     assert normalize_language("  繁體中文（香港）  ") == "繁體中文（香港）"
-    assert normalize_language("Traditional   \t Chinese") == "Traditional Chinese"
+    assert normalize_language("Pirate   \t English") == "Pirate English"
+    # Known spellings of one language share one cache key.
+    assert normalize_language("Traditional   \t Chinese") == "繁體中文"
+    assert normalize_language("Japanese") == normalize_language("日本語") == "日本語"
 
 
 def test_source_hash_is_sha256_hex() -> None:

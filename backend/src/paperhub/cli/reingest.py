@@ -1,7 +1,10 @@
 """Re-chunk every paper_content row using the current chunker.
 
-Deletes chunks first; preserves paper_content.id so membership (papers) +
-message history survive. Idempotent — runs as many times as needed.
+Preserves paper_content.id so membership (papers) + message history survive.
+When the re-derived chunk spans match the stored rows, only section names are
+updated in place (chunk ids, dom_id, page, bbox kept); rows are replaced only
+when the boundaries really changed. Marker block-anchored chunks are left
+alone. Idempotent — runs as many times as needed.
 
 Usage:
     uv run paperhub-reingest                 # all paper_content rows
@@ -15,6 +18,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +26,10 @@ import aiosqlite
 import tiktoken
 
 from paperhub.config import load_settings
+from paperhub.db.section_rename import apply_section_renames
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
 from paperhub.pipelines.extract import extract_latex, extract_pdf_with_headings
+from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
 
 _LOG = logging.getLogger("paperhub.reingest")
 _CL100K = tiktoken.get_encoding("cl100k_base")
@@ -62,17 +68,23 @@ def _build_sections_json(
     return json.dumps(entries)
 
 
-async def _reingest_one(
-    pcid: int,
-    *,
-    conn: aiosqlite.Connection,
-    dry_run: bool,
-) -> tuple[int, int]:
-    """Re-chunk one paper_content row.
+@dataclass
+class Derived:
+    """Chunks re-derived from a paper's cached source (no DB writes)."""
 
-    Returns (chunks_before, chunks_after) for logging.
-    chunks_before is 0 when the row is skipped (missing source_path).
-    """
+    chunks: list[Chunk]
+    extracted: str
+    is_pdf: bool
+    # The main .tex extraction picked (LaTeX only) — used to rewrite
+    # source.flattened.tex + the stored source_path so the HTML re-render stays
+    # in sync with the re-extracted body.
+    latex_main_path: Path | None
+    source_dir_path: str | None
+
+
+async def derive_chunks(conn: aiosqlite.Connection, pcid: int) -> Derived | None:
+    """Re-run extraction + chunking for one paper from its cached source.
+    ``None`` (logged) when the source is missing or not re-derivable."""
     async with conn.execute(
         "SELECT kind, source_path, source_dir_path, title "
         "FROM paper_content WHERE id = ?",
@@ -81,17 +93,11 @@ async def _reingest_one(
         row = await cur.fetchone()
     if row is None:
         _LOG.warning("pcid=%d: paper_content row missing — skipped", pcid)
-        return (0, 0)
+        return None
     kind: str | None = row[0]
     source_path_raw: str | None = row[1]
     source_dir_path_raw: str | None = row[2]
     title: str = str(row[3] or "")
-    # PDF heading boundaries (populated only for pdf_upload below).
-    pdf_headings: list[tuple[str, int]] = []
-    # The actual main .tex chosen by extraction (LaTeX only) — used below to
-    # rewrite source.flattened.tex + the stored source_path so the HTML
-    # re-render stays in sync with the re-extracted body.
-    latex_main_path: Path | None = None
 
     # CRITICAL: chunking must run on EXTRACTED body text, NOT raw source bytes.
     # For arxiv / latex_upload the chunker needs the flattened body (preamble
@@ -112,81 +118,152 @@ async def _reingest_one(
             source_dir = Path(source_dir_path_raw)
         else:
             _LOG.warning("pcid=%d: kind=%s has no source path — skipped", pcid, kind)
-            return (0, 0)
+            return None
         if not source_dir.is_dir():  # noqa: ASYNC240 — sequential CLI; sync I/O is fine
             _LOG.warning(
                 "pcid=%d: LaTeX source dir missing at %s — skipped", pcid, source_dir,
             )
-            return (0, 0)
+            return None
         try:
-            _ext = extract_latex(source_dir)
-            extracted = _ext.flattened_text
-            latex_main_path = _ext.main_path
+            ext = extract_latex(source_dir)
         except FileNotFoundError as exc:
             _LOG.warning("pcid=%d: extract_latex failed: %s — skipped", pcid, exc)
-            return (0, 0)
-    elif kind == "pdf_upload":
+            return None
+        macros = extract_macros_from_dir(ext.main_path.parent, ext.preamble)
+        return Derived(
+            chunks=chunk_text(ext.flattened_text, macros=macros),
+            extracted=ext.flattened_text, is_pdf=False,
+            latex_main_path=ext.main_path, source_dir_path=source_dir_path_raw,
+        )
+    if kind == "pdf_upload":
         if source_path_raw is None:
             _LOG.warning("pcid=%d: pdf_upload has no source_path — skipped", pcid)
-            return (0, 0)
+            return None
         pdf_path = Path(source_path_raw)
         if not pdf_path.exists():  # noqa: ASYNC240 — sequential CLI; sync I/O is fine
             _LOG.warning(
                 "pcid=%d: PDF source missing at %s — skipped", pcid, pdf_path,
             )
-            return (0, 0)
+            return None
         try:
             extracted, pdf_headings = extract_pdf_with_headings(pdf_path)
         except FileNotFoundError as exc:
             _LOG.warning("pcid=%d: extract_pdf failed: %s — skipped", pcid, exc)
-            return (0, 0)
-    else:
-        _LOG.warning("pcid=%d: unknown kind %r — skipped", pcid, kind)
-        return (0, 0)
-
-    async with conn.execute(
-        "SELECT COUNT(*) FROM chunks WHERE paper_content_id = ?", (pcid,)
-    ) as cur:
-        before_row = await cur.fetchone()
-    before = int(before_row[0]) if before_row else 0
-
-    # PDF: section boundaries from detected headings (single synthetic section
-    # on no-headings) + strip_comments=False (PDF text isn't LaTeX). LaTeX:
-    # the \section{} regex path, unchanged.
-    pdf_path_kind = kind == "pdf_upload"
-    if pdf_path_kind:
+            return None
+        # Section boundaries from detected headings (single synthetic section
+        # on no-headings) + strip_comments=False (PDF text isn't LaTeX).
         boundaries = pdf_headings if pdf_headings else [(title or "Full text", 0)]
-        chunks = chunk_text(extracted, sections=boundaries, strip_comments=False)
-    else:
-        chunks = chunk_text(extracted)
-    flattened = extracted  # alias for downstream sections_json computation
+        return Derived(
+            chunks=chunk_text(extracted, sections=boundaries, strip_comments=False),
+            extracted=extracted, is_pdf=True,
+            latex_main_path=None, source_dir_path=source_dir_path_raw,
+        )
+    _LOG.warning("pcid=%d: unknown kind %r — skipped", pcid, kind)
+    return None
+
+
+StoredRow = tuple[int, int, int, str, int | None]
+
+
+async def stored_chunk_rows(conn: aiosqlite.Connection, pcid: int) -> list[StoredRow]:
+    """``(id, char_start, char_end, text, page)`` in document (id) order."""
+    async with conn.execute(
+        "SELECT id, char_start, char_end, text, page FROM chunks "
+        "WHERE paper_content_id = ? ORDER BY id",
+        (pcid,),
+    ) as cur:
+        return [
+            (int(r[0]), int(r[1]), int(r[2]), str(r[3]), r[4])
+            for r in await cur.fetchall()
+        ]
+
+
+def same_geometry(stored: list[StoredRow], chunks: list[Chunk]) -> bool:
+    """True when re-derived chunks match the stored rows span-for-span."""
+    return len(stored) == len(chunks) and all(
+        (s[1], s[2], s[3]) == (c.char_start, c.char_end, c.text)
+        for s, c in zip(stored, chunks, strict=True)
+    )
+
+
+async def _reingest_one(
+    pcid: int,
+    *,
+    conn: aiosqlite.Connection,
+    dry_run: bool,
+) -> tuple[int, int]:
+    """Re-chunk one paper_content row.
+
+    Returns (chunks_before, chunks_after) for logging.
+    chunks_before is 0 when the row is skipped (missing source_path).
+
+    Chunk rows are referenced by id (message ``[chunk:N]`` citations, idea and
+    slide chunk-id lists) and carry ``dom_id`` / ``page`` / ``bbox`` this CLI
+    cannot recompute. So Marker block-anchored chunks (``page`` set) are left
+    alone; when the re-derived spans match the stored rows, only section names
+    change, in place, with the rename carried to every consumer; rows are
+    replaced only when the boundaries really changed.
+    """
+    derived = await derive_chunks(conn, pcid)
+    if derived is None:
+        return (0, 0)
+    stored = await stored_chunk_rows(conn, pcid)
+    before = len(stored)
+    chunks = derived.chunks
+    if any(r[4] is not None for r in stored):
+        _LOG.info(
+            "pcid=%d: Marker block-anchored chunks — left unchanged "
+            "(paperhub-repair-section-names fixes their names)", pcid,
+        )
+        return (before, before)
     if not chunks:
         _LOG.warning("pcid=%d: chunker produced zero chunks", pcid)
         return (before, 0)
 
+    in_place = same_geometry(stored, chunks)
     if dry_run:
-        _LOG.info(
-            "pcid=%d dry-run: would replace %d chunks with %d",
-            pcid,
-            before,
-            len(chunks),
-        )
+        if in_place:
+            n = await _count_name_changes(conn, stored, chunks)
+            _LOG.info("pcid=%d dry-run: spans unchanged; would rename %d chunk(s)", pcid, n)
+        else:
+            _LOG.info(
+                "pcid=%d dry-run: would replace %d chunks with %d", pcid, before, len(chunks),
+            )
         return (before, len(chunks))
-
-    # Compute sections_json before delete (pure function; no I/O).
-    sections_json = _build_sections_json(
-        chunks, flattened, strip_comments=not pdf_path_kind,
-    )
 
     # Keep the HTML-render input in sync with the re-extracted body: the
     # Citation-Canvas re-render (paperhub-rerender-html) reads
     # <cache>/source.flattened.tex, so a reingest that corrects extraction
     # (e.g. a fixed main-file pick) must rewrite it too — otherwise the Canvas
     # keeps rendering the old (wrong) body while the DB chunks are correct.
-    if latex_main_path is not None and source_dir_path_raw is not None:
-        (Path(source_dir_path_raw) / "source.flattened.tex").write_text(  # noqa: ASYNC240
-            extracted, encoding="utf-8",
+    # Also correct the stored main-file path when extraction re-picked it (the
+    # original ingest may have recorded a standalone fragment, arXiv:2406.07524).
+    if derived.latex_main_path is not None and derived.source_dir_path is not None:
+        (Path(derived.source_dir_path) / "source.flattened.tex").write_text(  # noqa: ASYNC240
+            derived.extracted, encoding="utf-8",
         )
+        await conn.execute(
+            "UPDATE paper_content SET source_path = ? WHERE id = ?",
+            (str(derived.latex_main_path), pcid),
+        )
+        await conn.commit()
+
+    if in_place:
+        rep = await apply_section_renames(
+            conn, pcid, {s[0]: c.section for s, c in zip(stored, chunks, strict=True)},
+        )
+        if rep.chunks:
+            _LOG.info("pcid=%d: spans unchanged; renamed sections in place: %s", pcid, rep)
+        return (before, len(chunks))
+
+    # Compute sections_json before delete (pure function; no I/O).
+    sections_json = _build_sections_json(
+        chunks, derived.extracted, strip_comments=not derived.is_pdf,
+    )
+    _LOG.warning(
+        "pcid=%d: chunk boundaries changed — replacing %d rows (chunk ids change; "
+        "re-render the Citation Canvas with paperhub-rerender-html)", pcid, before,
+    )
 
     # Destructive delete then re-insert.
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = ?", (pcid,))
@@ -203,22 +280,25 @@ async def _reingest_one(
             (pcid, c.section, c.char_start, c.char_end, c.text, c.match_text,
              c.page, bbox_json),
         )
-
-    # Also correct the stored main-file path when extraction re-picked it (the
-    # original ingest may have recorded a standalone fragment, arXiv:2406.07524).
-    if latex_main_path is not None:
-        await conn.execute(
-            "UPDATE paper_content SET sections_json = ?, source_path = ? WHERE id = ?",
-            (sections_json, str(latex_main_path), pcid),
-        )
-    else:
-        await conn.execute(
-            "UPDATE paper_content SET sections_json = ? WHERE id = ?",
-            (sections_json, pcid),
-        )
+    await conn.execute(
+        "UPDATE paper_content SET sections_json = ? WHERE id = ?",
+        (sections_json, pcid),
+    )
     await conn.commit()
 
     return (before, len(chunks))
+
+
+async def _count_name_changes(
+    conn: aiosqlite.Connection, stored: list[StoredRow], chunks: list[Chunk],
+) -> int:
+    names = {s[0]: c.section for s, c in zip(stored, chunks, strict=True)}
+    async with conn.execute(
+        "SELECT id, section FROM chunks WHERE paper_content_id = "
+        "(SELECT paper_content_id FROM chunks WHERE id = ?)",
+        (stored[0][0],),
+    ) as cur:
+        return sum(1 for r in await cur.fetchall() if names.get(int(r[0]), r[1]) != r[1])
 
 
 async def _amain() -> int:

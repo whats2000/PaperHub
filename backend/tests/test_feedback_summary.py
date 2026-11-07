@@ -125,6 +125,7 @@ async def test_summary_kpis_stages_weekly_and_other(
     assert by["answer"]["implicit"] == 1
     assert by["answer"]["weekly"] == [0, 0, 0, 1]
     assert s["other_reasons"] == [{"text": "too long", "count": 2}]
+    assert s["unattributed"] == {"explicit": 2, "implicit": 0}
 
 
 async def test_summary_empty_has_null_approval(app_with_db: tuple[Any, Any]) -> None:

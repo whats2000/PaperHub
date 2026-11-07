@@ -388,15 +388,8 @@ export function ConfirmQueue({ expanded, onExpandedChange, onSubmitted }: Confir
                   {/* Fixed header: question, reviewer doubt, navigation, progress. */}
                   <div className="shrink-0">
                     <div className="mt-3 mb-2 flex items-center gap-2.5 text-[13px]">
-                      <b className="shrink-0 font-semibold">{t("queue.question")}</b>
-                      <span
-                        className="min-w-0 truncate text-muted-foreground"
-                        title={cur.reviewer_doubt}
-                      >
-                        {t("queue.doubt", { doubt: cur.reviewer_doubt })}
-                      </span>
-                      <span className="flex-1" />
-                      <span className="inline-flex min-w-0 max-w-[55%] shrink items-center gap-1">
+                      <b className="min-w-0 flex-1 font-semibold">{t("queue.question")}</b>
+                      <span className="inline-flex min-w-0 shrink-0 items-center gap-1">
                         <Button
                           type="button"
                           size="icon"
@@ -410,7 +403,7 @@ export function ConfirmQueue({ expanded, onExpandedChange, onSubmitted }: Confir
                         </Button>
                         <span
                           ref={dotsRef}
-                          className="mx-1.5 inline-flex min-w-0 gap-1.5 overflow-x-auto p-0.5 [scrollbar-width:thin]"
+                          className="mx-1.5 inline-flex max-w-[min(40vw,22rem)] min-w-0 gap-1.5 overflow-x-auto p-0.5 [scrollbar-width:none]"
                         >
                           {items.map((q, i) => {
                             const a = answers[q.feedback_id];
@@ -459,6 +452,17 @@ export function ConfirmQueue({ expanded, onExpandedChange, onSubmitted }: Confir
                         </Button>
                       </span>
                     </div>
+                    {cur.reviewer_doubt && (
+                      <div
+                        data-testid="reviewer-doubt"
+                        className="mb-2 rounded-md border-l-2 border-primary bg-muted/60 px-3 py-2 text-[13px]"
+                      >
+                        <div className="text-[11.5px] font-medium text-muted-foreground">
+                          {t("queue.doubtLabel")}
+                        </div>
+                        <div className="mt-0.5">{cur.reviewer_doubt}</div>
+                      </div>
+                    )}
                     <div
                       role="progressbar"
                       aria-label={t("queue.progress", { answered: nAnswered, total: count })}

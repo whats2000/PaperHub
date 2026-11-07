@@ -311,8 +311,9 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
     its session has a private paper attached. ``include_private=false`` drops
     such samples; otherwise they set ``includes_private``.
 
-    An SFT sample is dropped when its history holds an assistant turn rated
-    down, so no down-rated answer becomes a training target."""
+    Any sample (SFT, correction pair or fork pair) is dropped when its prompt
+    history holds an assistant turn rated down, so no down-rated answer is
+    ever training context. Sibling pairing still needs identical prompts."""
     pol = await _polarities(conn, opts.include_implicit)
     down = await _down_runs(conn)
     private_sessions: dict[int, bool] = {}
@@ -333,9 +334,9 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
         a = await ans(run_id)
         if a is None:
             continue
+        if await _history_has_down(conn, a.session_id, a.prefix_len, down):
+            continue  # one rule: no sample carries a down-rated answer as context
         if polarity == "up":
-            if await _history_has_down(conn, a.session_id, a.prefix_len, down):
-                continue  # a down-rated answer would be trained on via history
             candidates.append((_Sample(
                 kind="sft", texts=[*(m["content"] for m in a.history), a.question,
                                    a.answer],
@@ -357,6 +358,9 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
         a1, a2 = await ans(orig_run), await ans(fork_run)
         if a1 is None or a2 is None or not _same_prompt(a1, a2):
             continue  # an edited fork is a different prompt: no pair
+        if any([await _history_has_down(conn, a.session_id, a.prefix_len, down)
+                for a in (a1, a2)]):
+            continue  # same rule as SFT / correction pairs
         chosen, rejected = (a1, a2) if p1[0] == "up" else (a2, a1)
         candidates.append((_Sample(
             kind="dpo_fork",
@@ -495,7 +499,7 @@ def _dataset_card(plan: ExportPlan, created: str) -> str:
         '- `sft.jsonl`: `{"messages": [system?, ...history, user, assistant]}` '
         "per thumbs-up answer. Only the FINAL assistant turn is a vetted "
         "target; history turns are context (mask them from the loss). Samples "
-        "whose history holds a down-rated answer are left out.",
+        "whose history holds a down-rated answer are left out, in `dpo.jsonl` too.",
         '- `dpo.jsonl`: `{"prompt": [...], "chosen": [assistant], '
         '"rejected": [assistant]}`.',
         "",

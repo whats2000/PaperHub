@@ -13,9 +13,13 @@ over-splitting small pieces.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import tiktoken
+
+from paperhub.pipelines.mathjax_macros import MacroValue
+from paperhub.pipelines.section_names import clean_latex_heading, read_section_argument
 
 _SECTION_RE = re.compile(r"\\section\{([^}]+)\}")
 # Matches a run of backslashes (group 1) followed by % and the rest of line
@@ -118,6 +122,7 @@ def chunk_text(
     hard: int = 1000,
     sections: list[tuple[str, int]] | None = None,
     strip_comments: bool = True,
+    macros: Mapping[str, MacroValue] | None = None,
 ) -> list[Chunk]:
     """Token-windowed chunker with section-aware boundaries.
 
@@ -130,6 +135,11 @@ def chunk_text(
     ``strip_comments`` — run :func:`strip_latex_comments` first (default).
     PDF text is not LaTeX, so the PDF path passes ``False`` to avoid truncating
     lines at any ``%`` (e.g. ``"95% accuracy"``).
+
+    ``macros`` — the paper's own macro definitions
+    (``extract_macros_from_dir``), used to name LaTeX sections whose heading
+    is a custom macro (``\\section{\\algo{}}`` -> ``"MDLM"``). Names only:
+    chunk boundaries never depend on it.
     """
     enc = tiktoken.get_encoding("cl100k_base")
 
@@ -163,7 +173,14 @@ def chunk_text(
         for m in _SECTION_RE.finditer(text):
             if m.start() > last_idx:
                 spans.append((last_section, last_idx, m.start()))
-            last_section = m.group(1).strip()
+            # The NAME comes from the brace-balanced argument, cleaned to plain
+            # text (`\section{\modelname{} Model}` -> "GR00T N1 Model"). The
+            # span still starts at m.end() — the first `}` — so chunk offsets,
+            # ids and every stored citation stay valid across the fix.
+            full = read_section_argument(text, m.start(1) - 1)
+            last_section = clean_latex_heading(
+                full if full is not None else m.group(1), macros,
+            )
             last_idx = m.end()
         if last_idx < len(text):
             spans.append((last_section, last_idx, len(text)))

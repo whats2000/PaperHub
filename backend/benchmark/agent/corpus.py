@@ -9,6 +9,7 @@ change.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -126,7 +127,13 @@ def import_inbox(
     A line is labelled once its ``expect`` is non-empty; unlabelled (or
     other-stage) lines are skipped as unlabelled; a labelled line whose JSON or
     ``variables`` is unusable is skipped as invalid. Returns
-    ``(cases, unlabelled, invalid)``. Note: inbox lines of any ``stage_hint``
+    ``(cases, unlabelled, invalid)``.
+
+    Ideation lines (``case_id = idea<id>-<status>``, one appended per outcome
+    change) follow "the latest outcome line per idea wins": for each idea only
+    its LAST line in file order is considered, and earlier lines (e.g.
+    ``idea5-saved`` once ``idea5-failed`` was appended) are skipped and counted
+    as unlabelled. Note: inbox lines of any ``stage_hint``
     carry the ROUTER step's variables/observed, so the importer filters by
     stage; only a router import is meaningful today.
     ``variables`` is normalised through the stage's own extractor so a recorded
@@ -134,8 +141,11 @@ def import_inbox(
     spec = get_stage(stage)
     cases: list[CorpusCase] = []
     unlabelled = invalid = 0
-    for raw in Path(inbox).read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
+    raws = [r for r in Path(inbox).read_text(encoding="utf-8").splitlines() if r.strip()]
+    latest = _latest_idea_lines(raws) if stage == "ideation" else None
+    for n, raw in enumerate(raws):
+        if latest is not None and n not in latest:
+            unlabelled += 1  # superseded by a later outcome of the same idea
             continue
         try:
             row = json.loads(raw)
@@ -153,6 +163,26 @@ def import_inbox(
         except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             invalid += 1
     return cases, unlabelled, invalid
+
+
+_IDEA_CASE = re.compile(r"^idea(\d+)-[a-z]+$")
+
+
+def _latest_idea_lines(raws: list[str]) -> set[int]:
+    """Indexes of the lines to consider: the last line of each
+    ``idea<id>-<status>`` case plus every line that is not an idea outcome."""
+    last: dict[str, int] = {}
+    keep: set[int] = set()
+    for n, raw in enumerate(raws):
+        try:
+            m = _IDEA_CASE.match(str(json.loads(raw).get("case_id") or ""))
+        except (json.JSONDecodeError, AttributeError):
+            m = None
+        if m is None:
+            keep.add(n)
+        else:
+            last[m.group(1)] = n
+    return keep | set(last.values())
 
 
 def merge_corpus(path: str | Path, cases: list[CorpusCase]) -> tuple[int, int]:

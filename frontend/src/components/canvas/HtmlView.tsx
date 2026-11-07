@@ -10,8 +10,10 @@ import {
 } from "@/lib/findAndHighlight";
 import {
   attachHtmlTranslation,
+  hasTranslatableBlocks,
   type HtmlTranslationHandle,
 } from "@/lib/htmlTranslation";
+import type { TranslationQueueStatus } from "@/lib/translationQueue";
 
 interface Props {
   /** The paper's rendered HTML, embedded via `srcdoc` (same-origin). */
@@ -59,6 +61,13 @@ export interface HtmlTranslationProps {
   retranslateNonce?: number;
   /** Whether a visible translation predates the current terminology memory. */
   onStaleChange?: (stale: boolean) => void;
+  /** Bumped to re-request every failed block (and resume a paused run). */
+  retryFailedNonce?: number;
+  /** Failed-block count / paused background run, on every change. */
+  onStatusChange?: (status: TranslationQueueStatus) => void;
+  /** Whether the loaded document has any paragraph to translate (a raw
+   *  `<pre>` render has none); reported on every document load. */
+  onTranslatableChange?: (translatable: boolean) => void;
 }
 
 /**
@@ -203,11 +212,26 @@ export function HtmlView({
   const trPaperId = translation?.paperId;
   const trFullPaper = translation?.fullPaper === true;
   const trRetranslate = translation?.retranslateNonce ?? 0;
+  const trRetryFailed = translation?.retryFailedNonce ?? 0;
   const handleRef = useRef<HtmlTranslationHandle | null>(null);
   const onStaleRef = useRef(translation?.onStaleChange);
+  const onStatusRef = useRef(translation?.onStatusChange);
+  const onTranslatableRef = useRef(translation?.onTranslatableChange);
   useEffect(() => {
     onStaleRef.current = translation?.onStaleChange;
-  }, [translation?.onStaleChange]);
+    onStatusRef.current = translation?.onStatusChange;
+    onTranslatableRef.current = translation?.onTranslatableChange;
+  }, [
+    translation?.onStaleChange,
+    translation?.onStatusChange,
+    translation?.onTranslatableChange,
+  ]);
+  // Each loaded document says whether it has anything to translate, so the
+  // pill can be disabled with a reason instead of silently doing nothing.
+  useEffect(() => {
+    if (!loaded || loaded.html !== html || !loaded.doc.body) return;
+    onTranslatableRef.current?.(hasTranslatableBlocks(loaded.doc));
+  }, [loaded, html]);
   useEffect(() => {
     if (!trEnabled || trLanguage === undefined || trPaperId === undefined) return;
     // Never attach to a superseded document: a paper/language change can race
@@ -225,12 +249,14 @@ export function HtmlView({
         retry: t("translation.retry", "Retry"),
       },
       onStaleChange: (stale) => onStaleRef.current?.(stale),
+      onStatusChange: (status) => onStatusRef.current?.(status),
     });
     handleRef.current = handle;
     return () => {
       if (handleRef.current === handle) handleRef.current = null;
       handle();
       onStaleRef.current?.(false);
+      onStatusRef.current?.({ failed: 0, paused: false });
     };
   }, [trEnabled, trLanguage, trPaperId, trFullPaper, loaded, html, t]);
 
@@ -241,6 +267,13 @@ export function HtmlView({
     seenRetranslate.current = trRetranslate;
     handleRef.current?.retranslate();
   }, [trRetranslate]);
+
+  const seenRetryFailed = useRef(trRetryFailed);
+  useEffect(() => {
+    if (seenRetryFailed.current === trRetryFailed) return;
+    seenRetryFailed.current = trRetryFailed;
+    handleRef.current?.retryFailed();
+  }, [trRetryFailed]);
 
   return (
     <iframe

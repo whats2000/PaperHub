@@ -3,7 +3,7 @@
 # Add a bucket: add a [[testsets]] block (e.g. the harvested production failures).
 [eval]
 stage       = "router"
-model       = "gemini/gemini-3.1-flash-lite"
+model       = "gemini/gemini-3.5-flash-lite"   # deploy router = small tier (PAPERHUB_MODEL_SMALL); PAPERHUB_ROUTER_MODEL unset
 reps        = 5                       # >=5 reps: router multi-intent tie-breaks are subtle (writing-agent-prompts)
 backend     = "auto"                  # provider Batch API where available, else concurrent
 store       = "benchmark/agent/results/experiments.jsonl"
@@ -13,7 +13,8 @@ prompts_dir = "benchmark/agent/prompts"
 # v2a = current verified winner (Plan G1). v3 (Plan G2) = v2a with model_tier
 # dropped + an explicit multi-intent priority rule. v3 is benchmarked AGAINST
 # v2a (the baseline), not v1.
-variants    = ["v1", "v2a", "v3c"]     # incumbent v1 (old deploy) vs prior-best v2a vs shipped v3c
+variants    = ["v5b", "v8a", "v8b"]   # v5b = router/v4 (baseline); v8b shipped as router/v5 (subject for the 0-refs which-paper rule); see prompts/router/README.md
+concurrency = 4
 
 [[testsets]]
 name   = "core"
@@ -32,3 +33,16 @@ corpus = "benchmark/agent/corpus/router.edge.jsonl"
 [[testsets]]
 name   = "multiintent"
 corpus = "benchmark/agent/corpus/router.multiintent.jsonl"
+
+# Chat-history counts ("how many questions have I asked") -> library_stats, in
+# en / zh-TW / zh-CN / ja, plus chitchat guards so "what can you do?" stays put.
+[[testsets]]
+name   = "history"
+corpus = "benchmark/agent/corpus/router.history.jsonl"
+
+# A bare pointer ("this paper", "這篇", "この論文") with 0 refs -> clarify, plus
+# guards: a named title (also next to a pointer, or named in an earlier turn)
+# -> paper_search, a pointer plus a topic -> paper_suggest. Live run 837.
+[[testsets]]
+name   = "deictic"
+corpus = "benchmark/agent/corpus/router.deictic.jsonl"

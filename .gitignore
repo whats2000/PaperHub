@@ -108,6 +108,8 @@ marker_service/*.local.*
 
 # benchmark results
 results/
+# ideation eval corpora filled with the library's cards (private docs included)
+backend/benchmark/agent/corpus/*.cards.jsonl
 
 # superpowers skill scratch (brainstorm / sdd)
 .superpowers/

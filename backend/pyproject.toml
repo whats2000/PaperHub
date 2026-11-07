@@ -41,8 +41,14 @@ dev = [
 [project.scripts]
 paperhub-replay = "paperhub.cli.replay:main"
 paperhub-reingest = "paperhub.cli.reingest:main"
+paperhub-repair-section-names = "paperhub.cli.repair_section_names:main"
 paperhub-backfill-assets = "paperhub.cli.backfill_assets:main"
+paperhub-backfill-cards = "paperhub.cli.backfill_cards:main"
 paperhub-rerender-html = "paperhub.cli.rerender_html:main"
+paperhub-repair-titles = "paperhub.cli.repair_titles:main"
+paperhub-repair-translations = "paperhub.cli.repair_translations:main"
+paperhub-consolidate-domains = "paperhub.cli.consolidate_domains:main"
+paperhub-narrow-idea-citations = "paperhub.cli.narrow_idea_citations:main"
 paperhub-mcp-up = "paperhub.cli.mcp_up:main"
 
 [tool.pytest.ini_options]

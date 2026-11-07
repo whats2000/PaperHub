@@ -475,3 +475,12 @@ def test_blocks_only_no_source_path_is_skipped_no_source(tmp_path: Path) -> None
         force=False, dry_run=False, blocks_only=True,
     )
     assert res.status == "skipped_no_source"
+
+
+def test_exit_code_fails_when_any_paper_failed() -> None:
+    """reingest_all_papers.ps1 judges each step by exit code; a run where a
+    paper errored (e.g. Marker went down mid-run) must not report success."""
+    from paperhub.cli.backfill_assets import exit_code
+
+    assert exit_code({"written": 3, "skipped_exists": 2}) == 0
+    assert exit_code({"written": 3, "error": 1}) == 1

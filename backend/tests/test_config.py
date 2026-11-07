@@ -244,6 +244,19 @@ def test_translate_model_defaults_to_small_tier(monkeypatch: pytest.MonkeyPatch)
     assert load_settings().translate_model == "x/pinned"
 
 
+def test_feedback_review_model_defaults_to_flagship_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The small tier garbles zh/ja reviewer doubts (~12 %); see
+    benchmark/agent/prompts/feedback_review_fork/README.md, Round 4."""
+    monkeypatch.delenv("PAPERHUB_FEEDBACK_REVIEW_MODEL", raising=False)
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "x/small")
+    monkeypatch.setenv("PAPERHUB_MODEL_FLAGSHIP", "x/flagship")
+    assert load_settings().feedback_review_model == "x/flagship"
+    monkeypatch.setenv("PAPERHUB_FEEDBACK_REVIEW_MODEL", "x/pinned")
+    assert load_settings().feedback_review_model == "x/pinned"
+
+
 def test_translate_full_paper_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PAPERHUB_TRANSLATE_FULL_PAPER", raising=False)
     assert load_settings().translate_full_paper is True

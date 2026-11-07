@@ -387,6 +387,72 @@ def test_page1_heuristic_runs_through_sanitiser(tmp_path: Path) -> None:
     assert _extract_pdf_title_from_page1(p) == ""
 
 
+_BODY = [("Different from conventional imaging methods, which acquire", 10)] * 6
+
+
+def test_page1_heuristic_skips_lowercase_journal_wordmark(tmp_path: Path) -> None:
+    # MDPI-style banner: the journal wordmark ("applied sciences") is set
+    # larger than the real title. Paper 89 got this wrong.
+    p = _build_pdf(
+        tmp_path,
+        page1_lines=[
+            ("applied", 19),
+            ("sciences", 19),
+            ("Article", 10),
+            ("A Review of Ghost Imaging via Sparsity Constraints", 17.9),
+            ("Shensheng Han, Hong Yu, Xia Shen", 10),
+            *_BODY,
+        ],
+    )
+    assert _extract_pdf_title_from_page1(p) == (
+        "A Review of Ghost Imaging via Sparsity Constraints"
+    )
+
+
+def test_page1_heuristic_skips_drop_cap_and_banner_word(tmp_path: Path) -> None:
+    # A decorative drop cap ("Q") and an article-type banner ("Resource")
+    # both outsize the title on Nature-family first pages.
+    p = _build_pdf(
+        tmp_path,
+        page1_lines=[
+            ("Resource", 30),
+            ("Q", 41.6),
+            ("LIVECell: A large-scale dataset for label-free", 24),
+            ("live cell segmentation", 24),
+            *_BODY,
+        ],
+    )
+    assert _extract_pdf_title_from_page1(p) == (
+        "LIVECell: A large-scale dataset for label-free live cell segmentation"
+    )
+
+
+def test_page1_heuristic_does_not_fall_to_author_line(tmp_path: Path) -> None:
+    # When the only outsized text is a wordmark, the next group (authors,
+    # barely above body size) is not a title: return "" so the LLM / stem
+    # fallback runs instead.
+    p = _build_pdf(
+        tmp_path,
+        page1_lines=[
+            ("sensors", 22),
+            ("Yen-Ting Li, Yu-Cheng Chan", 11),
+            *_BODY,
+        ],
+    )
+    assert _extract_pdf_title_from_page1(p) == ""
+
+
+def test_extract_pdf_metadata_rejects_replacement_char_title(tmp_path: Path) -> None:
+    # A metadata title that was mis-decoded upstream (U+FFFD) is junk; the
+    # page-1 heuristic should supply the title instead.
+    p = _build_pdf(
+        tmp_path,
+        title="LIVECell�XA large-scale dataset",
+        page1_lines=[("LIVECell: A large-scale dataset", 24), *_BODY],
+    )
+    assert _extract_pdf_metadata(p)["title"] == "LIVECell: A large-scale dataset"
+
+
 def test_extract_pdf_metadata_falls_back_to_page1_when_metadata_title_missing(
     tmp_path: Path,
 ) -> None:

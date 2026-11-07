@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.graph import CLARIFY_FALLBACK
+from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_node import memory_node
 from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
 from paperhub.agents.research import (
@@ -43,6 +44,7 @@ from paperhub.api.run_broker import RunBroker, RunHandle
 from paperhub.config import Settings, load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.tool_calls import drain_tool_calls_since
+from paperhub.errors import UserFacingError
 from paperhub.feedback.review import maybe_review_keyword
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.mcp.client_context import (
@@ -108,6 +110,9 @@ class ChatRequest(BaseModel):
     # When True the active-slide context block is built and threaded into
     # AgentState so paper_qa can anchor its answer to the visible slide.
     slide_attached: bool = False
+    # The UI language code (en / zh-TW / zh-CN / ja): the feedback reviewer
+    # writes its doubt in it.
+    ui_language: str | None = None
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
@@ -619,6 +624,7 @@ async def run_agent(
             await maybe_review_keyword(
                 conn, settings=settings, session_id=session_id, run_id=run_id,
                 user_message=req.user_message, llm=adapter,
+                ui_language=req.ui_language,
             )
             tracer = Tracer(conn, run_id=run_id, branch="")
             state: AgentState = {
@@ -654,8 +660,18 @@ async def run_agent(
                 # Slide-aware QA: build the active-slide context ONLY when the
                 # composer chip is attached (deterministic). Both the paper_qa
                 # branch and the slides action="qa" guard read state.slide_context.
+                # Plan H3 (QA I4): a chat opened from an idea carries the idea
+                # on EVERY turn, not only in the prefilled first message.
+                idea = await build_idea_context(conn, session_id=session_id)
+                if idea is not None:
+                    async with tracer.step(
+                        agent="ideation", tool="ideation:idea_context", model=None,
+                    ) as idea_step:
+                        idea_step.record_args({"session_id": session_id})
+                        idea_step.record_result(idea.record)
                 state = {
                     **state,
+                    "idea_context": idea.block if idea is not None else None,
                     "slide_context": (
                         await build_slide_context(
                             conn, session_id=session_id,
@@ -986,7 +1002,10 @@ async def run_agent(
                 # mark_terminal here — just re-raise so the cancel propagates.
                 raise
             except Exception as exc:
-                safe_msg = redact(str(exc))
+                safe_msg = (
+                    exc.user_message if isinstance(exc, UserFacingError)
+                    else redact(str(exc))
+                )
                 await _finalise(conn, run_id, session_id, safe_msg, status="error")
                 err_evt = ErrorEvent(run_id=run_id, branch="", message=safe_msg)
                 handle.emit({"event": err_evt.type,

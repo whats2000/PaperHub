@@ -34,8 +34,11 @@ def render_messages(system: str, user_template: str, variables: dict[str, Any],
     return messages
 
 
-def to_replay_output(spec: StageSpec, res: ExecResult) -> ReplayOutput:
+def to_replay_output(spec: StageSpec, res: ExecResult,
+                     variables: dict[str, Any] | None = None) -> ReplayOutput:
     output = spec.output_summary(res.parsed) if (res.parsed is not None and res.error is None) else {}
+    if output and spec.finalize is not None and variables is not None:
+        output = spec.finalize(variables, output)
     return ReplayOutput(output=output, tokens_in=res.tokens_in, error=res.error)
 
 
@@ -46,6 +49,7 @@ async def replay_stage(
 ) -> ReplayOutput:
     system, user_template = load_variant(spec.key, version, prompts_dir=prompts_dir)
     messages = render_messages(system, user_template, case.variables, case.history)
-    req = EvalRequest(key=case.case_id, messages=messages, response_model=spec.response_model)
+    req = EvalRequest(key=case.case_id, messages=messages, response_model=spec.response_model,
+                      max_tokens=spec.max_tokens)
     results = await execute([req], model=model, backend=backend, count_tokens=count_tokens)
-    return to_replay_output(spec, results[case.case_id])
+    return to_replay_output(spec, results[case.case_id], case.variables)

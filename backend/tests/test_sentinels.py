@@ -1,6 +1,8 @@
 """Tests for paperhub.pipelines.sentinels — TDD: written before implementation."""
 from __future__ import annotations
 
+import re
+
 import aiosqlite
 import pytest
 
@@ -241,6 +243,30 @@ def test_inject_sentinels_forward_fallback_lands_in_chunk_prose() -> None:
     # Token is past the \textbf{...} group, before the prose.
     tok_idx = marked.find(sentinel_token(0))
     assert tok_idx >= base.index("}")
+
+
+@pytest.mark.parametrize(
+    ("base", "start_after"),
+    [
+        ("\\maketitle\n\n\\begin{abstract}\nText", "\\maketitle"),
+        ("Prose.\n\n\\section*{Two Layers}\nBody", "Prose.\n\n"),
+        ("\\noindent \\textbf{Implementation.} Body", ""),
+        # The token must not move INTO the command's optional argument either:
+        # `\twocolumn[TOKEN \title{...}]` makes pandoc swallow the title block.
+        ("\\twocolumn[ %% two-column\n\\title{Ghost [x] imaging}\n]\nBody", ""),
+    ],
+)
+def test_inject_sentinels_never_glued_to_a_control_word(base: str, start_after: str) -> None:
+    # A token right after `\maketitle` / `\section` becomes part of the command
+    # name (`\maketitlePHCHUNKANCHOR0END`): pandoc then leaks "0END" as text and,
+    # for `\section*{...}`, drops the heading. 35 library papers showed this.
+    marked, injected = inject_sentinels(base, [len(start_after)])
+    assert injected == {0}
+    assert not re.search(r"\\[A-Za-z]+PHCHUNKANCHOR", marked)
+    # The command itself is left intact.
+    assert marked.replace(sentinel_token(0), "") == base
+    if base.startswith("\\twocolumn["):
+        assert marked.index(sentinel_token(0)) > base.index("\n]")
 
 
 def test_inject_sentinels_never_inside_brace_group() -> None:

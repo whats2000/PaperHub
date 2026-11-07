@@ -48,6 +48,227 @@ def test_expand_preamble_macros_noop_without_defs() -> None:
     assert expand_preamble_macros("plain \\unknown text", "") == "plain \\unknown text"
 
 
+_TOGGLE_PREAMBLE = "\\newtoggle{arxiv}\n\\toggletrue{arxiv}\n\\newtoggle{draft}\n"
+
+
+def test_expand_preamble_macros_resolves_etoolbox_toggles() -> None:
+    # arXiv:2312.00752 (Mamba): pandoc aborts on \iftoggle whose false branch is
+    # a bare token (`\iftoggle{arxiv}{~\parencite{x}}.`), so the whole paper fell
+    # back to a raw-LaTeX <pre>. Resolve toggles like TeX does: an unbraced
+    # argument is the next single token.
+    body = (
+        "layer\\iftoggle{arxiv}{~\\parencite{b}}. Next "
+        "\\iftoggle{arxiv}{three}{two} and \\iftoggle{draft}{X}{\\small} "
+        "\\nottoggle{arxiv}{no}{yes} \\iftoggle{arxiv}{a \\iftoggle{draft}{b}{c}}{d}"
+    )
+    out = expand_preamble_macros(body, _TOGGLE_PREAMBLE)
+    assert out == "layer~\\parencite{b} Next three and \\small yes a c"
+
+
+def test_expand_preamble_macros_unwraps_twocolumn_title_block() -> None:
+    # REVTeX/ICML put the title block in `\twocolumn[...]`; pandoc drops the
+    # whole optional argument, losing title, authors and abstract
+    # (arXiv:1203.3835).
+    body = (
+        "\\twocolumn[ %% two-column [opt]\n\\title{Ghost [x] imaging}\n"
+        "\\begin{abstract}A.\\end{abstract}\n]\nBody \\twocolumn text"
+    )
+    assert expand_preamble_macros(body, "") == (
+        " %% two-column [opt]\n\\title{Ghost [x] imaging}\n"
+        "\\begin{abstract}A.\\end{abstract}\n\nBody \\twocolumn text"
+    )
+
+
+def test_expand_preamble_macros_leaves_unknown_and_commented_toggles() -> None:
+    body = "\\iftoggle{other}{a}{b} % \\iftoggle{arxiv}{a}{b}"
+    assert expand_preamble_macros(body, _TOGGLE_PREAMBLE) == body
+    assert expand_preamble_macros(body, "") == body
+    # A commented declaration does not count.
+    assert expand_preamble_macros("\\iftoggle{x}{a}{b}", "% \\newtoggle{x}") == (
+        "\\iftoggle{x}{a}{b}"
+    )
+
+
+# --- argument-taking preamble macros -------------------------------------
+# pandoc drops an unknown command TOGETHER with its braced arguments, and the
+# render tex is body-only, so every use of a preamble \newcommand{\x}[n]{..}
+# vanished: Mamba (arXiv:2312.00752) lost all 15 `\para{..}` lead-ins.
+
+
+def test_expand_arg_macro_mamba_para_with_toggle_body() -> None:
+    preamble = (
+        _TOGGLE_PREAMBLE
+        + "\\newcommand{\\para}[1]{\\iftoggle{arxiv}{\\paragraph{#1}}{\\textbf{#1}}}\n"
+    )
+    body = "\\para{Selection Mechanism.}\nWe argue $x$.\n\\para {Two $h_t$.} next"
+    assert expand_preamble_macros(body, preamble) == (
+        "\\paragraph{Selection Mechanism.}\nWe argue $x$.\n"
+        "\\paragraph{Two $h_t$.} next"
+    )
+
+
+def test_expand_arg_macro_all_definition_forms() -> None:
+    preamble = (
+        "\\newcommand\\Eqn[1]{(\\ref{#1})}\n"
+        "\\providecommand*{\\two}[2]{#2-#1}\n"
+        "\\DeclareRobustCommand{\\opt}[2][dflt]{<#1|#2>}\n"
+        "\\def\\secref#1{Section~\\ref{#1}}\n"
+        "\\renewcommand{\\sec}[1]{Sec.~\\ref{#1}}\n"
+    )
+    body = (
+        "\\Eqn{e1} \\two{a}{b} \\opt{x} \\opt[y]{z} \\secref{s} "
+        "\\sec{m} \\Eqn x"
+    )
+    assert expand_preamble_macros(body, preamble) == (
+        "(\\ref{e1}) b-a <dflt|x> <y|z> Section~\\ref{s} "
+        "Sec.~\\ref{m} (\\ref{x})"
+    )
+
+
+def test_expand_arg_macro_nested_and_conditional_definitions() -> None:
+    # arXiv:2603.03276: author notes route through \displaytodo, defined in an
+    # \iftrue..\else..\fi switch; the PDF shows the true branch.
+    preamble = (
+        "\\iftrue\n  \\newcommand{\\displaytodo}[1]{#1}\n\\else\n"
+        "  \\newcommand{\\displaytodo}[1]{}\n\\fi\n"
+        "\\newcommand{\\pt}[1]{\\displaytodo{\\textcolor{blue}{[PT: #1]}}}\n"
+    )
+    assert expand_preamble_macros("a \\pt{fix} b", preamble) == (
+        "a \\textcolor{blue}{[PT: fix]} b"
+    )
+    hidden = preamble.replace("\\iftrue", "\\iffalse")
+    assert expand_preamble_macros("a \\pt{fix} b", hidden) == "a  b"
+    # \ifodd 1 (arXiv:2512.04952) and a \newif flag both resolve too.
+    odd = "\\ifodd 0\n\\newcommand{\\com}[1]{(C: #1)}\n\\else\n\\newcommand{\\com}[1]{}\n\\fi"
+    assert expand_preamble_macros("x\\com{y}z", odd) == "xz"
+    flag = (
+        "\\newif\\ifnotes\\notestrue\n"
+        "\\ifnotes\\newcommand{\\nt}[1]{[#1]}\\else\\newcommand{\\nt}[1]{}\\fi"
+    )
+    assert expand_preamble_macros("\\nt{y}", flag) == "[y]"
+
+
+def test_expand_arg_macro_resolves_ifx_on_known_macros() -> None:
+    # arXiv:2510.07077 writes every passage twice; \switchlanguage picks one
+    # with \ifx\paperlanguage\empty, so the abstract vanished without it.
+    preamble = (
+        "\\def\\paperlanguage{} % {ja} for Japanese\n"
+        "\\newcommand{\\switchlanguage}[2]{%\n  \\ifx\\paperlanguage\\empty%\n"
+        "  #1%\n  \\else%\n  #2%\n  \\fi%\n}\n"
+    )
+    body = "\\switchlanguage%\n{%\n  English.\n}{%\n  Japanese.\n}\nNext"
+    assert expand_preamble_macros(body, preamble) == "English.\n\nNext"
+    ja = preamble.replace("\\def\\paperlanguage{}", "\\def\\paperlanguage{ja}")
+    assert expand_preamble_macros(body, ja) == "Japanese.\n\nNext"
+    # \newcommand makes a \long macro, which \ifx tells apart from \empty.
+    long_empty = preamble.replace("\\def\\paperlanguage{}", "\\newcommand{\\paperlanguage}{}")
+    assert expand_preamble_macros(body, long_empty) == "Japanese.\n\nNext"
+    # An undecidable \ifx keeps the use untouched.
+    unknown = preamble.replace("\\def\\paperlanguage{}", "")
+    assert expand_preamble_macros(body, unknown) == body
+
+
+def test_expand_arg_macro_unknown_conditional_left_untouched() -> None:
+    # We cannot tell which branch TeX took, so never guess: the draft note
+    # stays an unknown command, which pandoc drops (as before).
+    preamble = (
+        "\\ifdefined\\final\n\\newcommand{\\note}[1]{}\n\\else\n"
+        "\\newcommand{\\note}[1]{\\textcolor{red}{#1}}\n\\fi\n"
+    )
+    assert expand_preamble_macros("a \\note{draft} b", preamble) == "a \\note{draft} b"
+
+
+def test_expand_arg_macro_annotation_mirrors_pdf() -> None:
+    # Empty body: the PDF shows nothing, so neither do we. A coloured body is
+    # printed in the PDF, so it is rendered (in colour).
+    preamble = (
+        "\\newcommand{\\eat}[1]{}\n\\newcommand{\\todo}[1]{\\textcolor{red}{TODO: #1}}\n"
+    )
+    out = expand_preamble_macros("a\\eat{gone} b \\todo{shown} c", preamble)
+    assert out == "a b \\textcolor{red}{TODO: shown} c"
+
+
+def test_expand_arg_macro_keeps_chunk_sentinels() -> None:
+    # A sentinel inside a dropped (or duplicated) argument must survive exactly
+    # once, or that chunk loses its Citation Canvas anchor.
+    preamble = "\\newcommand{\\eat}[1]{}\n\\newcommand{\\dup}[1]{#1/#1}\n"
+    out = expand_preamble_macros(
+        "a \\eat{PHCHUNKANCHOR3END x} b \\dup{PHCHUNKANCHOR4END y}", preamble
+    )
+    assert out == "a PHCHUNKANCHOR3END b PHCHUNKANCHOR4END y/ y"
+
+
+def test_expand_arg_macro_skips_comment_math_verbatim() -> None:
+    preamble = "\\newcommand{\\vv}[1]{V#1}\n"
+    body = (
+        "% \\vv{c}\n$\\vv{m}$ \\[\\vv{d}\\]\n"
+        "\\begin{verbatim}\\vv{q}\\end{verbatim} \\vv{t} 50\\% \\vv{u}"
+    )
+    assert expand_preamble_macros(body, preamble) == (
+        "% \\vv{c}\n$\\vv{m}$ \\[\\vv{d}\\]\n"
+        "\\begin{verbatim}\\vv{q}\\end{verbatim} Vt 50\\% Vu"
+    )
+
+
+def test_expand_arg_macro_leaves_unsafe_macros_untouched() -> None:
+    preamble = (
+        "\\newcommand{\\rec}[1]{\\rec{#1}}\n"            # self-recursive
+        "\\newcommand{\\at}[1]{\\@ifnextchar[{#1}{#1}}\n"  # @-internals
+        "\\newcommand{\\mk}[1]{\\def\\x{#1}}\n"           # defines a macro
+        "\\def\\delim#1.{#1}\n"                           # delimited parameter
+        "\\let\\oldsection\\section\n"
+        "\\renewcommand{\\section}[1]{\\oldsection{#1}}\n"  # wraps a saved original
+        "\\newcommand{\\bodydef}[1]{B#1}\n"
+    )
+    body = (
+        "\\rec{a} \\at{b} \\mk{c} \\delim d. \\section{S} "
+        "\\renewcommand{\\bodydef}[1]{C#1}\\bodydef{e}"
+    )
+    assert expand_preamble_macros(body, preamble) == body
+
+
+def test_expand_arg_macro_tex_definition_semantics() -> None:
+    # \newcommand never overrides; \renewcommand does; zero-arg macros in a
+    # body expand too.
+    preamble = (
+        "\\newcommand{\\nm}{Mamba}\n\\newcommand{\\a}[1]{A#1}\n"
+        "\\newcommand{\\a}[1]{X#1}\n\\newcommand{\\b}[1]{B#1}\n"
+        "\\renewcommand{\\b}[1]{\\nm: #1}\n"
+    )
+    assert expand_preamble_macros("\\a{1} \\b{2}", preamble) == "A1 Mamba: 2"
+
+
+def test_expand_arg_macro_mutual_recursion_and_broken_conditionals() -> None:
+    mutual = "\\newcommand{\\pa}[1]{\\pb{#1}}\n\\newcommand{\\pb}[1]{\\pa{#1}}\n"
+    assert expand_preamble_macros("x \\pa{1} y", mutual) == "x \\pa{1} y"
+    # A stray \fi (a conditional we do not know opened it) makes every later
+    # definition uncertain.
+    broken = "\\newcommand{\\ok}[1]{K#1}\n\\iftrue\\fi\\fi\n\\newcommand{\\no}[1]{N#1}\n"
+    assert expand_preamble_macros("\\ok{1}\\no{2}", broken) == "K1\\no{2}"
+    # A conditional inside an @-internal definition body is not a preamble
+    # conditional (arXiv:2503.14734's \widebar machinery).
+    internal = (
+        "\\makeatletter\n\\def\\wide@bar@#1#2{\\if#31 x\\else y\\fi\\fi}\n"
+        "\\makeatother\n\\newcommand{\\FIGREF}[1]{Fig.~\\ref{#1}}\n"
+    )
+    assert expand_preamble_macros("\\FIGREF{f}", internal) == "Fig.~\\ref{f}"
+
+
+def test_expand_arg_macro_missing_argument_left_untouched() -> None:
+    preamble = "\\newcommand{\\two}[2]{#1#2}\n"
+    for body in ("end \\two{a}", "x \\two{a}\n\n{b}", "{\\two{a}}"):
+        assert expand_preamble_macros(body, preamble) == body
+
+
+def test_expand_arg_macro_unbraced_token_and_control_word_spacing() -> None:
+    preamble = "\\newcommand{\\bb}[1]{\\bf#1}\n\\newcommand{\\ig}[1]{\\relax}\n"
+    # Unbraced argument = next token; a control word never glues to the
+    # letters substituted or following after it.
+    assert expand_preamble_macros("\\bb x \\bb\\alpha \\ig{z}text", preamble) == (
+        "\\bf x \\bf\\alpha \\relax text"
+    )
+
+
 def test_replace_symbol_macros_ding_check_and_cross() -> None:
     # arXiv:2506.10100's ablation table: \textcolor{red}{\ding{55}} renders as an
     # empty coloured span under pandoc; the glyph must be substituted pre-pandoc.

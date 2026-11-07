@@ -89,6 +89,7 @@ async def score_case(
         return CaseScore(case.case_id, rep, None, replay.tokens_in,
                          "no deterministic check and no judge configured", replay.output)
     fn = judge_fn or judge_scalar
-    score, rationale = await fn(request=str(case.variables.get("user_message", "")),
+    request = case.variables.get("user_message") or case.variables.get("problem") or ""
+    score, rationale = await fn(request=str(request),
                                 rubric=case.rubric, output_text=str(replay.output), model=judge_model)
     return CaseScore(case.case_id, rep, score, replay.tokens_in, rationale, replay.output)

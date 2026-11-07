@@ -110,13 +110,47 @@ _FRAGILE_ENVS = frozenset({
 _BEGIN_END_RE = re.compile(r"\\(begin|end)\s*\{([^}]*)\}")
 
 
+def optional_arg_end(base: str, j: int) -> int:
+    """Index just past the ``[...]`` optional argument starting at ``base[j]``
+    (nested brackets and brace groups respected, comments skipped), or ``j``
+    when ``base[j]`` is not ``[`` or the bracket never closes."""
+    if j >= len(base) or base[j] != "[":
+        return j
+    depth = 0
+    brace = 0
+    k = j
+    while k < len(base):
+        ch = base[k]
+        if ch == "\\":
+            k += 2
+            continue
+        if ch == "%":
+            nl = base.find("\n", k)
+            if nl < 0:
+                return j
+            k = nl
+            continue
+        if ch == "{":
+            brace += 1
+        elif ch == "}":
+            brace = max(0, brace - 1)
+        elif brace == 0 and ch == "[":
+            depth += 1
+        elif brace == 0 and ch == "]":
+            depth -= 1
+            if depth == 0:
+                return k + 1
+        k += 1
+    return j
+
+
 def _safe_injection_mask(base: str) -> tuple[list[bool], list[bool]]:
     """Return ``(safe, fragile_at)``, two per-index boolean masks over *base*.
 
     ``safe[i]`` — injecting a plain-text sentinel at ``i`` is LaTeX-safe:
     brace-depth 0, not inside math, and not inside a fragile environment (see
     `_FRAGILE_ENVS`). Also unsafe inside `\\begin{}`/`\\end{}` commands, command
-    names, and on the brace characters themselves.
+    names, right after a control word, and on the brace characters themselves.
 
     ``fragile_at[i]`` — index ``i`` is inside a fragile environment (a
     table/figure/verbatim/…), including its ``\\begin``/``\\end`` command spans.
@@ -135,6 +169,13 @@ def _safe_injection_mask(base: str) -> tuple[list[bool], list[bool]]:
     brace = 0
     fragile = 0
     i = 0
+    # Index right after a control word: a token there would extend the command
+    # name (`\maketitle` + token = one unknown control word), so pandoc leaks
+    # the token's tail as text and drops `\section*{...}` headings.
+    glued = -1
+    # End of a control word's `[...]` optional argument: a token inside it
+    # (`\twocolumn[TOKEN \title{..}]`) makes pandoc swallow the title block.
+    opt_until = -1
 
     def _fill_fragile(start: int, stop: int) -> None:
         for k in range(start, min(stop, n)):
@@ -166,6 +207,8 @@ def _safe_injection_mask(base: str) -> tuple[list[bool], list[bool]]:
             if j < n and base[j].isalpha():
                 while j < n and base[j].isalpha():
                     j += 1
+                glued = j
+                opt_until = max(opt_until, optional_arg_end(base, j))
             else:
                 j = i + 2
             _fill_fragile(i, j)
@@ -193,10 +236,12 @@ def _safe_injection_mask(base: str) -> tuple[list[bool], list[bool]]:
             fragile_at[i] = fragile > 0
             i += 1
             continue
-        safe[i] = brace == 0 and fragile == 0 and not math[i]
+        safe[i] = (
+            brace == 0 and fragile == 0 and not math[i] and i != glued and i >= opt_until
+        )
         fragile_at[i] = fragile > 0
         i += 1
-    safe[n] = brace == 0 and fragile == 0
+    safe[n] = brace == 0 and fragile == 0 and n != glued
     fragile_at[n] = fragile > 0
     return safe, fragile_at
 

@@ -26,11 +26,15 @@ Polarity = Literal["up", "down"]
 Stage = Literal["router", "retrieval", "citation", "answer"]
 
 
+OTHER_TEXT_MAX = 500
+CORRECTION_MAX = 8000
+
+
 class FeedbackPut(BaseModel):
     polarity: Polarity | None
     reasons: list[str] = Field(default_factory=list)
-    other_text: str | None = None
-    correction: str | None = None
+    other_text: str | None = Field(default=None, max_length=OTHER_TEXT_MAX)
+    correction: str | None = Field(default=None, max_length=CORRECTION_MAX)
 
 
 class FeedbackGuess(BaseModel):
@@ -101,10 +105,24 @@ class OtherReason(BaseModel):
     count: int
 
 
+class Unattributed(BaseModel):
+    """Negative answers whose reasons map to no stage (only "other", or none):
+    they belong in no stage bar, so they are counted apart."""
+
+    explicit: int = 0
+    implicit: int = 0
+
+
 class FeedbackSummary(BaseModel):
+    """``kpis.negatives_*`` count NEGATIVE ANSWERS (one per answer). A stage
+    counts an answer once per stage its reasons point to, so the stages can
+    add up to more than the negatives; ``unattributed`` holds the answers no
+    stage claims."""
+
     kpis: Kpis
     stages: list[StageSummary]
     other_reasons: list[OtherReason]
+    unattributed: Unattributed = Field(default_factory=Unattributed)
 
 
 class FeedbackCase(BaseModel):
@@ -114,6 +132,7 @@ class FeedbackCase(BaseModel):
     question: str
     kind: Literal["explicit", "implicit"]
     created_at: str
+    in_g1_inbox: bool = False
 
 
 class PresetCreate(BaseModel):
@@ -138,6 +157,7 @@ class G1InboxRequest(BaseModel):
 
 class G1InboxResult(BaseModel):
     appended: int
+    already: int = 0
 
 
 class ExportPreview(BaseModel):
@@ -152,7 +172,7 @@ class ExportRequest(BaseModel):
     since: str | None = None
     until: str | None = None
     model: str | None = None
-    cited_only: bool
+    cited_only: bool = False
 
 
 class ExportResult(BaseModel):
@@ -163,7 +183,7 @@ class ExportResult(BaseModel):
 
 
 class ReviewVerdict(BaseModel):
-    """The ``feedback_review/v1`` reviewer's structured verdict on a flagged
+    """A reviewer's (``feedback_review`` / ``feedback_review_fork``) verdict on a flagged
     answer. ``doubt`` is the one sentence shown to the user as the reviewer's
     concern. Unknown or repeated reasons are dropped, so ``reasons`` is always
     an ordered subset of ``REASONS``."""
@@ -197,7 +217,7 @@ REASON_DESCRIPTIONS: dict[str, str] = {
 
 
 def format_reasons_block(reasons: list[str] | None = None) -> str:
-    """The ``{reasons}`` slot of ``feedback_review/v1``: one ``- id: meaning``
+    """The ``{reasons}`` slot of the ``feedback_review`` prompts: one ``- id: meaning``
     line per reason the reviewer may pick (defaults to every ``REASONS`` id)."""
     ids = REASONS if reasons is None else [r for r in reasons if r in REASON_DESCRIPTIONS]
     return "\n".join(f"- {r}: {REASON_DESCRIPTIONS[r]}" for r in ids)

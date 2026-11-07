@@ -1,9 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
+import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
+import { retryableLazy } from "@/lib/retryableLazy";
 import { slideStageLabel } from "@/lib/slideStage";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
@@ -21,19 +23,19 @@ import { useRunReattach } from "@/hooks/useRunReattach";
 import { getDeck, updateDeckNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const CitationCanvas = lazy(() =>
+const CitationCanvas = retryableLazy(() =>
   import("@/components/canvas/CitationCanvas").then((m) => ({
     default: m.CitationCanvas,
   })),
 );
 
-const MemoryManager = lazy(() =>
+const MemoryManager = retryableLazy(() =>
   import("@/components/chat/MemoryManager").then((m) => ({
     default: m.MemoryManager,
   })),
 );
 
-const SlidesPanel = lazy(() =>
+const SlidesPanel = retryableLazy(() =>
   import("@/components/slides/SlidesPanel").then((m) => ({
     default: m.SlidesPanel,
   })),
@@ -309,9 +311,11 @@ export function ChatPage() {
             aria-hidden={!canvasOpen || undefined}
             {...(!canvasOpen ? { inert: true } : {})}
           >
-            <Suspense fallback={null}>
-              <CitationCanvas />
-            </Suspense>
+            <PanelLoadBoundary onRetry={CitationCanvas.reset}>
+              <Suspense fallback={null}>
+                <CitationCanvas />
+              </Suspense>
+            </PanelLoadBoundary>
           </div>
 
           {/* Memory Manager: absolutely overlays the Citation Canvas inside
@@ -324,9 +328,11 @@ export function ChatPage() {
                 {t("panel.memory")}
               </div>
               <div className="flex-1 overflow-y-auto">
-                <Suspense fallback={null}>
-                  <MemoryManager sessionId={backendSessionId} />
-                </Suspense>
+                <PanelLoadBoundary onRetry={MemoryManager.reset}>
+                  <Suspense fallback={null}>
+                    <MemoryManager sessionId={backendSessionId} />
+                  </Suspense>
+                </PanelLoadBoundary>
               </div>
             </div>
           )}
@@ -347,15 +353,17 @@ export function ChatPage() {
                 {t("panel.slides")}
               </div>
               <div className="flex-1 min-h-0 overflow-hidden">
-                <Suspense fallback={null}>
-                  <SlidesPanel
-                    sessionId={backendSessionId}
-                    speakerNotes={speakerNotes}
-                    busy={deckBusy}
-                    stage={deckStage}
-                    onSaveNote={handleSaveNote}
-                  />
-                </Suspense>
+                <PanelLoadBoundary onRetry={SlidesPanel.reset}>
+                  <Suspense fallback={null}>
+                    <SlidesPanel
+                      sessionId={backendSessionId}
+                      speakerNotes={speakerNotes}
+                      busy={deckBusy}
+                      stage={deckStage}
+                      onSaveNote={handleSaveNote}
+                    />
+                  </Suspense>
+                </PanelLoadBoundary>
               </div>
             </div>
           )}

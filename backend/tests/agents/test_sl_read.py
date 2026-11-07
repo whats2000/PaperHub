@@ -135,3 +135,69 @@ async def test_read_cap_applied(tmp_path: Path) -> None:
 
     assert len(result.text) <= _READ_TEXT_CAP
     assert result.chunk_ids == [1]
+
+
+async def _sectionless(c: aiosqlite.Connection) -> None:
+    """Paper 88-shaped: a short letter with no section headings, so every
+    chunk's section is NULL; the first chunk (the LaTeX preamble) has no
+    dom_id, and the bibliography closes the text."""
+    await c.execute(
+        "INSERT INTO paper_content "
+        "(id, content_key, kind, arxiv_id, title, abstract, sections_json, "
+        " source_path, source_dir_path, html_path) "
+        "VALUES (88, 'k88', 'arxiv', '1203.3835', 'A Letter', 'Abs.', NULL, "
+        "'/p', '/d', '/h')"
+    )
+    rows = [
+        (201, None, 0, r"\twocolumn[ \title{A Letter}"),
+        (202, "phchunk-1", 10, "Body one."),
+        (203, "phchunk-2", 20, "Body two."),
+        (204, "phchunk-3", 30, r"\begin{thebibliography}{99} \bibitem{A} A."),
+        (205, "phchunk-4", 40, "item{B} B."),
+    ]
+    for cid, dom, start, text in rows:
+        await c.execute(
+            "INSERT INTO chunks (id, paper_content_id, section, char_start, char_end, "
+            "text, dom_id) VALUES (?, 88, NULL, ?, ?, ?, ?)",
+            (cid, start, start + 9, text, dom),
+        )
+    await c.commit()
+
+
+@pytest.mark.asyncio
+async def test_full_text_resolves_a_sectionless_paper_to_its_anchored_body(
+    conn: aiosqlite.Connection,
+) -> None:
+    """A paper with no sections is cited as a whole: "Full text" resolves to
+    the body chunks the canvas can anchor (dom_id), before the bibliography."""
+    from paperhub.agents.sl_read import FULL_TEXT_SECTION, read_section_chunks
+
+    await _sectionless(conn)
+    result = await read_section_chunks(
+        paper_content_id=88, section_name=FULL_TEXT_SECTION, conn=conn)
+    assert result.chunk_ids == [202, 203]
+    assert "Body one." in result.text and "thebibliography" not in result.text
+    spaced = await read_section_chunks(paper_content_id=88, section_name=" full  TEXT ",
+                                       conn=conn)
+    assert spaced.chunk_ids == [202, 203]
+
+
+@pytest.mark.asyncio
+async def test_full_text_is_not_a_section_of_a_sectioned_paper(
+    conn: aiosqlite.Connection,
+) -> None:
+    from paperhub.agents.sl_read import FULL_TEXT_SECTION, read_section_chunks
+
+    result = await read_section_chunks(
+        paper_content_id=73, section_name=FULL_TEXT_SECTION, conn=conn)
+    assert result.chunk_ids == []
+
+
+@pytest.mark.asyncio
+async def test_is_sectionless(conn: aiosqlite.Connection) -> None:
+    from paperhub.agents.sl_read import is_sectionless
+
+    await _sectionless(conn)
+    assert await is_sectionless(conn, 88) is True
+    assert await is_sectionless(conn, 73) is False
+    assert await is_sectionless(conn, 9999) is False  # no chunks: nothing to cite

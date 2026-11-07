@@ -268,6 +268,75 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         )
         await conn.commit()
 
+    # Plan H3: chat_sessions.internal (hidden ideation tracing session).
+    async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "internal" not in cols:
+        await conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN internal "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+        await conn.commit()
+    # At most one internal session (guards the create race); after the ALTER
+    # so old DBs have the column.
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_sessions_internal "
+        "ON chat_sessions(internal) WHERE internal = 1"
+    )
+    await conn.commit()
+
+    # Plan H3: domains.manual (user-curated domains survive the orphan cleanup).
+    async with conn.execute("PRAGMA table_info(domains)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "manual" not in cols:
+        await conn.execute(
+            "ALTER TABLE domains ADD COLUMN manual INTEGER NOT NULL DEFAULT 0"
+        )
+        await conn.commit()
+
+    # Plan H3: mechanism_cards.slot (the card cache key covers the prompt slot;
+    # cards cached before the column were built by ideation_card/v1).
+    async with conn.execute("PRAGMA table_info(mechanism_cards)") as cur:
+        card_cols = {row[1] for row in await cur.fetchall()}
+    if "slot" not in card_cols:
+        await conn.execute(
+            "ALTER TABLE mechanism_cards ADD COLUMN slot TEXT NOT NULL "
+            "DEFAULT 'ideation_card/v1'"
+        )
+        await conn.commit()
+
+    # Plan H3: re-queue citation fetches that failed on the old request bug
+    # (S2 400 "Unrecognized or unsupported fields: [authors.name]"). New HTTP
+    # failures are recorded as ``error:HTTP<status>``, so this label only names
+    # pre-fix rows and the delete is effectively one-time.
+    await conn.execute(
+        "DELETE FROM citation_fetch WHERE status = 'error:HTTPStatusError'"
+    )
+    await conn.commit()
+
+    # Plan H2: mark review runs stored before ``REVIEW_RUN_JSON`` existed, so a
+    # runs count can tell them from chat turns. Idempotent (NULL rows only).
+    await conn.execute(
+        "UPDATE runs SET routing_decision_json = '{\"intent\": \"feedback_review\"}' "
+        "WHERE routing_decision_json IS NULL AND id IN "
+        "(SELECT run_id FROM tool_calls WHERE tool = 'feedback:review')"
+    )
+    await conn.commit()
+
+    # Plan H3: ideas.ever_saved (sticky; feeds the ideation save_rate).
+    async with conn.execute("PRAGMA table_info(ideas)") as cur:
+        idea_cols = {row[1] for row in await cur.fetchall()}
+    if "ever_saved" not in idea_cols:
+        await conn.execute(
+            "ALTER TABLE ideas ADD COLUMN ever_saved INTEGER NOT NULL DEFAULT 0"
+        )
+        await conn.execute(
+            "UPDATE ideas SET ever_saved = 1 WHERE status IN "
+            "('saved','trying','worked','failed') OR prev_status IN "
+            "('saved','trying','worked','failed')"
+        )
+        await conn.commit()
+
     # -----------------------------------------------------------------------
     # Idempotent column-add for runs.search_results_json (paper-search cards
     # persisted per turn so they replay cross-device). Pre-existing DBs won't
@@ -624,6 +693,12 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
                 "deck_version_id, started_at, finished_at, status FROM runs"
             ),
         )
+
+    # Plan H2: a pending reviewer item whose run was rated explicitly is
+    # resolved (idempotent; a no-op once nothing is pending).
+    from paperhub.feedback.repo import resolve_superseded
+
+    await resolve_superseded(conn)
 
 
 async def reconcile_interrupted_runs(conn: aiosqlite.Connection) -> None:

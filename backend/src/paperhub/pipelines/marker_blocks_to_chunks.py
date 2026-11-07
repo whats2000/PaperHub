@@ -28,6 +28,7 @@ from paperhub.pipelines.marker_client import MarkerBlock, MarkerDoc
 from paperhub.pipelines.marker_to_asset import (
     _build_section_name_map,
     _resolve_section,
+    section_header_name,
     strip_html,
 )
 
@@ -156,7 +157,9 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
             title = strip_html(block.html)
             if not title:
                 continue
-            current_section = title
+            # A non-heading "header" (axis ticks, a sub-figure label) keeps
+            # the enclosing section; its text still lands in the chunk.
+            current_section = section_header_name(block, name_map) or current_section
             pieces.append(
                 _Piece(
                     f"## {title}",
@@ -171,7 +174,7 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
         if bt in _GROUP_TYPES:
             piece_section = resolved or current_section
             if piece_section is None:
-                piece_section = _lookahead_section(blocks, idx, _sec)
+                piece_section = _lookahead_section(blocks, idx, _sec, name_map)
             text, bboxes, layout_kind, caption_text = _render_group(block, by_id)
             if not text:
                 continue
@@ -224,7 +227,7 @@ def marker_blocks_to_chunks(doc: MarkerDoc) -> list[Chunk]:
             if caption:
                 piece_section = current_section
                 if piece_section is None:
-                    piece_section = _lookahead_section(blocks, idx, _sec)
+                    piece_section = _lookahead_section(blocks, idx, _sec, name_map)
                 pieces.append(
                     _Piece(
                         f"*{caption}*",
@@ -283,12 +286,13 @@ def _lookahead_section(
     blocks: list[MarkerBlock],
     idx: int,
     sec_fn: Callable[[MarkerBlock], str | None],
+    name_map: dict[str, str],
 ) -> str | None:
     """First resolvable section among the blocks AFTER ``idx`` (floated-table
     fallback: Marker emits a TableGroup before its surrounding section text)."""
     for b in blocks[idx + 1 :]:
         if b.block_type == "SectionHeader":
-            title = strip_html(b.html)
+            title = section_header_name(b, name_map)
             if title:
                 return title
         s = sec_fn(b)

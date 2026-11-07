@@ -4,6 +4,8 @@ import hashlib
 import re
 from collections import Counter
 
+from paperhub.translation.language import canonical_language
+
 _PLACEHOLDER_RE = re.compile(r"⟦(\d+|BR)⟧")
 
 
@@ -18,8 +20,10 @@ def placeholders_intact(source: str, output: str) -> bool:
 
 
 def normalize_language(s: str) -> str:
-    """Strip and collapse inner whitespace so odd spacing shares one cache key."""
-    return " ".join(s.split())
+    """The cache key for a target-language label: known spellings of one
+    language share one canonical label ("Japanese" -> "日本語"); any other
+    label keeps its own key, with whitespace collapsed."""
+    return canonical_language(s)
 
 
 def source_hash(text: str) -> str:

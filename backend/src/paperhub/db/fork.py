@@ -143,6 +143,14 @@ async def fork_session(
             (new_sid, source_session_id),
         )
 
+        # Plan H3: a fork of an idea chat is still about that idea, so it keeps
+        # the idea link (and with it the per-turn idea context).
+        await conn.execute(
+            "INSERT OR IGNORE INTO idea_sessions (idea_id, session_id) "
+            "SELECT idea_id, ? FROM idea_sessions WHERE session_id = ?",
+            (new_sid, source_session_id),
+        )
+
         # slide_style_overrides (per-session deck style) — at most one row.
         await conn.execute(
             "INSERT INTO slide_style_overrides "

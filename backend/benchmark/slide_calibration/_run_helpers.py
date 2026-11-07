@@ -1,6 +1,7 @@
 """Shared helpers used by run_single.py and run_multi.py."""
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -56,9 +57,7 @@ def fetch_deck_artifacts(session_id: int) -> dict[str, Any]:
     slides_tex = ""
     if tex_path:
         p = Path(tex_path)
-        if p.is_absolute() and p.exists():
-            slides_tex = p.read_text(encoding="utf-8", errors="ignore")
-        elif p.exists():
+        if p.exists():
             slides_tex = p.read_text(encoding="utf-8", errors="ignore")
         else:
             print(f"[helpers] WARN deck.tex_path not readable: {tex_path}")
@@ -98,16 +97,14 @@ def fetch_tool_calls(run_id: int) -> list[dict[str, Any]]:
             (run_id,),
         )
         cols = [c[0] for c in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
     finally:
         con.close()
     for r in rows:
         for key in ("args_redacted_json", "result_summary_json"):
             if r.get(key):
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     r[key] = json.loads(r[key])
-                except json.JSONDecodeError:
-                    pass
     return rows
 
 

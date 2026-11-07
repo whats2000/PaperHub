@@ -431,12 +431,13 @@ describe("PdfTranslationLayer", () => {
  * a gutter of readerLeft-24 on its left) and place every inline-positioned
  * element (the paragraph rects) from its style, page-relative at readerLeft.
  */
-function stubLayout(readerLeft = 600) {
+function stubLayout(readerLeft = 600, readerTop = 0) {
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
     this: Element,
   ) {
     if (this.getAttribute("data-testid") === "reader") {
-      return new DOMRect(readerLeft, 0, 700, 800);
+      // A reader further down the page = its paragraphs scrolled out above.
+      return new DOMRect(readerLeft, readerTop, 700, 800);
     }
     const s = (this as HTMLElement).style;
     if (this instanceof HTMLElement && this.dataset.paragraphKey && s.top) {
@@ -572,6 +573,32 @@ describe("PdfTranslationLayer — long and split paragraphs", () => {
     hoverAt(2, AT_P2);
     expect(card()).toHaveAttribute("data-side", "below");
     expect(card().style.top).toBe("110px"); // P2's bottom (100) + 10
+  });
+});
+
+describe("PdfTranslationLayer — pinned card stays (QA F5)", () => {
+  it("docks a pinned card to the top edge when its paragraph scrolls out", async () => {
+    await renderReady();
+    hoverAt(2, AT_P2);
+    clickAt(2, AT_P2);
+    expect(card()).toHaveAttribute("data-state", "open");
+    vi.restoreAllMocks();
+    stubLayout(600, 2000); // P2 (top 60) is now far above the reading area
+    fireEvent.scroll(screen.getByTestId("reader"));
+    await waitFor(() => expect(card().style.top).toBe("2008px"));
+    expect(card()).toHaveAttribute("data-state", "open");
+  });
+
+  it("an unpinned card still steps aside", async () => {
+    await renderReady();
+    hoverAt(2, AT_P2);
+    expect(card()).toHaveAttribute("data-state", "open");
+    vi.restoreAllMocks();
+    stubLayout(600, 2000);
+    fireEvent.scroll(screen.getByTestId("reader"));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")?.getAttribute("data-state") ?? "closed").toBe("closed"),
+    );
   });
 });
 

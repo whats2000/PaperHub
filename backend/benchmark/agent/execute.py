@@ -16,8 +16,9 @@ import logging
 import os
 import re
 import tempfile
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,11 @@ class EvalRequest:
     key: str
     messages: list[dict[str, str]]
     response_model: type | None
+    max_tokens: int | None = None
+    """The deploy call's output cap (``StageSpec.max_tokens``); None = uncapped."""
+    params: dict[str, Any] = field(default_factory=dict)
+    """Extra provider kwargs from the variant YAML's ``params:`` (e.g. a
+    ``reasoning_effort`` budget), passed to every call of the request."""
 
 
 @dataclass
@@ -45,6 +51,9 @@ class ExecResult:
     tokens_in: int | None
     error: str | None = None
     backend: str = "concurrent"
+    usage: dict[str, Any] | None = None
+    """``completion_tokens`` / ``reasoning_tokens`` / ``latency_ms`` of the
+    call that produced the result (None when the provider reported nothing)."""
 
 
 TokenCounter = Callable[[str, list[dict[str, str]]], int | None]
@@ -78,15 +87,46 @@ def _extract_json(text: str) -> str:
     return s[a:b + 1] if (a != -1 and b > a) else s
 
 
-async def _structured_call(model: str, messages: list[dict[str, str]], response_model: type | None) -> Any:
+def _usage_of(resp: Any) -> dict[str, Any] | None:
+    usage = resp.get("usage") if isinstance(resp, dict) else getattr(resp, "usage", None)
+    if usage is None:
+        return None
+
+    def get(obj: Any, key: str) -> Any:
+        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+    details = get(usage, "completion_tokens_details")
+    return {"prompt_tokens": get(usage, "prompt_tokens"),
+            "completion_tokens": get(usage, "completion_tokens"),
+            "reasoning_tokens": get(details, "reasoning_tokens") if details else None}
+
+
+async def _structured_call(model: str, messages: list[dict[str, str]], response_model: type | None,
+                           max_tokens: int | None = None,
+                           params: dict[str, Any] | None = None,
+                           usage_out: dict[str, Any] | None = None) -> Any:
     """One structured call via litellm directly (eval-local — does NOT use the
-    production adapter). Native response_format first; JSON-mode fallback."""
+    production adapter). Native response_format first; JSON-mode fallback.
+    ``usage_out`` (when given) accumulates the token usage of every call made
+    (a JSON-mode fallback is a second call) and counts them in ``calls``."""
+    cap: dict[str, Any] = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    cap.update(params or {})
+
+    async def acompletion(**kw: Any) -> Any:
+        resp = await litellm.acompletion(**kw)
+        if usage_out is not None:
+            usage_out["calls"] = usage_out.get("calls", 0) + 1
+            for k, v in (_usage_of(resp) or {}).items():
+                if isinstance(v, int):
+                    usage_out[k] = usage_out.get(k, 0) + v
+        return resp
+
     if response_model is None:
-        resp = await litellm.acompletion(model=model, messages=messages, temperature=0)
+        resp = await acompletion(model=model, messages=messages, temperature=0, **cap)
         return resp["choices"][0]["message"]["content"]
     try:
-        resp = await litellm.acompletion(model=model, messages=messages, temperature=0,
-                                         response_format=response_model)
+        resp = await acompletion(model=model, messages=messages, temperature=0, **cap,
+                                 response_format=response_model)
         return response_model.model_validate_json(_extract_json(resp["choices"][0]["message"]["content"]))
     except Exception:  # noqa: BLE001 — native schema rejected / unsupported → JSON-mode fallback
         schema = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
@@ -95,20 +135,25 @@ async def _structured_call(model: str, messages: list[dict[str, str]], response_
                       "content": hinted[-1]["content"]
                       + "\n\nRespond with ONLY a JSON object matching this schema:\n" + schema}
         try:
-            resp = await litellm.acompletion(model=model, messages=hinted, temperature=0,
-                                             response_format={"type": "json_object"})
+            resp = await acompletion(model=model, messages=hinted, temperature=0, **cap,
+                                     response_format={"type": "json_object"})
         except Exception:  # noqa: BLE001 — provider lacks json_object too
-            resp = await litellm.acompletion(model=model, messages=hinted, temperature=0)
+            resp = await acompletion(model=model, messages=hinted, temperature=0, **cap)
         return response_model.model_validate_json(_extract_json(resp["choices"][0]["message"]["content"]))
 
 
 async def _one_concurrent(req: EvalRequest, *, model: str, counter: TokenCounter) -> ExecResult:
     tokens = counter(model, req.messages)
+    usage: dict[str, Any] = {}
+    started = time.monotonic()
     try:
-        parsed = await _structured_call(model, req.messages, req.response_model)
-        return ExecResult(req.key, parsed, tokens, None, "concurrent")
+        parsed = await _structured_call(model, req.messages, req.response_model, req.max_tokens,
+                                        req.params, usage)
+        error: str | None = None
     except Exception as exc:  # noqa: BLE001 — capture, don't abort the batch
-        return ExecResult(req.key, None, tokens, str(exc), "concurrent")
+        parsed, error = None, str(exc)
+    usage["latency_ms"] = int((time.monotonic() - started) * 1000)
+    return ExecResult(req.key, parsed, tokens, error, "concurrent", usage)
 
 
 async def _run_concurrent(
@@ -145,6 +190,9 @@ async def _run_batch_api(
     lines = []
     for r in requests:
         body: dict[str, Any] = {"model": model, "messages": r.messages, "temperature": 0}
+        if r.max_tokens is not None:
+            body["max_tokens"] = r.max_tokens
+        body.update(r.params)
         if r.response_model is not None:
             body["response_format"] = {"type": "json_object"}
             schema = json.dumps(r.response_model.model_json_schema(), ensure_ascii=False)
@@ -190,7 +238,8 @@ async def _run_batch_api(
         try:
             text = rec["response"]["body"]["choices"][0]["message"]["content"]
             parsed = rm.model_validate_json(_extract_json(text)) if rm is not None else text
-            results[key] = ExecResult(key, parsed, tokens.get(key), None, "batch_api")
+            results[key] = ExecResult(key, parsed, tokens.get(key), None, "batch_api",
+                                      _usage_of(rec["response"]["body"]))
         except Exception as exc:  # noqa: BLE001
             results[key] = ExecResult(key, None, tokens.get(key), str(exc), "batch_api")
     # Any request missing from the output is an error result (don't silently drop).

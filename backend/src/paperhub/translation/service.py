@@ -4,9 +4,12 @@ A translation batch is a pipeline call, not a chat turn: no ``runs`` row and no
 tracer step. Failures go to the backend log (paper id, block keys, language,
 provider error).
 
-Escalation per failed block (placeholder mismatch, missing from the reply, or
-the call raised): retry alone on ``model`` → alone on ``flagship_model`` →
-``unavailable``. ``LiteLlmAdapter.structured`` has its own availability
+Escalation per failed block (placeholder mismatch, an untranslated echo of the
+source, missing from the reply, or the call raised): retry alone on ``model`` →
+alone on ``flagship_model`` → ``unavailable``. An echo is never cached, and a
+cached row that is one (written before the check existed) is a miss. The whole
+request shares one time budget (``budget_s``): a call that would overrun it is
+cut off and its blocks end ``unavailable``. ``LiteLlmAdapter.structured`` has its own availability
 fallback (a non-small model that is down is downgraded to the small tier for
 that call); the service does not add another one. So the flagship attempt may
 in rare outages be served by the small tier; the placeholder check still
@@ -46,18 +49,29 @@ from paperhub.translation.placeholders import (
     placeholders_intact,
     source_hash,
 )
+from paperhub.translation.quality import is_echo, tidy_cjk_spacing
 
 logger = logging.getLogger(__name__)
 
 SLOT = "translate_blocks/v1"
 
+# Time budget for one request's model calls (primary batch, retries and
+# flagship together), so one pathological block can't hold a call for minutes.
+DEFAULT_BUDGET_S = 60.0
+
 # (text, model) of a clean translation, or None when it ended unavailable.
 _Outcome = tuple[str, str] | None
 
 
-def _valid(source: str, output: str) -> bool:
-    """Every placeholder survived, and no ``⟦BR⟧`` was moved to an edge."""
-    return placeholders_intact(source, output) and br_position_intact(source, output)
+def _problem(source: str, output: str | None, language: str) -> str | None:
+    """Why ``output`` is not a usable translation of ``source``, or ``None``."""
+    if output is None:
+        return "missing from reply"
+    if not (placeholders_intact(source, output) and br_position_intact(source, output)):
+        return "placeholder mismatch"
+    if is_echo(source, output, language):
+        return "echo (untranslated source)"
+    return None
 
 
 def _blocks_xml(blocks: list[TranslateBlock]) -> str:
@@ -65,6 +79,12 @@ def _blocks_xml(blocks: list[TranslateBlock]) -> str:
         f'<block key="{escape(b.key, {chr(34): "&quot;"})}">{escape(b.text)}</block>'
         for b in blocks
     )
+
+
+def _usable(row: CachedRow | None, block: TranslateBlock, language: str) -> bool:
+    """A cached row for this exact source that is not an untranslated echo."""
+    return (row is not None and row.source_hash == source_hash(block.text)
+            and not is_echo(block.text, row.text, language))
 
 
 def _html_predecessor(key: str) -> str | None:
@@ -83,11 +103,13 @@ class TranslationService:
         model: str,
         flagship_model: str,
         max_in_flight: int = 2,
+        budget_s: float = DEFAULT_BUDGET_S,
     ) -> None:
         self._llm = llm
         self._model = model
         self._flagship = flagship_model
         self._max_in_flight = max_in_flight
+        self._budget_s = budget_s
         self._sems: dict[int, asyncio.Semaphore] = {}
         # (paper, key, language, source_hash) -> the owning request's outcome.
         self._inflight: dict[tuple[int, str, str, str], asyncio.Future[_Outcome]] = {}
@@ -117,9 +139,11 @@ class TranslationService:
         misses: list[TranslateBlock] = []
         for b in req.blocks:
             row = cached.get(b.key)
-            if not req.force and row is not None and row.source_hash == source_hash(b.text):
+            if not req.force and _usable(row, b, language):
+                assert row is not None
                 results[b.key] = TranslateResult(
-                    key=b.key, status="ok", text=row.text, model=row.model,
+                    key=b.key, status="ok", text=tidy_cjk_spacing(row.text),
+                    model=row.model,
                     stale_terminology=row.memory_hash != memory_hash,
                 )
             else:
@@ -169,11 +193,13 @@ class TranslationService:
                 results[b.key] = TranslateResult(
                     key=b.key, status="ok", text=hit[0], model=hit[1],
                 )
-            elif row is not None and row.source_hash == source_hash(b.text):
+            elif _usable(row, b, language):
+                assert row is not None
                 # Ruling K: a forced re-translation that fails keeps showing
                 # the cached text, still marked stale.
                 results[b.key] = TranslateResult(
-                    key=b.key, status="ok", text=row.text, model=row.model,
+                    key=b.key, status="ok", text=tidy_cjk_spacing(row.text),
+                    model=row.model,
                     stale_terminology=True,
                 )
             else:
@@ -236,31 +262,41 @@ class TranslationService:
             return known.get(prev, "") if prev else ""
 
         out: dict[str, tuple[str, str]] = {}
+        deadline = asyncio.get_running_loop().time() + self._budget_s
 
         def accept(blocks: list[TranslateBlock], reply: dict[str, str],
-                   model: str) -> list[TranslateBlock]:
-            failed = []
+                   model: str) -> dict[str, str]:
+            """Keep the clean translations; return ``{key: problem}`` for the rest."""
+            problems: dict[str, str] = {}
             for b in blocks:
-                text = reply.get(b.key)
-                if text is not None and _valid(b.text, text):
+                raw = reply.get(b.key)
+                text = tidy_cjk_spacing(raw) if raw is not None else None
+                problem = _problem(b.text, text, language)
+                if problem is None and text is not None:
                     out[b.key] = (text, model)
                     known[b.key] = text
                 else:
-                    failed.append(b)
-            return failed
+                    problems[b.key] = problem or "missing from reply"
+            return problems
 
-        reply, err = await self._call(language, terminology, context_for(misses[0]),
-                                      misses, self._model)
-        failed = accept(misses, reply, self._model)
+        async def call(blocks: list[TranslateBlock], model: str,
+                       ) -> tuple[dict[str, str], BaseException | None]:
+            return await self._call(language, terminology, context_for(blocks[0]),
+                                    blocks, model, deadline)
+
+        reply, err = await call(misses, self._model)
+        problems = accept(misses, reply, self._model)
+        failed = [b for b in misses if b.key in problems]
         if failed:
-            self._log("batch", pid, failed, language, err, self._model)
+            self._log("batch", pid, failed, language, err, self._model, problems)
 
         if err is not None and failed:
-            reply, err = await self._call(language, terminology, context_for(failed[0]),
-                                          failed, self._flagship)
-            failed = accept(failed, reply, self._flagship)
+            reply, err = await call(failed, self._flagship)
+            problems = accept(failed, reply, self._flagship)
+            failed = [b for b in failed if b.key in problems]
             if failed:
-                self._log("flagship batch", pid, failed, language, err, self._flagship)
+                self._log("flagship batch", pid, failed, language, err, self._flagship,
+                          problems)
                 self._log_unavailable(pid, failed, language)
             return out
 
@@ -268,11 +304,11 @@ class TranslationService:
         for b in failed:
             models = (self._flagship,) if small_down else (self._model, self._flagship)
             for model in models:
-                single, err = await self._call(language, terminology, context_for(b),
-                                               [b], model)
-                if not accept([b], single, model):
+                single, err = await call([b], model)
+                problems = accept([b], single, model)
+                if not problems:
                     break
-                self._log("retry", pid, [b], language, err, model)
+                self._log("retry", pid, [b], language, err, model, problems)
                 if err is not None and model == self._model:
                     small_down = True
             else:
@@ -286,10 +322,18 @@ class TranslationService:
         context: str,
         blocks: list[TranslateBlock],
         model: str,
+        deadline: float,
     ) -> tuple[dict[str, str], BaseException | None]:
-        """One structured call → (first text per key, provider error or None)."""
+        """One structured call → (first text per key, provider error or None).
+
+        The call is cut off at ``deadline`` (the request's time budget); once
+        it has passed no call is made and the blocks fail with a timeout."""
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return {}, TimeoutError(
+                f"request time budget ({self._budget_s:g}s) spent before this call")
         try:
-            reply = await self._llm.structured(
+            reply = await asyncio.wait_for(self._llm.structured(
                 slot=SLOT,
                 variables={
                     "language": language,
@@ -299,7 +343,10 @@ class TranslationService:
                 },
                 response_model=TranslatedBlocks,
                 model=model,
-            )
+            ), remaining)
+        except TimeoutError:
+            return {}, TimeoutError(
+                f"call cut off by the {self._budget_s:g}s request time budget")
         except Exception as exc:  # noqa: BLE001 — every failure escalates
             return {}, exc
         texts: dict[str, str] = {}
@@ -316,9 +363,12 @@ class TranslationService:
         language: str,
         err: BaseException | None,
         model: str,
+        problems: dict[str, str],
     ) -> None:
-        reason = (f"{type(err).__name__}: {err}" if err is not None
-                  else "placeholder mismatch or missing from reply")
+        if err is not None:
+            reason = f"{type(err).__name__}: {err}"
+        else:
+            reason = "; ".join(f"{b.key}: {problems.get(b.key, '?')}" for b in blocks)
         logger.warning(
             "translation %s failed: paper=%s keys=%s language=%s model=%s error=%s",
             stage, pid, [b.key for b in blocks], language, model, reason,

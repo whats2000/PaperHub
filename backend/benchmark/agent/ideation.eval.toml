@@ -1,0 +1,51 @@
+# Per-agent eval sweep config (SRS §III-9) for the H3 ideation prompt.
+# Deterministic grade = recall@5 (expected source paper in the first 5 ideas);
+# the ship gate is >= 7 of 10 cases, plus the chosen variant beating the
+# baseline with the `pairwise` command. The committed corpus carries the
+# `@cards_from_db` sentinel in `cards_xml` — fill it from the live library
+# before sweeping (see "Ideation eval set" in benchmark/agent/README.md).
+[eval]
+stage       = "ideation"
+model       = "gemini/gemini-pro-latest"  # deploy ideation model: PAPERHUB_IDEATION_MODEL unset = the flagship, set to this in the settings DB
+reps        = 2
+backend     = "auto"
+concurrency = 4
+store       = "benchmark/agent/results/experiments.jsonl"
+prompts_dir = "benchmark/agent/prompts"
+variants    = ["v12", "v16", "v17"]   # v12 = ideation_propose/v2; v16/v17 = round 8 (QA I1-I3, I9); history in prompts/ideation/README.md
+# Call-setting variants (params: in the YAML): v12t2k / v12t4k = v12 with a 2048 / 4096-token thinking budget.
+
+[[testsets]]
+name   = "core"
+corpus = "benchmark/agent/corpus/ideation.core.cards.jsonl"   # built from ideation.core.jsonl
+
+# Free exploration over the whole library (run 705's input), graded on yield:
+# ideas that survive generate_ideas' validation, toward 5. Its own row.
+[[testsets]]
+name   = "explore"
+corpus = "benchmark/agent/corpus/ideation.explore.cards.jsonl"   # built from ideation.explore.jsonl
+
+# Free exploration on small boards (12-13 cards) holding one labelled pair:
+# recall@5 of the ordered pair among the ideas the agent would keep.
+[[testsets]]
+name   = "explore_board"
+corpus = "benchmark/agent/corpus/ideation.explore_board.cards.jsonl"   # built from ideation.explore_board.jsonl
+
+# Held out from tuning (round 7): problem-mode cases whose expected sources no
+# other case labels. Never tune on it; report it next to core.
+[[testsets]]
+name   = "heldout"
+corpus = "benchmark/agent/corpus/ideation.heldout.cards.jsonl"   # built from ideation.heldout.jsonl
+
+# generate_ideas' repair call (every first-round idea dropped): yield of kept
+# ideas, plus recall of the right source when only its fault was rejected.
+[[testsets]]
+name   = "repair"
+corpus = "benchmark/agent/corpus/ideation.repair.cards.jsonl"   # built from ideation.repair.jsonl
+
+# Round 8 (QA I1-I3): a zh-TW / zh-CN problem must get ideas in that language,
+# an irrelevant problem must get no ideas plus a no_fit_reason, rationales must
+# name their source paper, and a zh-TW explore run writes in the UI language.
+[[testsets]]
+name   = "qa"
+corpus = "benchmark/agent/corpus/ideation.qa.cards.jsonl"   # built from ideation.qa.jsonl

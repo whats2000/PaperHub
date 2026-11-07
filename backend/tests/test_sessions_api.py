@@ -834,3 +834,63 @@ async def test_resolve_history_excludes_system_messages(tmp_path: Path) -> None:
         await conn.commit()
         assert await _resolve_history(conn, 1, []) == [
             {"role": "user", "content": "q1"}]
+
+
+async def test_get_sessions_excludes_internal_ideation_session(
+    sessions_client: AsyncClient, tmp_path: Path
+) -> None:
+    from paperhub.ideation.internal_session import ideation_session_id
+
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        sid = await ideation_session_id(conn)
+    resp = await sessions_client.get("/sessions")
+    assert resp.status_code == 200
+    assert sid not in [s["id"] for s in resp.json()]
+
+
+async def test_internal_session_not_mutable_via_session_endpoints(
+    sessions_client: AsyncClient, tmp_path: Path
+) -> None:
+    from paperhub.ideation.internal_session import ideation_session_id
+
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        sid = await ideation_session_id(conn)
+    assert (await sessions_client.delete(f"/sessions/{sid}")).status_code == 404
+    assert (await sessions_client.post(f"/sessions/{sid}/restore")).status_code == 404
+    r = await sessions_client.post(f"/sessions/{sid}/fork", json={"run_id": 1})
+    assert r.status_code == 404
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn, conn.execute(
+        "SELECT deleted_at FROM chat_sessions WHERE id = ?", (sid,)
+    ) as cur:
+        assert (await cur.fetchone()) == (None,)
+
+
+async def test_list_sessions_returns_idea_id(
+    sessions_client: AsyncClient, tmp_path: Path
+) -> None:
+    """A chat opened from an idea carries that idea's id (the sidebar marker)."""
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute(
+            "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, source_path, "
+            "source_dir_path, html_path) "
+            "VALUES (1, 'arxiv:1506.01497', 'arxiv', '1506.01497', 'Faster R-CNN', '', "
+            "'', '')"
+        )
+        await conn.execute(
+            "INSERT INTO ideas (id, source_doc, source_section, title) "
+            "VALUES (7, 1, 'Anchors', 'Anchor boxes for reranking')"
+        )
+        await conn.execute(
+            "INSERT INTO chat_sessions (id, title) VALUES "
+            "(1, 'Idea chat'), (2, 'Plain chat')"
+        )
+        await conn.execute("INSERT INTO idea_sessions VALUES (7, 1)")
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions")
+    assert resp.status_code == 200
+    by_id = {s["id"]: s for s in resp.json()}
+    assert by_id[1]["idea_id"] == 7
+    assert by_id[2]["idea_id"] is None
+    # One row per session: the idea id comes from a subquery, not a join.
+    assert len(resp.json()) == 2

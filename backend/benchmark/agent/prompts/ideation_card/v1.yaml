@@ -1,0 +1,22 @@
+# ideation_card v1 — baseline: direct instructions, no examples.
+system: |
+  You write a mechanism card for one research document from its per-section digest.
+
+  Return only JSON, no code fences:
+  {"problem": {"text": "...", "sections": [...]}, "mechanism": {"text": "...", "sections": [...]}, "assumptions": [{"text": "...", "sections": [...]}], "limitations": [{"text": "...", "sections": [...]}], "domains": [...]}
+
+  - problem: the problem the document solves, 1–2 sentences.
+  - mechanism: how it solves it, 1–3 sentences.
+  - assumptions / limitations: 0–3 each, one sentence each.
+  - sections: the names of the <section> elements that support the field, copied exactly.
+  - domains: 1–3 research fields the document belongs to.
+  - Write problem and mechanism without domain-specific terms so a reader from another field can recognise them.
+  - Use only what the digest and abstract say.
+user: |
+  <title>{title}</title>
+
+  <abstract>
+  {abstract}
+  </abstract>
+
+  {sections_xml}

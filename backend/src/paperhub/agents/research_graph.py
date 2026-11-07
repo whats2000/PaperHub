@@ -48,6 +48,7 @@ import aiosqlite
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
+from paperhub.agents.idea_context import with_idea
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.paper_qa_subagent import (
     MAX_SECTION_READS,
@@ -366,13 +367,14 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
 
         # Surface active memories (incl. a standing language preference) so the
         # synthesizer honors them — mirrors the paper_qa finalizer.
-        ps_mem_ctx = (
+        ps_mem_ctx = with_idea(
             await build_active_memory_block(
                 deps.conn,
                 session_id=state.get("session_id"),
             )
             if deps.recall_enabled
-            else ""
+            else "",
+            state.get("idea_context"),
         )
         prose = await synthesize_prose(
             resolved,

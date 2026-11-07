@@ -23,6 +23,7 @@ from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
 from paperhub.api import decks as decks_api
 from paperhub.api import feedback as feedback_api
+from paperhub.api import ideation as ideation_api
 from paperhub.api import memories as memories_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
@@ -38,6 +39,8 @@ from paperhub.db.migrate import (
     reconcile_interrupted_runs,
     sweep_orphan_session_folders,
 )
+from paperhub.ideation.agent import reconcile_generating_problems
+from paperhub.ideation.citations import run_citation_loop
 from paperhub.logfile import install_file_logging
 from paperhub.mcp import (
     MCPRegistry,
@@ -88,6 +91,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
         await reconcile_interrupted_runs(conn)
+        # Plan H3: a problem left `generating` by a killed process -> `error`.
+        await reconcile_generating_problems(conn)
         # Fix author lists stored with arXiv fragment artifacts (idempotent).
         await repair_author_lists(conn)
         await apply_settings_overlay_at_boot(conn)
@@ -173,6 +178,23 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             name="paperhub-arxiv-backfill",
         )
 
+    # Background Semantic Scholar citation-edge fetch (Plan H3): one slow,
+    # rate-limit-aware loop over non-private arXiv documents. DB-queued, own
+    # connection. Disabled with PAPERHUB_CITATION_EDGES=0 (tests).
+    app.state.citation_task = None
+    app.state.citation_stop = None
+    app.state.citation_conn = None
+    if os.environ.get("PAPERHUB_CITATION_EDGES", "1") != "0":
+        citation_conn = await aiosqlite.connect(settings.db_path)
+        await configure_connection(citation_conn)
+        citation_stop = asyncio.Event()
+        app.state.citation_conn = citation_conn
+        app.state.citation_stop = citation_stop
+        app.state.citation_task = asyncio.create_task(
+            run_citation_loop(citation_conn, stop=citation_stop),
+            name="paperhub-citation-edges",
+        )
+
     # The dense-vector RAG stack (embedder + reranker + Chroma) was removed, so
     # there is no model pre-warm to wait on. Defer the "ready" banner to a
     # background task so it lands AFTER uvicorn logs "Application startup
@@ -239,6 +261,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if backfill_conn is not None:
             with contextlib.suppress(Exception):
                 await backfill_conn.close()
+        citation_stop = app.state.citation_stop
+        citation_task = app.state.citation_task
+        if citation_stop is not None and citation_task is not None:
+            citation_stop.set()
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(citation_task, timeout=5.0)
+            if not citation_task.done():
+                citation_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await citation_task
+        citation_conn = app.state.citation_conn
+        if citation_conn is not None:
+            with contextlib.suppress(Exception):
+                await citation_conn.close()
         await app.state.mcp_registry.shutdown()
 
 
@@ -365,6 +401,7 @@ def create_app() -> FastAPI:
     app.include_router(version_api.router)
     app.include_router(translations_api.router)
     app.include_router(feedback_api.router)
+    app.include_router(ideation_api.router)
     # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
     # External MCP clients (Claude Desktop, Cursor) and the agent (post
     # Task v2.5-4) reach the three Research Agent tools over the MCP wire

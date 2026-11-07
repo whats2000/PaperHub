@@ -10,11 +10,14 @@
     "newChat": "新对话",
     "noChats": "暂无对话。",
     "deleteChat": "删除对话：{{title}}",
-    "forkedFrom": "{{title}}（从 {{parent}} 分支）"
+    "forkedFrom": "{{title}}（从 {{parent}} 分支）",
+    "fromIdea": "从 idea 打开"
   },
   "sessionToast": {
     "deleteFailed": "删除对话失败",
     "deleted": "已删除对话",
+    "feedbackNote_one": "此对话的 {{count}} 条反馈及据此生成的训练数据也会一并移除。",
+    "feedbackNote_other": "此对话的 {{count}} 条反馈及据此生成的训练数据也会一并移除。",
     "undo": "撤销",
     "restoreFailed": "无法在服务器上还原此对话"
   },
@@ -48,10 +51,13 @@
     "feedback": "反馈",
     "feedbackBadge": "{{count}} 项待你确认"
   },
-  "ideasPage": {
-    "empty": "想法将显示在这里。"
-  },
   "feedbackPage": {
     "empty": "反馈将显示在这里。"
+  },
+  "panelLoad": {
+    "title": "此面板无法加载",
+    "body": "应用有部分内容下载失败，通常发生在更新之后。其他功能仍可正常使用。",
+    "retry": "重试",
+    "reload": "重新加载页面"
   }
 }

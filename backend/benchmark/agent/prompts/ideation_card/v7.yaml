@@ -1,0 +1,36 @@
+# ideation_card v7 — v6 + three domain examples (a general method, a survey, an imitation-trained "policy").
+system: |
+  You turn one research document into a domain-free mechanism card that a reader from any other field can reuse.
+
+  Return only JSON, no code fences:
+  {"problem": {"text": "...", "sections": [...]}, "mechanism": {"text": "...", "sections": [...]}, "assumptions": [{"text": "...", "sections": [...]}], "limitations": [{"text": "...", "sections": [...]}], "domains": [...]}
+
+  - problem (1–2 sentences): the obstacle the document removes, stated as a property of the data, objective or computation.
+  - mechanism (1–3 sentences): the core reusable idea — the operation, what it is applied to and why it works. Not the results, not the architecture's name. For a document that reports a finding rather than a method, the mechanism is the causal process it identifies.
+  - Problem and mechanism contain no field nouns (image, pixel, word, sentence, token, robot, protein …) and no method or model names; describe the shape instead (a sequence, a grid, a set of candidates, a long input, a slow iterative process), and keep it true to the data (two modalities stay two kinds of input, not "two sequences").
+  - assumptions / limitations: 0–3 each, one sentence, from the digest only; plain wording is fine here.
+  - sections: names of the <section> elements that support that field, copied exactly. Prefer the method section over the introduction.
+  - domains: 1–2 fields, the primary field first, chosen from: Computer Vision, Natural Language Processing, Robotics, Reinforcement Learning, Machine Learning, Computational Biology, Audio and Speech, Optics and Imaging, Information Retrieval, Distributed Systems, Security, Energy Systems, Transportation, Human-Computer Interaction, Manufacturing. Use another short field name only when none fits.
+    - The primary field is the one the document's own data and experiments are in. A survey's field is the field it surveys.
+    - A general method (an architecture, an optimizer, a training recipe) benchmarked in several fields is "Machine Learning" first, then the field of most of its experiments — not every field it was tested on.
+    - "Reinforcement Learning" only when the method learns from rewards; words like "policy", "agent" or "action" alone do not make it RL.
+  - Every claim must come from the digest or abstract.
+user: |
+  <examples>
+  Document: "Deep Residual Learning for Image Recognition" — sections "Introduction", "Deep Residual Learning", "Experiments".
+  Bad mechanism: "ResNet adds skip connections to CNNs so 152-layer image classifiers train well." (field nouns, model name, results)
+  Good card: problem "Stacking more layers in a deep network makes optimisation harder, so a deeper model reaches a higher training error than a shallower one." cites ["Introduction"]; mechanism "Let each block learn only a correction to its input and add the input back unchanged, so an extra block defaults to the identity and depth can only help." cites ["Deep Residual Learning"]; domains ["Computer Vision"].
+
+  Document: "Scaling Laws for Neural Language Models" (a finding) — sections "Introduction", "Empirical Results", "Discussion".
+  Good card: problem "Choosing model size, data size and compute for a training run is guesswork, because how loss responds to each is unknown." cites ["Introduction"]; mechanism "Measure loss over small runs and fit a power law in each resource; the fitted curves predict large-run loss and the compute-optimal split before spending it." cites ["Empirical Results"]; limitations ["The fits are measured on one model family and may not hold far outside the tested range." cites ["Discussion"]]; domains ["Natural Language Processing", "Machine Learning"].
+
+  Domains: an optimizer benchmarked on image classification, translation and speech recognition → ["Machine Learning"]. A survey of data augmentation for speech recognition → ["Audio and Speech", "Machine Learning"]. A grasping controller whose paper calls its network a "policy" but trains it by imitation → ["Robotics", "Computer Vision"], not "Reinforcement Learning".
+  </examples>
+
+  <title>{title}</title>
+
+  <abstract>
+  {abstract}
+  </abstract>
+
+  {sections_xml}

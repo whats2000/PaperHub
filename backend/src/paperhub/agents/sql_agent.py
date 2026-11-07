@@ -257,7 +257,7 @@ async def sql_agent_stream(
     # a standing directive like "respond in Japanese" always surfaces. The
     # agent prompt has no dedicated memory slot, so we prepend it to the
     # question the model reasons over (cheapest non-lossy injection; if a
-    # dedicated prompt var is wanted later, add it to sql_agent/v1).
+    # dedicated prompt var is wanted later, add it to sql_agent/v3).
     memory_context: str = ""
     if conn is not None and recall_enabled:
         memory_context = await build_active_memory_block(conn, session_id=session_id)
@@ -282,7 +282,7 @@ async def sql_agent_stream(
                 "recall_hit": bool(memory_context),
             })
             action: SqlRoundAction = await adapter.structured(
-                slot="sql_agent/v1",
+                slot="sql_agent/v3",
                 variables={
                     "session_id": session_id,
                     "response_language": language,

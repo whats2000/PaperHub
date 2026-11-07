@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     -- cascading. The sidebar groups forks under their parent from this column.
     forked_from_session_id INTEGER REFERENCES chat_sessions(id) ON DELETE SET NULL,
     -- Plan H2: the run (answer) this fork branched at; pairs fork siblings for DPO.
-    forked_from_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
+    forked_from_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    -- Plan H3: 1 = the hidden ideation tracing session (never listed/purged).
+    internal INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS paper_content (
@@ -264,4 +266,106 @@ CREATE TABLE IF NOT EXISTS feedback_presets (
     label TEXT NOT NULL UNIQUE,
     stage TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Plan H3: cross-domain ideation. Single user: there is no user column yet.
+-- The UNIQUE constraints below (domains.name, the composite primary keys) are
+-- deliberate single-user constraints; a future multi-user migration must
+-- rebuild those tables with the user column in each key.
+CREATE TABLE IF NOT EXISTS mechanism_cards (
+    paper_content_id INTEGER PRIMARY KEY
+        REFERENCES paper_content(id) ON DELETE CASCADE,
+    card_json TEXT NOT NULL,
+    digest_hash TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    -- The card prompt slot that built it; a slot or model change rebuilds.
+    slot TEXT NOT NULL DEFAULT 'ideation_card/v1',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS domains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color_index INTEGER,  -- NULL = gray Other
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- 1 = user-curated (renamed, merge target, or created by a manual edit):
+    -- the orphan cleanup in ideation/domains.py never deletes it.
+    manual INTEGER NOT NULL DEFAULT 0
+);
+
+-- A user-renamed or merged-away domain name (normalized) -> the domain it now
+-- belongs to, so re-analysis using the old name keeps the user's edit.
+CREATE TABLE IF NOT EXISTS domain_aliases (
+    name_norm TEXT PRIMARY KEY,
+    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS document_domains (
+    paper_content_id INTEGER NOT NULL
+        REFERENCES paper_content(id) ON DELETE CASCADE,
+    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+    manual INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (paper_content_id, domain_id)
+);
+
+-- Library-internal citation edges only (source cites target).
+CREATE TABLE IF NOT EXISTS citation_edges (
+    source_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    target_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    PRIMARY KEY (source_id, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS citation_external (
+    paper_content_id INTEGER NOT NULL
+        REFERENCES paper_content(id) ON DELETE CASCADE,
+    external_arxiv_id TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('cites','cited_by')),
+    PRIMARY KEY (paper_content_id, external_arxiv_id, direction)
+);
+
+CREATE TABLE IF NOT EXISTS citation_fetch (
+    paper_content_id INTEGER PRIMARY KEY
+        REFERENCES paper_content(id) ON DELETE CASCADE,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS problems (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    tried TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'generating'
+        CHECK (status IN ('generating','ready','error')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ideas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    problem_id INTEGER REFERENCES problems(id) ON DELETE CASCADE,
+    source_doc INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    source_section TEXT NOT NULL,
+    source_chunk_ids_json TEXT NOT NULL DEFAULT '[]',
+    target_doc INTEGER REFERENCES paper_content(id) ON DELETE CASCADE,
+    target_section TEXT,
+    target_chunk_ids_json TEXT NOT NULL DEFAULT '[]',
+    title TEXT NOT NULL,
+    rationale TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new','saved','trying','worked','failed','dismissed')),
+    prev_status TEXT
+        CHECK (prev_status IS NULL OR prev_status IN
+            ('new','saved','trying','worked','failed','dismissed')),
+    note TEXT NOT NULL DEFAULT '',
+    dismiss_reasons_json TEXT NOT NULL DEFAULT '[]',
+    dismiss_note TEXT NOT NULL DEFAULT '',
+    ever_saved INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ideas_problem ON ideas(problem_id);
+
+CREATE TABLE IF NOT EXISTS idea_sessions (
+    idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    PRIMARY KEY (idea_id, session_id)
 );

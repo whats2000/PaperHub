@@ -58,6 +58,10 @@ def _is_counted_negative(
     return kind == "explicit" or (status == "final" and verdict == "confirmed")
 
 
+def case_id(feedback_id: int, run_id: int) -> str:
+    return f"fb{feedback_id}-run{run_id}"
+
+
 async def build_inbox_lines(
     conn: aiosqlite.Connection, feedback_ids: list[int],
 ) -> list[dict[str, Any]] | None:
@@ -91,7 +95,7 @@ async def build_inbox_lines(
         ) as cur:
             step = await cur.fetchone()
         lines.append({
-            "case_id": f"fb{fid}-run{run_id}",
+            "case_id": case_id(fid, run_id),
             "stage_hint": STAGE_OF_REASON.get(reasons[0]) if reasons else None,
             "reasons": reasons,
             "correction": row[2],
@@ -105,17 +109,23 @@ async def build_inbox_lines(
     return lines
 
 
+def inbox_case_ids(path: Path) -> set[str]:
+    """The ``case_id`` of every line already in the inbox file."""
+    seen: set[str] = set()
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            try:
+                seen.add(str(json.loads(raw)["case_id"]))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+    return seen
+
+
 def append_inbox(path: Path, lines: list[dict[str, Any]]) -> int:
     """Append the lines whose ``case_id`` is not already in the file; return
     how many were added. Idempotent across calls and process restarts."""
     with _INBOX_LOCK:
-        seen: set[str] = set()
-        if path.exists():
-            for raw in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    seen.add(str(json.loads(raw)["case_id"]))
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    continue
+        seen = inbox_case_ids(path)
         fresh = [ln for ln in lines if ln["case_id"] not in seen]
         if fresh:
             path.parent.mkdir(parents=True, exist_ok=True)

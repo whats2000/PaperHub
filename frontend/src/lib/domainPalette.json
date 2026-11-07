@@ -1,0 +1,15 @@
+{
+  "note": "Ideas-graph domain palette (dataviz reference categorical, slots 1-8). passing_pairs = index pairs that pass every hard gate of the dataviz validate_palette.js in BOTH modes (light vs card #ffffff, dark vs card #171717). Mirror: frontend/src/lib/domainPalette.json and backend/src/paperhub/ideation/domain_palette.json must stay identical.",
+  "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
+  "dark": ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
+  "surfaces": {"light": "#ffffff", "dark": "#171717"},
+  "passing_pairs": [
+    [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 7],
+    [1, 2], [1, 6],
+    [2, 3], [2, 6], [2, 7],
+    [3, 4], [3, 5], [3, 6],
+    [4, 5], [4, 6],
+    [5, 6], [5, 7],
+    [6, 7]
+  ]
+}

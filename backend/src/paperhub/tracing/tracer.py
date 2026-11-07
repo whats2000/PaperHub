@@ -26,6 +26,10 @@ class _StepBuffer:
     # written result as ``_model_fallbacks`` so the trace shows "flagship
     # unavailable → used <small>" without the caller threading anything.
     model_fallbacks: list[dict[str, str]] = field(default_factory=list)
+    # Token usage + latency of every LLM call made DURING the step (the LLM
+    # adapter notes each one). Folded into the result as ``_llm_usage``; the
+    # token columns sum them unless the caller recorded its own counts.
+    llm_usage: list[dict[str, Any]] = field(default_factory=list)
 
     def record_args(self, args: dict[str, Any]) -> None:
         self.args = args
@@ -73,6 +77,38 @@ def note_model_fallback(from_model: str, to_model: str, reason: str) -> None:
         buf.model_fallbacks.append(
             {"from": from_model, "to": to_model, "reason": reason},
         )
+
+
+def note_llm_usage(model: str, usage: Any, latency_ms: int) -> None:
+    """Record one LLM call's token usage onto the currently-active trace step.
+
+    ``usage`` is the provider response's ``usage`` (an object or a dict, as
+    litellm returns it); ``reasoning_tokens`` is read from its
+    ``completion_tokens_details``. Safe no-op outside any ``tracer.step``."""
+    buf = _CURRENT_STEP.get()
+    if buf is None:
+        return
+
+    def get(obj: Any, key: str) -> Any:
+        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+    def as_int(v: Any) -> int | None:
+        return int(v) if isinstance(v, (int, float)) else None
+
+    details = get(usage, "completion_tokens_details") if usage is not None else None
+    buf.llm_usage.append({
+        "model": model,
+        "prompt_tokens": as_int(get(usage, "prompt_tokens")) if usage is not None else None,
+        "completion_tokens": (as_int(get(usage, "completion_tokens"))
+                              if usage is not None else None),
+        "reasoning_tokens": as_int(get(details, "reasoning_tokens")) if details else None,
+        "latency_ms": latency_ms,
+    })
+
+
+def _sum_known(values: Any) -> int | None:
+    known = [v for v in values if v is not None]
+    return sum(known) if known else None
 
 
 class Tracer:
@@ -151,6 +187,12 @@ class Tracer:
         result_payload = buf.result
         if buf.model_fallbacks:
             result_payload = {**(buf.result or {}), "_model_fallbacks": buf.model_fallbacks}
+        token_in, token_out = buf.token_in, buf.token_out
+        if buf.llm_usage:
+            result_payload = {**(result_payload or {}), "_llm_usage": buf.llm_usage}
+            if token_in is None and token_out is None:
+                token_in = _sum_known(u["prompt_tokens"] for u in buf.llm_usage)
+                token_out = _sum_known(u["completion_tokens"] for u in buf.llm_usage)
         result_json = (
             json.dumps(redact(result_payload)) if result_payload is not None else None
         )
@@ -172,8 +214,8 @@ class Tracer:
                 "args_redacted_json": args_json,
                 "result_summary_json": result_json,
                 "latency_ms": latency_ms,
-                "token_in": buf.token_in,
-                "token_out": buf.token_out,
+                "token_in": token_in,
+                "token_out": token_out,
                 "status": status,
                 "error": error,
             },

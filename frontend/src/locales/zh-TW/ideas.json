@@ -1,0 +1,216 @@
+{
+  "header": {
+    "library": "文獻庫 {{count}} 份",
+    "libraryPrivate": "文獻庫 {{count}} 份（含 {{private}} 份私密文件）"
+  },
+  "view": {
+    "aria": "檢視",
+    "graph": "圖譜",
+    "cards": "卡片"
+  },
+  "switcher": {
+    "aria": "問題：{{label}}",
+    "menu": "問題",
+    "explore": "自由探索",
+    "exploreSub": "文獻庫內的跨領域組合",
+    "yourProblems": "你的問題",
+    "ideaCount_one": "{{count}} 個 idea",
+    "ideaCount_other": "{{count}} 個 idea",
+    "generating": "產生中…",
+    "new": "描述新問題",
+    "listFailed": "無法載入問題",
+    "retry": "重試"
+  },
+  "entry": {
+    "label": "問題",
+    "placeholder": "描述新的問題：卡在哪裡、限制條件",
+    "tried": "已經試過的方法",
+    "triedPlaceholder": "試過哪些做法、為什麼不夠好（選填）",
+    "submit": "找跨領域 idea",
+    "failed": "無法建立問題",
+    "counter": "{{count}}/{{max}}"
+  },
+  "filter": {
+    "aria": "依狀態篩選 idea",
+    "active": "進行中",
+    "saved": "收藏",
+    "trying": "嘗試中",
+    "done": "有結果",
+    "dismissed": "已排除"
+  },
+  "state": {
+    "generating": "正在為你的問題尋找跨領域 idea…",
+    "generatingSub": "正在閱讀文獻庫的機制卡，並跨領域配對。",
+    "failed": "這個問題的 idea 產生失敗。",
+    "loadFailed": "無法載入 idea。",
+    "retry": "重試",
+    "emptyExplore": "還沒有跨領域組合。",
+    "emptyProblem": "這個問題還沒有 idea。",
+    "emptyHint": "文件依領域分組。點選文件即可查看或編輯它的領域。",
+    "summarising": "正在摘要你的文件 — {{ready}}/{{total}}",
+    "retryFailed": "無法重試這個問題",
+    "skipped_one": "有 {{count}} 份文件無法分析",
+    "skipped_other": "有 {{count}} 份文件無法分析",
+    "noRelevant": "你的文獻庫中沒有與這個問題相關的內容。",
+    "noRelevantHint": "請將此主題的論文加入文獻庫，或換個方式描述問題後再試一次。"
+  },
+  "graph": {
+    "aria": "發想圖譜",
+    "source": "來源",
+    "target": "目標",
+    "problem": "你的問題",
+    "private": "私密文件",
+    "ideaLabel": "{{title}}：{{source}} → {{target}}（{{status}}）",
+    "status": {
+      "new": "新的",
+      "saved": "收藏",
+      "trying": "嘗試中",
+      "worked": "有效",
+      "failed": "無效",
+      "dismissed": "已排除"
+    }
+  },
+  "drawer": {
+    "aria": "詳細資訊",
+    "close": "關閉",
+    "ideaKind": "跨領域 idea · {{status}}",
+    "source": "機制來源",
+    "target": "應用目標",
+    "yourProblem": "你描述的問題",
+    "why": "為什麼搭得上",
+    "note": "筆記",
+    "document": "文件",
+    "documentPrivate": "文件 · 私密",
+    "domains": "領域標籤",
+    "relatedIdeas": "相關 idea",
+    "none": "尚無",
+    "domain": "領域",
+    "domainDocs": "文件（{{count}}）",
+    "problem": "你的問題",
+    "tried": "已試過（不會再推薦）",
+    "triedNone": "未填寫",
+    "problemIdeas": "這個問題的 idea（{{count}}）",
+    "from": "來自 {{title}}",
+    "missing": "這個項目已不在圖譜中。"
+  },
+  "zoom": {
+    "aria": "縮放",
+    "in": "放大",
+    "out": "縮小",
+    "fit": "回到全圖"
+  },
+  "legend": {
+    "title": "圖例",
+    "domains": "領域（顏色）",
+    "other": "其他",
+    "relation": "關係",
+    "citation": "引用",
+    "idea": "idea：來源 → 目標",
+    "status": "idea 狀態",
+    "kept": "收藏／嘗試中／有效",
+    "ended": "無效／已排除",
+    "document": "文件",
+    "size": "大小 = 相關 idea 數",
+    "otherHint": "前八個領域之外的領域共用此顏色"
+  },
+  "detail": {
+    "sections": "引用段落",
+    "openSection": "開啟這個 idea 的對話，並在引用畫布顯示 {{section}}",
+    "status": "狀態",
+    "statusAria": "Idea 狀態",
+    "setStatus": {
+      "saved": "收藏",
+      "trying": "嘗試中",
+      "worked": "有效",
+      "failed": "無效"
+    },
+    "statusToast": "狀態改為「{{status}}」，已記錄為發想回饋",
+    "statusFailed": "無法更新 idea",
+    "note": "筆記",
+    "notePlaceholder": "例如：已和指導教授討論，下週做小規模實驗",
+    "saving": "儲存中…",
+    "saved": "已儲存",
+    "saveFailed": "筆記儲存失敗",
+    "openChat": "開聊天深入",
+    "continueChat": "繼續對話",
+    "chatFailed": "無法開啟對話",
+    "dismiss": "排除",
+    "dismissed": "已排除 · {{reasons}}",
+    "noReason": "未填原因",
+    "undo": "復原",
+    "undoFailed": "無法復原排除",
+    "newChat": "新對話",
+    "newChatHint": "就這個 idea 再開一個對話"
+  },
+  "dismiss": {
+    "title": "為什麼不適用？",
+    "reasons": {
+      "already_tried": "已試過",
+      "not_feasible": "不可行",
+      "analogy_fails": "類比不成立",
+      "not_novel": "不夠新",
+      "other": "其他"
+    },
+    "joiner": "、",
+    "notePlaceholder": "補充說明（選填）",
+    "noteLabel": "排除說明",
+    "hint": "排除原因會用來改進發想，同一個問題不會再推薦類似的 idea。",
+    "cancel": "取消",
+    "confirm": "確認排除",
+    "toast": "已排除「{{title}}」",
+    "failed": "無法排除 idea"
+  },
+  "domainEditor": {
+    "label": "領域標籤（手動修改後，重新分析不會覆蓋）",
+    "remove": "移除 {{name}}",
+    "openDomain": "改名或合併 {{name}}",
+    "addLabel": "加入領域",
+    "addPlaceholder": "加入領域…",
+    "create": "建立新領域「{{name}}」",
+    "suggestions": "領域建議",
+    "lastDomain": "每份文件至少要有一個領域",
+    "failed": "無法更新領域"
+  },
+  "domain": {
+    "rename": "改名",
+    "save": "儲存",
+    "renamed": "已更新領域名稱",
+    "mergeInto": "合併到",
+    "merge": "合併",
+    "merged": "已合併到 {{name}}",
+    "mergeHint": "這個領域的文件會歸到選定的領域，這個領域會移除。",
+    "failed": "無法更新領域",
+    "nameTaken": "已有名為「{{name}}」的領域，要改為合併到它嗎？"
+  },
+  "kanban": {
+    "explore": "自由探索：文獻庫內的跨領域組合",
+    "problem": "針對問題：{{text}}",
+    "empty": "沒有 idea",
+    "to": "到",
+    "chats_one": "已開 {{count}} 個對話",
+    "chats_other": "已開 {{count}} 個對話",
+    "columns": {
+      "new": "新的",
+      "saved": "收藏",
+      "trying": "嘗試中",
+      "done": "有結果",
+      "dismissed": "已排除"
+    }
+  },
+  "chat": {
+    "prefillProblem": "我們來深入討論這個 idea：「{{title}}」。\n機制來源：「{{source}}」的 {{sourceSection}} 段落。\n我的問題：{{problem}}\n為什麼可能搭得上：{{rationale}}\n要怎麼把這個機制用到我的問題上？類比可能在哪裡不成立？",
+    "prefillExplore": "我們來深入討論這個 idea：「{{title}}」。\n機制來源：「{{source}}」的 {{sourceSection}} 段落。\n應用目標：「{{target}}」的 {{targetSection}} 段落。\n為什麼可能搭得上：{{rationale}}\n這個機制要怎麼移植過去？類比可能在哪裡不成立？"
+  },
+  "explore": {
+    "run": "尋找新組合",
+    "running": "尋找中…",
+    "noNew": "這次沒有新的組合",
+    "found_one": "找到 {{count}} 個新組合",
+    "found_other": "找到 {{count}} 個新組合",
+    "failed": "自由探索失敗",
+    "overlay": "正在文獻庫中尋找跨領域組合…"
+  },
+  "section": {
+    "fullText": "全文"
+  }
+}

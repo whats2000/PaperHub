@@ -257,3 +257,49 @@ async def test_queue_skips_a_run_the_user_already_rated(
         items = (await c.get("/feedback/queue")).json()
     assert [i["run_id"] for i in items] == [r0]
     assert (await build_summary(conn)).kpis.pending == 1
+
+
+async def _states(conn: aiosqlite.Connection, run_id: int) -> list[tuple[Any, ...]]:
+    async with conn.execute(
+        "SELECT status, verdict FROM feedback WHERE run_id = ? AND kind = 'implicit'",
+        (run_id,),
+    ) as cur:
+        return [tuple(r) for r in await cur.fetchall()]
+
+
+async def test_explicit_rating_resolves_the_pending_reviewer_item(
+    app_with_db: tuple[Any, Any],
+) -> None:
+    """U2: the item must not stay ``needs_confirmation`` forever, and a
+    confirmed fork guess must not become a counted negative by being closed."""
+    from paperhub.feedback.repo import upsert_explicit
+
+    _, conn = app_with_db
+    _, r1, _ = await _seed_keyword(conn)
+    fid = await _implicit(conn, r1, trigger="fork")
+    await conn.execute("UPDATE feedback SET verdict = 'confirmed' WHERE id = ?", (fid,))
+    await conn.commit()
+    await upsert_explicit(conn, r1, "up", [], None, None)
+    assert await _states(conn, r1) == [("final", "rejected")]
+
+
+async def test_superseded_rows_migrate_and_the_migration_is_idempotent(
+    app_with_db: tuple[Any, Any],
+) -> None:
+    from paperhub.feedback.repo import resolve_superseded
+
+    _, conn = app_with_db
+    _, r1, r0 = await _seed_keyword(conn)
+    await _implicit(conn, r0)
+    await _implicit(conn, r1)
+    await conn.execute(
+        "INSERT INTO feedback (run_id, kind, polarity) VALUES (?, 'explicit', 'down')",
+        (r1,),
+    )
+    await conn.commit()
+    assert await resolve_superseded(conn, dry_run=True) == 1
+    assert await _states(conn, r1) == [("needs_confirmation", "uncertain")]
+    assert await resolve_superseded(conn) == 1
+    assert await _states(conn, r1) == [("final", "rejected")]
+    assert await _states(conn, r0) == [("needs_confirmation", "uncertain")]
+    assert await resolve_superseded(conn) == 0

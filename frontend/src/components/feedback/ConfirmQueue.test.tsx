@@ -110,7 +110,7 @@ describe("ConfirmQueue", () => {
     expect(screen.getByText("The questioned answer")).toBeInTheDocument();
     expect(screen.getByText("no, I meant 1")).toHaveAttribute("data-flagged", "true");
     expect(screen.getByText("Next reply 1")).toBeInTheDocument();
-    expect(screen.getByText("Reviewer's doubt: doubt 1")).toBeInTheDocument();
+    expect(screen.getByTestId("reviewer-doubt")).toHaveTextContent("doubt 1");
   });
 
   it("answering advances to the next unanswered item", async () => {

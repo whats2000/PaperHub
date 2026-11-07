@@ -63,3 +63,33 @@ async def test_run_experiment_missing_result_becomes_error(tmp_path, monkeypatch
                                   prompts_dir=tmp_path, count_tokens=lambda m, msgs: 100)
     assert len(result.scores) == 2  # both cases scored, none dropped
     assert any(s.error and "missing result" in s.error for s in result.scores)
+
+
+@pytest.mark.asyncio
+async def test_variant_params_reach_requests_and_usage_is_stored(tmp_path, monkeypatch):
+    """A call-setting variant (``params: {reasoning_effort: low}``) is swept like
+    a prompt variant; the executor's token/latency usage lands in the store."""
+    d = tmp_path / "router"
+    d.mkdir(parents=True)
+    (d / "v1.yaml").write_text("system: |\n  classify\nuser: |\n  {user_message}\n"
+                               "params:\n  reasoning_effort: low\n", encoding="utf-8")
+    seen = []
+
+    async def _fake_execute(requests, **kw):
+        seen.extend(r.params for r in requests)
+        d = RouterEvalOutput(intent="paper_qa")
+        return {r.key: ExecResult(r.key, d, 100, None, "concurrent",
+                                  {"completion_tokens": 300, "reasoning_tokens": 200,
+                                   "latency_ms": 1500, "calls": 1})
+                for r in requests}
+
+    monkeypatch.setattr(experiment, "execute", _fake_execute)
+    result = await run_experiment(get_stage("router"), "v1", _corpus(), model="m",
+                                  prompts_dir=tmp_path, count_tokens=lambda m, msgs: 1)
+    assert seen == [{"reasoning_effort": "low"}] * 2
+    meta, rows = to_store_payload(result)
+    assert meta["mean_reasoning_tokens"] == 200.0 and meta["mean_latency_ms"] == 1500.0
+    assert rows[0]["usage"]["completion_tokens"] == 300
+    path = tmp_path / "exp.jsonl"
+    store.record_experiment(path, meta=meta, scores=rows)
+    assert store.list_experiments(path)[0]["mean_reasoning_tokens"] == 200.0

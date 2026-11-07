@@ -1,7 +1,10 @@
 {
   "pill": {
     "toggle": "Translate paper",
-    "language": "Translation language: {{language}}"
+    "language": "Translation language: {{language}}",
+    "retryFailed_one": "Retry {{count}} failed translation",
+    "retryFailed_other": "Retry {{count}} failed translations",
+    "resume": "Resume translating the rest of the paper"
   },
   "menu": {
     "heading": "Translate into",
@@ -14,6 +17,7 @@
   "disabled": {
     "no_blocks": "This PDF has no paragraph layout yet",
     "no_inline_math_llm": "Formulas in this PDF couldn't be read; translation is off. Set a Marker LLM model and re-process this PDF.",
-    "load_failed": "This paper didn't load, so it can't be translated"
+    "load_failed": "This paper didn't load, so it can't be translated",
+    "no_text": "This paper's text couldn't be laid out as paragraphs, so it can't be translated"
   }
 }

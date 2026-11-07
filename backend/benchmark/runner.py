@@ -53,7 +53,12 @@ class CaseResult:
     elapsed_s: float
 
 
-def run_case(cfg: BenchmarkConfig, case: Case, sessions: dict[str, int]) -> CaseResult:
+def run_case(
+    cfg: BenchmarkConfig, case: Case, sessions: dict[str, int],
+    created: list[int] | None = None,
+) -> CaseResult:
+    """Run one case. Every session this call creates is appended to ``created``
+    so the caller can delete it afterwards."""
     driver.BASE = cfg.base_url
     if case.session_id is not None:
         # Slide-aware QA: reuse an existing session that already has a built
@@ -65,6 +70,8 @@ def run_case(cfg: BenchmarkConfig, case: Case, sessions: dict[str, int]) -> Case
             session_id = sessions[case.session_group]
         else:
             session_id = driver.create_session()
+            if created is not None:
+                created.append(session_id)
             if case.session_group:
                 sessions[case.session_group] = session_id
         attached = [_attach_one(cfg, session_id, k) for k in case.papers]
@@ -120,6 +127,17 @@ def _result_to_dict(r: CaseResult) -> dict[str, Any]:
         "cited_chunks": [dataclasses.asdict(c) for c in r.grounding.cited_chunks],
         "steps": [dataclasses.asdict(s) for s in r.grounding.steps],
     }
+
+
+def _delete_sessions(session_ids: list[int]) -> None:
+    """Delete every session the run created; one failure never skips the rest."""
+    for sid in session_ids:
+        try:
+            driver.delete_session(sid)
+        except Exception as exc:  # noqa: BLE001
+            print(f"warning: could not delete session {sid}: {exc}", flush=True)
+    if session_ids:
+        print(f"Deleted {len(session_ids)} benchmark session(s).", flush=True)
 
 
 def _case_done(d: dict[str, Any]) -> bool:
@@ -230,6 +248,12 @@ def main() -> None:
         "in backend/.env).",
     )
     ap.add_argument("--judge-model", default="", help="override the judge model")
+    ap.add_argument(
+        "--keep-sessions",
+        action="store_true",
+        help="keep the chat sessions the run created (e.g. to review a deck in "
+        "the frontend); by default they are deleted at the end.",
+    )
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -279,43 +303,54 @@ def main() -> None:
         )
         md_path.write_text(_md_report(cfg, results), encoding="utf-8")
 
-    for i, case in enumerate(cases, 1):
-        if case.id in prior and _case_done(prior[case.id]):
-            print(f"[{i}/{len(cases)}] {case.id}: carried over (resume)", flush=True)
-            results.append(prior[case.id])
+    # Sessions this run created; deleted at the end, also on a failure or an
+    # interrupt (sessions reused through `session_id` are not ours to delete).
+    created: list[int] = []
+    driver.BASE = cfg.base_url
+    try:
+        for i, case in enumerate(cases, 1):
+            if case.id in prior and _case_done(prior[case.id]):
+                print(f"[{i}/{len(cases)}] {case.id}: carried over (resume)", flush=True)
+                results.append(prior[case.id])
+                _flush()
+                continue
+            print(f"[{i}/{len(cases)}] {case.id}: {case.prompt[:70]}...", flush=True)
+            try:
+                r = run_case(cfg, case, sessions, created)
+                checks = r.grounding.auto_checks
+                flag = "OK " if all(checks.values()) else "FLAG"
+                print(
+                    f"      -> intent={r.actual_intent} run={r.run_id} {r.elapsed_s:.0f}s "
+                    f"[{flag}] {checks}",
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"      -> EXCEPTION: {exc}", flush=True)
+                raise
+            results.append(_result_to_dict(r))
+            # Write incrementally so a long sweep (slides cases take minutes) never
+            # loses completed cases if a later one hangs or the process is killed.
             _flush()
-            continue
-        print(f"[{i}/{len(cases)}] {case.id}: {case.prompt[:70]}...", flush=True)
-        try:
-            r = run_case(cfg, case, sessions)
-            checks = r.grounding.auto_checks
-            flag = "OK " if all(checks.values()) else "FLAG"
-            print(
-                f"      -> intent={r.actual_intent} run={r.run_id} {r.elapsed_s:.0f}s "
-                f"[{flag}] {checks}",
-                flush=True,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"      -> EXCEPTION: {exc}", flush=True)
-            raise
-        results.append(_result_to_dict(r))
-        # Write incrementally so a long sweep (slides cases take minutes) never
-        # loses completed cases if a later one hangs or the process is killed.
-        _flush()
 
-    if args.judge:
-        import asyncio
+        if args.judge:
+            import asyncio
 
-        from benchmark.judge import DEFAULT_JUDGE_MODEL, judge_results, load_env
+            from benchmark.judge import DEFAULT_JUDGE_MODEL, judge_results, load_env
 
-        load_env(".env")
-        jmodel = args.judge_model or DEFAULT_JUDGE_MODEL
-        print(f"\nLLM-judging {len(results)} case(s) with {jmodel} ...", flush=True)
-        results = asyncio.run(judge_results(results, model=jmodel))
-        _flush()
-        judged = [d for d in results if (d.get("judge") or {}).get("score") is not None]
-        total = sum((d["judge"]["score"] or 0) for d in judged)
-        print(f"LLM-judge score: {total}/{len(judged)}", flush=True)
+            load_env(".env")
+            jmodel = args.judge_model or DEFAULT_JUDGE_MODEL
+            print(f"\nLLM-judging {len(results)} case(s) with {jmodel} ...", flush=True)
+            results = asyncio.run(judge_results(results, model=jmodel))
+            _flush()
+            judged = [d for d in results if (d.get("judge") or {}).get("score") is not None]
+            total = sum((d["judge"]["score"] or 0) for d in judged)
+            print(f"LLM-judge score: {total}/{len(judged)}", flush=True)
+    finally:
+        if args.keep_sessions:
+            if created:
+                print(f"Kept {len(created)} benchmark session(s): {created}", flush=True)
+        else:
+            _delete_sessions(created)
 
     print(f"\nWrote {json_path}\nWrote {md_path}")
 

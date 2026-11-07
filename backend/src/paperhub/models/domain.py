@@ -29,6 +29,10 @@ class SectionEntry(BaseModel):
 class RoutingDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     intent: Intent
+    # Every OTHER intent the message also asks for (router/v4+). The router
+    # node promotes ``intent`` by the fixed priority in
+    # ``agents.router_policy`` instead of trusting the model to apply it.
+    also_requested: list[Intent] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     # v2.11: self-contained, anaphora-free rewrite of the user's latest
@@ -43,6 +47,12 @@ class RoutingDecision(BaseModel):
     # so a Chinese question isn't answered in English. Empty => agents fall
     # back to "the user's language".
     response_language: str = ""
+    # The paper title/author/id or topic the request is about, from this
+    # message or an earlier turn; "" when the message only points ("this
+    # paper"). None = the prompt did not ask for it (router/v4 and older).
+    # Kept LAST: placed before confidence/reasoning, the model rambled
+    # inside it (eval experiment 283).
+    subject: str | None = None
 
 
 class PaperQaPlan(BaseModel):
@@ -241,6 +251,9 @@ class AgentState(TypedDict, total=False):
     # (None when not attached / no deck → plain paper_qa, no regression).
     slide_attached: bool
     slide_context: str | None
+    # Plan H3 (QA I4): the <idea_context> block of a chat opened from an idea
+    # (agents/idea_context.build_idea_context), None for any other session.
+    idea_context: str | None
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
     report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action

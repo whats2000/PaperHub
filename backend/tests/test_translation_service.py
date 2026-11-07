@@ -121,7 +121,7 @@ async def test_misses_go_in_one_batch_with_preceding_context(
     assert llm.calls[0]["slot"] == "translate_blocks/v1"
     assert llm.calls[0]["model"] == SMALL
     assert v["context"] == "前一段"
-    assert v["language"] == "zh-TW"
+    assert v["language"] == "繁體中文"  # "zh-TW" is a known alias
     assert '<block key="h:5">a &lt;b&gt; &amp; c</block>' in v["blocks_xml"]
     assert [r.status for r in resp.results] == ["ok", "ok"]
     cached = await get_cached(migrated_db, pid, ["h:5", "h:6"], "zh-TW")
@@ -191,7 +191,7 @@ async def test_all_attempts_fail_returns_unavailable_and_does_not_cache(
     cached = await get_cached(migrated_db, pid, ["h:0", "h:1"], "zh-TW")
     assert set(cached) == {"h:0"}
     msg = "\n".join(r.getMessage() for r in caplog.records)
-    assert f"paper={pid}" in msg and "h:1" in msg and "zh-TW" in msg
+    assert f"paper={pid}" in msg and "h:1" in msg and "繁體中文" in msg
 
 
 @pytest.mark.asyncio
@@ -444,3 +444,126 @@ async def test_failed_cache_write_still_returns_translations(
     assert (r.status, r.text) == ("ok", "T(one)")
     assert any("cache write failed" in m for m in caplog.messages)
     assert not migrated_db.in_transaction
+
+
+PROSE = ("With the concept of photon introduced by Albert Einstein in 1905, the "
+         "statistical description of light is necessary for the study of ⟦0⟧.")
+PROSE_ZH = "隨著愛因斯坦於 1905 年提出光子的概念，光的統計描述對於研究 ⟦0⟧ 是必要的。"
+
+
+@pytest.mark.asyncio
+async def test_echo_in_a_batch_is_retried_alone_and_never_cached(
+    migrated_db: aiosqlite.Connection, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA B1: a block the model sent back in English inside a batch passed the
+    placeholder check and was cached as ``ok``. It must be retried alone."""
+    pid = await _seed(migrated_db)
+    calls: list[int] = []
+
+    def override(key: str, text: str, model: str) -> str:
+        calls.append(1)
+        if key == "p:/page/0/Text/11" and len(calls) <= 2:
+            return text  # echoed inside the batch
+        return PROSE_ZH if key == "p:/page/0/Text/11" else f"譯({text})"
+
+    llm = StubLlm(override)
+    with caplog.at_level("WARNING", logger="paperhub.translation.service"):
+        resp = await _svc(llm).translate(migrated_db, _req(
+            pid, ("p:/page/0/Text/9", "Keywords ⟦0⟧"), ("p:/page/0/Text/11", PROSE),
+        ))
+    by_key = {r.key: r for r in resp.results}
+    assert by_key["p:/page/0/Text/11"].status == "ok"
+    assert by_key["p:/page/0/Text/11"].text == PROSE_ZH
+    assert [c["model"] for c in llm.calls] == [SMALL, SMALL]
+    assert "echo" in caplog.text and "p:/page/0/Text/11" in caplog.text
+    cached = await get_cached(migrated_db, pid, ["p:/page/0/Text/11"], "zh-TW")
+    assert cached["p:/page/0/Text/11"].text == PROSE_ZH
+
+
+@pytest.mark.asyncio
+async def test_persistent_echo_ends_unavailable_and_is_not_cached(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    pid = await _seed(migrated_db)
+    llm = StubLlm(lambda key, text, model: text)
+    resp = await _svc(llm).translate(migrated_db, _req(pid, ("h:3", PROSE)))
+    assert resp.results[0].status == "unavailable"
+    assert [c["model"] for c in llm.calls] == [SMALL, SMALL, FLAG]
+    assert await get_cached(migrated_db, pid, ["h:3"], "zh-TW") == {}
+
+
+@pytest.mark.asyncio
+async def test_english_target_keeps_an_english_copy(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    pid = await _seed(migrated_db)
+    llm = StubLlm(lambda key, text, model: text)
+    resp = await _svc(llm).translate(migrated_db, _req(pid, ("h:3", PROSE),
+                                                        language="English"))
+    assert resp.results[0].status == "ok"
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_cached_echo_is_treated_as_a_miss(migrated_db: aiosqlite.Connection) -> None:
+    pid = await _seed(migrated_db)
+    mh = await _memory_hash(migrated_db)
+    await _put(migrated_db, pid, "h:3", "繁體中文", source_hash(PROSE), mh, PROSE, SMALL)
+    llm = StubLlm(lambda key, text, model: PROSE_ZH)
+    resp = await _svc(llm).translate(migrated_db, _req(pid, ("h:3", PROSE)))
+    assert resp.results[0].text == PROSE_ZH
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_fullwidth_spacing_is_tidied_before_caching(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    pid = await _seed(migrated_db)
+    llm = StubLlm(lambda key, text, model: "任務（ 例如 ⟦0⟧ ）。")
+    resp = await _svc(llm).translate(migrated_db, _req(pid, ("h:0", "tasks (e.g. ⟦0⟧).")))
+    assert resp.results[0].text == "任務（例如 ⟦0⟧）。"
+    cached = await get_cached(migrated_db, pid, ["h:0"], "zh-TW")
+    assert cached["h:0"].text == "任務（例如 ⟦0⟧）。"
+
+
+@pytest.mark.asyncio
+async def test_cached_rows_are_served_tidied(migrated_db: aiosqlite.Connection) -> None:
+    pid = await _seed(migrated_db)
+    mh = await _memory_hash(migrated_db)
+    await _put(migrated_db, pid, "h:0", "zh-TW", source_hash("x"), mh, "甲（ 乙 ）", SMALL)
+    resp = await _svc(StubLlm()).translate(migrated_db, _req(pid, ("h:0", "x")))
+    assert resp.results[0].text == "甲（乙）"
+
+
+@pytest.mark.asyncio
+async def test_language_aliases_share_one_cache(migrated_db: aiosqlite.Connection) -> None:
+    pid = await _seed(migrated_db)
+    llm = StubLlm(lambda key, text, model: "こんにちは")
+    svc = _svc(llm)
+    await svc.translate(migrated_db, _req(pid, ("h:0", "hi"), language="Japanese"))
+    await svc.translate(migrated_db, _req(pid, ("h:0", "hi"), language="日本語"))
+    assert len(llm.calls) == 1
+    assert llm.calls[0]["variables"]["language"] == "日本語"
+
+
+@pytest.mark.asyncio
+async def test_request_time_is_bounded(migrated_db: aiosqlite.Connection) -> None:
+    """QA nitpick: one block held a call for 117 s through primary, retry and
+    flagship. The whole request has one time budget."""
+    pid = await _seed(migrated_db)
+    llm = StubLlm(delay=0.3)
+    svc = TranslationService(llm, model=SMALL, flagship_model=FLAG, budget_s=0.5)
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    resp = await svc.translate(migrated_db, _req(pid, ("h:0", "x"), ("h:1", "y")))
+    # The first call (0.3 s) succeeds; nothing waits past the budget.
+    assert loop.time() - start < 0.8
+    assert [r.status for r in resp.results] == ["ok", "ok"]
+
+    slow = StubLlm(delay=5)
+    svc = TranslationService(slow, model=SMALL, flagship_model=FLAG, budget_s=0.3)
+    start = loop.time()
+    resp = await svc.translate(migrated_db, _req(pid, ("h:5", "z")))
+    assert loop.time() - start < 1.0
+    assert resp.results[0].status == "unavailable"

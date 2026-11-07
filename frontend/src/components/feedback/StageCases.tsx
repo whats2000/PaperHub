@@ -81,6 +81,11 @@ function CaseItem({
             >
               {t(`analysis.kind.${c.kind}`)}
             </Badge>
+            {c.in_g1_inbox && (
+              <Badge variant="outline" className="border-primary/40 text-primary">
+                {t("analysis.inInbox")}
+              </Badge>
+            )}
             {!Number.isNaN(date.getTime()) && <span>{date.toLocaleDateString(i18n.language)}</span>}
             <span>{t("queue.run", { id: c.run_id })}</span>
             <button
@@ -104,6 +109,7 @@ function CaseItem({
           type="checkbox"
           checked={checked}
           onChange={(e) => onCheck(e.target.checked)}
+          disabled={c.in_g1_inbox}
           aria-label={t("analysis.include", { question: c.question })}
           className="mt-0.5 size-4 shrink-0 accent-primary"
         />
@@ -156,7 +162,7 @@ export function StageCases({ stage, top }: { stage: StageSummary; top: boolean }
   }, [stage.stage]);
 
   const checkedIds = (cases ?? [])
-    .filter((c) => !unchecked.has(c.feedback_id))
+    .filter((c) => !unchecked.has(c.feedback_id) && !c.in_g1_inbox)
     .map((c) => c.feedback_id);
 
   const setChecked = (id: number, on: boolean) =>
@@ -172,10 +178,14 @@ export function StageCases({ stage, top }: { stage: StageSummary; top: boolean }
     setSending(true);
     try {
       const res = await postG1Inbox({ feedback_ids: checkedIds });
-      toast.success(t("analysis.g1Sent", { count: res.appended }));
-      // Sent: clear the checks so the same cases aren't appended twice.
-      const sent = checkedIds;
-      setUnchecked((prev) => new Set([...prev, ...sent]));
+      if (res.appended === 0) toast.info(t("analysis.g1NoneNew"));
+      else toast.success(t("analysis.g1Sent", { count: res.appended }));
+      // Sent: mark them as in the inbox so the count excludes them and a
+      // reload shows the same state (the backend reports `in_g1_inbox`).
+      const sent = new Set(checkedIds);
+      setCases((prev) =>
+        (prev ?? []).map((c) => (sent.has(c.feedback_id) ? { ...c, in_g1_inbox: true } : c)),
+      );
     } catch {
       toast.error(t("analysis.g1Failed"));
     } finally {
@@ -213,7 +223,7 @@ export function StageCases({ stage, top }: { stage: StageSummary; top: boolean }
               <CaseItem
                 key={c.feedback_id}
                 c={c}
-                checked={!unchecked.has(c.feedback_id)}
+                checked={!unchecked.has(c.feedback_id) && !c.in_g1_inbox}
                 onCheck={(on) => setChecked(c.feedback_id, on)}
               />
             ))}

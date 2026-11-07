@@ -89,18 +89,78 @@ async def test_find_related_cited_by() -> None:
 
 
 @respx.mock
-async def test_find_related_similar() -> None:
-    """mode=similar hits /related and reads paper objects directly (no sub-key)."""
-    arxiv_id = "2402.12345"
-    respx.get(f"{API_BASE}/paper/arXiv:{arxiv_id}/related").mock(
+@pytest.mark.parametrize(
+    ("mode", "endpoint", "sub_key"),
+    [("cites", "references", "citedPaper"), ("cited_by", "citations", "citingPaper")],
+)
+async def test_find_related_requests_only_fields_the_graph_endpoints_accept(
+    mode: str, endpoint: str, sub_key: str,
+) -> None:
+    """S2's /references and /citations reject nested ``authors.name`` with a
+    400 ("Unrecognized or unsupported fields: [authors.name]"); they take a
+    bare ``authors`` (id + name). Pin the params and the parsing."""
+    arxiv_id = "2301.08243"
+    route = respx.get(f"{API_BASE}/paper/arXiv:{arxiv_id}/{endpoint}").mock(
         return_value=httpx.Response(
-            200, json={"data": [_PAPER_WITH_ARXIV, _PAPER_NO_ARXIV]},
+            200,
+            json={"data": [{sub_key: {
+                **_PAPER_WITH_ARXIV,
+                "authors": [{"authorId": "1", "name": "Alice"}],
+            }}]},
+        ),
+    )
+    result = await find_related(arxiv_id, mode=mode, max_results=100)  # type: ignore[arg-type]
+    params = route.calls.last.request.url.params
+    assert params["fields"] == "title,abstract,year,authors,externalIds"
+    assert params["limit"] == "100"
+    assert result[0].authors == ["Alice"]
+    assert result[0].arxiv_id == "2403.00001"
+
+
+@respx.mock
+async def test_find_related_similar() -> None:
+    """mode=similar uses the S2 Recommendations API (the Graph API has no
+    /paper/<id>/related — it 404s) over the all-cs pool, reading paper
+    objects from ``recommendedPapers``."""
+    arxiv_id = "2402.12345"
+    route = respx.get(
+        f"{ss.RECOMMENDATIONS_BASE}/papers/forpaper/arXiv:{arxiv_id}",
+    ).mock(
+        return_value=httpx.Response(
+            200, json={"recommendedPapers": [_PAPER_WITH_ARXIV, _PAPER_NO_ARXIV]},
         ),
     )
     result = await find_related(arxiv_id, mode="similar", max_results=8)
+    params = route.calls.last.request.url.params
+    assert params["from"] == "all-cs"
+    assert params["limit"] == "8"
+    assert params["fields"] == "title,abstract,year,authors,externalIds"
     assert len(result) == 2
     assert result[0].arxiv_id == "2403.00001"
     assert result[1].arxiv_id is None
+
+
+@respx.mock
+async def test_find_related_fills_diag_and_error_carries_body_head() -> None:
+    """``diag`` receives the transport facts for the MCP ``_meta``; a non-2xx
+    raises with the response body head so the trace shows S2's reason."""
+    arxiv_id = "2402.12345"
+    respx.get(f"{API_BASE}/paper/arXiv:{arxiv_id}/references").mock(
+        return_value=httpx.Response(200, json={"data": [{"citedPaper": _PAPER_WITH_ARXIV}]}),
+    )
+    diag: dict[str, object] = {}
+    await find_related(arxiv_id, mode="cites", max_results=3, diag=diag)
+    assert diag["http_status"] == 200
+    assert diag["attempts"] == 1
+    assert diag["url_path"] == f"/graph/v1/paper/arXiv:{arxiv_id}/references"
+    respx.get(f"{API_BASE}/paper/arXiv:{arxiv_id}/citations").mock(
+        return_value=httpx.Response(400, json={"error": "Unrecognized fields: [x]"}),
+    )
+    diag2: dict[str, object] = {}
+    with pytest.raises(httpx.HTTPStatusError, match="Unrecognized fields"):
+        await find_related(arxiv_id, mode="cited_by", diag=diag2)
+    assert diag2["http_status"] == 400
+    assert "Unrecognized fields" in str(diag2["body_head"])
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,20 @@ async def test_get_deck_404_when_none(
         assert r.status_code == 404
 
 
+async def test_get_deck_optional_returns_null_when_none(
+    app_with_db: tuple[Any, aiosqlite.Connection],
+) -> None:
+    """``?optional=1`` answers "no deck" with 200 + null: opening a deckless
+    chat is the normal case, and a 404 there logs a browser console error."""
+    app, _ = app_with_db
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://t"
+    ) as c:
+        r = await c.get("/sessions/1/deck", params={"optional": 1})
+        assert r.status_code == 200
+        assert r.json() is None
+
+
 async def test_get_deck_and_pdf(
     app_with_db: tuple[Any, aiosqlite.Connection],
     tmp_path: Path,

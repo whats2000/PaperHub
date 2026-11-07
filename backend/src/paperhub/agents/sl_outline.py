@@ -31,11 +31,15 @@ per-key read-evidence map (``reads``), and dropped.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from pydantic import ValidationError
+
 from paperhub.agents.sl_read import ReadResult
 from paperhub.agents.sl_seed import _looks_like_survey
+from paperhub.errors import UserFacingError
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.slide_domain import (
     DeckOutline,
@@ -48,6 +52,8 @@ from paperhub.models.slide_domain import (
     RoundAction,
 )
 from paperhub.tracing.tracer import Tracer
+
+logger = logging.getLogger(__name__)
 
 # Maximum support excerpts injected per slide to keep prompt size bounded.
 _MAX_SUPPORT_EXCERPTS = 6
@@ -238,6 +244,66 @@ def _minimal_outline(digests: list[PaperDigest], task_description: str) -> DeckO
 
 
 # ---------------------------------------------------------------------------
+# Bounded structured call (run 879)
+# ---------------------------------------------------------------------------
+
+OUTLINE_MAX_TOKENS = 16_000
+"""Output cap for one outline round. A 30-slide outline is ~9k tokens; run 879's
+flash-lite fallback emitted 65 518 tokens (4 minutes) of runaway text before
+the JSON broke, so the cap makes a runaway fail in ~30 s instead."""
+OUTLINE_CALL_TIMEOUT_S = 150.0
+"""Overall bound on one attempt (the adapter's own fallback included)."""
+OUTLINE_ATTEMPTS = 2
+"""One retry on an unusable outline (invalid/truncated JSON, or a timeout)."""
+
+_OUTLINE_FAILED: dict[str, str] = {
+    "English": "I couldn't plan the slide deck this time: the model's outline was "
+               "incomplete. Please try again, or ask for a shorter deck.",
+    "Traditional Chinese": "這次無法規劃簡報:模型產生的大綱不完整。請再試一次,"
+                           "或要求較短的簡報。",
+    "Simplified Chinese": "这次无法规划简报:模型生成的大纲不完整。请再试一次,"
+                          "或要求较短的简报。",
+    "Japanese": "今回はスライドの構成を作成できませんでした。モデルの出力が不完全でした。"
+                "もう一度お試しいただくか、短いスライドを依頼してください。",
+}
+
+
+def outline_failed_message(language: str) -> str:
+    """The user-facing text for a failed outline, in the reply language (the
+    router's ``response_language`` name), English when not covered."""
+    return _OUTLINE_FAILED.get(language, _OUTLINE_FAILED["English"])
+
+
+class OutlineGenerationError(UserFacingError):
+    """The outline model produced no usable plan after ``OUTLINE_ATTEMPTS``.
+    ``str(exc)`` is the raw detail (it lands in the ``tool_calls`` trace);
+    ``user_message`` is what the chat shows."""
+
+
+async def _ask_round(
+    adapter: LlmAdapter, step: Any, language: str, **call: Any,
+) -> RoundAction:
+    attempts = 0
+    last = ""
+    while attempts < OUTLINE_ATTEMPTS:
+        attempts += 1
+        try:
+            async with asyncio.timeout(OUTLINE_CALL_TIMEOUT_S):
+                action: RoundAction = await adapter.structured(
+                    max_tokens=OUTLINE_MAX_TOKENS, **call,
+                )
+                return action
+        except ValidationError as exc:
+            last = str(exc)
+        except TimeoutError:
+            last = f"timed out after {OUTLINE_CALL_TIMEOUT_S:.0f}s"
+        logger.warning("slides outline attempt %d failed: %s", attempts, last[:200])
+    step.record_result({"failure": "outline_unusable", "attempts": attempts,
+                        "error": last[:500]})
+    raise OutlineGenerationError(last, user_message=outline_failed_message(language))
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -308,7 +374,8 @@ async def run_sl_outline(
             is_last_round = round_num == max_rounds
             read_block = _format_read_block(reads_by_key)
 
-            action: RoundAction = await adapter.structured(
+            action: RoundAction = await _ask_round(
+                adapter, step, response_language,
                 slot="slides_outline/v1",
                 variables={
                     "task_description": task_description,

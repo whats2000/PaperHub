@@ -32,6 +32,8 @@ class ForkSessionRequest(BaseModel):
     # before that message. The frontend resolves it from the clicked user
     # message (or its paired assistant message).
     run_id: int
+    # UI language code: the feedback reviewer writes its doubt in it.
+    ui_language: str | None = None
 
 
 class ForkSessionResponse(BaseModel):
@@ -49,6 +51,9 @@ class SessionSummary(BaseModel):
     # Fork lineage (SRS v2.30): the session this one was forked FROM, or None
     # for a normal session. Drives the sidebar's indented fork grouping.
     forked_from_session_id: int | None = None
+    # Plan H3: the idea this chat was opened from (idea_sessions), else None.
+    # Drives the sidebar's Lightbulb marker.
+    idea_id: int | None = None
 
 
 class RoutingDecisionOut(BaseModel):
@@ -126,10 +131,14 @@ async def list_sessions() -> list[SessionSummary]:
             SELECT s.id, s.title, s.created_at,
                    COALESCE(MAX(m.created_at), s.created_at) AS updated_at,
                    COUNT(m.id) AS message_count,
-                   s.forked_from_session_id
+                   s.forked_from_session_id,
+                   -- A subquery (not a join) so COUNT(m.id) isn't multiplied;
+                   -- a session belongs to at most one idea in practice.
+                   (SELECT MIN(i.idea_id) FROM idea_sessions i
+                    WHERE i.session_id = s.id) AS idea_id
             FROM chat_sessions s
             LEFT JOIN messages m ON m.session_id = s.id
-            WHERE s.deleted_at IS NULL
+            WHERE s.deleted_at IS NULL AND s.internal = 0
             GROUP BY s.id
             -- "Meaningful" = has messages OR a non-default title. A named chat
             -- carries intent even with no persisted messages yet; only the
@@ -148,6 +157,7 @@ async def list_sessions() -> list[SessionSummary]:
             updated_at=str(r[3]),
             message_count=int(r[4]),
             forked_from_session_id=int(r[5]) if r[5] is not None else None,
+            idea_id=int(r[6]) if r[6] is not None else None,
         )
         for r in rows
     ]
@@ -365,7 +375,8 @@ async def delete_session(session_id: int) -> None:
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         async with conn.execute(
-            "SELECT title FROM chat_sessions WHERE id = ?", (session_id,)
+            "SELECT title FROM chat_sessions WHERE id = ? AND internal = 0",
+            (session_id,),
         ) as cur:
             srow = await cur.fetchone()
         if srow is None:
@@ -399,7 +410,8 @@ async def restore_session(session_id: int) -> None:
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         cur = await conn.execute(
-            "UPDATE chat_sessions SET deleted_at = NULL WHERE id = ?",
+            "UPDATE chat_sessions SET deleted_at = NULL "
+            "WHERE id = ? AND internal = 0",
             (session_id,),
         )
         if cur.rowcount == 0:
@@ -429,7 +441,8 @@ async def fork_session_endpoint(
         # latter is a client 400. A soft-deleted session is invisible in
         # GET /sessions, so forking it must 404 too (not resurrect its history).
         async with conn.execute(
-            "SELECT 1 FROM chat_sessions WHERE id = ? AND deleted_at IS NULL",
+            "SELECT 1 FROM chat_sessions "
+            "WHERE id = ? AND deleted_at IS NULL AND internal = 0",
             (session_id,),
         ) as cur:
             if await cur.fetchone() is None:
@@ -448,7 +461,7 @@ async def fork_session_endpoint(
     if settings.feedback_review_enabled:
         maybe_review_fork(
             settings=settings, session_id=session_id, target_run_id=req.run_id,
-            llm=LiteLlmAdapter(),
+            llm=LiteLlmAdapter(), ui_language=req.ui_language,
         )
     return ForkSessionResponse(
         session_id=result.new_session_id,

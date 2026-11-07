@@ -98,11 +98,12 @@ async def build_slide_context(
 
 
 def slide_aware_query(state: AgentState) -> str:
-    """The QA query: the active-slide context (when present) prepended to the
-    router's resolved query, so section navigation targets the right section.
-    Falls back to ``effective_query`` when there is no slide context."""
+    """The QA query: the idea context of a chat opened from an idea and the
+    active-slide context (when present) prepended to the router's resolved
+    query, so section navigation targets the right section. Falls back to
+    ``effective_query`` when there is neither."""
     base = effective_query(state)
-    ctx = state.get("slide_context")
-    if not ctx:
+    blocks = [b for b in (state.get("idea_context"), state.get("slide_context")) if b]
+    if not blocks:
         return base
-    return f"{ctx}\n\nThe user's question: {base}"
+    return "\n\n".join(blocks) + f"\n\nThe user's question: {base}"

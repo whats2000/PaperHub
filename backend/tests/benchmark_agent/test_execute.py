@@ -82,3 +82,46 @@ async def test_batch_failure_degrades_to_concurrent(monkeypatch):
     res = await execute.execute(_reqs(), model="gpt-4o", backend="auto",
                                 count_tokens=lambda m, msgs: 1, poll_interval=0)
     assert res["c1"].parsed.intent == "paper_qa" and res["c1"].backend == "concurrent"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_passes_the_request_output_cap(monkeypatch):
+    """A stage with a deploy output cap is replayed under the same cap (a
+    thinking model truncating at the cap must show up in the eval)."""
+    seen: list[dict] = []
+
+    async def _fake_acompletion(**kw):
+        seen.append(kw)
+        return {"choices": [{"message": {"content": '{"intent":"paper_qa"}'}}]}
+    monkeypatch.setattr(execute.litellm, "acompletion", _fake_acompletion)
+    capped = EvalRequest(key="c1", messages=[{"role": "user", "content": "q"}],
+                         response_model=_Out, max_tokens=123)
+    await execute.execute([capped], model="ollama/llama3", backend="concurrent",
+                          count_tokens=lambda m, msgs: 1)
+    assert seen and all(kw["max_tokens"] == 123 for kw in seen)
+    seen.clear()
+    await execute.execute(_reqs(), model="ollama/llama3", backend="concurrent",
+                          count_tokens=lambda m, msgs: 1)
+    assert seen and all("max_tokens" not in kw for kw in seen)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_passes_params_and_records_usage(monkeypatch):
+    """A variant's call params (e.g. a reasoning budget) reach the provider,
+    and the call's completion/reasoning tokens + latency come back."""
+    seen = {}
+
+    async def _fake_acompletion(**kw):
+        seen.update(kw)
+        return {"choices": [{"message": {"content": '{"intent":"paper_qa"}'}}],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 700,
+                          "completion_tokens_details": {"reasoning_tokens": 640}}}
+    monkeypatch.setattr(execute.litellm, "acompletion", _fake_acompletion)
+    req = EvalRequest(key="c1", messages=[{"role": "user", "content": "q"}],
+                      response_model=_Out, params={"reasoning_effort": "low"})
+    res = await execute.execute([req], model="ollama/llama3", backend="concurrent",
+                                count_tokens=lambda m, msgs: 1)
+    assert seen["reasoning_effort"] == "low"
+    usage = res["c1"].usage
+    assert usage["completion_tokens"] == 700 and usage["reasoning_tokens"] == 640
+    assert isinstance(usage["latency_ms"], int)

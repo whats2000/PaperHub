@@ -21,6 +21,8 @@ from pathlib import Path
 import pymupdf
 from pylatexenc.latex2text import LatexNodes2Text
 
+from paperhub.pipelines.section_names import is_heading_shaped, is_wrapped_continuation
+
 logger = logging.getLogger(__name__)
 
 # Match the REAL \begin{document} / \end{document} markers — skip any
@@ -69,6 +71,17 @@ _AUTHOR_SPLIT = re.compile(r"\s*(?:;|\band\b)\s*", re.IGNORECASE)
 # Collapses runs of whitespace into a single space when stitching page-1
 # spans back together for the largest-font title heuristic.
 _WHITESPACE_RUN = re.compile(r"\s+")
+# Article-type banners that sit above the title on publisher first pages.
+_BANNER_WORD = re.compile(
+    r"^(open|open access|article|research article|original article|resource|"
+    r"review|review article|letter|communication|brief report|research)$",
+    re.IGNORECASE,
+)
+# A page-1 font group below the largest must be this much bigger than body
+# text to count as a title (author lines / headings sit at 1.0-1.3x body).
+_TITLE_MIN_BODY_RATIO = 1.4
+# U+FFFD and C0/C1 control characters: a mis-decoded string, never a title.
+_GARBLED_CHAR = re.compile(r"[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 @dataclass(frozen=True)
@@ -278,7 +291,8 @@ def extract_pdf_with_headings(
     pieces: list[str] = []
     # Collect raw candidates first, then drop running headers (banners that
     # repeat across pages — "Article", journal name, footer) in a second pass.
-    candidates: list[tuple[str, int]] = []
+    # (name, offset, set entirely in the heading font): see the naming pass.
+    candidates: list[tuple[str, int, bool]] = []
     with pymupdf.open(pdf_path) as doc:  # type: ignore[no-untyped-call]
         body_size = _modal_body_font_size(doc)
         title_size = _page1_title_size(doc)
@@ -295,19 +309,23 @@ def extract_pdf_with_headings(
                     name = "".join(s.get("text") or "" for s in spans).strip()
                     if len(name) > _HEADING_MAX_CHARS or not _looks_like_heading(name):
                         continue
-                    size = max(
-                        (round(s.get("size", 0.0), 1) for s in spans
-                         if (s.get("text") or "").strip()),
-                        default=0.0,
-                    )
+                    sizes = [
+                        round(s.get("size", 0.0), 1) for s in spans
+                        if (s.get("text") or "").strip()
+                    ]
+                    size = max(sizes, default=0.0)
                     in_band = size >= body_size + _HEADING_MIN_DELTA and (
                         title_size <= 0.0 or size < title_size
                     )
                     if not in_band:
                         continue
+                    # A real heading is set ENTIRELY in the heading font; a
+                    # prose line with one larger inline span (`conv_block` in
+                    # code font) only reaches the band through that span.
+                    uniform = min(sizes) >= body_size + _HEADING_MIN_DELTA
                     idx = page_text.find(name)
                     if idx >= 0:
-                        candidates.append((name, offset + idx))
+                        candidates.append((name, offset + idx, uniform))
             pieces.append(page_text)
             offset += len(page_text)
             if pno < last:
@@ -315,10 +333,54 @@ def extract_pdf_with_headings(
     # Running headers repeat on multiple pages; a real section heading appears
     # once. Drop every name that occurs more than once.
     name_counts: dict[str, int] = defaultdict(int)
-    for name, _ in candidates:
+    for name, _, _ in candidates:
         name_counts[name] += 1
-    headings = [(n, o) for n, o in candidates if name_counts[n] == 1]
-    return _PDF_PAGE_SEP.join(pieces), headings
+    full_text = _PDF_PAGE_SEP.join(pieces)
+    return full_text, _name_heading_candidates(
+        [c for c in candidates if name_counts[c[0]] == 1], full_text,
+    )
+
+
+def _name_heading_candidates(
+    candidates: list[tuple[str, int, bool]], full_text: str,
+) -> list[tuple[str, int]]:
+    """Name each font-size candidate boundary.
+
+    A real heading is set entirely in the heading font AND is heading-shaped.
+    Any other candidate (a code line, a prose line with a larger inline span)
+    KEEPS its boundary — chunk offsets, and so every stored chunk id /
+    citation, stay stable across re-ingest — but takes the name of the real
+    heading it sits under. The lowercase second line of a wrapped heading,
+    directly after it, is joined onto that heading. A candidate before any real
+    heading has nothing to inherit and is dropped (its text joins the unnamed
+    front matter).
+    """
+    out: list[tuple[str, int]] = []
+    current: str | None = None
+    current_idx = -1
+    prev_end: int | None = None  # end of the previous candidate if it was a heading
+    for name, off, uniform in candidates:
+        follows_heading = (
+            prev_end is not None and not full_text[prev_end:off].strip()
+        )
+        if uniform and is_heading_shaped(name):
+            current = name
+            current_idx = len(out)
+            out.append((name, off))
+            prev_end = off + len(name)
+        elif (
+            uniform and follows_heading and current is not None
+            and is_wrapped_continuation(name)
+        ):
+            current = f"{current} {name}"
+            out[current_idx] = (current, out[current_idx][1])
+            out.append((current, off))
+            prev_end = off + len(name)
+        else:
+            if current is not None:
+                out.append((current, off))
+            prev_end = None
+    return out
 
 
 def extract_pdf_page1_text(pdf_path: Path) -> str:
@@ -353,6 +415,8 @@ def _sanitise_pdf_title(raw: object) -> str:
     if not t or len(t) > 500:
         return ""
     if _STOCK_PLACEHOLDER_TITLE.match(t):
+        return ""
+    if _GARBLED_CHAR.search(t):
         return ""
     return t
 
@@ -392,50 +456,82 @@ def _sanitise_pdf_year(creation: object, mod: object) -> int | None:
     return None
 
 
-def _extract_pdf_title_from_page1_doc(doc: pymupdf.Document) -> str:
-    """Heuristic: title is the text at the largest font size on page 1.
+def page1_title_groups(doc: pymupdf.Document) -> tuple[list[tuple[float, str]], float]:
+    """Page-1 text grouped by font size, largest first, plus the body size.
 
-    Works for the typical academic-paper layout (title prominent at the top
-    of page 1, larger than abstract / authors / affiliations / journal
-    citation). Returns ``""`` when page 1 is empty, image-only, or the
-    largest-font text fails to sanitise into a plausible title.
-
-    This is the second-tier fallback used when ``doc.metadata['title']`` is
-    empty or junk — Adobe InDesign / Word PDFs from Nature, Springer, etc.
-    routinely ship with metadata fields stripped even when the rendered
-    page-1 title is right there at 24-26pt.
+    Each group is ``(size, text)`` with the spans at that size joined in
+    document order (blocks, then lines, then spans). The body size is the
+    size carrying the most characters. Returns ``([], 0.0)`` for an empty or
+    image-only page.
     """
     if len(doc) == 0:
-        return ""
-    page = doc[0]
-    blocks = page.get_text("dict").get("blocks", [])  # type: ignore[no-untyped-call]
-    # First pass: find the maximum text-span font size on page 1.
-    max_size = 0.0
+        return [], 0.0
+    blocks = doc[0].get_text("dict").get("blocks", [])  # type: ignore[no-untyped-call]
+    pieces: dict[float, list[str]] = defaultdict(list)
+    chars: dict[float, int] = defaultdict(int)
     for b in blocks:
         if b.get("type", 0) != 0:  # 0 = text; skip image blocks.
             continue
         for line in b.get("lines", []):
             for span in line.get("spans", []):
                 sz = round(span.get("size", 0.0), 1)
-                if sz > max_size:
-                    max_size = sz
-    if max_size <= 0.0:
-        return ""
-    # Second pass: collect every span at the max size in document order
-    # (blocks, then lines within each block, then spans within each line).
-    pieces: list[str] = []
-    for b in blocks:
-        if b.get("type", 0) != 0:
-            continue
-        for line in b.get("lines", []):
-            for span in line.get("spans", []):
-                if round(span.get("size", 0.0), 1) == max_size:
-                    txt = span.get("text", "")
-                    if txt:
-                        pieces.append(txt)
-    joined = " ".join(pieces)
-    cleaned = _WHITESPACE_RUN.sub(" ", joined).strip()
-    return _sanitise_pdf_title(cleaned)
+                txt = span.get("text", "")
+                if sz <= 0.0 or not txt:
+                    continue
+                pieces[sz].append(txt)
+                chars[sz] += len(txt.strip())
+    if not pieces:
+        return [], 0.0
+    body = max(chars, key=lambda k: chars[k])
+    groups = [
+        (sz, _WHITESPACE_RUN.sub(" ", " ".join(pieces[sz])).strip())
+        for sz in sorted(pieces, reverse=True)
+    ]
+    return groups, body
+
+
+def looks_like_title_text(text: str) -> bool:
+    """False for page-1 text that outsizes the title without being one: a
+    decorative drop cap (``Q``), an all-lowercase journal wordmark
+    (``applied sciences``) or an article-type banner (``Resource``)."""
+    if sum(c.isalpha() for c in text) < 4:
+        return False
+    if not any(c.isupper() for c in text):
+        return False
+    return _BANNER_WORD.match(text) is None
+
+
+def _extract_pdf_title_from_page1_doc(doc: pymupdf.Document) -> str:
+    """Heuristic: title is the largest-font text on page 1 that reads as one.
+
+    Works for the typical academic-paper layout (title prominent at the top
+    of page 1, larger than abstract / authors / affiliations / journal
+    citation). Font-size groups are tried largest first; a drop cap, a
+    lowercase journal wordmark or an article-type banner is skipped
+    (:func:`looks_like_title_text`). A group below the largest must also
+    stand clearly above body text (``_TITLE_MIN_BODY_RATIO``) so the walk
+    never lands on an author line or a section heading. Returns ``""`` when
+    no group qualifies; the caller then tries the LLM / filename stem.
+
+    This is the second-tier fallback used when ``doc.metadata['title']`` is
+    empty or junk — Adobe InDesign / Word PDFs from Nature, Springer, etc.
+    routinely ship with metadata fields stripped even when the rendered
+    page-1 title is right there at 24-26pt.
+    """
+    groups, body = page1_title_groups(doc)
+    for i, (size, text) in enumerate(groups):
+        if i > 0 and size < body * _TITLE_MIN_BODY_RATIO:
+            break
+        if looks_like_title_text(text):
+            return _sanitise_pdf_title(text)
+    return ""
+
+
+def legacy_page1_title(doc: pymupdf.Document) -> str:
+    """The pre-fix page-1 pick (plain largest-font text). Used only by the
+    title-repair CLI to tell an auto-derived stored title from a typed one."""
+    groups, _ = page1_title_groups(doc)
+    return _sanitise_pdf_title(groups[0][1]) if groups else ""
 
 
 # First uncommented ``\title{`` (optionally ``\title[short]{``). Requires the

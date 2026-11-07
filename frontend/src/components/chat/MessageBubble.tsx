@@ -19,6 +19,7 @@ import { SqlCard } from "@/components/chat/SqlCard";
 import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
+import { rehypeTableBreaks } from "@/lib/rehypeTableBreaks";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
 import { liftSqlFence } from "@/lib/liftSqlFence";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
@@ -146,7 +147,11 @@ export function MessageBubble({
             // we want for arbitrary tool-result strings flowing into assistant content.
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }], rehypeChunkCitations]}
+              rehypePlugins={[
+                [rehypeKatex, { macros: KATEX_MACROS }],
+                rehypeChunkCitations,
+                rehypeTableBreaks,
+              ]}
               components={{
                 // A ```sql fenced block (the SQL a library_stats turn ran) is
                 // lifted out of the prose into a distinct collapsible card.

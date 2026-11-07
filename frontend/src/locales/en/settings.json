@@ -94,7 +94,15 @@
     },
     "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
       "label": "Feedback reviewer",
-      "help": "Checks whether a flagged answer was really wrong. Defaults to the small tier."
+      "help": "Checks whether a flagged answer was really wrong. Defaults to the flagship tier."
+    },
+    "PAPERHUB_IDEATION_CARD_MODEL": {
+      "label": "Mechanism card builder",
+      "help": "Summarises each document's problem and mechanism for ideation. Defaults to the small tier."
+    },
+    "PAPERHUB_IDEATION_MODEL": {
+      "label": "Ideation model",
+      "help": "Proposes cross-domain ideas from the mechanism cards. Defaults to the flagship tier."
     },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "Slide resolver",
@@ -132,6 +140,10 @@
     "PAPERHUB_FEEDBACK_KEYWORDS": {
       "label": "Correction keywords",
       "help": "Comma-separated words that flag the previous answer for review. Blank uses the built-in Chinese / English / Japanese list."
+    },
+    "PAPERHUB_IDEATION_PROBLEM_THINKING_BUDGET": {
+      "label": "Ideation reasoning budget (problem mode)",
+      "help": "Caps the reasoning tokens of each idea proposal for a problem. 0 = no cap. Free exploration is never capped."
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "Inject recalled memories",

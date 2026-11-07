@@ -14,7 +14,7 @@ from typing import Any
 from benchmark.agent.corpus import CorpusCase
 from benchmark.agent.execute import EvalRequest, TokenCounter, execute
 from benchmark.agent.grade import CaseScore, JudgeFn, score_case
-from benchmark.agent.prompts import load_variant
+from benchmark.agent.prompts import load_variant, load_variant_params
 from benchmark.agent.replay import render_messages, to_replay_output
 from benchmark.agent.replay_types import ReplayOutput
 from benchmark.agent.stages import StageSpec
@@ -38,6 +38,9 @@ class ExperimentResult:
     scores: list[CaseScore]
     mean_score: float | None
     mean_tokens_in: float | None
+    usage: list[dict[str, Any] | None] | None = None
+    """Per score row (same order): the call's completion/reasoning tokens and
+    latency, as the executor measured them."""
 
 
 def _mean(values: list[float]) -> float | None:
@@ -52,25 +55,29 @@ async def run_experiment(
     created_at: str = "", corpus_name: str = "", notes: str = "",
 ) -> ExperimentResult:
     system, user_template = load_variant(spec.key, version, prompts_dir=prompts_dir)
+    params = load_variant_params(spec.key, version, prompts_dir=prompts_dir)
     requests: list[EvalRequest] = []
     index: list[tuple[CorpusCase, int]] = []
     for case in corpus:
         for rep in range(reps):
             messages = render_messages(system, user_template, case.variables, case.history)
             key = f"{case.case_id}#{rep}"
-            requests.append(EvalRequest(key=key, messages=messages, response_model=spec.response_model))
+            requests.append(EvalRequest(key=key, messages=messages, response_model=spec.response_model,
+                                        max_tokens=spec.max_tokens, params=params))
             index.append((case, rep))
 
     results = await execute(requests, model=model, backend=backend,
                             concurrency=concurrency, count_tokens=count_tokens)
 
     scores: list[CaseScore] = []
+    usage: list[dict[str, Any] | None] = []
     for (case, rep), req in zip(index, requests, strict=True):
         res = results.get(req.key)
+        usage.append(res.usage if res is not None else None)
         if res is None:
             replay = ReplayOutput(output={}, tokens_in=None, error="missing result from executor")
         else:
-            replay = to_replay_output(spec, res)
+            replay = to_replay_output(spec, res, case.variables)
         scores.append(await score_case(spec, case, replay, rep,
                                        judge_model=judge_model, judge_fn=judge_fn))
 
@@ -79,7 +86,8 @@ async def run_experiment(
     meta = ExperimentMeta(git_commit=git_commit, stage=spec.key,
                           prompt_version=f"{spec.key}/{version}", model=model,
                           corpus=corpus_name, reps=reps, created_at=created_at, notes=notes)
-    return ExperimentResult(meta=meta, scores=scores, mean_score=mean_score, mean_tokens_in=mean_tokens_in)
+    return ExperimentResult(meta=meta, scores=scores, mean_score=mean_score,
+                            mean_tokens_in=mean_tokens_in, usage=usage)
 
 
 def to_store_payload(result: ExperimentResult) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -91,10 +99,15 @@ def to_store_payload(result: ExperimentResult) -> tuple[dict[str, Any], list[dic
         "reps": result.meta.reps, "mean_score": result.mean_score,
         "mean_tokens_in": result.mean_tokens_in, "notes": result.meta.notes,
     }
+    usage = result.usage or [None] * len(result.scores)
+    for key in ("completion_tokens", "reasoning_tokens", "latency_ms"):
+        vals = [float(u[key]) for u in usage if u and isinstance(u.get(key), int)]
+        if vals:
+            meta[f"mean_{key}"] = _mean(vals)
     rows = [
         {"case_id": s.case_id, "rep": s.rep, "score": s.score, "tokens_in": s.tokens_in,
          "rationale": s.rationale, "output_json": json.dumps(s.output, ensure_ascii=False),
-         "error": s.error}
-        for s in result.scores
+         "error": s.error, **({"usage": u} if u else {})}
+        for s, u in zip(result.scores, usage, strict=True)
     ]
     return meta, rows

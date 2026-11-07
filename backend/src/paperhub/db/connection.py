@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import contextvars
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,6 +18,22 @@ import aiosqlite
 # insufficient because each ingest sprayed ~400 INSERTs at the lock and
 # contention could stack faster than the timeout cleared it.
 _DB_WRITE_LOCK = asyncio.Lock()
+
+# The task currently inside ``write_transaction``. The lock is not
+# re-entrant, so a helper that opens its own transaction checks
+# ``in_write_transaction`` and fails fast instead of deadlocking when called
+# from inside one. The task (not a bool) is stored because a child task
+# copies the context: it must not inherit "inside" — it runs on its own and
+# may legitimately open a transaction once the parent's commits.
+_IN_WRITE_TX: contextvars.ContextVar[asyncio.Task[object] | None] = (
+    contextvars.ContextVar("paperhub_in_write_tx", default=None)
+)
+
+
+def in_write_transaction() -> bool:
+    """Whether the current task is inside a ``write_transaction`` block."""
+    owner = _IN_WRITE_TX.get()
+    return owner is not None and owner is asyncio.current_task()
 
 
 def norm_for_match(s: str | None) -> str:
@@ -105,6 +122,7 @@ async def write_transaction(
     """
     async with _DB_WRITE_LOCK:
         await conn.execute("BEGIN IMMEDIATE")
+        token = _IN_WRITE_TX.set(asyncio.current_task())
         try:
             yield
             await conn.commit()
@@ -115,3 +133,6 @@ async def write_transaction(
             with contextlib.suppress(Exception):
                 await conn.execute("ROLLBACK")
             raise
+        finally:
+            with contextlib.suppress(ValueError):  # closed from another context
+                _IN_WRITE_TX.reset(token)

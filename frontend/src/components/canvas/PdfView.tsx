@@ -16,6 +16,7 @@ import {
   hasGeometricRegion,
   markerPageToPageNumber,
 } from "@/lib/bboxHighlight";
+import type { TranslationQueueStatus } from "@/lib/translationQueue";
 import type { ParagraphsResponse, PdfParagraph } from "@/types/translation";
 
 // pdf.js needs a worker; resolve it from the installed pdfjs-dist via Vite's
@@ -53,6 +54,10 @@ export interface PdfTranslationOptions {
   onStaleChange?: (stale: boolean) => void;
   /** The layer's own paragraphs fetch finished (null = failed). */
   onParagraphsLoaded?: (res: ParagraphsResponse | null) => void;
+  /** Bumped to re-request every failed paragraph. */
+  retryFailedNonce?: number;
+  /** Failed-paragraph count / paused background run, on every change. */
+  onStatusChange?: (status: TranslationQueueStatus) => void;
 }
 
 interface Props {
@@ -334,6 +339,8 @@ export function PdfView({
         paragraphs={translation?.paragraphs}
         retranslateNonce={translation?.retranslateNonce}
         onStaleChange={translation?.onStaleChange}
+        retryFailedNonce={translation?.retryFailedNonce}
+        onStatusChange={translation?.onStatusChange}
         onParagraphsLoaded={translation?.onParagraphsLoaded}
         readerRef={containerRef}
       >

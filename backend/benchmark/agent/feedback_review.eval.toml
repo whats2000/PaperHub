@@ -3,13 +3,15 @@
 # sentence is judged afterwards with the `pairwise` command.
 [eval]
 stage       = "feedback_review"
-model       = "gemini/gemini-3.5-flash-lite"   # deploy small tier (PAPERHUB_MODEL_SMALL)
-reps        = 3
+model       = "gemini/gemini-3.8-flash"   # deploy reviewer tier: PAPERHUB_FEEDBACK_REVIEW_MODEL defaults to the flagship (Round 4)
+reps        = 5
 backend     = "auto"
 store       = "benchmark/agent/results/experiments.jsonl"
 prompts_dir = "benchmark/agent/prompts"
-variants    = ["v1", "v3", "v6", "v9", "v10"]   # v10 shipped; all rounds (v1–v10) in prompts/feedback_review/README.md
+variants    = ["v21"]   # v21 = shipped feedback_review/v3; all rounds in prompts/feedback_review/README.md
+concurrency = 4
 
 [[testsets]]
 name   = "core"
 corpus = "benchmark/agent/corpus/feedback_review.core.jsonl"
+

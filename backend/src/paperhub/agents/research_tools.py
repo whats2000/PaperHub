@@ -332,12 +332,13 @@ async def search_semantic_scholar_dispatch(
     *,
     query: str,
     max_results: int = 8,
+    diag: dict[str, Any] | None = None,
 ) -> list[SemanticScholarToolHit]:
     """Free-text Semantic Scholar search. Returns hits with an LLM-friendly
     ``paper_id`` prefix (``arxiv:<id>`` when available, else ``ss:<paperId>``)
     so the agent can pass it straight back into ``find_related_papers``
     or into the final ``json:candidates`` shortlist."""
-    hits = await search_papers(query, max_results)
+    hits = await search_papers(query, max_results, diag=diag)
     out: list[SemanticScholarToolHit] = []
     for h in hits:
         pid = f"arxiv:{h.arxiv_id}" if h.arxiv_id else f"ss:{h.paperId}"
@@ -360,8 +361,12 @@ async def find_related_papers_dispatch(
     paper_id: str,
     mode: Mode,
     max_results: int = 8,
+    diag: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """v2.4: accepts ``arxiv:<id>`` or ``ss:<paperId>``. The Semantic Scholar
+    """``diag`` receives the Semantic Scholar transport facts (see
+    :func:`~paperhub.pipelines.semantic_scholar.find_related`).
+
+    v2.4: accepts ``arxiv:<id>`` or ``ss:<paperId>``. The Semantic Scholar
     endpoints accept ``arXiv:<id>`` natively when the paper has an arxiv ID;
     for ss: IDs we pass the raw paper ID. Internally we still call
     ``find_related`` which builds the ``arXiv:<id>`` prefix itself, so for
@@ -369,7 +374,9 @@ async def find_related_papers_dispatch(
     fetch_paper_metadata first when the prefix is ``ss:``."""
     if paper_id.startswith("arxiv:"):
         arxiv_id = paper_id.removeprefix("arxiv:")
-        related = await find_related(arxiv_id, mode=mode, max_results=max_results)
+        related = await find_related(
+            arxiv_id, mode=mode, max_results=max_results, diag=diag,
+        )
         return [asdict(r) for r in related]
     if paper_id.startswith("ss:"):
         # find_related currently only supports arxiv IDs via /paper/arXiv:<id>/...
@@ -379,7 +386,7 @@ async def find_related_papers_dispatch(
         meta = await fetch_paper_metadata(paper_id.removeprefix("ss:"))
         if meta.arxiv_id:
             related = await find_related(
-                meta.arxiv_id, mode=mode, max_results=max_results,
+                meta.arxiv_id, mode=mode, max_results=max_results, diag=diag,
             )
             return [asdict(r) for r in related]
         return []

@@ -341,3 +341,57 @@ describe("translation queue full-paper back-off", () => {
     expect(max()).toBe(199);
   });
 });
+
+describe("translation queue: retry all failed (QA F2)", () => {
+  function flaky(n: number, fullPaper = false) {
+    let fail = true;
+    const sent: TranslateRequest[] = [];
+    const send = (req: TranslateRequest): Promise<TranslateResponse> => {
+      sent.push(req);
+      return Promise.resolve({
+        results: req.blocks.map((b) =>
+          fail
+            ? { key: b.key, status: "unavailable" as const, text: null, model: null, stale_terminology: false }
+            : { key: b.key, status: "ok" as const, text: "t", model: "m", stale_terminology: false },
+        ),
+      });
+    };
+    const q = createTranslationQueue({ paperId: 1, language: "ja", fullPaper, send });
+    const statuses: { failed: number; paused: boolean }[] = [];
+    q.onStatus((s) => statuses.push(s));
+    const keys = Array.from({ length: n }, (_, i) => `h:${i}`);
+    q.setBlocks(keys, Object.fromEntries(keys.map((k) => [k, `x${k}`])));
+    const settle = async () => {
+      for (let i = 0; i < 60; i++) await flush();
+    };
+    return { q, sent, statuses, settle, recover: () => { fail = false; } };
+  }
+
+  it("reports the failed count and re-sends every failed key at once", async () => {
+    const { q, sent, statuses, settle, recover } = flaky(3);
+    const results: TranslateResult[] = [];
+    q.onResult((r) => results.push(r));
+    q.setVisible(["h:0", "h:1", "h:2"]);
+    await settle();
+    expect(statuses.at(-1)).toEqual({ failed: 3, paused: false });
+    recover();
+    expect(q.retryFailed()).toEqual(["h:0", "h:1", "h:2"]);
+    await settle();
+    expect(sent).toHaveLength(2);
+    expect(statuses.at(-1)).toEqual({ failed: 0, paused: false });
+    expect(results.filter((r) => r.status === "ok").map((r) => r.key)).toEqual(["h:0", "h:1", "h:2"]);
+  });
+
+  it("reports a paused background run, and retryFailed resumes it", async () => {
+    const { q, sent, statuses, settle, recover } = flaky(200, true);
+    q.setVisible(["h:0"]);
+    await settle();
+    expect(statuses.at(-1)!.paused).toBe(true);
+    const before = sent.length;
+    recover();
+    q.retryFailed();
+    await settle();
+    expect(sent.length).toBeGreaterThan(before);
+    expect(statuses.at(-1)).toEqual({ failed: 0, paused: false });
+  });
+});

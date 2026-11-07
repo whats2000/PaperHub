@@ -5,6 +5,7 @@ import {
   NARROW_GUTTER_PX,
   contentScrollTop,
   describeBreak,
+  glidesBetween,
   placeCard,
 } from "@/lib/cardPlacement";
 
@@ -34,10 +35,10 @@ describe("placeCard — side placement", () => {
     const narrow = placeCard({
       paraRects: [rect(640, 300, 500, 80)],
       viewport: VIEWPORT,
-      gutter: { left: 12, right: 312 },
+      gutter: { left: 12, right: 412 },
       cardHeight: 120,
     })!;
-    expect(narrow.width).toBe(300);
+    expect(narrow.width).toBe(400);
     expect(narrow.left).toBe(12);
   });
 
@@ -201,11 +202,20 @@ describe("placeCard — narrow fallback", () => {
     })!;
 
   it(`keeps the side card at a ${NARROW_GUTTER_PX}px gutter`, () => {
-    expect(place(260).side).toBe("left");
+    expect(place(NARROW_GUTTER_PX).side).toBe("left");
+    expect(place(NARROW_GUTTER_PX).width).toBe(NARROW_GUTTER_PX);
   });
 
-  it("drops below the paragraph inside the reader when the gutter is 259px", () => {
-    const p = place(259);
+  it("never squeezes the side card below a readable width (QA F6: a 326px gutter)", () => {
+    expect(NARROW_GUTTER_PX).toBeGreaterThanOrEqual(360);
+    const p = place(326);
+    expect(p.side).toBe("below");
+    expect(p.width).toBeGreaterThanOrEqual(NARROW_GUTTER_PX);
+    expect(p.left).toBeGreaterThanOrEqual(READER.left);
+  });
+
+  it("drops below the paragraph inside the reader when the gutter is too narrow", () => {
+    const p = place(NARROW_GUTTER_PX - 1);
     expect(p.side).toBe("below");
     expect(p.maxHeight).toBeLessThanOrEqual(0.45 * 800);
     expect(p.top).toBe(380 + 10); // under the paragraph's bottom
@@ -227,14 +237,105 @@ describe("placeCard — narrow fallback", () => {
     expect(p.arrowX).toBeLessThanOrEqual(460 - 30);
   });
 
-  it("lifts a below card that would run off the viewport bottom", () => {
-    const p = placeCard({
-      paraRects: [rect(640, 700, 500, 150)],
-      viewport: VIEWPORT,
-      gutter: { left: 12, right: 200 },
-      cardHeight: 300,
-      reader: READER,
-    })!;
+  const narrow = (para: DOMRect, cardHeight: number) =>
+    placeCard({ paraRects: [para], viewport: VIEWPORT, gutter: { left: 12, right: 200 }, cardHeight, reader: READER })!;
+
+  it("flips above the paragraph when the card has no room below it, arrow pointing down", () => {
+    const p = narrow(rect(640, 700, 500, 150), 300);
+    expect(p.side).toBe("above");
+    // Its bottom sits just above the paragraph: nothing of the paragraph is covered.
+    expect(p.top + Math.min(300, p.maxHeight)).toBe(700 - 10);
+    expect(p.top).toBeGreaterThanOrEqual(VIEWPORT.top + CARD_EDGE);
+    expect(p.arrowY).toBe(0);
+    expect(p.arrowX).toBeGreaterThan(0);
+  });
+
+  it("keeps the card below when it fits there", () => {
+    const p = narrow(rect(640, 300, 500, 80), 300);
+    expect(p.side).toBe("below");
+    expect(p.top).toBe(390);
+  });
+
+  it("takes the roomier side, shortened to fit, when neither side holds the whole card", () => {
+    const p = narrow(rect(640, 400, 500, 150), 600);
+    expect(p.side).toBe("below");
+    expect(p.top).toBe(560);
+    expect(p.top + p.maxHeight).toBeLessThanOrEqual(VIEWPORT.bottom - CARD_EDGE);
+    const q = narrow(rect(640, 450, 500, 150), 600);
+    expect(q.side).toBe("above");
+    expect(q.top).toBe(VIEWPORT.top + CARD_EDGE);
+    expect(q.top + q.maxHeight).toBeLessThanOrEqual(450 - 10);
+  });
+
+  it("picks the side of a card not yet measured by its tallest size, so it doesn't flip once measured", () => {
+    // Up to 360px tall (45 %): only the room above (472px) holds that, not below (192px).
+    expect(narrow(rect(640, 590, 500, 100), 0).side).toBe("above");
+    expect(narrow(rect(640, 590, 500, 100), 258).side).toBe("above");
+  });
+
+  it("only covers the paragraph when it leaves no usable room on either side", () => {
+    const p = narrow(rect(640, 150, 500, 700), 300);
+    expect(p.side).toBe("below");
     expect(p.top + Math.min(300, p.maxHeight)).toBe(VIEWPORT.bottom - CARD_EDGE);
+  });
+});
+
+describe("glidesBetween", () => {
+  it("never glides a card between under and over its paragraph, which would sweep it across the text", () => {
+    expect(glidesBetween("below", "above")).toBe(false);
+    expect(glidesBetween("above", "below")).toBe(false);
+  });
+
+  it("glides any other move", () => {
+    expect(glidesBetween("below", "below")).toBe(true);
+    expect(glidesBetween("above", "above")).toBe(true);
+    expect(glidesBetween("left", "below")).toBe(true);
+    expect(glidesBetween(null, "above")).toBe(true);
+  });
+});
+
+describe("placeCard — pinned (QA F5)", () => {
+  const pinned = (para: DOMRect, gutter = WIDE) =>
+    placeCard({
+      paraRects: [para],
+      viewport: VIEWPORT,
+      gutter,
+      cardHeight: 200,
+      reader: READER,
+      pinned: true,
+    });
+
+  it("stays at the top edge when its paragraph scrolled out above", () => {
+    const p = pinned(rect(640, -400, 500, 80))!;
+    expect(p.side).toBe("left");
+    expect(p.top).toBe(VIEWPORT.top + CARD_EDGE);
+    expect(p.scrollFraction).toBe(1);
+  });
+
+  it("stays at the bottom edge when its paragraph is below the view", () => {
+    const p = pinned(rect(640, 1400, 500, 80))!;
+    expect(p.top + 200).toBe(VIEWPORT.bottom - CARD_EDGE);
+    expect(p.scrollFraction).toBe(0);
+  });
+
+  it("inside the reader, docks to the edge the paragraph left by, arrow toward it", () => {
+    const narrowGutter = { left: 12, right: 200 };
+    const up = pinned(rect(640, -400, 500, 80), narrowGutter)!;
+    expect(up.side).toBe("below"); // arrow up, toward the paragraph above
+    expect(up.top).toBe(VIEWPORT.top + CARD_EDGE);
+    const down = pinned(rect(640, 1400, 500, 80), narrowGutter)!;
+    expect(down.side).toBe("above");
+    expect(down.top + 200).toBe(VIEWPORT.bottom - CARD_EDGE);
+  });
+
+  it("an unpinned card still steps aside once no fragment is in view", () => {
+    expect(
+      placeCard({
+        paraRects: [rect(640, -400, 500, 80)],
+        viewport: VIEWPORT,
+        gutter: WIDE,
+        cardHeight: 200,
+      }),
+    ).toBeNull();
   });
 });

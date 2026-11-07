@@ -89,3 +89,21 @@ describe("TranslationCard scroll sync", () => {
     expect(content().scrollTop).toBe(50);
   });
 });
+
+describe("TranslationCard arrow side", () => {
+  const arrow = () => screen.getByRole("dialog").querySelector<HTMLElement>("span[aria-hidden=\"true\"]")!;
+
+  it("points down from its bottom edge, and grows from there, when it sits above the paragraph", () => {
+    render(<Card placement={{ ...PLACEMENT, side: "above", arrowY: 0, arrowX: 30 }} scroll={at(0)} />);
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-side", "above");
+    expect(screen.getByRole("dialog").className).toContain("origin-bottom-left");
+    expect(arrow().className).toContain("-bottom-[6px]");
+    expect(arrow().style.left).toBe("30px");
+  });
+
+  it("points up from its top edge under the paragraph", () => {
+    render(<Card placement={{ ...PLACEMENT, side: "below", arrowY: 0, arrowX: 30 }} scroll={at(0)} />);
+    expect(screen.getByRole("dialog").className).toContain("origin-top-left");
+    expect(arrow().className).toContain("-top-[6px]");
+  });
+});

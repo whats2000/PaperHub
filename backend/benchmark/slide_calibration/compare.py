@@ -116,7 +116,7 @@ def compare_round(round_no: int) -> int:
         open_pdf(b_dir / "slides.pdf")
 
     print(
-        f"\n[compare] done. Open each PaperHub PDF and review for yourself; "
+        "\n[compare] done. Open each PaperHub PDF and review for yourself; "
         "style is your judgement, not a pattern-match against any example."
     )
     return 0

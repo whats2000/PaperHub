@@ -1,14 +1,15 @@
 """Background ``feedback:review`` run (Plan H2, FR-19).
 
 A correction-like user message (keyword trigger) or a fork flags the previous
-answer. ``schedule_review`` starts a detached task that asks the reviewer
-prompt ``feedback_review/v1`` whether the answer was wrong and stores an
-implicit ``down`` feedback row. A keyword review is ``needs_confirmation``
+answer. ``schedule_review`` starts a detached task that asks a reviewer
+prompt whether the answer was wrong and stores an implicit ``down`` feedback
+row. A keyword review uses ``REVIEW_SLOT``; a fork, which has no follow-up
+text, uses ``FORK_REVIEW_SLOT`` (``REVIEW_SLOTS``). A keyword review is ``needs_confirmation``
 when the verdict is ``uncertain`` (the user is asked on the Feedback page) and
 ``final`` otherwise; rejected verdicts are kept, so they are never re-asked,
 and the summary counts only confirmed implicit rows. A fork review is ALWAYS
-``needs_confirmation``: the prompt was evaluated on keyword follow-ups only, so
-a fork verdict (empty follow-up) is a guess shown in the queue, never final.
+``needs_confirmation`` (Ruling K2): a fork says only that the user went back,
+so its verdict is a guess shown in the queue, never final.
 One implicit row per ``(run, trigger)`` (partial unique index); a duplicate
 review records ``skipped: duplicate``. A target with a blank answer or a run
 that did not finish ``ok`` is skipped without an LLM call.
@@ -19,21 +20,26 @@ its own DB connection, every failure is recorded as an ``error`` step + an
 (``_ask_reviewer``): an output cap, one retry on an invalid verdict and an
 overall timeout; a failure records its kind, the attempts and the head of the
 bad output on the error step. The review run has no messages, so it
-never shows in the chat.
+never shows in the chat; its ``routing_decision_json`` is ``REVIEW_RUN_JSON``.
 
 The prompt variables are built exactly like the eval stage
 (``benchmark/agent/stages.py`` ``feedback_review``): ``question``, ``answer``,
 ``user_followup`` (``""`` for a fork, which has no follow-up message),
 ``trace_summary`` in the corpus format, and ``reasons`` from
-``format_reasons_block()``. Two rare trace lines go beyond the corpus:
-``cited: N more chunks`` (more than six citations) and ``failed step:
-agent/tool`` (an error step that was not a user cancellation).
+``format_reasons_block()``. Every cited chunk is shown in full (whitespace
+collapsed) until ``CITED_TEXT_BUDGET`` characters of passage text are spent:
+the passage that crosses it is cut with ``...`` and later ones read
+``[text not shown: passage budget spent]``. ``ReviewInputs.cited_passages``
+(recorded on the step) says what was shown or cut. One rare trace line goes
+beyond the corpus: ``failed step: agent/tool`` (an error step that was not a
+user cancellation).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,25 +61,68 @@ from paperhub.tracing.tracer import Tracer
 _LOG = logging.getLogger(__name__)
 
 Trigger = Literal["keyword", "fork"]
-REVIEW_SLOT = "feedback_review/v1"
+REVIEW_SLOT = "feedback_review/v4"
+FORK_REVIEW_SLOT = "feedback_review_fork/v4"
+REVIEW_SLOTS: dict[Trigger, str] = {"keyword": REVIEW_SLOT, "fork": FORK_REVIEW_SLOT}
+"""The reviewer prompt per trigger. The keyword prompt sends every empty
+follow-up to ``rejected`` (benchmark/agent/prompts/feedback_review_fork/README.md),
+so a fork has its own prompt; it takes the same variables and ignores
+``user_followup``."""
+_UI_LANGUAGES = {
+    "en": "English", "zh-TW": "Traditional Chinese", "zh-CN": "Simplified Chinese",
+    "ja": "Japanese",
+}
+_DEFAULT_DOUBT_LANGUAGE = "the main language of the user's question"
+
+
+def doubt_language(ui_language: str | None) -> str:
+    """The language the reviewer writes its ``doubt`` in: the client's UI
+    language (``en``, ``zh-TW``, ``zh-CN``, ``ja``) by name, else the question's."""
+    return _UI_LANGUAGES.get((ui_language or "").strip(), _DEFAULT_DOUBT_LANGUAGE)
+
+
+REVIEW_RUN_JSON = '{"intent": "feedback_review"}'
+"""``runs.routing_decision_json`` of a review run. A review run is never
+routed; the marker lets a ``runs`` count (``library_stats``) tell it from a
+chat turn, as the ideation runs' ``{"ideation_mode": ...}`` marker does."""
 
 _live_tasks: set[asyncio.Task[None]] = set()
 """Strong refs to in-flight review tasks so they are not GC'd mid-run."""
 
-REVIEW_MAX_TOKENS = 1024
-"""Output cap for the reviewer call. A verdict is a few dozen tokens; the cap
-stops a degenerate repetition loop (run 694: 65 535 chars of one repeated
-combining accent in 113 s) early. Kept above the bare verdict size so a
-provider that counts thinking tokens against the cap still has room for the
-JSON."""
+REVIEW_MAX_TOKENS = 4096
+"""Output cap for the reviewer call. The cap stops a degenerate repetition loop
+(run 694: 65 535 chars of one repeated combining accent in 113 s) early. Gemini
+counts thinking tokens against it: the flagship reviewer thinks for 140-960
+tokens (959 of 1024 on ``fork-ja-thin-evidence``), and 1024 truncated 2 of 135
+verdicts, so the cap leaves room for that plus the JSON."""
+REVIEW_FALLBACK_ENV = "PAPERHUB_FEEDBACK_REVIEW_FALLBACK_MODEL"
+
+
+def review_fallback_model() -> str:
+    """The model a failing reviewer call downgrades to; ``""`` (the default)
+    means none. Not the usual small tier: it garbles zh/ja doubts (~12 % in the
+    eval) and scores fork cases worse, and a failed background review is only
+    recorded, while a garbled verdict would be kept."""
+    return os.environ.get(REVIEW_FALLBACK_ENV, "").strip()
+
+
 REVIEW_ATTEMPTS = 2
 """One retry when the verdict is not valid JSON / not a valid ``ReviewVerdict``."""
 REVIEW_TIMEOUT_S = 90.0
 """Overall bound on the review's LLM work (every attempt together)."""
 _BAD_OUTPUT_HEAD = 300
 
-_MAX_CITED = 6
-_CITED_HEAD = 200
+CITED_TEXT_BUDGET = 16_000
+"""Characters of cited passage text (all citations together) in the summary.
+Runs 825/827 showed a 200-char head per chunk hides the fact that supports the
+answer; chunks are at most 5 000 chars, so this fits three whole chunks
+(~4k tokens) before cutting."""
+SQL_TEXT_MAX = 600
+SQL_ROWS_MAX = 10
+SQL_RESULT_MAX = 800
+SQL_QUERIES_MAX = 4
+"""Bounds on the ``library_stats`` evidence lines: the query, the rows shown and
+the rendered result, per query; at most ``SQL_QUERIES_MAX`` queries."""
 _SECTION_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)(?=\s|$|\.)")
 
 
@@ -96,6 +145,8 @@ class ReviewInputs:
     # ``tool_calls.step_index`` of every target-run step read (branch '').
     step_ids_read: list[int] = field(default_factory=list)
     cited_chunk_ids: list[int] = field(default_factory=list)
+    # One ``{chunk_id, chars, shown_chars, cut}`` per cited chunk found.
+    cited_passages: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _loads(raw: str | None) -> Any:
@@ -105,6 +156,28 @@ def _loads(raw: str | None) -> Any:
         return json.loads(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _sql_lines(args: Any, result: Any) -> list[str]:
+    """``sql: <query>`` + ``result: columns=... rows=...`` for one recorded
+    ``sql.query`` step, bounded; a failed query shows the error."""
+    sql = args.get("sql") if isinstance(args, dict) else None
+    out = [f"sql: {' '.join(str(sql).split())[:SQL_TEXT_MAX]}"] if sql else []
+    if not isinstance(result, dict):
+        return out
+    payload = result.get("payload")
+    if result.get("ok") is False or not isinstance(payload, dict):
+        out.append(f"result: error {str(result.get('error'))[:200]}")
+        return out
+    rows = payload.get("rows")
+    rows = rows if isinstance(rows, list) else []
+    body = f"columns={payload.get('columns')} rows={json.dumps(rows[:SQL_ROWS_MAX], ensure_ascii=False)}"
+    if len(body) > SQL_RESULT_MAX:
+        body = body[:SQL_RESULT_MAX] + "..."
+    if len(rows) > SQL_ROWS_MAX or body.endswith("..."):
+        body += f" ({len(rows)} rows in all)"
+    out.append("result: " + body)
+    return out
 
 
 async def load_review_inputs(
@@ -144,6 +217,8 @@ async def load_review_inputs(
     refs: list[tuple[int, str]] | None = None
     reads: list[tuple[int | None, list[str]]] = []
     failed: list[str] = []
+    evidence: list[str] = []  # non-cited intents: what the run recorded
+    sql_seen = 0
     for _sid, agent, tool, status, error, args_raw, result_raw in steps:
         result = _loads(result_raw)
         if agent == "router" and tool == "classify" and isinstance(result, dict):
@@ -170,6 +245,29 @@ async def load_review_inputs(
                 if name and str(name) not in names:
                     names.append(str(name))
             reads.append((int(pcid) if isinstance(pcid, int) else None, names))
+        if tool == "sql.query" and status == "ok":
+            sql_seen += 1
+            if sql_seen <= SQL_QUERIES_MAX:
+                evidence.extend(_sql_lines(_loads(args_raw), result))
+        elif tool == "report:outline" and isinstance(result, dict):
+            title = result.get("talk_title")
+            if title:
+                evidence.append(f'deck: "{title}"')
+        elif tool == "report:compile" and isinstance(result, dict):
+            evidence.append(
+                "compiled: ok, " + f"{result.get('page_count')} pages"
+                if result.get("ok") else "compiled: failed",
+            )
+        elif tool == "paper_search:finalize" and isinstance(result, dict):
+            titles = [
+                str(c.get("title")) for c in result.get("emitted_candidates") or []
+                if isinstance(c, dict) and c.get("title")
+            ]
+            if titles:
+                evidence.append("found: " + "; ".join(f'"{t}"' for t in titles[:8]))
+            missing = result.get("not_found")
+            if isinstance(missing, list) and missing:
+                evidence.append("not found: " + "; ".join(str(m) for m in missing[:8]))
         if status == "error" and error != "cancelled":
             failed.append(f"{agent}/{tool}")
     if router is None and run_row is not None:
@@ -211,20 +309,23 @@ async def load_review_inputs(
         query = (router or {}).get("resolved_query") or question
         lines.append(f'search: "{query}" -> {n} results')
 
+    lines.extend(evidence)
+
     cited = cited_chunk_ids(answer)
-    shown = cited[:_MAX_CITED]
     chunk_rows: dict[int, tuple[int, str | None, str]] = {}
-    if shown:
-        marks = ",".join("?" * len(shown))
+    if cited:
+        marks = ",".join("?" * len(cited))
         async with conn.execute(
             f"SELECT id, paper_content_id, section, text FROM chunks "
-            f"WHERE id IN ({marks})", shown,
+            f"WHERE id IN ({marks})", cited,
         ) as cur:
             for cid, pcid, section, text in await cur.fetchall():
                 chunk_rows[int(cid)] = (int(pcid), section, str(text))
     if not cited:
         lines.append("cited: none")
-    for cid in shown:
+    passages: list[dict[str, Any]] = []
+    budget = CITED_TEXT_BUDGET
+    for cid in cited:
         row = chunk_rows.get(cid)
         if row is None:
             lines.append(f"cited: chunk {cid} (not found)")
@@ -233,12 +334,18 @@ async def load_review_inputs(
         where = label.get(pcid, f"paper {pcid}")
         if section:
             where += f" §{section_label(section)}"
-        head = " ".join(text.split())
-        if len(head) > _CITED_HEAD:
-            head = head[:_CITED_HEAD].rstrip() + "..."
-        lines.append(f'cited: chunk {cid} ({where}) "{head}"')
-    if len(cited) > len(shown):
-        lines.append(f"cited: {len(cited) - len(shown)} more chunks")
+        body = " ".join(text.split())
+        shown = body[:budget]
+        budget -= len(shown)
+        passages.append({"chunk_id": cid, "chars": len(body),
+                         "shown_chars": len(shown), "cut": len(shown) < len(body)})
+        if not shown and body:
+            lines.append(f"cited: chunk {cid} ({where}) "
+                         "[text not shown: passage budget spent]")
+            continue
+        if len(shown) < len(body):
+            shown = shown.rstrip() + "..."
+        lines.append(f'cited: chunk {cid} ({where}) "{shown}"')
 
     if intent == "paper_qa" and refs:
         read_ids = {pcid for pcid, _n in reads}
@@ -253,6 +360,7 @@ async def load_review_inputs(
         trace_summary="\n".join(lines),
         step_ids_read=[int(s[0]) for s in steps],
         cited_chunk_ids=cited,
+        cited_passages=passages,
     )
 
 
@@ -286,7 +394,7 @@ def _validation_failure(exc: ValidationError) -> tuple[str, str]:
 
 
 async def _ask_reviewer(
-    llm: LlmAdapter, model: str, variables: dict[str, Any],
+    llm: LlmAdapter, model: str, variables: dict[str, Any], *, slot: str = REVIEW_SLOT,
 ) -> tuple[ReviewVerdict, int]:
     """The bounded reviewer call: capped output, one retry on an invalid
     verdict, all attempts under ``REVIEW_TIMEOUT_S``. Returns the verdict and
@@ -300,9 +408,10 @@ async def _ask_reviewer(
                 attempts += 1
                 try:
                     verdict = await llm.structured(
-                        slot=REVIEW_SLOT, variables=variables,
+                        slot=slot, variables=variables,
                         response_model=ReviewVerdict, model=model,
                         max_tokens=REVIEW_MAX_TOKENS,
+                        fallback_model=review_fallback_model(),
                     )
                     return verdict, attempts
                 except ValidationError as exc:
@@ -346,6 +455,7 @@ async def run_review(
     trigger: Trigger,
     llm: LlmAdapter,
     model: str,
+    ui_language: str | None = None,
 ) -> None:
     """The review task body. Never raises (except a cancellation)."""
     # Cheap pre-check; the partial unique index is the real guard (below).
@@ -360,8 +470,9 @@ async def run_review(
                     return  # already reviewed for this trigger
             async with write_transaction(conn):
                 ins = await conn.execute(
-                    "INSERT INTO runs (session_id, status) VALUES (?, 'running')",
-                    (session_id,),
+                    "INSERT INTO runs (session_id, status, routing_decision_json) "
+                    "VALUES (?, 'running', ?)",
+                    (session_id, REVIEW_RUN_JSON),
                 )
                 assert ins.lastrowid is not None
                 review_run_id = int(ins.lastrowid)
@@ -387,6 +498,7 @@ async def run_review(
                         "trace_summary": (
                             inputs.trace_summary if inputs is not None else ""
                         ),
+                        "doubt_language": doubt_language(ui_language),
                     })
                     skip = await _skip_reason(conn, target_run_id, inputs)
                     if skip is not None:
@@ -400,7 +512,8 @@ async def run_review(
                                 "user_followup": followup or "",
                                 "trace_summary": inputs.trace_summary,
                                 "reasons": format_reasons_block(),
-                            })
+                                "doubt_language": doubt_language(ui_language),
+                            }, slot=REVIEW_SLOTS[trigger])
                         except ReviewCallFailed as exc:
                             step.record_result(exc.summary())
                             raise
@@ -412,11 +525,22 @@ async def run_review(
                             "guessed_reasons": guessed,
                             "step_ids_read": inputs.step_ids_read,
                             "cited_chunk_ids": inputs.cited_chunk_ids,
+                            "cited_passages": inputs.cited_passages,
                             "attempts": attempts,
+                            "slot": REVIEW_SLOTS[trigger],
                         }
                         needs_user = trigger == "fork" or verdict.verdict == "uncertain"
                         stored = "needs_confirmation" if needs_user else "final"
+                        stored_verdict = verdict.verdict
                         async with write_transaction(conn):
+                            async with conn.execute(
+                                "SELECT 1 FROM feedback WHERE run_id = ? "
+                                "AND kind = 'explicit'", (target_run_id,),
+                            ) as rated:
+                                if await rated.fetchone() is not None:
+                                    # The user already rated this answer: that
+                                    # is their answer, nothing left to ask.
+                                    stored, stored_verdict = "final", "rejected"
                             ins = await conn.execute(
                                 "INSERT INTO feedback (run_id, message_id, kind, "
                                 "polarity, reasons_json, trigger, verdict, status, "
@@ -427,7 +551,7 @@ async def run_review(
                                 (
                                     target_run_id, inputs.answer_message_id,
                                     json.dumps(list(verdict.reasons), ensure_ascii=False),
-                                    trigger, verdict.verdict, stored, verdict.doubt,
+                                    trigger, stored_verdict, stored, verdict.doubt,
                                 ),
                             )
                         if ins.rowcount == 0:  # a concurrent review won the race
@@ -468,11 +592,13 @@ def schedule_review(
     trigger: Trigger,
     llm: LlmAdapter,
     model: str,
+    ui_language: str | None = None,
 ) -> None:
     """Start the background review; returns at once."""
     task = asyncio.create_task(run_review(
         db_path=db_path, session_id=session_id, target_run_id=target_run_id,
         followup=followup, trigger=trigger, llm=llm, model=model,
+        ui_language=ui_language,
     ))
     _live_tasks.add(task)
     task.add_done_callback(_live_tasks.discard)
@@ -489,6 +615,7 @@ async def maybe_review_keyword(
     run_id: int,
     user_message: str,
     llm: LlmAdapter,
+    ui_language: str | None = None,
 ) -> None:
     """Chat hook: a correction keyword in the user's new message flags the
     latest previous answer in the session, unless that answer is a fork's copy
@@ -511,7 +638,7 @@ async def maybe_review_keyword(
         schedule_review(
             db_path=settings.db_path, session_id=session_id,
             target_run_id=int(row[0]), followup=user_message, trigger="keyword",
-            llm=llm, model=settings.feedback_review_model,
+            llm=llm, model=settings.feedback_review_model, ui_language=ui_language,
         )
     except Exception:  # noqa: BLE001 — the chat turn must not notice
         _LOG.warning("feedback keyword hook failed", exc_info=True)
@@ -519,6 +646,7 @@ async def maybe_review_keyword(
 
 def maybe_review_fork(
     *, settings: Settings, session_id: int, target_run_id: int, llm: LlmAdapter,
+    ui_language: str | None = None,
 ) -> None:
     """Fork hook: forking at a turn flags that turn's answer. Never raises."""
     try:
@@ -527,7 +655,7 @@ def maybe_review_fork(
         schedule_review(
             db_path=settings.db_path, session_id=session_id,
             target_run_id=target_run_id, followup=None, trigger="fork",
-            llm=llm, model=settings.feedback_review_model,
+            llm=llm, model=settings.feedback_review_model, ui_language=ui_language,
         )
     except Exception:  # noqa: BLE001 — the fork must not notice
         _LOG.warning("feedback fork hook failed", exc_info=True)

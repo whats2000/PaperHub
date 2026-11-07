@@ -1,6 +1,6 @@
 import { useId, useState, type KeyboardEvent } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, Languages, RefreshCw } from "lucide-react";
+import { Check, ChevronDown, Languages, RefreshCw, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { usePresence } from "@/hooks/usePresence";
@@ -22,6 +22,7 @@ import { useTranslationStore } from "@/store/translation";
 
 export type TranslateDisabledReason =
   | "no_blocks"
+  | "no_text"
   | "no_inline_math_llm"
   | "load_failed";
 
@@ -38,6 +39,12 @@ interface Props {
   /** Cached translations predate the current terminology memory. */
   staleTerminology: boolean;
   onRetranslate: () => void;
+  /** Blocks whose translation ended unavailable. */
+  failedCount?: number;
+  /** The full-paper background run paused after repeated failures. */
+  paused?: boolean;
+  /** Re-request every failed block and resume a paused run. */
+  onRetryFailed?: () => void;
 }
 
 /** Matches the label's closed-state `duration-200` transition. */
@@ -50,6 +57,11 @@ function disabledText(
   switch (reason) {
     case "no_blocks":
       return t("disabled.no_blocks", "This PDF has no paragraph layout yet");
+    case "no_text":
+      return t(
+        "disabled.no_text",
+        "This paper's text couldn't be laid out as paragraphs, so it can't be translated",
+      );
     case "no_inline_math_llm":
       return t(
         "disabled.no_inline_math_llm",
@@ -81,6 +93,9 @@ export function TranslatePill({
   onDisabledInteract,
   staleTerminology,
   onRetranslate,
+  failedCount = 0,
+  paused = false,
+  onRetryFailed,
 }: Props) {
   const { t, i18n } = useTranslation("translation");
   const language = useTranslationStore((s) => s.language);
@@ -103,6 +118,24 @@ export function TranslatePill({
   const label = usePresence(on || choosing, LABEL_EXIT_MS);
   const [menuOpen, setMenuOpen] = useState(false);
   const [custom, setCustom] = useState("");
+  // Retry-all: offered while translation is on and something failed (or the
+  // background run paused). The badge pops in and out from its own centre.
+  const canRetry = on && !!onRetryFailed && (failedCount > 0 || paused);
+  const badge = usePresence(canRetry, 150);
+  // The badge keeps its last count while it zooms out.
+  const [shownCount, setShownCount] = useState(failedCount);
+  if (failedCount > 0 && failedCount !== shownCount) setShownCount(failedCount);
+  const retryLabel =
+    failedCount > 0
+      ? t("pill.retryFailed", {
+          count: failedCount,
+          defaultValue: "Retry {{count}} failed translations",
+        })
+      : t("pill.resume", "Resume translating the rest of the paper");
+  const retryFailed = () => {
+    setMenuOpen(false);
+    onRetryFailed?.();
+  };
 
   const uiEndonym =
     LANGUAGE_ENDONYMS[i18n.language as keyof typeof LANGUAGE_ENDONYMS] ?? null;
@@ -282,6 +315,19 @@ export function TranslatePill({
                           className="h-8 text-sm"
                         />
                       </div>
+                      {canRetry && (
+                        <>
+                          <div className="-mx-1 my-1 border-t border-border" />
+                          <button
+                            type="button"
+                            onClick={retryFailed}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            {retryLabel}
+                          </button>
+                        </>
+                      )}
                       {staleTerminology && (
                         <>
                           <div className="-mx-1 my-1 border-t border-border" />
@@ -317,6 +363,26 @@ export function TranslatePill({
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      {badge.mounted && (
+        <button
+          type="button"
+          data-state={badge.state}
+          onClick={retryFailed}
+          aria-label={retryLabel}
+          title={retryLabel}
+          className={cn(
+            "pointer-events-auto absolute -top-2 -left-2 flex h-5 min-w-5 items-center justify-center gap-0.5 rounded-full bg-destructive px-1 text-[11px] font-medium text-white shadow-sm outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring",
+            "duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-50",
+            "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-50",
+            "motion-reduce:animate-none",
+          )}
+        >
+          <RotateCcw className="size-3" aria-hidden />
+          {(failedCount > 0 || badge.state === "closed") && shownCount > 0 && (
+            <span>{badge.state === "closed" ? shownCount : failedCount}</span>
+          )}
+        </button>
+      )}
     </div>
   );
 }

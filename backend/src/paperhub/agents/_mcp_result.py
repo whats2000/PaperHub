@@ -52,8 +52,30 @@ def normalize_mcp_result(raw: Any) -> Any:
         else:
             return raw
 
-    # Step 2 — unwrap {"result": X} envelope emitted by FastMCP for list returns.
-    if isinstance(raw, dict) and set(raw.keys()) == {"result"}:
+    # Step 2 — unwrap {"result": X} (FastMCP list-return envelope) and the
+    # meta-in-payload envelope {"result": X, "_meta": {...}}.
+    if isinstance(raw, dict) and set(raw.keys()) in ({"result"}, {"result", "_meta"}):
         return raw["result"]
 
     return raw
+
+
+def split_mcp_result(raw: Any) -> tuple[Any, dict[str, Any]]:
+    """``(payload, meta)``: like :func:`normalize_mcp_result`, but also returns
+    the diagnostic ``_meta`` of a ``{"result": X, "_meta": {...}}`` envelope
+    (``{}`` when there is none) so the caller can record it on its tracer step.
+    """
+    meta: dict[str, Any] = {}
+    if isinstance(raw, str):
+        raw = normalize_mcp_result(raw) if raw.strip()[:1] != "{" else _loads(raw)
+    if isinstance(raw, dict) and set(raw.keys()) == {"result", "_meta"}:
+        m = raw["_meta"]
+        meta = m if isinstance(m, dict) else {}
+    return normalize_mcp_result(raw), meta
+
+
+def _loads(raw: str) -> Any:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw

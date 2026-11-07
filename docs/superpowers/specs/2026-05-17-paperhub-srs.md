@@ -1004,7 +1004,7 @@ Markers: **[user]** = decided by the user in the 2026-11-05 design session; **[c
    - Left: one row per agent stage — stacked explicit/implicit bar, total, 4-week sparkline and week-over-week delta; the **top stage is preselected**.
    - Right (permanent pane): the selected stage's cases (question, explicit/implicit, run, "view conversation" / "view trace"), checkboxes, and **Send to G1 to-label (N)** — the G1 bridge below.
    - "Other reason" texts with counts, each with **promote to preset** — manual only, no automatic promotion [call].
-3. **"How good are the ideas?" — ideation feedback** (a separate block, H3 → flywheel): save rate, "worked" rate after trying, dismissal reasons; **Write to ideation eval data** sends them to the G1 inbox (§III-10.3 *Idea management*).
+3. **"How good are the ideas?" — ideation feedback** (a separate block, H3 → flywheel): save rate, "worked" rate after trying, dismissal reasons; **Write to ideation eval data** sends them to the G1 inbox (§III-10.3 *Idea management*). This block ships in H3 (moved from H2), since it needs H3's idea lifecycle.
 
 - **Export training data** is a header action opening a dialog: options (below) with a **live summary** of what will be exported (counts per format, whether private documents are included) before writing.
 - Charts on this page follow the dataviz rules: the explicit-vs-implicit stacked bars use two categorical colours that pass the validator on both surfaces (all-pairs), with a legend, direct totals, hover values and a table view.

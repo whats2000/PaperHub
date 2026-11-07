@@ -4,6 +4,7 @@ import {
   TR_STYLE_ID,
   attachHtmlTranslation,
   extractBlocks,
+  hasTranslatableBlocks,
   removeTranslations,
   renderTranslation,
 } from "@/lib/htmlTranslation";
@@ -391,6 +392,166 @@ describe("attachHtmlTranslation: stale terminology", () => {
     expect(stale.at(-1)).toBe(true);
     see(1, false);
     expect(stale.at(-1)).toBe(false);
+    handle();
+  });
+});
+
+describe("extractBlocks: references and bylines (QA F1)", () => {
+  it("skips author/date lines, bibliographies and the References section", () => {
+    const doc = makeDoc(
+      '<h1 class="title">Attention</h1>' +
+        '<p class="author">Ashish Vaswani</p>' +
+        '<p class="date">June 2017</p>' +
+        "<p>Shanghai Institute of Optics, Chinese Academy of Sciences, Shanghai 201800, China</p>" +
+        "<p>* Correspondence: sshan@mail.shcnc.ac.cn</p>" +
+        "<p>doi:10.3390/app8081379</p>" +
+        "<p>Keywords: Deep Learning, Transformer Models</p>" +
+        "<h2>Results</h2>" +
+        "<p>The model wins on every benchmark we tried.</p>" +
+        '<h2 id="references">References</h2>' +
+        "<ol><li><p>A. Vaswani et al. Attention is all you need. In NeurIPS, 2017.</p></li></ol>" +
+        "<p>Jimmy Ba, Jamie Kiros. Layer normalization. 2016.</p>" +
+        "<h2>Appendix</h2>" +
+        "<p>Extra tables follow here.</p>" +
+        '<div class="thebibliography"><p>Dzmitry Bahdanau and Yoshua Bengio. Neural machine translation by jointly learning to align.</p></div>',
+    );
+    const texts = extractBlocks(doc).map((b) => b.text);
+    expect(texts).toEqual([
+      "Attention",
+      "Keywords: Deep Learning, Transformer Models",
+      "Results",
+      "The model wins on every benchmark we tried.",
+      "Appendix",
+      "Extra tables follow here.",
+    ]);
+  });
+
+  it("keeps keys stable: a skipped block still takes its index", () => {
+    const doc = makeDoc(
+      '<p class="author">Yi Tay</p><p>First real paragraph here.</p>',
+    );
+    expect(extractBlocks(doc).map((b) => b.key)).toEqual(["h:1"]);
+  });
+});
+
+describe("hasTranslatableBlocks (QA B2)", () => {
+  it("is false for a raw-LaTeX <pre> fallback render", () => {
+    expect(hasTranslatableBlocks(makeDoc("<pre>\\section{Intro} text</pre>"))).toBe(false);
+    expect(hasTranslatableBlocks(makeDoc("<p>Some prose.</p>"))).toBe(true);
+  });
+});
+
+describe("translation text contrast (QA F4)", () => {
+  it("renders the translation darker than the muted pending/unavailable states", () => {
+    const doc = makeDoc("<p>Hello.</p>");
+    renderTranslation(extractBlocks(doc)[0]!, ok("h:0", "你好。"));
+    const css = doc.getElementById(TR_STYLE_ID)!.textContent;
+    const inner = css.slice(css.indexOf(".ph-tr-inner {"));
+    expect(inner.slice(0, inner.indexOf("}"))).not.toContain("oklch(0.556 0 0)");
+    expect(css).toMatch(/data-ph-tr-state="pending"[^{]*\{[^}]*oklch\(0\.556 0 0\)/);
+  });
+});
+
+describe("scroll position (QA F7)", () => {
+  /** A document with a window (an iframe's), as in the Citation Canvas. */
+  function frameDoc(body: string): Document {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument!;
+    doc.body.innerHTML = body;
+    return doc;
+  }
+
+  function stubLayout(doc: Document, blockBottom: number) {
+    const win = doc.defaultView!;
+    const anchor = doc.createElement("p");
+    anchor.textContent = "anchor";
+    doc.body.appendChild(anchor);
+    let anchorTop = 100;
+    anchor.getBoundingClientRect = () => ({ top: anchorTop } as DOMRect);
+    doc.elementFromPoint = () => anchor;
+    const first = doc.body.firstElementChild!;
+    first.getBoundingClientRect = () => ({ top: blockBottom - 40, bottom: blockBottom } as DOMRect);
+    const scrollBy = vi.fn();
+    win.scrollBy = scrollBy;
+    return { scrollBy, grow: (px: number) => (anchorTop += px) };
+  }
+
+  it("opens a box above the viewport at once and scrolls by the shift", () => {
+    const doc = frameDoc("<p>Above the fold.</p>");
+    const { scrollBy, grow } = stubLayout(doc, -50);
+    const [block] = extractBlocks(doc);
+    // The insert pushes the anchor down by 60px; the view follows it.
+    const origAfter = block!.el.after.bind(block!.el);
+    block!.el.after = (...n: (string | Node)[]) => {
+      origAfter(...n);
+      grow(60);
+    };
+    const box = renderTranslation(block!, ok("h:0", "摺疊上方"));
+    expect(box.hasAttribute("data-open")).toBe(true);
+    expect(scrollBy).toHaveBeenCalledWith(0, 60);
+  });
+
+  it("holds an on-screen cited highlight still while boxes above it open", () => {
+    const doc = frameDoc('<p>Above the citation.</p><p><span class="ph-cite-hl">cited</span></p>');
+    const win = doc.defaultView!;
+    const [first] = extractBlocks(doc);
+    const hl = doc.querySelector(".ph-cite-hl")!;
+    let hlTop = 444;
+    hl.getBoundingClientRect = () => ({ top: hlTop, bottom: hlTop + 20 } as DOMRect);
+    first!.el.getBoundingClientRect = () => ({ top: 150, bottom: 200 } as DOMRect);
+    const scrollBy = vi.fn();
+    win.scrollBy = scrollBy;
+    const origAfter = first!.el.after.bind(first!.el);
+    first!.el.after = (...n: (string | Node)[]) => {
+      origAfter(...n);
+      hlTop += 306; // the box pushes the highlight down (444 -> 750)
+    };
+    const box = renderTranslation(first!, ok("h:0", "引文上方"));
+    expect(box.hasAttribute("data-open")).toBe(true);
+    expect(scrollBy).toHaveBeenCalledWith(0, 306);
+  });
+
+  it("animates a box in view and leaves the scroll alone", () => {
+    vi.useFakeTimers();
+    const doc = frameDoc("<p>In view.</p>");
+    const { scrollBy } = stubLayout(doc, 300);
+    const box = renderTranslation(extractBlocks(doc)[0]!, ok("h:0", "可見"));
+    expect(box.hasAttribute("data-open")).toBe(false);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachHtmlTranslation: retry all failed (QA F2)", () => {
+  it("reports failures and retries them all at once", async () => {
+    const doc = makeDoc("<p>Hello there.</p><p>Second one here.</p>");
+    let fail = true;
+    const send = (req: TranslateRequest): Promise<TranslateResponse> =>
+      Promise.resolve({
+        results: req.blocks.map((b) =>
+          fail
+            ? { key: b.key, status: "unavailable" as const, text: null, model: null, stale_terminology: false }
+            : ok(b.key, "好。"),
+        ),
+      });
+    const statuses: { failed: number; paused: boolean }[] = [];
+    const handle = attachHtmlTranslation(doc, {
+      paperId: 1,
+      language: "繁體中文",
+      fullPaper: true,
+      send,
+      onStatusChange: (s) => statuses.push(s),
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statuses.at(-1)).toEqual({ failed: 2, paused: false });
+    fail = false;
+    handle.retryFailed();
+    doc.querySelectorAll(".ph-tr").forEach((b) =>
+      expect(b.getAttribute("data-ph-tr-state")).toBe("pending"),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statuses.at(-1)).toEqual({ failed: 0, paused: false });
+    expect([...doc.querySelectorAll(".ph-tr")].map((b) => b.textContent)).toEqual(["好。", "好。"]);
     handle();
   });
 });

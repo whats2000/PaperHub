@@ -1,0 +1,216 @@
+{
+  "header": {
+    "library": "ライブラリ：{{count}} 件",
+    "libraryPrivate": "ライブラリ：{{count}} 件（うち非公開 {{private}} 件）"
+  },
+  "view": {
+    "aria": "表示",
+    "graph": "グラフ",
+    "cards": "カード"
+  },
+  "switcher": {
+    "aria": "課題：{{label}}",
+    "menu": "課題",
+    "explore": "自由探索",
+    "exploreSub": "ライブラリ内の分野横断の組み合わせ",
+    "yourProblems": "あなたの課題",
+    "ideaCount_one": "アイデア {{count}} 件",
+    "ideaCount_other": "アイデア {{count}} 件",
+    "generating": "生成中…",
+    "new": "新しい課題を記述",
+    "listFailed": "課題を読み込めませんでした",
+    "retry": "再試行"
+  },
+  "entry": {
+    "label": "課題",
+    "placeholder": "新しい課題を記述：行き詰まっている点、制約条件",
+    "tried": "すでに試したこと",
+    "triedPlaceholder": "試したアプローチと、うまくいかなかった理由（任意）",
+    "submit": "分野横断のアイデアを探す",
+    "failed": "課題を作成できませんでした",
+    "counter": "{{count}}/{{max}}"
+  },
+  "filter": {
+    "aria": "ステータスでアイデアを絞り込む",
+    "active": "進行中",
+    "saved": "保存済み",
+    "trying": "試行中",
+    "done": "結果あり",
+    "dismissed": "除外済み"
+  },
+  "state": {
+    "generating": "課題に対する分野横断のアイデアを探しています…",
+    "generatingSub": "ライブラリのメカニズムカードを読み、分野をまたいで組み合わせています。",
+    "failed": "この課題のアイデア生成に失敗しました。",
+    "loadFailed": "アイデアを読み込めませんでした。",
+    "retry": "再試行",
+    "emptyExplore": "分野横断の組み合わせはまだありません。",
+    "emptyProblem": "この課題のアイデアはまだありません。",
+    "emptyHint": "文書は分野ごとにまとめられています。文書をクリックすると分野を確認・編集できます。",
+    "summarising": "文書を要約しています — {{ready}}/{{total}}",
+    "retryFailed": "この課題を再試行できませんでした",
+    "skipped_one": "{{count}} 件の文書を分析できませんでした",
+    "skipped_other": "{{count}} 件の文書を分析できませんでした",
+    "noRelevant": "ライブラリにこの問題に関連する内容がありません。",
+    "noRelevantHint": "このテーマの論文をライブラリに追加するか、問題の書き方を変えてもう一度お試しください。"
+  },
+  "graph": {
+    "aria": "アイデアグラフ",
+    "source": "ソース",
+    "target": "ターゲット",
+    "problem": "あなたの課題",
+    "private": "非公開ドキュメント",
+    "ideaLabel": "{{title}}：{{source}} → {{target}}（{{status}}）",
+    "status": {
+      "new": "新規",
+      "saved": "保存済み",
+      "trying": "試行中",
+      "worked": "効果あり",
+      "failed": "効果なし",
+      "dismissed": "除外済み"
+    }
+  },
+  "drawer": {
+    "aria": "詳細",
+    "close": "閉じる",
+    "ideaKind": "異分野アイデア · {{status}}",
+    "source": "メカニズムの出典",
+    "target": "適用先",
+    "yourProblem": "あなたが記述した課題",
+    "why": "なぜ当てはまるか",
+    "note": "メモ",
+    "document": "文書",
+    "documentPrivate": "文書 · 非公開",
+    "domains": "分野タグ",
+    "relatedIdeas": "関連アイデア",
+    "none": "まだありません",
+    "domain": "分野",
+    "domainDocs": "文書（{{count}}）",
+    "problem": "あなたの課題",
+    "tried": "試したこと（今後は提案されません）",
+    "triedNone": "記載なし",
+    "problemIdeas": "この課題のアイデア（{{count}}）",
+    "from": "出典：{{title}}",
+    "missing": "この項目はグラフにもうありません。"
+  },
+  "zoom": {
+    "aria": "ズーム",
+    "in": "拡大",
+    "out": "縮小",
+    "fit": "全体を表示"
+  },
+  "legend": {
+    "title": "凡例",
+    "domains": "分野（色）",
+    "other": "その他",
+    "relation": "関係",
+    "citation": "引用",
+    "idea": "アイデア：出典 → 適用先",
+    "status": "アイデアの状態",
+    "kept": "保存／試行中／有効",
+    "ended": "無効／除外",
+    "document": "文書",
+    "size": "大きさ = 関連アイデア数",
+    "otherHint": "上位8分野以外はこの色を共有します"
+  },
+  "detail": {
+    "sections": "引用セクション",
+    "openSection": "このアイデアのチャットを開き、{{section}} を引用キャンバスに表示します",
+    "status": "ステータス",
+    "statusAria": "アイデアのステータス",
+    "setStatus": {
+      "saved": "保存",
+      "trying": "試行中",
+      "worked": "効果あり",
+      "failed": "効果なし"
+    },
+    "statusToast": "ステータスを「{{status}}」に変更し、発想フィードバックとして記録しました",
+    "statusFailed": "アイデアを更新できませんでした",
+    "note": "メモ",
+    "notePlaceholder": "例：指導教員と相談済み。来週小規模に実験する",
+    "saving": "保存中…",
+    "saved": "保存しました",
+    "saveFailed": "メモを保存できませんでした",
+    "openChat": "チャットで深掘り",
+    "continueChat": "チャットを続ける",
+    "chatFailed": "チャットを開けませんでした",
+    "dismiss": "除外",
+    "dismissed": "除外済み · {{reasons}}",
+    "noReason": "理由なし",
+    "undo": "元に戻す",
+    "undoFailed": "除外を元に戻せませんでした",
+    "newChat": "新しいチャット",
+    "newChatHint": "このアイデアについて別のチャットを始める"
+  },
+  "dismiss": {
+    "title": "合わない理由は？",
+    "reasons": {
+      "already_tried": "試したことがある",
+      "not_feasible": "実現できない",
+      "analogy_fails": "類推が成り立たない",
+      "not_novel": "新しさがない",
+      "other": "その他"
+    },
+    "joiner": "、",
+    "notePlaceholder": "補足（任意）",
+    "noteLabel": "除外のメモ",
+    "hint": "除外理由は発想の改善に使われ、同じ問題に似たアイデアは再提案されません。",
+    "cancel": "キャンセル",
+    "confirm": "除外する",
+    "toast": "「{{title}}」を除外しました",
+    "failed": "アイデアを除外できませんでした"
+  },
+  "domainEditor": {
+    "label": "分野タグ（手動の変更は再分析で上書きされません）",
+    "remove": "{{name}} を削除",
+    "openDomain": "{{name}} の名前変更・統合",
+    "addLabel": "分野を追加",
+    "addPlaceholder": "分野を追加…",
+    "create": "新しい分野「{{name}}」を作成",
+    "suggestions": "分野の候補",
+    "lastDomain": "文書には少なくとも 1 つの分野が必要です",
+    "failed": "分野を更新できませんでした"
+  },
+  "domain": {
+    "rename": "名前を変更",
+    "save": "保存",
+    "renamed": "分野名を更新しました",
+    "mergeInto": "統合先",
+    "merge": "統合",
+    "merged": "{{name}} に統合しました",
+    "mergeHint": "この分野の文書は選んだ分野に移り、この分野はなくなります。",
+    "failed": "分野を更新できませんでした",
+    "nameTaken": "「{{name}}」という分野はすでにあります。代わりに統合しますか？"
+  },
+  "kanban": {
+    "explore": "自由探索：ライブラリ内の分野横断の組み合わせ",
+    "problem": "あなたの課題：{{text}}",
+    "empty": "アイデアなし",
+    "to": "→",
+    "chats_one": "チャット {{count}} 件",
+    "chats_other": "チャット {{count}} 件",
+    "columns": {
+      "new": "新規",
+      "saved": "保存",
+      "trying": "試行中",
+      "done": "結果あり",
+      "dismissed": "除外済み"
+    }
+  },
+  "chat": {
+    "prefillProblem": "アイデア「{{title}}」を深掘りしたいです。\n仕組みの出典：「{{source}}」の {{sourceSection}} セクション。\n私の課題：{{problem}}\n合いそうな理由：{{rationale}}\nこの仕組みを私の課題にどう応用できますか？類推が成り立たなくなるのはどこですか？",
+    "prefillExplore": "アイデア「{{title}}」を深掘りしたいです。\n仕組みの出典：「{{source}}」の {{sourceSection}} セクション。\n応用先：「{{target}}」の {{targetSection}} セクション。\n合いそうな理由：{{rationale}}\nこの仕組みはどう移せますか？類推が成り立たなくなるのはどこですか？"
+  },
+  "explore": {
+    "run": "新しい組み合わせを探す",
+    "running": "探索中…",
+    "noNew": "今回は新しい組み合わせはありません",
+    "found_one": "新しい組み合わせ {{count}} 件",
+    "found_other": "新しい組み合わせ {{count}} 件",
+    "failed": "自由探索に失敗しました",
+    "overlay": "ライブラリ内で分野横断の組み合わせを探しています…"
+  },
+  "section": {
+    "fullText": "全文"
+  }
+}

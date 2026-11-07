@@ -26,6 +26,8 @@ class EvalConfig:
     store: str = "benchmark/agent/results/experiments.jsonl"
     prompts_dir: str = "benchmark/agent/prompts"
     backend: str = "auto"
+    concurrency: int = 8
+    """Parallel LLM calls per experiment (concurrent backend)."""
 
 
 def load_eval_config(path: str | Path) -> EvalConfig:
@@ -45,4 +47,5 @@ def load_eval_config(path: str | Path) -> EvalConfig:
                       judge_model=(str(ev["judge_model"]) if ev.get("judge_model") else None),
                       store=str(ev.get("store", "benchmark/agent/results/experiments.jsonl")),
                       prompts_dir=str(ev.get("prompts_dir", "benchmark/agent/prompts")),
-                      backend=str(ev.get("backend", "auto")))
+                      backend=str(ev.get("backend", "auto")),
+                      concurrency=int(ev.get("concurrency", 8)))

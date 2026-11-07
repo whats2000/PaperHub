@@ -94,7 +94,15 @@
     },
     "PAPERHUB_FEEDBACK_REVIEW_MODEL": {
       "label": "反馈审查模型",
-      "help": "检查被标记的回答是否真的有误。默认使用小型层级。"
+      "help": "检查被标记的回答是否真的有误。默认使用旗舰层级。"
+    },
+    "PAPERHUB_IDEATION_CARD_MODEL": {
+      "label": "机制卡构建模型",
+      "help": "为构思整理每份文档的问题与机制。默认使用小型层级。"
+    },
+    "PAPERHUB_IDEATION_MODEL": {
+      "label": "构思模型",
+      "help": "根据机制卡提出跨领域点子。默认使用旗舰层级。"
     },
     "PAPERHUB_REPORT_RESOLVE_MODEL": {
       "label": "幻灯片解析器",
@@ -132,6 +140,10 @@
     "PAPERHUB_FEEDBACK_KEYWORDS": {
       "label": "纠正关键词",
       "help": "以逗号分隔、会将上一条回答标记为待审查的词语。留空则使用内置的中文／英文／日文列表。"
+    },
+    "PAPERHUB_IDEATION_PROBLEM_THINKING_BUDGET": {
+      "label": "点子推理预算（问题模式）",
+      "help": "限制针对问题提出点子时每次调用的推理 token 数。0 = 不限制。自由探索永不限制。"
     },
     "PAPERHUB_MEMORY_RECALL": {
       "label": "注入回忆的记忆",

@@ -21,6 +21,7 @@ def test_load_eval_config(tmp_path):
     cfg = load_eval_config(toml)
     assert cfg.stage == "router" and cfg.reps == 2 and cfg.backend == "auto"
     assert cfg.variants == ["v1", "v2"] and cfg.testsets[0].name == "core"
+    assert cfg.concurrency == 8  # default parallel LLM calls per experiment
 
 
 @pytest.mark.asyncio
@@ -30,7 +31,7 @@ async def test_run_sweep_grid_and_matrix(tmp_path, monkeypatch):
     _write(core, ['{"case_id":"a","stage":"router","variables":{"user_message":"q","enabled_refs_count":1,"slide_attached":false},"expect":{"intent":"paper_qa"}}'])
     _write(reg, ['{"case_id":"b","stage":"router","variables":{"user_message":"d","enabled_refs_count":1,"slide_attached":false},"expect":{"intent":"slides"}}'])
     toml = tmp_path / "router.eval.toml"
-    toml.write_text('[eval]\nstage="router"\nmodel="m"\nreps=1\nvariants=["v1","v2"]\n'
+    toml.write_text('[eval]\nstage="router"\nmodel="m"\nreps=1\nconcurrency=3\nvariants=["v1","v2"]\n'
                     f'store="{(tmp_path / "e.jsonl").as_posix()}"\nprompts_dir="{tmp_path.as_posix()}"\n\n'
                     f'[[testsets]]\nname="core"\ncorpus="{core.as_posix()}"\n\n'
                     f'[[testsets]]\nname="regression"\ncorpus="{reg.as_posix()}"\n', encoding="utf-8")
@@ -38,6 +39,7 @@ async def test_run_sweep_grid_and_matrix(tmp_path, monkeypatch):
 
     async def _fake_run_experiment(spec, version, cases, **kw):
         # v1 -> always paper_qa; v2 -> always slides. core expects paper_qa, regression expects slides.
+        assert kw["concurrency"] == 3
         intent = "slides" if version == "v2" else "paper_qa"
         scores = [CaseScore(c.case_id, 0, 1.0 if c.expect["intent"] == intent else 0.0, 100, "", {}) for c in cases]
         mean = sum(s.score for s in scores) / len(scores)

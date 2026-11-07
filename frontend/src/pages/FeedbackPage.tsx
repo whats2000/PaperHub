@@ -3,6 +3,7 @@ import { BarChart3, Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ConfirmQueue } from "@/components/feedback/ConfirmQueue";
+import { IdeationFeedback } from "@/components/feedback/IdeationFeedback";
 import { ExportDialog } from "@/components/feedback/ExportDialog";
 import { StageAnalysis } from "@/components/feedback/StageAnalysis";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -46,6 +47,21 @@ export function FeedbackPage() {
       >
         <StageAnalysis refreshKey={refreshKey} />
       </section>
+      {/* Ideation feedback, below the analysis; collapses with it while the
+          queue is expanded. */}
+      <div
+        data-testid="feedback-ideation"
+        aria-hidden={expanded || undefined}
+        inert={expanded}
+        className={cn(
+          "grid shrink-0 transition-[grid-template-rows,opacity] duration-[280ms] ease-out motion-reduce:transition-none",
+          expanded ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <IdeationFeedback />
+        </div>
+      </div>
     </div>
   );
 }

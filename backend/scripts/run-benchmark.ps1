@@ -27,6 +27,10 @@
     carried over; only failed/missing cases are re-run, merged into one report.
     Useful after a transient network drop mid-sweep.
 
+.PARAMETER KeepSessions
+    Keep the chat sessions the run created. By default every session the run
+    created is deleted at the end, also when a case fails or the run is stopped.
+
 .EXAMPLE
     scripts/run-benchmark.ps1
     scripts/run-benchmark.ps1 -Config benchmark/my-cases.toml -Only qa-01-mha
@@ -38,7 +42,8 @@ param(
     [string]$Only = "",
     [string]$Resume = "",
     [switch]$Judge,
-    [string]$JudgeModel = ""
+    [string]$JudgeModel = "",
+    [switch]$KeepSessions
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +81,7 @@ try {
     }
     if ($Judge) { $runnerArgs += "--judge" }
     if ($JudgeModel) { $runnerArgs += @("--judge-model", $JudgeModel) }
+    if ($KeepSessions) { $runnerArgs += "--keep-sessions" }
     & uv @runnerArgs
     $code = $LASTEXITCODE
 } finally {

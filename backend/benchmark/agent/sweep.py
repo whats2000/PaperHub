@@ -38,6 +38,7 @@ async def run_sweep(
             result = await run_experiment(
                 spec, variant, cases, model=cfg.model, reps=cfg.reps,
                 judge_model=cfg.judge_model, prompts_dir=cfg.prompts_dir, backend=cfg.backend,
+                concurrency=cfg.concurrency,
                 count_tokens=count_tokens, git_commit=git_commit, created_at=created_at,
                 corpus_name=ts.name, notes=f"sweep:{ts.name}")
             meta, rows = to_store_payload(result)

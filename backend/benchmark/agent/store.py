@@ -15,6 +15,7 @@ from typing import Any
 _META_KEYS = (
     "id", "created_at", "git_commit", "stage", "prompt_version", "model",
     "corpus", "n_cases", "reps", "mean_score", "mean_tokens_in", "notes",
+    "mean_completion_tokens", "mean_reasoning_tokens", "mean_latency_ms",
 )
 
 

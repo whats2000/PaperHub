@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any, TypeVar
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 
 from paperhub.config import llm_timeout_s, small_tier_model
 from paperhub.llm.prompts.registry import PromptRegistry
-from paperhub.tracing.tracer import note_model_fallback
+from paperhub.tracing.tracer import note_llm_usage, note_model_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,17 @@ def _is_transient_stream_error(exc: BaseException) -> bool:
     return any(s in needle for s in _TRANSIENT_STREAM_SUBSTRINGS)
 
 
+async def _acompletion_noted(*, model: str, **kwargs: Any) -> Any:
+    """``litellm.acompletion`` that notes the call's token usage (reasoning
+    tokens included) and latency on the active trace step."""
+    started = time.monotonic()
+    response = await litellm.acompletion(model=model, **kwargs)
+    usage = response.get("usage") if isinstance(response, dict) else getattr(
+        response, "usage", None)
+    note_llm_usage(model, usage, int((time.monotonic() - started) * 1000))
+    return response
+
+
 class LiteLlmAdapter:
     def __init__(
         self,
@@ -173,14 +185,18 @@ class LiteLlmAdapter:
         tier for THIS call only and record the degrade on the trace step. A
         permanent error (bad request / auth) is re-raised immediately. If the
         fallback ALSO fails, that error propagates — the provider is likely down.
-        The downgrade is per-call, so the next turn tries the flagship again."""
+        The downgrade is per-call, so the next turn tries the flagship again.
+
+        ``fallback_model`` (keyword) overrides the adapter's fallback tier for
+        this call: ``""`` disables the downgrade, a model name replaces it."""
         messages = self._messages(slot, variables, history)
         timeout = kwargs.pop("timeout", self._timeout)
+        fallback_override = kwargs.pop("fallback_model", None)
         base: dict[str, Any] = dict(kwargs)
         if timeout is not None:
             base["timeout"] = timeout
 
-        fb = self._fallback_model
+        fb = self._fallback_model if fallback_override is None else fallback_override
         if not fb or model == fb:
             # Already the small tier (or no fallback configured): no lower tier
             # to fall to, so a failure simply propagates.
@@ -217,7 +233,7 @@ class LiteLlmAdapter:
         # the model is constrained at the API boundary, not just by prompt phrasing.
         if _supports_response_schema(model):
             try:
-                response = await litellm.acompletion(
+                response = await _acompletion_noted(
                     model=model,
                     messages=messages,
                     response_format=response_model,
@@ -270,7 +286,7 @@ class LiteLlmAdapter:
         # Don't let a caller-supplied response_format collide with ours.
         call_kwargs = {k: v for k, v in kwargs.items() if k != "response_format"}
         try:
-            response = await litellm.acompletion(
+            response = await _acompletion_noted(
                 model=model,
                 messages=hinted,
                 response_format={"type": "json_object"},
@@ -279,7 +295,7 @@ class LiteLlmAdapter:
         except BadRequestError:
             # Provider doesn't support json_object either — last resort: rely on
             # the schema instruction in the prompt with no response_format.
-            response = await litellm.acompletion(
+            response = await _acompletion_noted(
                 model=model, messages=hinted, **call_kwargs,
             )
         content = response["choices"][0]["message"]["content"]

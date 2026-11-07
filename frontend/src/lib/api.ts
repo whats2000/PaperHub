@@ -1,3 +1,4 @@
+import i18n from "@/lib/i18n";
 import type {
   ReferenceItem,
   LibraryItem,
@@ -41,6 +42,22 @@ import type {
   RunFeedback,
   Stage,
 } from "@/types/feedback";
+import type {
+  DocumentDomainsPut,
+  DocumentOut,
+  DomainPatch,
+  ExploreResponse,
+  ExploreStatus,
+  FeedbackToG1Response,
+  GraphDomain,
+  GraphResponse,
+  Idea,
+  IdeaChatResponse,
+  IdeaPatch,
+  IdeationFeedbackSummary,
+  Problem,
+  ProblemCreate,
+} from "@/types/ideation";
 
 export const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
@@ -182,7 +199,7 @@ export async function forkSession(
 ): Promise<ForkResult> {
   return apiFetch<ForkResult>(`/sessions/${sessionId}/fork`, {
     method: "POST",
-    body: JSON.stringify({ run_id: runId }),
+    body: JSON.stringify({ run_id: runId, ui_language: i18n.resolvedLanguage ?? i18n.language }),
   });
 }
 
@@ -409,6 +426,13 @@ export async function uploadPdf(
  * Throws on non-2xx (including 404 when no deck has been generated yet). */
 export async function getDeck(sessionId: number): Promise<DeckMeta> {
   return apiFetch<DeckMeta>(`/sessions/${sessionId}/deck`);
+}
+
+/** Deck metadata for a session, or null when it has none
+ * (GET /sessions/{id}/deck?optional=1). For probes on chats that usually
+ * have no deck: a 404 would log a browser console error for that normal case. */
+export async function getDeckIfAny(sessionId: number): Promise<DeckMeta | null> {
+  return apiFetch<DeckMeta | null>(`/sessions/${sessionId}/deck?optional=1`);
 }
 
 /** Manually set the speaker note for the slide occupying `page`. Returns the
@@ -717,6 +741,12 @@ export async function getRunFeedbackGuess(runId: number): Promise<FeedbackGuess>
   return apiFetch<FeedbackGuess>(`/feedback/runs/${runId}/guess`);
 }
 
+/** How many feedback rows (thumbs + reviewer rows) hang off a chat's runs. */
+export async function getSessionFeedbackCount(sessionId: number): Promise<number> {
+  const r = await apiFetch<{ count: number }>(`/feedback/sessions/${sessionId}/count`);
+  return r.count;
+}
+
 /** Every explicit feedback row of a session, to restore the thumbs on reload. */
 export async function listSessionFeedback(sessionId: number): Promise<RunFeedback[]> {
   return apiFetch<RunFeedback[]>(`/feedback/runs?session_id=${sessionId}`);
@@ -770,7 +800,7 @@ function exportQuery(opts: ExportRequest): string {
   const q = new URLSearchParams();
   q.set("include_implicit", String(opts.include_implicit ?? false));
   q.set("include_private", String(opts.include_private ?? true));
-  q.set("cited_only", String(opts.cited_only));
+  q.set("cited_only", String(opts.cited_only ?? false));
   if (opts.since) q.set("since", opts.since);
   if (opts.until) q.set("until", opts.until);
   if (opts.model) q.set("model", opts.model);
@@ -793,4 +823,92 @@ export async function postExport(body: ExportRequest): Promise<ExportResult> {
 /** Download URL of one exported file. */
 export function exportFileUrl(dir: string, file: string): string {
   return `${API_BASE_URL}/feedback/exports/${encodeURIComponent(dir)}/${encodeURIComponent(file)}`;
+}
+
+// ---- Ideation (Plan H3) ----
+
+/** The ideation graph of one scope: a problem's ideas, or free exploration. */
+export async function getIdeationGraph(scope: "explore" | number): Promise<GraphResponse> {
+  const q = scope === "explore" ? "explore=1" : `problem_id=${scope}`;
+  return apiFetch<GraphResponse>(`/ideation/graph?${q}`);
+}
+
+export async function listIdeationProblems(): Promise<Problem[]> {
+  return apiFetch<Problem[]>("/ideation/problems");
+}
+
+/** Create a problem; the backend starts generating its ideas in the background. */
+export async function createIdeationProblem(body: ProblemCreate): Promise<Problem> {
+  return apiFetch<Problem>("/ideation/problems", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getIdeationProblem(problemId: number): Promise<Problem> {
+  return apiFetch<Problem>(`/ideation/problems/${problemId}`);
+}
+
+/** Re-run a failed problem's generation (409 unless it failed). */
+export async function retryIdeationProblem(problemId: number): Promise<Problem> {
+  return apiFetch<Problem>(`/ideation/problems/${problemId}/retry`, { method: "POST" });
+}
+
+export async function patchIdeationIdea(ideaId: number, body: IdeaPatch): Promise<Idea> {
+  return apiFetch<Idea>(`/ideation/ideas/${ideaId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Start a free-exploration run in the background (a second call joins the running one). */
+export async function postIdeationExplore(language?: string): Promise<ExploreResponse> {
+  // Free exploration has no problem text to take a language from: send the UI's.
+  return apiFetch<ExploreResponse>("/ideation/explore", {
+    method: "POST",
+    ...(language ? { body: JSON.stringify({ language }) } : {}),
+  });
+}
+
+/** Whether a free-exploration run is in flight, and how the latest one ended. */
+export async function getIdeationExploreStatus(): Promise<ExploreStatus> {
+  return apiFetch<ExploreStatus>("/ideation/explore/status");
+}
+
+/** Restore a dismissed idea to the status it had before (prev_status). */
+export async function undoDismissIdeationIdea(ideaId: number): Promise<Idea> {
+  return apiFetch<Idea>(`/ideation/ideas/${ideaId}/undo-dismiss`, { method: "POST" });
+}
+
+/** Open a new chat session linked to the idea, with both documents attached. */
+export async function postIdeationIdeaChat(ideaId: number): Promise<IdeaChatResponse> {
+  return apiFetch<IdeaChatResponse>(`/ideation/ideas/${ideaId}/chat`, { method: "POST" });
+}
+
+/** Manually set a document's domains; re-analysis never overwrites the edit. */
+export async function putIdeationDocumentDomains(
+  docId: number,
+  body: DocumentDomainsPut,
+): Promise<DocumentOut> {
+  return apiFetch<DocumentOut>(`/ideation/documents/${docId}/domains`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Rename a domain or merge it into another; returns the domain list. */
+export async function patchIdeationDomain(domainId: number, body: DomainPatch): Promise<GraphDomain[]> {
+  return apiFetch<GraphDomain[]>(`/ideation/domains/${domainId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getIdeationFeedbackSummary(): Promise<IdeationFeedbackSummary> {
+  return apiFetch<IdeationFeedbackSummary>("/ideation/feedback-summary");
+}
+
+/** Append idea outcomes to the ideation eval data (the G1 inbox). */
+export async function postIdeationFeedbackToG1(): Promise<FeedbackToG1Response> {
+  return apiFetch<FeedbackToG1Response>("/ideation/feedback-to-g1", { method: "POST" });
 }

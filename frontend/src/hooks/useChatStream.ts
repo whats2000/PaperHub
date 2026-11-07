@@ -1,3 +1,4 @@
+import i18n from "@/lib/i18n";
 import { useCallback, useRef } from "react";
 import type {
   RoutingDecision,
@@ -82,6 +83,7 @@ export function useChatStream() {
           history,
           ...(currentViewPage !== undefined ? { current_view_page: currentViewPage } : {}),
           slide_attached: slideAttached,
+          ui_language: i18n.resolvedLanguage ?? i18n.language,
         },
         {
           onEvent: (event, data) => {

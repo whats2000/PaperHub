@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from paperhub.agents.idea_context import with_idea
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.llm.adapter import LlmAdapter
@@ -28,6 +29,7 @@ async def chitchat_stream(
         memory_context = await build_active_memory_block(
             conn, session_id=state.get("session_id")
         )
+    memory_context = with_idea(memory_context, state.get("idea_context"))
     async with tracer.step(agent="chitchat", tool="generate", model=model) as step:
         step.record_args({
             "user_message": user_message,

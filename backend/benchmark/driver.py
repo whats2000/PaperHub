@@ -38,6 +38,12 @@ def create_session() -> int:
     return int(r.json()["session_id"])
 
 
+def delete_session(session_id: int) -> None:
+    """Delete a chat session (soft delete once it has messages)."""
+    r = httpx.delete(f"{BASE}/sessions/{session_id}", timeout=30)
+    r.raise_for_status()
+
+
 def add_paper(session_id: int, pc_id: int) -> dict[str, Any]:
     """Attach an already-ingested paper_content row to the session (dedup hit)."""
     r = httpx.post(

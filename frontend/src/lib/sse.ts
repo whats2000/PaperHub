@@ -16,6 +16,8 @@ export interface ChatRequestBody {
   /** Whether the on-screen slide is attached as context for the QA agent.
    *  Always sent; false when no deck is open. Backend default: false. */
   slide_attached: boolean;
+  /** UI language code; the feedback reviewer writes its doubt in it. */
+  ui_language?: string;
 }
 
 export async function streamChat(
