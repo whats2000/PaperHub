@@ -5,7 +5,8 @@
     "viewingTitle": "{{title}} — viewing (not an active reference)",
     "addToReferences": "Add to references (include in future answers)",
     "add": "Add",
-    "close": "Close canvas"
+    "close": "Close canvas",
+    "closeReader": "Close reader"
   },
   "stale": "This citation's passage is no longer available — the paper may have been re-indexed.",
   "error": {

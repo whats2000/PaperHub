@@ -309,3 +309,38 @@ describe("CitationCanvas reading panel", () => {
     ).toHaveAttribute("aria-hidden", "true");
   });
 });
+
+describe("CitationCanvas standalone reader (Ideas page)", () => {
+  const paper9 = { paper_content_id: 9, title: "Paper C" };
+
+  it("shows the given paper, not the chat's references, and opens without the canvas store", async () => {
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body"),
+    );
+    expect(screen.getByRole("button", { name: "Paper C" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Paper A/ })).not.toBeInTheDocument();
+    expect(useCanvasStore.getState().open).toBe(false);
+  });
+
+  it("closes through its own callback and leaves the chat canvas alone", async () => {
+    const onClose = vi.fn();
+    render(<CitationCanvas standalone={{ papers: [paper9], onClose }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Close reader" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores citation and paper requests meant for the chat's canvas", async () => {
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body"),
+    );
+    act(() => useCanvasStore.getState().openCitation(42));
+    act(() => useCanvasStore.getState().openPaper(8));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body");
+    // The request stays for the chat canvas to consume.
+    expect(useCanvasStore.getState().requestedChunkId).toBe(42);
+    expect(useCanvasStore.getState().requestedPaperId).toBe(8);
+  });
+});

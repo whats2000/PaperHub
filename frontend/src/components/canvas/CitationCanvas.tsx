@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -56,9 +56,25 @@ interface DocEntry {
   pdfData?: Uint8Array;
 }
 
-export function CitationCanvas() {
+/** A paper the standalone reader shows. */
+export interface ReaderPaper {
+  paper_content_id: number;
+  title: string;
+}
+
+interface CitationCanvasProps {
+  /**
+   * Standalone reader (the Ideas page): shows these papers instead of the
+   * active chat's references, is always open, leaves the chat canvas's
+   * citation / paper requests for that canvas, and closes through onClose.
+   */
+  standalone?: { papers: ReaderPaper[]; onClose: () => void };
+}
+
+export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const { t } = useTranslation("canvas");
-  const open = useCanvasStore((s) => s.open);
+  const storeOpen = useCanvasStore((s) => s.open);
+  const open = standalone ? true : storeOpen;
   const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
   const requestedEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
   const requestNonce = useCanvasStore((s) => s.requestNonce);
@@ -81,10 +97,27 @@ export function CitationCanvas() {
       ? (sessions.find((s) => s.id === activeSessionId) ?? null)
       : null;
   const backendSessionId = activeSession?.backend_session_id ?? null;
-  const allRefs: ReferenceItem[] =
-    backendSessionId !== null
-      ? (referencesBySession[backendSessionId] ?? [])
-      : [];
+  const standalonePapers = standalone?.papers;
+  const allRefs: ReferenceItem[] = useMemo(
+    () =>
+      standalonePapers
+        ? standalonePapers.map((p) => ({
+            // Not a chat reference: no papers row, never toggled.
+            papers_id: -p.paper_content_id,
+            paper_content_id: p.paper_content_id,
+            enabled: true,
+            added_at: "",
+            arxiv_id: null,
+            title: p.title,
+            year: null,
+            kind: "",
+            is_private: false,
+          }))
+        : backendSessionId !== null
+          ? (referencesBySession[backendSessionId] ?? [])
+          : [],
+    [standalonePapers, backendSessionId, referencesBySession],
+  );
   const refs = allRefs.filter((r) => r.enabled);
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
@@ -358,7 +391,8 @@ export function CitationCanvas() {
   // requestNonce so the same chunk re-clicked re-resolves; consumes the request
   // so a later browse-mode open doesn't re-jump here.
   useEffect(() => {
-    if (!open || requestedChunkId == null) return;
+    // The standalone reader leaves chat citations to the chat's canvas.
+    if (standalone || !open || requestedChunkId == null) return;
     let cancelled = false;
     getChunk(requestedChunkId)
       .then(async (c) => {
@@ -426,6 +460,7 @@ export function CitationCanvas() {
   // from re-jumping here.
   const prevPaperNonceRef = useRef(useCanvasStore.getState().paperRequestNonce);
   useEffect(() => {
+    if (standalone) return;
     return useCanvasStore.subscribe((state) => {
       if (state.paperRequestNonce === prevPaperNonceRef.current) return;
       prevPaperNonceRef.current = state.paperRequestNonce;
@@ -453,8 +488,9 @@ export function CitationCanvas() {
   // References panel can mark the active row. `setActivePaperId` is a Zustand
   // action, not a React setter, so calling it in the effect body is fine.
   useEffect(() => {
+    if (standalone) return; // not the chat's canvas
     setActivePaperId(open ? effectivePaperId : null);
-  }, [open, effectivePaperId, setActivePaperId]);
+  }, [standalone, open, effectivePaperId, setActivePaperId]);
 
   const handleTabClick = (pid: number) => {
     // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
@@ -591,8 +627,8 @@ export function CitationCanvas() {
           size="icon"
           variant="ghost"
           className="h-7 w-7 shrink-0"
-          aria-label={t("panel.close")}
-          onClick={closeCanvas}
+          aria-label={standalone ? t("panel.closeReader", "Close reader") : t("panel.close")}
+          onClick={standalone ? standalone.onClose : closeCanvas}
         >
           <X className="h-4 w-4" />
         </Button>
