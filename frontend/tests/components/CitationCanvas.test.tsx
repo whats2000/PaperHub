@@ -343,4 +343,25 @@ describe("CitationCanvas standalone reader (Ideas page)", () => {
     expect(useCanvasStore.getState().requestedChunkId).toBe(42);
     expect(useCanvasStore.getState().requestedPaperId).toBe(8);
   });
+
+  it("highlights a citation it was given, for its own paper", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/papers/content/7/document`, () => HttpResponse.json({ mode: "pdf" })),
+      http.get(`${API_BASE_URL}/papers/content/7/pdf`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3, 4]).buffer, {
+          headers: { "Content-Type": "application/pdf" },
+        }),
+      ),
+    );
+    render(
+      <CitationCanvas
+        standalone={{ papers: [{ paper_content_id: 7, title: "Paper A" }], onClose: vi.fn(), citation: { chunkId: 42, nonce: 1 } }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-view")).toHaveTextContent("Expert collapse is mitigated."),
+    );
+    // Resolved by the reader itself; the chat canvas's request slot is untouched.
+    expect(useCanvasStore.getState().requestedChunkId).toBeNull();
+  });
 });

@@ -68,16 +68,26 @@ interface CitationCanvasProps {
    * active chat's references, is always open, leaves the chat canvas's
    * citation / paper requests for that canvas, and closes through onClose.
    */
-  standalone?: { papers: ReaderPaper[]; onClose: () => void };
+  standalone?: {
+    papers: ReaderPaper[];
+    onClose: () => void;
+    /** A passage to highlight; a new nonce re-highlights the same chunk. */
+    citation?: { chunkId: number; endChunkId?: number; nonce: number };
+  };
 }
 
 export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const { t } = useTranslation("canvas");
   const storeOpen = useCanvasStore((s) => s.open);
   const open = standalone ? true : storeOpen;
-  const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
-  const requestedEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
-  const requestNonce = useCanvasStore((s) => s.requestNonce);
+  const storeChunkId = useCanvasStore((s) => s.requestedChunkId);
+  const storeEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
+  const storeNonce = useCanvasStore((s) => s.requestNonce);
+  // The citation to resolve: the standalone reader's own, else the chat's request.
+  const standaloneCitation = standalone?.citation;
+  const requestedChunkId = standalone ? (standaloneCitation?.chunkId ?? null) : storeChunkId;
+  const requestedEndChunkId = standalone ? (standaloneCitation?.endChunkId ?? null) : storeEndChunkId;
+  const requestNonce = standalone ? (standaloneCitation?.nonce ?? 0) : storeNonce;
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
@@ -391,8 +401,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // requestNonce so the same chunk re-clicked re-resolves; consumes the request
   // so a later browse-mode open doesn't re-jump here.
   useEffect(() => {
-    // The standalone reader leaves chat citations to the chat's canvas.
-    if (standalone || !open || requestedChunkId == null) return;
+    if (!open || requestedChunkId == null) return;
     let cancelled = false;
     getChunk(requestedChunkId)
       .then(async (c) => {
@@ -441,7 +450,8 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         }
       })
       .finally(() => {
-        if (!cancelled) consumeCitation();
+        // The standalone reader leaves the chat's request slot alone.
+        if (!cancelled && !standalone) consumeCitation();
       });
     return () => {
       cancelled = true;
