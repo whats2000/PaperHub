@@ -35,7 +35,9 @@
     "arxivInputAria": "arXiv identifier",
     "arxivPlaceholder": "2310.06825 or https://arxiv.org/abs/2310.06825",
     "invalidArxiv": "Not a valid arXiv identifier or URL.",
-    "import": "Import"
+    "import": "Import",
+    "private": "Private document",
+    "privateHelp": "Marks it as a confidential document — shown with a lock."
   },
   "search": {
     "foundPapers": "Found papers",

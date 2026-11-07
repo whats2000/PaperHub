@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS paper_content (
     source_dir_path TEXT NOT NULL,
     html_path TEXT NOT NULL,
     ingested_at TEXT NOT NULL DEFAULT (datetime('now')),
+    is_private INTEGER NOT NULL DEFAULT 0 CHECK (is_private IN (0, 1)),
     CHECK ((arxiv_id IS NOT NULL) <> (sha256 IS NOT NULL))
 );
 

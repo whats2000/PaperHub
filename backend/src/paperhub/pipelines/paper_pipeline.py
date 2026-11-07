@@ -123,6 +123,9 @@ class IngestRequest:
     upload_path: Path | None = None
     upload_kind: Literal["pdf", "latex"] | None = None  # if upload_path is set
     metadata_override: ArxivMetadata | None = None  # skip arXiv metadata API when set
+    # H0: a NEW paper_content row is born private when set (single INSERT, no
+    # public-then-upgrade window). Ignored on a cache hit — the caller upgrades.
+    is_private: bool = False
 
 
 @dataclass(frozen=True)
@@ -415,6 +418,7 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status="latex",
+            is_private=req.is_private,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -496,6 +500,7 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status=asset_status,
+            is_private=req.is_private,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -680,6 +685,7 @@ class PaperPipeline:
             chunks=chunks,
             sections_json=sections_json,
             asset_status=asset_status,
+            is_private=req.is_private,
         )
 
         papers_id = await self._link_to_session(req.session_id, paper_content_id)
@@ -963,6 +969,7 @@ class PaperPipeline:
         chunks: list[Chunk],
         sections_json: str | None = None,
         asset_status: str | None = None,
+        is_private: bool = False,
     ) -> tuple[int, list[int]]:
         """Persist paper_content + chunks in a single atomic transaction.
 
@@ -981,8 +988,8 @@ class PaperPipeline:
                 "INSERT INTO paper_content "
                 "(content_key, kind, arxiv_id, sha256, title, authors_json, year, "
                 "abstract, sections_json, source_path, source_dir_path, html_path, "
-                "asset_status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "asset_status, is_private) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     content_key,
                     kind,
@@ -997,6 +1004,7 @@ class PaperPipeline:
                     str(source_dir_path),
                     str(html_path),
                     asset_status,
+                    1 if is_private else 0,
                 ),
             )
             async with self._conn.execute("SELECT last_insert_rowid()") as cur:

@@ -35,7 +35,9 @@
     "arxivInputAria": "arXiv 識別碼",
     "arxivPlaceholder": "2310.06825 或 https://arxiv.org/abs/2310.06825",
     "invalidArxiv": "不是有效的 arXiv 識別碼或網址。",
-    "import": "匯入"
+    "import": "匯入",
+    "private": "私密文件",
+    "privateHelp": "標記為機密文件，並以鎖頭圖示顯示。"
   },
   "search": {
     "foundPapers": "找到的論文",

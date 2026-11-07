@@ -49,6 +49,7 @@ function ref(over: Partial<ReferenceItem> = {}): ReferenceItem {
     title: "Attention Is All You Need",
     year: 2017,
     kind: "arxiv",
+    is_private: false,
     ...over,
   };
 }

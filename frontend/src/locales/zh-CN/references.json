@@ -39,5 +39,6 @@
     "deletedForced": "已删除（强制卸除）",
     "deleted": "已从文献库删除",
     "deleteFailed": "删除失败"
-  }
+  },
+  "privateDocument": "私密文档"
 }

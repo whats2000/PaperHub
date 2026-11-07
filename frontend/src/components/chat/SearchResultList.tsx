@@ -92,6 +92,7 @@ function ManualDownloadFallback({
         title: result.title,
         year: candidate.year,
         kind: "pdf_upload",
+        is_private: result.is_private,
       });
       toast.success(result.cache_hit ? t("toast.reattached") : t("toast.added"), {
         description: result.title,
@@ -289,6 +290,7 @@ function AddButton({ candidate, sessionId }: AddButtonProps) {
         title: result.title,
         year: candidate.year,
         kind: candidate.arxiv_id ? "arxiv" : "pdf_upload",
+        is_private: result.is_private,
       });
       setState("idle");
       // Refresh the panel with authoritative server state.

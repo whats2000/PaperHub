@@ -39,6 +39,7 @@ function makeRef(papersId: number, title: string): ReferenceItem {
     title,
     year: 2026,
     kind: "arxiv",
+    is_private: false,
   };
 }
 

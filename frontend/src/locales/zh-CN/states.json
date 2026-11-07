@@ -42,5 +42,16 @@
   },
   "rejection": {
     "label": "已拒绝：{{reason}}"
+  },
+  "nav": {
+    "ideas": "想法",
+    "feedback": "反馈",
+    "feedbackBadge": "{{count}} 项待你确认"
+  },
+  "ideasPage": {
+    "empty": "想法将显示在这里。"
+  },
+  "feedbackPage": {
+    "empty": "反馈将显示在这里。"
   }
 }

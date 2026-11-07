@@ -35,7 +35,9 @@
     "arxivInputAria": "arXiv 标识符",
     "arxivPlaceholder": "2310.06825 或 https://arxiv.org/abs/2310.06825",
     "invalidArxiv": "不是有效的 arXiv 标识符或网址。",
-    "import": "导入"
+    "import": "导入",
+    "private": "私密文档",
+    "privateHelp": "标记为机密文档，并以锁形图标显示。"
   },
   "search": {
     "foundPapers": "找到的论文",

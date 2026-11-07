@@ -39,5 +39,6 @@
     "deletedForced": "已刪除（強制卸除）",
     "deleted": "已從文獻庫刪除",
     "deleteFailed": "刪除失敗"
-  }
+  },
+  "privateDocument": "私密文件"
 }

@@ -988,7 +988,7 @@ Markers: **[user]** = decided by the user in the 2026-11-05 design session; **[c
 - Runs in the background and never delays the chat; traced as its own run (`feedback:review`) recording the trigger, the ids it read, verdict, reasons and rationale.
 - Stored separately from explicit feedback; analysis and export can include or exclude it. Rejected verdicts are kept to tune the keywords and the reviewer.
 
-**Storage** [call]. New table `feedback`: run id, message id, kind (explicit / implicit), polarity, reasons, other text, correction text, reviewer verdict and status, timestamps. H2 also ships the `paper_content` private flag and its upload checkbox (§III-10.3), since the export's private-document option is its first consumer.
+**Storage** [call]. New table `feedback`: run id, message id, kind (explicit / implicit), polarity, reasons, other text, correction text, reviewer verdict and status, timestamps. H0 (the shared foundation) ships the `paper_content` private flag and its upload checkbox (§III-10.3); H2's export private-document option is its first consumer.
 
 **Feedback page (FR-19)** — a sidebar entry above the chat list, alongside Ideas, with a count badge of items needing confirmation [user approved the interactive prototype]. Laid out around **three user moments**, top to bottom:
 

@@ -1,7 +1,8 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useSlidesStore } from "@/store/slides";
+import { useNavStore } from "@/store/nav";
 import { SlidesPanel } from "@/components/slides/SlidesPanel";
 import * as api from "@/lib/api";
 import type { DeckSlideDetail } from "@/types/domain";
@@ -339,5 +340,43 @@ describe("SlidesPanel", () => {
     expect(
       await screen.findByRole("button", { name: /Introduction/ }),
     ).toBeInTheDocument();
+  });
+  describe("arrow-key navigation", () => {
+    afterEach(() => useNavStore.setState({ page: "chat" }));
+
+    // goTo clamps to numPages, so wait until the deck reports its 5 pages.
+    const pagesLoaded = (container: HTMLElement) =>
+      waitFor(() => expect(container.querySelectorAll("[data-page]")).toHaveLength(5));
+
+    it("ArrowRight advances the slide while chat is showing", async () => {
+      const { container } = render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+      await pagesLoaded(container);
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(useSlidesStore.getState().currentPageBySession[7]).toBe(2);
+    });
+
+    it("ignores arrows while another page hides the chat", async () => {
+      useNavStore.setState({ page: "feedback" });
+      const { container } = render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+      await pagesLoaded(container);
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(useSlidesStore.getState().currentPageBySession[7]).toBe(1);
+    });
+
+    it("ignores arrows typed into an editable field", async () => {
+      const { container } = render(<SlidesPanel sessionId={7} speakerNotes={{}} />);
+      await pagesLoaded(container);
+      fireEvent.click(await screen.findByRole("button", { name: /Edit this frame/i }));
+      const ta = await screen.findByLabelText("latex-source");
+      fireEvent.keyDown(ta, { key: "ArrowRight" });
+      expect(useSlidesStore.getState().currentPageBySession[7]).toBe(1);
+      const editable = document.createElement("div");
+      editable.setAttribute("contenteditable", "true");
+      document.body.appendChild(editable);
+      fireEvent.keyDown(editable, { key: "ArrowLeft" });
+      fireEvent.keyDown(editable, { key: "ArrowRight" });
+      expect(useSlidesStore.getState().currentPageBySession[7]).toBe(1);
+      editable.remove();
+    });
   });
 });

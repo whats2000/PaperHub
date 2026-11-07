@@ -65,6 +65,8 @@ export interface ReferenceItem {
   title: string;
   year: number | null;
   kind: string; // 'arxiv' | 'pdf_upload' | 'latex_upload'
+  /** Confidential document (H0): shown with a lock; never inferred. */
+  is_private: boolean;
 }
 
 export interface LibraryItem {
@@ -73,6 +75,7 @@ export interface LibraryItem {
   title: string;
   abstract: string | null;
   year: number | null;
+  is_private: boolean;
 }
 
 export interface ChunkResolution {
@@ -105,7 +108,9 @@ export interface AttachResult {
   title: string;
 }
 
-export type IngestResult = AttachResult;
+/** Upload/ingest response; `is_private` is the server's truth (the flag is
+ *  upgrade-only, so a re-upload of a private PDF stays private). */
+export type IngestResult = AttachResult & { is_private: boolean };
 
 export interface DeckMeta {
   deck_id: number;

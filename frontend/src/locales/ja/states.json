@@ -42,5 +42,16 @@
   },
   "rejection": {
     "label": "却下：{{reason}}"
+  },
+  "nav": {
+    "ideas": "アイデア",
+    "feedback": "フィードバック",
+    "feedbackBadge": "{{count}} 件の確認待ち"
+  },
+  "ideasPage": {
+    "empty": "アイデアはここに表示されます。"
+  },
+  "feedbackPage": {
+    "empty": "フィードバックはここに表示されます。"
   }
 }

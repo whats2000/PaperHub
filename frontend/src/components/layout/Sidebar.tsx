@@ -1,23 +1,39 @@
 import {
+  BarChart3,
   BookMarked,
   ChevronsLeft,
   ChevronsRight,
   CornerDownRight,
+  Lightbulb,
   MessageSquare,
   Plus,
   Trash2,
 } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { AccountMenu } from "@/components/layout/AccountMenu";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ReferenceSourcesPanel } from "@/components/references/ReferenceSourcesPanel";
+import { usePresence } from "@/hooks/usePresence";
 import { deleteBackendSession, restoreBackendSession } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { groupSessionsByFork } from "@/lib/sessionTree";
 import { useChatStore } from "@/store/chat";
+import { useNavStore } from "@/store/nav";
 import { useSettingsStore } from "@/store/settings";
+
+/** Feedback count chip: grows in, shrinks out (reduced motion: instant). */
+const BADGE_MOTION =
+  "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:animate-none";
 
 export function Sidebar() {
   const { t } = useTranslation("states");
@@ -30,6 +46,15 @@ export function Sidebar() {
   const toggleSidebar = useChatStore((s) => s.toggleSidebar);
   const sidebarTab = useChatStore((s) => s.sidebarTab);
   const setSidebarTab = useChatStore((s) => s.setSidebarTab);
+
+  const page = useNavStore((s) => s.page);
+  const setPage = useNavStore((s) => s.setPage);
+  const feedbackBadge = useNavStore((s) => s.feedbackBadge);
+  // The chip animates out when the count drops to 0; keep showing the last
+  // non-zero count meanwhile so it doesn't flash "0" on its way out.
+  const badgePresence = usePresence(feedbackBadge > 0);
+  const [shownBadge, setShownBadge] = useState(feedbackBadge);
+  if (feedbackBadge > 0 && feedbackBadge !== shownBadge) setShownBadge(feedbackBadge);
 
   // Count references for the active session to drive the tab badge.
   const referencesBySession = useChatStore((s) => s.referencesBySession);
@@ -93,6 +118,15 @@ export function Sidebar() {
     navigator.userAgent.toLowerCase().includes("mac");
   const kbdNew = isMac ? "⌘K" : "Ctrl+K";
 
+  const badgeText = t("nav.feedbackBadge", "{{count}} need your confirmation", {
+    count: feedbackBadge,
+  });
+
+  const pageEntries = [
+    { id: "ideas", Icon: Lightbulb, label: t("nav.ideas", "Ideas") },
+    { id: "feedback", Icon: BarChart3, label: t("nav.feedback", "Feedback") },
+  ] as const;
+
   // Each tab gets its own click-to-expand icon when collapsed.
   const expandToTab = (tab: "chats" | "references") => {
     setSidebarTab(tab);
@@ -102,7 +136,7 @@ export function Sidebar() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border">
+      <div className="shrink-0 h-(--header-h) flex items-center justify-between px-4 border-b border-border">
         {!collapsed && (
           <span className="text-lg font-semibold">{t("appName")}</span>
         )}
@@ -127,6 +161,46 @@ export function Sidebar() {
         /* Collapsed: vertical icon rail.  Each icon both selects the tab AND
            expands the sidebar so the user always lands in the right view. */
         <div className="p-2 flex flex-col gap-1">
+          <TooltipProvider>
+            {pageEntries.map(({ id, Icon, label }) => (
+              <Tooltip key={id}>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setPage(id)}
+                      // aria-label overrides content, so the pending count
+                      // must be part of it to be announced.
+                      aria-label={
+                        id === "feedback" && feedbackBadge > 0
+                          ? `${label}, ${badgeText}`
+                          : label
+                      }
+                      aria-current={page === id ? "page" : undefined}
+                      className={cn("relative w-full", page === id && "bg-accent")}
+                    />
+                  }
+                >
+                  <Icon className="h-4 w-4" />
+                  {id === "feedback" && badgePresence.mounted && (
+                    <span
+                      aria-hidden="true"
+                      data-state={badgePresence.state}
+                      className={cn(
+                        "absolute -right-0.5 -top-0.5 inline-flex items-center justify-center min-w-4 h-4 rounded-full bg-muted px-1 text-[10px] text-foreground tabular-nums duration-150",
+                        BADGE_MOTION,
+                      )}
+                    >
+                      {shownBadge}
+                    </span>
+                  )}
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
+          <div className="my-1 h-px bg-border" role="separator" />
           <Button
             size="icon"
             variant={sidebarTab === "chats" ? "default" : "ghost"}
@@ -154,6 +228,45 @@ export function Sidebar() {
         </div>
       ) : (
         <>
+          {/* Page entries — Ideas / Feedback sit above the chat/references tabs. */}
+          <div className="flex flex-col gap-0.5 p-2 border-b border-border">
+            {pageEntries.map(({ id, Icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPage(id)}
+                aria-current={page === id ? "page" : undefined}
+                className={cn(
+                  "w-full inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                  page === id
+                    ? "bg-accent text-accent-foreground"
+                    : "text-foreground hover:bg-accent/50",
+                )}
+              >
+                <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                {label}
+                {id === "feedback" && badgePresence.mounted && (
+                  <span
+                    aria-hidden="true"
+                    data-state={badgePresence.state}
+                    className={cn(
+                      "ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-4 rounded-full bg-muted px-1 text-[10px] tabular-nums duration-150",
+                      BADGE_MOTION,
+                    )}
+                  >
+                    {shownBadge}
+                  </span>
+                )}
+                {id === "feedback" && feedbackBadge > 0 && (
+                  <>
+                    {" "}
+                    <span className="sr-only">{badgeText}</span>
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+
           {/* Tab bar — single source of truth for which view is active. */}
           <div
             role="tablist"

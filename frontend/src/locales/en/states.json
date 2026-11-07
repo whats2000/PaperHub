@@ -42,5 +42,16 @@
   },
   "rejection": {
     "label": "Rejected: {{reason}}"
+  },
+  "nav": {
+    "ideas": "Ideas",
+    "feedback": "Feedback",
+    "feedbackBadge": "{{count}} need your confirmation"
+  },
+  "ideasPage": {
+    "empty": "Ideas will appear here."
+  },
+  "feedbackPage": {
+    "empty": "Feedback will appear here."
   }
 }

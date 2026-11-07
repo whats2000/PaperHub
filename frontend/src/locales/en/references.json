@@ -39,5 +39,6 @@
     "deletedForced": "Deleted (forced detach)",
     "deleted": "Deleted from library",
     "deleteFailed": "Delete failed"
-  }
+  },
+  "privateDocument": "Private document"
 }

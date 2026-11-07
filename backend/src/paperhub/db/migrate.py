@@ -319,6 +319,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
     # -----------------------------------------------------------------------
+    # H0: Idempotent column-add for paper_content.is_private
+    # Private-document flag set at upload time (0 = public, 1 = private).
+    # Read by H2's export and H3's lock marker. Pre-H0 rows default to 0.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "is_private" not in cols:
+        await conn.execute(
+            "ALTER TABLE paper_content ADD COLUMN is_private "
+            "INTEGER NOT NULL DEFAULT 0 CHECK (is_private IN (0, 1))"
+        )
+        await conn.commit()
+
+    # -----------------------------------------------------------------------
     # W6-1: Idempotent column-add for chunks.dom_id
     # (pre-existing DBs created before Plan D Wave 6 won't have this column).
     # Populated at re-ingest / sentinel-injection time; rows that haven't been

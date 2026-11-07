@@ -95,7 +95,13 @@ export function PdfView({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setWidth(el.clientWidth - 24);
+    const measure = () => {
+      // While chat is hidden (kept mounted under Ideas/Feedback) clientWidth is
+      // 0; keep the last good width so pages aren't re-rendered at a bogus
+      // width and the highlight geometry survives (same guard as SlidesPanel).
+      if (el.clientWidth === 0) return;
+      setWidth(el.clientWidth - 24);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);

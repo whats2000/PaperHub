@@ -12,6 +12,7 @@ import type {
   DeckEventData,
 } from "@/types/domain";
 import { createBackendSession } from "@/lib/api";
+import { useNavStore } from "@/store/nav";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -155,6 +156,7 @@ export const useChatStore = create<ChatState>()(
       referencesBySession: {},
 
       newSession: () => {
+        useNavStore.getState().setPage("chat");
         const id = get()._nextId;
         set((s) => ({
           sessions: [
@@ -167,6 +169,7 @@ export const useChatStore = create<ChatState>()(
         return id;
       },
 
+      // Deliberately does not reset the page: forking only starts from the chat page.
       addForkedSession: (backendId, title, forkedFromSessionId = null) => {
         const existing = get().sessions.find(
           (s) => s.backend_session_id === backendId,
@@ -193,7 +196,10 @@ export const useChatStore = create<ChatState>()(
         return id;
       },
 
-      selectSession: (id) => set({ activeSessionId: id }),
+      selectSession: (id) => {
+        useNavStore.getState().setPage("chat");
+        set({ activeSessionId: id });
+      },
 
       appendMessage: (sessionId, message) =>
         set((s) => ({

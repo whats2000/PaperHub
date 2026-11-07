@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, Loader2, PanelRight, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2, Lock, PanelRight, Trash2 } from "lucide-react";
 
 import type { ReferenceItem } from "@/types/domain";
 import {
@@ -13,6 +13,11 @@ import { useCanvasStore } from "@/store/canvas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { LibraryBrowserModal } from "./LibraryBrowserModal";
 
 interface Props {
@@ -143,6 +148,25 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
             {refs.map((ref) => {
               const isActiveOnCanvas =
                 activePaperId === ref.paper_content_id;
+              const lock = ref.is_private ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        role="img"
+                        tabIndex={0}
+                        aria-label={t("privateDocument", "Private document")}
+                        className="mr-1 inline-flex align-text-bottom rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    }
+                  >
+                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {t("privateDocument", "Private document")}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null;
               return (
               <li
                 key={ref.papers_id}
@@ -158,17 +182,23 @@ export function ReferenceSourcesPanel({ frontendSessionId }: Props) {
                 />
                 <div className="flex-1 min-w-0">
                   {ref.arxiv_id ? (
-                    <a
-                      href={`https://arxiv.org/abs/${ref.arxiv_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium hover:underline flex items-start gap-1 leading-snug line-clamp-2"
-                    >
-                      <span className="min-w-0">{ref.title}</span>
-                      <ExternalLink className="h-3 w-3 shrink-0 mt-0.5" />
-                    </a>
+                    // The focusable lock sits BESIDE the link, never inside it
+                    // (no interactive content nested in an <a>).
+                    <div className="flex items-start">
+                      {lock}
+                      <a
+                        href={`https://arxiv.org/abs/${ref.arxiv_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-w-0 text-xs font-medium hover:underline flex items-start gap-1 leading-snug line-clamp-2"
+                      >
+                        <span className="min-w-0">{ref.title}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0 mt-0.5" />
+                      </a>
+                    </div>
                   ) : (
                     <span className="text-xs font-medium leading-snug line-clamp-2">
+                      {lock}
                       {ref.title}
                     </span>
                   )}

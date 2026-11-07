@@ -15,6 +15,7 @@ const sampleItems: LibraryItem[] = [
     title: "Attention Is All You Need",
     abstract: "Transformer architecture",
     year: 2017,
+    is_private: false,
   },
   {
     paper_content_id: 2,
@@ -22,6 +23,7 @@ const sampleItems: LibraryItem[] = [
     title: "GPT-3 Language Models",
     abstract: "Large language models",
     year: 2020,
+    is_private: false,
   },
 ];
 

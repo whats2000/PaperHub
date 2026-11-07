@@ -35,7 +35,9 @@
     "arxivInputAria": "arXiv識別子",
     "arxivPlaceholder": "2310.06825 または https://arxiv.org/abs/2310.06825",
     "invalidArxiv": "有効なarXiv識別子またはURLではありません。",
-    "import": "インポート"
+    "import": "インポート",
+    "private": "非公開ドキュメント",
+    "privateHelp": "機密ドキュメントとして扱い、ロックアイコンで表示します。"
   },
   "search": {
     "foundPapers": "見つかった論文",

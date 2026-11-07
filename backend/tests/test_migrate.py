@@ -189,3 +189,53 @@ async def test_apply_schema_idempotent_for_layout_json(
         async with conn.execute("PRAGMA table_info(paper_content)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
     assert "layout_json" in cols
+
+
+# ---------------------------------------------------------------------------
+# H0: paper_content.is_private column
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_paper_content_has_is_private_column(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    async with migrated_db.execute("PRAGMA table_info(paper_content)") as cur:
+        cols = {row[1]: row for row in await cur.fetchall()}
+    assert "is_private" in cols
+    assert cols["is_private"][3] == 1  # NOT NULL
+    assert cols["is_private"][4] == "0"  # DEFAULT 0
+
+
+@pytest.mark.asyncio
+async def test_apply_schema_idempotent_for_is_private(tmp_path: Path) -> None:
+    db_path = tmp_path / "idem_private.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await apply_schema(conn)
+        async with conn.execute("PRAGMA table_info(paper_content)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+    assert "is_private" in cols
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_is_private_to_existing_db(tmp_path: Path) -> None:
+    """A pre-H0 paper_content table (no is_private) gains the column, rows -> 0."""
+    db_path = tmp_path / "old.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute("ALTER TABLE paper_content DROP COLUMN is_private")
+        await conn.execute(
+            "INSERT INTO paper_content (content_key, kind, arxiv_id, title, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES ('arxiv:1', 'arxiv', '1', 't', 'a', 'b', 'c')"
+        )
+        await conn.commit()
+        await apply_schema(conn)
+        async with conn.execute("SELECT is_private FROM paper_content") as cur:
+            row = await cur.fetchone()
+        assert row is not None and row[0] == 0
+        # The migrated column must carry the same CHECK as a fresh schema.
+        with pytest.raises(aiosqlite.IntegrityError):
+            await conn.execute("UPDATE paper_content SET is_private = 2")

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Loader2, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -49,6 +49,7 @@ function buildReference(
     title: result.title,
     year: null,
     kind,
+    is_private: result.is_private,
   };
 }
 
@@ -70,6 +71,8 @@ export function AttachPaperMenu() {
   const [busy, setBusy] = useState(false);
   const [arxivInput, setArxivInput] = useState("");
   const [arxivError, setArxivError] = useState<string | null>(null);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const privateHelpId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset transient state when the menu is closed.
@@ -78,6 +81,7 @@ export function AttachPaperMenu() {
     if (!next) {
       setArxivInput("");
       setArxivError(null);
+      setIsPrivate(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -92,12 +96,17 @@ export function AttachPaperMenu() {
     // dismissed — ingestion (esp. PDFs) can run for a while. We resolve THIS
     // toast (by id) to success/error/info so it never lingers as a spinner.
     const toastId = toast.loading(t("toast.processing"));
+    // Snapshot + reset: the flag applies to this upload only, win or lose.
+    const markPrivate = isPrivate;
+    setIsPrivate(false);
     try {
       // Lazy-create the backend session so the FIRST attach in a fresh chat
       // works (no message required). After this, the active session carries
       // `startedAt`; a mid-flight session switch is still caught below.
       const startedAt = await ensureBackendSession(activeId);
-      const result = await uploadPdf(startedAt, file);
+      const result = await uploadPdf(startedAt, file, {
+        private: markPrivate,
+      });
       if (currentBackendSessionId() !== startedAt) {
         toast.info(t("toast.sessionChanged"), { id: toastId });
         return;
@@ -214,6 +223,34 @@ export function AttachPaperMenu() {
               <span className="text-xs text-muted-foreground">
                 {t("attach.pdfHint")}
               </span>
+              <div className="flex items-start gap-2">
+                <input
+                  id={`${privateHelpId}-box`}
+                  type="checkbox"
+                  checked={isPrivate}
+                  onChange={(e) => setIsPrivate(e.target.checked)}
+                  disabled={busy || !hasActiveSession}
+                  aria-describedby={privateHelpId}
+                  className="mt-0.5 h-3.5 w-3.5 accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <div className="flex flex-col">
+                  <label
+                    htmlFor={`${privateHelpId}-box`}
+                    className="text-xs font-medium"
+                  >
+                    {t("attach.private", "Private document")}
+                  </label>
+                  <span
+                    id={privateHelpId}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {t(
+                      "attach.privateHelp",
+                      "Marks it as a confidential document — shown with a lock.",
+                    )}
+                  </span>
+                </div>
+              </div>
               <input
                 ref={fileInputRef}
                 type="file"

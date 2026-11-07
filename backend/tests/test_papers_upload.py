@@ -581,3 +581,136 @@ async def test_upload_same_bytes_returns_cache_hit(
     second_body: dict[str, Any] = second.json()
     assert second_body["cache_hit"] is True
     assert second_body["paper_content_id"] == first_body["paper_content_id"]
+
+
+async def _post_sample(
+    ac: AsyncClient, session_id: int, *, private: bool | None
+) -> dict[str, Any]:
+    sample_pdf = Path(__file__).parent / "fixtures" / "papers" / "sample.pdf"
+    data = {"session_id": str(session_id)}
+    if private is not None:
+        data["private"] = "true" if private else "false"
+    with sample_pdf.open("rb") as f:
+        r = await ac.post(
+            "/papers/upload",
+            data=data,
+            files={"file": ("sample.pdf", f, "application/pdf")},
+        )
+    assert r.status_code == 201, r.text
+    body: dict[str, Any] = r.json()
+    return body
+
+
+async def _is_private(tmp_path: Path, pc_id: int) -> int:
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn, conn.execute(
+        "SELECT is_private FROM paper_content WHERE id = ?", (pc_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+@pytest.mark.asyncio
+async def test_upload_private_flag_sets_is_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        body = await _post_sample(ac, session_id, private=True)
+    assert await _is_private(tmp_path, body["paper_content_id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_default_is_public(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        body = await _post_sample(ac, session_id, private=None)
+    assert await _is_private(tmp_path, body["paper_content_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_reupload_without_flag_keeps_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        first = await _post_sample(ac, session_id, private=True)
+        second = await _post_sample(ac, session_id, private=None)
+    assert second["cache_hit"] is True
+    assert await _is_private(tmp_path, first["paper_content_id"]) == 1
+    assert first["is_private"] is True
+    assert second["is_private"] is True
+
+
+@pytest.mark.asyncio
+async def test_upload_response_is_private_false_when_public(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        body = await _post_sample(ac, session_id, private=None)
+    assert body["is_private"] is False
+
+
+@pytest.mark.asyncio
+async def test_reupload_with_flag_upgrades_cache_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        first = await _post_sample(ac, session_id, private=None)
+        assert await _is_private(tmp_path, first["paper_content_id"]) == 0
+        second = await _post_sample(ac, session_id, private=True)
+    assert second["cache_hit"] is True
+    assert await _is_private(tmp_path, first["paper_content_id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_private_cache_miss_row_is_born_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache-miss private upload INSERTs the row with is_private=1.
+
+    The flag must not depend on a follow-up UPDATE: a spy reads the row the
+    instant ``PaperPipeline.ingest`` returns, before the endpoint does
+    anything else, so a public-then-upgrade write window fails this test.
+    """
+    from paperhub.pipelines.paper_pipeline import IngestRequest, PaperPipeline
+
+    session_id = await _setup_workspace(tmp_path, monkeypatch)
+    original_ingest = PaperPipeline.ingest
+    seen: dict[str, Any] = {}
+
+    async def _spy(self: PaperPipeline, req: IngestRequest) -> Any:
+        result = await original_ingest(self, req)
+        async with self._conn.execute(
+            "SELECT is_private FROM paper_content WHERE id = ?",
+            (result.paper_content_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        seen["cache_hit"] = result.cache_hit
+        seen["is_private_after_ingest"] = int(row[0])
+        return result
+
+    monkeypatch.setattr(PaperPipeline, "ingest", _spy)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://test"
+    ) as ac:
+        body = await _post_sample(ac, session_id, private=True)
+
+    assert seen["cache_hit"] is False
+    assert seen["is_private_after_ingest"] == 1
+    assert body["is_private"] is True

@@ -52,6 +52,7 @@ function makeRef(overrides: Partial<ReferenceItem> = {}): ReferenceItem {
     title: "Attention Is All You Need",
     year: 2017,
     kind: "arxiv",
+    is_private: false,
     ...overrides,
   };
 }

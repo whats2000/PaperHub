@@ -39,5 +39,6 @@
     "deletedForced": "削除しました（強制切り離し）",
     "deleted": "ライブラリから削除しました",
     "deleteFailed": "削除に失敗しました"
-  }
+  },
+  "privateDocument": "非公開ドキュメント"
 }

@@ -9,6 +9,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import aiosqlite
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, model_validator
@@ -19,7 +20,7 @@ from paperhub.agents.research_tools import (
 )
 from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
-from paperhub.db.connection import open_db
+from paperhub.db.connection import open_db, write_transaction
 from paperhub.pipelines.paper_pipeline import (
     ArxivMetadata,
     IngestRequest,
@@ -65,6 +66,7 @@ class ReferenceItem(BaseModel):
     title: str
     year: int | None
     kind: str
+    is_private: bool
 
 
 class IngestResponse(BaseModel):
@@ -72,6 +74,17 @@ class IngestResponse(BaseModel):
     papers_id: int
     cache_hit: bool
     title: str
+    is_private: bool = False
+
+
+async def _read_is_private(conn: aiosqlite.Connection, paper_content_id: int) -> bool:
+    """Server truth for the lock marker (the flag is upgrade-only)."""
+    async with conn.execute(
+        "SELECT is_private FROM paper_content WHERE id = ?",
+        (paper_content_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return bool(row[0]) if row else False
 
 
 class FromLibraryBody(BaseModel):
@@ -89,6 +102,7 @@ class LibraryItem(BaseModel):
     title: str
     abstract: str | None
     year: int | None
+    is_private: bool
 
 
 @router.get("", response_model=list[ReferenceItem])
@@ -101,7 +115,7 @@ async def list_session_references(
         open_db(settings.db_path) as conn,
         conn.execute(
             "SELECT p.id, p.paper_content_id, p.enabled, p.added_at, "
-            "       pc.arxiv_id, pc.title, pc.year, pc.kind "
+            "       pc.arxiv_id, pc.title, pc.year, pc.kind, pc.is_private "
             "FROM papers p JOIN paper_content pc ON pc.id = p.paper_content_id "
             "WHERE p.session_id = ? ORDER BY p.added_at DESC",
             (session_id,),
@@ -118,6 +132,7 @@ async def list_session_references(
             title=str(r[5] or ""),
             year=int(r[6]) if r[6] is not None else None,
             kind=str(r[7]),
+            is_private=bool(r[8]),
         )
         for r in rows
     ]
@@ -161,6 +176,7 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
                 metadata_override=metadata_override,
                 unpaywall_email=settings.unpaywall_email,
             )
+            is_private = await _read_is_private(conn, result.paper_content_id)
     except NoIngestibleSourceError as exc:
         raise HTTPException(
             status_code=422,
@@ -178,6 +194,7 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
         papers_id=result.papers_id,
         cache_hit=result.cache_hit,
         title=result.title,
+        is_private=is_private,
     )
 
 
@@ -187,6 +204,7 @@ async def upload_paper(
     session_id: int = Form(..., ge=1),
     file: UploadFile = File(...),  # noqa: B008 — FastAPI parameter declaration idiom
     title: str | None = Form(None),
+    private: bool = Form(False),
 ) -> IngestResponse:
     """Accept a multipart PDF upload, sha256-key it, run the pipeline.
 
@@ -258,8 +276,19 @@ async def upload_paper(
                     upload_path=upload_path,
                     upload_kind="pdf",
                     metadata_override=metadata_override,
+                    is_private=private,
                 ),
             )
+            if private and result.cache_hit:
+                # A cache miss INSERTs the row already private (no public
+                # window). A cache hit upgrades only — a re-upload without
+                # the flag never clears it, so 0 is never written here.
+                async with write_transaction(conn):
+                    await conn.execute(
+                        "UPDATE paper_content SET is_private = 1 WHERE id = ?",
+                        (result.paper_content_id,),
+                    )
+            is_private = await _read_is_private(conn, result.paper_content_id)
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -273,6 +302,7 @@ async def upload_paper(
         papers_id=result.papers_id,
         cache_hit=result.cache_hit,
         title=result.title,
+        is_private=is_private,
     )
 
 
@@ -317,7 +347,7 @@ async def list_library(
             )
             args.extend([pattern, pattern])
     sql = (
-        "SELECT pc.id, pc.arxiv_id, pc.title, pc.abstract, pc.year "
+        "SELECT pc.id, pc.arxiv_id, pc.title, pc.abstract, pc.year, pc.is_private "
         f"FROM paper_content pc WHERE {' AND '.join(where)} "
         "ORDER BY pc.year DESC NULLS LAST, pc.id DESC "
         "LIMIT ? OFFSET ?"
@@ -333,6 +363,7 @@ async def list_library(
             title=r[2] or "",
             abstract=r[3],
             year=int(r[4]) if r[4] is not None else None,
+            is_private=bool(r[5]),
         )
         for r in rows
     ]
@@ -369,11 +400,13 @@ async def attach_from_library(body: FromLibraryBody) -> IngestResponse:
             raise HTTPException(
                 500, "papers row missing after INSERT — DB invariant violated"
             )
+        is_private = await _read_is_private(conn, body.paper_content_id)
     return IngestResponse(
         paper_content_id=body.paper_content_id,
         papers_id=int(papers_row[0]),
         cache_hit=True,
         title=title,
+        is_private=is_private,
     )
 
 

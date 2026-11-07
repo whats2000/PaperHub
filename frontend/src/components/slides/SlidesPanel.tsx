@@ -28,6 +28,7 @@ import {
   NOTE_MIN_HEIGHT,
 } from "@/store/slides";
 import { useChatStore } from "@/store/chat";
+import { useNavStore } from "@/store/nav";
 import {
   fetchDeckPdfData,
   deckPdfUrl,
@@ -356,6 +357,22 @@ export function SlidesPanel({
   // Keyboard navigation.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      // Chat stays mounted (hidden) under the Ideas/Feedback pages; a hidden
+      // deck must not steal their arrows or move the presenter window.
+      if (useNavStore.getState().page !== "chat") return;
+      // Arrows typed into a field move the caret, not the deck.
+      const target = e.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          // jsdom has no isContentEditable; also covers nested editor nodes.
+          target.closest('[contenteditable]:not([contenteditable="false"])') !== null)
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft") goTo(currentPage - 1);
       else if (e.key === "ArrowRight") goTo(currentPage + 1);
     };

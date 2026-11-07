@@ -1,7 +1,6 @@
 import type {
   ReferenceItem,
   LibraryItem,
-  AttachResult,
   IngestResult,
   ChunkResolution,
   SessionSummary,
@@ -75,8 +74,8 @@ export async function listLibrary(
 export async function attachFromLibrary(
   sessionId: number,
   paperContentId: number,
-): Promise<AttachResult> {
-  return apiFetch<AttachResult>("/papers/from-library", {
+): Promise<IngestResult> {
+  return apiFetch<IngestResult>("/papers/from-library", {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
@@ -365,10 +364,12 @@ export async function createMemory(
 export async function uploadPdf(
   sessionId: number,
   file: File,
+  opts?: { private?: boolean },
 ): Promise<IngestResult> {
   const form = new FormData();
   form.append("session_id", String(sessionId));
   form.append("file", file);
+  if (opts?.private) form.append("private", "true");
   const res = await fetch(`${API_BASE_URL}/papers/upload`, {
     method: "POST",
     body: form,

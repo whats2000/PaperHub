@@ -1806,3 +1806,93 @@ async def test_delete_library_paper_preserves_sibling_caches(
         "the entire papers_cache/arxiv/ tree"
     )
     assert (cache_b / "source" / "main.tex").read_text(encoding="utf-8") == "transformer"
+
+
+async def test_references_and_library_expose_is_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /papers and GET /papers/library items carry is_private: bool."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        attached = await _seed_paper_content(
+            conn, content_key="arxiv:1111.0001", title="Attached", arxiv_id="1111.0001"
+        )
+        lib = await _seed_paper_content(
+            conn, content_key="arxiv:1111.0002", title="Library", arxiv_id="1111.0002"
+        )
+        await _seed_papers_row(conn, session_id=session_id, paper_content_id=attached)
+        await conn.execute("UPDATE paper_content SET is_private = 1 WHERE id = ?", (lib,))
+        await conn.commit()
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        refs = (await client.get(f"/papers?session_id={session_id}")).json()
+        library = (await client.get(f"/papers/library?session_id={session_id}")).json()
+
+    assert refs[0]["is_private"] is False
+    assert library[0]["is_private"] is True
+
+
+async def test_post_papers_response_carries_stored_is_private_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /papers (arXiv ingest) returns the STORED is_private (public → False)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        pc_id = await _seed_paper_content(
+            conn, content_key="arxiv:1706.03762", title="Attention",
+            arxiv_id="1706.03762",
+        )
+
+    async def _fake_ingest(self: Any, req: Any) -> IngestResult:
+        return IngestResult(
+            paper_content_id=pc_id, papers_id=1, cache_hit=False, title="Attention",
+        )
+
+    import paperhub.pipelines.paper_pipeline as pipeline_module
+
+    with patch.object(pipeline_module.PaperPipeline, "ingest", _fake_ingest):
+        app = create_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                "/papers", json={"session_id": session_id, "arxiv_id": "1706.03762"},
+            )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["is_private"] is False
+
+
+async def test_post_from_library_response_carries_stored_is_private_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /papers/from-library returns the STORED is_private (private → True)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        pc_id = await _seed_paper_content(
+            conn, content_key="arxiv:2401.00001", title="Private paper",
+            arxiv_id="2401.00001",
+        )
+        await conn.execute(
+            "UPDATE paper_content SET is_private = 1 WHERE id = ?", (pc_id,)
+        )
+        await conn.commit()
+
+    app = create_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/papers/from-library",
+            json={"session_id": session_id, "paper_content_id": pc_id},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["is_private"] is True
