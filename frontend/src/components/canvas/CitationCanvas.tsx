@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -33,6 +33,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
@@ -56,12 +57,38 @@ interface DocEntry {
   pdfData?: Uint8Array;
 }
 
-export function CitationCanvas() {
+/** A paper the standalone reader shows. */
+export interface ReaderPaper {
+  paper_content_id: number;
+  title: string;
+}
+
+interface CitationCanvasProps {
+  /**
+   * Standalone reader (the Ideas page): shows these papers instead of the
+   * active chat's references, is always open, leaves the chat canvas's
+   * citation / paper requests for that canvas, and closes through onClose.
+   */
+  standalone?: {
+    papers: ReaderPaper[];
+    onClose: () => void;
+    /** A passage to highlight; a new nonce re-highlights the same chunk. */
+    citation?: { chunkId: number; endChunkId?: number; nonce: number };
+  };
+}
+
+export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const { t } = useTranslation("canvas");
-  const open = useCanvasStore((s) => s.open);
-  const requestedChunkId = useCanvasStore((s) => s.requestedChunkId);
-  const requestedEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
-  const requestNonce = useCanvasStore((s) => s.requestNonce);
+  const storeOpen = useCanvasStore((s) => s.open);
+  const open = standalone ? true : storeOpen;
+  const storeChunkId = useCanvasStore((s) => s.requestedChunkId);
+  const storeEndChunkId = useCanvasStore((s) => s.requestedEndChunkId);
+  const storeNonce = useCanvasStore((s) => s.requestNonce);
+  // The citation to resolve: the standalone reader's own, else the chat's request.
+  const standaloneCitation = standalone?.citation;
+  const requestedChunkId = standalone ? (standaloneCitation?.chunkId ?? null) : storeChunkId;
+  const requestedEndChunkId = standalone ? (standaloneCitation?.endChunkId ?? null) : storeEndChunkId;
+  const requestNonce = standalone ? (standaloneCitation?.nonce ?? 0) : storeNonce;
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
@@ -81,10 +108,27 @@ export function CitationCanvas() {
       ? (sessions.find((s) => s.id === activeSessionId) ?? null)
       : null;
   const backendSessionId = activeSession?.backend_session_id ?? null;
-  const allRefs: ReferenceItem[] =
-    backendSessionId !== null
-      ? (referencesBySession[backendSessionId] ?? [])
-      : [];
+  const standalonePapers = standalone?.papers;
+  const allRefs: ReferenceItem[] = useMemo(
+    () =>
+      standalonePapers
+        ? standalonePapers.map((p) => ({
+            // Not a chat reference: no papers row, never toggled.
+            papers_id: -p.paper_content_id,
+            paper_content_id: p.paper_content_id,
+            enabled: true,
+            added_at: "",
+            arxiv_id: null,
+            title: p.title,
+            year: null,
+            kind: "",
+            is_private: false,
+          }))
+        : backendSessionId !== null
+          ? (referencesBySession[backendSessionId] ?? [])
+          : [],
+    [standalonePapers, backendSessionId, referencesBySession],
+  );
   const refs = allRefs.filter((r) => r.enabled);
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
@@ -407,7 +451,8 @@ export function CitationCanvas() {
         }
       })
       .finally(() => {
-        if (!cancelled) consumeCitation();
+        // The standalone reader leaves the chat's request slot alone.
+        if (!cancelled && !standalone) consumeCitation();
       });
     return () => {
       cancelled = true;
@@ -426,6 +471,7 @@ export function CitationCanvas() {
   // from re-jumping here.
   const prevPaperNonceRef = useRef(useCanvasStore.getState().paperRequestNonce);
   useEffect(() => {
+    if (standalone) return;
     return useCanvasStore.subscribe((state) => {
       if (state.paperRequestNonce === prevPaperNonceRef.current) return;
       prevPaperNonceRef.current = state.paperRequestNonce;
@@ -453,8 +499,9 @@ export function CitationCanvas() {
   // References panel can mark the active row. `setActivePaperId` is a Zustand
   // action, not a React setter, so calling it in the effect body is fine.
   useEffect(() => {
+    if (standalone) return; // not the chat's canvas
     setActivePaperId(open ? effectivePaperId : null);
-  }, [open, effectivePaperId, setActivePaperId]);
+  }, [standalone, open, effectivePaperId, setActivePaperId]);
 
   const handleTabClick = (pid: number) => {
     // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
@@ -518,7 +565,7 @@ export function CitationCanvas() {
               className={
                 "truncate rounded px-2 py-1 text-xs font-medium transition-colors " +
                 (effectivePaperId === r.paper_content_id
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-foreground/10 text-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground")
               }
               title={r.title}
@@ -549,7 +596,7 @@ export function CitationCanvas() {
                       className={
                         "w-full truncate rounded px-2 py-1.5 text-left text-xs font-medium transition-colors " +
                         (effectivePaperId === r.paper_content_id
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-foreground/10 text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground")
                       }
                       title={r.title}
@@ -591,8 +638,8 @@ export function CitationCanvas() {
           size="icon"
           variant="ghost"
           className="h-7 w-7 shrink-0"
-          aria-label={t("panel.close")}
-          onClick={closeCanvas}
+          aria-label={standalone ? t("panel.closeReader", "Close reader") : t("panel.close")}
+          onClick={standalone ? standalone.onClose : closeCanvas}
         >
           <X className="h-4 w-4" />
         </Button>
@@ -615,6 +662,9 @@ export function CitationCanvas() {
             {t("error.loadPaper")}
           </div>
         )}
+
+        {/* The shown paper is still being fetched. */}
+        {effectivePaperId != null && activeDoc === null && <PaperLoading />}
 
         {/* HTML papers: kept mounted (hidden) for instant switching. */}
         {htmlPapers.map((pid) => {

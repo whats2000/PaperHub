@@ -35,7 +35,7 @@ import {
 } from "@/lib/ideaGraphLayout";
 import { cn } from "@/lib/utils";
 import type { IdeationSelection } from "@/store/ideation";
-import type { GraphResponse, Idea, IdeaStatus } from "@/types/ideation";
+import type { GraphResponse, Idea, IdeaStatus, LegendHighlight } from "@/types/ideation";
 
 /** Line style per status: status is never encoded by colour. */
 const STATUS_DASH: Record<IdeaStatus, string | undefined> = {
@@ -108,6 +108,39 @@ interface Focus {
   docs: Set<number>;
   ideas: Set<number>;
   problem: boolean;
+  /** Lit hulls; when absent, a hull is lit if it holds a focused document. */
+  domains?: Set<number>;
+  /** Whether citations are lit; when absent, a citation is lit if both ends are focused. */
+  citations?: boolean;
+}
+
+/** What a hovered legend category lights: its own elements, nothing else. */
+function focusOfHighlight(h: LegendHighlight, ideas: Idea[], graph: GraphResponse): Focus {
+  const f: Focus = { docs: new Set(), ideas: new Set(), problem: false, domains: new Set(), citations: false };
+  const take = (idea: Idea) => {
+    f.ideas.add(idea.id);
+    f.docs.add(idea.source_doc);
+    if (idea.target_doc === null) f.problem = true;
+    else f.docs.add(idea.target_doc);
+  };
+  if (h.kind === "domains") {
+    f.domains = new Set(h.ids);
+    for (const d of graph.documents) if (d.domains.some((id) => f.domains!.has(id))) f.docs.add(d.id);
+    delete f.citations;
+  } else if (h.kind === "citations") {
+    f.citations = true;
+    for (const c of graph.citations) {
+      f.docs.add(c.source_id);
+      f.docs.add(c.target_id);
+    }
+  } else if (h.kind === "ideas") {
+    ideas.forEach(take);
+  } else if (h.kind === "status") {
+    ideas.filter((i) => h.statuses.includes(i.status)).forEach(take);
+  } else {
+    for (const d of graph.documents) if (d.is_private) f.docs.add(d.id);
+  }
+  return f;
 }
 
 function focusOf(selected: IdeationSelection, ideas: Idea[], documents: GraphResponse["documents"]): Focus | null {
@@ -154,6 +187,8 @@ export interface IdeaGraphProps {
   onLayout?: (layout: GraphLayout) => void;
   /** A click that reached the svg background (not a node, idea or label). */
   onBackgroundClick?: (e: MouseEvent<SVGSVGElement>) => void;
+  /** A hovered legend category: lights its elements over any selection while it lasts. */
+  highlight?: LegendHighlight | null;
   /** Ideas fading out (just dismissed): drawn at opacity 0 until they're dropped. */
   leavingIds?: readonly number[];
   seed?: number;
@@ -172,6 +207,7 @@ function IdeaGraphImpl({
   onLayout,
   onBackgroundClick,
   leavingIds,
+  highlight = null,
   seed = 1,
   className,
 }: IdeaGraphProps) {
@@ -248,7 +284,10 @@ function IdeaGraphImpl({
   const nodeById = useMemo(() => new Map(shown.nodes.map((n) => [n.id, n])), [shown.nodes]);
   const docById = useMemo(() => new Map(graph.documents.map((d) => [d.id, d])), [graph.documents]);
   const domainName = useMemo(() => new Map(graph.domains.map((d) => [d.id, d.name])), [graph.domains]);
-  const focus = useMemo(() => focusOf(selected, ideas, graph.documents), [selected, ideas, graph.documents]);
+  const focus = useMemo(
+    () => (highlight ? focusOfHighlight(highlight, ideas, graph) : focusOf(selected, ideas, graph.documents)),
+    [highlight, selected, ideas, graph],
+  );
   const selIdea = selected?.kind === "idea" ? ideas.find((i) => i.id === selected.id) : undefined;
   const problemPos = shown.problem;
   // Document labels: collision-aware at the current zoom (see `placeLabels`).
@@ -285,7 +324,10 @@ function IdeaGraphImpl({
     const labelY = h.label?.y ?? Math.min(...h.points.map((p) => p[1])) + 16;
     const color = colorOf(h.domainId);
     const dimmed =
-      focus && !graph.documents.some((d) => focus.docs.has(d.id) && d.domains.includes(h.domainId));
+      focus &&
+      (focus.domains
+        ? !focus.domains.has(h.domainId)
+        : !graph.documents.some((d) => focus.docs.has(d.id) && d.domains.includes(h.domainId)));
     const name = domainName.get(h.domainId) ?? "";
     const pick = onSelectDomain ? () => onSelectDomain(h.domainId) : null;
     return (
@@ -331,7 +373,7 @@ function IdeaGraphImpl({
     const a = nodeById.get(c.source_id);
     const b = nodeById.get(c.target_id);
     if (!a || !b) return null;
-    const on = !focus || (focus.docs.has(c.source_id) && focus.docs.has(c.target_id));
+    const on = !focus || (focus.citations ?? (focus.docs.has(c.source_id) && focus.docs.has(c.target_id)));
     return (
       <line
         key={`${c.source_id}-${c.target_id}`}

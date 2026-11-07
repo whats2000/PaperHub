@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -69,12 +69,13 @@ describe("DocDomainEditor", () => {
   });
 
   it("removing two tags within the exit window sends one edit without both", async () => {
-    const user = userEvent.setup();
     const three = { ...doc, domains: [1, 2, 3] };
     useIdeationStore.setState({ graph: { ...GRAPH, documents: [three, GRAPH.documents[1]!] } });
     render(<DocDomainEditor doc={three} domains={GRAPH.domains} onOpenDomain={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Remove Vision" }));
-    await user.click(screen.getByRole("button", { name: "Remove Detection" }));
+    // Back to back, so both land inside the 150 ms exit window however busy the
+    // machine is (awaited userEvent clicks could drift past it under load).
+    fireEvent.click(screen.getByRole("button", { name: "Remove Vision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Detection" }));
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]).toEqual({ domain_ids: [3], new_names: [] });
     // Still one edit after the refetch settles.

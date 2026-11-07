@@ -19,6 +19,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { AttachPaperMenu } from "@/components/chat/AttachPaperMenu";
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { createSpeechRecognizer, isSpeechSupported, type SpeechRecognizer } from "@/lib/speech";
@@ -129,6 +130,9 @@ export function Composer({
 
   const value = draft;
   const setValue = setDraft;
+  // Grow with the draft (a prefilled idea opening can be many lines),
+  // capped at 40% of the viewport.
+  useAutoGrowTextarea(ref, value);
 
   // When something prefills the composer (deck-chip Generate/Edit), focus the
   // textarea and drop the cursor at the end so the prompt is ready to complete.

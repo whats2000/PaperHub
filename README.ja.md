@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-1368%20backend%20%2B%20541%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.40.1%20(SRS%20v2.40.1)-success)
+![Tests](https://img.shields.io/badge/tests-2064%20backend%20%2B%201041%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.41.0%20(SRS%20v2.41.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · **日本語** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
@@ -61,6 +61,20 @@ PaperHub は **UX ファースト**で設計されています。検索された
 | :---: | :---: |
 | [![Citation Canvas highlighting a cited chunk in the rendered paper HTML](docs/screenshots/04-citation-canvas-html.png)](docs/screenshots/04-citation-canvas-html.png) | [![Same citation highlighted in the source PDF via a geometry overlay](docs/screenshots/05-citation-canvas-pdf.png)](docs/screenshots/05-citation-canvas-pdf.png) |
 | 任意の `[chunk]` をクリック → LaTeX でレンダリングされた HTML 内の正確な一節へスクロールしてハイライトします。 | …そして元の PDF 内の同じ一節も。根拠のない主張はありません。 |
+
+**自分の言語で読む — レイアウトはそのまま。**
+
+| HTML 論文：各段落の下に訳文 | PDF：ホバー／ピン留めの翻訳カード |
+| :---: | :---: |
+| [![The paper reader with a Traditional Chinese translation under each paragraph of an HTML paper](docs/screenshots/13-bilingual-html.png)](docs/screenshots/13-bilingual-html.png) | [![A PDF paper with the hover translation card beside the hovered paragraph](docs/screenshots/14-bilingual-pdf.png)](docs/screenshots/14-bilingual-pdf.png) |
+| 翻訳をオンにして任意の言語を選択。数式・引用・コードはそのまま残ります。 | PDF は元のレイアウトのまま。段落にホバーすると訳文、クリックでピン留め。 |
+
+**分野横断のアイデア + フィードバックの循環。**
+
+| アイデアグラフ | フィードバックページ |
+| :---: | :---: |
+| [![The Ideas graph: library documents grouped by domain with cross-domain idea edges](docs/screenshots/15-ideas-graph.png)](docs/screenshots/15-ideas-graph.png) | [![The Feedback page: where answers go wrong by stage, cases to send to the G1 eval](docs/screenshots/16-feedback-page.png)](docs/screenshots/16-feedback-page.png) |
+| ある分野の仕組みを別分野の課題に対応付け、ライブラリ上に描画。論文はその場のリーダーで開けます。 | 高評価・低評価とレビューで確認された誤りを段階別に集計し、SFT/DPO データとして出力、または評価セットへ送れます。 |
 
 **学会水準のスライド — 分離された任意指定のノート。**
 
@@ -336,7 +350,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 ドキュメント
 
-- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.40.1** まで提供)。
+- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.41.0** まで提供)。
 - **[実装プラン](docs/superpowers/plans/)** — サブプロジェクトごとに 1 つ、それぞれ TDD で実行。
 - **[バックエンド開発者向けドキュメント](backend/README.md)** — バックエンド固有の注記。
 
@@ -352,7 +366,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.40.1}
+  version = {2.41.0}
 }
 ```
 

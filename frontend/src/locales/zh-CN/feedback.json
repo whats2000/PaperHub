@@ -1,7 +1,9 @@
 {
   "thumbs": {
     "up": "好回答",
-    "down": "不好的回答"
+    "down": "不好的回答",
+    "upPressed": "已反馈：好回答（再点一下取消）",
+    "downPressed": "已反馈：不好的回答（再点一下取消）"
   },
   "popover": {
     "title": "哪里不对？",
@@ -24,7 +26,8 @@
   },
   "toast": {
     "saved": "已记录反馈，会连同这次的 trace 一起保存。",
-    "failed": "无法保存反馈，请再试一次。"
+    "failed": "无法保存反馈，请再试一次。",
+    "removed": "已取消反馈"
   },
   "queue": {
     "count_one": "{{count}} 条反馈等你确认",

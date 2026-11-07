@@ -13,7 +13,7 @@ prompts_dir = "benchmark/agent/prompts"
 # v2a = current verified winner (Plan G1). v3 (Plan G2) = v2a with model_tier
 # dropped + an explicit multi-intent priority rule. v3 is benchmarked AGAINST
 # v2a (the baseline), not v1.
-variants    = ["v5b", "v8a", "v8b"]   # v5b = router/v4 (baseline); v8b shipped as router/v5 (subject for the 0-refs which-paper rule); see prompts/router/README.md
+variants    = ["v8b", "v9c", "v9e"]   # v8b = router/v5 (baseline); v9e shipped as router/v6 (a follow-up restates the discussed subject); see prompts/router/README.md
 concurrency = 4
 
 [[testsets]]
@@ -46,3 +46,11 @@ corpus = "benchmark/agent/corpus/router.history.jsonl"
 [[testsets]]
 name   = "deictic"
 corpus = "benchmark/agent/corpus/router.deictic.jsonl"
+
+# A follow-up's resolved_query must restate the discussed subject (the paper
+# readers see only resolved_query), graded by expect.query_has / query_lacks;
+# guards: a self-contained question, a topic switch and other intents keep
+# their rewrite free of the old subject. Live run 892.
+[[testsets]]
+name   = "followup"
+corpus = "benchmark/agent/corpus/router.followup.jsonl"

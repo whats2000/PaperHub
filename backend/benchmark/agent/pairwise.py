@@ -119,7 +119,12 @@ class PairwiseReport:
 
 
 def _request_text(case: CorpusCase) -> str:
-    return json.dumps(case.variables, ensure_ascii=False, indent=1)
+    text = json.dumps(case.variables, ensure_ascii=False, indent=1)
+    if not case.history:
+        return text
+    # A follow-up is judged against the conversation it continues.
+    prior = json.dumps(case.history, ensure_ascii=False, indent=1)
+    return f"Prior turns:\n{prior}\n\nLatest turn:\n{text}"
 
 
 def _output(row: dict[str, Any] | None) -> dict[str, Any] | None:

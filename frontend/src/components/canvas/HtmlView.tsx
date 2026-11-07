@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { applyIframeTheme } from "@/lib/applyIframeTheme";
+import { PaperLoading } from "@/components/canvas/PaperLoading";
+import { usePresence } from "@/hooks/usePresence";
+import { applyIframeTheme, withDarkStyle } from "@/lib/applyIframeTheme";
+import { cn } from "@/lib/utils";
 import {
   clearHighlight,
   findAndHighlight,
@@ -116,6 +119,16 @@ export function HtmlView({
     null,
   );
 
+  // The theme a paper first shows in is baked into its srcdoc, so a dark reader
+  // never paints white before onLoad; a later switch goes through
+  // applyIframeTheme and never reloads the paper.
+  const [firstPaint, setFirstPaint] = useState({ html, dark: isDark });
+  if (firstPaint.html !== html) setFirstPaint({ html, dark: isDark });
+  const srcDoc = useMemo(
+    () => (firstPaint.dark ? withDarkStyle(firstPaint.html) : firstPaint.html),
+    [firstPaint],
+  );
+
   const apply = (): void => {
     const doc = ref.current?.contentDocument;
     if (!doc?.body) return;
@@ -171,7 +184,13 @@ export function HtmlView({
     onImageActivateRef.current?.(img.currentSrc || img.src, img.alt ?? "");
   }, []);
 
+  // The skeleton covers the iframe until this paper has loaded (text laid
+  // out, MathJax and figures in), then fades out.
+  const [readyHtml, setReadyHtml] = useState<string | null>(null);
+  const skeleton = usePresence(readyHtml !== html, 200);
+
   const handleLoad = (): void => {
+    setReadyHtml(html);
     loadedRef.current = true;
     apply();
     const loadedDoc = ref.current?.contentDocument ?? null;
@@ -276,13 +295,23 @@ export function HtmlView({
   }, [trRetryFailed]);
 
   return (
-    <iframe
-      ref={ref}
-      title={t("panel.label")}
-      srcDoc={html}
-      onLoad={handleLoad}
-      sandbox="allow-scripts allow-same-origin"
-      className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
-    />
+    <div className="relative flex h-full w-full flex-1 flex-col">
+      <iframe
+        ref={ref}
+        title={t("panel.label")}
+        srcDoc={srcDoc}
+        onLoad={handleLoad}
+        sandbox="allow-scripts allow-same-origin"
+        className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
+      />
+      {skeleton.mounted && (
+        <PaperLoading
+          className={cn(
+            "absolute inset-0 bg-card transition-opacity duration-200 ease-out motion-reduce:transition-none",
+            skeleton.state === "closed" && "pointer-events-none opacity-0",
+          )}
+        />
+      )}
+    </div>
   );
 }

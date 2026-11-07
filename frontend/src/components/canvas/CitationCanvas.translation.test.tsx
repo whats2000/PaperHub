@@ -158,7 +158,7 @@ async function loadHtmlPaper(
   let iframe: HTMLIFrameElement | null = null;
   await waitFor(() => {
     iframe = container.querySelector<HTMLIFrameElement>(
-      'div:not([hidden]) > iframe[title="Citation Canvas"]',
+      'div:not([hidden]) > div > iframe[title="Citation Canvas"]',
     );
     expect(iframe).not.toBeNull();
   });

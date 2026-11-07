@@ -165,6 +165,8 @@ async def paper_qa_finalize(
             # slide is attached) — recorded so a mis-grounded final answer is
             # diagnosable from the DB. Agent-flow observability policy.
             "user_message": user_message,
+            # Whether the finalizer had the conversation (run 892).
+            "history_turns": len(state.get("history") or []),
         })
         collected: list[str] = []
         async for tok in adapter.stream(

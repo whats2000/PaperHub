@@ -1,6 +1,30 @@
 export const BASE_STYLE_ID = "ph-base-style";
 export const DARK_STYLE_ID = "ph-dark-mode";
 
+// The invert trick: a normal white-bg/black-text page inverts to a dark bg
+// with light text. Set the base background to WHITE first so transparent
+// pages also invert to dark. Do NOT set a dark background here — the filter
+// would invert it back to light (white-on-white). Re-invert media so figures
+// keep their true colours.
+const DARK_CSS = `
+    html { background: #ffffff; filter: invert(0.9) hue-rotate(180deg); }
+    img, svg, video, canvas, [style*="background-image"] {
+      filter: invert(1) hue-rotate(180deg);
+    }
+  `;
+
+/**
+ * The paper's HTML with the dark stylesheet already in its head, so a dark
+ * reader paints dark from the first frame instead of white until `onLoad`.
+ * `applyIframeTheme` finds it by id, so a later theme switch removes or keeps it.
+ */
+export function withDarkStyle(html: string): string {
+  const tag = `<style id="${DARK_STYLE_ID}">${DARK_CSS}</style>`;
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${tag}</head>`);
+  return `${tag}${html}`;
+}
+
 /**
  * Make a rendered paper document readable in the app's dark theme.
  *
@@ -37,16 +61,6 @@ export function applyIframeTheme(doc: Document, dark: boolean): void {
   if (existing) return;
   const style = doc.createElement("style");
   style.id = DARK_STYLE_ID;
-  // The invert trick: a normal white-bg/black-text page inverts to a dark bg
-  // with light text. Set the base background to WHITE first so transparent
-  // pages also invert to dark. Do NOT set a dark background here — the filter
-  // would invert it back to light (white-on-white). Re-invert media so figures
-  // keep their true colours.
-  style.textContent = `
-    html { background: #ffffff; filter: invert(0.9) hue-rotate(180deg); }
-    img, svg, video, canvas, [style*="background-image"] {
-      filter: invert(1) hue-rotate(180deg);
-    }
-  `;
+  style.textContent = DARK_CSS;
   (doc.head ?? doc.documentElement).appendChild(style);
 }

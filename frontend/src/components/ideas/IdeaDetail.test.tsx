@@ -108,15 +108,15 @@ afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 
 /** IdeaDetail fed from the store, the way the drawer renders it. */
-function Harness() {
+function Harness({ onReadSection }: { onReadSection?: (docId: number, chunkIds: number[]) => void }) {
   const idea = useIdeationStore((s) => {
     const sel = s.selected;
     return sel?.kind === "idea" ? s.graph?.ideas.find((i) => i.id === sel.id) : undefined;
   });
-  return idea ? <IdeaDetail key={idea.id} idea={idea} /> : null;
+  return idea ? <IdeaDetail key={idea.id} idea={idea} onReadSection={onReadSection} /> : null;
 }
 
-function setup(idea: Idea = base()) {
+function setup(idea: Idea = base(), onReadSection?: (docId: number, chunkIds: number[]) => void) {
   server_idea = idea;
   useIdeationStore.setState({
     scope: "explore",
@@ -125,7 +125,7 @@ function setup(idea: Idea = base()) {
     selected: { kind: "idea", id: idea.id },
     leavingIdeaIds: [],
   });
-  return render(<Harness />);
+  return render(<Harness onReadSection={onReadSection} />);
 }
 
 beforeEach(() => {
@@ -361,5 +361,17 @@ describe("IdeaDetail", () => {
     } finally {
       await i18n.changeLanguage("en");
     }
+  });
+
+  it("opens a cited section in the page's reader when it has one, not in a chat", async () => {
+    const user = userEvent.setup();
+    const onRead = vi.fn();
+    useCanvasStore.setState({ open: false, requestedChunkId: null, requestedEndChunkId: null });
+    const idea = base();
+    setup(idea, onRead);
+    await user.click(screen.getByRole("button", { name: /Region Proposal Networks/ }));
+    expect(onRead).toHaveBeenCalledWith(idea.source_doc, idea.source_chunk_ids);
+    expect(useCanvasStore.getState().open).toBe(false);
+    expect(chatCalls).toEqual([]);
   });
 });

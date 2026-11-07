@@ -43,7 +43,18 @@ const STATUS_FALLBACK: Record<IdeaStatus, string> = {
 /** The open "Dismissed" toast per idea, so the banner's Undo can retire it. */
 const undoToasts = new Map<number, string | number>();
 
-function SectionLink({ section, chunkIds, onOpen }: { section: string; chunkIds: number[]; onOpen: () => void }) {
+function SectionLink({
+  section,
+  chunkIds,
+  onOpen,
+  inReader = false,
+}: {
+  section: string;
+  chunkIds: number[];
+  onOpen: () => void;
+  /** Opens in the page's reader rather than in the idea's chat. */
+  inReader?: boolean;
+}) {
   const { t } = useTranslation("ideas");
   if (chunkIds.length === 0) return null;
   const label = sectionLabel(section);
@@ -51,7 +62,11 @@ function SectionLink({ section, chunkIds, onOpen }: { section: string; chunkIds:
     <button
       type="button"
       onClick={onOpen}
-      title={t("detail.openSection", "Opens the idea's chat with {{section}} in the Citation Canvas", { section: label })}
+      title={
+        inReader
+          ? t("detail.readSection", "Opens {{section}} in the reader", { section: label })
+          : t("detail.openSection", "Opens the idea's chat with {{section}} in the Citation Canvas", { section: label })
+      }
       className="inline-flex max-w-full items-center gap-1 rounded border border-border bg-card px-1.5 py-0.5 text-[11.5px] transition-colors hover:border-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <BookOpen className="size-3 shrink-0" aria-hidden="true" />
@@ -68,7 +83,14 @@ function Label({ children }: { children: React.ReactNode }) {
  * The idea drawer's management block: cited-section links, the status
  * buttons, the autosaving note, opening a chat and dismissing with reasons.
  */
-export function IdeaDetail({ idea }: { idea: Idea }) {
+export function IdeaDetail({
+  idea,
+  onReadSection,
+}: {
+  idea: Idea;
+  /** Read a cited section in place (the Ideas page's reader); without it, the idea's chat opens it. */
+  onReadSection?: (docId: number, chunkIds: number[]) => void;
+}) {
   const { t } = useTranslation("ideas");
   const patchIdea = useIdeationStore((s) => s.patchIdea);
   const dismissIdea = useIdeationStore((s) => s.dismissIdea);
@@ -225,13 +247,23 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
             <SectionLink
               section={idea.source_section}
               chunkIds={idea.source_chunk_ids}
-              onOpen={() => void openSection(idea.source_chunk_ids)}
+              inReader={!!onReadSection}
+              onOpen={() =>
+                onReadSection
+                  ? onReadSection(idea.source_doc, idea.source_chunk_ids)
+                  : void openSection(idea.source_chunk_ids)
+              }
             />
-            {idea.target_section && (
+            {idea.target_section && idea.target_doc !== null && (
               <SectionLink
                 section={idea.target_section}
                 chunkIds={idea.target_chunk_ids}
-                onOpen={() => void openSection(idea.target_chunk_ids)}
+                inReader={!!onReadSection}
+                onOpen={() => {
+                  const target = idea.target_doc;
+                  if (onReadSection && target !== null) onReadSection(target, idea.target_chunk_ids);
+                  else void openSection(idea.target_chunk_ids);
+                }}
               />
             )}
           </div>

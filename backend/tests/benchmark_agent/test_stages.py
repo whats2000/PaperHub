@@ -84,3 +84,20 @@ def test_router_finalize_asks_which_paper_when_nothing_is_named():
                          "slide_attached": False}, raw)
     assert out["intent"] == "clarify" and out["llm_intent"] == "paper_search"
     assert out["subject_rule"]["demoted_to"] == "clarify"
+
+
+def test_router_score_checks_resolved_query_terms():
+    """A follow-up case also grades what the subagents will read: every
+    ``query_has`` group needs one of its terms in resolved_query (case-
+    insensitive), and no ``query_lacks`` term may appear (a stale subject)."""
+    spec = get_stage("router")
+    expect = {"intent": "paper_qa", "query_has": [["GISC", "稀疏"], ["YOLOSeg"]],
+              "query_lacks": ["Mamba"]}
+    good = {"intent": "paper_qa", "resolved_query": "設計將 gisc 移植到 YOLOSeg 的實驗方法"}
+    assert spec.deterministic_score(expect, good) == 1.0
+    missing = {"intent": "paper_qa", "resolved_query": "請給我更詳細的實驗方法內容"}
+    assert spec.deterministic_score(expect, missing) == 0.0
+    stale = {"intent": "paper_qa", "resolved_query": "稀疏 YOLOSeg Mamba"}
+    assert spec.deterministic_score(expect, stale) == 0.0
+    wrong_intent = {**good, "intent": "slides"}
+    assert spec.deterministic_score(expect, wrong_intent) == 0.0

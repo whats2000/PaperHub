@@ -1,5 +1,31 @@
 [
   {
+    "version": "2.41.0",
+    "date": "2026-11-08",
+    "highlights": {
+      "en": [
+        "Bilingual reading: turn on translation in the reader to see each paragraph of an HTML paper translated underneath it, or hover a paragraph of a PDF to read it in a card — in any language, with math and citations kept as they are.",
+        "Ideas: describe a problem and get cross-domain ideas drawn on a graph of your library, each citing the mechanism it borrows; read any paper in place, open a chat on an idea, and track ideas from saved to worked.",
+        "Feedback: rate answers with a thumbs up or down, see where the system goes wrong by stage on the new Feedback page, and export your feedback as Hugging Face SFT/DPO training data."
+      ],
+      "zh-TW": [
+        "雙語閱讀：在閱讀器開啟翻譯，HTML 論文的每段下方會顯示譯文；PDF 論文只要滑過段落就能在卡片中閱讀譯文。可選任何語言，數學式與引用原樣保留。",
+        "想法：描述你的問題，就能在文獻庫圖譜上得到跨領域的 idea，每個都註明借用的機制；可直接在頁面中閱讀論文、針對 idea 開啟對話，並追蹤 idea 從收藏到有效的進度。",
+        "回饋：用讚或倒讚評價回答，在新的回饋頁面看出系統在哪個階段最常出錯，並將回饋匯出為 Hugging Face SFT/DPO 訓練資料。"
+      ],
+      "zh-CN": [
+        "双语阅读：在阅读器开启翻译，HTML 论文的每段下方会显示译文；PDF 论文只要悬停段落就能在卡片中阅读译文。可选任意语言，数学式与引用原样保留。",
+        "想法：描述你的问题，就能在文献库图谱上得到跨领域的 idea，每个都注明借用的机制；可直接在页面中阅读论文、针对 idea 开启对话，并跟踪 idea 从收藏到有效的进度。",
+        "反馈：用点赞或点踩评价回答，在新的反馈页面看出系统在哪个阶段最常出错，并将反馈导出为 Hugging Face SFT/DPO 训练数据。"
+      ],
+      "ja": [
+        "対訳リーディング：リーダーで翻訳をオンにすると、HTML 論文は各段落の下に訳文が表示され、PDF 論文は段落にホバーするだけでカードで訳文を読めます。言語は自由に選べ、数式と引用はそのまま残ります。",
+        "アイデア：課題を書くと、ライブラリのグラフ上に分野横断のアイデアが借用した仕組みの引用付きで表示されます。その場で論文を読み、アイデアごとにチャットを開き、保存から成果までを追跡できます。",
+        "フィードバック：回答を高評価・低評価で評価し、新しいフィードバックページでどの段階で誤りが多いかを確認、フィードバックを Hugging Face の SFT/DPO 学習データとして出力できます。"
+      ]
+    }
+  },
+  {
     "version": "2.40.1",
     "date": "2026-11-05",
     "highlights": {

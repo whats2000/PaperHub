@@ -295,3 +295,47 @@ describe("IdeaGraph", () => {
     }
   });
 });
+
+describe("IdeaGraph legend highlight", () => {
+  const op = (id: string) => screen.getByTestId(id).getAttribute("opacity");
+
+  it("lights one domain's documents and hull and dims the rest", () => {
+    render(<IdeaGraph graph={graph()} highlight={{ kind: "domains", ids: [3] }} />);
+    expect(op("node-4")).toBe("1");
+    expect(op("node-1")).toBe("0.3");
+    expect(op("hull-3")).toBe("1");
+    // A document in two domains does not keep the other domain's hull lit.
+    expect(op("hull-1")).toBe("0.3");
+  });
+
+  it("lights the citations only", () => {
+    render(<IdeaGraph graph={graph()} highlight={{ kind: "citations" }} />);
+    expect(screen.getByTestId("citation")).toHaveAttribute("opacity", "1");
+    expect(op("idea-11")).toBe("0.3");
+    expect(op("node-1")).toBe("1");
+    expect(op("node-4")).toBe("0.3");
+  });
+
+  it("lights the ideas of the hovered statuses and their documents", () => {
+    render(<IdeaGraph graph={graph()} highlight={{ kind: "status", statuses: ["saved"] }} />);
+    expect(op("idea-12")).toBe("1");
+    expect(op("idea-11")).toBe("0.3");
+    expect(op("idea-13")).toBe("0.3");
+    expect(screen.getByTestId("citation")).toHaveAttribute("opacity", "0.3");
+  });
+
+  it("lights private documents", () => {
+    render(<IdeaGraph graph={graph()} highlight={{ kind: "private" }} />);
+    expect(op("node-3")).toBe("1");
+    expect(op("node-1")).toBe("0.3");
+  });
+
+  it("wins over the selection while hovered, then gives it back", () => {
+    const { rerender } = render(<IdeaGraph graph={graph()} selected={{ kind: "doc", id: 4 }} highlight={{ kind: "domains", ids: [1] }} />);
+    expect(op("node-1")).toBe("1");
+    expect(op("node-4")).toBe("0.3");
+    rerender(<IdeaGraph graph={graph()} selected={{ kind: "doc", id: 4 }} highlight={null} />);
+    expect(op("node-4")).toBe("1");
+    expect(op("node-1")).toBe("0.3");
+  });
+});

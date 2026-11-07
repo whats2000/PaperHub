@@ -512,3 +512,51 @@ async def test_paper_qa_subgraph_all_empty_picks_yields_no_content_message(
     # final_response is the no-content sentinel.
     assert "final_response" in final_state
     assert "I checked every enabled reference" in final_state["final_response"]
+
+
+async def test_paper_qa_dispatch_passes_the_recent_conversation(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Run 892: each subagent gets the last exchange from state['history']
+    so it gathers what the conversation needs next, not the bare message."""
+    from unittest.mock import MagicMock
+
+    from paperhub.agents.recent_conversation import recent_conversation
+    from paperhub.agents.research_graph import ResearchDeps, build_paper_qa_subgraph
+    from paperhub.mcp.registry import MCPRegistry
+    from paperhub.pipelines.paper_pipeline import PaperPipeline
+
+    session_id = await _make_session(migrated_db)
+    await _insert_paper(migrated_db, session_id=session_id, arxiv_id="2401.0300",
+                        title="Paper A")
+    history = [{"role": "user", "content": "Port GISC to YOLOSeg?"},
+               {"role": "assistant", "content": "Treat defects as sparse [chunk:1]."}]
+    seen: list[dict[str, Any]] = []
+
+    async def _fake_subagent(*, paper_content_id: int, **kw: Any) -> PerPaperPicks:
+        seen.append(kw)
+        return PerPaperPicks(paper_content_id=paper_content_id, title="Paper A",
+                             picked_chunks=[], rationale="x")
+
+    deps = ResearchDeps(
+        adapter=_StubAdapter(["x"]),  # type: ignore[arg-type]
+        tracer=fake_tracer, paper_qa_model="stub", conn=migrated_db,
+        pipeline=MagicMock(spec=PaperPipeline), mcp_registry=MagicMock(spec=MCPRegistry),
+        paper_qa_subagent_model="stub", paper_qa_max_section_reads=2,
+    )
+    state: dict[str, Any] = {
+        "run_id": fake_tracer._run_id,  # noqa: SLF001
+        "branch": "", "session_id": session_id,
+        "user_message": "more detailed method", "history": history,
+    }
+    with patch("paperhub.agents.research_graph.run_paper_qa_subagent",
+               new=AsyncMock(side_effect=_fake_subagent)):
+        async for _ in build_paper_qa_subgraph(deps).astream(
+            state, stream_mode=["custom", "values"],
+        ):
+            pass
+
+    assert len(seen) == 1
+    assert seen[0]["recent_conversation"] == recent_conversation(history)
+    assert seen[0]["history_turns"] == 2

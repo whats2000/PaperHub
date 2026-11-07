@@ -140,7 +140,8 @@
     "undo": "撤销",
     "undoFailed": "无法撤销排除",
     "newChat": "新对话",
-    "newChatHint": "就这个 idea 再开一个对话"
+    "newChatHint": "就这个 idea 再开一个对话",
+    "readSection": "在阅读器中打开「{{section}}」"
   },
   "dismiss": {
     "title": "为什么不适用？",
@@ -212,5 +213,10 @@
   },
   "section": {
     "fullText": "全文"
+  },
+  "reader": {
+    "open": "阅读论文",
+    "aria": "论文阅读器",
+    "resize": "调整阅读器宽度"
   }
 }

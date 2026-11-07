@@ -1,7 +1,9 @@
 {
   "thumbs": {
     "up": "好回答",
-    "down": "不好的回答"
+    "down": "不好的回答",
+    "upPressed": "已回饋：好回答（再按一下取消）",
+    "downPressed": "已回饋：不好的回答（再按一下取消）"
   },
   "popover": {
     "title": "哪裡不對？",
@@ -24,7 +26,8 @@
   },
   "toast": {
     "saved": "已記錄回饋，會連同這次的 trace 一起保存。",
-    "failed": "無法儲存回饋，請再試一次。"
+    "failed": "無法儲存回饋，請再試一次。",
+    "removed": "已取消回饋"
   },
   "queue": {
     "count_one": "{{count}} 筆回饋等你確認",

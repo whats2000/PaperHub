@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { AlertCircle, LayoutGrid, Lightbulb, Loader2, Network, RotateCw } from "lucide-react";
+import { AlertCircle, BookOpen, LayoutGrid, Lightbulb, Loader2, Network, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -11,6 +11,7 @@ import { IdeaDetail } from "@/components/ideas/IdeaDetail";
 import { IdeaDrawer, type DrawerSlots } from "@/components/ideas/IdeaDrawer";
 import { IdeaGraph } from "@/components/ideas/IdeaGraph";
 import { IdeaKanban } from "@/components/ideas/IdeaKanban";
+import { PaperReaderDrawer, type ReaderRequest } from "@/components/ideas/PaperReaderDrawer";
 import { ProblemEntry } from "@/components/ideas/ProblemEntry";
 import { ProblemSwitcher } from "@/components/ideas/ProblemSwitcher";
 import { ZoomControl } from "@/components/ideas/ZoomControl";
@@ -28,7 +29,7 @@ import {
   type IdeationSelection,
   type IdeationView,
 } from "@/store/ideation";
-import type { CardProgress } from "@/types/ideation";
+import type { CardProgress, LegendHighlight } from "@/types/ideation";
 
 const ZOOM = { min: 0.5, max: 3 } as const;
 const ZOOM_STEP = 1.25;
@@ -266,6 +267,11 @@ export function IdeasPage() {
     [panToKeepVisible],
   );
   const drawerOpen = selected !== null;
+  // The legend category under the pointer, lit on the graph while hovered.
+  const [legendHighlight, setLegendHighlight] = useState<LegendHighlight | null>(null);
+  // The document open in the paper reader (over the graph and the drawer).
+  const [readerPaper, setReaderPaper] = useState<ReaderRequest | null>(null);
+  const closeReader = useCallback(() => setReaderPaper(null), []);
   // Mirrors for onLayout, which runs from the graph and must not change identity.
   useEffect(() => {
     viewRef.current = pz.transform;
@@ -273,15 +279,42 @@ export function IdeasPage() {
     drawerOpenRef.current = drawerOpen;
   });
   const domains = graph?.domains;
+  const documents = graph?.documents;
   const slots = useMemo<DrawerSlots>(
     () => ({
-      idea: (idea) => <IdeaDetail key={idea.id} idea={idea} />,
-      doc: (doc) => (
-        <DocDomainEditor
-          doc={doc}
-          domains={domains ?? []}
-          onOpenDomain={(id) => setSelected({ kind: "domain", id })}
+      idea: (idea) => (
+        <IdeaDetail
+          key={idea.id}
+          idea={idea}
+          onReadSection={(docId, chunkIds) => {
+            const first = chunkIds[0];
+            if (first === undefined) return;
+            setReaderPaper({
+              paper_content_id: docId,
+              title: documents?.find((d) => d.id === docId)?.title ?? "",
+              // A new nonce re-highlights even when the same section is reopened.
+              citation: { chunkId: first, endChunkId: chunkIds[chunkIds.length - 1], nonce: Date.now() },
+            });
+          }}
         />
+      ),
+      doc: (doc) => (
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mb-3"
+            onClick={() => setReaderPaper({ paper_content_id: doc.id, title: doc.title })}
+          >
+            <BookOpen aria-hidden="true" />
+            {t("ideas:reader.open", "Read paper")}
+          </Button>
+          <DocDomainEditor
+            doc={doc}
+            domains={domains ?? []}
+            onOpenDomain={(id) => setSelected({ kind: "domain", id })}
+          />
+        </>
       ),
       domain: (domain) => (
         <DomainSettings
@@ -292,7 +325,7 @@ export function IdeasPage() {
         />
       ),
     }),
-    [domains, setSelected],
+    [domains, documents, setSelected, t],
   );
   const fitAll = useCallback(() => {
     const l = layoutRef.current;
@@ -375,6 +408,7 @@ export function IdeasPage() {
                 graph={graph}
                 ideas={graphIdeas}
                 leavingIds={leavingIdeaIds}
+                highlight={legendHighlight}
                 selected={selected}
                 onSelect={select}
                 onSelectDomain={selectDomain}
@@ -394,7 +428,7 @@ export function IdeasPage() {
                 onFit={fitAll}
                 shifted={drawerOpen}
               />
-              <GraphLegend domains={graph.domains} drawerOpen={drawerOpen} />
+              <GraphLegend domains={graph.domains} onHighlight={setLegendHighlight} />
             </>
           )}
         </ViewSlot>
@@ -421,6 +455,7 @@ export function IdeasPage() {
           returnFocusTo={returnFocusTo}
           slots={slots}
         />
+        <PaperReaderDrawer paper={readerPaper} onClose={closeReader} />
         {/* Always mounted, so screen readers hear the text when it's filled in. */}
         <p role="status" className="sr-only">
           {generating && !error ? generatingText : ""}

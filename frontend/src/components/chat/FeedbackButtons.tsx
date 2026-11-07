@@ -19,8 +19,9 @@ const CORRECTION_MAX = 8000;
 // Matches the popover's exit animation (duration-150).
 const EXIT_MS = 150;
 
+// Unpressed: a muted outline. Pressed: a solid thumb in the text colour.
 const thumbClass =
-  "h-6 w-6 aria-pressed:text-foreground aria-pressed:[&_svg]:fill-current aria-pressed:[&_svg]:[fill-opacity:0.15]";
+  "h-6 w-6 text-muted-foreground transition-colors hover:text-foreground aria-pressed:text-foreground aria-pressed:[&_svg]:fill-current";
 
 /**
  * Thumbs up / down for one completed answer. Up is a one-click toggle; down
@@ -51,34 +52,38 @@ export function FeedbackButtons({ runId }: { runId: number }) {
       },
     );
 
+  /** A second click on a pressed thumb removes the feedback. */
+  const remove = () =>
+    void save({ polarity: null, reasons: [] }).then((ok) => {
+      if (ok) toast.success(t("toast.removed", "Feedback removed"));
+    });
+
   const onUp = () => {
-    void save(
-      vote?.polarity === "up"
-        ? { polarity: null, reasons: [] }
-        : { polarity: "up", reasons: [] },
-    );
+    if (vote?.polarity === "up") remove();
+    else void save({ polarity: "up", reasons: [] });
   };
 
   const onOpenChange = (next: boolean) => {
+    // A pressed thumbs down is removed on one click, like a pressed thumbs up.
+    if (next && vote?.polarity === "down") {
+      remove();
+      return;
+    }
     setOpen(next);
     if (!next) return;
     const seq = ++openSeq.current;
-    // Reopening a saved thumbs down restores everything it saved.
-    const savedVote = vote?.polarity === "down" ? vote : null;
-    const saved = savedVote ? [...savedVote.reasons] : null;
-    if (saved && savedVote?.otherText && !saved.includes(OTHER)) saved.push(OTHER);
     touched.current = false;
-    setSelected(new Set(saved ?? []));
+    setSelected(new Set());
     setGuessed([]);
-    setOtherText(savedVote?.otherText ?? "");
-    setCorrection(savedVote?.correction ?? "");
-    setCorrectionOpen(!!savedVote?.correction);
+    setOtherText("");
+    setCorrection("");
+    setCorrectionOpen(false);
     getRunFeedbackGuess(runId).then(
       (g) => {
         if (seq !== openSeq.current) return;
         setGuessed(g.reasons);
-        // A saved answer wins over the guess; so does anything the user picked.
-        if (saved === null && !touched.current) setSelected(new Set(g.reasons));
+        // Anything the user already picked wins over the guess.
+        if (!touched.current) setSelected(new Set(g.reasons));
       },
       () => undefined, // No guess: the chips simply start empty.
     );
@@ -136,7 +141,7 @@ export function FeedbackButtons({ runId }: { runId: number }) {
         variant="ghost"
         className={thumbClass}
         aria-label={t("thumbs.up")}
-        title={t("thumbs.up")}
+        title={vote?.polarity === "up" ? t("thumbs.upPressed", "Marked as a good answer · click to remove") : t("thumbs.up")}
         aria-pressed={vote?.polarity === "up"}
         onClick={onUp}
       >
@@ -151,7 +156,11 @@ export function FeedbackButtons({ runId }: { runId: number }) {
               variant="ghost"
               className={thumbClass}
               aria-label={t("thumbs.down")}
-              title={t("thumbs.down")}
+              title={
+                vote?.polarity === "down"
+                  ? t("thumbs.downPressed", "Marked as a bad answer · click to remove")
+                  : t("thumbs.down")
+              }
               aria-pressed={vote?.polarity === "down"}
             />
           }

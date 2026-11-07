@@ -5,7 +5,8 @@
     "viewingTitle": "{{title}} — 查看中（非使用中的参考文献）",
     "addToReferences": "加入参考文献（纳入未来的回答）",
     "add": "加入",
-    "close": "关闭画布"
+    "close": "关闭画布",
+    "closeReader": "关闭阅读器"
   },
   "stale": "此引用的段落已不再可用——该论文可能已重新建立索引。",
   "error": {

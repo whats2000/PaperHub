@@ -1,3 +1,75 @@
+# router — follow-ups restate the subject (router/v6)
+
+Shipped as `src/paperhub/llm/prompts/router_v6.yaml` = **v9e**. The round
+before it (router/v5 = v8b, the 0-refs "which paper?" rule) follows below.
+
+## Hypothesis
+
+Live run 892 (an idea chat about porting GISC sparsity constraints into
+YOLOSeg low-contrast defect segmentation): 「給我更詳細實驗方法」 was rewritten
+as 「請給我更詳細的實驗方法內容」. The paper_qa subagents see only
+`resolved_query`, so each read its own paper's method and the answer was
+marked off_topic. A follow-up's rewrite must restate the subject under
+discussion; a self-contained question, a topic switch and every other intent
+must keep their current rewrite and route.
+
+## Test set
+
+`router.followup.jsonl` (12 cases, all with history): 5 targets (zh-TW run 892
+with its real history, en, ja, zh-CN, an en idea port) graded by intent plus
+`expect.query_has` (the subject must appear in `resolved_query`), and 7 guards
+(a self-contained question in the same chat, a topic switch to
+`paper_suggest`, thanks, slides, memory, library_stats, and an anaphoric
+`paper_search`) with `expect.query_lacks` where a stale subject must not leak.
+Plus every earlier bucket. Deploy model `gemini/gemini-3.5-flash-lite`,
+5 reps, one call in flight.
+
+## Variants
+
+| ver | change |
+|---|---|
+| v8b | baseline (`router/v5`) |
+| v9a | `resolved_query` field: for a follow-up, restate the subject |
+| v9b | v9a + one English follow-up example |
+| v9c | v9b + a `## Follow-ups` section: the paper readers see only `resolved_query`; never stand in "the enabled paper" for a named subject |
+| v9d | v9a + the section, no example |
+| **v9e** | v9c + name the subject briefly (no recap of the answer), keep the conversation's script |
+
+## Results (score / tokens in)
+
+| bucket | v8b | v9a | v9b | v9c | v9d | v9e |
+|---|---|---|---|---|---|---|
+| followup | 0.83 / 3395 | 0.85 | 0.93, 0.98 (2 runs) | 1.00, 0.98 | 1.00 | **1.00** / 3726 |
+| core | 1.00 / 2174 | | | 1.00 | 1.00 | 1.00 / 2504 |
+| regression | 1.00 | | | 1.00 | 1.00 | 1.00 |
+| edge | 1.00 | | | 1.00 | 1.00 | 1.00 |
+| multiintent | 1.00 | | | 1.00 | 1.00 | 1.00 |
+| history | 1.00 | | | 1.00 | 1.00 | 1.00 |
+| deictic | 1.00 | | | 1.00 | 0.98 ⚠ | 1.00 |
+
+v8b misses `fu-zh-tw-gisc-method` 5/5 (「請提供更詳細的實驗方法內容」) and
+`fu-en-lora-experiments` 5/5 ("…experiments of the enabled paper"). v9d sent
+`dx-guard-topic-0refs` to `paper_search` once.
+
+Pairwise judge `gemini/gemini-pro-latest` (`STAGE_RUBRICS["router"]` + case
+rubric, the case history now in the request), A/B swapped, on followup:
+
+| A vs B | A | B | tie |
+|---|---|---|---|
+| v9c vs v8b | 14 | 6 | 40 |
+| **v9e vs v8b** | **20** | **2** | 38 |
+
+v9c lost the both-correct `fu-zh-cn-ddpm-limits` pairs 0–4: it rewrote a
+Simplified-Chinese conversation in Traditional script and recapped the earlier
+answer into the query. v9e wins them 3–0, wins 10 of 10 target pairs on the
+subject check, and loses only 2 `fu-guard-independent-question` pairs (both
+variants sometimes expand "YOLOSeg" to the full title).
+
+## Known limits
+
+- `response_language` of the script-neutral 「那它的局限呢？」 is often
+  "Traditional Chinese" in every variant (predates this change).
+
 # router — 0-refs "which paper?" rule (router/v5)
 
 Shipped as `src/paperhub/llm/prompts/router_v5.yaml` = **v8b**. The round

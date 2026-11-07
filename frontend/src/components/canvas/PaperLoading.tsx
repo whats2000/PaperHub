@@ -1,52 +1,50 @@
-import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-// Varied line widths so the skeleton reads like a page of prose, not a grid.
-const LINE_WIDTHS = [
-  "w-full",
-  "w-11/12",
-  "w-10/12",
-  "w-full",
-  "w-9/12",
-  "w-11/12",
-  "w-8/12",
-  "w-10/12",
-  "w-9/12",
+import { cn } from "@/lib/utils";
+
+// Line widths per paragraph; each ends on a short line, like prose.
+const PARAGRAPHS = [
+  ["w-full", "w-full", "w-11/12", "w-full", "w-7/12"],
+  ["w-full", "w-11/12", "w-full", "w-10/12", "w-full", "w-5/12"],
+  ["w-full", "w-full", "w-10/12", "w-8/12"],
 ];
 
 interface Props {
-  /** Status text under the skeleton. */
+  /** Status text for screen readers. */
   label?: string;
+  className?: string;
+}
+
+function Bar({ className }: { className: string }) {
+  return <div aria-hidden="true" className={cn("skeleton-shimmer rounded-sm", className)} />;
 }
 
 /**
- * Loading placeholder for the reading panel: a pulsing document skeleton (title,
- * byline, a paragraph of lines) plus a spinner + label. Used both for the brief
- * swap interlude (DeferredRemount) and while react-pdf parses a PDF, so every
+ * Loading placeholder for the reading panel, shaped like the page it stands in
+ * for: a title, a byline and paragraphs of shimmering bars (Ant Design
+ * Skeleton "active" style). Used while a paper is fetched, while an HTML paper
+ * lays out, while react-pdf parses a PDF and during a paper swap, so every
  * "paper is loading" moment looks the same.
  */
-export function PaperLoading({ label }: Props) {
+export function PaperLoading({ label, className }: Props) {
   const { t } = useTranslation("canvas");
   const text = label ?? t("loading.paper");
   return (
-    <div className="flex h-full w-full flex-1 flex-col items-center justify-center gap-5 overflow-hidden p-6">
-      <div className="w-full max-w-md space-y-3 rounded-lg border border-border bg-background/50 p-6 shadow-sm">
-        {/* title + byline */}
-        <div className="h-5 w-3/4 animate-pulse rounded bg-muted" />
-        <div className="h-3 w-2/5 animate-pulse rounded bg-muted/70" />
-        {/* paragraph */}
-        <div className="space-y-2.5 pt-4">
-          {LINE_WIDTHS.map((w, i) => (
-            <div
-              key={i}
-              className={`h-2.5 animate-pulse rounded bg-muted/60 ${w}`}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>{text}</span>
+    <div
+      role="status"
+      className={cn("flex h-full w-full flex-1 justify-center overflow-hidden px-8 pt-10", className)}
+    >
+      <span className="sr-only">{text}</span>
+      <div className="w-full max-w-2xl">
+        <Bar className="h-7 w-3/5" />
+        <Bar className="mt-4 h-4 w-2/5" />
+        {PARAGRAPHS.map((lines, p) => (
+          <div key={p} className="mt-8 space-y-3">
+            {lines.map((w, i) => (
+              <Bar key={i} className={cn("h-4", w)} />
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );

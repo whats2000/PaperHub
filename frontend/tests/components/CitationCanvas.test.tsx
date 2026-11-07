@@ -109,7 +109,7 @@ beforeEach(() => {
 });
 
 const activeHtmlView = (c: HTMLElement): HTMLIFrameElement | null =>
-  c.querySelector('div:not([hidden]) > iframe[title="Citation Canvas"]');
+  c.querySelector('div:not([hidden]) > div > iframe[title="Citation Canvas"]');
 
 describe("CitationCanvas reading panel", () => {
   it("renders nothing when closed with no references", () => {
@@ -307,5 +307,86 @@ describe("CitationCanvas reading panel", () => {
     expect(
       container.querySelector('aside[aria-label="Citation Canvas"]'),
     ).toHaveAttribute("aria-hidden", "true");
+  });
+});
+
+describe("CitationCanvas standalone reader (Ideas page)", () => {
+  const paper9 = { paper_content_id: 9, title: "Paper C" };
+
+  it("shows the given paper, not the chat's references, and opens without the canvas store", async () => {
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body"),
+    );
+    expect(screen.getByRole("button", { name: "Paper C" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Paper A/ })).not.toBeInTheDocument();
+    expect(useCanvasStore.getState().open).toBe(false);
+  });
+
+  it("closes through its own callback and leaves the chat canvas alone", async () => {
+    const onClose = vi.fn();
+    render(<CitationCanvas standalone={{ papers: [paper9], onClose }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Close reader" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores citation and paper requests meant for the chat's canvas", async () => {
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    await waitFor(() =>
+      expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body"),
+    );
+    act(() => useCanvasStore.getState().openCitation(42));
+    act(() => useCanvasStore.getState().openPaper(8));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body");
+    // The request stays for the chat canvas to consume.
+    expect(useCanvasStore.getState().requestedChunkId).toBe(42);
+    expect(useCanvasStore.getState().requestedPaperId).toBe(8);
+  });
+
+  it("highlights a citation it was given, for its own paper", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/papers/content/7/document`, () => HttpResponse.json({ mode: "pdf" })),
+      http.get(`${API_BASE_URL}/papers/content/7/pdf`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3, 4]).buffer, {
+          headers: { "Content-Type": "application/pdf" },
+        }),
+      ),
+    );
+    render(
+      <CitationCanvas
+        standalone={{ papers: [{ paper_content_id: 7, title: "Paper A" }], onClose: vi.fn(), citation: { chunkId: 42, nonce: 1 } }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-view")).toHaveTextContent("Expert collapse is mitigated."),
+    );
+    // Resolved by the reader itself; the chat canvas's request slot is untouched.
+    expect(useCanvasStore.getState().requestedChunkId).toBeNull();
+  });
+
+  it("shows the paper skeleton while the paper is being fetched", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/papers/content/9/document`, async () => {
+        await gate;
+        return HttpResponse.json({ mode: "html" });
+      }),
+    );
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("Loading paper…");
+    release();
+    await waitFor(() => expect(activeHtmlView(container)).not.toBeNull());
+  });
+
+  it("marks the shown paper's tab with the soft grey, not the accent colour", () => {
+    render(<CitationCanvas standalone={{ papers: [paper9, { paper_content_id: 8, title: "Paper B" }], onClose: vi.fn() }} />);
+    const active = screen.getByRole("button", { name: "Paper C" });
+    expect(active.className).toContain("bg-foreground/10");
+    expect(active.className).not.toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Paper B" }).className).not.toContain("bg-foreground/10");
   });
 });

@@ -107,3 +107,27 @@ describe("TranslationCard arrow side", () => {
     expect(arrow().className).toContain("-top-[6px]");
   });
 });
+
+describe("TranslationCard surface", () => {
+  // The card floats over the chat column and the page; the shared popover
+  // surface is near-identical to both in dark mode, so it uses its own grey.
+  it("uses the grey card surface, not the shared popover one, for the card and its arrow", () => {
+    render(<Card placement={PLACEMENT} scroll={at(0)} />);
+    const card = screen.getByRole("dialog");
+    const arrow = card.querySelector<HTMLElement>("span[aria-hidden=\"true\"]")!;
+    for (const el of [card, arrow]) {
+      expect(el.className).toContain("bg-secondary");
+      expect(el.className).not.toContain("bg-popover");
+      expect(el.className).toContain("border-foreground/15");
+    }
+  });
+
+  it("gives its buttons a hover shade that differs from the grey surface", () => {
+    render(<Card placement={PLACEMENT} scroll={at(0)} />);
+    for (const name of [/pin translation/i, /close translation/i]) {
+      const btn = screen.getByRole("button", { name });
+      expect(btn.className).toContain("hover:bg-foreground/10");
+      expect(btn.className).not.toContain("hover:bg-muted");
+    }
+  });
+});

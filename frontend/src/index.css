@@ -73,6 +73,32 @@
     100% { background-position: -200% 0; }
 }
 
+/* Loading skeleton bars (Ant Design Skeleton "active" style): a light band
+   sweeps left to right across a tinted bar. Tinted from --foreground, so it
+   reads on any surface in both themes; still under reduced motion. */
+@keyframes skeleton-shimmer {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+.skeleton-shimmer {
+    background: linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--foreground) 6%, transparent) 25%,
+        color-mix(in oklch, var(--foreground) 13%, transparent) 37%,
+        color-mix(in oklch, var(--foreground) 6%, transparent) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-shimmer {
+        animation: none;
+        background: color-mix(in oklch, var(--foreground) 6%, transparent);
+    }
+}
+
 @keyframes slide-build-beam {
     0%   { transform: translateX(-120%); opacity: 0; }
     15%  { opacity: 1; }

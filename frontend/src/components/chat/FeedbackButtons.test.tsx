@@ -155,18 +155,6 @@ describe("FeedbackButtons", () => {
     expect(down43).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("reopening a saved thumbs down shows its saved reasons, not the guess", async () => {
-    useFeedbackStore.setState({
-      byRun: { 42: { polarity: "down", reasons: ["factual"], otherText: null, correction: null } },
-    });
-    const user = userEvent.setup();
-    render(<FeedbackButtons runId={42} />);
-    await user.click(downButton());
-    await screen.findByRole("button", { name: "Too long" });
-    expect(chip("Factual error")).toHaveAttribute("aria-pressed", "true");
-    expect(chip(/Wrong citation/)).toHaveAttribute("aria-pressed", "false");
-  });
-
   it("reverts and toasts when saving fails", async () => {
     server.use(
       http.put(`${API_BASE_URL}/feedback/runs/:runId`, () =>
@@ -178,6 +166,48 @@ describe("FeedbackButtons", () => {
     await user.click(upButton());
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(upButton()).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("FeedbackButtons pressed state", () => {
+  it("draws a pressed thumb solid and an unpressed one as a muted outline", () => {
+    useFeedbackStore.setState({
+      byRun: { 42: { polarity: "up", reasons: [], otherText: null, correction: null } },
+    });
+    render(<FeedbackButtons runId={42} />);
+    for (const btn of [upButton(), downButton()]) {
+      expect(btn.className).toContain("text-muted-foreground");
+      expect(btn.className).toContain("aria-pressed:[&_svg]:fill-current");
+      expect(btn.className).not.toContain("fill-opacity");
+    }
+    expect(upButton()).toHaveAttribute("title", "Marked as a good answer · click to remove");
+    expect(downButton()).toHaveAttribute("title", "Bad answer");
+  });
+
+  it("a pressed thumbs down is removed on one click, without opening the reasons", async () => {
+    useFeedbackStore.setState({
+      byRun: { 42: { polarity: "down", reasons: ["factual"], otherText: null, correction: null } },
+    });
+    const user = userEvent.setup();
+    render(<FeedbackButtons runId={42} />);
+    expect(downButton()).toHaveAttribute("title", "Marked as a bad answer · click to remove");
+    await user.click(downButton());
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ polarity: null, reasons: [] });
+    expect(downButton()).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Submit" })).not.toBeInTheDocument();
+    expect(toastSuccess).toHaveBeenCalledWith("Feedback removed");
+  });
+
+  it("removing a thumbs up says so too", async () => {
+    useFeedbackStore.setState({
+      byRun: { 42: { polarity: "up", reasons: [], otherText: null, correction: null } },
+    });
+    const user = userEvent.setup();
+    render(<FeedbackButtons runId={42} />);
+    await user.click(upButton());
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(toastSuccess).toHaveBeenCalledWith("Feedback removed");
   });
 });
 
@@ -204,54 +234,23 @@ describe("MessageBubble thumbs placement", () => {
 });
 
 describe("FeedbackButtons fix round 1", () => {
-  it("reopening a saved thumbs down pre-fills other text and correction, and resubmit keeps them", async () => {
-    useFeedbackStore.setState({
-      byRun: {
-        42: { polarity: "down", reasons: ["factual", "other"], otherText: "missed table 2", correction: "42%" },
-      },
-    });
-    const user = userEvent.setup();
-    render(<FeedbackButtons runId={42} />);
-    await user.click(downButton());
-    await screen.findByRole("button", { name: "Too long" });
-
-    const other = screen.getByPlaceholderText("Describe the other reason…");
-    expect(other).toHaveValue("missed table 2");
-    expect(other.closest("[data-state]")).toHaveAttribute("data-state", "open");
-    const corr = screen.getByPlaceholderText("The right answer would be…");
-    expect(corr).toHaveValue("42%");
-    expect(corr.closest("[data-state]")).toHaveAttribute("data-state", "open");
-
-    await user.click(screen.getByRole("button", { name: "Submit" }));
-    await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0]).toEqual({
-      polarity: "down",
-      reasons: ["factual", "other"],
-      other_text: "missed table 2",
-      correction: "42%",
-    });
-    expect(useFeedbackStore.getState().byRun[42]).toEqual({
-      polarity: "down",
-      reasons: ["factual", "other"],
-      otherText: "missed table 2",
-      correction: "42%",
-    });
-  });
-
-  it("a quick re-submit before presets load keeps a saved preset reason", async () => {
+  it("a quick submit before presets load keeps a guessed preset reason", async () => {
     server.use(
       http.get(`${API_BASE_URL}/feedback/presets`, async () => {
         await delay("infinite");
         return HttpResponse.json([]);
       }),
+      http.get(`${API_BASE_URL}/feedback/runs/:runId/guess`, () => HttpResponse.json({ reasons: ["Too long"] })),
     );
-    useFeedbackStore.setState({
-      byRun: { 42: { polarity: "down", reasons: ["Too long"], otherText: null, correction: null } },
-    });
     const user = userEvent.setup();
     render(<FeedbackButtons runId={42} />);
     await user.click(downButton());
-    await user.click(await screen.findByRole("button", { name: "Submit" }));
+    const submit = await screen.findByRole("button", { name: "Submit" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Wrong citation/ })).toBeInTheDocument());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20)); // let the guess land
+    });
+    await user.click(submit);
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]?.reasons).toEqual(["Too long"]);
   });
