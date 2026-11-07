@@ -140,7 +140,8 @@
     "undo": "復原",
     "undoFailed": "無法復原排除",
     "newChat": "新對話",
-    "newChatHint": "就這個 idea 再開一個對話"
+    "newChatHint": "就這個 idea 再開一個對話",
+    "readSection": "在閱讀器中開啟「{{section}}」"
   },
   "dismiss": {
     "title": "為什麼不適用？",

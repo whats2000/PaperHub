@@ -140,7 +140,8 @@
     "undo": "元に戻す",
     "undoFailed": "除外を元に戻せませんでした",
     "newChat": "新しいチャット",
-    "newChatHint": "このアイデアについて別のチャットを始める"
+    "newChatHint": "このアイデアについて別のチャットを始める",
+    "readSection": "リーダーで「{{section}}」を開く"
   },
   "dismiss": {
     "title": "合わない理由は？",

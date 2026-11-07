@@ -11,8 +11,7 @@ import { IdeaDetail } from "@/components/ideas/IdeaDetail";
 import { IdeaDrawer, type DrawerSlots } from "@/components/ideas/IdeaDrawer";
 import { IdeaGraph } from "@/components/ideas/IdeaGraph";
 import { IdeaKanban } from "@/components/ideas/IdeaKanban";
-import { PaperReaderDrawer } from "@/components/ideas/PaperReaderDrawer";
-import type { ReaderPaper } from "@/components/canvas/CitationCanvas";
+import { PaperReaderDrawer, type ReaderRequest } from "@/components/ideas/PaperReaderDrawer";
 import { ProblemEntry } from "@/components/ideas/ProblemEntry";
 import { ProblemSwitcher } from "@/components/ideas/ProblemSwitcher";
 import { ZoomControl } from "@/components/ideas/ZoomControl";
@@ -271,7 +270,7 @@ export function IdeasPage() {
   // The legend category under the pointer, lit on the graph while hovered.
   const [legendHighlight, setLegendHighlight] = useState<LegendHighlight | null>(null);
   // The document open in the paper reader (over the graph and the drawer).
-  const [readerPaper, setReaderPaper] = useState<ReaderPaper | null>(null);
+  const [readerPaper, setReaderPaper] = useState<ReaderRequest | null>(null);
   const closeReader = useCallback(() => setReaderPaper(null), []);
   // Mirrors for onLayout, which runs from the graph and must not change identity.
   useEffect(() => {
@@ -280,9 +279,25 @@ export function IdeasPage() {
     drawerOpenRef.current = drawerOpen;
   });
   const domains = graph?.domains;
+  const documents = graph?.documents;
   const slots = useMemo<DrawerSlots>(
     () => ({
-      idea: (idea) => <IdeaDetail key={idea.id} idea={idea} />,
+      idea: (idea) => (
+        <IdeaDetail
+          key={idea.id}
+          idea={idea}
+          onReadSection={(docId, chunkIds) => {
+            const first = chunkIds[0];
+            if (first === undefined) return;
+            setReaderPaper({
+              paper_content_id: docId,
+              title: documents?.find((d) => d.id === docId)?.title ?? "",
+              // A new nonce re-highlights even when the same section is reopened.
+              citation: { chunkId: first, endChunkId: chunkIds[chunkIds.length - 1], nonce: Date.now() },
+            });
+          }}
+        />
+      ),
       doc: (doc) => (
         <>
           <Button
@@ -310,7 +325,7 @@ export function IdeasPage() {
         />
       ),
     }),
-    [domains, setSelected, t],
+    [domains, documents, setSelected, t],
   );
   const fitAll = useCallback(() => {
     const l = layoutRef.current;

@@ -140,7 +140,8 @@
     "undo": "Undo",
     "undoFailed": "Couldn't undo the dismissal",
     "newChat": "New chat",
-    "newChatHint": "Start another chat about this idea"
+    "newChatHint": "Start another chat about this idea",
+    "readSection": "Opens {{section}} in the reader"
   },
   "dismiss": {
     "title": "Why doesn't it fit?",

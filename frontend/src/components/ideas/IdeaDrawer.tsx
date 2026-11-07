@@ -216,13 +216,20 @@ export function IdeaDrawer({
         <>
           <h3 className="mb-2.5 text-[15px] leading-snug font-semibold">{idea.title}</h3>
           <Label>{t("ideas:drawer.source", "Mechanism source")}</Label>
-          <Row color={docColor(idea.source_doc)} title={docTitle(idea.source_doc)} sub={sectionLabel(idea.source_section)} />
+          {/* The cards jump to their document (or the problem) on the graph. */}
+          <Row
+            color={docColor(idea.source_doc)}
+            title={docTitle(idea.source_doc)}
+            sub={sectionLabel(idea.source_section)}
+            onClick={() => onSelect({ kind: "doc", id: idea.source_doc })}
+          />
           <Label>{t("ideas:drawer.target", "Applied to")}</Label>
           {idea.target_doc === null ? (
             <Row
               color={docColor(null)}
               title={graph?.problem?.text ?? t("ideas:graph.problem", "Your problem")}
               sub={t("ideas:drawer.yourProblem", "The problem you described")}
+              onClick={() => onSelect({ kind: "problem" })}
             />
           ) : (
             <Row
@@ -239,6 +246,10 @@ export function IdeaDrawer({
                 </>
               }
               sub={idea.target_section != null ? sectionLabel(idea.target_section) : undefined}
+              onClick={() => {
+                const target = idea.target_doc;
+                if (target !== null) onSelect({ kind: "doc", id: target });
+              }}
             />
           )}
           <Label>{t("ideas:drawer.why", "Why it fits")}</Label>

@@ -133,6 +133,25 @@ describe("IdeaDrawer", () => {
     expect(d.getByText("Rationale for 11.")).toBeInTheDocument();
   });
 
+  it("jumps to the source and target documents from their cards", async () => {
+    const onSelect = vi.fn();
+    render(<IdeaDrawer graph={graph()} ideas={graph().ideas} selected={{ kind: "idea", id: 11 }} onSelect={onSelect} />);
+    const d = within(screen.getByTestId("idea-drawer"));
+    await userEvent.click(d.getByRole("button", { name: /Faster R-CNN/ }));
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "doc", id: 1 });
+    await userEvent.click(d.getByRole("button", { name: /GPT-3/ }));
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "doc", id: 2 });
+  });
+
+  it("jumps to the problem from a problem idea's target card", async () => {
+    const onSelect = vi.fn();
+    const g = problemGraph();
+    const id = g.ideas[0]!.id;
+    render(<IdeaDrawer graph={g} ideas={g.ideas} selected={{ kind: "idea", id }} onSelect={onSelect} />);
+    await userEvent.click(within(screen.getByTestId("idea-drawer")).getByRole("button", { name: /The problem you described/ }));
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "problem" });
+  });
+
   it("shows the problem's full text, what was tried, and its idea list", () => {
     const onSelect = vi.fn();
     const g = problemGraph();
