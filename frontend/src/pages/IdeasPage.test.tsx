@@ -12,6 +12,12 @@ const { toast } = vi.hoisted(() => ({
   }),
 }));
 vi.mock("sonner", () => ({ toast }));
+// The reader is covered by the CitationCanvas tests; here only that it opens.
+vi.mock("@/components/canvas/CitationCanvas", () => ({
+  CitationCanvas: ({ standalone }: { standalone: { papers: { title: string }[] } }) => (
+    <div data-testid="standalone-reader">{standalone.papers[0]?.title}</div>
+  ),
+}));
 
 import { API_BASE_URL } from "@/lib/api";
 import { IdeasPage } from "@/pages/IdeasPage";
@@ -501,5 +507,19 @@ describe("Ideas page: an explore scope with no ideas yet", () => {
     expect(screen.getByTestId("node-1")).toBeInTheDocument();
     expect(screen.getByTestId("hull-label-1")).toHaveTextContent("Vision");
     expect(screen.getByTestId("hull-label-2")).toHaveTextContent("Language");
+  });
+});
+
+describe("Ideas page: reading a document", () => {
+  it("opens the paper reader from the document drawer, over it, without leaving the page", async () => {
+    const user = userEvent.setup();
+    render(<IdeasPage />);
+    const page = useNavStore.getState().page;
+    await user.click(await screen.findByTestId("node-1"));
+    const drawer = await screen.findByTestId("idea-drawer");
+    await user.click(within(drawer).getByRole("button", { name: "Read paper" }));
+    expect(await screen.findByTestId("standalone-reader")).toHaveTextContent("Faster R-CNN");
+    expect(useNavStore.getState().page).toBe(page);
+    expect(useIdeationStore.getState().selected).toEqual({ kind: "doc", id: 1 });
   });
 });

@@ -212,5 +212,9 @@
   },
   "section": {
     "fullText": "全文"
+  },
+  "reader": {
+    "open": "論文を読む",
+    "aria": "論文リーダー"
   }
 }

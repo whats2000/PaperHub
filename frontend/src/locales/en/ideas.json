@@ -212,5 +212,9 @@
   },
   "section": {
     "fullText": "Full text"
+  },
+  "reader": {
+    "open": "Read paper",
+    "aria": "Paper reader"
   }
 }
