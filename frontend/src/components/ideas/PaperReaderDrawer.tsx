@@ -1,9 +1,21 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { CitationCanvas, type ReaderPaper } from "@/components/canvas/CitationCanvas";
+import type { ReaderPaper } from "@/components/canvas/CitationCanvas";
+import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
+import { retryableLazy } from "@/lib/retryableLazy";
 import { usePresence } from "@/hooks/usePresence";
 import { cn } from "@/lib/utils";
+
+// Loaded on first read: the reader (and PDF.js) stays out of the Ideas page bundle.
+const CitationCanvas = retryableLazy(() =>
+  import("@/components/canvas/CitationCanvas").then((m) => ({ default: m.CitationCanvas })),
+);
+
+/** A paper to read, and optionally a passage in it to highlight. */
+export type ReaderRequest = ReaderPaper & {
+  citation?: { chunkId: number; endChunkId?: number; nonce: number };
+};
 
 const EXIT_MS = 200;
 const DEFAULT_WIDTH = 820;
@@ -40,14 +52,14 @@ export function PaperReaderDrawer({
   paper,
   onClose,
 }: {
-  paper: ReaderPaper | null;
+  paper: ReaderRequest | null;
   onClose: () => void;
 }) {
   const { t } = useTranslation("ideas");
   const open = paper !== null;
   const { mounted } = usePresence(open, EXIT_MS);
   // Keep showing the last paper while sliding out.
-  const [shown, setShown] = useState<ReaderPaper | null>(paper);
+  const [shown, setShown] = useState<ReaderRequest | null>(paper);
   if (paper !== null && paper !== shown) setShown(paper);
   // Mount off-screen, then slide in on the next frame.
   const [entered, setEntered] = useState(false);
@@ -125,7 +137,18 @@ export function PaperReaderDrawer({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
-  if (!mounted || shown === null) return null;
+  // Stable between renders, so the reader doesn't rebuild its paper list each time.
+  const standalone = useMemo(
+    () =>
+      shown && {
+        papers: [{ paper_content_id: shown.paper_content_id, title: shown.title }],
+        onClose,
+        citation: shown.citation,
+      },
+    [shown, onClose],
+  );
+
+  if (!mounted || shown === null || standalone === null) return null;
   const slidIn = open && entered;
   return (
     <div
@@ -154,7 +177,11 @@ export function PaperReaderDrawer({
       />
       {/* No pointer events while dragging, so the paper's iframe can't swallow the moves. */}
       <div className={cn("h-full", resizing && "pointer-events-none")}>
-        <CitationCanvas key={shown.paper_content_id} standalone={{ papers: [shown], onClose }} />
+        <PanelLoadBoundary onRetry={CitationCanvas.reset}>
+          <Suspense fallback={null}>
+            <CitationCanvas key={shown.paper_content_id} standalone={standalone} />
+          </Suspense>
+        </PanelLoadBoundary>
       </div>
     </div>
   );

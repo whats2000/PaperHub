@@ -32,10 +32,17 @@ afterEach(() => vi.useRealTimers());
 
 const paper = { paper_content_id: 9, title: "Ghost imaging" };
 
+/** Let the lazily imported reader load. */
+const settle = () =>
+  act(async () => {
+    await vi.dynamicImportSettled();
+  });
+
 describe("PaperReaderDrawer", () => {
-  it("slides in with the paper and slides out on close before unmounting", () => {
+  it("slides in with the paper and slides out on close before unmounting", async () => {
     const onClose = vi.fn();
     const { rerender } = render(<PaperReaderDrawer paper={paper} onClose={onClose} />);
+    await settle();
     expect(screen.getByTestId("reader")).toHaveTextContent("Ghost imaging");
     act(() => {
       vi.advanceTimersByTime(50);
@@ -52,10 +59,11 @@ describe("PaperReaderDrawer", () => {
     expect(screen.queryByTestId("paper-reader-drawer")).not.toBeInTheDocument();
   });
 
-  it("closes on Escape and keeps the key from also closing the drawer beneath", () => {
+  it("closes on Escape and keeps the key from also closing the drawer beneath", async () => {
     const onClose = vi.fn();
     render(<PaperReaderDrawer paper={paper} onClose={onClose} />);
     const beneath = vi.fn((e: KeyboardEvent) => e.defaultPrevented);
+    await settle();
     document.addEventListener("keydown", beneath);
     fireEvent.keyDown(document, { key: "Escape" });
     document.removeEventListener("keydown", beneath);
@@ -63,7 +71,7 @@ describe("PaperReaderDrawer", () => {
     expect(beneath).toHaveReturnedWith(true);
   });
 
-  it("leaves Escape to a field the reader is typing in", () => {
+  it("leaves Escape to a field the reader is typing in", async () => {
     const onClose = vi.fn();
     render(
       <>
@@ -71,14 +79,16 @@ describe("PaperReaderDrawer", () => {
         <PaperReaderDrawer paper={paper} onClose={onClose} />
       </>,
     );
+    await settle();
     fireEvent.keyDown(screen.getByLabelText("field"), { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("widens when its left edge is dragged left, and remembers the width", () => {
+  it("widens when its left edge is dragged left, and remembers the width", async () => {
     window.innerWidth = 1600; // the 90%-of-window cap stays out of the way
     const { unmount } = render(<PaperReaderDrawer paper={paper} onClose={vi.fn()} />);
     const drawer = screen.getByTestId("paper-reader-drawer");
+    await settle();
     expect(drawer.style.getPropertyValue("--reader-w")).toBe("820px");
     const edge = screen.getByRole("separator");
     fireEvent.pointerDown(edge, { clientX: 1000 });
@@ -88,9 +98,10 @@ describe("PaperReaderDrawer", () => {
     unmount();
     render(<PaperReaderDrawer paper={paper} onClose={vi.fn()} />);
     expect(screen.getByTestId("paper-reader-drawer").style.getPropertyValue("--reader-w")).toBe("940px");
+    await settle();
   });
 
-  it("a click outside closes only the reader and does not reach what is underneath", () => {
+  it("a click outside closes only the reader and does not reach what is underneath", async () => {
     const onClose = vi.fn();
     const underneath = vi.fn();
     render(
@@ -101,6 +112,7 @@ describe("PaperReaderDrawer", () => {
         <PaperReaderDrawer paper={paper} onClose={onClose} />
       </>,
     );
+    await settle();
     const graph = screen.getByRole("button", { name: "Graph" });
     fireEvent.pointerDown(graph);
     fireEvent.click(graph);
@@ -108,10 +120,11 @@ describe("PaperReaderDrawer", () => {
     expect(underneath).not.toHaveBeenCalled();
   });
 
-  it("a click inside the reader, or in a popup it portalled out, keeps it open", () => {
+  it("a click inside the reader, or in a popup it portalled out, keeps it open", async () => {
     const onClose = vi.fn();
     render(<PaperReaderDrawer paper={paper} onClose={onClose} />);
     fireEvent.pointerDown(screen.getByTestId("reader"));
+    await settle();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Portalled menu item" }));
     expect(onClose).not.toHaveBeenCalled();
   });
