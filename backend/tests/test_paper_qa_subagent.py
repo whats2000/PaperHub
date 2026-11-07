@@ -1005,3 +1005,68 @@ async def test_finalizer_per_paper_block_includes_page_for_marker_chunks(
     # chunk 102 has page=None → no 'p.' annotation for it
     # (We can't easily check the absence per chunk, but we verify p.6 is present for chunk 101)
     _ = tokens  # tokens consumed — no assertion on LLM output text
+
+
+async def test_subagent_sees_and_records_the_recent_conversation(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    """Run 892: the subagent gathers evidence for the answering agent, so it
+    gets the last exchange in a <recent_conversation> block, and the trace
+    records that input (not the rendered prompt)."""
+    pcid, cid_map = await _seed_paper_with_sections(
+        migrated_db, title="YOLOSeg",
+        sections=[{"name": "Method", "chunks": ["UNet-style decoder."]}],
+    )
+    cid = cid_map["UNet-style decoder."]
+    mock_completion = AsyncMock(side_effect=[
+        _msg(tool_calls=[_tool_call("c1", "list_sections", {})]),
+        _msg(content=f"Decoder details [chunk:{cid}]."),
+    ])
+    convo = "<previous_user_message>Port GISC to YOLOSeg?</previous_user_message>"
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        await run_paper_qa_subagent(
+            paper_content_id=pcid, title="YOLOSeg",
+            user_message="Detailed experimental method for porting GISC to YOLOSeg",
+            recent_conversation=convo, history_turns=2,
+            tracer=fake_tracer, model="stub", conn=migrated_db, max_section_reads=2,
+        )
+
+    sent = mock_completion.call_args_list[0].kwargs["messages"]
+    user_text = sent[1]["content"]
+    assert f"<recent_conversation>\n{convo}\n</recent_conversation>" in user_text
+    assert "Detailed experimental method for porting GISC to YOLOSeg" in user_text
+
+    async with migrated_db.execute(
+        "SELECT args_redacted_json FROM tool_calls WHERE tool = 'paper_qa:subagent'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    args = json.loads(row[0])
+    assert args["recent_conversation"] == convo
+    assert args["history_turns"] == 2
+
+
+async def test_subagent_first_message_marks_no_conversation(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Any,
+) -> None:
+    pcid, cid_map = await _seed_paper_with_sections(
+        migrated_db, title="P", sections=[{"name": "Method", "chunks": ["m."]}],
+    )
+    mock_completion = AsyncMock(side_effect=[
+        _msg(content=f"m [chunk:{cid_map['m.']}]."),
+    ])
+
+    from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
+
+    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+        await run_paper_qa_subagent(
+            paper_content_id=pcid, title="P", user_message="What is the method?",
+            tracer=fake_tracer, model="stub", conn=migrated_db, max_section_reads=2,
+        )
+    user_text = mock_completion.call_args_list[0].kwargs["messages"][1]["content"]
+    assert "<recent_conversation>\n(none: this is the first message)\n</recent_conversation>" in user_text

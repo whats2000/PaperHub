@@ -403,6 +403,9 @@ def _extract_cited_chunk_ids(summary: str) -> list[int]:
 
 # ──────────────────────── main entry point ──────────────────────────
 
+SUBAGENT_PROMPT_SLOT = "paper_qa_subagent/v2"
+NO_CONVERSATION = "(none: this is the first message)"
+
 
 async def run_paper_qa_subagent(
     *,
@@ -414,6 +417,8 @@ async def run_paper_qa_subagent(
     conn: aiosqlite.Connection,
     max_section_reads: int = MAX_SECTION_READS,
     registry: PromptRegistry | None = None,
+    recent_conversation: str = "",
+    history_turns: int = 0,
     **litellm_kwargs: Any,
 ) -> PerPaperPicks:
     """Run the per-paper paper_qa subagent loop.
@@ -425,11 +430,18 @@ async def run_paper_qa_subagent(
     no-tool-calls response), returns ALL chunks read as a best-effort
     fallback — every chunk the subagent ever loaded is handed to the
     finalizer.
+
+    ``recent_conversation`` is the last exchange (``agents.recent_conversation``)
+    so the subagent gathers what the conversation needs next; "" on a first
+    message. ``history_turns`` is only recorded.
     """
     reg = registry or PromptRegistry()
-    prompt = reg.get("paper_qa_subagent/v1")
+    prompt = reg.get(SUBAGENT_PROMPT_SLOT)
     system = prompt.system.format(max_section_reads=max_section_reads)
-    user = prompt.user_template.format(title=title, user_message=user_message)
+    user = prompt.user_template.format(
+        title=title, user_message=user_message,
+        recent_conversation=recent_conversation or NO_CONVERSATION,
+    )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -470,6 +482,11 @@ async def run_paper_qa_subagent(
             # mis-grounded answer is diagnosable from the DB alone (no re-run /
             # no reconstruct script). Agent-flow observability policy.
             "user_message": user_message,
+            # The conversation the subagent saw (run 892): the bounded last
+            # exchange as rendered into <recent_conversation>, and how many
+            # turns the session had.
+            "recent_conversation": recent_conversation,
+            "history_turns": history_turns,
         })
 
         # +2: one for a free list_sections turn (before any reads), one safety

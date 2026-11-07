@@ -55,6 +55,7 @@ from paperhub.agents.paper_qa_subagent import (
     PerPaperPicks,
     run_paper_qa_subagent,
 )
+from paperhub.agents.recent_conversation import recent_conversation
 from paperhub.agents.research import (
     SearchCandidate,
     _resolve_enabled_papers,
@@ -485,11 +486,17 @@ def build_paper_qa_subgraph(deps: ResearchDeps) -> Any:
             else MAX_SECTION_READS
         )
 
+        # The subagents gather evidence for the answering agent, so they see
+        # the last exchange too, not only the rewritten message (run 892).
+        convo = recent_conversation(state.get("history"))
+
         async def _one_with_emit(pid: int, title: str) -> PerPaperPicks:
             picks = await run_paper_qa_subagent(
                 paper_content_id=pid,
                 title=title,
                 user_message=slide_aware_query(state),
+                recent_conversation=convo,
+                history_turns=len(state.get("history") or []),
                 tracer=deps.tracer,
                 model=subagent_model,
                 conn=deps.conn,
