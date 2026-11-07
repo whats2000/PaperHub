@@ -19,3 +19,14 @@ describe("canvas i18n", () => {
     expect(screen.getByText("論文を読み込み中…")).toBeInTheDocument();
   });
 });
+
+describe("PaperLoading skeleton", () => {
+  it("is a page-shaped shimmer skeleton with a status label and no spinner", () => {
+    const { container } = render(<PaperLoading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading paper…");
+    const bars = container.querySelectorAll(".skeleton-shimmer");
+    expect(bars.length).toBeGreaterThan(8);
+    expect(container.querySelector(".animate-spin")).toBeNull();
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+});
