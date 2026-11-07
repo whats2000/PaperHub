@@ -419,6 +419,27 @@ def unwrap_twocolumn(tex: str) -> str:
     return tex
 
 
+# Numeric skip glue. pandoc aborts the WHOLE parse on `\hskip <length>`
+# ("unexpected 0") and prints the length of `\kern <length>` as text, so a
+# paper whose template flattens \paragraph to `\hskip 0.9em plus 0.3em minus
+# 0.3em` (LoRA, arXiv:2106.09685) fell back to the <pre> dump, and an
+# algorithm's `\kern0.1em` showed "0.1em" (arXiv:2410.12557). Drop the glue
+# (an \hskip becomes a space) and, as TeX does, the one optional space after
+# its unit. A skip given by a register (`\hskip\labelsep`) is left alone.
+_TEX_UNIT = r"(?:pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu|px)"
+_TEX_NUM = r"[-+]?\s*(?:\d+(?:\.\d*)?|\.\d+)"
+_TEX_STRETCH = rf"{_TEX_NUM}\s*(?:{_TEX_UNIT}|fil{{1,3}})"
+_SKIP_GLUE_RE = re.compile(
+    rf"\\(hskip|kern)(?![A-Za-z])\s*{_TEX_NUM}\s*{_TEX_UNIT}"
+    rf"(?:\s*plus\s*{_TEX_STRETCH})?(?:\s*minus\s*{_TEX_STRETCH})? ?"
+)
+
+
+def strip_skip_glue(tex: str) -> str:
+    r"""Drop numeric ``\hskip`` / ``\kern`` glue pandoc can't parse."""
+    return _SKIP_GLUE_RE.sub(lambda m: " " if m.group(1) == "hskip" else "", tex)
+
+
 # Argument-taking preamble macros. pandoc drops an unknown command TOGETHER
 # with its braced arguments, and the render tex is body-only, so every use of a
 # preamble `\newcommand{\para}[1]{..}` vanished from the HTML: Mamba
@@ -998,7 +1019,8 @@ def expand_preamble_macros(tex: str, preamble: str) -> str:
     preamble defines none. etoolbox toggles are resolved first
     (:func:`resolve_toggles`) and ``\twocolumn[...]`` title blocks unwrapped
     (:func:`unwrap_twocolumn`); argument-taking macros are expanded after the
-    zero-arg ones (:func:`expand_arg_macros`)."""
+    zero-arg ones (:func:`expand_arg_macros`); numeric skip glue pandoc can't
+    parse is dropped last (:func:`strip_skip_glue`)."""
     tex = unwrap_twocolumn(resolve_toggles(tex, preamble))
     macros = _parse_zero_arg_macros(preamble)
 
@@ -1021,7 +1043,8 @@ def expand_preamble_macros(tex: str, preamble: str) -> str:
         tex = resolve_toggles(expanded, preamble)
         if macros:
             tex = _expand_zero_arg(tex)
-    return tex
+    # Last: glue may come from an expanded body (LoRA's \paragraph).
+    return strip_skip_glue(tex)
 
 
 def render_html(

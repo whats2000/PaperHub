@@ -785,3 +785,45 @@ def test_render_latex_pandoc_resolves_input_relative_to_source_dir(tmp_path: Pat
     render_html(source=src_dir / "main.tex", kind="latex", out_path=out)
     html = out.read_text(encoding="utf-8")
     assert "included introduction text from a separate file" in html
+
+
+def test_expand_preamble_macros_drops_numeric_skip_glue() -> None:
+    # pandoc aborts the whole parse on `\hskip <length>` (LoRA, arXiv:2106.09685:
+    # its template's \paragraph flattens to `\hskip 0.9em plus 0.3em minus
+    # 0.3em`) and prints the length of `\kern <length>` as text
+    # (arXiv:2410.12557). A chunk anchor glued to the glue survives.
+    body = (
+        "{\bfseries Lead.}\hskip 0.9em plus 0.3em minus 0.3emPHCHUNKANCHOR7END\n"
+        "Next \hskip1em word; \FOR{\kern0.05em other \kern0.1em batch}\n"
+        "\item[\hskip\labelsep\bfseries Proof.] kept"
+    )
+    assert expand_preamble_macros(body, "") == (
+        "{\bfseries Lead.} PHCHUNKANCHOR7END\n"
+        "Next  word; \FOR{other batch}\n"
+        "\item[\hskip\labelsep\bfseries Proof.] kept"
+    )
+
+
+def test_expand_preamble_macros_leaves_text_without_skip_glue_unchanged() -> None:
+    body = "A \vskip 0.1in B \hspace{1em} C $\kern$ D skip 3em plus"
+    assert expand_preamble_macros(body, "") == body
+
+
+def test_render_latex_survives_paragraph_skip_glue(tmp_path: Path) -> None:
+    """LoRA rendered as the <pre> fallback because pandoc failed on the glue."""
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc binary not installed")
+    src = tmp_path / "source.render.tex"
+    src.write_text(
+        expand_preamble_macros(
+            "\section{Method}\n\medskip \noindent {\bfseries A Generalization.}"
+            "\hskip 0.9em plus 0.3em minus 0.3em A more general form.\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "source.html"
+    render_html(source=src, kind="latex", out_path=out)
+    html = out.read_text(encoding="utf-8")
+    assert "<pre" not in html
+    assert "plus 0.3em" not in html and "A more general form." in html
