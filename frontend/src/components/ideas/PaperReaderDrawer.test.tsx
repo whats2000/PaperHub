@@ -155,4 +155,14 @@ describe("PaperReaderDrawer", () => {
     fireEvent.click(graph);
     expect(underneath).toHaveBeenCalledTimes(1);
   });
+
+  it("shows the paper skeleton while the reader itself loads", async () => {
+    // A fresh module: the reader isn't loaded yet, as on the page's first open.
+    vi.resetModules();
+    const { PaperReaderDrawer: FreshDrawer } = await import("./PaperReaderDrawer");
+    render(<FreshDrawer paper={paper} onClose={vi.fn()} />);
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    await settle();
+    expect(screen.getByTestId("reader")).toBeInTheDocument();
+  });
 });

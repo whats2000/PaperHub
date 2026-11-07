@@ -109,7 +109,7 @@ beforeEach(() => {
 });
 
 const activeHtmlView = (c: HTMLElement): HTMLIFrameElement | null =>
-  c.querySelector('div:not([hidden]) > iframe[title="Citation Canvas"]');
+  c.querySelector('div:not([hidden]) > div > iframe[title="Citation Canvas"]');
 
 describe("CitationCanvas reading panel", () => {
   it("renders nothing when closed with no references", () => {
@@ -363,5 +363,22 @@ describe("CitationCanvas standalone reader (Ideas page)", () => {
     );
     // Resolved by the reader itself; the chat canvas's request slot is untouched.
     expect(useCanvasStore.getState().requestedChunkId).toBeNull();
+  });
+
+  it("shows the paper skeleton while the paper is being fetched", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/papers/content/9/document`, async () => {
+        await gate;
+        return HttpResponse.json({ mode: "html" });
+      }),
+    );
+    const { container } = render(<CitationCanvas standalone={{ papers: [paper9], onClose: vi.fn() }} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("Loading paper…");
+    release();
+    await waitFor(() => expect(activeHtmlView(container)).not.toBeNull());
   });
 });

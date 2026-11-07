@@ -33,6 +33,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
@@ -661,6 +662,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             {t("error.loadPaper")}
           </div>
         )}
+
+        {/* The shown paper is still being fetched. */}
+        {effectivePaperId != null && activeDoc === null && <PaperLoading />}
 
         {/* HTML papers: kept mounted (hidden) for instant switching. */}
         {htmlPapers.map((pid) => {

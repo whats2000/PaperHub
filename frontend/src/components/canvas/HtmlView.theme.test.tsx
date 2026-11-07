@@ -1,5 +1,5 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { DARK_STYLE_ID } from "@/lib/applyIframeTheme";
@@ -42,5 +42,24 @@ describe("HtmlView dark first paint", () => {
     rerender(view(false, PAPER.replace("Body", "Other")));
     expect(srcdoc(container)).not.toContain(DARK_STYLE_ID);
     expect(srcdoc(container)).toContain("Other");
+  });
+});
+
+describe("HtmlView loading skeleton", () => {
+  it("shows the skeleton until the paper has loaded, then fades it out", () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(view(false));
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => {
+        container.querySelector("iframe")!.dispatchEvent(new Event("load"));
+      });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

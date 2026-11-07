@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState, type CSSProperties
 import { useTranslation } from "react-i18next";
 
 import type { ReaderPaper } from "@/components/canvas/CitationCanvas";
+import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
 import { retryableLazy } from "@/lib/retryableLazy";
 import { usePresence } from "@/hooks/usePresence";
@@ -186,7 +187,7 @@ export function PaperReaderDrawer({
       {/* No pointer events while dragging, so the paper's iframe can't swallow the moves. */}
       <div className={cn("h-full", resizing && "pointer-events-none")}>
         <PanelLoadBoundary onRetry={CitationCanvas.reset}>
-          <Suspense fallback={null}>
+          <Suspense fallback={<PaperLoading className="bg-card" />}>
             <CitationCanvas key={shown.paper_content_id} standalone={standalone} />
           </Suspense>
         </PanelLoadBoundary>
