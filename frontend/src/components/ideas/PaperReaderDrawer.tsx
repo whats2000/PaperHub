@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ReaderPaper } from "@/components/canvas/CitationCanvas";
@@ -33,6 +33,26 @@ function storedWidth(): number {
 
 /** Pointer-downs that began inside the reader, portalled popups included (React bubbles through portals). */
 const insideReader = new WeakSet<Event>();
+
+/**
+ * Swallow the click that ends the current press. One-shot and independent of
+ * the reader: closing the reader unmounts its listeners before that click
+ * arrives. A press with no click (a drag) is dropped at the next press.
+ */
+function swallowNextClick(): void {
+  const onClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    done();
+  };
+  const done = () => {
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("pointerdown", done, true);
+  };
+  document.addEventListener("click", onClick, true);
+  // The next press starts after this one: a click still pending is no longer ours.
+  setTimeout(() => document.addEventListener("pointerdown", done, true), 0);
+}
 
 /** A popup open above the reader (a menu, the language list): Escape is its own. */
 const OPEN_POPUP =
@@ -100,27 +120,15 @@ export function PaperReaderDrawer({
 
   // A press outside the reader closes it, and only it: the click that follows
   // is swallowed so it doesn't also select or deselect on the graph beneath.
-  const swallowClick = useRef(false);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      swallowClick.current = false;
       if (insideReader.has(e)) return;
-      swallowClick.current = true;
+      swallowNextClick();
       onClose();
     };
-    const onClick = (e: MouseEvent) => {
-      if (!swallowClick.current) return;
-      swallowClick.current = false;
-      e.stopPropagation();
-      e.preventDefault();
-    };
     document.addEventListener("pointerdown", onDown);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("click", onClick, true);
-    };
+    return () => document.removeEventListener("pointerdown", onDown);
   }, [open, onClose]);
 
   // Escape closes the reader first: captured before the detail drawer's

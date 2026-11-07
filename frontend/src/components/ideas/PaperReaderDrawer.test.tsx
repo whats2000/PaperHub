@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -127,5 +128,31 @@ describe("PaperReaderDrawer", () => {
     await settle();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Portalled menu item" }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("still swallows the click after the press outside has really closed it", async () => {
+    // Like the Ideas page: closing unmounts the reader before the click arrives.
+    const underneath = vi.fn();
+    function Page() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={underneath}>
+            Graph
+          </button>
+          <PaperReaderDrawer paper={open ? paper : null} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
+    render(<Page />);
+    await settle();
+    const graph = screen.getByRole("button", { name: "Graph" });
+    fireEvent.pointerDown(graph);
+    fireEvent.click(graph);
+    expect(underneath).not.toHaveBeenCalled();
+    // The next click on the graph is the user's again.
+    fireEvent.pointerDown(graph);
+    fireEvent.click(graph);
+    expect(underneath).toHaveBeenCalledTimes(1);
   });
 });
