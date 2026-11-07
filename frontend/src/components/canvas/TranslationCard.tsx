@@ -162,7 +162,9 @@ export function TranslationCard({
           glide && !prefersReducedMotion() ? "top 200ms ease-out, left 200ms ease-out" : undefined,
       }}
       className={cn(
-        "fixed z-50 flex max-w-[460px] flex-col rounded-md border border-border bg-popover px-3 pt-2.5 pb-2 text-popover-foreground shadow-md outline-none",
+        // Its own grey surface + stronger border: the shared popover surface is
+        // near-identical to the chat column behind it in dark mode.
+        "fixed z-50 flex max-w-[460px] flex-col rounded-md border border-foreground/15 bg-secondary px-3 pt-2.5 pb-2 text-secondary-foreground shadow-md outline-none dark:border-foreground/20",
         side === "below" ? "origin-top-left" : side === "above" ? "origin-bottom-left" : "origin-top-right",
         "duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
@@ -172,7 +174,7 @@ export function TranslationCard({
       <span
         aria-hidden="true"
         className={cn(
-          "absolute size-2.5 rotate-45 border border-border bg-popover",
+          "absolute size-2.5 rotate-45 border border-foreground/15 bg-secondary dark:border-foreground/20",
           side === "below"
             ? "-top-[6px] border-r-0 border-b-0"
             : side === "above"
@@ -181,7 +183,7 @@ export function TranslationCard({
         )}
         style={inReader ? { left: placement.arrowX } : { top: placement.arrowY }}
       />
-      <div className="-mt-0.5 -mr-1 mb-1 flex shrink-0 items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="-mt-0.5 -mr-1 mb-1 flex shrink-0 items-center justify-between gap-2 text-xs text-foreground/65">
         <span className="truncate">{language}</span>
         <div className="flex items-center">
           <button
@@ -193,7 +195,7 @@ export function TranslationCard({
                 ? t("translationCard.unpin", "Unpin translation")
                 : t("translationCard.pin", "Pin translation")
             }
-            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
+            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-foreground/10 hover:text-foreground"
           >
             {pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
           </button>
@@ -201,7 +203,7 @@ export function TranslationCard({
             type="button"
             onClick={onClose}
             aria-label={t("translationCard.close", "Close translation")}
-            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
+            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-foreground/10 hover:text-foreground"
           >
             <X className="size-3.5" />
           </button>
@@ -220,25 +222,25 @@ export function TranslationCard({
         {status === "ok" && html !== null ? (
           <div dangerouslySetInnerHTML={{ __html: html }} />
         ) : status === "unavailable" ? (
-          <div className="flex items-center justify-between gap-2 text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 text-foreground/65">
             <span>{t("translation.unavailable", "Translation unavailable")}</span>
             <button
               type="button"
               onClick={onRetry}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-muted hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-foreground/10 hover:text-foreground"
             >
               <RotateCcw className="size-3" />
               {t("translationCard.retry", "Retry")}
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-foreground/65">
             <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
             {t("translation.pending", "Translating…")}
           </div>
         )}
       </div>
-      <div className="mt-1.5 shrink-0 text-[11.5px] text-muted-foreground">
+      <div className="mt-1.5 shrink-0 text-[11.5px] text-foreground/65">
         {pinned
           ? t("translationCard.hintPinned", "Pinned · Esc or ✕ to close")
           : t("translationCard.hintHover", "Click the paragraph to pin")}
