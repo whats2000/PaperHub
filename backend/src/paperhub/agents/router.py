@@ -45,6 +45,9 @@ async def router_node(
                 "user_message": user_message,
                 "enabled_refs_count": enabled_refs_count,
                 "slide_attached": slide_attached,
+                # How much conversation the router had: a follow-up resolves
+                # against it (run 892 lost the thread).
+                "history_turns": len(history),
             },
         )
         decision = await adapter.structured(

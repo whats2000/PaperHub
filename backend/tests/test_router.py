@@ -296,3 +296,35 @@ async def test_router_uses_chat_history_aware_prompt(migrated_db, fake_tracer) -
     system = PromptRegistry().get("router/v5").system
     assert "usage history" in system and "model_tier" not in system
     assert "also_requested" in system and '"subject"' in system
+
+
+async def test_router_records_how_many_history_turns_it_saw(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A follow-up's routing depends on the conversation; the trace says how
+    much of it the router had (run 892)."""
+    import json
+
+    await migrated_db.execute("INSERT INTO chat_sessions DEFAULT VALUES")
+    await migrated_db.execute("INSERT INTO runs (session_id) VALUES (1)")
+    await migrated_db.commit()
+    tracer = Tracer(migrated_db, run_id=1, branch="")
+    state: AgentState = {
+        "run_id": 1, "branch": "", "session_id": 1,
+        "user_message": "more detail please",
+        "history": [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "q2"},
+        ],
+    }
+    await router_node(
+        state, adapter=LiteLlmAdapter(), tracer=tracer, model="gpt-4o-mini",
+        mock_response='{"intent":"paper_qa","confidence":0.9,"reasoning":"r"}',
+    )
+    async with migrated_db.execute(
+        "SELECT args_redacted_json FROM tool_calls WHERE tool = 'classify'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert json.loads(row[0])["history_turns"] == 3

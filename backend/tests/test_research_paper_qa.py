@@ -335,3 +335,40 @@ async def test_slide_context_reaches_subagent_query(
     assert captured["user_message"].startswith(
         "Active slide (page 5) title: FASTerVQ Architecture")
     assert "explain the graph on the current slide" in captured["user_message"]
+
+
+async def test_paper_qa_finalizer_records_how_many_history_turns_it_saw(
+    migrated_db: aiosqlite.Connection,
+    fake_tracer: Tracer,
+) -> None:
+    """Whether the finalizer had the conversation must be readable from its
+    trace row (a follow-up answered as if the chat were new, run 892)."""
+    import json
+
+    from paperhub.agents.paper_qa_subagent import PerPaperPicks, PickedChunk
+    from paperhub.agents.research import paper_qa_finalize
+
+    picks = [
+        PerPaperPicks(
+            paper_content_id=15, title="MolmoAct",
+            picked_chunks=[PickedChunk(chunk_id=101, text="t", section="Method")],
+            rationale="r",
+        )
+    ]
+    adapter = _StubAdapter(tokens=["ok"], token_map={"paper_qa_synthesize/v2": ["ok"]})
+    history = [
+        {"role": "user", "content": "how would the idea port?"},
+        {"role": "assistant", "content": "By adding a sparsity term."},
+    ]
+    async for _ in paper_qa_finalize(
+        per_paper_picks=picks, user_message="more detail", adapter=adapter,
+        tracer=fake_tracer, model="stub",
+        state={"run_id": fake_tracer._run_id, "history": history},  # type: ignore[arg-type]  # noqa: SLF001
+    ):
+        pass
+    async with migrated_db.execute(
+        "SELECT args_redacted_json FROM tool_calls WHERE tool = 'paper_qa:finalize'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert json.loads(row[0])["history_turns"] == 2
