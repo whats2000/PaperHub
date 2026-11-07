@@ -565,7 +565,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
               className={
                 "truncate rounded px-2 py-1 text-xs font-medium transition-colors " +
                 (effectivePaperId === r.paper_content_id
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-secondary text-secondary-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground")
               }
               title={r.title}
@@ -596,7 +596,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                       className={
                         "w-full truncate rounded px-2 py-1.5 text-left text-xs font-medium transition-colors " +
                         (effectivePaperId === r.paper_content_id
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-secondary text-secondary-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground")
                       }
                       title={r.title}
