@@ -215,6 +215,7 @@
   },
   "reader": {
     "open": "Read paper",
-    "aria": "Paper reader"
+    "aria": "Paper reader",
+    "resize": "Resize reader"
   }
 }
