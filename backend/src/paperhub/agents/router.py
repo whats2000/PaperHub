@@ -51,7 +51,7 @@ async def router_node(
             },
         )
         decision = await adapter.structured(
-            slot="router/v5",
+            slot="router/v6",
             variables={
                 "user_message": user_message,
                 "enabled_refs_count": enabled_refs_count,

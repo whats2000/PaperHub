@@ -277,8 +277,10 @@ async def test_router_slide_attached_defaults_false(migrated_db, fake_tracer) ->
 
 
 async def test_router_uses_chat_history_aware_prompt(migrated_db, fake_tracer) -> None:
-    """router/v5 keeps v3's chat-history routing (eval bucket ``history``) and
-    asks for ``also_requested`` and ``subject``, which the in-code rules read."""
+    """router/v6 keeps v3's chat-history routing (eval bucket ``history``),
+    asks for ``also_requested`` and ``subject``, which the in-code rules read,
+    and makes a follow-up's resolved_query restate the discussed subject
+    (eval bucket ``followup``, run 892)."""
     captured: dict[str, object] = {}
 
     class _Cap:
@@ -292,10 +294,11 @@ async def test_router_uses_chat_history_aware_prompt(migrated_db, fake_tracer) -
              "user_message": "How many chat sessions do I have?", "history": []}
     await router_node(state, adapter=_Cap(), tracer=fake_tracer, model="m",
                       conn=migrated_db)
-    assert captured["slot"] == "router/v5"
-    system = PromptRegistry().get("router/v5").system
+    assert captured["slot"] == "router/v6"
+    system = PromptRegistry().get("router/v6").system
     assert "usage history" in system and "model_tier" not in system
     assert "also_requested" in system and '"subject"' in system
+    assert "## Follow-ups" in system
 
 
 async def test_router_records_how_many_history_turns_it_saw(
