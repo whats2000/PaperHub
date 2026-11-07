@@ -28,7 +28,7 @@ import {
   type IdeationSelection,
   type IdeationView,
 } from "@/store/ideation";
-import type { CardProgress } from "@/types/ideation";
+import type { CardProgress, LegendHighlight } from "@/types/ideation";
 
 const ZOOM = { min: 0.5, max: 3 } as const;
 const ZOOM_STEP = 1.25;
@@ -266,6 +266,8 @@ export function IdeasPage() {
     [panToKeepVisible],
   );
   const drawerOpen = selected !== null;
+  // The legend category under the pointer, lit on the graph while hovered.
+  const [legendHighlight, setLegendHighlight] = useState<LegendHighlight | null>(null);
   // Mirrors for onLayout, which runs from the graph and must not change identity.
   useEffect(() => {
     viewRef.current = pz.transform;
@@ -375,6 +377,7 @@ export function IdeasPage() {
                 graph={graph}
                 ideas={graphIdeas}
                 leavingIds={leavingIdeaIds}
+                highlight={legendHighlight}
                 selected={selected}
                 onSelect={select}
                 onSelectDomain={selectDomain}
@@ -394,7 +397,7 @@ export function IdeasPage() {
                 onFit={fitAll}
                 shifted={drawerOpen}
               />
-              <GraphLegend domains={graph.domains} />
+              <GraphLegend domains={graph.domains} onHighlight={setLegendHighlight} />
             </>
           )}
         </ViewSlot>

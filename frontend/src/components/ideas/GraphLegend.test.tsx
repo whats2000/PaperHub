@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { GraphLegend } from "./GraphLegend";
 
@@ -35,5 +35,35 @@ describe("GraphLegend", () => {
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(toggle());
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("GraphLegend hover highlight", () => {
+  it("reports the hovered category and clears it on leave", async () => {
+    const onHighlight = vi.fn();
+    render(<GraphLegend domains={domains} onHighlight={onHighlight} />);
+    await userEvent.hover(screen.getByText("Vision"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "domains", ids: [1] });
+    await userEvent.unhover(screen.getByText("Vision"));
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+    await userEvent.hover(screen.getByTestId("legend-other"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "domains", ids: [2, 3] });
+    await userEvent.hover(screen.getByText("Citation"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "citations" });
+    await userEvent.hover(screen.getByText("Idea: source → target"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "ideas" });
+    await userEvent.hover(screen.getByText("Saved / trying / worked"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "status", statuses: ["saved", "trying", "worked"] });
+    await userEvent.hover(screen.getByText("Trying"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "status", statuses: ["trying"] });
+    await userEvent.hover(screen.getByText("Private document"));
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "private" });
+  });
+
+  it("does not highlight the size row, which is no category", async () => {
+    const onHighlight = vi.fn();
+    render(<GraphLegend domains={domains} onHighlight={onHighlight} />);
+    await userEvent.hover(screen.getByText("Size = related ideas"));
+    expect(onHighlight).not.toHaveBeenCalled();
   });
 });

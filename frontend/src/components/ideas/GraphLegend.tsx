@@ -1,15 +1,24 @@
-import { useState, type ReactNode } from "react";
+import { useState, type HTMLAttributes, type ReactNode } from "react";
 import { Check, ChevronDown, EyeOff, FlaskConical, Lock, Star, X, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Collapsible } from "@/components/ui/collapsible";
 import { domainColorVar } from "@/lib/domainColors";
 import { cn } from "@/lib/utils";
-import type { GraphDomain, IdeaStatus } from "@/types/ideation";
+import type { GraphDomain, IdeaStatus, LegendHighlight } from "@/types/ideation";
 
-function Item({ swatch, children }: { swatch: ReactNode; children: ReactNode }) {
+/** Pointer handlers that light a category on the graph while a row is hovered. */
+type HoverProps = Pick<HTMLAttributes<HTMLElement>, "onMouseEnter" | "onMouseLeave">;
+
+function Item({ swatch, children, hover }: { swatch: ReactNode; children: ReactNode; hover?: HoverProps }) {
   return (
-    <li className="flex items-center gap-[7px] leading-[1.9] whitespace-nowrap">
+    <li
+      {...hover}
+      className={cn(
+        "flex items-center gap-[7px] leading-[1.9] whitespace-nowrap",
+        hover && "-mx-1 rounded-sm px-1 transition-colors duration-150 hover:bg-muted motion-reduce:transition-none",
+      )}
+    >
       <span aria-hidden="true" className="inline-flex w-[22px] shrink-0 justify-center">
         {swatch}
       </span>
@@ -48,8 +57,17 @@ const STATUS_ICONS: [IdeaStatus, LucideIcon, string][] = [
  * Semi-transparent while idle, opaque on hover or focus; it never moves when
  * the drawer opens. Only the reader folds or opens it: the drawer does not.
  */
-export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
+export function GraphLegend({
+  domains,
+  onHighlight,
+}: {
+  domains: GraphDomain[];
+  /** Called with the hovered category, and with null when the pointer leaves it. */
+  onHighlight?: (highlight: LegendHighlight | null) => void;
+}) {
   const { t } = useTranslation("ideas");
+  const hover = (h: LegendHighlight): HoverProps | undefined =>
+    onHighlight && { onMouseEnter: () => onHighlight(h), onMouseLeave: () => onHighlight(null) };
   const [open, setOpen] = useState(true);
   // The "Other" row lists the domains it folds together while hovered, focused or clicked.
   const [otherOpen, setOtherOpen] = useState(false);
@@ -61,6 +79,7 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
   return (
     <div
       data-testid="graph-legend"
+      onMouseLeave={() => onHighlight?.(null)}
       className={cn(
         "absolute bottom-3.5 left-3.5 z-[5] w-[206px] rounded-md border bg-popover text-xs text-popover-foreground shadow-md",
         "opacity-55 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
@@ -82,15 +101,21 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
         <div className="max-h-[50vh] overflow-y-auto px-2.5 pb-2">
           <Group title={t("ideas:legend.domains", "Domain (colour)")}>
             {colored.map((d) => (
-              <Item key={d.id} swatch={<Dot color={domainColorVar(d.color_index)} />}>
+              <Item key={d.id} swatch={<Dot color={domainColorVar(d.color_index)} />} hover={hover({ kind: "domains", ids: [d.id] })}>
                 {d.name}
               </Item>
             ))}
             {hasOther && (
               <li
                 data-testid="legend-other"
-                onMouseEnter={() => setOtherOpen(true)}
-                onMouseLeave={() => setOtherOpen(false)}
+                onMouseEnter={() => {
+                  setOtherOpen(true);
+                  onHighlight?.({ kind: "domains", ids: others.map((d) => d.id) });
+                }}
+                onMouseLeave={() => {
+                  setOtherOpen(false);
+                  onHighlight?.(null);
+                }}
                 onFocus={() => setOtherOpen(true)}
                 onBlur={() => setOtherOpen(false)}
               >
@@ -116,7 +141,13 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
                 <Collapsible open={otherOpen}>
                   <ul data-testid="legend-other-list" className="pb-1 pl-[29px] text-muted-foreground">
                     {others.map((d) => (
-                      <li key={d.id} className="truncate leading-[1.7]" title={d.name}>
+                      <li
+                        key={d.id}
+                        className="-mx-1 truncate rounded-sm px-1 leading-[1.7] transition-colors duration-150 hover:bg-muted motion-reduce:transition-none"
+                        title={d.name}
+                        onMouseEnter={() => onHighlight?.({ kind: "domains", ids: [d.id] })}
+                        onMouseLeave={() => onHighlight?.({ kind: "domains", ids: others.map((o) => o.id) })}
+                      >
                         {d.name}
                       </li>
                     ))}
@@ -127,6 +158,7 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
           </Group>
           <Group title={t("ideas:legend.relation", "Relation")}>
             <Item
+              hover={hover({ kind: "citations" })}
               swatch={
                 <svg width="22" height="6">
                   <line x1="0" y1="3" x2="22" y2="3" style={{ stroke: "var(--muted-foreground)" }} strokeWidth={1} />
@@ -136,6 +168,7 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
               {t("ideas:legend.citation", "Citation")}
             </Item>
             <Item
+              hover={hover({ kind: "ideas" })}
               swatch={
                 <svg width="22" height="8">
                   <line x1="0" y1="4" x2="16" y2="4" stroke="currentColor" strokeWidth={1.5} strokeDasharray="4 3" />
@@ -147,13 +180,13 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
             </Item>
           </Group>
           <Group title={t("ideas:legend.status", "Idea status")}>
-            <Item swatch={<Line dash="5 4" />}>{t("ideas:graph.status.new", "New")}</Item>
-            <Item swatch={<Line />}>{t("ideas:legend.kept", "Saved / trying / worked")}</Item>
-            <Item swatch={<Line dash="1.5 4" />}>{t("ideas:legend.ended", "Failed / dismissed")}</Item>
+            <Item swatch={<Line dash="5 4" />} hover={hover({ kind: "status", statuses: ["new"] })}>{t("ideas:graph.status.new", "New")}</Item>
+            <Item swatch={<Line />} hover={hover({ kind: "status", statuses: ["saved", "trying", "worked"] })}>{t("ideas:legend.kept", "Saved / trying / worked")}</Item>
+            <Item swatch={<Line dash="1.5 4" />} hover={hover({ kind: "status", statuses: ["failed", "dismissed"] })}>{t("ideas:legend.ended", "Failed / dismissed")}</Item>
           </Group>
           <ul className="grid grid-cols-2">
             {STATUS_ICONS.map(([s, Icon, fallback]) => (
-              <Item key={s} swatch={<Icon className="size-3.5" />}>
+              <Item key={s} swatch={<Icon className="size-3.5" />} hover={hover({ kind: "status", statuses: [s] })}>
                 {t(`ideas:graph.status.${s}`, fallback)}
               </Item>
             ))}
@@ -169,7 +202,7 @@ export function GraphLegend({ domains }: { domains: GraphDomain[] }) {
             >
               {t("ideas:legend.size", "Size = related ideas")}
             </Item>
-            <Item swatch={<Lock className="size-3.5" />}>{t("ideas:graph.private", "Private document")}</Item>
+            <Item swatch={<Lock className="size-3.5" />} hover={hover({ kind: "private" })}>{t("ideas:graph.private", "Private document")}</Item>
           </Group>
         </div>
       </Collapsible>

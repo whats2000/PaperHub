@@ -170,3 +170,11 @@ export interface IdeationFeedbackSummary {
   worked_rate: number | null;
   dismiss_reasons: { reason: string; count: number }[];
 }
+
+/** A legend category under the pointer: the graph lights what it names and dims the rest. */
+export type LegendHighlight =
+  | { kind: "domains"; ids: number[] }
+  | { kind: "citations" }
+  | { kind: "ideas" }
+  | { kind: "status"; statuses: IdeaStatus[] }
+  | { kind: "private" };
