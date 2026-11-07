@@ -104,10 +104,22 @@ def _router_finalize(variables: dict[str, Any], output: dict[str, Any]) -> dict[
 
 
 def _router_score(expect: dict[str, Any], output: dict[str, Any]) -> float | None:
+    """Exact intent match; a follow-up case may also grade the rewrite the
+    subagents read: each ``query_has`` group needs one of its terms in
+    ``resolved_query`` and no ``query_lacks`` term may appear (case-insensitive)."""
     want = expect.get("intent")
     if want is None:
         return None
-    return 1.0 if output.get("intent") == want else 0.0
+    if output.get("intent") != want:
+        return 0.0
+    query = str(output.get("resolved_query") or "").casefold()
+    for group in expect.get("query_has") or []:
+        terms = [group] if isinstance(group, str) else group
+        if not any(str(t).casefold() in query for t in terms):
+            return 0.0
+    if any(str(t).casefold() in query for t in expect.get("query_lacks") or []):
+        return 0.0
+    return 1.0
 
 
 ROUTER = StageSpec(

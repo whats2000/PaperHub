@@ -122,3 +122,27 @@ async def test_pairwise_deterministic_first_then_order_swapped_judge():
                    (2, "tie", "judge-split"), (3, "tie", "both-failed")]
     assert len(calls) == 4  # judge only runs when both pass, twice each
     assert "A wins: 2" in rep.to_markdown()
+
+
+@pytest.mark.asyncio
+async def test_pairwise_request_includes_prior_turns():
+    """A follow-up's rewrite can only be judged against the conversation it
+    resolves, so the judge's request carries the case history."""
+    spec = get_stage("router")
+    case = CorpusCase(case_id="c", stage="router",
+                      variables={"user_message": "more detail", "enabled_refs_count": 1,
+                                 "slide_attached": False},
+                      expect={"intent": "paper_qa"},
+                      history=[{"role": "user", "content": "port GISC to YOLOSeg?"},
+                               {"role": "assistant", "content": "Here is how."}])
+    seen: list[str] = []
+
+    async def judge(*, request: str, **_: object) -> str:
+        seen.append(request)
+        return "tie"
+
+    out = {"intent": "paper_qa", "resolved_query": "q"}
+    row = {"case_id": "c", "rep": 0, "output_json": json.dumps(out), "error": None}
+    await pairwise_compare(spec, [case], [row], [dict(row)], label_a="a", label_b="b",
+                           judge_model="m", judge=judge)
+    assert seen and "port GISC to YOLOSeg?" in seen[0] and "more detail" in seen[0]
