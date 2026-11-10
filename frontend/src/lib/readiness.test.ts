@@ -16,6 +16,28 @@ function readiness(small: SettingsModelCheck, flagship: SettingsModelCheck): Set
 }
 
 describe("hasBlockingConfigIssue", () => {
+  it("does NOT block on a transient failure of the agent's tools ping", () => {
+    const r = {
+      ...readiness(check({}), check({})),
+      models: { small: check({}), flagship: check({}), agent: check({ key_ok: false, error: "Timeout" }) },
+    };
+    expect(hasBlockingConfigIssue(r)).toBe(false);
+  });
+
+
+  it("blocks when the core agent model cannot call tools", () => {
+    const r = {
+      ...readiness(check({}), check({})),
+      models: {
+        small: check({}),
+        flagship: check({}),
+        agent: check({ key_ok: false, error: "ToolCallingUnsupported" }),
+      },
+    };
+    expect(hasBlockingConfigIssue(r)).toBe(true);
+  });
+
+
   it("blocks when a key is missing", () => {
     const r = readiness(check({ key_ok: false, missing_keys: ["GEMINI_API_KEY"] }), check({}));
     expect(hasBlockingConfigIssue(r)).toBe(true);

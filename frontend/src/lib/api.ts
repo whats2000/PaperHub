@@ -4,6 +4,7 @@ import type {
   LibraryItem,
   IngestResult,
   ChunkResolution,
+  ConfirmStatus,
   SessionSummary,
   BackendMessage,
   MemoryItem,
@@ -248,10 +249,44 @@ export async function getChunk(chunkId: number): Promise<ChunkResolution> {
 export async function getDocumentMode(
   paperContentId: number,
 ): Promise<"pdf" | "html"> {
-  const d = await apiFetch<{ mode: "pdf" | "html" }>(
+  return (await getDocumentInfo(paperContentId)).mode;
+}
+
+export interface DocumentInfo {
+  mode: "pdf" | "html";
+  /** The paper has a page PDF (its own, or one compiled from its LaTeX):
+   *  page-region citations open on it, as a PDF tab for HTML papers. */
+  page_pdf: boolean;
+}
+
+export async function getDocumentInfo(paperContentId: number): Promise<DocumentInfo> {
+  const d = await apiFetch<{ mode: "pdf" | "html"; page_pdf?: boolean }>(
     `/papers/content/${paperContentId}/document`,
   );
-  return d.mode;
+  return { mode: d.mode, page_pdf: d.page_pdf === true };
+}
+
+/** The page PDF's bytes (what the agent viewed; [view:] citations open on it). */
+export async function fetchPagePdfData(paperContentId: number): Promise<Uint8Array> {
+  const res = await fetch(`${API_BASE_URL}/papers/content/${paperContentId}/page-pdf`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** A `[view:]` region on the page PDF: 0-based page, box in PDF points. */
+export interface ViewRegion {
+  page: number;
+  bbox: number[];
+  source: "own" | "compiled";
+}
+
+export async function getViewRegion(
+  paperContentId: number,
+  page: number,
+  box: readonly number[],
+): Promise<ViewRegion> {
+  const q = new URLSearchParams({ page: String(page), box: box.join(",") });
+  return apiFetch<ViewRegion>(`/papers/content/${paperContentId}/view-region?${q}`);
 }
 
 /** Fetch a paper's rendered HTML as a string. The Citation Canvas embeds it via
@@ -635,6 +670,9 @@ export interface SettingsReadiness {
   models: {
     small: SettingsModelCheck;
     flagship: SettingsModelCheck;
+    /** The core agent model (PAPERHUB_AGENT_MODEL, else the flagship),
+     *  pre-flighted with a tools list: it must support tool calling. */
+    agent?: SettingsModelCheck;
   };
 }
 
@@ -674,11 +712,14 @@ export async function getModelOptions(): Promise<SettingsModelOptions> {
 
 /** Fire-and-forget cancel for an in-flight run. Safe to call after the stream
  *  is already done — the backend no-ops on a finished run. */
-export async function cancelRun(runId: number): Promise<void> {
-  await apiFetch<{ status: string }>(`/chat/cancel`, {
-    method: "POST",
-    body: JSON.stringify({ run_id: runId }),
-  });
+/** Stop a run. `kept`: the turn had already acted (a paper added, a memory
+ *  saved), so the backend keeps its question and a stopped stub. */
+export async function cancelRun(runId: number): Promise<{ kept: boolean }> {
+  const res = await apiFetch<{ status: string; kept?: boolean } | undefined>(
+    `/chat/cancel`,
+    { method: "POST", body: JSON.stringify({ run_id: runId }) },
+  );
+  return { kept: res?.kept === true };
 }
 
 /** Poll for recorded SSE events after a reconnect (A10 reattach path).
@@ -688,6 +729,65 @@ export async function fetchRunEvents(
   since: number,
 ): Promise<RunEventsResponse> {
   return apiFetch<RunEventsResponse>(`/chat/runs/${runId}/events?since=${since}`);
+}
+
+// ── Agent actions (H4) ───────────────────────────────────────────────────────
+
+/** A confirm card's action is no longer pending (already confirmed,
+ *  dismissed, or running elsewhere): the endpoints answer 409. */
+export class ActionNotPending extends Error {
+  constructor() {
+    super("action is not pending");
+    this.name = "ActionNotPending";
+  }
+}
+
+export type ConfirmActionResult =
+  | { status: "done"; result: { content: string; record?: Record<string, unknown> } }
+  | { status: "failed"; error: string };
+
+async function postAction<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, { method: "POST" });
+  if (res.status === 409) throw new ActionNotPending();
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+/** Run a pending confirm-tier action directly (no LLM). */
+export async function confirmAction(actionId: string): Promise<ConfirmActionResult> {
+  return postAction<ConfirmActionResult>(
+    `/chat/actions/${encodeURIComponent(actionId)}/confirm`,
+  );
+}
+
+/** A confirm-tier action's current state (re-read after a 409). */
+export async function getAction(actionId: string): Promise<{
+  status: ConfirmStatus;
+  result?: { content: string; record?: Record<string, unknown> } | null;
+  error?: string;
+}> {
+  return apiFetch(`/chat/actions/${encodeURIComponent(actionId)}`);
+}
+
+/** Dismiss a pending confirm-tier action. */
+export async function dismissAction(actionId: string): Promise<void> {
+  await postAction<{ status: string }>(
+    `/chat/actions/${encodeURIComponent(actionId)}/dismiss`,
+  );
+}
+
+/** Turn the per-chat agent auto-approve switch on or off. */
+export async function setSessionAutoApprove(
+  sessionId: number,
+  autoApprove: boolean,
+): Promise<{ id: number; auto_approve: boolean }> {
+  return apiFetch<{ id: number; auto_approve: boolean }>(`/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ auto_approve: autoApprove }),
+  });
 }
 
 // ── Version (FR-16) ──────────────────────────────────────────────────────────
@@ -911,4 +1011,29 @@ export async function getIdeationFeedbackSummary(): Promise<IdeationFeedbackSumm
 /** Append idea outcomes to the ideation eval data (the G1 inbox). */
 export async function postIdeationFeedbackToG1(): Promise<FeedbackToG1Response> {
   return apiFetch<FeedbackToG1Response>("/ideation/feedback-to-g1", { method: "POST" });
+}
+
+/** A figure a chat answer cites as `[fig:P/ID]` (H4 figure citations). */
+export interface FigureMeta {
+  paper_content_id: number;
+  id: string;
+  caption: string;
+  /** 0-based page on the paper's page PDF. */
+  page: number | null;
+  title: string;
+  has_image: boolean;
+  /** The HTML anchor (`phfig-NNN`) the render put before the figure. */
+  html_anchor: string | null;
+  /** The figure's box on its page, in PDF points (top-left origin). */
+  bbox: number[] | null;
+}
+
+export async function getFigureMeta(paperContentId: number, figureId: string): Promise<FigureMeta> {
+  return apiFetch<FigureMeta>(
+    `/papers/content/${paperContentId}/figures/${encodeURIComponent(figureId)}`,
+  );
+}
+
+export function figureImageUrl(paperContentId: number, figureId: string): string {
+  return `${API_BASE_URL}/papers/content/${paperContentId}/figures/${encodeURIComponent(figureId)}/image`;
 }

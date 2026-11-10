@@ -55,6 +55,11 @@ class Settings:
     # Plan H3 mechanism-card builder (small tier) + ideation proposer (flagship).
     ideation_card_model: str
     ideation_model: str
+    # Plan H4 core agent: the tool-calling loop (flagship), its context
+    # gatherers and the permission auto-approve classifier (small).
+    agent_model: str
+    agent_gather_model: str
+    agent_autoapprove_model: str
 
     # Per-call LLM request timeout (seconds). Bounds EVERY litellm completion so
     # a slow/unavailable provider can't ride the litellm default (~600 s) ×
@@ -81,6 +86,14 @@ class Settings:
     # Days a soft-deleted chat session is retained before being permanently
     # purged (cascading its messages/runs/papers) at startup.
     session_retention_days: int
+
+    # Plan H4 core agent loop bounds.
+    agent_max_steps: int
+    agent_max_turn_tokens: int
+    agent_keep_turns: int
+    # The core agent may look at figure images (view_figure); off for a
+    # text-only model.
+    agent_vision: bool
 
     # ── 7. Memory / recall ──────────────────────────────────────────────
     # Inject recalled memories into paper_qa / library_stats prompts (ON by
@@ -181,6 +194,15 @@ def llm_timeout_s() -> float:
         return 120.0
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    """A positive int from the environment; unset / non-numeric / <= 0 -> default."""
+    try:
+        value = int(os.environ.get(name) or default)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 def load_settings() -> Settings:
     workspace = Path(os.environ.get("PAPERHUB_WORKSPACE", "./workspace")).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -211,6 +233,9 @@ def load_settings() -> Settings:
         feedback_review_model=os.environ.get("PAPERHUB_FEEDBACK_REVIEW_MODEL") or flagship,
         ideation_card_model=os.environ.get("PAPERHUB_IDEATION_CARD_MODEL") or small,
         ideation_model=os.environ.get("PAPERHUB_IDEATION_MODEL") or flagship,
+        agent_model=os.environ.get("PAPERHUB_AGENT_MODEL") or flagship,
+        agent_gather_model=os.environ.get("PAPERHUB_AGENT_GATHER_MODEL") or small,
+        agent_autoapprove_model=os.environ.get("PAPERHUB_AGENT_AUTOAPPROVE_MODEL") or small,
         llm_timeout_s=llm_timeout_s(),
 
         # 6. Agent tunables.
@@ -229,6 +254,12 @@ def load_settings() -> Settings:
         session_retention_days=int(
             os.environ.get("PAPERHUB_SESSION_RETENTION_DAYS", "30"),
         ),
+
+        agent_max_steps=_positive_int_env("PAPERHUB_AGENT_MAX_STEPS", 12),
+        agent_max_turn_tokens=_positive_int_env("PAPERHUB_AGENT_MAX_TURN_TOKENS", 120000),
+        agent_keep_turns=_positive_int_env("PAPERHUB_AGENT_KEEP_TURNS", 12),
+        agent_vision=os.environ.get("PAPERHUB_AGENT_VISION", "1")
+        not in ("0", "", "false", "False"),
 
         # 7. Memory / recall.
         memory_recall_enabled=os.environ.get(

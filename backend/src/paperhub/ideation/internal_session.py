@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import aiosqlite
 
+from paperhub.db.connection import write_lock
+
 INTERNAL_TITLE = "Ideation (internal)"
 
 
@@ -23,19 +25,21 @@ async def ideation_session_id(conn: aiosqlite.Connection) -> int:
     sid = await _lookup(conn)
     if sid is None:
         # The unique index makes a concurrent creator a no-op; re-select wins.
-        await conn.execute(
-            "INSERT OR IGNORE INTO chat_sessions (title, internal) VALUES (?, 1)",
-            (INTERNAL_TITLE,),
-        )
-        await conn.commit()
+        async with write_lock(conn):
+            await conn.execute(
+                "INSERT OR IGNORE INTO chat_sessions (title, internal) VALUES (?, 1)",
+                (INTERNAL_TITLE,),
+            )
+            await conn.commit()
         sid = await _lookup(conn)
         if sid is None:
             raise RuntimeError("ideation session creation failed")
     # Defensive: a tombstone would get it purged (cascading its trace runs).
-    await conn.execute(
-        "UPDATE chat_sessions SET deleted_at = NULL "
-        "WHERE id = ? AND deleted_at IS NOT NULL",
-        (sid,),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            "UPDATE chat_sessions SET deleted_at = NULL "
+            "WHERE id = ? AND deleted_at IS NOT NULL",
+            (sid,),
+        )
+        await conn.commit()
     return sid

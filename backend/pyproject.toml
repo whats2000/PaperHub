@@ -1,6 +1,6 @@
 [project]
 name = "paperhub"
-version = "2.41.0"
+version = "2.42.0"
 description = "PaperHub backend — UX-first chat shell with paper KB + RAG + slide pipeline."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,10 +46,14 @@ paperhub-backfill-assets = "paperhub.cli.backfill_assets:main"
 paperhub-backfill-cards = "paperhub.cli.backfill_cards:main"
 paperhub-rerender-html = "paperhub.cli.rerender_html:main"
 paperhub-repair-titles = "paperhub.cli.repair_titles:main"
+paperhub-repair-layout = "paperhub.cli.repair_layout:main"
+paperhub-backfill-figure-locations = "paperhub.cli.backfill_figure_locations:main"
+paperhub-backfill-page-pdfs = "paperhub.cli.backfill_page_pdfs:main"
 paperhub-repair-translations = "paperhub.cli.repair_translations:main"
 paperhub-consolidate-domains = "paperhub.cli.consolidate_domains:main"
 paperhub-narrow-idea-citations = "paperhub.cli.narrow_idea_citations:main"
 paperhub-mcp-up = "paperhub.cli.mcp_up:main"
+paperhub-copy-workspace = "paperhub.cli.copy_workspace:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

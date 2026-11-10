@@ -56,7 +56,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             raise RuntimeError("backend dropped the stream")
         return driver.ChatResult(run_id=1, session_id=session_id, intent="chitchat")
 
-    def delete_session(session_id: int) -> None:
+    def delete_session(session_id: int, **_: Any) -> None:
         state["deleted"].append(session_id)
 
     monkeypatch.setattr(driver, "create_session", create_session)
@@ -101,7 +101,7 @@ def test_one_failed_delete_does_not_skip_the_rest(harness: dict[str, Any],
                                                   monkeypatch: pytest.MonkeyPatch) -> None:
     deleted: list[int] = []
 
-    def flaky_delete(session_id: int) -> None:
+    def flaky_delete(session_id: int, **_: Any) -> None:
         if session_id == 101:
             raise RuntimeError("404")
         deleted.append(session_id)

@@ -6,14 +6,19 @@ import { Collapsible } from "@/components/ui/collapsible";
 import { cleanForPreview } from "@/lib/answerPreview";
 import { CHUNK_MARKER_RE } from "@/lib/chunkCitations";
 import { prefersReducedMotion, revealInScroll } from "@/lib/motion";
+import { UNSOURCED_RE } from "@/lib/unsourcedMarks";
 import { cn } from "@/lib/utils";
 import type { QueueItem, QueueTurn } from "@/types/feedback";
 
 // Matches the clamp's height transition (duration-200) plus a margin.
 const CLAMP_MS = 220;
 
-// Chunk markers (single and multi-id, shared with the chat) or a bare `[3]`.
-const CITE_RE = new RegExp(`${CHUNK_MARKER_RE.source}|\\[\\d+\\]`, "g");
+// Chunk markers (single and multi-id, shared with the chat), the validator's
+// `[unsourced:…]` marks, or a bare `[3]`.
+const CITE_RE = new RegExp(
+  `${CHUNK_MARKER_RE.source}|${UNSOURCED_RE.source}|\\[\\d+\\]`,
+  "g",
+);
 
 /** Citation markers (`[3]`, `[chunk:12]`, `[chunk:12, 13]`) rendered as quiet
  * superscripts. */

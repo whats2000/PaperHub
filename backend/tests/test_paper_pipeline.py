@@ -1028,6 +1028,15 @@ Some body text here is present in the introduction section of this document.
     asset = read_paper_asset(Path(str(sdp_row[0])))
 
     assert asset is not None, "PaperAsset must be written for arXiv LaTeX ingest"
+    if shutil.which("pdflatex") is not None:
+        # The fixture lacks graphicx: the strict compile fails, the arXiv
+        # fetch is blocked in tests, and the lenient compile still gives the
+        # paper its page PDF — under asset/, never the cache root.
+        from paperhub.pipelines.page_pdf import COMPILED_PDF, page_pdf_path
+
+        cache = Path(str(sdp_row[0]))
+        assert page_pdf_path(cache) == cache / "asset" / COMPILED_PDF
+        assert not list(cache.glob("*.pdf"))  # noqa: ASYNC240
     assert any(s.name == "Intro" for s in asset.sections), (
         f"Expected section 'Intro' in asset.sections; got {[s.name for s in asset.sections]}"
     )

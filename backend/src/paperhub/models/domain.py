@@ -203,6 +203,9 @@ class AgentState(TypedDict, total=False):
     # from RoutingDecision.response_language). Final-response agents read this
     # (fallback "the user's language") so they answer in the user's language.
     response_language: str
+    # H4: the frontend's UI language (e.g. "zh-TW"); the core agent's last
+    # fallback for its reply language.
+    ui_language: str
     routing_decision: RoutingDecision
     final_response: str
     history: list[dict[str, str]]
@@ -257,6 +260,8 @@ class AgentState(TypedDict, total=False):
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
     report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action
+    # H4: set by the core agent's slide tools; _resolve skips classify_deck_command.
+    report_forced_command: DeckCommand | None
     # v2.22: TASK target language for the SLIDE CONTENT, detected from the
     # instruction (e.g. "把簡報換成英文" → "English"), independent of the
     # router's response_language (which is the chat-REPLY language). Empty/unset

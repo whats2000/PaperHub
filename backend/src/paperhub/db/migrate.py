@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import shutil
 from importlib.resources import files
@@ -694,6 +695,39 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             ),
         )
 
+    # -----------------------------------------------------------------------
+    # Plan H4 (additive): agent-flow columns. Placed AFTER the runs rebuild
+    # above, whose fixed copy list would otherwise drop them. pending_actions
+    # and chunks_fts (+ triggers) come from schema.sql.
+    # -----------------------------------------------------------------------
+    async with conn.execute("PRAGMA table_info(runs)") as cur:
+        run_cols = {row[1] for row in await cur.fetchall()}
+    if "mode" not in run_cols:
+        await conn.execute(
+            "ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'pipeline'"
+        )
+    if "agent_record_json" not in run_cols:
+        await conn.execute("ALTER TABLE runs ADD COLUMN agent_record_json TEXT")
+    async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
+        sess_cols = {row[1] for row in await cur.fetchall()}
+    if "auto_approve" not in sess_cols:
+        await conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN auto_approve "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+    await conn.commit()
+
+    # Backfill chunks_fts when it is empty while chunks is not. An external-
+    # content table's own COUNT(*) mirrors the content table, so test the
+    # docsize shadow table, which only holds really-indexed rows.
+    async with conn.execute("SELECT COUNT(*) FROM chunks") as cur:
+        n_chunks = int((await cur.fetchone() or (0,))[0])
+    async with conn.execute("SELECT COUNT(*) FROM chunks_fts_docsize") as cur:
+        n_indexed = int((await cur.fetchone() or (0,))[0])
+    if n_chunks > 0 and n_indexed == 0:
+        await conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
+        await conn.commit()
+
     # Plan H2: a pending reviewer item whose run was rated explicitly is
     # resolved (idempotent; a no-op once nothing is pending).
     from paperhub.feedback.repo import resolve_superseded
@@ -744,3 +778,18 @@ async def reconcile_interrupted_runs(conn: aiosqlite.Connection) -> None:
     except Exception:
         await conn.execute("ROLLBACK")
         raise
+
+
+INTERRUPTED_ACTION_ERROR = "interrupted: the server stopped while this action ran"
+
+
+async def reconcile_claimed_actions(conn: aiosqlite.Connection) -> None:
+    """Fail every confirm-tier action still claimed at startup (H4 review
+    #11): a claim (``result_json`` set, status ``pending``) whose process
+    died would otherwise show `running` forever."""
+    await conn.execute(
+        "UPDATE pending_actions SET status = 'failed', result_json = ? "
+        "WHERE status = 'pending' AND result_json IS NOT NULL",
+        (json.dumps({"error": INTERRUPTED_ACTION_ERROR}),),
+    )
+    await conn.commit()

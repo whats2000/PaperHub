@@ -64,6 +64,11 @@ async def fork_session(
     fork_run_id: int,
     workspace_dir: Path,  # used by the deck copy added in Task 2
 ) -> ForkResult:
+    """Copy the source chat up to the forked message into a new chat.
+
+    The new chat's auto_approve is not copied: a fork starts with it off
+    (fails closed; SRS §III-10.4), so skipping confirmations is never
+    inherited without the user turning it on again."""
     # Resolve the fork point first (raises if the run_id is bogus).
     fork_msg_id, forked_text = await _forked_message(
         conn, source_session_id=source_session_id, fork_run_id=fork_run_id
@@ -103,8 +108,8 @@ async def fork_session(
                 continue
             async with conn.execute(
                 "SELECT routing_decision_json, search_results_json, "
-                "deck_version_id, started_at, finished_at, status "
-                "FROM runs WHERE id = ?",
+                "deck_version_id, started_at, finished_at, status, "
+                "mode, agent_record_json FROM runs WHERE id = ?",
                 (old_run_id,),
             ) as rcur:
                 r = await rcur.fetchone()
@@ -113,8 +118,9 @@ async def fork_session(
             ins = await conn.execute(
                 "INSERT INTO runs (session_id, routing_decision_json, "
                 "search_results_json, deck_version_id, started_at, finished_at, "
-                "status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (new_sid, r[0], r[1], r[2], r[3], r[4], r[5]),
+                "status, mode, agent_record_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (new_sid, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]),
             )
             assert ins.lastrowid is not None
             run_map[int(old_run_id)] = int(ins.lastrowid)

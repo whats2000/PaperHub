@@ -14,8 +14,7 @@ from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
 from paperhub.feedback import review
 from paperhub.feedback.models import ReviewVerdict, format_reasons_block
-
-_ROUTER_CHITCHAT = '{"intent":"chitchat","confidence":0.9,"reasoning":"chat"}'
+from tests.agent_script import answer, script_agent
 
 
 class _StubLlm:
@@ -54,8 +53,8 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_FEEDBACK_REVIEW", "1")
     monkeypatch.delenv("PAPERHUB_FEEDBACK_KEYWORDS", raising=False)
-    monkeypatch.setenv("PAPERHUB_ROUTER_MOCK", _ROUTER_CHITCHAT)
-    monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "Sure.")
+    # Every chat turn: the scripted core agent answers without tools.
+    script_agent(monkeypatch, [answer("Sure.")] * 20)
     return tmp_path
 
 

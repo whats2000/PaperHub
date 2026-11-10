@@ -6,6 +6,10 @@ to ``runs.routing_decision_json``), the ``research/paper_qa:subagent`` steps'
 ``chunks_read`` counts, step ``status='error'`` rows, and the run's assistant
 ``messages`` row (the finalize step records only the answer length, so the
 answer text for the citation check comes from ``messages``).
+
+An agent run (``runs.mode = 'agent'``, H4) has no router or subagent rows;
+its signals come from its ``agent:step`` / ``tool:*`` rows and its work
+record instead (``_guess_agent``), with stages from ``models.agent_stage``.
 """
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ from typing import Any
 import aiosqlite
 
 from paperhub.feedback.citations import cited_chunk_ids
-from paperhub.feedback.models import REASONS
+from paperhub.feedback.models import REASON_OF_STAGE, REASONS, agent_stage
 
 # The router v2 prompt's multi-intent tie-break wording. The router has no
 # structured "tie" field and the spec forbids adding one.
@@ -41,10 +45,55 @@ def _error_reason(agent: str, tool: str) -> str:
     return "factual"
 
 
+# Agent-run tools that read chunks; one that returned none read nothing.
+_CHUNK_READERS = frozenset({
+    "tool:read_section", "tool:read_chunks", "tool:read_layout_object",
+    "tool:search_chunks", "tool:gather",
+})
+_ID_KEYS = ("chunk_ids", "hit_ids", "chunk_ids_selected")
+
+
+def _guess_agent(
+    steps: list[Any], record: dict[str, Any] | None,
+) -> set[str]:
+    """Signals of an agent run (``runs.mode = 'agent'``), from its own
+    ``agent:*`` / ``tool:*`` rows and ``runs.agent_record_json``:
+
+    * a failed agent step -> the reason of its stage (``agent_stage``);
+    * ``validate_citations`` removed a marker -> ``citation``;
+    * chunk-reading tools ran and none returned a chunk -> ``wrong_source``;
+    * chunks were read but the answer cites none -> ``citation``."""
+    found: set[str] = set()
+    reader_ids: list[int] | None = None
+    removed = bool((record or {}).get("citations_removed"))
+    for agent, tool, status, error, result_raw in steps:
+        if agent != "agent":
+            continue  # a tool's own pipeline rows; the tool row speaks for it
+        result = _loads(result_raw)
+        if status == "error" and error != "cancelled":
+            found.add(REASON_OF_STAGE[agent_stage(str(tool), result) or "answer"])
+        if tool == "agent:step" and (result or {}).get("citations_removed"):
+            removed = True
+        if tool in _CHUNK_READERS:
+            reader_ids = reader_ids or []
+            for key in _ID_KEYS:
+                ids = (result or {}).get(key)
+                if isinstance(ids, list):
+                    reader_ids += [i for i in ids if isinstance(i, int)]
+    if removed:
+        found.add("citation")
+    if reader_ids is not None and not reader_ids:
+        found.add("wrong_source")
+    if record is not None and record.get("read") and not record.get("cited"):
+        found.add("citation")
+    return found
+
+
 async def guess_reasons(conn: aiosqlite.Connection, run_id: int) -> list[str]:
     """Return the pre-selected reasons for ``run_id`` in ``REASONS`` order."""
     async with conn.execute(
-        "SELECT routing_decision_json FROM runs WHERE id = ?", (run_id,),
+        "SELECT routing_decision_json, mode, agent_record_json FROM runs "
+        "WHERE id = ?", (run_id,),
     ) as cur:
         run_row = await cur.fetchone()
     if run_row is None:
@@ -56,6 +105,10 @@ async def guess_reasons(conn: aiosqlite.Connection, run_id: int) -> list[str]:
         (run_id,),
     ) as cur:
         steps = list(await cur.fetchall())
+
+    if run_row[1] == "agent":
+        found_agent = _guess_agent(steps, _loads(run_row[2]))
+        return [r for r in REASONS if r in found_agent]
 
     found: set[str] = set()
     router: dict[str, Any] | None = None

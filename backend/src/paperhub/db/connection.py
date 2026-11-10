@@ -36,6 +36,53 @@ def in_write_transaction() -> bool:
     return owner is not None and owner is asyncio.current_task()
 
 
+# The task currently holding ``_DB_WRITE_LOCK`` (via ``write_transaction``
+# or ``write_lock``). Stored as the task, like ``_IN_WRITE_TX``, so child
+# tasks do not inherit ownership.
+_LOCK_OWNER: contextvars.ContextVar[asyncio.Task[object] | None] = (
+    contextvars.ContextVar("paperhub_write_lock_owner", default=None)
+)
+
+
+def holds_write_lock() -> bool:
+    """Whether the current task holds ``_DB_WRITE_LOCK``."""
+    owner = _LOCK_OWNER.get()
+    return owner is not None and owner is asyncio.current_task()
+
+
+@asynccontextmanager
+async def write_lock(
+    conn: aiosqlite.Connection | None = None,
+) -> AsyncIterator[None]:
+    """Hold ``_DB_WRITE_LOCK`` around a raw ``execute`` + ``commit`` write.
+
+    Re-entrant per task: a task that already holds the lock (inside
+    ``write_transaction`` or an outer ``write_lock``) proceeds without
+    waiting. Tasks sharing one connection (an agent step's concurrent tool
+    calls) must take it for every write, or one task's statements land
+    inside — and its ``commit`` ends — another task's open transaction.
+
+    With ``conn``, a block that raises is rolled back before the lock is
+    released, so a half-written implicit transaction never stays open for
+    the next writer's commit. A re-entered block leaves that to the owner.
+    """
+    if holds_write_lock():
+        yield
+        return
+    async with _DB_WRITE_LOCK:
+        token = _LOCK_OWNER.set(asyncio.current_task())
+        try:
+            yield
+        except BaseException:
+            if conn is not None:
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+            raise
+        finally:
+            with contextlib.suppress(ValueError):  # closed from another context
+                _LOCK_OWNER.reset(token)
+
+
 def norm_for_match(s: str | None) -> str:
     """Normalize a string for forgiving substring search.
 
@@ -121,7 +168,12 @@ async def write_transaction(
     cleanly.
     """
     async with _DB_WRITE_LOCK:
-        await conn.execute("BEGIN IMMEDIATE")
+        owner_token = _LOCK_OWNER.set(asyncio.current_task())
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+        except BaseException:
+            _LOCK_OWNER.reset(owner_token)
+            raise
         token = _IN_WRITE_TX.set(asyncio.current_task())
         try:
             yield
@@ -136,3 +188,5 @@ async def write_transaction(
         finally:
             with contextlib.suppress(ValueError):  # closed from another context
                 _IN_WRITE_TX.reset(token)
+            with contextlib.suppress(ValueError):
+                _LOCK_OWNER.reset(owner_token)

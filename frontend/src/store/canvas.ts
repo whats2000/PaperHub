@@ -5,6 +5,20 @@ import { persist, createJSONStorage } from "zustand/middleware";
 export const CANVAS_MIN_WIDTH = 320;
 export const CANVAS_DEFAULT_WIDTH = 480;
 
+/** A `[fig:P/ID]` citation: open the reader on that figure. */
+export interface FigureRequest {
+  paper: number;
+  figureId: string;
+}
+
+/** A `[view:P/N/box]` citation: a region of a page the agent viewed — 1-based
+ *  page, box `[x0, y0, x1, y1]` in 0-1000 page coordinates. */
+export interface ViewRequest {
+  paper: number;
+  page: number;
+  box: [number, number, number, number];
+}
+
 interface CanvasState {
   open: boolean;
   /** The chunk the user clicked a citation for. Null when opened via the
@@ -14,6 +28,10 @@ interface CanvasState {
    *  a whole section → highlight from `requestedChunkId` to this one). Null for
    *  a single-chunk `[chunk:N]` citation. */
   requestedEndChunkId: number | null;
+  /** A figure citation to open (exclusive with the chunk / view requests). */
+  requestedFigure: FigureRequest | null;
+  /** A page-region citation to open (exclusive with the chunk / figure ones). */
+  requestedView: ViewRequest | null;
   /** Bumped on every openCitation so clicking the SAME chunk twice re-triggers
    *  resolution in the component (which keys an effect on this). */
   requestNonce: number;
@@ -40,6 +58,10 @@ interface CanvasState {
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number, endChunkId?: number) => void;
+  /** A figure citation: open the canvas on the figure and highlight it. */
+  openFigure: (paper: number, figureId: string) => void;
+  /** A page-region citation: open the canvas on the page and highlight it. */
+  openView: (paper: number, page: number, box: ViewRequest["box"]) => void;
   /** Cleared by the canvas once it has resolved the request, so re-opening in
    *  browse mode (References button — no new request) doesn't re-jump to the
    *  last-cited passage even when the canvas remounts. */
@@ -65,6 +87,8 @@ export const useCanvasStore = create<CanvasState>()(
       open: false,
       requestedChunkId: null,
       requestedEndChunkId: null,
+      requestedFigure: null,
+      requestedView: null,
       requestNonce: 0,
       requestAnimateScroll: false,
       requestedPaperId: null,
@@ -78,10 +102,37 @@ export const useCanvasStore = create<CanvasState>()(
           open: true,
           requestedChunkId: chunkId,
           requestedEndChunkId: endChunkId ?? null,
+          requestedFigure: null,
+          requestedView: null,
+          requestNonce: s.requestNonce + 1,
+        })),
+      openFigure: (paper, figureId) =>
+        set((s) => ({
+          requestAnimateScroll: s.open,
+          open: true,
+          requestedChunkId: null,
+          requestedEndChunkId: null,
+          requestedFigure: { paper, figureId },
+          requestedView: null,
+          requestNonce: s.requestNonce + 1,
+        })),
+      openView: (paper, page, box) =>
+        set((s) => ({
+          requestAnimateScroll: s.open,
+          open: true,
+          requestedChunkId: null,
+          requestedEndChunkId: null,
+          requestedFigure: null,
+          requestedView: { paper, page, box },
           requestNonce: s.requestNonce + 1,
         })),
       consumeCitation: () =>
-        set({ requestedChunkId: null, requestedEndChunkId: null }),
+        set({
+          requestedChunkId: null,
+          requestedEndChunkId: null,
+          requestedFigure: null,
+          requestedView: null,
+        }),
       openPaper: (paperContentId) =>
         set((s) => ({
           open: true,

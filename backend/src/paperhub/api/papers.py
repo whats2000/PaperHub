@@ -6,10 +6,12 @@ import asyncio
 import logging
 import mimetypes
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
 import aiosqlite
+import pymupdf
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, model_validator
@@ -22,12 +24,18 @@ from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
 from paperhub.ideation.domains import assign_color_indices
-from paperhub.pipelines.paper_asset import read_block_assets
+from paperhub.pipelines.page_pdf import is_compiled_pdf, page_pdf_path
+from paperhub.pipelines.paper_asset import (
+    FigureAsset,
+    read_block_assets,
+    read_paper_asset,
+)
 from paperhub.pipelines.paper_pipeline import (
     ArxivMetadata,
     IngestRequest,
     PaperPipeline,
 )
+from paperhub.pipelines.sentinels import figure_dom_id
 from paperhub.translation.models import ParagraphsResponse
 from paperhub.translation.pdf_paragraphs import build_paragraphs
 
@@ -391,7 +399,8 @@ async def attach_from_library(body: FromLibraryBody) -> IngestResponse:
             )
         title = row[0] or ""
         await conn.execute(
-            "INSERT OR IGNORE INTO papers (session_id, paper_content_id) VALUES (?, ?)",
+            "INSERT INTO papers (session_id, paper_content_id) VALUES (?, ?) "
+            "ON CONFLICT (session_id, paper_content_id) DO UPDATE SET enabled = 1",
             (body.session_id, body.paper_content_id),
         )
         await conn.commit()
@@ -444,6 +453,9 @@ async def remove_from_session(papers_id: int) -> None:
 
 class DocumentModeResponse(BaseModel):
     mode: str  # "html" | "pdf"
+    # The paper has a page PDF (its own, or one compiled from its LaTeX):
+    # [view:] citations open on it (a PDF tab for HTML papers).
+    page_pdf: bool = False
 
 
 @router.get("/content/{paper_content_id}/sections")
@@ -493,7 +505,7 @@ async def document_mode(paper_content_id: int) -> DocumentModeResponse:
     # of a LaTeX paper, making them false-positive as PDF-rendered.
     pdfs = sorted(source_dir.glob("*.pdf"))  # noqa: ASYNC240
     mode = "pdf" if pdfs else "html"
-    return DocumentModeResponse(mode=mode)
+    return DocumentModeResponse(mode=mode, page_pdf=page_pdf_path(source_dir) is not None)
 
 
 @router.get("/content/{paper_content_id}/paragraphs", response_model=ParagraphsResponse)
@@ -568,6 +580,139 @@ async def serve_pdf(paper_content_id: int) -> FileResponse:
         filename=pdf_path.name,
         content_disposition_type="inline",
     )
+
+
+class FigureMeta(BaseModel):
+    paper_content_id: int
+    id: str
+    caption: str
+    page: int | None           # 0-based, on the page PDF
+    title: str
+    has_image: bool
+    # Where a [fig:] citation opens: the HTML anchor the render put before
+    # the figure, and its box (PDF points) on the page PDF.
+    html_anchor: str | None = None
+    bbox: list[float] | None = None
+
+
+async def _figure(paper_content_id: int, figure_id: str) -> tuple[FigureAsset, Path, str]:
+    """A paper's asset figure by id, its image path and the paper title; 404
+    when the paper or the figure is unknown. The id is matched against the
+    asset's own list, so a crafted id never reaches the filesystem."""
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT source_dir_path, title FROM paper_content WHERE id = ?",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    src = Path(row[0])
+    asset = read_paper_asset(src)
+    fig = next((f for f in (asset.figures if asset else []) if f.id == figure_id), None)
+    if fig is None:
+        raise HTTPException(404, f"no figure {figure_id!r} in paper {paper_content_id}")
+    return fig, fig.abs_image_path(src), str(row[1] or "")
+
+
+@router.get("/content/{paper_content_id}/figures/{figure_id}")
+async def figure_meta(paper_content_id: int, figure_id: str) -> FigureMeta:
+    """Caption and page of a figure a chat answer cites as ``[fig:P/ID]``."""
+    fig, path, title = await _figure(paper_content_id, figure_id)
+    return FigureMeta(
+        paper_content_id=paper_content_id, id=fig.id, caption=fig.caption,
+        page=fig.page, title=title, has_image=path.is_file(),  # noqa: ASYNC240
+        html_anchor=await asyncio.to_thread(_html_anchor, paper_content_id, fig.id),
+        bbox=list(fig.bbox) if fig.bbox is not None else None,
+    )
+
+
+def _html_anchor(paper_content_id: int, figure_id: str) -> str | None:
+    """``phfig-NNN`` when the paper's rendered HTML carries that anchor."""
+    dom = figure_dom_id(figure_id)
+    if dom is None:
+        return None
+    settings = load_settings()
+    with sqlite3.connect(settings.db_path) as conn:
+        row = conn.execute("SELECT html_path FROM paper_content WHERE id = ?",
+                           (paper_content_id,)).fetchone()
+    html = Path(row[0]) if row and row[0] else None
+    if html is None or not html.is_file():
+        return None
+    return dom if f'id="{dom}"' in html.read_text(encoding="utf-8", errors="ignore") else None
+
+
+async def _cache_dir(paper_content_id: int) -> Path:
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute("SELECT source_dir_path FROM paper_content WHERE id = ?",
+                     (paper_content_id,)) as cur,
+    ):
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    return Path(row[0])
+
+
+@router.get("/content/{paper_content_id}/page-pdf")
+async def serve_page_pdf(paper_content_id: int) -> FileResponse:
+    """The paper's page PDF: what the agent viewed and [view:] citations open."""
+    pdf = page_pdf_path(await _cache_dir(paper_content_id))
+    if pdf is None:
+        raise HTTPException(404, f"paper_content {paper_content_id} has no page PDF")
+    return FileResponse(pdf, media_type="application/pdf", content_disposition_type="inline")
+
+
+class ViewRegion(BaseModel):
+    page: int                  # 0-based, as the PDF reader takes it
+    bbox: list[float]          # PDF points, top-left origin
+    source: str                # "own" (the paper's PDF) | "compiled" (asset/paper.pdf)
+
+
+@router.get("/content/{paper_content_id}/view-region")
+async def view_region(paper_content_id: int, page: int, box: str) -> ViewRegion:
+    """A ``[view:P/N/box]`` citation's region in PDF points on the page PDF."""
+    try:
+        vals = [int(v) for v in box.split(",")]
+    except ValueError:
+        vals = []
+    if (len(vals) != 4 or not (0 <= vals[0] < vals[2] <= 1000)
+            or not (0 <= vals[1] < vals[3] <= 1000)):
+        raise HTTPException(400, "box must be x0,y0,x1,y1 in 0-1000 with x0<x1, y0<y1")
+    pdf = page_pdf_path(await _cache_dir(paper_content_id))
+    if pdf is None:
+        raise HTTPException(404, f"paper_content {paper_content_id} has no page PDF")
+    size = await asyncio.to_thread(_page_rect, pdf, page)
+    if size is None:
+        raise HTTPException(404, f"page {page} is not in the page PDF")
+    w, h = size
+    return ViewRegion(
+        page=page - 1,
+        bbox=[vals[0] / 1000 * w, vals[1] / 1000 * h, vals[2] / 1000 * w, vals[3] / 1000 * h],
+        source="compiled" if is_compiled_pdf(pdf) else "own",
+    )
+
+
+def _page_rect(pdf: Path, page: int) -> tuple[float, float] | None:
+    with pymupdf.open(pdf) as doc:  # type: ignore[no-untyped-call]
+        if not 1 <= page <= doc.page_count:
+            return None
+        r = doc[page - 1].rect
+        return float(r.width), float(r.height)
+
+
+@router.get("/content/{paper_content_id}/figures/{figure_id}/image")
+async def figure_image(paper_content_id: int, figure_id: str) -> FileResponse:
+    """The figure's image file, for the ``[fig:P/ID]`` citation popover."""
+    _fig, path, _title = await _figure(paper_content_id, figure_id)
+    if not path.is_file():  # noqa: ASYNC240
+        raise HTTPException(404, f"figure {figure_id!r} has no image file")
+    media = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media, content_disposition_type="inline")
 
 
 @router.get("/content/{paper_content_id}/html")

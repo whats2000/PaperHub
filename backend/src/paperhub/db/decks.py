@@ -18,6 +18,8 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.db.connection import write_lock
+
 
 @dataclass
 class DeckRow:
@@ -55,34 +57,35 @@ async def upsert_deck(
     Used by the F4 NOTES/EDIT sub-flows (which preserve the existing
     ``current_version_id``). F4.5 GENERATE goes through ``sl_emit`` instead.
     """
-    await conn.execute(
-        """
-        INSERT INTO decks (session_id, run_id, tex_path, pdf_path, speaker_notes_json,
-                           plan_json, page_count, current_version_id,
-                           contributing_paper_ids_json, status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(session_id) DO UPDATE SET
-            run_id=excluded.run_id, tex_path=excluded.tex_path, pdf_path=excluded.pdf_path,
-            speaker_notes_json=excluded.speaker_notes_json, plan_json=excluded.plan_json,
-            page_count=excluded.page_count,
-            current_version_id=COALESCE(excluded.current_version_id, decks.current_version_id),
-            contributing_paper_ids_json=excluded.contributing_paper_ids_json,
-            status=excluded.status, updated_at=datetime('now')
-        """,
-        (
-            session_id,
-            run_id,
-            tex_path,
-            pdf_path,
-            json.dumps(speaker_notes),
-            json.dumps(plan),
-            page_count,
-            current_version_id,
-            json.dumps(contributing_paper_ids),
-            status,
-        ),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            """
+            INSERT INTO decks (session_id, run_id, tex_path, pdf_path, speaker_notes_json,
+                               plan_json, page_count, current_version_id,
+                               contributing_paper_ids_json, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                run_id=excluded.run_id, tex_path=excluded.tex_path, pdf_path=excluded.pdf_path,
+                speaker_notes_json=excluded.speaker_notes_json, plan_json=excluded.plan_json,
+                page_count=excluded.page_count,
+                current_version_id=COALESCE(excluded.current_version_id, decks.current_version_id),
+                contributing_paper_ids_json=excluded.contributing_paper_ids_json,
+                status=excluded.status, updated_at=datetime('now')
+            """,
+            (
+                session_id,
+                run_id,
+                tex_path,
+                pdf_path,
+                json.dumps(speaker_notes),
+                json.dumps(plan),
+                page_count,
+                current_version_id,
+                json.dumps(contributing_paper_ids),
+                status,
+            ),
+        )
+        await conn.commit()
 
 
 async def get_deck(conn: aiosqlite.Connection, *, session_id: int) -> DeckRow | None:

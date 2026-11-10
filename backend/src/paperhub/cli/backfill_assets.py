@@ -40,6 +40,7 @@ import aiosqlite
 
 from paperhub.config import load_settings
 from paperhub.pipelines.extract import extract_latex
+from paperhub.pipelines.figure_merge import join_split_figures
 from paperhub.pipelines.latex_to_asset import latex_source_to_asset
 from paperhub.pipelines.marker_client import MarkerClient, get_marker_client
 from paperhub.pipelines.marker_to_asset import marker_doc_to_asset, marker_doc_to_blocks
@@ -165,6 +166,7 @@ def build_asset_for_paper(
         doc = client.extract(pdf_path.read_bytes(), max_pages=max_pages)
         asset = marker_doc_to_asset(
             doc, source_dir=cache_dir, inline_math_llm=client.inline_math_llm())
+        asset = join_split_figures(asset, doc.blocks, pdf_path, cache_dir)
     else:
         # LaTeX path. The source dir (where figure files live) is the directory
         # CONTAINING the main .tex — robust across cache layout + flat fixtures,

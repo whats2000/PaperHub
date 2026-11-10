@@ -19,6 +19,7 @@
   "modelKeyMissing": "缺少提供商密钥：{{keys}}",
   "modelUnusable": "此模型无法使用——请确认模型名称可用且 API 密钥有效。",
   "modelUnreachable": "目前无法连接到提供商——通常是暂时性问题，请稍后再试。",
+  "modelNoTools": "此模型无法调用工具，而每一轮对话都需要——请选择支持工具（函数）调用的模型。",
   "modelChecking": "正在检查模型可用性…",
   "getApiKey": "获取 API 密钥",
   "welcome": {
@@ -175,6 +176,27 @@
     },
     "PAPERHUB_SLIDE_STYLE_PROFILE": {
       "label": "幻灯片样式配置"
+    },
+    "PAPERHUB_AGENT_MODEL": {
+      "label": "核心代理",
+      "help": "负责回答每一条对话的工具调用代理。默认为旗舰层级。"
+    },
+    "PAPERHUB_AGENT_GATHER_MODEL": {
+      "label": "代理上下文收集器",
+      "help": "为核心代理的收集工具阅读论文。默认为小型层级。"
+    },
+    "PAPERHUB_AGENT_AUTOAPPROVE_MODEL": {
+      "label": "代理自动批准器",
+      "help": "判断代理提出的操作是否符合你的要求。默认为小型层级。"
+    },
+    "PAPERHUB_AGENT_MAX_STEPS": {
+      "label": "代理每轮最大工具步数"
+    },
+    "PAPERHUB_AGENT_MAX_TURN_TOKENS": {
+      "label": "代理每轮工具结果 token 预算"
+    },
+    "PAPERHUB_AGENT_KEEP_TURNS": {
+      "label": "代理原文保留的对话轮数"
     }
   }
 }

@@ -19,6 +19,7 @@
   "modelKeyMissing": "プロバイダーキーがありません：{{keys}}",
   "modelUnusable": "このモデルは使用できません——モデル名が利用可能か、API キーが有効かを確認してください。",
   "modelUnreachable": "現在プロバイダーに接続できません——通常は一時的な問題です。しばらくして再試行してください。",
+  "modelNoTools": "このモデルはツールを呼び出せません。すべての会話ターンで必要です——ツール（関数）呼び出しに対応したモデルを選んでください。",
   "modelChecking": "モデルの利用可否を確認中…",
   "getApiKey": "API キーを取得",
   "welcome": {
@@ -175,6 +176,27 @@
     },
     "PAPERHUB_SLIDE_STYLE_PROFILE": {
       "label": "スライドスタイルプロファイル"
+    },
+    "PAPERHUB_AGENT_MODEL": {
+      "label": "コアエージェント",
+      "help": "すべてのチャットターンに答えるツール呼び出しエージェント。既定はフラッグシップ層。"
+    },
+    "PAPERHUB_AGENT_GATHER_MODEL": {
+      "label": "エージェントの文脈収集",
+      "help": "コアエージェントの収集ツールのために論文を読みます。既定はスモール層。"
+    },
+    "PAPERHUB_AGENT_AUTOAPPROVE_MODEL": {
+      "label": "エージェントの自動承認",
+      "help": "エージェントが提案した操作が依頼内容に合っているかを判定します。既定はスモール層。"
+    },
+    "PAPERHUB_AGENT_MAX_STEPS": {
+      "label": "エージェントの1ターン最大ツールステップ数"
+    },
+    "PAPERHUB_AGENT_MAX_TURN_TOKENS": {
+      "label": "エージェントの1ターンのツール結果トークン予算"
+    },
+    "PAPERHUB_AGENT_KEEP_TURNS": {
+      "label": "エージェントが原文のまま保持する会話ターン数"
     }
   }
 }

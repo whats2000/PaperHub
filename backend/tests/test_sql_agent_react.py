@@ -420,3 +420,141 @@ async def test_active_memory_recall_reaches_model(
         conn=migrated_db, recall_enabled=True,
     ))
     assert "Always respond in Japanese." in str(adapter.calls[0]["question"])
+
+
+# ---------------------------------------------------------------------------
+# overlap_describe (H4 query_library): the first round reads the schema from
+# the local DB and runs while the traced MCP describes (which reconnect the
+# loopback session) are still in flight; the first sql.query waits for them.
+# ---------------------------------------------------------------------------
+
+
+class _SlowDescribeRegistry(_QueryRegistry):
+    def __init__(self, query_results: list[Any]) -> None:
+        super().__init__(query_results)
+        import asyncio
+
+        self.release = asyncio.Event()
+        self.describe_done = False
+
+    async def call(self, name: str, args: dict) -> Any:
+        if name == "sql.describe":
+            await self.release.wait()
+            self.describe_done = True
+        elif name == "sql.query":
+            assert self.describe_done, "sql.query ran before the describes finished"
+        return await super().call(name, args)
+
+
+@pytest.mark.asyncio
+async def test_overlap_describe_runs_first_round_during_describe(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    tracer = await _seed_run(migrated_db)
+    reg = _SlowDescribeRegistry([{"columns": ["n"], "rows": [[5]]}])
+
+    class _ReleasingAdapter(_ScriptedAdapter):
+        async def structured(self, **kw: Any) -> Any:  # type: ignore[override]
+            # Round 1 runs while the describes are blocked; let them finish.
+            if not self.calls:
+                assert not reg.describe_done
+                reg.release.set()
+            return await super().structured(**kw)
+
+    adapter = _ReleasingAdapter([
+        SqlRoundAction(action="query", sql="SELECT count(*) AS n FROM paper_content",
+                       answer=None, papers=[]),
+        SqlRoundAction(action="finalize", sql=None, answer="You have 5 papers.",
+                       papers=[]),
+    ])
+    items = await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="m", conn=migrated_db, recall_enabled=False,
+        overlap_describe=True,
+    ))
+    assert "You have 5 papers." in "".join(x for x in items if isinstance(x, str))
+    schemas = adapter.calls[0]["table_schemas"]
+    async with migrated_db.execute("PRAGMA table_info(paper_content)") as cur:
+        pc_cols = ", ".join(r[1] for r in await cur.fetchall())
+    assert f"paper_content columns: {pc_cols}" in schemas
+    assert reg.describe_calls == 2 and reg.query_calls == 1
+    async with migrated_db.execute(
+        "SELECT tool, status FROM tool_calls WHERE run_id = 1 "
+        "AND tool = 'sql.describe'"
+    ) as cur:
+        assert [tuple(r) for r in await cur.fetchall()] == [
+            ("sql.describe", "ok"), ("sql.describe", "ok")]
+
+
+@pytest.mark.asyncio
+async def test_overlap_describe_awaited_when_round_one_finalizes(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    tracer = await _seed_run(migrated_db)
+    reg = _SlowDescribeRegistry([{"columns": ["n"], "rows": [[3]]}])
+    pending_at_return: list[bool] = []
+
+    class _Adapter(_ScriptedAdapter):
+        async def structured(self, **kw: Any) -> Any:  # type: ignore[override]
+            out = await super().structured(**kw)
+            # Round 1 returns while the describes are still blocked.
+            pending_at_return.append(not reg.describe_done)
+            reg.release.set()
+            return out
+
+    adapter = _Adapter([
+        SqlRoundAction(action="finalize", sql=None, answer="3.", papers=[]),
+    ])
+    items = await _drain(sql_agent_stream(
+        _state(), adapter=adapter, tracer=tracer, registry=reg,
+        planner_model="m", conn=migrated_db, recall_enabled=False,
+        overlap_describe=True,
+    ))
+    assert pending_at_return == [True]
+    assert "3." in items
+    # The stream awaited the describes before it ended.
+    assert reg.describe_done and reg.describe_calls == 2
+
+
+class _FailingDescribeRegistry(_QueryRegistry):
+    async def call(self, name: str, args: dict) -> Any:
+        if name == "sql.describe":
+            raise RuntimeError("mcp reconnect failed")
+        return await super().call(name, args)
+
+
+@pytest.mark.asyncio
+async def test_overlap_describe_failure_after_finalize_keeps_the_answer(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The answer was computed from the local schema; a failed background
+    describe is traced (status error) and logged, not raised, and its
+    exception is retrieved (no 'Task exception was never retrieved')."""
+    import asyncio
+    import gc
+
+    loop = asyncio.get_running_loop()
+    unhandled: list[dict[str, Any]] = []
+    old = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _l, ctx: unhandled.append(ctx))
+    try:
+        tracer = await _seed_run(migrated_db)
+        adapter = _ScriptedAdapter([
+            SqlRoundAction(action="finalize", sql=None, answer="You have 3.",
+                           papers=[]),
+        ])
+        items = await _drain(sql_agent_stream(
+            _state(), adapter=adapter, tracer=tracer,
+            registry=_FailingDescribeRegistry([]), planner_model="m",
+            conn=migrated_db, recall_enabled=False, overlap_describe=True,
+        ))
+        assert "You have 3." in items
+        async with migrated_db.execute(
+            "SELECT status FROM tool_calls WHERE run_id = 1 AND tool = 'sql.describe'"
+        ) as cur:
+            assert [r[0] for r in await cur.fetchall()] == ["error"]
+        gc.collect()
+        await asyncio.sleep(0)
+        assert not [c for c in unhandled if "never retrieved" in str(c.get("message"))]
+    finally:
+        loop.set_exception_handler(old)

@@ -19,6 +19,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from paperhub import settings_overlay as ov
+from paperhub.api import actions as actions_api
 from paperhub.api import chat, health
 from paperhub.api import chunks as chunks_api
 from paperhub.api import decks as decks_api
@@ -36,6 +37,7 @@ from paperhub.db.connection import configure_connection, open_db
 from paperhub.db.migrate import (
     apply_schema,
     purge_deleted_sessions,
+    reconcile_claimed_actions,
     reconcile_interrupted_runs,
     sweep_orphan_session_folders,
 )
@@ -91,6 +93,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_db(settings.db_path) as conn:
         await apply_schema(conn)
         await reconcile_interrupted_runs(conn)
+        await reconcile_claimed_actions(conn)
         # Plan H3: a problem left `generating` by a killed process -> `error`.
         await reconcile_generating_problems(conn)
         # Fix author lists stored with arXiv fragment artifacts (idempotent).
@@ -392,6 +395,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(chat.router)
+    app.include_router(actions_api.router)
     app.include_router(sessions_api.router)
     app.include_router(papers_api.router)
     app.include_router(chunks_api.router)

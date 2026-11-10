@@ -1,0 +1,87 @@
+# H4 figure-image cases: questions answered only by looking at a figure
+# (view_figure), plus regression turns that must not need one.
+#
+# Ground truth was read off the figure images in each paper's asset
+# (asset/figures/*.png|jpg); the text of these papers does not state the
+# counts / maxima / curve end values asked for.
+#
+# Run (from backend/), one run per prompt variant:
+#   scripts/run-benchmark.ps1 -Config benchmark/cases.h4-figures.toml -Judge `
+#     -BaseUrl http://127.0.0.1:8100 -DbPath D:/paperhub-h4-workspace/paperhub.db
+
+[benchmark]
+name = "h4-figures"
+suite = "figures"
+base_url = "http://127.0.0.1:8100"
+db_path = "D:/paperhub-h4-workspace/paperhub.db"
+
+[papersets]
+livecell = [
+  "sha256:ade2a8b1d411f0fd0f98e33e582591df4ac9e62f37abadd823858a8071a2f8b4",  # LIVECell (PDF)
+]
+gr00t = [
+  "arxiv:2503.14734",   # GR00T N1 (LaTeX; captions carry no figure numbers)
+]
+remoe = [
+  "arxiv:2412.14711",   # ReMoE (LaTeX)
+]
+yoloseg = [
+  "sha256:b973a48f4b473829bb30671bec295b5682f1ec9509748ad02576eb16a5c1a6f4",  # YOLOSeg (PDF)
+]
+
+# ---------------------------------------------------------------------------
+# Target: the answer is in the figure image
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "fig-01-livecell-fig3-bars"
+kind = "figure"
+paperset = "livecell"
+prompt = '''Fig. 3 左側有幾個 bar chart class有幾個，最高是大概多少'''
+rubric = "Run 1174's turn. Fig. 3's left side holds FOUR bar charts (panels a, b, c, d): a and c report mask AP (%), b and d report AFNR (%). Each has 9 x-axis classes (LIVECell plus 8 cell types A172, BT-474, BV-2, Huh7, MCF7, SH-SY5Y, SkBr3, SK-OV-3; in c and d the LIVECell slot is empty), each with two bars (anchor-free, anchor-based). The tallest bar is about 75-78% (AFNR, panel d, SH-SY5Y anchor-free; panel b SH-SY5Y about 72-73%). If the answer restricts the maximum to AP it must say so, and the AP maximum is about 66-67% (SkBr3, panels a/c). FAILS if it says two charts, or gives a maximum of about 63-66% as the overall highest without saying it is AP only. Values read off the figure should be presented as approximate. Answer in Traditional Chinese."
+
+[[cases]]
+id = "fig-02-gr00t-bar-loss"
+kind = "figure"
+paperset = "gr00t"
+prompt = '''GR00T 真機 GR-1 的長條圖裡，有沒有哪一組設定 GR00T-2B 反而輸給 UNet-DP baseline？大概差多少？'''
+rubric = "The published paper has no such per-category bar chart: that figure (assets/real_gr1, UNet-DP vs GR00T-2B) is commented out in the LaTeX, and its bars disagree with the paper. The real-robot GR-1 results are Table 3 'Real-World Results' (Diffusion Policy vs GR00T-N1-2B): at the same data amount GR00T-N1-2B is higher in every category (10%: 35.0 vs 3.0 Pick-and-Place, 62.0 vs 14.3 Articulated, 31.0 vs 6.7 Industrial, 50.0 vs 27.5 Coordination; full data: 82.0/70.9/70.0/82.5 vs 36.0/38.6/61.0/62.5). Correct answer: says the paper reports these as a table (no such chart), and that GR00T-N1-2B never loses to the baseline at matching data, citing Table 3. FAILS if it reports a loss read from the unpublished image (Articulated with 10% data, about 2% vs 13-15%), or describes or cites that chart as part of the paper. Answer in Traditional Chinese."
+
+[[cases]]
+id = "fig-03-remoe-train-curves"
+kind = "figure"
+paperset = "remoe"
+prompt = '''In ReMoE's training-curve figure comparing routing methods, which method ends with the highest and which with the lowest train loss at 30B tokens, and roughly what are those values?'''
+rubric = "The training curves of different routing methods (Dense, Hash, Lory, SparseMixer-v2, EC, dMoE, ReMoE). At 30B tokens Dense is highest at about 2.03 and ReMoE is lowest at about 1.91 (accept 2.02-2.05 and 1.90-1.93). FAILS if it names other methods as highest/lowest. Approximate values are fine."
+
+[[cases]]
+id = "fig-04-livecell-heatmap-max"
+kind = "figure"
+paperset = "livecell"
+prompt = '''In LIVECell Fig. 3e (anchor-free transferability heatmap), which train-set → test-set pair has the highest AP, and what is it?'''
+rubric = "Fig. 3e: the highest AP is training on BT-474 and testing on SkBr3, 62.94 (A172 → SkBr3 is 62.85, a close second). The SkBr3 test column is the darkest overall. FAILS if it reports a pair from panel f (anchor-based, whose maximum is BT-474 → SkBr3 = 64.49) as the 3e answer."
+
+# ---------------------------------------------------------------------------
+# Regression: answerable from the text / tables; no figure needed
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "fig-r1-livecell-cell-types"
+kind = "regression"
+paperset = "livecell"
+prompt = '''LIVECell 資料集包含哪幾種細胞株？'''
+rubric = "Eight cell types: A172, BT-474, BV-2, Huh7, MCF7, SH-SY5Y, SkBr3, SK-OV-3, cited from the paper's text. Answer in Traditional Chinese."
+
+[[cases]]
+id = "fig-r2-yoloseg-table3"
+kind = "regression"
+paperset = "yoloseg"
+prompt = '''In YOLOSeg's Table 3, which method has the highest IoU and which has the highest AP@IoU=0.5?'''
+rubric = "Highest IoU: YOLOSeg with DDPM image augmentation, 0.732 (DCGAN variant 0.722). Highest AP@IoU=0.5: Ultralytics's YOLOv5s-segmentation, 0.872 (but its IoU is only 0.433). Values must be cited from the table/text chunks."
+
+[[cases]]
+id = "fig-r3-remoe-routing"
+kind = "regression"
+paperset = "remoe"
+prompt = '''How does ReMoE route tokens, and how does it control sparsity?'''
+rubric = "ReMoE replaces TopK + softmax routing with a ReLU router (fully differentiable), and controls sparsity with an adaptive L1 regularisation on the router outputs whose coefficient is adjusted to reach a target sparsity; cited from the paper."

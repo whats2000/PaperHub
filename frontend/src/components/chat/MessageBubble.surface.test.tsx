@@ -16,3 +16,33 @@ describe("MessageBubble user surface", () => {
     expect(bubble.className).not.toContain("bg-primary");
   });
 });
+
+describe("MessageBubble stopped turn (H4 review #5)", () => {
+  it("shows a stopped note and keeps the turn's chips", () => {
+    const msg: ChatMessage = {
+      role: "assistant",
+      content: "",
+      run_id: 3,
+      status: "stopped",
+      agent_events: [
+        {
+          event: "paper_added",
+          data: { papers_id: 1, paper_content_id: 2, title: "Paper X", undoable: true },
+        },
+      ],
+    };
+    render(<MessageBubble message={msg} backendSessionId={5} />);
+    expect(screen.getByTestId("stopped-turn")).toBeInTheDocument();
+    expect(screen.getByText(/Paper X/)).toBeInTheDocument();
+  });
+});
+
+describe("MessageBubble stopping turn (concern 5)", () => {
+  it("shows a stopping note while the backend decides", () => {
+    const msg: ChatMessage = {
+      role: "assistant", content: "partial", run_id: 3, status: "streaming", stopping: true,
+    };
+    render(<MessageBubble message={msg} backendSessionId={5} />);
+    expect(screen.getByTestId("stopping-turn")).toHaveTextContent("Stopping…");
+  });
+});

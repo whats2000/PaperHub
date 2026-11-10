@@ -609,3 +609,71 @@ async def test_export_rejects_an_empty_plan_and_inverted_dates(
         r = await c.post("/feedback/export", json={"model": "no-such-model"})
         assert r.status_code == 422 and "nothing to export" in r.text
         assert sorted(p.name for p in (tmp_path / "exports").iterdir()) == before
+
+
+# ------------------------------------------- review #8: fork-pair DPO
+
+
+def _fake_trajectories(monkeypatch: pytest.MonkeyPatch,
+                       prompts: dict[int, list[dict[str, Any]]]) -> None:
+    """Agent runs get a trajectory whose prompt is ``prompts[run]``."""
+    from paperhub.feedback import export as export_mod
+    from paperhub.feedback.trajectory import Trajectory
+
+    async def fake(conn: Any, run_id: int, **_kw: Any) -> Trajectory:
+        prompt = prompts[run_id]
+        return Trajectory(
+            messages=[*prompt, {"role": "assistant", "content": f"answer {run_id}"}],
+            tools=[{"type": "function"}], prompt_len=len(prompt))
+
+    monkeypatch.setattr(export_mod, "agent_trajectory", fake)
+
+
+async def _agent(conn: aiosqlite.Connection, run_id: int) -> None:
+    await conn.execute("UPDATE runs SET mode = 'agent' WHERE id = ?", (run_id,))
+
+
+async def test_fork_pair_needs_both_runs_in_the_same_mode(
+    app_with_db: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An old pipeline answer forked into an agent answer: the pipeline
+    prompt has no tools or session state, so no pair; counted."""
+    _, conn = app_with_db
+    sid = await _session(conn)
+    orig = await _turn(conn, sid, "Explain X", "pipeline answer")
+    await _rate(conn, orig, "down")
+    fork = await _fork(conn, sid, orig, "Explain X", "agent answer")
+    await _agent(conn, fork)
+    await _rate(conn, fork, "up")
+    await conn.commit()
+    _fake_trajectories(monkeypatch, {fork: [{"role": "user", "content": "Explain X"}]})
+    plan = await build_export(conn, _opts())
+    assert plan.dpo == [] and plan.fork_mode_mismatch_drops == 1
+
+
+async def test_agent_fork_pair_needs_the_same_prompt_prefix(
+    app_with_db: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two agent runs whose session state differed (e.g. a paper added in
+    between): the rebuilt prompts differ, so no pair; counted."""
+    _, conn = app_with_db
+    sid = await _session(conn)
+    orig = await _turn(conn, sid, "Explain X", "a1")
+    await _agent(conn, orig)
+    await _rate(conn, orig, "down")
+    same = await _fork(conn, sid, orig, "Explain X", "a2")
+    await _agent(conn, same)
+    await _rate(conn, same, "up")
+    differs = await _fork(conn, sid, orig, "Explain X", "a3")
+    await _agent(conn, differs)
+    await _rate(conn, differs, "up")
+    await conn.commit()
+    base = [{"role": "system", "content": "S"},
+            {"role": "user", "content": "<enabled_papers>1</enabled_papers>"},
+            {"role": "user", "content": "Explain X"}]
+    changed = [base[0], {"role": "user", "content": "<enabled_papers>1, 2</enabled_papers>"},
+               base[2]]
+    _fake_trajectories(monkeypatch, {orig: base, same: base, differs: changed})
+    plan = await build_export(conn, _opts())
+    assert len(plan.dpo) == 1 and plan.agent_prompt_mismatch_drops == 1
+    assert plan.dpo[0]["prompt"] == base

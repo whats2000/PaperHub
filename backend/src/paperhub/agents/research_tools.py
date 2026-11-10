@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 import httpx
 
+from paperhub.db.connection import write_lock
 from paperhub.pipelines.arxiv_client import search_arxiv as _search_arxiv_sync
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, IngestRequest, PaperPipeline
 from paperhub.pipelines.semantic_scholar import (
@@ -410,19 +411,21 @@ async def _attach_library(
     session_id: int,
 ) -> AddResult:
     pcid = int(pcid_raw)
-    await conn.execute(
-        "INSERT OR IGNORE INTO papers (session_id, paper_content_id) "
-        "VALUES (?, ?)",
-        (session_id, pcid),
-    )
-    await conn.commit()
-    async with conn.execute(
-        "SELECT p.id, pc.title FROM papers p "
-        "JOIN paper_content pc ON pc.id = p.paper_content_id "
-        "WHERE p.session_id = ? AND p.paper_content_id = ?",
-        (session_id, pcid),
-    ) as cur:
-        row = await cur.fetchone()
+    async with write_lock(conn):
+        await conn.execute(
+            "INSERT INTO papers (session_id, paper_content_id) "
+            "VALUES (?, ?) ON CONFLICT (session_id, paper_content_id) "
+            "DO UPDATE SET enabled = 1",
+            (session_id, pcid),
+        )
+        await conn.commit()
+        async with conn.execute(
+            "SELECT p.id, pc.title FROM papers p "
+            "JOIN paper_content pc ON pc.id = p.paper_content_id "
+            "WHERE p.session_id = ? AND p.paper_content_id = ?",
+            (session_id, pcid),
+        ) as cur:
+            row = await cur.fetchone()
     if row is None:
         raise RuntimeError(
             f"library paper {pcid} not found after INSERT — DB invariant violated",

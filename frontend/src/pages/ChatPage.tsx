@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
+import { AutoApproveToggle } from "@/components/chat/AutoApproveToggle";
 import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
 import { retryableLazy } from "@/lib/retryableLazy";
 import { slideStageLabel } from "@/lib/slideStage";
@@ -266,7 +267,7 @@ export function ChatPage() {
       style={{ gridTemplateColumns: `1fr ${rightPanelOpen ? canvasWidth : 0}px` }}
     >
       <div className="flex min-h-0 min-w-0 flex-col">
-        <ChatThread session={activeSession} />
+        <ChatThread session={activeSession} onSend={handleSubmit} />
         <Composer
           onSubmit={handleSubmit}
           disabled={isStreaming || setupRequired}
@@ -281,6 +282,7 @@ export function ChatPage() {
           slidesOpen={slidesOpen}
           onToggleSlides={handleToggleSlides}
           slideChip={slideChip}
+          actions={<AutoApproveToggle />}
         />
       </div>
       {/* Right panel — shared slot for Citation Canvas and Memory Manager.

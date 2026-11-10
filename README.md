@@ -14,8 +14,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-2064%20backend%20%2B%201041%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.41.0%20(SRS%20v2.41.0)-success)
+![Tests](https://img.shields.io/badge/tests-2484%20backend%20%2B%201116%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.42.0%20(SRS%20v2.42.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 **English** · [日本語](README.ja.md) · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
@@ -356,7 +356,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 Documentation
 
-- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (shipped through **v2.41.0**).
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (shipped through **v2.42.0**).
 - **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
 - **[Backend developer docs](backend/README.md)** — backend-specific notes.
 
@@ -372,7 +372,7 @@ If you use PaperHub in your research or build on it, please cite it:
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.41.0}
+  version = {2.42.0}
 }
 ```
 

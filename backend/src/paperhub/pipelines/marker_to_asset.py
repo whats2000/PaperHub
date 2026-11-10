@@ -171,6 +171,8 @@ def marker_doc_to_asset(
                     page=block.page,
                     section=sec,
                     image_path=f"figures/{fname}",
+                    bbox=(tuple(float(v) for v in block.bbox)  # type: ignore[arg-type]
+                          if len(block.bbox) == 4 else None),
                 )
             )
             fig_n += 1

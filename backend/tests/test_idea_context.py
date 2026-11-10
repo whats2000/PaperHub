@@ -13,6 +13,7 @@ from paperhub.agents.idea_context import build_idea_context, with_idea
 from paperhub.agents.slide_context import slide_aware_query
 from paperhub.config import load_settings
 from paperhub.tracing.tracer import Tracer
+from tests.agent_script import answer, script_agent
 from tests.test_chat_sse import _bootstrap_schema, _consume_sse, _wire_test_app
 
 
@@ -117,9 +118,7 @@ async def test_chitchat_sees_the_idea(migrated_db: aiosqlite.Connection) -> None
 async def test_chat_turn_records_the_idea_context(tmp_path: Any, monkeypatch: Any) -> None:
     """Every turn of a linked session — not just the prefilled first one."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv("PAPERHUB_ROUTER_MOCK",
-                       '{"intent":"chitchat","confidence":0.9,"reasoning":"x"}')
-    monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", "Sure.")
+    script_agent(monkeypatch, [answer("Sure."), answer("Sure.")])
     await _bootstrap_schema(tmp_path)
     async with aiosqlite.connect(load_settings().db_path) as conn:
         sid, iid = await _linked(conn)

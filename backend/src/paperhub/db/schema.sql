@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     -- Plan H2: the run (answer) this fork branched at; pairs fork siblings for DPO.
     forked_from_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
     -- Plan H3: 1 = the hidden ideation tracing session (never listed/purged).
-    internal INTEGER NOT NULL DEFAULT 0
+    internal INTEGER NOT NULL DEFAULT 0,
+    -- Plan H4: 1 = agent-mode confirm-tier tools run without asking.
+    auto_approve INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS paper_content (
@@ -58,6 +60,22 @@ CREATE TABLE IF NOT EXISTS chunks (
     dom_id TEXT
 );
 
+-- Plan H4: external-content full-text index over chunks.text (the agent's
+-- search_in_papers). Kept in sync by the triggers; backfilled by apply_schema.
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text, content='chunks', content_rowid='id'
+);
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -80,8 +98,27 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT,
     status TEXT NOT NULL DEFAULT 'running'
-        CHECK (status IN ('running', 'ok', 'error', 'cancelled', 'interrupted'))
+        CHECK (status IN ('running', 'ok', 'error', 'cancelled', 'interrupted')),
+    -- Plan H4: 'pipeline' (router + subgraphs) or 'agent' (tool-calling loop).
+    mode TEXT NOT NULL DEFAULT 'pipeline',
+    -- Plan H4: the agent turn's work record
+    -- {"tools": [...], "read": [chunk ids], "cited": [...], "papers": [...], "steps": n}
+    agent_record_json TEXT
 );
+
+-- Plan H4: a confirm-tier tool call awaiting the user's approval.
+CREATE TABLE IF NOT EXISTS pending_actions (
+    id TEXT PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    session_id INTEGER NOT NULL,
+    tool TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'done', 'dismissed', 'failed')),
+    result_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_run ON pending_actions(run_id);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
     run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

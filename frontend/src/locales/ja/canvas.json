@@ -28,13 +28,17 @@
     "imagePreview": "画像プレビュー"
   },
   "marker": {
-    "citationAria": "引用 {{ordinal}}"
+    "citationAria": "引用 {{ordinal}}",
+    "figureAria": "図の引用 {{ordinal}}",
+    "viewAria": "{{page}} ページの領域、引用 {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "引用された論文を読み込めませんでした",
     "addPaperFailed": "この論文を参考文献に追加できませんでした",
     "passageNotFoundHtml": "この箇所を論文内で見つけられませんでした",
-    "passageNotFoundPdf": "この箇所を PDF 内で見つけられませんでした"
+    "passageNotFoundPdf": "この箇所を PDF 内で見つけられませんでした",
+    "figureGone": "この図は論文内に見つかりません。",
+    "regionGone": "このページ領域は論文内に見つかりません。"
   },
   "translation": {
     "pending": "翻訳中…",
@@ -51,6 +55,23 @@
     "hintPinned": "固定中 · Esc または ✕ で閉じる",
     "continuedPage": "{{page}} ページに続く",
     "continuedColumn": "右の段に続く",
-    "firstUseHint": "段落にカーソルを合わせると翻訳が表示されます"
+    "firstUseHint": "段落にカーソルを合わせると翻訳が表示されます",
+    "mathNote": "数式は PDF からの機械転写のため、誤りを含む場合があります。元のページと照合してください。"
+  },
+  "tabs": {
+    "label": "表示形式",
+    "html": "HTML",
+    "pdf": "PDF"
+  },
+  "unsourced": {
+    "aria": "出典未確認：{{reason}}",
+    "explain": "この記述の引用は確認できなかったため削除されました：{{reason}}。この記述は未確認として扱ってください。",
+    "reason": {
+      "not_read": "引用された段落は回答時に読まれていません",
+      "figure_not_viewed": "引用された図は回答時に見られていません",
+      "region_not_viewed": "引用されたページ領域は回答時に見られていません",
+      "quote_not_found": "引用された文言は回答時に読んだどの段落にもありません",
+      "unknown": "出典を確認できませんでした"
+    }
   }
 }

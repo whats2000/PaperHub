@@ -37,6 +37,34 @@ async def build_memory_context_block(
     return f"{_HEADER}\n{lines}"
 
 
+async def active_memories(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: int | None,
+    limit: int = 20,
+) -> list[tuple[int, str, str]]:
+    """``(id, scope, content)`` of every active memory visible to the caller
+    (global ones, plus this session's), newest first."""
+    if session_id is None:
+        sql = (
+            "SELECT id, scope, content FROM memories "
+            "WHERE status = 'active' AND scope = 'global' "
+            "ORDER BY created_at DESC, id DESC LIMIT ?"
+        )
+        params: tuple[object, ...] = (limit,)
+    else:
+        sql = (
+            "SELECT id, scope, content FROM memories "
+            "WHERE status = 'active' AND "
+            "(scope = 'global' OR (scope = 'session' AND session_id = ?)) "
+            "ORDER BY created_at DESC, id DESC LIMIT ?"
+        )
+        params = (session_id, limit)
+    async with conn.execute(sql, params) as cur:
+        rows = await cur.fetchall()
+    return [(int(r[0]), str(r[1]), str(r[2])) for r in rows]
+
+
 async def build_active_memory_block(
     conn: aiosqlite.Connection,
     *,

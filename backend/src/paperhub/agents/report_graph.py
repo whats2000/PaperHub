@@ -65,6 +65,7 @@ from paperhub.agents.slide_agent import run_slide_agent
 from paperhub.agents.state import effective_query, response_language
 from paperhub.agents.style_resolver import resolve_preamble
 from paperhub.config import load_settings
+from paperhub.db.connection import write_lock
 from paperhub.db.deck_slides import (
     DeckSlideRow,
     get_deck_slides,
@@ -473,23 +474,41 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         # language request concurrently (both read only the instruction). Deck
         # length is irrelevant on an existing-deck edit, so meta.min/max_pages
         # are ignored here — only meta.language is used.
-        cmd, meta = await asyncio.gather(
-            classify_deck_command(
+        forced = state.get("report_forced_command")
+        if forced is not None:
+            # H4 core agent: the tool already decided the action; skip the
+            # classifier but still detect the slide-content language / length.
+            cmd = forced
+            meta = await detect_slide_meta(
                 adapter=deps.adapter,
                 tracer=deps.tracer,
                 model=deps.resolve_model,
                 instruction=instruction,
-                current_view_page=state.get("current_view_page") or 1,
-                deck_outline=outline,
-                slide_attached=bool(state.get("slide_attached")),
-            ),
-            detect_slide_meta(
-                adapter=deps.adapter,
-                tracer=deps.tracer,
-                model=deps.resolve_model,
-                instruction=instruction,
-            ),
-        )
+            )
+            if cmd.action == "regenerate" and (
+                meta.min_pages is not None or meta.max_pages is not None
+            ):
+                out["report_target_slides"] = target_slides_from_meta(
+                    meta, load_settings().slide_default_length
+                )
+        else:
+            cmd, meta = await asyncio.gather(
+                classify_deck_command(
+                    adapter=deps.adapter,
+                    tracer=deps.tracer,
+                    model=deps.resolve_model,
+                    instruction=instruction,
+                    current_view_page=state.get("current_view_page") or 1,
+                    deck_outline=outline,
+                    slide_attached=bool(state.get("slide_attached")),
+                ),
+                detect_slide_meta(
+                    adapter=deps.adapter,
+                    tracer=deps.tracer,
+                    model=deps.resolve_model,
+                    instruction=instruction,
+                ),
+            )
         # Page 1 is the title page (no content slide row). An edit_slides command
         # that resolves to page 1 is really a title-page edit (F4.2).
         if cmd.action == "edit_slides":
@@ -1345,11 +1364,12 @@ def build_report_subgraph(deps: ReportDeps) -> Any:
         # can surface a per-turn DeckChip card pointing at it (FR-12).
         run_id_state = state.get("run_id")
         if new_version_id and run_id_state is not None:
-            await deps.conn.execute(
-                "UPDATE runs SET deck_version_id = ? WHERE id = ?",
-                (new_version_id, run_id_state),
-            )
-            await deps.conn.commit()
+            async with write_lock(deps.conn):
+                await deps.conn.execute(
+                    "UPDATE runs SET deck_version_id = ? WHERE id = ?",
+                    (new_version_id, run_id_state),
+                )
+                await deps.conn.commit()
         fresh = await get_deck(deps.conn, session_id=state["session_id"])
         assert fresh is not None
 

@@ -176,6 +176,22 @@ describe("PdfTranslationLayer", () => {
     expect(card.querySelector(".katex")).not.toBeNull();
   });
 
+  it("notes that a paragraph's formulas are machine-transcribed", async () => {
+    await renderReady();
+    hoverAt(1, AT_P1);
+    const card = await screen.findByRole("dialog");
+    await waitFor(() => expect(card).toHaveTextContent("設"));
+    expect(card.querySelector("[data-math-note]")).not.toBeNull();
+  });
+
+  it("adds no formula note to a paragraph without math", async () => {
+    await renderReady();
+    hoverAt(2, AT_P2);
+    const card = await screen.findByRole("dialog");
+    await waitFor(() => expect(card).toHaveTextContent("第二段"));
+    expect(card.querySelector("[data-math-note]")).toBeNull();
+  });
+
   describe("request priority", () => {
     let observers: { cb: IntersectionObserverCallback; el?: Element }[];
     beforeEach(() => {

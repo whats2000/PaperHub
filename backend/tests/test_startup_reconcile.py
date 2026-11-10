@@ -163,3 +163,30 @@ async def test_non_running_run_untouched(tmp_path):
         assert len(msgs) == 2
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_claimed_actions_of_a_dead_process_become_failed(tmp_path) -> None:
+    """Review #11: a confirm claimed (result_json marker, status pending)
+    when the process died would show `running` forever."""
+    from paperhub.db.migrate import reconcile_claimed_actions
+
+    conn = await _bootstrap(tmp_path / "db.sqlite")
+    try:
+        sid = await _session_id(conn)
+        rid = await _run_id(conn, sid, status="ok")
+        await conn.execute(
+            "INSERT INTO pending_actions (id, run_id, session_id, tool, args_json, result_json) "
+            "VALUES ('claimed', ?, ?, 'forget', '{}', '{\"claimed\": true}')", (rid, sid))
+        await conn.execute(
+            "INSERT INTO pending_actions (id, run_id, session_id, tool, args_json) "
+            "VALUES ('open', ?, ?, 'forget', '{}')", (rid, sid))
+        await conn.commit()
+        await reconcile_claimed_actions(conn)
+        async with conn.execute(
+            "SELECT id, status, result_json FROM pending_actions ORDER BY id") as cur:
+            rows = [tuple(r) for r in await cur.fetchall()]
+    finally:
+        await conn.close()
+    assert rows[0][0] == "claimed" and rows[0][1] == "failed" and "error" in rows[0][2]
+    assert rows[1] == ("open", "pending", None)

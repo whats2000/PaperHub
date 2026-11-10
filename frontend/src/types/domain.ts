@@ -176,13 +176,93 @@ export interface ManualEditResult {
   log?: string;
 }
 
+/** The turn summary an agent run shows instead of the routing badge
+ *  (SRS §III-10.4): the `agent_summary` SSE event / replayed field. */
+export interface AgentSummary {
+  papers_read: number;
+  steps: number;
+  tools: string[];
+}
+
+/** A chip's Undo state: `undoable` comes from the replay (false when the
+ *  row is gone or belongs to another chat); `undone` is set after Undo. */
+interface UndoState {
+  undoable?: boolean;
+  undone?: boolean;
+}
+
+export interface PaperAddedData extends UndoState {
+  papers_id: number;
+  paper_content_id: number;
+  title: string;
+}
+
+export interface MemorySavedData extends UndoState {
+  memory_id: number;
+  content: string;
+  scope: "session" | "global";
+}
+
+/** pending → (running) → done | failed | dismissed; `unavailable` = the
+ *  action belongs to another chat (a fork's copy) or was already handled. */
+export type ConfirmStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "dismissed"
+  | "unavailable";
+
+/** What a confirm-tier action acts on, looked up by the backend so the card
+ *  can name it in words (H4 review #1/#4). */
+export type ConfirmTarget =
+  | { kind: "paper"; id: number; title: string }
+  | { kind: "memory"; id: number; content: string; scope: "session" | "global" }
+  | { kind: "other"; summary: string };
+
+export interface ConfirmRequestData {
+  action_id: string;
+  tool: string;
+  /** The target as one line (fallback when `target` is absent). */
+  args_summary: string;
+  target?: ConfirmTarget;
+  /** The backend's (English) reason; shown only via `reason_kind`. */
+  reason: string;
+  /** Why the user is asked: auto-approve off, the classifier unsure, or the
+   *  classifier failed. */
+  reason_kind?: "required" | "classifier" | "classifier_failed";
+  status?: ConfirmStatus;
+  result?: { content: string; record?: Record<string, unknown> } | null;
+  error?: string;
+}
+
+/** A tool UI event of an agent turn, live (SSE) or replayed (agent_events). */
+export type AgentUiEvent =
+  | { event: "paper_added"; data: PaperAddedData }
+  | { event: "memory_saved"; data: MemorySavedData }
+  | { event: "confirm_request"; data: ConfirmRequestData };
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   run_id: number | null;
   routing_decision?: RoutingDecision;
+  /** Agent turns (H4): shown instead of the routing badge. */
+  agent_summary?: AgentSummary;
+  /** Agent turns: paper/memory chips and confirmation cards, in order. */
+  agent_events?: AgentUiEvent[];
+  /** One card list per search an agent turn ran (`search_results` keeps
+   *  every card flattened). */
+  search_result_batches?: SearchResultCandidate[][];
   trace?: ToolCallRecord[];
-  status?: "streaming" | "processing" | "ok" | "error" | "interrupted";
+  /** "stopped": the user pressed Stop after the turn had already acted (a
+   *  paper added, a memory saved); the stub keeps those chips and Undo. */
+  status?: "streaming" | "processing" | "ok" | "error" | "interrupted" | "stopped";
+  /** Set while a retracted (stopped) turn animates out before removal. */
+  exiting?: boolean;
+  /** Stop pressed; waiting for the backend to say whether the turn had
+   *  already acted (kept as a stub) or is retracted. */
+  stopping?: boolean;
   error?: string;
   search_results?: SearchResultCandidate[];
   deck?: DeckEventData;
@@ -199,6 +279,8 @@ export interface ChatSession {
   /** The idea this chat was opened from (Plan H3), or null. Drives the
    *  sidebar's Lightbulb marker. */
   idea_id?: number | null;
+  /** Per-chat agent auto-approve switch (H4); off by default. */
+  auto_approve?: boolean;
 }
 
 /** Backend-of-record session row (GET /sessions). The frontend merges these
@@ -213,6 +295,8 @@ export interface SessionSummary {
   forked_from_session_id?: number | null;
   /** The idea this chat was opened from (Plan H3 idea_sessions), else null. */
   idea_id?: number | null;
+  /** Per-chat agent auto-approve switch (H4). */
+  auto_approve?: boolean;
 }
 
 /** Result of POST /sessions/{id}/fork — the new session + the forked message
@@ -230,6 +314,12 @@ export interface BackendMessage {
   run_id: number | null;
   created_at: string;
   routing_decision?: RoutingDecision;
+  /** Agent runs (H4) replay their turn summary instead of a routing badge. */
+  agent_summary?: AgentSummary | null;
+  /** Agent runs: chips + confirm cards, each card with its action's status. */
+  agent_events?: AgentUiEvent[] | null;
+  /** Agent runs: one card list per search. */
+  search_result_batches?: SearchResultCandidate[][] | null;
   /** Paper-search result cards emitted on this turn, replayed so they show on
    *  every device (null for non-search turns). */
   search_results?: SearchResultCandidate[] | null;

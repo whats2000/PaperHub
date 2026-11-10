@@ -523,3 +523,46 @@ def test_acompletion_retry_default_attempts_is_5() -> None:
 
     sig = inspect.signature(_acompletion_with_retry)
     assert sig.parameters["max_attempts"].default == 5
+
+
+@pytest.mark.asyncio
+async def test_slide_agent_records_each_llm_call_usage_and_latency(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, fake_tracer: Any
+) -> None:
+    """Carry-forward E: the report:slide_agent row lists every LLM call's
+    tokens and latency (record principle), like adapter-made calls do."""
+    import aiosqlite
+
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    first = _tool_call_msg("initial_draft", {"deck_tex": _GOOD_DECK})
+    first["usage"] = {"prompt_tokens": 1200, "completion_tokens": 300}
+    second = _tool_call_msg("done", {})
+    second["usage"] = {"prompt_tokens": 1600, "completion_tokens": 5,
+                       "completion_tokens_details": {"reasoning_tokens": 2}}
+    llm = AsyncMock(side_effect=[first, _tool_call_msg("compile_check", {}), second])
+
+    async def fake_compile_check(**kw: Any) -> CompileCheckResult:
+        return CompileCheckResult(ok=True, page_count=1, compile_errors=[],
+                                  frame_overflow=[], unrendered_math_frames=[])
+
+    monkeypatch.setattr("paperhub.agents.slide_agent.run_compile_check",
+                        fake_compile_check)
+    await run_slide_agent(
+        bundles=[_bundle()], task_description="Generate slides",
+        response_language="English", resolved_preamble=r"\documentclass{beamer}",
+        workdir=workdir, existing_deck_tex=None, figure_inventory={},
+        memory_context="", tracer=fake_tracer, model="stub", llm_acompletion=llm,
+    )
+    conn: aiosqlite.Connection = fake_tracer._conn
+    async with conn.execute(
+        "SELECT result_summary_json, token_in, token_out FROM tool_calls "
+        "WHERE tool = 'report:slide_agent'") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    usage = json.loads(row[0])["_llm_usage"]
+    assert [(u["prompt_tokens"], u["completion_tokens"]) for u in usage] == [
+        (1200, 300), (None, None), (1600, 5)]
+    assert usage[2]["reasoning_tokens"] == 2
+    assert all(isinstance(u["latency_ms"], int) for u in usage)
+    assert (row[1], row[2]) == (2800, 305)

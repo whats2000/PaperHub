@@ -21,19 +21,28 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    cancelRun: vi.fn().mockResolvedValue(undefined),
+    cancelRun: vi.fn().mockResolvedValue({ kept: false }),
+    fetchSessionMessages: vi.fn().mockResolvedValue([]),
     listSessionReferences: vi.fn().mockResolvedValue([]),
   };
 });
 
-import { useChatStream } from "@/hooks/useChatStream";
+import { STOP_EXIT_MS, useChatStream } from "@/hooks/useChatStream";
+
+/** The stopped turn first collapses (carry-forward B), then is removed. */
+async function afterExit(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, STOP_EXIT_MS + 30));
+  });
+}
 import { useChatStore } from "@/store/chat";
 import { useSlidesStore } from "@/store/slides";
 import { streamChat } from "@/lib/sse";
-import { cancelRun } from "@/lib/api";
+import { cancelRun, fetchSessionMessages } from "@/lib/api";
 
 const mockStreamChat = vi.mocked(streamChat);
 const mockCancelRun = vi.mocked(cancelRun);
+const mockFetchMessages = vi.mocked(fetchSessionMessages);
 
 beforeEach(() => {
   useChatStore.getState().reset();
@@ -44,7 +53,7 @@ beforeEach(() => {
   });
   mockStreamChat.mockReset();
   mockCancelRun.mockReset();
-  mockCancelRun.mockResolvedValue(undefined);
+  mockCancelRun.mockResolvedValue({ kept: false });
 });
 
 afterEach(() => {
@@ -103,7 +112,10 @@ describe("useChatStream stop()", () => {
       await sendPromise!;
     });
 
-    // After stop: session has 0 messages (both retracted)
+    // The pair animates out first, then both are retracted.
+    const exiting = useChatStore.getState().sessions.find((s) => s.id === sessionId)!;
+    expect(exiting.messages.every((m) => m.exiting)).toBe(true);
+    await afterExit();
     const sessionAfterStop = useChatStore.getState().sessions.find((s) => s.id === sessionId)!;
     expect(sessionAfterStop.messages).toHaveLength(0);
 
@@ -115,7 +127,7 @@ describe("useChatStream stop()", () => {
     expect(mockCancelRun).toHaveBeenCalledTimes(1);
   });
 
-  it("reattach: stop() fires cancelRun(77) and retracts the pair when send() never ran", () => {
+  it("reattach: stop() fires cancelRun(77) and retracts the pair when send() never ran", async () => {
     // Simulates a page refresh where the user reattaches to an in-flight run.
     // send() was NOT called this render — sessionIdRef and runIdRef are null.
     // stop() must resolve sid from activeSessionId and rid from the trailing
@@ -148,7 +160,8 @@ describe("useChatStream stop()", () => {
     expect(mockCancelRun).toHaveBeenCalledWith(RUN_ID);
     expect(mockCancelRun).toHaveBeenCalledTimes(1);
 
-    // retractTurn must have removed both messages (0 remaining).
+    await afterExit();
+    // Both messages are removed after the exit (0 remaining).
     const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)!;
     expect(session.messages).toHaveLength(0);
 
@@ -187,10 +200,91 @@ describe("useChatStream stop()", () => {
       await sendPromise!;
     });
 
+    await afterExit();
     const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)!;
     expect(session.messages).toHaveLength(0);
     expect(useChatStore.getState().composerDraft).toBe(USER_TEXT);
     // No run_id was seen, so cancelRun must NOT be called
     expect(mockCancelRun).not.toHaveBeenCalled();
+  });
+
+  it("concern 5: a turn the backend kept becomes the stub, never animates out", async () => {
+    const RUN_ID = 55;
+    mockCancelRun.mockResolvedValue({ kept: true });
+    mockFetchMessages.mockResolvedValue([
+      { role: "user", content: "add BERT", run_id: RUN_ID, created_at: "", run_status: "cancelled" },
+      {
+        role: "assistant", content: "", run_id: RUN_ID, created_at: "", run_status: "cancelled",
+        agent_events: [{ event: "paper_added", data: { papers_id: 1, paper_content_id: 68, title: "BERT", undoable: true } }],
+      },
+    ]);
+    const sessionId = useChatStore.getState().newSession();
+    useChatStore.setState({ activeSessionId: sessionId });
+    useChatStore.getState().patchSessionBackendId(sessionId, 9);
+    useChatStore.getState().appendMessage(sessionId, { role: "user", content: "add BERT", run_id: RUN_ID });
+    useChatStore.getState().appendMessage(sessionId, {
+      role: "assistant", content: "", run_id: RUN_ID, status: "processing",
+    });
+    const { result } = renderHook(() => useChatStream());
+    act(() => {
+      result.current.stop();
+    });
+    // Waiting for the backend: still in place, nothing exiting, composer untouched.
+    let msgs = useChatStore.getState().sessions.find((s) => s.id === sessionId)!.messages;
+    expect(msgs[1]!.stopping).toBe(true);
+    expect(msgs.some((m) => m.exiting)).toBe(false);
+    await afterExit();
+    msgs = useChatStore.getState().sessions.find((s) => s.id === sessionId)!.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]!.status).toBe("stopped");
+    expect(msgs[1]!.agent_events?.[0]?.event).toBe("paper_added");
+    expect(useChatStore.getState().composerDraft).toBe("");
+  });
+
+  function seedStopping(runId: number) {
+    const sessionId = useChatStore.getState().newSession();
+    useChatStore.setState({ activeSessionId: sessionId });
+    useChatStore.getState().patchSessionBackendId(sessionId, 9);
+    useChatStore.getState().appendMessage(sessionId, { role: "user", content: "add BERT", run_id: runId });
+    useChatStore.getState().appendMessage(sessionId, {
+      role: "assistant", content: "", run_id: runId, status: "processing",
+    });
+    return sessionId;
+  }
+
+  it("residual D2: a failed cancel re-reads the chat and keeps a stub the backend kept", async () => {
+    const RUN_ID = 56;
+    mockCancelRun.mockRejectedValue(new Error("network"));
+    mockFetchMessages.mockResolvedValue([
+      { role: "user", content: "add BERT", run_id: RUN_ID, created_at: "", run_status: "cancelled" },
+      {
+        role: "assistant", content: "", run_id: RUN_ID, created_at: "", run_status: "cancelled",
+        agent_events: [{ event: "paper_added", data: { papers_id: 1, paper_content_id: 68, title: "BERT", undoable: true } }],
+      },
+    ]);
+    const sessionId = seedStopping(RUN_ID);
+    const { result } = renderHook(() => useChatStream());
+    act(() => {
+      result.current.stop();
+    });
+    await afterExit();
+    const msgs = useChatStore.getState().sessions.find((s) => s.id === sessionId)!.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]!.status).toBe("stopped");
+    expect(msgs[1]!.agent_events?.[0]?.event).toBe("paper_added");
+  });
+
+  it("residual D2: a failed cancel whose re-read shows no stub retracts the turn", async () => {
+    mockCancelRun.mockRejectedValue(new Error("network"));
+    mockFetchMessages.mockResolvedValue([]);
+    const sessionId = seedStopping(57);
+    const { result } = renderHook(() => useChatStream());
+    act(() => {
+      result.current.stop();
+    });
+    await afterExit();
+    const msgs = useChatStore.getState().sessions.find((s) => s.id === sessionId)!.messages;
+    expect(msgs).toHaveLength(0);
+    expect(useChatStore.getState().composerDraft).toBe("add BERT");
   });
 });

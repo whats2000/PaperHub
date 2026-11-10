@@ -9,6 +9,7 @@ import {
   clearHighlight,
   findAndHighlight,
   highlightChunkRange,
+  highlightFigure,
   scrollToSection,
 } from "@/lib/findAndHighlight";
 import {
@@ -34,6 +35,9 @@ interface Props {
   /** Last-resort: the chunk's section title, to scroll to its heading when the
    *  anchor + text-search both miss (so a citation never dead-ends). */
   sectionTitle: string | null;
+  /** A `[fig:]` citation's anchor (`phfig-NNN`): the figure after it is
+   *  outlined. Takes precedence over the chunk targets. */
+  highlightFigureAnchor?: string | null;
   /** Called when anchor, text, and section all failed to locate anything. */
   onHighlightMiss?: () => void;
   /** Bumped per resolved citation so re-clicking the SAME chunk re-fires the
@@ -87,6 +91,7 @@ export function HtmlView({
   highlightEndDomId,
   highlightText,
   sectionTitle,
+  highlightFigureAnchor = null,
   onHighlightMiss,
   nonce,
   scrollBehavior = "smooth",
@@ -133,7 +138,7 @@ export function HtmlView({
     const doc = ref.current?.contentDocument;
     if (!doc?.body) return;
     applyIframeTheme(doc, isDark);
-    if (!highlightDomId && !highlightText && !sectionTitle) return;
+    if (!highlightDomId && !highlightText && !sectionTitle && !highlightFigureAnchor) return;
 
     // Unwrap the PREVIOUS highlight NOW, but defer wrapping + scrolling to the
     // NEW target to a later macrotask. Doing both in one synchronous click
@@ -155,6 +160,8 @@ export function HtmlView({
       // Resolution order, best → last-resort: deterministic anchor → text-
       // search → section heading (so a citation always lands somewhere useful).
       const found =
+        (highlightFigureAnchor !== null &&
+          highlightFigure(live, highlightFigureAnchor, scrollBehavior)) ||
         (highlightDomId !== null &&
           highlightChunkRange(
             live,
@@ -221,7 +228,15 @@ export function HtmlView({
     apply();
     return () => cancelPending.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, highlightDomId, highlightEndDomId, highlightText, sectionTitle, nonce]);
+  }, [
+    isDark,
+    highlightDomId,
+    highlightEndDomId,
+    highlightText,
+    sectionTitle,
+    highlightFigureAnchor,
+    nonce,
+  ]);
 
   // Translation overlay (overlay only: inserts `div.ph-tr` siblings, never
   // edits the paper's nodes). Re-attaches when the document, paper, language

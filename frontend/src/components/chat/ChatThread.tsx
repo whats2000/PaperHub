@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { ChatSession } from "@/types/domain";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { RoutingBadge } from "@/components/chat/RoutingBadge";
+import { AgentSummaryBadge } from "@/components/chat/AgentSummaryBadge";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { SlideProgressCard } from "@/components/chat/SlideProgressCard";
 import { TraceInline } from "@/components/chat/TraceInline";
@@ -14,7 +15,15 @@ import { useChatStore } from "@/store/chat";
 import { useFeedbackStore } from "@/store/feedback";
 import { useChatStream } from "@/hooks/useChatStream";
 
-export function ChatThread({ session }: { session: ChatSession | null }) {
+export function ChatThread({
+  session,
+  onSend,
+}: {
+  session: ChatSession | null;
+  /** Send a message as the user would (proposal buttons). Defaults to this
+   *  thread's own stream; ChatPage passes its submit so Stop reaches it. */
+  onSend?: (text: string) => void;
+}) {
   const { t } = useTranslation("chat");
   const endRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
@@ -61,6 +70,20 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
     [session, send],
   );
 
+  const sendText = useCallback(
+    (text: string) => {
+      if (onSend) {
+        onSend(text);
+        return;
+      }
+      if (!session) return;
+      send(session.id, text).catch((err: unknown) => {
+        console.warn("[ChatThread] send failed:", err);
+      });
+    },
+    [onSend, session, send],
+  );
+
   const forkFrom = useCallback(
     async (runId: number) => {
       if (!session || session.backend_session_id === null) return;
@@ -88,6 +111,15 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
   if (!session || session.messages.length === 0) {
     return <EmptyState />;
   }
+
+  const turnInFlight = session.messages.some(
+    (m) => m.status === "streaming" || m.status === "processing",
+  );
+  const patchEvent = useChatStore.getState().patchAgentEvent;
+  // Proposals are follow-ups to the latest answer only.
+  const latestAssistant = session.messages
+    .map((m) => m.role)
+    .lastIndexOf("assistant");
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -154,44 +186,75 @@ export function ChatThread({ session }: { session: ChatSession | null }) {
           return (
             <div
               key={`${msg.run_id ?? "user"}-${i}`}
-              // Match the user bubble's reserved bottom space on the assistant
-              // section so the area under the trace breathes the same way.
-              className={`space-y-1${msg.role === "assistant" ? " pb-6" : ""}`}
+              // A stopped turn collapses toward where it was (height, gap and
+              // opacity, 200 ms) before it is removed, so the thread glides.
+              data-exiting={msg.exiting ? "true" : undefined}
+              data-testid={msg.exiting ? "exiting-message" : undefined}
+              className="grid grid-rows-[1fr] transition-[grid-template-rows,opacity,margin] duration-200 ease-out data-[exiting=true]:mt-0! data-[exiting=true]:grid-rows-[0fr] data-[exiting=true]:opacity-0 motion-reduce:transition-none"
             >
-              {showResearchCard && (
-                <div className="pl-1">
-                  <ResearchProgressCard intent={intent} trace={msg.trace} />
-                </div>
-              )}
-              {showSlideCard && (
-                <div className="pl-1">
-                  <SlideProgressCard trace={msg.trace} />
-                </div>
-              )}
-              <MessageBubble
-                message={msg}
-                onRetry={retryHandler}
-                backendSessionId={session.backend_session_id}
-                researching={showResearchCard || showSlideCard}
-                onPrefill={requestComposerText}
-                onFork={forkHandler}
-              />
-              {msg.role === "assistant" && msg.routing_decision && (
-                <div className="flex justify-start pl-1">
-                  <RoutingBadge decision={msg.routing_decision} />
-                </div>
-              )}
-              {msg.role === "assistant" &&
-                msg.run_id !== null &&
-                session.backend_session_id !== null && (
+              <div
+                // Match the user bubble's reserved bottom space on the assistant
+                // section so the area under the trace breathes the same way.
+                className={`min-h-0 space-y-1${msg.role === "assistant" ? " pb-6" : ""}${msg.exiting ? " overflow-hidden" : ""}`}
+              >
+                {showResearchCard && (
                   <div className="pl-1">
-                    <TraceInline
-                      trace={msg.trace ?? []}
-                      sessionId={session.backend_session_id}
-                      runId={msg.run_id}
-                    />
+                    <ResearchProgressCard intent={intent} trace={msg.trace} />
                   </div>
                 )}
+                {showSlideCard && (
+                  <div className="pl-1">
+                    <SlideProgressCard trace={msg.trace} />
+                  </div>
+                )}
+                <MessageBubble
+                  message={msg}
+                  onRetry={retryHandler}
+                  backendSessionId={session.backend_session_id}
+                  researching={showResearchCard || showSlideCard}
+                  onPrefill={requestComposerText}
+                  onFork={forkHandler}
+                  onSend={i === latestAssistant ? sendText : undefined}
+                  sendDisabled={turnInFlight}
+                  onPatchEvent={
+                    msg.run_id !== null
+                      ? (index, patch) =>
+                          patchEvent(session.id, msg.run_id!, index, patch)
+                      : undefined
+                  }
+                />
+                {/* Pipeline (pre-H4) turns keep their routing badge; agent
+                    turns show the turn summary, which also toggles the trace. */}
+                {msg.role === "assistant" &&
+                  !msg.agent_summary &&
+                  msg.routing_decision && (
+                    <div className="flex justify-start pl-1">
+                      <RoutingBadge decision={msg.routing_decision} />
+                    </div>
+                  )}
+                {msg.role === "assistant" &&
+                  msg.run_id !== null &&
+                  session.backend_session_id !== null && (
+                    <div className="pl-1">
+                      <TraceInline
+                        trace={msg.trace ?? []}
+                        sessionId={session.backend_session_id}
+                        runId={msg.run_id}
+                        badge={
+                          msg.agent_summary
+                            ? ({ open, toggle }) => (
+                                <AgentSummaryBadge
+                                  summary={msg.agent_summary!}
+                                  open={open}
+                                  onToggle={toggle}
+                                />
+                              )
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )}
+              </div>
             </div>
           );
         })}

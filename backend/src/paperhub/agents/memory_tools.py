@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal
 import aiosqlite
 
 from paperhub.agents.memory_gate import MemoryGateRefusal, classify_memory_safety
+from paperhub.db.connection import write_lock
 
 if TYPE_CHECKING:
     from paperhub.llm.adapter import LlmAdapter
@@ -62,15 +63,16 @@ async def add_memory(
     bound: int | None = None if scope == "global" else session_id
     if scope == "session" and bound is None:
         raise MemoryScopeError("session-scoped memory requires a session_id")
-    await conn.execute(
-        "INSERT INTO memories (scope, session_id, content) VALUES (?, ?, ?)",
-        (scope, bound, content),
-    )
-    await conn.commit()
-    async with conn.execute("SELECT last_insert_rowid()") as cur:
-        row = await cur.fetchone()
-    assert row is not None
-    return int(row[0])
+    async with write_lock(conn):
+        await conn.execute(
+            "INSERT INTO memories (scope, session_id, content) VALUES (?, ?, ?)",
+            (scope, bound, content),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        return int(row[0])
 
 
 async def recall_memories(
@@ -151,11 +153,12 @@ async def edit_memory(
     editable from any session).
     """
     await _owned_or_raise(conn, session_id=session_id, memory_id=memory_id)
-    await conn.execute(
-        "UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?",
-        (content, memory_id),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            "UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?",
+            (content, memory_id),
+        )
+        await conn.commit()
 
 
 async def forget_memory(
@@ -170,8 +173,9 @@ async def forget_memory(
     session (same ownership rule as :func:`edit_memory`).
     """
     await _owned_or_raise(conn, session_id=session_id, memory_id=memory_id)
-    await conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        await conn.commit()
 
 
 async def _detect_conflict(
@@ -273,20 +277,21 @@ async def add_memory_with_supersede(
 
     conflict_id = await _detect_conflict(conn, content, scope, session_id, adapter, model)
 
-    await conn.execute(
-        "INSERT INTO memories (scope, session_id, content, supersedes) VALUES (?, ?, ?, ?)",
-        (scope, bound, content, conflict_id),
-    )
-    async with conn.execute("SELECT last_insert_rowid()") as cur:
-        row = await cur.fetchone()
-    assert row is not None
-    new_id = int(row[0])
-
-    if conflict_id is not None:
+    async with write_lock(conn):
         await conn.execute(
-            "UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = datetime('now') WHERE id = ?",
-            (new_id, conflict_id),
+            "INSERT INTO memories (scope, session_id, content, supersedes) VALUES (?, ?, ?, ?)",
+            (scope, bound, content, conflict_id),
         )
-    await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        new_id = int(row[0])
+
+        if conflict_id is not None:
+            await conn.execute(
+                "UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = datetime('now') WHERE id = ?",
+                (new_id, conflict_id),
+            )
+        await conn.commit()
 
     return new_id

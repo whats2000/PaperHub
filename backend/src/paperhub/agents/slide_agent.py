@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,7 @@ from paperhub.models.slide_domain import (
     KeyFigureBundle,
     PaperContextBundle,
 )
-from paperhub.tracing.tracer import Tracer
+from paperhub.tracing.tracer import Tracer, note_llm_usage
 
 LlmAcompletion = Callable[..., Awaitable[Any]]
 
@@ -70,6 +71,13 @@ _TRANSIENT_SUBSTRINGS: tuple[str, ...] = (
     "502",
     "GeminiException",
 )
+
+
+def _usage_of(response: Any) -> Any:
+    """The provider usage of an ``acompletion`` response (object or dict)."""
+    if isinstance(response, dict):
+        return response.get("usage")
+    return getattr(response, "usage", None)
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -579,6 +587,7 @@ async def run_slide_agent(
         try:
             while tool_calls_used < max_tool_calls:
                 try:
+                    started = time.monotonic()
                     response = await _acompletion_with_retry(
                         llm_acompletion,
                         model=model,
@@ -586,6 +595,10 @@ async def run_slide_agent(
                         tools=tools_schema,
                         tool_choice="auto",
                     )
+                    # Per-call tokens + latency into the step's _llm_usage.
+                    note_llm_usage(
+                        model, _usage_of(response),
+                        int((time.monotonic() - started) * 1000))
                 except Exception as exc:
                     # Transient retry exhausted (or non-transient error). If we
                     # have ANY deck state from a prior tool call, ship it

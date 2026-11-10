@@ -34,6 +34,7 @@ export function SettingsModal() {
   const modelChecks: Record<string, SettingsModelCheck | undefined> = {
     PAPERHUB_MODEL_SMALL: readiness?.models.small,
     PAPERHUB_MODEL_FLAGSHIP: readiness?.models.flagship,
+    PAPERHUB_AGENT_MODEL: readiness?.models.agent,
   };
   const renderField = (f: SettingsField) => (
     <FieldRow
@@ -379,6 +380,11 @@ function FieldRow({
               ? t("settings:modelKeyMissing", "Missing provider key: {{keys}}", {
                   keys: modelCheck.missing_keys.join(", "),
                 })
+              : modelCheck.error === "ToolCallingUnsupported"
+                ? t(
+                    "settings:modelNoTools",
+                    "This model can't call tools, which every chat turn needs — pick a model with tool (function) calling.",
+                  )
               : isTransientError(modelCheck.error)
                 ? t(
                     "settings:modelUnreachable",

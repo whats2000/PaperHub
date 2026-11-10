@@ -1,5 +1,31 @@
 [
   {
+    "version": "2.42.0",
+    "date": "2026-11-10",
+    "highlights": {
+      "en": [
+        "One research assistant: every chat is handled by an agent that keeps the whole conversation, works through several steps — reading sections, searching, comparing papers, making slides — and shows each step live; removing a paper or forgetting a memory always asks you first.",
+        "Evidence you can check: the assistant reads figures, tables and formulas from the paper's actual pages, and a citation opens the exact page region it read, highlighted — LaTeX papers now have a PDF tab of their compiled pages.",
+        "Honest sources: a claim whose source could not be verified carries a dashed “?” that explains why, and PDF translation cards note when their formulas are machine-transcribed."
+      ],
+      "zh-TW": [
+        "一位研究助理：每段對話都由一個能記住完整脈絡的 agent 處理，它會分多步完成工作（讀章節、搜尋、比較論文、製作投影片），並即時顯示每一步；移除論文或刪除記憶前一定先問你。",
+        "可核對的證據：助理直接從論文的實際頁面讀圖、表與公式，點引用就會打開它讀過的那個頁面區域並標示出來；LaTeX 論文也新增了編譯後 PDF 的分頁。",
+        "誠實標示來源：無法驗證來源的說法會帶一個虛線「?」並說明原因；PDF 翻譯卡片也會註明其中的公式為機器轉寫。"
+      ],
+      "zh-CN": [
+        "一位研究助理：每段对话都由一个能记住完整上下文的 agent 处理，它会分多步完成工作（读章节、搜索、比较论文、制作幻灯片），并实时显示每一步；移除论文或删除记忆前一定先询问你。",
+        "可核对的证据：助理直接从论文的实际页面读取图、表与公式，点击引用就会打开它读过的那个页面区域并加以标示；LaTeX 论文也新增了编译后 PDF 的标签页。",
+        "如实标示来源：无法验证来源的说法会带一个虚线“?”并说明原因；PDF 翻译卡片也会注明其中的公式为机器转写。"
+      ],
+      "ja": [
+        "ひとりのリサーチアシスタント：すべてのチャットを、会話の流れ全体を覚えているエージェントが担当し、章の読解・検索・論文比較・スライド作成など複数のステップで作業を進め、各ステップをリアルタイムで表示します。論文の削除やメモリの消去は必ず事前に確認します。",
+        "確かめられる根拠：アシスタントは論文の実際のページから図・表・数式を読み取り、引用をクリックすると読んだページ領域がハイライト付きで開きます。LaTeX 論文にはコンパイル済み PDF のタブが加わりました。",
+        "正直な出典表示：出典を検証できなかった記述には理由を説明する破線の「?」が付き、PDF の翻訳カードは数式が機械転写であることを明記します。"
+      ]
+    }
+  },
+  {
     "version": "2.41.0",
     "date": "2026-11-08",
     "highlights": {

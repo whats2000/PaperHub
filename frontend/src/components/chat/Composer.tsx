@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BookOpen,
@@ -56,6 +56,9 @@ interface Props {
   isStreaming?: boolean;
   /** Called when the user clicks the Stop button during streaming. */
   onStop?: () => void;
+  /** Extra controls in the tool row, left of voice + send (the agent
+   *  auto-approve chip). */
+  actions?: ReactNode;
 }
 
 export function Composer({
@@ -72,6 +75,7 @@ export function Composer({
   slideChip = null,
   isStreaming = false,
   onStop,
+  actions,
 }: Props) {
   const { t } = useTranslation("chat");
   const draft = useChatStore((s) => s.composerDraft);
@@ -290,9 +294,10 @@ export function Composer({
                   </TooltipContent>
                 </Tooltip>
               </div>
-              {/* Right cluster: voice + send — input actions, set apart from
-                  the left-side panel toggles. */}
-              <div className="flex items-center gap-1">
+              {/* Right cluster: chat-level actions, voice + send — input
+                  actions, set apart from the left-side panel toggles. */}
+              <div data-composer-actions className="flex items-center gap-1">
+                {actions}
                 {speechSupported && (
                   <Tooltip>
                     <TooltipTrigger

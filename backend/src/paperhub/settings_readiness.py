@@ -27,6 +27,7 @@ import time
 from typing import Any
 
 import litellm
+from litellm.exceptions import BadRequestError, UnsupportedParamsError
 
 from paperhub.settings_registry import (
     LIVE_DISCOVERY_PROVIDERS,
@@ -125,15 +126,55 @@ def _redact_detail(message: str) -> str:
     return head[:200]
 
 
-async def _model_check(model: str) -> dict[str, Any]:
-    """Cached per-model readiness check."""
+# A trivial tool for the agent model's pre-flight: a model without tool
+# calling fails it (every chat turn is a tool-calling agent loop).
+_PING_TOOLS = [{"type": "function", "function": {
+    "name": "noop", "description": "Does nothing.",
+    "parameters": {"type": "object", "properties": {}}}}]
+TOOLS_UNSUPPORTED = "ToolCallingUnsupported"
+
+
+async def _ping_agent_model(model: str) -> dict[str, Any]:
+    """The plain pre-flight, then the same call with a tools list. A model
+    that answers the first but rejects the second cannot run the agent."""
+    plain = await _ping_model(model)
+    if not plain["key_ok"]:
+        return plain
+    try:
+        await litellm.acompletion(
+            model=model, messages=[{"role": "user", "content": "ping"}],
+            tools=_PING_TOOLS, max_tokens=1, timeout=_PING_TIMEOUT_S,
+            num_retries=_PING_RETRIES,
+        )
+    except Exception as exc:  # noqa: BLE001 - any failure: not runnable now
+        # Only the provider rejecting the request (a 400 / unsupported param:
+        # the tools list) means no tool calling. A timeout, 429 or 5xx keeps
+        # its class, which the UI treats as transient and never blocking.
+        rejected = isinstance(
+            exc, (BadRequestError, UnsupportedParamsError))
+        return {"model": model, "key_ok": False, "missing_keys": [],
+                "error": TOOLS_UNSUPPORTED if rejected else type(exc).__name__,
+                "detail": _redact_detail(str(exc))}
+    return plain
+
+
+async def _model_check(model: str, *, tools: bool = False) -> dict[str, Any]:
+    """Cached per-model readiness check (``tools``: the agent's check)."""
+    key = f"{model}|tools" if tools else model
     now = time.monotonic()
-    cached = _readiness_cache.get(model)
+    cached = _readiness_cache.get(key)
     if cached is not None and now - cached[0] < _READINESS_TTL_S:
         return cached[1]
-    result = await _ping_model(model)
-    _readiness_cache[model] = (time.monotonic(), result)
+    result = await (_ping_agent_model(model) if tools and model else _ping_model(model))
+    _readiness_cache[key] = (time.monotonic(), result)
     return result
+
+
+def _agent_model() -> str:
+    """The core agent's model: PAPERHUB_AGENT_MODEL, else the flagship tier
+    (as ``config.load_settings`` resolves it)."""
+    return (os.environ.get("PAPERHUB_AGENT_MODEL") or "").strip() or _effective_model(
+        "PAPERHUB_MODEL_FLAGSHIP")
 
 
 def clear_readiness_cache() -> None:
@@ -152,13 +193,16 @@ def configured_providers(credential_keys: list[str]) -> list[str]:
 
 
 async def compute_readiness(credential_keys: list[str]) -> dict[str, Any]:
-    """``ready`` iff both gate models pass a live 1-token pre-flight (cached)."""
+    """``ready`` iff the gate models pass a live 1-token pre-flight (cached):
+    small, flagship, and the core agent model with a tool-calling ping."""
     checks = await asyncio.gather(
-        *(_model_check(_effective_model(key)) for _, key in _GATE_MODEL_KEYS)
+        *(_model_check(_effective_model(key)) for _, key in _GATE_MODEL_KEYS),
+        _model_check(_agent_model(), tools=True),
     )
     models = {
-        name: check for (name, _), check in zip(_GATE_MODEL_KEYS, checks, strict=True)
+        name: check for (name, _), check in zip(_GATE_MODEL_KEYS, checks, strict=False)
     }
+    models["agent"] = checks[-1]
     return {
         "ready": all(m["key_ok"] for m in models.values()),
         "credentials_set": len(credential_keys) > 0,

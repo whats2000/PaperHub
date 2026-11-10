@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Pin, PinOff, RotateCcw, X } from "lucide-react";
+import { Info, Loader2, Pin, PinOff, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "katex/dist/katex.min.css";
 
@@ -31,6 +31,9 @@ interface Props {
   status: TranslationCardStatus;
   /** Rendered translation (from `mathToKatexHtml`) when status is `ok`. */
   html: string | null;
+  /** The translation holds formulas machine-transcribed from the PDF: say so,
+   *  so a reader checks them against the page instead of trusting them. */
+  mathNote?: boolean;
   pinned: boolean;
   /** Last placement; kept while closed so the exit plays where the card was. */
   placement: CardPlacement | null;
@@ -62,6 +65,7 @@ export function TranslationCard({
   language,
   status,
   html,
+  mathNote = false,
   pinned,
   placement,
   scroll = null,
@@ -143,6 +147,7 @@ export function TranslationCard({
   }, [mounted, cardRef]);
 
   if (!mounted || !placement) return null;
+  const showMathNote = mathNote && status === "ok" && html !== null;
 
   return createPortal(
     <div
@@ -239,6 +244,29 @@ export function TranslationCard({
             {t("translation.pending", "Translating…")}
           </div>
         )}
+      </div>
+      {/* Collapses/expands its height when moving between paragraphs with
+          and without formulas, so the hint below glides instead of jumping. */}
+      <div
+        className={cn(
+          "grid shrink-0 transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+          showMathNote ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+        aria-hidden={!showMathNote}
+      >
+        <div className="overflow-hidden">
+          {/* Kept mounted so the collapse has content to animate away. */}
+          <p
+            data-math-note={showMathNote ? "" : undefined}
+            className="mt-1.5 flex items-start gap-1 text-[11.5px] leading-snug text-foreground/65"
+          >
+            <Info className="mt-px size-3 shrink-0" aria-hidden="true" />
+            {t(
+              "translationCard.mathNote",
+              "Formulas are machine-transcribed from the PDF and may contain errors. Check them against the page.",
+            )}
+          </p>
+        </div>
       </div>
       <div className="mt-1.5 shrink-0 text-[11.5px] text-foreground/65">
         {pinned

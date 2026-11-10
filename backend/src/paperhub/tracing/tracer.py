@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import json
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.db.connection import in_write_transaction, write_lock
 from paperhub.models.domain import Branch
 from paperhub.tracing.redactor import redact
 
@@ -112,11 +114,18 @@ def _sum_known(values: Any) -> int | None:
 
 
 class Tracer:
-    def __init__(self, conn: aiosqlite.Connection, *, run_id: int, branch: Branch) -> None:
+    def __init__(
+        self, conn: aiosqlite.Connection, *, run_id: int, branch: Branch,
+        append_only: bool = False,
+    ) -> None:
         self._conn = conn
         self._run_id = run_id
         self._branch = branch
         self._next_index = 0
+        # Tracers that join an already-running run (e.g. a user-confirmed
+        # action) take the next free index at WRITE time, so they can never
+        # collide with the run's own rows.
+        self._append_only = append_only
 
     @property
     def run_id(self) -> int:
@@ -196,28 +205,50 @@ class Tracer:
         result_json = (
             json.dumps(redact(result_payload)) if result_payload is not None else None
         )
-        await self._conn.execute(
-            "INSERT INTO tool_calls (run_id, branch, step_index, parent_step, "
-            "agent, tool, model, args_redacted_json, result_summary_json, "
-            "latency_ms, token_in, token_out, status, error) "
-            "VALUES (:run_id, :branch, :step_index, :parent_step, "
-            ":agent, :tool, :model, :args_redacted_json, :result_summary_json, "
-            ":latency_ms, :token_in, :token_out, :status, :error)",
-            {
-                "run_id": self._run_id,
-                "branch": self._branch,
-                "step_index": index,
-                "parent_step": parent_step,
-                "agent": agent,
-                "tool": tool,
-                "model": model,
-                "args_redacted_json": args_json,
-                "result_summary_json": result_json,
-                "latency_ms": latency_ms,
-                "token_in": token_in,
-                "token_out": token_out,
-                "status": status,
-                "error": error,
-            },
+        params = {
+            "run_id": self._run_id,
+            "branch": self._branch,
+            "step_index": index,
+            "parent_step": parent_step,
+            "agent": agent,
+            "tool": tool,
+            "model": model,
+            "args_redacted_json": args_json,
+            "result_summary_json": result_json,
+            "latency_ms": latency_ms,
+            "token_in": token_in,
+            "token_out": token_out,
+            "status": status,
+            "error": error,
+        }
+        next_free = (
+            "(SELECT COALESCE(MAX(step_index), -1) + 1 FROM tool_calls "
+            "WHERE run_id = :run_id AND branch = :branch)"
         )
-        await self._conn.commit()
+
+        def insert(step_expr: str) -> str:
+            return (
+                "INSERT INTO tool_calls (run_id, branch, step_index, parent_step, "
+                "agent, tool, model, args_redacted_json, result_summary_json, "
+                "latency_ms, token_in, token_out, status, error) "
+                f"VALUES (:run_id, :branch, {step_expr}, :parent_step, "
+                ":agent, :tool, :model, :args_redacted_json, :result_summary_json, "
+                ":latency_ms, :token_in, :token_out, :status, :error)"
+            )
+
+        # Serialised with every other writer on this connection (ruling R9):
+        # concurrent tasks share it, so an unlocked INSERT + commit could
+        # land inside, and end, a sibling's open write transaction. Inside
+        # the caller's own write_transaction the row joins that transaction
+        # and its commit, instead of committing it early.
+        async with write_lock(self._conn):
+            if self._append_only:
+                await self._conn.execute(insert(next_free), params)
+            else:
+                try:
+                    await self._conn.execute(insert(":step_index"), params)
+                except sqlite3.IntegrityError:
+                    # A step appended by a user-confirmed action took this index.
+                    await self._conn.execute(insert(next_free), params)
+            if not in_write_transaction():
+                await self._conn.commit()

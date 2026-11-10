@@ -30,6 +30,7 @@ from typing import Protocol
 import aiosqlite
 
 from paperhub.agents.sl_cite import with_grounding
+from paperhub.db.connection import write_lock
 from paperhub.models.slide_domain import KeyFigureBundle
 from paperhub.pipelines.slide_pipeline.deck_slides_map import build_deck_slides
 from paperhub.pipelines.slide_pipeline.figure_inventory import (
@@ -534,86 +535,87 @@ async def run_sl_emit(
         else None
     )
 
-    await conn.execute(
-        """
-        INSERT INTO decks (
-            session_id, run_id, tex_path, pdf_path, speaker_notes_json,
-            plan_json, page_count, current_version_id,
-            contributing_paper_ids_json, status, created_at, updated_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'), datetime('now')
-        )
-        ON CONFLICT(session_id) DO UPDATE SET
-            run_id = excluded.run_id,
-            tex_path = excluded.tex_path,
-            pdf_path = excluded.pdf_path,
-            speaker_notes_json = excluded.speaker_notes_json,
-            page_count = excluded.page_count,
-            current_version_id = excluded.current_version_id,
-            contributing_paper_ids_json = excluded.contributing_paper_ids_json,
-            status = excluded.status,
-            updated_at = datetime('now')
-        """,
-        (
-            session_id,
-            run_id,
-            str(deck_path),
-            str(pdf_path) if pdf_exists else None,
-            speaker_notes_json,
-            page_count,
-            version_id,
-            json.dumps(contributing_paper_ids),
-            status,
-        ),
-    )
-
-    async with conn.execute(
-        "SELECT id FROM decks WHERE session_id = ?", (session_id,)
-    ) as cur:
-        row = await cur.fetchone()
-    if row is None:
-        raise RuntimeError(
-            f"sl_emit: decks row not found for session_id={session_id} after upsert"
-        )
-    deck_id = int(row[0])
-
-    # 5. Rebuild deck_slides rows. Earlier rows (if any) are cleared because
-    # frame_count likely changed; notes are reapplied by index from `speaker_notes`.
-    # F4.5: record which version snapshot THIS run stamped so per-turn
-    # DeckChip cards on replay can point at the version produced by THAT
-    # turn (not just the deck's current_version_id, which only matches
-    # the most recent run).
-    await conn.execute(
-        "UPDATE runs SET deck_version_id = ? WHERE id = ?",
-        (version_id, run_id),
-    )
-
-    await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
-    # F4.5: reuse ``build_deck_slides`` (the same helper the F4 EDIT flow
-    # uses) so sl_emit and edit flows produce IDENTICALLY shaped deck_slides
-    # rows. Earlier sl_emit walked frames itself via ``_frame_spans`` and
-    # kept the leading title frame as slide_index 0, while build_deck_slides
-    # drops the title — so a single-page edit shifted every slide_index by 1
-    # and mangled every note via the restore-by-index loop. Unifying both
-    # paths on build_deck_slides eliminates the asymmetry.
-    # Resolve per-slide source grounding from each frame's % cite: marker
-    # (north-star traceback). Non-blocking: an unsourced frame persists "[]".
-    inputs = await with_grounding(
-        build_deck_slides(audited_tex, page_count), audited_tex, conn
-    )
-    for s in inputs:
-        note_text = (speaker_notes or {}).get(s.slide_index)
+    async with write_lock(conn):
         await conn.execute(
             """
-            INSERT INTO deck_slides (
-                deck_id, slide_index, frame_tex, note_text, note_language,
-                page_start, page_end, source_sections_json
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+            INSERT INTO decks (
+                session_id, run_id, tex_path, pdf_path, speaker_notes_json,
+                plan_json, page_count, current_version_id,
+                contributing_paper_ids_json, status, created_at, updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'), datetime('now')
+            )
+            ON CONFLICT(session_id) DO UPDATE SET
+                run_id = excluded.run_id,
+                tex_path = excluded.tex_path,
+                pdf_path = excluded.pdf_path,
+                speaker_notes_json = excluded.speaker_notes_json,
+                page_count = excluded.page_count,
+                current_version_id = excluded.current_version_id,
+                contributing_paper_ids_json = excluded.contributing_paper_ids_json,
+                status = excluded.status,
+                updated_at = datetime('now')
             """,
-            (deck_id, s.slide_index, s.frame_tex, note_text,
-             s.page_start, s.page_end, s.source_sections_json),
+            (
+                session_id,
+                run_id,
+                str(deck_path),
+                str(pdf_path) if pdf_exists else None,
+                speaker_notes_json,
+                page_count,
+                version_id,
+                json.dumps(contributing_paper_ids),
+                status,
+            ),
         )
-    await conn.commit()
+
+        async with conn.execute(
+            "SELECT id FROM decks WHERE session_id = ?", (session_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"sl_emit: decks row not found for session_id={session_id} after upsert"
+            )
+        deck_id = int(row[0])
+
+        # 5. Rebuild deck_slides rows. Earlier rows (if any) are cleared because
+        # frame_count likely changed; notes are reapplied by index from `speaker_notes`.
+        # F4.5: record which version snapshot THIS run stamped so per-turn
+        # DeckChip cards on replay can point at the version produced by THAT
+        # turn (not just the deck's current_version_id, which only matches
+        # the most recent run).
+        await conn.execute(
+            "UPDATE runs SET deck_version_id = ? WHERE id = ?",
+            (version_id, run_id),
+        )
+
+        await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
+        # F4.5: reuse ``build_deck_slides`` (the same helper the F4 EDIT flow
+        # uses) so sl_emit and edit flows produce IDENTICALLY shaped deck_slides
+        # rows. Earlier sl_emit walked frames itself via ``_frame_spans`` and
+        # kept the leading title frame as slide_index 0, while build_deck_slides
+        # drops the title — so a single-page edit shifted every slide_index by 1
+        # and mangled every note via the restore-by-index loop. Unifying both
+        # paths on build_deck_slides eliminates the asymmetry.
+        # Resolve per-slide source grounding from each frame's % cite: marker
+        # (north-star traceback). Non-blocking: an unsourced frame persists "[]".
+        inputs = await with_grounding(
+            build_deck_slides(audited_tex, page_count), audited_tex, conn
+        )
+        for s in inputs:
+            note_text = (speaker_notes or {}).get(s.slide_index)
+            await conn.execute(
+                """
+                INSERT INTO deck_slides (
+                    deck_id, slide_index, frame_tex, note_text, note_language,
+                    page_start, page_end, source_sections_json
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+                """,
+                (deck_id, s.slide_index, s.frame_tex, note_text,
+                 s.page_start, s.page_end, s.source_sections_json),
+            )
+        await conn.commit()
 
     return EmitResult(
         deck_id=deck_id,

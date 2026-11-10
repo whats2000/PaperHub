@@ -1,4 +1,5 @@
 import contextlib
+import json
 from pathlib import Path
 
 from paperhub.pipelines.paper_asset import (
@@ -133,3 +134,24 @@ def test_read_paper_asset_ignores_unknown_section_and_equation_keys(
     assert asset is not None
     assert asset.sections == [SectionAsset("Intro", 0)]
     assert asset.equations == [EquationAsset("eq-1", "x", None)]
+
+
+def test_figure_location_fields_round_trip_and_default_when_absent(tmp_path: Path) -> None:
+    """``bbox`` / ``env_index`` (where a figure sits in the reader) survive a
+    write + read; assets written before them read back as None."""
+    figs = [
+        FigureAsset("fig-001", "c", 3, None, "figures/fig-001.png",
+                    bbox=(1.0, 2.0, 30.5, 40.0)),
+        FigureAsset("fig-002", "d", None, "Intro", "figures/fig-002.png", env_index=4),
+    ]
+    write_paper_asset(PaperAsset(figures=figs), tmp_path)
+    back = read_paper_asset(tmp_path)
+    assert back is not None and back.figures == figs
+    old = tmp_path / "old"
+    (old / "asset").mkdir(parents=True)
+    (old / "asset" / "figures.json").write_text(json.dumps([
+        {"id": "fig-001", "caption": "", "page": 0, "section": None,
+         "image_path": "figures/fig-001.png"}]), encoding="utf-8")
+    legacy = read_paper_asset(old)
+    assert legacy is not None
+    assert legacy.figures[0].bbox is None and legacy.figures[0].env_index is None

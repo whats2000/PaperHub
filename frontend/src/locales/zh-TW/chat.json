@@ -73,6 +73,8 @@
   "bubble": {
     "retry": "重試",
     "interrupted": "生成已中斷",
+    "stopped": "已停止。已執行的動作列在下方，可以復原。",
+    "stopping": "正在停止…",
     "copy": "複製訊息",
     "fork": "從此訊息分支",
     "forkTitle": "從此處分支 — 開新對話並編輯此訊息"
@@ -117,11 +119,71 @@
     "step_other": "{{count}} 個步驟",
     "loading": "正在載入追蹤…",
     "empty": "沒有記錄任何步驟。",
-    "retry": "重試"
+    "retry": "重試",
+    "agentStep": "第 {{n}} 步",
+    "answer": "回答"
   },
   "panel": {
     "memory": "記憶",
     "slides": "投影片",
     "resize": "調整參考面板大小"
+  },
+  "agentSummary": {
+    "label": "代理",
+    "papers_one": "讀了 {{count}} 篇論文",
+    "papers_other": "讀了 {{count}} 篇論文",
+    "steps_one": "{{count}} 步",
+    "steps_other": "{{count}} 步",
+    "tools": "使用的工具：{{tools}}",
+    "noTools": "未使用工具直接回答"
+  },
+  "agentEvent": {
+    "paperAdded": "已加入論文",
+    "memorySaved": "已存入記憶",
+    "undo": "復原",
+    "undone": "已復原",
+    "undoFailed": "無法復原"
+  },
+  "confirm": {
+    "title": "確認此操作",
+    "reason": "原因：",
+    "confirm": "確認",
+    "dismiss": "略過",
+    "running": "執行中…",
+    "done": "完成。",
+    "failedGeneric": "動作執行失敗。",
+    "interrupted": "執行期間伺服器停止了，動作可能沒有完成。",
+    "reasonClassifier": "自動核准無法確定這正是你要求的動作。",
+    "reasonCheckFailed": "自動核准檢查失敗，所以請你確認。",
+    "action": {
+      "removePaper": "從此對話移除「{{title}}」",
+      "forgetGlobal": "忘記這則記憶（所有對話）：「{{content}}」",
+      "forgetSession": "忘記這則記憶（此對話）：「{{content}}」"
+    },
+    "result": {
+      "removePaper": "已從此對話移除「{{title}}」。",
+      "forget": "已忘記「{{content}}」。"
+    },
+    "unavailable": "此操作在這裡已無法使用。",
+    "stale": "此操作已處理過了。",
+    "requestFailed": "無法連線到伺服器，請再試一次。",
+    "dismissed": "已略過：{{summary}}"
+  },
+  "autoApprove": {
+    "menuTitle": "核准模式",
+    "ask": {
+      "title": "先詢問",
+      "desc": "移除論文或刪除記憶前先問你",
+      "tooltip": "會變更論文庫或記憶的操作（移除論文、刪除記憶）都會等你確認。僅套用於此對話，這是預設模式。"
+    },
+    "auto": {
+      "title": "自動核准",
+      "desc": "通過快速檢查的操作直接執行，有風險時才詢問",
+      "tooltip": "開啟後，原本需要你確認的操作（移除論文、刪除記憶）會先經過快速檢查，決定能否不經詢問直接執行。僅套用於此對話，預設為關閉。"
+    },
+    "failed": "無法變更自動核准設定"
+  },
+  "proposals": {
+    "label": "建議的後續問題"
   }
 }

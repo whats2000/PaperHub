@@ -24,17 +24,24 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymupdf
 
+from paperhub.pipelines.figure_composite import Panel, compose_panels, width_share
+from paperhub.pipelines.figure_numbers import _drop_subfigure_groups, _strip_comments
+from paperhub.pipelines.figure_wrappers import unwrap_figure_wrappers
 from paperhub.pipelines.paper_asset import (
     EquationAsset,
     FigureAsset,
     PaperAsset,
     SectionAsset,
     paper_asset_dir,
+    read_paper_asset,
 )
+from paperhub.pipelines.sentinels import inject_figure_sentinels
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,8 @@ _SECTION_RE = re.compile(r"\\section\{([^}]+)\}")
 _FIGURE_ENV_RE = re.compile(
     r"\\begin\{figure\*?\}(.*?)\\end\{figure\*?\}", re.DOTALL
 )
+
+_COMMENT_ENV_RE = re.compile(r"\\begin\{comment\}.*?\\end\{comment\}", re.DOTALL)
 
 # \includegraphics[opts]{path} — opts bracket is optional
 _INCLUDEGRAPHICS_RE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\s*\{([^}]+)\}")
@@ -78,6 +87,162 @@ _RASTERIZE_DPI = 200   # higher than figures.py's 150 — asset quality matters
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def in_latex_comment(text: str, pos: int) -> bool:
+    """Whether ``pos`` lies after an unescaped ``%`` on its line."""
+    i = text.rfind("\n", 0, pos) + 1
+    while i < pos:
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == "%":
+            return True
+        i += 1
+    return False
+
+
+def figure_env_starts(flattened_text: str) -> list[int]:
+    """Start offset of every figure environment, by ``env_index`` (the
+    ordinal ``latex_source_to_asset`` records on each figure)."""
+    return [m.start() for m in _FIGURE_ENV_RE.finditer(flattened_text)]
+
+
+@dataclass(frozen=True)
+class FigureEnv:
+    """A figure environment with a resolvable image, in document order."""
+
+    env_index: int          # ordinal among all figure environments
+    env_start: int
+    caption: str
+    resolved: Path
+    commented: bool         # inside a ``%`` comment: not part of the paper
+    panels: list[PanelSource] = field(default_factory=list)
+    # The caption the paper prints for the figure: its own top-level
+    # \caption (not a panel's, not a commented draft), long form, braces
+    # parsed fully, citation keys and labels dropped. ``caption`` is the
+    # earlier extraction, kept to match assets stored before this.
+    main_caption: str = ""
+
+
+# Commands whose argument is not printed as text (a number or nothing).
+_REF_CMD_RE = re.compile(
+    r"\\(?:[a-zA-Z]*cite[a-zA-Z]*|ref|eqref|[cC]ref|autoref|label|footnote)\*?"
+    r"(?:\[[^\]]*\])*\{[^{}]*\}")
+
+
+def _braced(text: str, i: int, opener: str, closer: str) -> tuple[str, int] | None:
+    """The balanced ``opener…closer`` group at ``text[i]`` (after blanks):
+    its inner text and the index after it; None when there is none."""
+    while i < len(text) and text[i] in " \t\n":
+        i += 1
+    if i >= len(text) or text[i] != opener:
+        return None
+    depth, j = 0, i
+    while j < len(text):
+        if text[j] == "\\":
+            j += 2
+            continue
+        depth += text[j] == opener
+        depth -= text[j] == closer
+        j += 1
+        if depth == 0:
+            return text[i + 1:j - 1], j
+    return None
+
+
+def main_caption(env_body: str) -> str:
+    """The figure's own printed caption (see ``FigureEnv.main_caption``): the
+    first top-level ``\\caption`` — an environment holding two side-by-side
+    figures has two, and its stored image is the first figure's."""
+    body = _drop_subfigure_groups(_strip_comments(env_body))
+    for m in re.finditer(r"\\caption(?![a-zA-Z])\*?", body):
+        i = m.end()
+        short = _braced(body, i, "[", "]")
+        if short is not None:
+            i = short[1]
+        long = _braced(body, i, "{", "}")
+        if long is not None:
+            return _clean_caption(_REF_CMD_RE.sub("", long[0]).replace("\\ ", " "))
+    return ""
+
+
+def figure_envs(latex_source_dir: Path, flattened_text: str) -> list[FigureEnv]:
+    """The figure environments ``latex_source_to_asset`` numbers: those with
+    an ``\\includegraphics`` that resolves to a file."""
+    out: list[FigureEnv] = []
+    # \begin{comment}...\end{comment} (the comment package) hides its body.
+    comment_spans = [
+        (c.start(), c.end()) for c in _COMMENT_ENV_RE.finditer(flattened_text)
+        if not in_latex_comment(flattened_text, c.start())]
+    for env_index, m in enumerate(_FIGURE_ENV_RE.finditer(flattened_text)):
+        env_body = m.group(1)
+        ig_m = _INCLUDEGRAPHICS_RE.search(env_body)
+        if ig_m is None:
+            continue
+        ref = ig_m.group(1).strip()
+        cap_m = _CAPTION_RE.search(env_body)
+        caption = _clean_caption(cap_m.group(1) if cap_m else "")
+        resolved = _resolve_figure_path(ref, latex_source_dir)
+        if resolved is None:
+            logger.debug("latex_to_asset: skipping unresolvable figure %r", ref)
+            continue
+        commented = in_latex_comment(flattened_text, m.start()) or any(
+            s <= m.start() < e for s, e in comment_spans)
+        out.append(FigureEnv(
+            env_index=env_index, env_start=m.start(), caption=caption,
+            resolved=resolved, commented=commented,
+            panels=figure_panels(env_body, latex_source_dir),
+            main_caption=main_caption(env_body),
+        ))
+    return out
+
+
+_INCLUDEGRAPHICS_OPTS_RE = re.compile(
+    r"\\includegraphics\s*(\[[^\]]*\])?\s*\{([^}]+)\}")
+_PANEL_LABEL_RE = re.compile(
+    r"^\s*(?:(?:\\label\{[^}]*\}|%[^\n]*\n)\s*)*\(([a-z])\)\s*([^\\{}%]*)")
+_ROW_BREAK_RE = re.compile(r"\\\\|\\par\b|\\newline\b|\n\s*\n")
+
+
+@dataclass(frozen=True)
+class PanelSource:
+    resolved: Path
+    width: float | None
+    new_row: bool
+    label: str | None
+
+
+def figure_panels(env_body: str, latex_source_dir: Path) -> list[PanelSource]:
+    """Every resolvable image of a figure environment, in order, with its
+    line share, whether a line break comes before it, and its ``(a) caption``
+    (sub-figure wrappers unwrapped first, which writes those labels)."""
+    body = unwrap_figure_wrappers(f"\\begin{{figure}}{env_body}\\end{{figure}}")
+    matches = list(_INCLUDEGRAPHICS_OPTS_RE.finditer(body))
+    panels: list[PanelSource] = []
+    for i, m in enumerate(matches):
+        resolved = _resolve_figure_path(m.group(2), latex_source_dir)
+        if resolved is None:
+            continue
+        before = body[matches[i - 1].end():m.start()] if i else ""
+        after = body[m.end():matches[i + 1].start() if i + 1 < len(matches) else len(body)]
+        lab = _PANEL_LABEL_RE.match(after)
+        label = (f"({lab.group(1)}) {' '.join(lab.group(2).split())}".strip()
+                 if lab else None)
+        panels.append(PanelSource(
+            resolved=resolved, width=width_share(m.group(1) or ""),
+            new_row=bool(i and _ROW_BREAK_RE.search(before)), label=label,
+        ))
+    return panels
+
+
+def anchor_asset_figures(marked: str, cache_dir: Path) -> tuple[str, set[str]]:
+    """Put each asset figure's ``phfig`` sentinel before its environment in
+    the (chunk-sentinel-marked) render source; returns the anchored ids."""
+    asset = read_paper_asset(cache_dir)
+    figures = [(f.id, f.env_index) for f in (asset.figures if asset else [])
+               if f.env_index is not None]
+    return inject_figure_sentinels(marked, figure_env_starts(marked), figures)
 
 
 def _section_map(flattened_text: str) -> list[tuple[int, str]]:
@@ -185,6 +350,24 @@ def _stage_figure(
     return f"figures/{dst_name}"
 
 
+def stage_panels(panels: list[PanelSource], figures_dir: Path, fig_index: int) -> str:
+    """Compose a multi-panel figure into ``figures/fig-NNN.png`` (PDF / EPS
+    panels rasterised first); returns its asset-relative path."""
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        staged: list[Panel] = []
+        for n, p in enumerate(panels):
+            if p.resolved.suffix.lower() in (".pdf", ".eps"):
+                raster = Path(tmp) / f"panel-{n}.png"
+                _rasterize_to_png(p.resolved, raster)
+            else:
+                raster = p.resolved
+            staged.append(Panel(raster, p.width, p.new_row, p.label))
+        dst = figures_dir / f"fig-{fig_index:03d}.png"
+        compose_panels(staged, dst)
+    return f"figures/{dst.name}"
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -231,30 +414,21 @@ def latex_source_to_asset(
     # --- 2. Figures ---
     figures: list[FigureAsset] = []
     fig_index = 1
-    for m in _FIGURE_ENV_RE.finditer(flattened_text):
-        env_body = m.group(1)
-        env_start = m.start()
-
-        # Find \includegraphics ref
-        ig_m = _INCLUDEGRAPHICS_RE.search(env_body)
-        if ig_m is None:
-            continue
-        ref = ig_m.group(1).strip()
-
-        # Find \caption
-        cap_m = _CAPTION_RE.search(env_body)
-        raw_caption = cap_m.group(1) if cap_m else ""
-        caption = _clean_caption(raw_caption)
-
-        # Resolve file
-        resolved = _resolve_figure_path(ref, latex_source_dir)
-        if resolved is None:
-            logger.debug("latex_to_asset: skipping unresolvable figure %r", ref)
+    for env in figure_envs(latex_source_dir, flattened_text):
+        env_index, env_start, caption, resolved = (
+            env.env_index, env.env_start, env.main_caption or env.caption, env.resolved)
+        if env.commented:
+            # Commented out: not part of the paper. It keeps its number, as
+            # before this check, so later figures keep their ids (slide decks
+            # refer to figures by id).
+            fig_index += 1
             continue
 
-        # Stage the file
+        # Stage the file (several panels: one composite image of them all)
         try:
-            image_path = _stage_figure(resolved, figures_dir, fig_index)
+            image_path = (stage_panels(env.panels, figures_dir, fig_index)
+                          if len(env.panels) > 1
+                          else _stage_figure(resolved, figures_dir, fig_index))
         except Exception:  # noqa: BLE001 — pymupdf / IO errors
             logger.warning(
                 "latex_to_asset: failed to stage figure %s (index %d), skipping",
@@ -272,6 +446,8 @@ def latex_source_to_asset(
                 page=None,
                 section=section_name,
                 image_path=image_path,
+                env_index=env_index,
+                panels=len(env.panels) if len(env.panels) > 1 else None,
             )
         )
         fig_index += 1

@@ -591,6 +591,7 @@ ${next.side}`;
         language={language}
         status={status}
         html={html}
+        mathNote={(shown?.math.length ?? 0) > 0}
         pinned={pinned !== null}
         placement={placement}
         scroll={scroll}

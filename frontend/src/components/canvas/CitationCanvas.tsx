@@ -8,7 +8,11 @@ import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import {
   getChunk,
-  getDocumentMode,
+  getDocumentInfo,
+  getFigureMeta,
+  figureImageUrl,
+  getViewRegion,
+  fetchPagePdfData,
   getPdfParagraphs,
   getTranslateConfig,
   fetchPaperHtml,
@@ -27,6 +31,7 @@ import {
   localizeMathjax,
 } from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -55,6 +60,19 @@ interface DocEntry {
   status: "ready" | "error";
   html?: string;
   pdfData?: Uint8Array;
+  /** An HTML paper also has a page PDF (compiled from its LaTeX): the reader
+   *  offers it as a PDF tab, where [view:] citations open. */
+  pagePdf?: boolean;
+}
+
+/** Which view of an HTML paper the reader shows. */
+type ReaderTab = "html" | "pdf";
+
+/** A figure or page region to highlight on a PDF view (0-based page, PDF points). */
+interface RegionTarget {
+  paper: number;
+  page: number;
+  bbox: number[];
 }
 
 /** A paper the standalone reader shows. */
@@ -89,6 +107,11 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const requestedChunkId = standalone ? (standaloneCitation?.chunkId ?? null) : storeChunkId;
   const requestedEndChunkId = standalone ? (standaloneCitation?.endChunkId ?? null) : storeEndChunkId;
   const requestNonce = standalone ? (standaloneCitation?.nonce ?? 0) : storeNonce;
+  // Figure / page-region citations come from the chat only.
+  const storeFigure = useCanvasStore((s) => s.requestedFigure);
+  const storeView = useCanvasStore((s) => s.requestedView);
+  const requestedFigure = standalone ? null : storeFigure;
+  const requestedView = standalone ? null : storeView;
   const requestAnimateScroll = useCanvasStore((s) => s.requestAnimateScroll);
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
@@ -152,6 +175,32 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
     null,
   );
+  // A [fig:] citation on an HTML paper: the anchor the figure follows.
+  const [figureTarget, setFigureTarget] = useState<{ paper: number; anchor: string } | null>(
+    null,
+  );
+  // A [fig:] on a PDF paper, or a [view:] citation: the region to highlight.
+  const [regionTarget, setRegionTarget] = useState<RegionTarget | null>(null);
+  // HTML papers with a page PDF: which tab is shown, and the page PDF bytes.
+  const [readerTabByPaper, setReaderTabByPaper] = useState<Record<number, ReaderTab>>({});
+  // Whether the HTML | PDF track animates: only when the tab changes for the
+  // paper already shown — a paper switch jumps straight to that paper's tab.
+  const [slideTrack, setSlideTrack] = useState(false);
+  const [pagePdfByPaper, setPagePdfByPaper] = useState<
+    Record<number, Uint8Array | "error">
+  >({});
+  const pagePdfFetched = useRef<Set<number>>(new Set());
+  const ensurePagePdf = useCallback((pid: number) => {
+    if (pagePdfFetched.current.has(pid)) return;
+    pagePdfFetched.current.add(pid);
+    fetchPagePdfData(pid).then(
+      (data) => setPagePdfByPaper((prev) => ({ ...prev, [pid]: data })),
+      () => {
+        setPagePdfByPaper((prev) => ({ ...prev, [pid]: "error" }));
+        pagePdfFetched.current.delete(pid); // retry on the next request
+      },
+    );
+  }, []);
 
   // Papers we've already kicked off a fetch for (prefetch dedupe).
   const fetchedDocs = useRef<Set<number>>(new Set());
@@ -165,13 +214,14 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     fetchedDocs.current.add(pid);
     void (async () => {
       try {
-        const mode = await getDocumentMode(pid);
+        const { mode, page_pdf } = await getDocumentInfo(pid);
         const entry: DocEntry =
           mode === "pdf"
             ? { mode, status: "ready", pdfData: await fetchPaperPdfData(pid) }
             : {
                 mode,
                 status: "ready",
+                pagePdf: page_pdf,
                 // Strip the dead polyfill.io/html5shiv scripts (they stall the
                 // load), repoint any MathJax loader (Debian-local path OR CDN)
                 // at the vendored same-origin build (else math renders as raw
@@ -433,6 +483,14 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         // The cited paper may be a toggled-off reference the prefetch skipped —
         // fetch it on demand so it can be displayed view-only (no-op if cached).
         ensureDoc(c.paper_content_id);
+        setFigureTarget(null);
+        setRegionTarget(null);
+        setSlideTrack(samePaper);
+        setReaderTabByPaper((prev) =>
+          prev[c.paper_content_id] === "pdf"
+            ? { ...prev, [c.paper_content_id]: "html" }
+            : prev,
+        );
         setActiveChunk(c);
         setEndDomId(endDom);
         setDisplayedPaperId(c.paper_content_id);
@@ -460,6 +518,80 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestNonce]);
 
+  // Resolve a clicked figure / page-region citation → its paper + the target:
+  // an HTML paper highlights the figure after its anchor; a PDF paper — or a
+  // page region on any paper — highlights the box on the page PDF (an HTML
+  // paper switches to its PDF tab for that). Keyed on requestNonce like the
+  // chunk resolution above, which ignores these requests.
+  useEffect(() => {
+    if (!open) return;
+    const fig = requestedFigure;
+    const view = requestedView;
+    if (fig == null && view == null) return;
+    const pid = fig ? fig.paper : (view?.paper ?? 0);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const info = await getDocumentInfo(pid);
+        let anchor: string | null = null;
+        let region: { page: number; bbox: number[] } | null = null;
+        if (fig) {
+          const meta = await getFigureMeta(pid, fig.figureId);
+          if (info.mode === "html" && meta.html_anchor) anchor = meta.html_anchor;
+          else if (meta.page != null && meta.bbox && info.page_pdf)
+            region = { page: meta.page, bbox: meta.bbox };
+          else if (meta.page != null && info.page_pdf) {
+            // Known page, unknown box: open the page itself.
+            const r = await getViewRegion(pid, meta.page + 1, [0, 0, 1000, 1000]);
+            region = { page: r.page, bbox: r.bbox };
+          } else if (meta.has_image) {
+            // No place in the paper: show the cited figure's image.
+            if (cancelled) return;
+            setLightbox({
+              src: figureImageUrl(pid, fig.figureId),
+              alt: meta.caption || fig.figureId,
+            });
+            return;
+          } else throw new Error("API 404: figure not locatable");
+        } else if (view) {
+          const r = await getViewRegion(pid, view.page, view.box);
+          region = { page: r.page, bbox: r.bbox };
+        }
+        if (cancelled) return;
+        const samePaper = pid === effectivePaperId;
+        ensureDoc(pid);
+        setSlideTrack(samePaper);
+        if (info.mode === "html") {
+          const tab: ReaderTab = anchor ? "html" : "pdf";
+          setReaderTabByPaper((prev) => ({ ...prev, [pid]: tab }));
+          if (tab === "pdf") ensurePagePdf(pid);
+        }
+        setActiveChunk(null);
+        setEndDomId(null);
+        setFigureTarget(anchor ? { paper: pid, anchor } : null);
+        setRegionTarget(region ? { paper: pid, ...region } : null);
+        setDisplayedPaperId(pid);
+        setScrollAnimate(requestAnimateScroll && samePaper);
+        setStale(false);
+        setHighlightNonce((n) => n + 1);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/\b40[04]\b/.test(msg)) {
+          toast.message(t(fig ? "toast.figureGone" : "toast.regionGone"));
+        } else {
+          toast.error(t("toast.loadCitedPaperFailed"));
+        }
+      } finally {
+        if (!cancelled) consumeCitation();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestNonce]);
+
   // Switch the active paper when the References panel asks to "Open in canvas"
   // (no chunk highlight — just a paper swap). We react via Zustand's subscribe
   // API (a ref tracks the last-handled nonce, so re-opening the SAME paper still
@@ -478,8 +610,11 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       const pid = state.requestedPaperId;
       if (pid == null) return;
       ensureDoc(pid);
+      setSlideTrack(false);
       setDisplayedPaperId(pid);
       setActiveChunk(null);
+      setFigureTarget(null);
+      setRegionTarget(null);
       setStale(false);
       useCanvasStore.getState().consumePaperRequest();
     });
@@ -508,9 +643,20 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     // unmounts the old reader and mounts the new one across a task boundary —
     // so this swap can stay a plain synchronous state update without freezing.
     setDisplayedPaperId(pid);
+    setSlideTrack(pid === effectivePaperId);
     setActiveChunk(null);
+    setFigureTarget(null);
+    setRegionTarget(null);
     setStale(false);
     setOverflowOpen(false);
+  };
+
+  const switchReaderTab = (tab: ReaderTab) => {
+    if (effectivePaperId == null) return;
+    const pid = effectivePaperId;
+    setSlideTrack(true);
+    setReaderTabByPaper((prev) => ({ ...prev, [pid]: tab }));
+    if (tab === "pdf") ensurePagePdf(pid);
   };
 
   // Promote the view-only transient paper into an enabled reference (the user
@@ -546,6 +692,23 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const htmlPapers = renderableIds.filter(
     (pid) => docByPaper[pid]?.mode === "html",
   );
+  // An HTML paper with a page PDF shows HTML | PDF tabs; the two views sit
+  // side by side on a track that slides toward the chosen one.
+  const activeHasPagePdf =
+    activeDoc?.mode === "html" && activeDoc.status === "ready" && activeDoc.pagePdf === true;
+  const readerTab: ReaderTab =
+    effectivePaperId != null && activeHasPagePdf
+      ? (readerTabByPaper[effectivePaperId] ?? "html")
+      : "html";
+  const activePagePdf =
+    effectivePaperId != null ? pagePdfByPaper[effectivePaperId] : undefined;
+  // What a PDF view of `pid` highlights: a cited chunk, else a figure/region.
+  const pdfTarget = (pid: number) =>
+    activeChunk?.paper_content_id === pid
+      ? { text: resolveNeedle(activeChunk), page: activeChunk.page, bbox: activeChunk.bbox }
+      : regionTarget?.paper === pid
+        ? { text: null, page: regionTarget.page, bbox: regionTarget.bbox }
+        : null;
 
   return (
     <aside
@@ -645,6 +808,58 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         </Button>
       </header>
 
+      {/* HTML | PDF tabs for an HTML paper with a page PDF: always mounted,
+          the bar's height opens and closes so the reader below glides. */}
+      <div
+        data-reader-tabs
+        data-open={activeHasPagePdf ? "true" : "false"}
+        aria-hidden={!activeHasPagePdf}
+        inert={!activeHasPagePdf ? true : undefined}
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          activeHasPagePdf ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div
+            role="tablist"
+            aria-label={t("tabs.label")}
+            className="flex gap-1 border-b border-border px-2 py-1"
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+              e.preventDefault();
+              const next: ReaderTab = readerTab === "html" ? "pdf" : "html";
+              switchReaderTab(next);
+              e.currentTarget
+                .querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)
+                ?.focus();
+            }}
+          >
+            {(["html", "pdf"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                data-tab={tab}
+                id={`reader-tab-${tab}`}
+                aria-selected={readerTab === tab}
+                aria-controls={`reader-panel-${tab}`}
+                tabIndex={readerTab === tab ? 0 : -1}
+                onClick={() => switchReaderTab(tab)}
+                className={cn(
+                  "rounded px-2 py-0.5 text-xs font-medium transition-colors duration-150 motion-reduce:transition-none",
+                  readerTab === tab
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {t(`tabs.${tab}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Body */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {stale && (
@@ -666,7 +881,25 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         {/* The shown paper is still being fetched. */}
         {effectivePaperId != null && activeDoc === null && <PaperLoading />}
 
-        {/* HTML papers: kept mounted (hidden) for instant switching. */}
+        {/* HTML papers: kept mounted (hidden) for instant switching. Their
+            page PDF sits beside them on a track that slides between the two. */}
+        <div
+          data-reader-track
+          hidden={activeDoc?.mode !== "html"}
+          className={cn(
+            "flex h-full w-[200%] flex-1",
+            slideTrack &&
+              "transition-transform duration-200 ease-out motion-reduce:transition-none",
+            readerTab === "pdf" && "-translate-x-1/2",
+          )}
+        >
+        <div
+          id="reader-panel-html"
+          role="tabpanel"
+          aria-labelledby="reader-tab-html"
+          className="flex h-full w-1/2 flex-col"
+          inert={readerTab === "pdf" ? true : undefined}
+        >
         {htmlPapers.map((pid) => {
           const doc = docByPaper[pid];
           if (doc?.status !== "ready" || doc.html == null) return null;
@@ -682,9 +915,13 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 isDark={isDark}
                 scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
-                  isActive && activeChunk?.paper_content_id === pid
+                  isActive &&
+                  (activeChunk?.paper_content_id === pid || figureTarget?.paper === pid)
                     ? highlightNonce
                     : 0
+                }
+                highlightFigureAnchor={
+                  isActive && figureTarget?.paper === pid ? figureTarget.anchor : null
                 }
                 highlightDomId={
                   isActive &&
@@ -723,6 +960,35 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             </div>
           );
         })}
+        </div>
+        <div
+          id="reader-panel-pdf"
+          role="tabpanel"
+          aria-labelledby="reader-tab-pdf"
+          className="flex h-full w-1/2 flex-col"
+          inert={readerTab !== "pdf" ? true : undefined}
+        >
+          {effectivePaperId != null &&
+            activeHasPagePdf &&
+            (readerTab === "pdf" || activePagePdf !== undefined) &&
+            (activePagePdf === undefined ? (
+              <PaperLoading />
+            ) : activePagePdf === "error" ? (
+              <div className="p-4 text-xs text-destructive">{t("error.loadPaper")}</div>
+            ) : (
+              <DeferredRemount swapKey={effectivePaperId}>
+                <PdfView
+                  data={activePagePdf}
+                  highlightText={null}
+                  bboxPage={regionTarget?.paper === effectivePaperId ? regionTarget.page : null}
+                  bbox={regionTarget?.paper === effectivePaperId ? regionTarget.bbox : null}
+                  nonce={regionTarget?.paper === effectivePaperId ? highlightNonce : 0}
+                  onHighlightMiss={() => toast.message(t("toast.regionGone"))}
+                />
+              </DeferredRemount>
+            ))}
+        </div>
+        </div>
 
         {/* PDF papers: render only the active one (react-pdf is heavy).
             DeferredRemount remounts the reader across a task boundary on a
@@ -734,26 +1000,10 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             <DeferredRemount swapKey={effectivePaperId}>
               <PdfView
                 data={activeDoc.pdfData}
-                highlightText={
-                  activeChunk?.paper_content_id === effectivePaperId
-                    ? resolveNeedle(activeChunk)
-                    : null
-                }
-                bboxPage={
-                  activeChunk?.paper_content_id === effectivePaperId
-                    ? activeChunk.page
-                    : null
-                }
-                bbox={
-                  activeChunk?.paper_content_id === effectivePaperId
-                    ? activeChunk.bbox
-                    : null
-                }
-                nonce={
-                  activeChunk?.paper_content_id === effectivePaperId
-                    ? highlightNonce
-                    : 0
-                }
+                highlightText={pdfTarget(effectivePaperId)?.text ?? null}
+                bboxPage={pdfTarget(effectivePaperId)?.page ?? null}
+                bbox={pdfTarget(effectivePaperId)?.bbox ?? null}
+                nonce={pdfTarget(effectivePaperId) ? highlightNonce : 0}
                 onHighlightMiss={() =>
                   toast.message(t("toast.passageNotFoundPdf"))
                 }

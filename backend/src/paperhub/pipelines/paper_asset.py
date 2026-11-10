@@ -25,6 +25,14 @@ class FigureAsset:
     page: int | None
     section: str | None
     image_path: str            # relative to the asset dir, e.g. "figures/fig-001.png"
+    # Where the figure sits in the reader, so a [fig:P/ID] citation can open
+    # on it. PDF reader: its bbox in PDF points on ``page`` (0-based).
+    bbox: tuple[float, float, float, float] | None = None
+    # HTML reader (LaTeX papers): the ordinal of its figure environment in the
+    # flattened source; the render puts a ``phfig-<id>`` anchor before it.
+    env_index: int | None = None
+    # A LaTeX figure of several images: how many panels its image composes.
+    panels: int | None = None
 
     def abs_image_path(self, source_dir: Path) -> Path:
         return paper_asset_dir(source_dir) / self.image_path
@@ -98,11 +106,24 @@ def _read_figures(raw: object, origin: Path) -> list[FigureAsset]:
     """Usable figures: known fields only, and imageless figures
     (``image_path == ""``, a TikZ figure never rasterised) are skipped."""
     figs: list[FigureAsset] = []
+    # Optional location fields (absent in assets written before them).
+    raw_by_id = {str(x.get("id")): x for x in raw if isinstance(x, dict)} \
+        if isinstance(raw, list) else {}
     for x in _known_fields(raw, _FIGURE_FIELDS, origin):
         if not x["image_path"]:
             _LOG.warning("skipping imageless figure %s in %s", x["id"], origin)
             continue
-        figs.append(FigureAsset(**x))
+        extra = raw_by_id.get(x["id"], {})
+        bbox = extra.get("bbox")
+        env_index = extra.get("env_index")
+        panels = extra.get("panels")
+        figs.append(FigureAsset(
+            **x,
+            bbox=(tuple(float(v) for v in bbox)  # type: ignore[arg-type]
+                  if isinstance(bbox, list) and len(bbox) == 4 else None),
+            env_index=env_index if isinstance(env_index, int) else None,
+            panels=panels if isinstance(panels, int) else None,
+        ))
     return figs
 
 

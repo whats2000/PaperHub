@@ -38,9 +38,10 @@ def create_session() -> int:
     return int(r.json()["session_id"])
 
 
-def delete_session(session_id: int) -> None:
-    """Delete a chat session (soft delete once it has messages)."""
-    r = httpx.delete(f"{BASE}/sessions/{session_id}", timeout=30)
+def delete_session(session_id: int, *, base: str | None = None) -> None:
+    """Delete a chat session (soft delete once it has messages) on ``base``
+    (default: the module's ``BASE``)."""
+    r = httpx.delete(f"{base or BASE}/sessions/{session_id}", timeout=30)
     r.raise_for_status()
 
 
@@ -82,16 +83,22 @@ def chat(
     *,
     current_view_page: int = 0,
     slide_attached: bool = False,
+    history: list[dict[str, str]] | None = None,
     timeout: float = 1800.0,
 ) -> ChatResult:
+    """Send one turn. ``history`` (``[{role, content}, ...]``) seeds the earlier
+    conversation, as the frontend sends it; omitted, the backend rebuilds the
+    history from the session's stored messages."""
     res = ChatResult(session_id=session_id)
     tokens: list[str] = []
-    payload = {
+    payload: dict[str, Any] = {
         "session_id": session_id,
         "user_message": user_message,
         "current_view_page": current_view_page,
         "slide_attached": slide_attached,
     }
+    if history:
+        payload["history"] = history
     with httpx.stream(
         "POST", f"{BASE}/chat", json=payload, timeout=timeout
     ) as r:

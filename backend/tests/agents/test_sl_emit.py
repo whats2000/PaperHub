@@ -265,3 +265,36 @@ async def test_emit_records_null_pdf_filename_when_deck_pdf_missing(
     snapshots = list((workdir / "edit_history").glob("version_*.json"))
     data = json.loads(snapshots[0].read_text(encoding="utf-8"))
     assert data["pdf_filename"] is None
+
+
+@pytest.mark.asyncio
+async def test_emit_failure_after_upsert_rolls_back_and_frees_connection(
+    conn: aiosqlite.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after the decks upsert must not leave a partial decks row in
+    an open transaction on the shared connection (agent tools share it)."""
+    import paperhub.agents.sl_emit as sl_emit_mod
+    from paperhub.db.connection import write_transaction
+
+    def boom(*_a: object, **_k: object) -> object:
+        raise RuntimeError("frame split failed")
+
+    monkeypatch.setattr(sl_emit_mod, "build_deck_slides", boom)
+    workdir = tmp_path / "slides"
+    workdir.mkdir()
+    with pytest.raises(RuntimeError, match="frame split failed"):
+        await run_sl_emit(
+            session_id=1, run_id=1, deck_tex=_DECK, workdir=workdir,
+            page_count=2, status="ok", contributing_paper_ids=[],
+            figure_inventory={}, conn=conn,
+        )
+    assert not conn.in_transaction
+    # A following write transaction starts cleanly and commits only itself.
+    async with write_transaction(conn):
+        await conn.execute("UPDATE runs SET status = 'ok' WHERE id = 1")
+    async with conn.execute("SELECT COUNT(*) FROM decks") as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == 0
+    async with conn.execute("SELECT deck_version_id FROM runs WHERE id = 1") as cur:
+        r2 = await cur.fetchone()
+    assert r2 is not None and r2[0] is None

@@ -47,6 +47,7 @@ const READY_FROM_CACHE: SettingsReadiness = {
   models: {
     small: { model: "", key_ok: true, missing_keys: [], error: null, detail: null },
     flagship: { model: "", key_ok: true, missing_keys: [], error: null, detail: null },
+    agent: { model: "", key_ok: true, missing_keys: [], error: null, detail: null },
   },
 };
 

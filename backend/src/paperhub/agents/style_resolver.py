@@ -18,6 +18,8 @@ from typing import Literal
 
 import aiosqlite
 
+from paperhub.db.connection import write_lock
+
 OverrideSource = Literal["user_request", "agent_inferred", "global_memory_projection"]
 
 
@@ -63,27 +65,29 @@ async def set_session_override(
     conn: aiosqlite.Connection,
 ) -> None:
     """Upsert the per-session preamble override."""
-    await conn.execute(
-        """
-        INSERT INTO slide_style_overrides (session_id, preamble_tex, source)
-        VALUES (?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET
-            preamble_tex = excluded.preamble_tex,
-            source = excluded.source,
-            updated_at = datetime('now')
-        """,
-        (session_id, preamble_tex, source),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            """
+            INSERT INTO slide_style_overrides (session_id, preamble_tex, source)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                preamble_tex = excluded.preamble_tex,
+                source = excluded.source,
+                updated_at = datetime('now')
+            """,
+            (session_id, preamble_tex, source),
+        )
+        await conn.commit()
 
 
 async def clear_session_override(*, session_id: int, conn: aiosqlite.Connection) -> bool:
     """Drop the per-session preamble override. Returns True iff a row existed."""
-    cur = await conn.execute(
-        "DELETE FROM slide_style_overrides WHERE session_id = ?", (session_id,)
-    )
-    await conn.commit()
-    return (cur.rowcount or 0) > 0
+    async with write_lock(conn):
+        cur = await conn.execute(
+            "DELETE FROM slide_style_overrides WHERE session_id = ?", (session_id,)
+        )
+        await conn.commit()
+        return (cur.rowcount or 0) > 0
 
 
 async def promote_to_global(
@@ -108,33 +112,34 @@ async def promote_to_global(
     preamble_tex = str(row[0])
 
     metadata = json.dumps({"kind": "slide_style_global"})
-    await conn.execute(
-        """
-        INSERT INTO memories (scope, content, created_at, updated_at, status, metadata)
-        VALUES ('global', ?, datetime('now'), datetime('now'), 'active', ?)
-        """,
-        (preamble_tex, metadata),
-    )
-    async with conn.execute("SELECT last_insert_rowid()") as cur:
-        id_row = await cur.fetchone()
-    assert id_row is not None
-    new_id = int(id_row[0])
+    async with write_lock(conn):
+        await conn.execute(
+            """
+            INSERT INTO memories (scope, content, created_at, updated_at, status, metadata)
+            VALUES ('global', ?, datetime('now'), datetime('now'), 'active', ?)
+            """,
+            (preamble_tex, metadata),
+        )
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            id_row = await cur.fetchone()
+        assert id_row is not None
+        new_id = int(id_row[0])
 
-    # Supersede any prior active slide_style_global rows; point them at the new one.
-    # The `id != ?` clause excludes the row we just inserted.
-    await conn.execute(
-        """
-        UPDATE memories
-           SET status = 'superseded',
-               superseded_by = ?,
-               updated_at = datetime('now')
-         WHERE scope = 'global'
-           AND status = 'active'
-           AND id != ?
-           AND metadata IS NOT NULL
-           AND json_extract(metadata, '$.kind') = 'slide_style_global'
-        """,
-        (new_id, new_id),
-    )
-    await conn.commit()
+        # Supersede any prior active slide_style_global rows; point them at the new one.
+        # The `id != ?` clause excludes the row we just inserted.
+        await conn.execute(
+            """
+            UPDATE memories
+               SET status = 'superseded',
+                   superseded_by = ?,
+                   updated_at = datetime('now')
+             WHERE scope = 'global'
+               AND status = 'active'
+               AND id != ?
+               AND metadata IS NOT NULL
+               AND json_extract(metadata, '$.kind') = 'slide_style_global'
+            """,
+            (new_id, new_id),
+        )
+        await conn.commit()
     return True

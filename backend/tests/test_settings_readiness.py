@@ -137,3 +137,59 @@ async def test_fetch_model_options_falls_back_to_static(
     )
     out = await sr.fetch_model_options(["gemini"])
     assert out["gemini"] == ["gemini/gemini-2.5-pro"]
+
+
+@pytest.mark.asyncio
+async def test_agent_model_is_gated_with_a_tool_calling_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review #10: every chat turn runs on the core agent model, so readiness
+    checks it (PAPERHUB_AGENT_MODEL, else the flagship) and with a tools list:
+    a model without tool calling fails the gate."""
+    sr._reset_cache_for_tests()
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("PAPERHUB_MODEL_FLAGSHIP", "gemini/flag")
+    monkeypatch.setenv("PAPERHUB_AGENT_MODEL", "gemini/no-tools")
+    calls: list[dict[str, object]] = []
+
+    async def ping(**kw: object) -> object:
+        calls.append(kw)
+        if kw["model"] == "gemini/no-tools" and kw.get("tools"):
+            raise sr.litellm.BadRequestError(
+                message="this model does not support tools", model="no-tools",
+                llm_provider="gemini")
+        return object()
+
+    monkeypatch.setattr(sr.litellm, "acompletion", ping)
+    result = await sr.compute_readiness(["GEMINI_API_KEY"])
+    agent = result["models"]["agent"]
+    assert agent["model"] == "gemini/no-tools"
+    assert agent["key_ok"] is False and agent["error"] == "ToolCallingUnsupported"
+    assert result["ready"] is False
+    assert any(c["model"] == "gemini/no-tools" and c.get("tools") for c in calls)
+
+    sr._reset_cache_for_tests()
+    monkeypatch.delenv("PAPERHUB_AGENT_MODEL")
+    result = await sr.compute_readiness(["GEMINI_API_KEY"])
+    assert result["models"]["agent"]["model"] == "gemini/flag"
+    assert result["models"]["agent"]["key_ok"] is True and result["ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_of_the_tools_ping_is_not_tool_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-review N3: a timeout / 429 on the tools ping keeps its own class
+    (transient, never blocking), not ToolCallingUnsupported."""
+    sr._reset_cache_for_tests()
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("PAPERHUB_AGENT_MODEL", "gemini/agent")
+
+    async def ping(**kw: object) -> object:
+        if kw.get("tools"):
+            raise sr.litellm.Timeout(message="slow", model="agent", llm_provider="gemini")
+        return object()
+
+    monkeypatch.setattr(sr.litellm, "acompletion", ping)
+    result = await sr.compute_readiness(["GEMINI_API_KEY"])
+    assert result["models"]["agent"]["error"] == "Timeout"

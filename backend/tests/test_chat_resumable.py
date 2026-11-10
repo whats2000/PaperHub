@@ -6,8 +6,8 @@ events are buffered in a :class:`RunHandle`; ``POST /chat`` returns a thin
 
 The load-bearing invariants under test:
 
-1. **Same stream** — a mocked chitchat turn yields the SAME client-visible event
-   sequence as before (session → routing_decision → token(s) → final).
+1. **Same stream** — a scripted agent answer turn yields the client-visible
+   event sequence (session → tool_step / token(s) → agent_summary → final).
 2. **Disconnect ≠ cancel** — dropping the subscriber early leaves the background
    ``run_agent`` task running to a terminal status AND persists the assistant
    message row. Only the explicit Stop endpoint (A3) cancels.
@@ -29,6 +29,7 @@ from httpx import ASGITransport, AsyncClient
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
+from tests.agent_script import answer, script_agent
 
 
 class _FakeMcpRegistry:
@@ -93,13 +94,9 @@ def _clear_broker() -> Iterator[None]:
 
 
 def _chitchat_env(monkeypatch: Any, tmp_path: Any, reply: str = "Hello there!") -> None:
+    """A plain answer turn: the scripted agent answers without tools."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat",'
-        '"confidence":0.9,"reasoning":"greeting"}',
-    )
-    monkeypatch.setenv("PAPERHUB_CHITCHAT_MOCK", reply)
+    script_agent(monkeypatch, [answer(reply)])
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +118,12 @@ async def test_chat_subscriber_streams_same_sequence(
             events = await _consume_sse(response.aiter_bytes())
 
     types = [t for t, _ in events]
-    # Unchanged client-visible sequence: session first, then routing, tokens, final.
+    # Client-visible sequence: session first, tokens, summary, final.
     assert types[0] == "session"
-    assert "routing_decision" in types
-    assert types.count("tool_step") >= 2  # router + chitchat
-    assert "final" in types
+    assert "routing_decision" not in types
+    assert types.count("tool_step") >= 1  # the agent:step row
+    assert "token" in types
+    assert types[-2:] == ["agent_summary", "final"]
     final_payload = next(d for t, d in events if t == "final")
     assert final_payload["content"] == "Hello there!"
 
@@ -137,23 +135,14 @@ async def test_disconnect_does_not_cancel_run(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"chitchat",'
-        '"confidence":0.9,"reasoning":"greeting"}',
-    )
     await _bootstrap_schema(tmp_path)
 
-    # A chitchat stream that yields several tokens with small awaits so we can
-    # disconnect mid-stream while the background task is still running.
-    async def _slow_chitchat(state: Any, **kwargs: Any) -> AsyncIterator[str]:
-        for i in range(5):
-            await asyncio.sleep(0.02)
-            yield f"tok{i} "
+    # A slow answer stream (small awaits between deltas) so we can disconnect
+    # mid-stream while the background task is still running.
+    script_agent(
+        monkeypatch, [answer("tok0 tok1 tok2 tok3 tok4 ")], token_delay=0.05)
 
     import paperhub.api.chat as chat_module
-
-    monkeypatch.setattr(chat_module, "chitchat_stream", _slow_chitchat)
 
     app = _wire_test_app()
     transport = ASGITransport(app=app)
@@ -186,7 +175,7 @@ async def test_disconnect_does_not_cancel_run(
     ) as cur:
         row = await cur.fetchone()
     assert row is not None, "background task must persist the assistant message"
-    assert row[0] == "tok0 tok1 tok2 tok3 tok4 "
+    assert row[0] == "tok0 tok1 tok2 tok3 tok4"
 
     # The runs row is terminal 'ok'.
     async with aiosqlite.connect(settings.db_path) as conn, conn.execute(

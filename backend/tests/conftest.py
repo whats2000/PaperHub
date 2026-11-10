@@ -43,6 +43,18 @@ def _fresh_db_write_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db_connection, "_DB_WRITE_LOCK", asyncio.Lock())
 
 
+@pytest.fixture(autouse=True)
+def _no_arxiv_pdf_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never fetch a page PDF from arXiv (a strict compile failing on
+    a fixture would otherwise reach the network)."""
+    from paperhub.pipelines import page_pdf
+
+    def blocked(url: str, target: Path) -> None:
+        raise RuntimeError(f"network blocked in tests: {url}")
+
+    monkeypatch.setattr(page_pdf, "_download", blocked)
+
+
 @pytest_asyncio.fixture
 async def migrated_db(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
     db_path = tmp_path / "paperhub.db"

@@ -12,6 +12,7 @@
 #     .\scripts\start.ps1 -BackendPort 8765  # custom backend port
 #     .\scripts\start.ps1 -NoReload          # production-style: no uvicorn --reload
 #     .\scripts\start.ps1 -NoWebSearch       # skip launching external MCP daemons (open-websearch)
+#     .\scripts\start.ps1 -Workspace D:/ws -McpConfig D:/ws/mcp_servers.toml   # isolated instance
 #
 [CmdletBinding()]
 param(
@@ -19,11 +20,16 @@ param(
     [string]$BindHost = "127.0.0.1",     # $Host is a PowerShell reserved automatic
     [switch]$NoReload,                   # default: uvicorn --reload on
     [switch]$NoWebSearch,                # default: ensure external MCP daemons (open-websearch)
-    [switch]$NoReap                      # default: reap stale listeners from a prior run before starting
+    [switch]$NoReap,                     # default: reap stale listeners from a prior run before starting
+    [string]$Workspace = "",             # optional: sets PAPERHUB_WORKSPACE (isolated instance)
+    [string]$McpConfig = ""              # optional: sets PAPERHUB_MCP_CONFIG (own MCP toml)
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -Path (Join-Path $PSScriptRoot "..")
+
+if ($Workspace) { $env:PAPERHUB_WORKSPACE = $Workspace }
+if ($McpConfig) { $env:PAPERHUB_MCP_CONFIG = $McpConfig }
 
 # --- process-tree teardown helpers -------------------------------------------
 # We spawn children through `uv` / `npx` wrappers, so the handle we hold is the

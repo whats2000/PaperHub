@@ -73,6 +73,8 @@
   "bubble": {
     "retry": "重试",
     "interrupted": "生成已中断",
+    "stopped": "已停止。已执行的操作列在下方，可以撤销。",
+    "stopping": "正在停止…",
     "copy": "复制消息",
     "fork": "从此消息分叉",
     "forkTitle": "从此处分叉 — 新建对话并编辑此消息"
@@ -117,11 +119,71 @@
     "step_other": "{{count}} 个步骤",
     "loading": "正在加载追踪…",
     "empty": "没有记录任何步骤。",
-    "retry": "重试"
+    "retry": "重试",
+    "agentStep": "第 {{n}} 步",
+    "answer": "回答"
   },
   "panel": {
     "memory": "记忆",
     "slides": "幻灯片",
     "resize": "调整参考面板大小"
+  },
+  "agentSummary": {
+    "label": "代理",
+    "papers_one": "读了 {{count}} 篇论文",
+    "papers_other": "读了 {{count}} 篇论文",
+    "steps_one": "{{count}} 步",
+    "steps_other": "{{count}} 步",
+    "tools": "使用的工具：{{tools}}",
+    "noTools": "未使用工具直接回答"
+  },
+  "agentEvent": {
+    "paperAdded": "已添加论文",
+    "memorySaved": "已存入记忆",
+    "undo": "撤销",
+    "undone": "已撤销",
+    "undoFailed": "无法撤销"
+  },
+  "confirm": {
+    "title": "确认此操作",
+    "reason": "原因：",
+    "confirm": "确认",
+    "dismiss": "忽略",
+    "running": "执行中…",
+    "done": "完成。",
+    "failedGeneric": "操作执行失败。",
+    "interrupted": "执行期间服务器停止了，操作可能没有完成。",
+    "reasonClassifier": "自动批准无法确定这正是你要求的操作。",
+    "reasonCheckFailed": "自动批准检查失败，所以请你确认。",
+    "action": {
+      "removePaper": "从此对话移除「{{title}}」",
+      "forgetGlobal": "忘记这条记忆（所有对话）：「{{content}}」",
+      "forgetSession": "忘记这条记忆（此对话）：「{{content}}」"
+    },
+    "result": {
+      "removePaper": "已从此对话移除「{{title}}」。",
+      "forget": "已忘记「{{content}}」。"
+    },
+    "unavailable": "此操作在这里已不可用。",
+    "stale": "此操作已经处理过了。",
+    "requestFailed": "无法连接到服务器，请重试。",
+    "dismissed": "已忽略：{{summary}}"
+  },
+  "autoApprove": {
+    "menuTitle": "批准模式",
+    "ask": {
+      "title": "先询问",
+      "desc": "移除论文或删除记忆前先问你",
+      "tooltip": "会更改论文库或记忆的操作（移除论文、删除记忆）都会等你确认。仅应用于此对话，这是默认模式。"
+    },
+    "auto": {
+      "title": "自动批准",
+      "desc": "通过快速检查的操作直接执行，有风险时才询问",
+      "tooltip": "开启后，原本需要你确认的操作（移除论文、删除记忆）会先经过快速检查，决定能否不经询问直接执行。仅应用于此对话，默认关闭。"
+    },
+    "failed": "无法更改自动批准设置"
+  },
+  "proposals": {
+    "label": "建议的后续问题"
   }
 }

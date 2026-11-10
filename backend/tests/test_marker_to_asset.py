@@ -19,6 +19,7 @@ def test_maps_figures_equations_sections(tmp_path: Path) -> None:
                     section_hierarchy={"1": "/page/0/SectionHeader/1"}),
         MarkerBlock(block_type="Figure", images={"img": png},
                     caption="Figure 1: the architecture diagram.", page=2,
+                    bbox=[50.0, 80.5, 300.0, 240.0],
                     section_hierarchy={"1": "/page/0/SectionHeader/1"}),
         MarkerBlock(block_type="Equation", html="<math/>", latex=r"E=mc^2",
                     section_hierarchy={"1": "/page/0/SectionHeader/1"}),
@@ -28,6 +29,7 @@ def test_maps_figures_equations_sections(tmp_path: Path) -> None:
     f = asset.figures[0]
     assert "architecture" in f.caption.lower()
     assert f.page == 2 and f.section == "Method"  # resolved from the block-id ref
+    assert f.bbox == (50.0, 80.5, 300.0, 240.0)  # where a [fig:] citation opens
     assert (paper_asset_dir(tmp_path) / f.image_path).exists()
     assert asset.equations[0].latex == "E=mc^2"
     assert asset.equations[0].section == "Method"

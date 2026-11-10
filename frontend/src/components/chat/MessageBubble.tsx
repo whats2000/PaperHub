@@ -11,7 +11,7 @@ import { toast } from "sonner";
 // KaTeX stylesheet — required for rehype-katex output to render correctly.
 import "katex/dist/katex.min.css";
 
-import type { ChatMessage } from "@/types/domain";
+import type { ChatMessage, SearchResultCandidate } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/states/LoadingDots";
 import { SearchResultList } from "@/components/chat/SearchResultList";
@@ -19,10 +19,22 @@ import { SqlCard } from "@/components/chat/SqlCard";
 import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
+import { rehypeFigureCitations } from "@/lib/rehypeFigureCitations";
+import { rehypeUnsourcedMarks } from "@/lib/unsourcedMarks";
 import { rehypeTableBreaks } from "@/lib/rehypeTableBreaks";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
 import { liftSqlFence } from "@/lib/liftSqlFence";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
+import { FigureCitationMarker } from "@/components/canvas/FigureCitationMarker";
+import { ViewCitationMarker } from "@/components/canvas/ViewCitationMarker";
+import { UnsourcedMarker } from "@/components/canvas/UnsourcedMarker";
+import { AgentEventChip, type ChipEvent } from "@/components/chat/AgentEventChip";
+import { ConfirmActionCard } from "@/components/chat/ConfirmActionCard";
+import { ProposalButtons } from "@/components/chat/ProposalButtons";
+import { splitProposals } from "@/lib/proposals";
+import { listSessionReferences } from "@/lib/api";
+import { useChatStore } from "@/store/chat";
+import { useMemoriesStore } from "@/store/memories";
 
 interface Props {
   message: ChatMessage;
@@ -43,6 +55,25 @@ interface Props {
   /** Fork this (user) message: branch a new session from the point above it
    *  and prefill the composer with this message. Only shown on user messages. */
   onFork?: () => void;
+  /** Send a proposal button's text as a new message (agent turns). */
+  onSend?: (text: string) => void;
+  /** A turn is in flight: proposal buttons are disabled. */
+  sendDisabled?: boolean;
+  /** Merge a patch into this message's agent UI event at `index` (a confirm
+   *  card's status/result, a chip's undone flag). */
+  onPatchEvent?: (index: number, patch: Record<string, unknown>) => void;
+}
+
+/** After a confirmed action ran, refresh the panels it may have changed. */
+function refreshAfterAction(sessionId: number | null | undefined): void {
+  if (sessionId == null) return;
+  void listSessionReferences(sessionId)
+    .then((refs) => useChatStore.getState().setReferences(sessionId, refs))
+    .catch(() => undefined);
+  void useMemoriesStore
+    .getState()
+    .fetchMemories(sessionId)
+    .catch(() => undefined);
 }
 
 export function MessageBubble({
@@ -52,6 +83,9 @@ export function MessageBubble({
   researching = false,
   onPrefill,
   onFork,
+  onSend,
+  sendDisabled = false,
+  onPatchEvent,
 }: Props) {
   const { t } = useTranslation("chat");
   const { t: tStates } = useTranslation("states");
@@ -61,8 +95,10 @@ export function MessageBubble({
   const isStreaming = message.status === "streaming" || message.status === "processing";
   const isError = message.status === "error";
   const isInterrupted = message.status === "interrupted";
-  const isStreamingEmpty = isStreaming && !message.content;
-  const isStreamingWithContent = isStreaming && !!message.content;
+  const isStopped = message.status === "stopped";
+  const isStreamingEmpty =
+    isStreaming && !splitProposals(message.content).body;
+  const isStreamingWithContent = isStreaming && !isStreamingEmpty;
   // Copy is offered on completed assistant messages AND on the user's own
   // input bubbles (always copyable). Fork (rollback) is user-only.
   const canCopy =
@@ -75,6 +111,28 @@ export function MessageBubble({
     isAssistant &&
     message.search_results !== undefined &&
     message.search_results.length > 0;
+  // One list per search (agent turns may search several times); a pipeline
+  // turn's single list otherwise.
+  const searchBatches: SearchResultCandidate[][] = !hasSearchResults
+    ? []
+    : message.search_result_batches && message.search_result_batches.length > 0
+      ? message.search_result_batches.filter((b) => b.length > 0)
+      : [message.search_results!];
+  // Agent answers keep their <proposal> lines in the stored text (R12); show
+  // them as buttons, not markdown. Proposal buttons only on a finished turn.
+  const { body, proposals } = isAssistant
+    ? splitProposals(message.content)
+    : { body: message.content, proposals: [] as string[] };
+  const agentEvents = isAssistant ? (message.agent_events ?? []) : [];
+  const chipEvents = agentEvents
+    .map((ev, index) => ({ ev, index }))
+    .filter(
+      (x): x is { ev: ChipEvent; index: number } =>
+        x.ev.event === "paper_added" || x.ev.event === "memory_saved",
+    );
+  const confirmEvents = agentEvents
+    .map((ev, index) => ({ ev, index }))
+    .filter((x) => x.ev.event === "confirm_request");
 
   // The research card owns the waiting state; nothing to show in the bubble
   // until content or search results arrive.
@@ -137,6 +195,13 @@ export function MessageBubble({
                 </Button>
               )}
             </div>
+          ) : isStopped ? (
+            <p
+              data-testid="stopped-turn"
+              className="text-muted-foreground italic animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+            >
+              {t("bubble.stopped", "Stopped. What already ran is below; you can undo it.")}
+            </p>
           ) : isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : isStreamingEmpty ? (
@@ -152,6 +217,8 @@ export function MessageBubble({
               rehypePlugins={[
                 [rehypeKatex, { macros: KATEX_MACROS }],
                 rehypeChunkCitations,
+                rehypeFigureCitations,
+                rehypeUnsourcedMarks,
                 rehypeTableBreaks,
               ]}
               components={{
@@ -170,6 +237,41 @@ export function MessageBubble({
                   }
                   return <pre>{children}</pre>;
                 },
+                "fig-cite": ({ node }: ExtraProps) => {
+                  const props = (node?.properties ?? {}) as {
+                    dataPaper?: number | string;
+                    dataFigure?: string;
+                    dataOrdinal?: number | string;
+                  };
+                  return (
+                    <FigureCitationMarker
+                      paper={Number(props.dataPaper)}
+                      figureId={String(props.dataFigure ?? "")}
+                      ordinal={Number(props.dataOrdinal)}
+                    />
+                  );
+                },
+                "unsourced-mark": ({ node }: ExtraProps) => {
+                  const props = (node?.properties ?? {}) as { dataReason?: string };
+                  return <UnsourcedMarker reason={String(props.dataReason ?? "")} />;
+                },
+                "view-cite": ({ node }: ExtraProps) => {
+                  const props = (node?.properties ?? {}) as {
+                    dataPaper?: number | string;
+                    dataPage?: number | string;
+                    dataBox?: string;
+                    dataOrdinal?: number | string;
+                  };
+                  const b = String(props.dataBox ?? "").split(",").map(Number);
+                  return (
+                    <ViewCitationMarker
+                      paper={Number(props.dataPaper)}
+                      page={Number(props.dataPage)}
+                      box={[b[0] ?? 0, b[1] ?? 0, b[2] ?? 0, b[3] ?? 0]}
+                      ordinal={Number(props.dataOrdinal)}
+                    />
+                  );
+                },
                 "chunk-cite": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as {
                     dataChunkId?: number | string;
@@ -184,10 +286,20 @@ export function MessageBubble({
                 },
               } as Components}
             >
-              {normalizeMath(liftSqlFence(message.content)) || " "}
+              {normalizeMath(liftSqlFence(body)) || " "}
             </ReactMarkdown>
           )}
-          {isStreamingWithContent && (
+          {message.stopping && (
+            // Stop pressed: the turn stays put until the backend says whether
+            // it had already acted (kept as a stub) or is retracted.
+            <p
+              data-testid="stopping-turn"
+              className="not-prose mt-1 text-xs italic text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+            >
+              {t("bubble.stopping", "Stopping…")}
+            </p>
+          )}
+          {isStreamingWithContent && !message.stopping && (
             // Cursor blink trailing the streamed content — subtler than dots
             // once real text is visible.
             <span
@@ -202,17 +314,52 @@ export function MessageBubble({
             the assistant placeholder render and the `session` SSE event
             populating backend_session_id; SearchResultList handles that
             by disabling the Add button until the id arrives. */}
-        {hasSearchResults && (
+        {searchBatches.map((candidates, i) => (
           <SearchResultList
-            candidates={message.search_results!}
+            key={i}
+            candidates={candidates}
             sessionId={backendSessionId ?? null}
           />
+        ))}
+
+        {/* Agent "do, show, undo" chips (papers added, memories saved). */}
+        {chipEvents.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {chipEvents.map(({ ev, index }) => (
+              <AgentEventChip
+                key={index}
+                ev={ev}
+                sessionId={backendSessionId ?? null}
+                onChange={(patch) => onPatchEvent?.(index, patch)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Confirm-tier actions waiting for the user. */}
+        {confirmEvents.map(({ ev, index }) =>
+          ev.event === "confirm_request" ? (
+            <ConfirmActionCard
+              key={ev.data.action_id}
+              data={ev.data}
+              onChange={(patch) => onPatchEvent?.(index, patch)}
+              onDone={() => refreshAfterAction(backendSessionId)}
+            />
+          ) : null,
         )}
 
         {/* Deck chip — rendered when a slide deck has been generated for this
             turn (deck SSE event). Shows below search results if both exist. */}
         {isAssistant && message.deck !== undefined && (
           <DeckChip deck={message.deck} onPrefill={onPrefill} />
+        )}
+
+        {isAssistant && !isStreaming && onSend && (
+          <ProposalButtons
+            proposals={proposals}
+            onSend={onSend}
+            disabled={sendDisabled}
+          />
         )}
 
         {/* Hover-revealed action row under the bubble, bottom-right — the same
@@ -234,7 +381,7 @@ export function MessageBubble({
                 className="h-6 w-6"
                 aria-label={t("bubble.copy")}
                 onClick={() => {
-                  navigator.clipboard.writeText(message.content).then(
+                  navigator.clipboard.writeText(body).then(
                     () => toast.success(t("toast.copied")),
                     () => toast.error(t("toast.copyFailed")),
                   );

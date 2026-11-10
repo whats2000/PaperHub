@@ -20,7 +20,7 @@ const item = (answer: string): QueueItem => ({
 });
 
 describe("ConversationContext citations", () => {
-  it.each(["[chunk:101,102]", "[chunk:75143, 75161]", "[chunk:7]", "[3]"])(
+  it.each(["[chunk:101,102]", "[chunk:75143, 75161]", "[chunk:7]", "[3]", "[unsourced:not_read]"])(
     "renders %s as a superscript, not raw text",
     (marker) => {
       const { container } = render(<ConversationContext item={item(`Alpha ${marker} beta.`)} />);

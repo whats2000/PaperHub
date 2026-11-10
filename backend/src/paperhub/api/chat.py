@@ -1,5 +1,7 @@
 import asyncio
+import contextlib
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -12,6 +14,17 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from paperhub.agents.chitchat import chitchat_stream
+from paperhub.agents.core.action_tools import build_default_registry
+from paperhub.agents.core.agent import (
+    REPLAYED_UI_EVENTS,
+    AgentDeps,
+    Final,
+    Step,
+    Token,
+    ToolEvent,
+    run_core_agent,
+)
+from paperhub.agents.core.context import in_live_history
 from paperhub.agents.graph import CLARIFY_FALLBACK
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_node import memory_node
@@ -37,12 +50,15 @@ from paperhub.agents.sql_agent import sql_agent_stream
 from paperhub.agents.state import AgentState
 from paperhub.agents.stubs import stub_response
 from paperhub.agents.style_commands import (
+    StyleAction,
     classify_style_command,
     handle_style_command,
 )
 from paperhub.api.run_broker import RunBroker, RunHandle
+from paperhub.api.sessions import load_search_results
 from paperhub.config import Settings, load_settings
-from paperhub.db.connection import open_db
+from paperhub.db.connection import open_db, write_lock
+from paperhub.db.decks import get_deck
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.errors import UserFacingError
 from paperhub.feedback.review import maybe_review_keyword
@@ -54,6 +70,8 @@ from paperhub.mcp.client_context import (
 )
 from paperhub.mcp.registry import MCPRegistry
 from paperhub.models.events import (
+    AgentSummary,
+    AgentSummaryEvent,
     ErrorEvent,
     FinalEvent,
     RoutingDecisionEvent,
@@ -67,6 +85,7 @@ from paperhub.tracing.redactor import redact
 from paperhub.tracing.tracer import Tracer
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Resumable streaming (FR-15): a chat turn runs as a backend-owned background
@@ -116,6 +135,13 @@ class ChatRequest(BaseModel):
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
+    async with write_lock(conn):
+        return await _ensure_session_locked(conn, session_id)
+
+
+async def _ensure_session_locked(
+    conn: aiosqlite.Connection, session_id: int | None,
+) -> int:
     if session_id is not None:
         # The client may hold a backend_session_id (in localStorage) that no
         # longer exists in the DB — a reset workspace, a deleted session, or a
@@ -149,13 +175,14 @@ def _derive_title(content: str) -> str:
 
 
 async def _new_run(conn: aiosqlite.Connection, session_id: int) -> int:
-    await conn.execute(
-        "INSERT INTO runs (session_id, status) VALUES (?, 'running')",
-        (session_id,),
-    )
-    await conn.commit()
-    async with conn.execute("SELECT last_insert_rowid()") as cur:
-        row = await cur.fetchone()
+    async with write_lock(conn):
+        await conn.execute(
+            "INSERT INTO runs (session_id, status) VALUES (?, 'running')",
+            (session_id,),
+        )
+        await conn.commit()
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
     assert row is not None
     return int(row[0])
 
@@ -166,19 +193,32 @@ async def _finalise(
     session_id: int,
     final_content: str,
     status: str,
-) -> int:
-    await conn.execute(
-        "INSERT INTO messages (session_id, role, content, run_id) "
-        "VALUES (?, 'assistant', ?, ?)",
-        (session_id, final_content, run_id),
-    )
-    await conn.execute(
-        "UPDATE runs SET finished_at = datetime('now'), status = ? WHERE id = ?",
-        (status, run_id),
-    )
-    await conn.commit()
-    async with conn.execute("SELECT last_insert_rowid()") as cur:
-        row = await cur.fetchone()
+) -> int | None:
+    """Save the assistant message and end the run with ``status``.
+
+    Only while the run is still ``running``: a run the Stop endpoint already
+    marked ``cancelled`` keeps that status and gets no assistant message.
+    Returns the message id, or None when the run was no longer running."""
+    async with write_lock(conn):
+        async with conn.execute(
+            "SELECT status FROM runs WHERE id = ?", (run_id,),
+        ) as cur:
+            run_row = await cur.fetchone()
+        if run_row is None or run_row[0] != "running":
+            return None
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (?, 'assistant', ?, ?)",
+            (session_id, final_content, run_id),
+        )
+        async with conn.execute("SELECT last_insert_rowid()") as cur:
+            row = await cur.fetchone()
+        await conn.execute(
+            "UPDATE runs SET finished_at = datetime('now'), status = ? "
+            "WHERE id = ? AND status = 'running'",
+            (status, run_id),
+        )
+        await conn.commit()
     assert row is not None
     return int(row[0])
 
@@ -324,33 +364,38 @@ async def _resolve_history(
     if history:
         return [h.model_dump() for h in history]
     async with conn.execute(
-        "SELECT role, content FROM messages "
-        "WHERE session_id = ? AND role IN ('user', 'assistant') "
-        "ORDER BY id",
+        "SELECT m.role, m.content, r.status FROM messages m "
+        "LEFT JOIN runs r ON r.id = m.run_id "
+        "WHERE m.session_id = ? AND m.role IN ('user', 'assistant') "
+        "ORDER BY m.id",
         (session_id,),
     ) as cur:
         rows = await cur.fetchall()
-    return [{"role": str(r[0]), "content": str(r[1])} for r in rows]
+    # The client's filter (see in_live_history), so both paths agree.
+    return [{"role": str(r[0]), "content": str(r[1])} for r in rows
+            if in_live_history(str(r[0]), str(r[1]), r[2])]
 
 
 async def _record_user_message(
     conn: aiosqlite.Connection, session_id: int, content: str, run_id: int
 ) -> None:
-    await conn.execute(
-        "INSERT INTO messages (session_id, role, content, run_id) "
-        "VALUES (?, 'user', ?, ?)",
-        (session_id, content, run_id),
-    )
-    # Promote the still-default title from the first user message so the
-    # session is identifiable in GET /sessions across devices. Fires while the
-    # title is the seed 'New chat' OR a fork placeholder ('Fork of …'); the
-    # rename moves the title off both sentinels so later turns never overwrite it.
-    await conn.execute(
-        "UPDATE chat_sessions SET title = ? "
-        "WHERE id = ? AND (title = 'New chat' OR title LIKE 'Fork of %')",
-        (_derive_title(content), session_id),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (?, 'user', ?, ?)",
+            (session_id, content, run_id),
+        )
+        # Promote the still-default title from the first user message so the
+        # session is identifiable in GET /sessions across devices. Fires while
+        # the title is the seed 'New chat' OR a fork placeholder ('Fork of …');
+        # the rename moves the title off both sentinels so later turns never
+        # overwrite it.
+        await conn.execute(
+            "UPDATE chat_sessions SET title = ? "
+            "WHERE id = ? AND (title = 'New chat' OR title LIKE 'Fork of %')",
+            (_derive_title(content), session_id),
+        )
+        await conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +632,7 @@ _NULL_PIPELINE: Any = _NullPipeline()
 _NULL_REGISTRY: Any = _NullRegistry()
 
 
-async def run_agent(
+async def run_pipeline_turn(
     handle: RunHandle,
     session_id: int,
     run_id: int,
@@ -599,7 +644,15 @@ async def run_agent(
     memory_op_mock: str | None,
     mcp_registry: Any,
 ) -> None:
-    """Execute one chat turn as a backend-owned background task (FR-15).
+    """The pre-H4 turn: ``router_node`` + one intent pipeline (FR-06).
+
+    Not on the request path since Plan H4 (``POST /chat`` drives
+    :func:`run_agent`, the core agent); kept, like the router itself, until
+    a later cleanup (SRS §III-10.4 "Out of scope"). Tests that pin
+    pipeline-only behaviour route ``chat_endpoint`` here by patching
+    ``run_agent``.
+
+    Execute one chat turn as a backend-owned background task (FR-15).
 
     The body is the former ``stream_events`` generator with every
     ``yield {"event": E, "data": D}`` replaced by ``handle.emit({...})`` and
@@ -987,6 +1040,8 @@ async def run_agent(
                 message_id = await _finalise(
                     conn, run_id, session_id, final_content, status="ok",
                 )
+                if message_id is None:  # stopped meanwhile; Stop owns cleanup
+                    return
                 final_evt = FinalEvent(
                     run_id=run_id, branch="",
                     message_id=message_id, content=final_content,
@@ -1019,6 +1074,398 @@ async def run_agent(
                 # mark_terminal already closes subscriber queues on the
                 # ok/error paths, and the cancel endpoint does it for cancelled.
                 reset_client_headers_context(headers_token)
+
+
+# ---------------------------------------------------------------------------
+# H4: every turn drives the core agent (SRS §III-10.4, FR-21)
+# ---------------------------------------------------------------------------
+
+TRACE_POLL_SECONDS = 0.5
+"""How often a running turn streams trace rows that closed without a UI
+event (a read tool, a parallel call), so the trace panel stays live."""
+
+
+def _emit_json(handle: RunHandle, name: str, data: Any) -> None:
+    handle.emit({"event": name,
+                 "data": json.dumps(data, separators=(",", ":"), default=str)})
+
+
+def _emit_model(handle: RunHandle, name: str, evt: BaseModel) -> None:
+    handle.emit({"event": name, "data": evt.model_dump_json(exclude={"type"})})
+
+
+class _TraceStream:
+    """Streams a run's ``tool_calls`` rows as ``tool_step`` events, each once.
+
+    Rows close out of order (parallel tool calls) and the loop forwards
+    some rows itself (a tool's inner pipeline steps), so emission keeps a
+    SET of emitted step indexes, not a watermark. ``_floor`` is the highest
+    index at or below which every row was emitted; drains read from there.
+    """
+
+    def __init__(self, conn: aiosqlite.Connection, run_id: int,
+                 handle: RunHandle) -> None:
+        self._conn = conn
+        self._run_id = run_id
+        self._handle = handle
+        self._emitted: set[int] = set()
+        self._floor = -1
+        self._lock = asyncio.Lock()
+
+    def claim(self, step_index: int) -> bool:
+        """Mark ``step_index`` emitted; False when it already was."""
+        if step_index <= self._floor or step_index in self._emitted:
+            return False
+        self._emitted.add(step_index)
+        while self._floor + 1 in self._emitted:
+            self._floor += 1
+            self._emitted.discard(self._floor)
+        return True
+
+    def forward(self, record: dict[str, Any]) -> None:
+        idx = record.get("step_index")
+        # Negative indexes are the Report stage heartbeats (live-only, never
+        # in tool_calls); several stages reuse -1, the frontend collapses
+        # them, so they bypass de-duplication.
+        if isinstance(idx, int) and idx >= 0 and not self.claim(idx):
+            return
+        _emit_json(self._handle, "tool_step", {"record": record})
+
+    async def drain(self) -> None:
+        async with self._lock:
+            for rec in await drain_tool_calls_since(
+                self._conn, self._run_id, self._floor,
+            ):
+                if self.claim(int(rec["step_index"])):
+                    _emit_json(self._handle, "tool_step", {"record": rec})
+
+    async def poll(self) -> None:
+        """Background drain. A failed drain is logged and retried on the
+        next tick; it must never fail (or mask the error of) the turn."""
+        while True:
+            await asyncio.sleep(TRACE_POLL_SECONDS)
+            try:
+                await self.drain()
+            except Exception:  # noqa: BLE001 - best-effort live trace
+                logger.warning("trace drain failed for run %s", self._run_id,
+                               exc_info=True)
+
+
+async def _append_search_batch(
+    conn: aiosqlite.Connection, run_id: int, cards: list[dict[str, Any]],
+) -> None:
+    """Append one card list to ``runs.search_results_json`` as
+    ``{"batches": [...]}`` (a turn may search several times)."""
+    async with write_lock(conn):
+        async with conn.execute(
+            "SELECT search_results_json FROM runs WHERE id = ?", (run_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        batches = load_search_results(row[0] if row else None)
+        batches.append(cards)
+        await conn.execute(
+            "UPDATE runs SET search_results_json = ? WHERE id = ?",
+            (json.dumps({"batches": batches}, separators=(",", ":")), run_id),
+        )
+        await conn.commit()
+
+
+async def _style_intercept(
+    conn: aiosqlite.Connection, session_id: int, message: str,
+) -> StyleAction | None:
+    """The F4.5 deterministic slide-style command, when it applies.
+
+    The router used to gate it on the ``slides`` intent. Without a router it
+    is gated on the chat having a deck, and "remember this style" also on a
+    session style existing, so a message such as "記住我喜歡的風格" about
+    answers still reaches the agent."""
+    action = classify_style_command(message)
+    if action is None or await get_deck(conn, session_id=session_id) is None:
+        return None
+    if action == "promote_to_global":
+        async with conn.execute(
+            "SELECT 1 FROM slide_style_overrides WHERE session_id = ?",
+            (session_id,),
+        ) as cur:
+            if await cur.fetchone() is None:
+                return None
+    return action
+
+
+async def _save_agent_record(
+    conn: aiosqlite.Connection, run_id: int, record: dict[str, Any],
+) -> None:
+    async with write_lock(conn):
+        await conn.execute(
+            "UPDATE runs SET agent_record_json = ? WHERE id = ?",
+            (json.dumps(record), run_id),
+        )
+        await conn.commit()
+
+
+_REPLAYED_UI_EVENTS = REPLAYED_UI_EVENTS
+# A stopped turn that already did one of these keeps a stub (cancel_run).
+_SIDE_EFFECT_EVENTS = frozenset({"paper_added", "memory_saved"})
+_CANCEL_WAIT_S = 10.0
+
+
+async def _store_ui_events(
+    conn: aiosqlite.Connection, run_id: int, ui_events: list[dict[str, Any]],
+) -> None:
+    """Merge ``ui_events`` into the run's saved agent record."""
+    async with conn.execute(
+        "SELECT agent_record_json FROM runs WHERE id = ?", (run_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    try:
+        record = json.loads(row[0]) if row is not None and row[0] else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        record = {}
+    if not isinstance(record, dict):
+        record = {}
+    record["ui_events"] = ui_events
+    await _save_agent_record(conn, run_id, record)
+
+
+async def _drive_core_agent(
+    handle: RunHandle,
+    state: AgentState,
+    *,
+    conn: aiosqlite.Connection,
+    tracer: Tracer,
+    trace: _TraceStream,
+    settings: Settings,
+    adapter: LiteLlmAdapter,
+    mcp_registry: Any,
+) -> tuple[str, dict[str, Any]]:
+    """Run the core agent and translate its events to SSE. Returns the
+    citation-validated answer and the turn's work record."""
+    run_id = int(state["run_id"])
+    session_id = int(state["session_id"])
+    ui_events: list[dict[str, Any]] = []
+
+    async def forward(name: str, payload: dict[str, Any]) -> None:
+        if name in _REPLAYED_UI_EVENTS:
+            ui_events.append({"event": name, "data": dict(payload)})
+        if name == "tool_step":
+            trace.forward(dict(payload.get("record") or {}))
+            return
+        if name == "search_results":
+            # library:<id> cards already in this chat carry their papers_id:
+            # the frontend's "Added" badge joins on it (PDF-only papers have
+            # no arxiv_id to match).
+            marked = await _mark_already_in_session(
+                conn, session_id,
+                [SearchCandidate(**SearchCandidateModel(**c).model_dump())
+                 for c in payload.get("candidates") or []],
+            )
+            sr_evt = SearchResultsEvent(
+                run_id=run_id,
+                candidates=[SearchCandidateModel(**asdict(c)) for c in marked],
+            )
+            # Persist each batch so the cards replay cross-device.
+            await _append_search_batch(
+                conn, run_id, [c.model_dump() for c in sr_evt.candidates])
+            _emit_model(handle, sr_evt.type, sr_evt)
+        else:
+            _emit_json(handle, name, payload)
+        await trace.drain()
+
+    deps = AgentDeps(
+        adapter=adapter, tracer=tracer, conn=conn, settings=settings,
+        registry=build_default_registry(settings), emit=forward,
+        mcp_registry=mcp_registry,
+    )
+    final: Final | None = None
+    poller = asyncio.create_task(trace.poll())
+    events = run_core_agent(state, deps)
+    try:
+        async for ev in events:
+            if isinstance(ev, Token):
+                tok = TokenEvent(run_id=run_id, branch="", text=ev.text)
+                _emit_model(handle, tok.type, tok)
+            elif isinstance(ev, ToolEvent):
+                await forward(ev.name, ev.payload)
+            elif isinstance(ev, Step):
+                await trace.drain()
+            elif isinstance(ev, Final):
+                final = ev
+    except asyncio.CancelledError:
+        # Stop may land while an event is being forwarded (the loop is then
+        # suspended at its yield, not cancelled): mark it a Stop and close it
+        # so it saves the turn's record and completed actions.
+        deps.stop_requested = True
+        await asyncio.shield(events.aclose())
+        raise
+    except Exception:
+        # The loop saved its error record; keep the cards already shown. A
+        # failure here must not replace the loop's own error.
+        try:
+            await _store_ui_events(conn, run_id, ui_events)
+        except Exception:  # noqa: BLE001 - logged; the loop error propagates
+            logger.exception("could not save the UI events of run %s", run_id)
+        raise
+    finally:
+        # Close the loop on every path (an error here leaves it at a yield;
+        # never leave it to the GC finaliser). A no-op once it has finished.
+        with contextlib.suppress(Exception):
+            await asyncio.shield(events.aclose())
+        poller.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller
+        # The suppress above also swallows a Stop delivered while awaiting
+        # the poller; re-raise it so the turn does not finish as 'ok'.
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise asyncio.CancelledError
+    if final is None:  # the loop always ends with Final; defensive
+        raise RuntimeError("core agent ended without a final answer")
+    # Every agent record carries ui_events (possibly empty): one shape.
+    record = {**final.record, "ui_events": ui_events}
+    await _save_agent_record(conn, run_id, record)
+    return final.text, record
+
+
+async def run_agent(
+    handle: RunHandle,
+    session_id: int,
+    run_id: int,
+    req: ChatRequest,
+    settings: Settings,
+    adapter: LiteLlmAdapter,
+    router_mock: str | None,
+    chitchat_mock: str | None,
+    memory_op_mock: str | None,
+    mcp_registry: Any,
+) -> None:
+    """Execute one chat turn through the core agent, as a backend-owned
+    background task (FR-15, FR-21).
+
+    No router: the agent picks tools step by step (SRS §III-10.4). SSE:
+    ``session``, then ``tool_step`` per trace row (each once), ``token`` per
+    answer delta and one event per tool UI event (``search_results``,
+    ``deck``, ``paper_added``, ``memory_saved``, ``confirm_request``,
+    ``answer_reset``), then ``agent_summary`` and ``final`` (the
+    citation-validated answer, replacing the streamed text). The run is
+    ``mode='agent'``. Only the Stop endpoint cancels it; the loop cancels its
+    in-flight tool tasks with it and the endpoint retracts the messages.
+    The router mocks are pipeline-only (see :func:`run_pipeline_turn`).
+    """
+    # The router mocks only steer the pipeline turn; the agent has no router.
+    del router_mock, chitchat_mock, memory_op_mock
+    async with open_db(settings.db_path) as conn:
+        sess_evt = SessionEvent(run_id=run_id, session_id=session_id)
+        _emit_model(handle, sess_evt.type, sess_evt)
+        # Before the user message is saved, so it is not counted twice.
+        resolved_history = await _resolve_history(conn, session_id, req.history)
+        await _record_user_message(conn, session_id, req.user_message, run_id)
+        async with write_lock(conn):
+            await conn.execute(
+                "UPDATE runs SET mode = 'agent' WHERE id = ?", (run_id,))
+            await conn.commit()
+        # Plan H2: a correction-like message flags the previous answer for a
+        # detached background review (never raises, never awaits the LLM).
+        await maybe_review_keyword(
+            conn, settings=settings, session_id=session_id, run_id=run_id,
+            user_message=req.user_message, llm=adapter,
+            ui_language=req.ui_language,
+        )
+        tracer = Tracer(conn, run_id=run_id, branch="")
+        trace = _TraceStream(conn, run_id, handle)
+        # MCP calls (incl. the loopback papers/sql/memory servers) forward
+        # the session/run headers the loopback middleware requires.
+        headers_token = set_client_headers_context(
+            ClientHeadersContext(session_id=session_id, run_id=run_id),
+        )
+        try:
+            # Plan H3 (QA I4): a chat opened from an idea carries the idea on
+            # every turn; slide context only when the composer chip is on.
+            idea = await build_idea_context(conn, session_id=session_id)
+            if idea is not None:
+                async with tracer.step(
+                    agent="ideation", tool="ideation:idea_context", model=None,
+                ) as idea_step:
+                    idea_step.record_args({"session_id": session_id})
+                    idea_step.record_result(idea.record)
+            state: AgentState = {
+                "run_id": run_id, "branch": "", "session_id": session_id,
+                "user_message": req.user_message,
+                "history": resolved_history,
+                "current_view_page": req.current_view_page,
+                "slide_attached": req.slide_attached,
+                "idea_context": idea.block if idea is not None else None,
+                "slide_context": (
+                    await build_slide_context(
+                        conn, session_id=session_id,
+                        current_view_page=req.current_view_page,
+                    )
+                    if req.slide_attached else None
+                ),
+            }
+            if req.ui_language:
+                state["ui_language"] = req.ui_language
+
+            style_action = await _style_intercept(
+                conn, session_id, req.user_message)
+            if style_action is not None:
+                # Deterministic and instant (no LLM), as before H4.
+                async with tracer.step(
+                    agent="agent", tool="agent:style_command", model=None,
+                ) as st:
+                    st.record_args({"action": style_action})
+                    final_content = await handle_style_command(
+                        action=style_action, session_id=session_id, conn=conn,
+                    )
+                    st.record_result({"action": style_action,
+                                      "answer": final_content})
+                tok = TokenEvent(run_id=run_id, branch="", text=final_content)
+                _emit_model(handle, tok.type, tok)
+                record: dict[str, Any] = {
+                    "tools": [], "read": [], "cited": [], "papers": [],
+                    "steps": 0, "style_command": style_action,
+                    "ui_events": [],
+                }
+                await _save_agent_record(conn, run_id, record)
+            else:
+                final_content, record = await _drive_core_agent(
+                    handle, state, conn=conn, tracer=tracer, trace=trace,
+                    settings=settings, adapter=adapter,
+                    mcp_registry=mcp_registry,
+                )
+
+            await trace.drain()
+            summary = AgentSummaryEvent(
+                run_id=run_id, **AgentSummary.from_record(record).model_dump())
+            _emit_model(handle, summary.type, summary)
+            message_id = await _finalise(
+                conn, run_id, session_id, final_content, status="ok",
+            )
+            if message_id is None:  # stopped meanwhile; Stop owns cleanup
+                return
+            final_evt = FinalEvent(
+                run_id=run_id, branch="", message_id=message_id,
+                content=final_content,
+            )
+            _emit_model(handle, final_evt.type, final_evt)
+            handle.final_message_id = message_id
+            handle.mark_terminal("ok", now=time.monotonic())
+        except asyncio.CancelledError:
+            # Stop (A3): the cancel endpoint retracts the messages and marks
+            # the run cancelled; re-raise so the cancel propagates.
+            raise
+        except Exception as exc:
+            safe_msg = (
+                exc.user_message if isinstance(exc, UserFacingError)
+                else redact(str(exc))
+            )
+            with contextlib.suppress(Exception):
+                await trace.drain()
+            await _finalise(conn, run_id, session_id, safe_msg, status="error")
+            err_evt = ErrorEvent(run_id=run_id, branch="", message=safe_msg)
+            _emit_model(handle, err_evt.type, err_evt)
+            handle.mark_terminal("error", now=time.monotonic())
+        finally:
+            reset_client_headers_context(headers_token)
 
 
 async def _terminal_events_from_db(
@@ -1056,12 +1503,28 @@ async def _terminal_events_from_db(
         final_evt = FinalEvent(
             run_id=run_id, branch="", message_id=msg_id, content=content,
         )
-        return [
-            {
-                "event": final_evt.type,
-                "data": final_evt.model_dump_json(exclude={"type"}),
-            }
-        ]
+        out: list[dict[str, Any]] = []
+        # An agent run's summary precedes its final, as on the live stream.
+        async with conn.execute(
+            "SELECT mode, agent_record_json FROM runs WHERE id = ?", (run_id,),
+        ) as cur:
+            run_row = await cur.fetchone()
+        if run_row is not None and run_row[0] == "agent" and run_row[1]:
+            try:
+                record = json.loads(run_row[1])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                record = None
+            if isinstance(record, dict):
+                summary = AgentSummaryEvent(
+                    run_id=run_id,
+                    **AgentSummary.from_record(record).model_dump())
+                out.append({"event": summary.type,
+                            "data": summary.model_dump_json(exclude={"type"})})
+        out.append({
+            "event": final_evt.type,
+            "data": final_evt.model_dump_json(exclude={"type"}),
+        })
+        return out
 
     if status == "error":
         content = str(row[1]) if row is not None else "An error occurred."
@@ -1104,24 +1567,118 @@ class CancelRequest(BaseModel):
     run_id: int
 
 
+def _did_side_effects(raw_record: str | None) -> bool:
+    try:
+        record = json.loads(raw_record) if raw_record else None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    events = record.get("ui_events") if isinstance(record, dict) else None
+    return isinstance(events, list) and any(
+        isinstance(e, dict) and e.get("event") in _SIDE_EFFECT_EVENTS
+        for e in events)
+
+
+async def _side_effects_from_trace(
+    conn: aiosqlite.Connection, run_id: int,
+) -> list[dict[str, Any]]:
+    """The chips of the actions that ran, rebuilt from the run's ``tool:*``
+    rows: durable even when the turn has not saved its record yet."""
+    async with conn.execute(
+        "SELECT tool, result_summary_json FROM tool_calls WHERE run_id = ? "
+        "AND status = 'ok' AND tool IN ('tool:add_paper', 'tool:remember', "
+        "'tool:remove_paper', 'tool:forget') ORDER BY step_index", (run_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    events: list[dict[str, Any]] = []
+    for tool, raw in rows:
+        try:
+            rec = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if tool == "tool:add_paper" and rec.get("added")                 and rec.get("prior_state") != "enabled":
+            events.append({"event": "paper_added", "data": {
+                "papers_id": rec.get("papers_id"),
+                "paper_content_id": rec.get("paper_content_id"),
+                "title": rec.get("title")}})
+        elif tool == "tool:remember" and rec.get("saved"):
+            events.append({"event": "memory_saved", "data": {
+                "memory_id": rec.get("memory_id"), "content": rec.get("content"),
+                "scope": rec.get("scope")}})
+        elif tool == "tool:remove_paper" and rec.get("removed"):
+            # Undone later in the same run: no chip (its Undo would re-act).
+            events = [e for e in events if not (
+                e["event"] == "paper_added"
+                and e["data"].get("paper_content_id") == rec.get("paper_content_id"))]
+        elif tool == "tool:forget" and rec.get("forgotten"):
+            events = [e for e in events if not (
+                e["event"] == "memory_saved"
+                and e["data"].get("memory_id") == rec.get("memory_id"))]
+    return events
+
+
 @router.post("/chat/cancel")
-async def cancel_run(req: CancelRequest) -> dict[str, str]:
+async def cancel_run(req: CancelRequest) -> dict[str, Any]:
+    """Stop a turn. ``kept``: the turn had already acted (a paper added, a
+    memory saved), so its question and a stopped stub with those chips stay;
+    otherwise the turn is retracted."""
     handle = broker.get(req.run_id)
     if handle is not None and handle.task is not None and not handle.task.done():
         handle.task.cancel()
         handle.mark_terminal("cancelled", now=time.monotonic())
+        # Let the turn save what it already did (its record) before deciding
+        # what of the turn stays.
+        _, pending = await asyncio.wait({handle.task}, timeout=_CANCEL_WAIT_S)
+        if pending:
+            logger.warning(
+                "run %s did not stop within %ss; deciding from its trace",
+                req.run_id, _CANCEL_WAIT_S)
+    kept = False
     settings = load_settings()
-    async with open_db(settings.db_path) as conn:
-        # guard BOTH writes on still-'running' so a Stop racing completion can't nuke a real answer
-        await conn.execute(
-            "DELETE FROM messages WHERE run_id = ? AND run_id IN "
-            "(SELECT id FROM runs WHERE id = ? AND status = 'running')",
-            (req.run_id, req.run_id))
+    async with open_db(settings.db_path) as conn, write_lock(conn):
+        # Every write is guarded on still-'running' so a Stop racing
+        # completion can't nuke a real answer.
+        async with conn.execute(
+            "SELECT session_id, agent_record_json FROM runs "
+            "WHERE id = ? AND status = 'running'", (req.run_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is not None:
+            kept = _did_side_effects(row[1])
+            if not kept:
+                # The record may not be saved yet (a turn slow to stop): the
+                # trace rows of the actions that ran are already durable.
+                traced = await _side_effects_from_trace(conn, req.run_id)
+                if traced:
+                    kept = True
+                    await conn.execute(
+                        "UPDATE runs SET agent_record_json = ? WHERE id = ?",
+                        (json.dumps({"cancelled": True, "ui_events": traced}),
+                         req.run_id))
+            if kept:
+                # A paper was attached or a memory saved before Stop: keep
+                # the question and an empty answer stub the chips (and
+                # their Undo) replay on, instead of a silent action.
+                await conn.execute(
+                    "DELETE FROM messages WHERE run_id = ? AND role = 'assistant'",
+                    (req.run_id,))
+                await conn.execute(
+                    "INSERT INTO messages (session_id, role, content, run_id) "
+                    "VALUES (?, 'assistant', '', ?)", (int(row[0]), req.run_id))
+            else:
+                await conn.execute(
+                    "DELETE FROM messages WHERE run_id = ?", (req.run_id,))
+            # The stopped turn's confirmations can no longer be acted on.
+            await conn.execute(
+                "UPDATE pending_actions SET status = 'dismissed' "
+                "WHERE run_id = ? AND status = 'pending' AND result_json IS NULL",
+                (req.run_id,))
         await conn.execute(
             "UPDATE runs SET finished_at=datetime('now'), status='cancelled' "
             "WHERE id = ? AND status = 'running'", (req.run_id,))
         await conn.commit()
-    return {"status": "cancelled", "run_id": str(req.run_id)}
+    return {"status": "cancelled", "run_id": str(req.run_id), "kept": kept}
 
 
 @router.post("/chat")

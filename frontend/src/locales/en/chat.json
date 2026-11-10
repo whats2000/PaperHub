@@ -73,6 +73,8 @@
   "bubble": {
     "retry": "Retry",
     "interrupted": "Generation was interrupted.",
+    "stopped": "Stopped. What already ran is below; you can undo it.",
+    "stopping": "Stopping…",
     "copy": "Copy message",
     "fork": "Fork from this message",
     "forkTitle": "Fork from here — branch a new chat and edit this message"
@@ -117,11 +119,71 @@
     "step_other": "{{count}} steps",
     "loading": "Loading trace…",
     "empty": "No steps recorded.",
-    "retry": "retry"
+    "retry": "retry",
+    "agentStep": "Step {{n}}",
+    "answer": "answer"
   },
   "panel": {
     "memory": "Memory",
     "slides": "Slides",
     "resize": "Resize reference panel"
+  },
+  "agentSummary": {
+    "label": "Agent",
+    "papers_one": "read {{count}} paper",
+    "papers_other": "read {{count}} papers",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "tools": "Tools used: {{tools}}",
+    "noTools": "Answered without tools"
+  },
+  "agentEvent": {
+    "paperAdded": "Added paper",
+    "memorySaved": "Saved to memory",
+    "undo": "Undo",
+    "undone": "Undone",
+    "undoFailed": "Couldn't undo"
+  },
+  "confirm": {
+    "title": "Confirm this action",
+    "reason": "Why:",
+    "confirm": "Confirm",
+    "dismiss": "Dismiss",
+    "running": "Running…",
+    "done": "Done.",
+    "failedGeneric": "The action failed.",
+    "interrupted": "The server stopped while this ran; it may not have finished.",
+    "reasonClassifier": "Auto-approve wasn't sure this is exactly what you asked for.",
+    "reasonCheckFailed": "The auto-approve check failed, so you're asked.",
+    "action": {
+      "removePaper": "Remove \"{{title}}\" from this chat",
+      "forgetGlobal": "Forget this memory (all chats): \"{{content}}\"",
+      "forgetSession": "Forget this memory (this chat): \"{{content}}\""
+    },
+    "result": {
+      "removePaper": "Removed \"{{title}}\" from this chat.",
+      "forget": "Forgot \"{{content}}\"."
+    },
+    "unavailable": "This action is no longer available here.",
+    "stale": "This action was already handled.",
+    "requestFailed": "Couldn't reach the server. Try again.",
+    "dismissed": "Dismissed: {{summary}}"
+  },
+  "autoApprove": {
+    "menuTitle": "Approval mode",
+    "ask": {
+      "title": "Ask first",
+      "desc": "Asks you before removing a paper or forgetting a memory",
+      "tooltip": "Actions that change your library or memory (remove a paper, forget a memory) wait for your confirmation. Applies to this chat only; this is the default."
+    },
+    "auto": {
+      "title": "Auto",
+      "desc": "Runs actions that pass a quick check; asks for anything risky",
+      "tooltip": "When on, a quick check decides whether actions that normally need your confirmation (removing a paper, forgetting a memory) can run without asking. Applies to this chat only; off by default."
+    },
+    "failed": "Couldn't change auto-approve"
+  },
+  "proposals": {
+    "label": "Suggested follow-ups"
   }
 }

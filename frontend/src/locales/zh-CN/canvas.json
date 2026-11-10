@@ -28,13 +28,17 @@
     "imagePreview": "图片预览"
   },
   "marker": {
-    "citationAria": "引用 {{ordinal}}"
+    "citationAria": "引用 {{ordinal}}",
+    "figureAria": "图片引用 {{ordinal}}",
+    "viewAria": "第 {{page}} 页区域，引用 {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "无法加载引用的论文",
     "addPaperFailed": "无法将这篇论文加入参考文献",
     "passageNotFoundHtml": "在论文中找不到这个段落",
-    "passageNotFoundPdf": "在 PDF 中找不到这个段落"
+    "passageNotFoundPdf": "在 PDF 中找不到这个段落",
+    "figureGone": "论文中已找不到这张图。",
+    "regionGone": "论文中已找不到这个页面区域。"
   },
   "translation": {
     "pending": "翻译中…",
@@ -51,6 +55,23 @@
     "hintPinned": "已固定 · Esc 或 ✕ 关闭",
     "continuedPage": "接续第 {{page}} 页",
     "continuedColumn": "接续右栏",
-    "firstUseHint": "将鼠标移到段落上即可看到译文"
+    "firstUseHint": "将鼠标移到段落上即可看到译文",
+    "mathNote": "公式由 PDF 机器转写，可能有误，请对照原页。"
+  },
+  "tabs": {
+    "label": "阅读视图",
+    "html": "HTML",
+    "pdf": "PDF"
+  },
+  "unsourced": {
+    "aria": "来源未经核实：{{reason}}",
+    "explain": "这个说法的引用无法核对，已移除：{{reason}}。请将这个说法视为未经证实。",
+    "reason": {
+      "not_read": "回答时并未读过所引用的段落",
+      "figure_not_viewed": "回答时并未看过所引用的图",
+      "region_not_viewed": "回答时并未看过所引用的页面区域",
+      "quote_not_found": "引述的文字不在回答时读过的任何段落中",
+      "unknown": "无法核对来源"
+    }
   }
 }

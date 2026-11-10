@@ -342,3 +342,103 @@ def postprocess_sentinels(html: str) -> tuple[str, dict[int, str]]:
 
     new_html = _TOKEN_RE.sub(_sub, html)
     return new_html, found
+
+
+# ---------------------------------------------------------------- figure anchors
+# A figure cited as [fig:P/fig-NNN] opens the Citation Canvas on it: the render
+# puts PHFIGANCHOR<NNN>END just before the figure's environment, and
+# `postprocess_figure_sentinels` turns it into <span id="phfig-NNN">. The
+# figure itself is the first <figure> after that anchor.
+
+_FIG_ID_RE = re.compile(r"^fig-(\d+)$")
+_FIG_TOKEN_RE = re.compile(r"PHFIGANCHOR(\d+)END")
+
+
+def figure_token(figure_id: str) -> str | None:
+    """The sentinel for an asset figure id ``fig-NNN`` (None for other ids)."""
+    m = _FIG_ID_RE.match(figure_id)
+    return f"PHFIGANCHOR{m.group(1)}END" if m else None
+
+
+def figure_dom_id(figure_id: str) -> str | None:
+    """The anchor id the HTML carries for ``fig-NNN``: ``phfig-NNN``."""
+    m = _FIG_ID_RE.match(figure_id)
+    return f"phfig-{m.group(1)}" if m else None
+
+
+def _comment_mask(text: str) -> list[bool]:
+    """``mask[i]``: index ``i`` is inside a ``%`` comment (unescaped)."""
+    mask = [False] * (len(text) + 1)
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "%":
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            for k in range(i, end):
+                mask[k] = True
+            # Inserting right before the newline still lands in the comment.
+            mask[end] = True
+            i = end
+            continue
+        i += 1
+    return mask
+
+
+def inject_figure_sentinels(
+    base: str, env_starts: list[int], figures: list[tuple[str, int]],
+) -> tuple[str, set[str]]:
+    """Insert each figure's sentinel at the nearest LaTeX-safe point at or
+    before its environment's start, never past the previous figure
+    environment (``figures`` = ``(figure id, env_index)``; ``env_starts`` =
+    every figure environment's start in ``base``). A figure with no safe point
+    there gets no anchor. Returns the marked text and the anchored ids."""
+    safe, fragile = _safe_injection_mask(base)
+    comment = _comment_mask(base)
+    math = [False] * (len(base) + 1)
+    for s, e in find_math_spans(base):
+        for k in range(s, min(e, len(base))):
+            math[k] = True
+
+    def usable(q: int, pos: int) -> bool:
+        if comment[q]:
+            return False  # a token in a % comment never reaches the HTML
+        if safe[q]:
+            return True
+        # Right before \begin{figure} at the start of a line (e.g. just after
+        # \maketitle, where the glued-command rule rejects the newline): safe
+        # when that line is plain flow, not math or a float.
+        return q == pos and (q == 0 or (
+            base[q - 1] == "\n" and not fragile[q - 1] and not math[q - 1]))
+
+    resolved: list[tuple[int, str]] = []
+    for figure_id, env_index in figures:
+        token = figure_token(figure_id)
+        if token is None or not 0 <= env_index < len(env_starts):
+            continue
+        pos = env_starts[env_index]
+        floor = env_starts[env_index - 1] if env_index > 0 else -1
+        cand = next((q for q in range(pos, floor, -1) if usable(q, pos)), None)
+        if cand is not None:
+            resolved.append((cand, token))
+    out = base
+    # Back to front; on a tie the later figure goes right of the earlier one.
+    for pos, token in sorted(resolved, key=lambda r: r[0], reverse=True):
+        out = out[:pos] + token + out[pos:]
+    return out, {f"fig-{_FIG_TOKEN_RE.match(t).group(1)}"  # type: ignore[union-attr]
+                 for _, t in resolved}
+
+
+def postprocess_figure_sentinels(html: str) -> tuple[str, set[str]]:
+    """Replace each surviving figure sentinel with ``<span id="phfig-NNN">``;
+    returns the html and the figure ids anchored."""
+    found: set[str] = set()
+
+    def _sub(m: re.Match[str]) -> str:
+        found.add(f"fig-{m.group(1)}")
+        return f'<span id="phfig-{m.group(1)}"></span>'
+
+    return _FIG_TOKEN_RE.sub(_sub, html), found

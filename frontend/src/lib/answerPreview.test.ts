@@ -17,3 +17,9 @@ describe("cleanForPreview", () => {
     expect(cleanForPreview("Just text [chunk:3].")).toBe("Just text [chunk:3].");
   });
 });
+
+describe("cleanForPreview proposals", () => {
+  it("drops an agent answer's proposal lines", () => {
+    expect(cleanForPreview("Answer.\n<proposal>Make slides</proposal>")).toBe("Answer.");
+  });
+});

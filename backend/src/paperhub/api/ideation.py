@@ -81,6 +81,7 @@ from paperhub.ideation.models import (
     Problem,
     ProblemCreate,
 )
+from paperhub.ideation.problems import insert_problem, start_problem_run
 
 router = APIRouter(prefix="/ideation", tags=["ideation"])
 
@@ -293,13 +294,7 @@ def _start(
 
 async def _start_problem(request: Request, conn: aiosqlite.Connection, pid: int) -> None:
     """Start the problem's run; on failure mark it ``error`` and re-raise."""
-    try:
-        _start("problem", request, pid)
-    except Exception:
-        async with write_transaction(conn):
-            await conn.execute(
-                "UPDATE problems SET status = 'error' WHERE id = ?", (pid,))
-        raise
+    await start_problem_run(conn, pid, lambda: _start("problem", request, pid))
 
 
 @router.get("/problems", response_model=list[Problem])
@@ -324,13 +319,7 @@ async def create_problem(body: ProblemCreate, request: Request) -> Problem:
             422, f"what you tried is longer than {TRIED_MAX_CHARS} characters")
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
-        async with write_transaction(conn):
-            cur = await conn.execute(
-                "INSERT INTO problems (text, tried, status) VALUES (?, ?, 'generating')",
-                (text, body.tried.strip()),
-            )
-            assert cur.lastrowid is not None
-            pid = int(cur.lastrowid)
+        pid = await insert_problem(conn, text=text, tried=body.tried.strip())
         problem = await _get_problem(conn, pid)
         await _start_problem(request, conn, pid)
     return problem

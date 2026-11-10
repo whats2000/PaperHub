@@ -14,6 +14,7 @@ from paperhub.agents.research import SearchCandidate, SearchResultsYield
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
+from tests.agent_script import answer, calls, script_agent
 
 
 class _FakeMcpRegistry:
@@ -75,16 +76,15 @@ def _candidate(paper_id: str, *, title: str = "T") -> SearchCandidate:
 async def test_library_stats_forwards_search_results_event_and_persists(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
-    """A library_stats turn whose SQL agent yields a SearchResultsYield must:
+    """A query_library call whose SQL agent yields a SearchResultsYield must:
     - emit a search_results SSE event carrying the candidates, and
-    - persist runs.search_results_json for that run,
-    while still streaming the answer tokens + a final event."""
+    - persist the batch in runs.search_results_json for that run,
+    while the agent's answer still streams as tokens + a final event."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"library_stats","confidence":0.95,'
-        '"reasoning":"list papers"}',
-    )
+    script_agent(monkeypatch, [
+        calls(("query_library", {"question": "list my papers"})),
+        answer("You have 1 paper."),
+    ])
     await _bootstrap_schema()
 
     # Seed a paper_content row so the library:<id> candidate is resolvable
@@ -125,9 +125,9 @@ async def test_library_stats_forwards_search_results_event_and_persists(
         for tok in _tokens:
             yield tok
 
-    import paperhub.api.chat as chat_module
+    import paperhub.agents.core.action_tools as action_tools
 
-    monkeypatch.setattr(chat_module, "sql_agent_stream", _fake_sql_agent_stream)
+    monkeypatch.setattr(action_tools, "sql_agent_stream", _fake_sql_agent_stream)
 
     app = _wire_test_app()
     transport = ASGITransport(app=app)
@@ -166,6 +166,6 @@ async def test_library_stats_forwards_search_results_event_and_persists(
         row = await cur.fetchone()
     assert row is not None
     assert row[0] is not None, "Expected runs.search_results_json to be persisted"
-    persisted = json.loads(row[0])
-    assert len(persisted) == 1
-    assert persisted[0]["paper_id"] == f"library:{pcid}"
+    persisted = json.loads(row[0])["batches"]
+    assert len(persisted) == 1 and len(persisted[0]) == 1
+    assert persisted[0][0]["paper_id"] == f"library:{pcid}"

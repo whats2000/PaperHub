@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
 import litellm
@@ -11,6 +11,7 @@ from litellm.exceptions import BadRequestError
 from pydantic import BaseModel
 
 from paperhub.config import llm_timeout_s, small_tier_model
+from paperhub.llm.adapter import ToolCall, ToolTurn
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.tracing.tracer import note_llm_usage, note_model_fallback
 
@@ -125,6 +126,21 @@ async def _acompletion_noted(*, model: str, **kwargs: Any) -> Any:
         response, "usage", None)
     note_llm_usage(model, usage, int((time.monotonic() - started) * 1000))
     return response
+
+
+def _g(obj: Any, key: str) -> Any:
+    """Read ``key`` from a litellm chunk piece that may be a dict or an object."""
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+
+def _parse_tool_args(raw: str) -> dict[str, Any]:
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {"_raw": raw}
+    return parsed if isinstance(parsed, dict) else {"_raw": raw}
 
 
 class LiteLlmAdapter:
@@ -371,3 +387,137 @@ class LiteLlmAdapter:
         if last_exc is not None:
             raise last_exc
         raise RuntimeError("stream retry loop fell through without yielding")
+
+    async def tool_turn(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+        tool_choice: str | dict[str, Any] = "auto",
+        **kwargs: Any,
+    ) -> ToolTurn:
+        """One streamed tool-calling turn.
+
+        Content deltas are forwarded to ``on_token``; streamed tool-call deltas
+        are assembled per ``index`` into ToolCalls (malformed argument JSON
+        becomes ``{"_raw": text}``, never an error). Retry / flagship -> small
+        fallback follow ``stream``: only while no content token has reached
+        ``on_token`` (tool-call deltas are buffered); later failures propagate.
+        Usage is noted on the active trace step."""
+        timeout = kwargs.pop("timeout", self._timeout)
+        base: dict[str, Any] = dict(kwargs)
+        if timeout is not None:
+            base["timeout"] = timeout
+        fb = self._fallback_model
+        models = [model] + ([fb] if (fb and model != fb) else [])
+        last_exc: BaseException | None = None
+
+        for mi, m in enumerate(models):
+            has_fallback_left = mi < len(models) - 1
+            max_attempts = 2 if has_fallback_left else 3
+            for attempt in range(1, max_attempts + 1):
+                emitted_any = False
+                started = time.monotonic()
+                try:
+                    tool_kw: dict[str, Any] = (
+                        {"tools": tools, "tool_choice": tool_choice} if tools else {})
+                    response = await litellm.acompletion(
+                        model=m, messages=messages, stream=True,
+                        stream_options={"include_usage": True}, **tool_kw, **base,
+                    )
+                    parts: list[str] = []
+                    slots: list[dict[str, str]] = []
+                    by_index: dict[int, dict[str, str]] = {}
+                    usage: Any = None
+                    finish_reason: str | None = None
+                    async for chunk in response:
+                        u = _g(chunk, "usage")
+                        if u is not None:
+                            usage = u
+                        for choice in _g(chunk, "choices") or []:
+                            fr = _g(choice, "finish_reason")
+                            if fr:
+                                finish_reason = str(fr)
+                            delta = _g(choice, "delta")
+                            if delta is None:
+                                continue
+                            text = _g(delta, "content") or ""
+                            if text:
+                                emitted_any = True
+                                parts.append(text)
+                                if on_token is not None:
+                                    await on_token(text)
+                            for tc in _g(delta, "tool_calls") or []:
+                                idx = _g(tc, "index")
+                                tid = _g(tc, "id") or ""
+                                slot = by_index.get(idx) if isinstance(idx, int) else (
+                                    slots[-1] if slots else None)
+                                # A new non-empty id differing from the slot's own
+                                # id starts a new call (providers that send each
+                                # parallel call as its own chunk, index 0/None).
+                                if slot is not None and tid and slot["id"] and (
+                                        slot["id"] != tid):
+                                    slot = None
+                                if slot is None:
+                                    slot = {"id": "", "name": "", "args": ""}
+                                    slots.append(slot)
+                                    if isinstance(idx, int):
+                                        by_index[idx] = slot
+                                if tid:
+                                    slot["id"] = tid
+                                fn = _g(tc, "function")
+                                if fn is not None:
+                                    name = _g(fn, "name") or ""
+                                    cur = slot["name"]
+                                    # Never concatenate a repeated full name;
+                                    # fragmented names (no overlap) still join.
+                                    if name and name != cur:
+                                        slot["name"] = (
+                                            name if (not cur or name.startswith(cur))
+                                            else cur + name)
+                                    slot["args"] += _g(fn, "arguments") or ""
+                    note_llm_usage(m, usage, int((time.monotonic() - started) * 1000))
+                    calls: list[ToolCall] = []
+                    dropped: list[dict[str, Any]] = []
+                    for i, sl in enumerate(slots):
+                        call = ToolCall(
+                            id=sl["id"] or f"call_{i}",
+                            name=sl["name"],
+                            arguments=_parse_tool_args(sl["args"]),
+                        )
+                        if call.name:
+                            calls.append(call)
+                        else:  # never dispatch an unnamed tool
+                            logger.warning("tool_turn: dropping unnamed call %s", call.id)
+                            dropped.append({"id": call.id, "arguments": call.arguments})
+                    usage_out: dict[str, Any] = {}
+                    if usage is not None:
+                        for k in ("prompt_tokens", "completion_tokens"):
+                            v = _g(usage, k)
+                            if isinstance(v, (int, float)):
+                                usage_out[k] = int(v)
+                    if finish_reason is not None:
+                        usage_out["finish_reason"] = finish_reason
+                    return ToolTurn("".join(parts), calls, usage_out, dropped)
+                except Exception as exc:  # noqa: BLE001 — classified below
+                    last_exc = exc
+                    if emitted_any:
+                        raise
+                    if attempt < max_attempts and _is_transient_stream_error(exc):
+                        await asyncio.sleep(2 ** (attempt - 1))
+                        continue
+                    break
+            if has_fallback_left and last_exc is not None and _should_downgrade(last_exc):
+                nxt = models[mi + 1]
+                logger.warning(
+                    "tool_turn: %s unavailable (%s) — downgrading to %s",
+                    m, type(last_exc).__name__, nxt,
+                )
+                note_model_fallback(m, nxt, f"{type(last_exc).__name__}: {last_exc}"[:200])
+                continue
+            break
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("tool_turn retry loop fell through")

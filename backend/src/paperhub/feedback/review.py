@@ -33,6 +33,13 @@ the passage that crosses it is cut with ``...`` and later ones read
 (recorded on the step) says what was shown or cut. One rare trace line goes
 beyond the corpus: ``failed step: agent/tool`` (an error step that was not a
 user cancellation).
+
+An agent run (``runs.mode = 'agent'``, H4) is summarised from its own rows
+(``_agent_trace``): ``route: agent`` with the turn's enabled papers as refs,
+``read:`` lines from its read/gather tools (chunks read by id are named by
+their section), ``search:`` lines from ``search_papers``, ``sql:`` lines from
+``query_library`` records, and one ``citation removed: chunk N (never read)``
+line per marker ``validate_citations`` dropped.
 """
 from __future__ import annotations
 
@@ -158,9 +165,10 @@ def _loads(raw: str | None) -> Any:
         return None
 
 
-def _sql_lines(args: Any, result: Any) -> list[str]:
+def _sql_lines(args: Any, result: Any, total: int | None = None) -> list[str]:
     """``sql: <query>`` + ``result: columns=... rows=...`` for one recorded
-    ``sql.query`` step, bounded; a failed query shows the error."""
+    ``sql.query`` step, bounded; a failed query shows the error. ``total`` is
+    the full row count when ``rows`` holds only the recorded head."""
     sql = args.get("sql") if isinstance(args, dict) else None
     out = [f"sql: {' '.join(str(sql).split())[:SQL_TEXT_MAX]}"] if sql else []
     if not isinstance(result, dict):
@@ -171,13 +179,127 @@ def _sql_lines(args: Any, result: Any) -> list[str]:
         return out
     rows = payload.get("rows")
     rows = rows if isinstance(rows, list) else []
+    n_rows = max(total or 0, len(rows))
     body = f"columns={payload.get('columns')} rows={json.dumps(rows[:SQL_ROWS_MAX], ensure_ascii=False)}"
     if len(body) > SQL_RESULT_MAX:
         body = body[:SQL_RESULT_MAX] + "..."
-    if len(rows) > SQL_ROWS_MAX or body.endswith("..."):
-        body += f" ({len(rows)} rows in all)"
+    if n_rows > SQL_ROWS_MAX or body.endswith("..."):
+        body += f" ({n_rows} rows in all)"
     out.append("result: " + body)
     return out
+
+
+@dataclass
+class _AgentTrace:
+    """What an agent run's ``agent:*`` / ``tool:*`` rows show the reviewer."""
+
+    papers: list[int] | None  # the turn's enabled papers (step 1 record)
+    reads: list[tuple[int | None, list[str]]]
+    searches: list[str]
+    sql: list[str]
+    citations_removed: list[int]
+
+
+async def _agent_trace(
+    conn: aiosqlite.Connection, steps: list[Any], record: Any,
+) -> _AgentTrace:
+    """Reads (sections, figures and chunks by paper), paper searches, SQL
+    queries and dropped citations of an agent run, from its own rows."""
+    papers: list[int] | None = None
+    by_paper: dict[int | None, list[str]] = {}
+    searches: list[str] = []
+    sql: list[str] = []
+    removed: list[int] = [
+        i for i in (record.get("citations_removed") or [])
+        if isinstance(i, int)
+    ] if isinstance(record, dict) else []
+    sql_seen = 0
+    chunk_reads: list[int] = []
+
+    def read(paper: Any, name: Any) -> None:
+        key = paper if isinstance(paper, int) else None
+        names = by_paper.setdefault(key, [])
+        if name and str(name) not in names:
+            names.append(str(name))
+
+    for _sid, agent, tool, status, _error, args_raw, result_raw in steps:
+        if agent != "agent":
+            continue
+        args, result = _loads(args_raw), _loads(result_raw)
+        args = args if isinstance(args, dict) else {}
+        result = result if isinstance(result, dict) else {}
+        if tool == "agent:step":
+            state = result.get("session_state")
+            if isinstance(state, dict) and isinstance(state.get("papers"), list):
+                papers = [p for p in state["papers"] if isinstance(p, int)]
+            for i in result.get("citations_removed") or []:
+                if isinstance(i, int) and i not in removed:
+                    removed.append(i)
+            continue
+        if status != "ok":
+            continue
+        if tool == "tool:read_section":
+            read(result.get("paper"), result.get("section"))
+        elif tool == "tool:read_layout_object":
+            read(result.get("paper"), result.get("label"))
+        elif tool == "tool:view_figure":
+            read(result.get("paper"), result.get("figure"))
+        elif tool == "tool:gather":
+            for entry in result.get("sections_read") or []:
+                if isinstance(entry, dict):
+                    read(entry.get("paper"), entry.get("section"))
+            chunk_reads += [i for i in result.get("chunk_ids_selected") or []
+                            if isinstance(i, int)]
+        elif tool == "tool:read_chunks":
+            chunk_reads += [i for i in result.get("chunk_ids") or []
+                            if isinstance(i, int)]
+        elif tool == "tool:search_papers":
+            cards = result.get("candidates")
+            n = len(cards) if isinstance(cards, list) else 0
+            searches.append(f'search: "{result.get("query")}" -> {n} results')
+        elif tool == "tool:query_library":
+            for q in result.get("queries") or []:
+                if not isinstance(q, dict):
+                    continue
+                sql_seen += 1
+                if sql_seen > SQL_QUERIES_MAX:
+                    break
+                failed = "error" in q
+                sql.extend(_sql_lines(
+                    {"sql": q.get("sql")},
+                    {"ok": not failed, "error": q.get("error"),
+                     "payload": None if failed else {
+                         "columns": q.get("columns"), "rows": q.get("rows")}},
+                    total=q.get("total_rows") if isinstance(q.get("total_rows"), int)
+                    else None,
+                ))
+    if chunk_reads:  # chunks read by id: name their paper and section
+        marks = ",".join("?" * len(chunk_reads))
+        async with conn.execute(
+            f"SELECT id, paper_content_id, section FROM chunks WHERE id IN ({marks})",
+            tuple(chunk_reads),
+        ) as cur:
+            where = {int(r[0]): (int(r[1]), r[2]) for r in await cur.fetchall()}
+        for cid in chunk_reads:
+            if cid in where:
+                read(where[cid][0], where[cid][1])
+    return _AgentTrace(
+        papers=papers, reads=list(by_paper.items()), searches=searches, sql=sql,
+        citations_removed=removed,
+    )
+
+
+async def _paper_titles(
+    conn: aiosqlite.Connection, ids: list[int],
+) -> list[tuple[int, str]]:
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    async with conn.execute(
+        f"SELECT id, title FROM paper_content WHERE id IN ({marks})", tuple(ids),
+    ) as cur:
+        titles = {int(r[0]): r[1] for r in await cur.fetchall()}
+    return [(i, str(titles.get(i) or f"Paper {i}")) for i in ids]
 
 
 async def load_review_inputs(
@@ -198,8 +320,8 @@ async def load_review_inputs(
     ) as cur:
         q = await cur.fetchone()
     async with conn.execute(
-        "SELECT session_id, routing_decision_json, search_results_json "
-        "FROM runs WHERE id = ?", (run_id,),
+        "SELECT session_id, routing_decision_json, search_results_json, mode, "
+        "agent_record_json FROM runs WHERE id = ?", (run_id,),
     ) as cur:
         run_row = await cur.fetchone()
     async with conn.execute(
@@ -212,6 +334,7 @@ async def load_review_inputs(
     question = str(q[0]) if q is not None else ""
     answer = str(ans[1])
     session_id = int(run_row[0]) if run_row is not None else None
+    agent_mode = run_row is not None and run_row[3] == "agent"
 
     router: dict[str, Any] | None = None
     refs: list[tuple[int, str]] | None = None
@@ -245,7 +368,8 @@ async def load_review_inputs(
                 if name and str(name) not in names:
                     names.append(str(name))
             reads.append((int(pcid) if isinstance(pcid, int) else None, names))
-        if tool == "sql.query" and status == "ok":
+        if tool == "sql.query" and status == "ok" and not agent_mode:
+            # (an agent run's queries come from its query_library records)
             sql_seen += 1
             if sql_seen <= SQL_QUERIES_MAX:
                 evidence.extend(_sql_lines(_loads(args_raw), result))
@@ -270,6 +394,14 @@ async def load_review_inputs(
                 evidence.append("not found: " + "; ".join(str(m) for m in missing[:8]))
         if status == "error" and error != "cancelled":
             failed.append(f"{agent}/{tool}")
+    agent = (await _agent_trace(conn, steps, _loads(run_row[4]))
+             if agent_mode and run_row is not None else None)
+    if agent is not None:
+        router = {"intent": "agent"}
+        if agent.papers is not None:
+            refs = await _paper_titles(conn, agent.papers)
+        reads = agent.reads
+        evidence = agent.sql + evidence
     if router is None and run_row is not None:
         rd = _loads(run_row[1])
         router = rd if isinstance(rd, dict) else None
@@ -309,6 +441,8 @@ async def load_review_inputs(
         query = (router or {}).get("resolved_query") or question
         lines.append(f'search: "{query}" -> {n} results')
 
+    if agent is not None:
+        lines.extend(agent.searches)
     lines.extend(evidence)
 
     cited = cited_chunk_ids(answer)
@@ -347,6 +481,9 @@ async def load_review_inputs(
             shown = shown.rstrip() + "..."
         lines.append(f'cited: chunk {cid} ({where}) "{shown}"')
 
+    if agent is not None:
+        lines.extend(f"citation removed: chunk {i} (never read)"
+                     for i in agent.citations_removed)
     if intent == "paper_qa" and refs:
         read_ids = {pcid for pcid, _n in reads}
         missing = [label[pcid] for pcid, _t in refs if pcid not in read_ids]

@@ -19,6 +19,7 @@
   "modelKeyMissing": "缺少供應商金鑰：{{keys}}",
   "modelUnusable": "此模型無法使用——請確認模型名稱可用且 API 金鑰有效。",
   "modelUnreachable": "目前無法連線到供應商——通常是暫時性問題，請稍後再試。",
+  "modelNoTools": "此模型無法呼叫工具，而每一輪對話都需要——請選擇支援工具（函式）呼叫的模型。",
   "modelChecking": "正在檢查模型可用性…",
   "getApiKey": "取得 API 金鑰",
   "welcome": {
@@ -175,6 +176,27 @@
     },
     "PAPERHUB_SLIDE_STYLE_PROFILE": {
       "label": "投影片樣式設定檔"
+    },
+    "PAPERHUB_AGENT_MODEL": {
+      "label": "核心代理",
+      "help": "負責回答每一則對話的工具呼叫代理。預設為旗艦層級。"
+    },
+    "PAPERHUB_AGENT_GATHER_MODEL": {
+      "label": "代理脈絡蒐集器",
+      "help": "為核心代理的蒐集工具閱讀論文。預設為小型層級。"
+    },
+    "PAPERHUB_AGENT_AUTOAPPROVE_MODEL": {
+      "label": "代理自動核准器",
+      "help": "判斷代理提出的動作是否符合你的要求。預設為小型層級。"
+    },
+    "PAPERHUB_AGENT_MAX_STEPS": {
+      "label": "代理每回合最大工具步數"
+    },
+    "PAPERHUB_AGENT_MAX_TURN_TOKENS": {
+      "label": "代理每回合工具結果 token 預算"
+    },
+    "PAPERHUB_AGENT_KEEP_TURNS": {
+      "label": "代理原文保留的對話回合數"
     }
   }
 }

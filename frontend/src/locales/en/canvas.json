@@ -28,13 +28,17 @@
     "imagePreview": "Image preview"
   },
   "marker": {
-    "citationAria": "citation {{ordinal}}"
+    "citationAria": "citation {{ordinal}}",
+    "figureAria": "figure citation {{ordinal}}",
+    "viewAria": "region on page {{page}}, citation {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "Couldn't load the cited paper",
     "addPaperFailed": "Couldn't add this paper to references",
     "passageNotFoundHtml": "Couldn't locate this passage in the paper",
-    "passageNotFoundPdf": "Couldn't locate this passage in the PDF"
+    "passageNotFoundPdf": "Couldn't locate this passage in the PDF",
+    "figureGone": "This figure is no longer in the paper.",
+    "regionGone": "This page region is no longer in the paper."
   },
   "translation": {
     "pending": "Translating…",
@@ -51,6 +55,23 @@
     "hintPinned": "Pinned · Esc or ✕ to close",
     "continuedPage": "continued on page {{page}}",
     "continuedColumn": "continued in the right column",
-    "firstUseHint": "Hover a paragraph to see its translation"
+    "firstUseHint": "Hover a paragraph to see its translation",
+    "mathNote": "Formulas are machine-transcribed from the PDF and may contain errors. Check them against the page."
+  },
+  "tabs": {
+    "label": "Reader view",
+    "html": "HTML",
+    "pdf": "PDF"
+  },
+  "unsourced": {
+    "aria": "Source not verified: {{reason}}",
+    "explain": "This claim's citation could not be checked, so it was removed: {{reason}}. Treat the claim as unverified.",
+    "reason": {
+      "not_read": "the cited passage was not read for this answer",
+      "figure_not_viewed": "the cited figure was not looked at for this answer",
+      "region_not_viewed": "the cited page region was not looked at for this answer",
+      "quote_not_found": "the quoted words are not in any passage read for this answer",
+      "unknown": "the source could not be checked"
+    }
   }
 }

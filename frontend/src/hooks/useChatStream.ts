@@ -1,15 +1,26 @@
 import i18n from "@/lib/i18n";
 import { useCallback, useRef } from "react";
 import type {
+  AgentUiEvent,
   RoutingDecision,
   SearchResultCandidate,
   ToolCallRecord,
   DeckEventData,
 } from "@/types/domain";
 import { streamChat } from "@/lib/sse";
-import { cancelRun, listSessionReferences } from "@/lib/api";
+import { cancelRun, fetchSessionMessages, listSessionReferences } from "@/lib/api";
+import { prefersReducedMotion } from "@/lib/motion";
 import { useChatStore } from "@/store/chat";
 import { useSlidesStore } from "@/store/slides";
+
+/** Agent-turn events (H4) applied through the store's shared dispatcher. */
+const AGENT_EVENTS = new Set([
+  "agent_summary",
+  "answer_reset",
+  "paper_added",
+  "memory_saved",
+  "confirm_request",
+]);
 
 interface SessionData { run_id: number; session_id: number; }
 interface ToolStepData { record: ToolCallRecord; }
@@ -21,6 +32,9 @@ interface SearchResultsData {
   run_id: number;
   candidates: SearchResultCandidate[];
 }
+
+/** The stopped turn's collapse (matches duration-200 plus a margin). */
+export const STOP_EXIT_MS = 220;
 
 export function useChatStream() {
   const abortRef = useRef<AbortController | null>(null);
@@ -154,6 +168,9 @@ export function useChatStream() {
               if (slidesStore.currentPageBySession[d.session_id] === undefined) {
                 slidesStore.setCurrentPage(d.session_id, 1);
               }
+            } else if (AGENT_EVENTS.has(event)) {
+              store.getState().applyAgentEvent(sessionId, runId, event, data);
+              // (The store also refreshes references / memories it changed.)
             } else if (event === "final") {
               const f = data as FinalData;
               store.getState().finaliseMessage(sessionId, f.run_id, f.content);
@@ -218,11 +235,67 @@ export function useChatStream() {
       }
     }
     abortRef.current?.abort();                        // 1) cut the stream
-    if (sid !== null) {                               // 2) retract the pair + restore text
-      const restored = store.getState().retractTurn(sid);
-      if (restored) store.getState().requestComposerText(restored);
+    if (sid === null) {
+      if (rid !== null) void cancelRun(rid).catch(() => undefined);
+      return;
     }
-    if (rid !== null) void cancelRun(rid).catch(() => undefined);  // 3) kill the backend run
+    // 2) a turn whose chips already showed stays as a "stopped" stub. Any
+    //    other turn waits in place ("stopping") for the backend: it may have
+    //    acted after the last event the stream showed.
+    const { kept: keptLocally } = store.getState().stopTurn(sid);
+    const retract = () => {
+      // Collapse out (STOP_EXIT_MS), then drop; the text returns to the
+      // composer only now that the turn is really gone.
+      const restored = store.getState().retractStopping(sid);
+      if (restored) store.getState().requestComposerText(restored);
+      const remove = () => store.getState().removeExiting(sid);
+      if (prefersReducedMotion()) remove();
+      else setTimeout(remove, STOP_EXIT_MS);
+    };
+    if (rid === null) {                               // never reached the backend
+      if (!keptLocally) retract();
+      return;
+    }
+    const cancelled = cancelRun(rid);                 // 3) kill the backend run
+    if (keptLocally) {
+      void cancelled.catch(() => undefined);
+      return;
+    }
+    // The backend's replay of this run: its stub (if it kept one) and chips.
+    const readStub = async () => {
+      const backendId =
+        store.getState().sessions.find((s) => s.id === sid)?.backend_session_id ?? null;
+      if (backendId === null) return null;
+      const messages = await fetchSessionMessages(backendId);
+      return messages.find((m) => m.role === "assistant" && m.run_id === rid) ?? null;
+    };
+    void cancelled.then(
+      async ({ kept }) => {
+        if (!kept) {
+          retract();
+          return;
+        }
+        // Kept: the stub shows the chips the backend recorded for this run.
+        const events: AgentUiEvent[] | null = await readStub()
+          .then((stub) => stub?.agent_events ?? null)
+          .catch(() => null);
+        store.getState().keepStopping(sid, events);
+      },
+      async () => {
+        // The cancel call failed (network): the backend may still have
+        // stopped and kept the turn, so ask it before retracting.
+        try {
+          const stub = await readStub();
+          if (stub !== null && stub.run_status === "cancelled") {
+            store.getState().keepStopping(sid, stub.agent_events ?? null);
+            return;
+          }
+        } catch {
+          // fall through: nothing known to keep
+        }
+        retract();
+      },
+    );
   }, [store]);
 
   return { send, stop };

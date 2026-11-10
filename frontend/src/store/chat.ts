@@ -10,8 +10,11 @@ import type {
   SessionSummary,
   BackendMessage,
   DeckEventData,
+  AgentSummary,
+  AgentUiEvent,
 } from "@/types/domain";
-import { createBackendSession } from "@/lib/api";
+import { createBackendSession, listSessionReferences } from "@/lib/api";
+import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
 import { useSlidesStore } from "@/store/slides";
 
@@ -96,10 +99,47 @@ interface ChatState {
     candidates: SearchResultCandidate[],
   ) => void;
   setDeckOnMessage: (sessionId: number, deck: DeckEventData | null) => void;
+  /** Agent turns (H4): apply one agent SSE event — `agent_summary`,
+   *  `answer_reset`, `paper_added`, `memory_saved`, `confirm_request` —
+   *  to the turn's assistant message (by run id, else the last assistant
+   *  message: the UI events carry no run id). Shared by the live stream and
+   *  the reattach poller. Unknown names are ignored. */
+  applyAgentEvent: (
+    sessionId: number,
+    runId: number | null,
+    name: string,
+    data: unknown,
+  ) => void;
+  /** Merge `patch` into one agent UI event's data (a confirm card's
+   *  status/result, a chip's `undone`). */
+  patchAgentEvent: (
+    sessionId: number,
+    runId: number,
+    index: number,
+    patch: Record<string, unknown>,
+  ) => void;
+  /** Per-chat auto-approve switch (mirrors `chat_sessions.auto_approve`). */
+  setAutoApprove: (sessionId: number, value: boolean) => void;
   /** Remove the trailing streaming assistant placeholder AND its paired user
    *  message (never leave a user message without a reply). Returns the user
    *  message text so the caller can restore it to the composer. */
   retractTurn: (sessionId: number) => string;
+  /** Stop pressed (H4 review #5): a turn whose agent already acted (paper
+   *  added, memory saved) is kept as a `stopped` stub with those chips (its
+   *  pending confirmations become dismissed, as the backend does). Any other
+   *  turn stays in place as `stopping` until the backend answers
+   *  (`retractStopping` / `keepStopping`). */
+  stopTurn: (sessionId: number) => { kept: boolean };
+  /** The backend retracted the stopping turn: mark it exiting (it animates
+   *  out, then `removeExiting` drops it). Returns its user text for the
+   *  composer. */
+  retractStopping: (sessionId: number) => string;
+  /** The backend kept the stopping turn (it had acted): make it the stopped
+   *  stub with the run's chips (from the backend's replay of that run). */
+  keepStopping: (sessionId: number, events: AgentUiEvent[] | null) => void;
+  /** Drop the messages `stopTurn` marked as exiting (only those: a turn sent
+   *  meanwhile stays). */
+  removeExiting: (sessionId: number) => void;
   ensureBackendSession: (sessionId: number) => Promise<number>;
   // Cross-device sync (backend is source of truth)
   reconcileBackendSessions: (summaries: SessionSummary[]) => void;
@@ -121,6 +161,50 @@ function deriveTitle(content: string): string {
   const cut = trimmed.slice(0, 40);
   const lastSpace = cut.lastIndexOf(" ");
   return (lastSpace > 20 ? cut.slice(0, lastSpace) : cut) + "…";
+}
+
+/** Patch the assistant message of `runId`, or — when it is null or not
+ *  found — the session's last assistant message. */
+function patchTurnMessage(
+  sessions: ChatSession[],
+  sessionId: number,
+  runId: number | null,
+  fn: (m: ChatMessage) => ChatMessage,
+): ChatSession[] {
+  return sessions.map((sess) => {
+    if (sess.id !== sessionId) return sess;
+    let idx =
+      runId === null
+        ? -1
+        : sess.messages.findIndex(
+            (m) => m.role === "assistant" && m.run_id === runId,
+          );
+    if (idx < 0) idx = sess.messages.map((m) => m.role).lastIndexOf("assistant");
+    if (idx < 0) return sess;
+    const messages = [...sess.messages];
+    messages[idx] = fn(messages[idx]!);
+    return { ...sess, messages };
+  });
+}
+
+const AGENT_UI_EVENTS = new Set(["paper_added", "memory_saved", "confirm_request"]);
+
+/** The identity of an agent UI event: replays (the reattach poller restarts
+ *  at cursor 0) must not add the same card twice. */
+function agentEventKey(ev: AgentUiEvent): string {
+  switch (ev.event) {
+    case "confirm_request":
+      return `confirm:${ev.data.action_id}`;
+    case "paper_added":
+      return `paper:${ev.data.papers_id}`;
+    case "memory_saved":
+      return `memory:${ev.data.memory_id}`;
+  }
+}
+
+/** A search batch's identity: its candidates' keys, in order. */
+function batchKey(batch: SearchResultCandidate[]): string {
+  return JSON.stringify(batch.map((c) => c.paper_id));
 }
 
 /**
@@ -433,6 +517,88 @@ export const useChatStore = create<ChatState>()(
         return restored;
       },
 
+      stopTurn: (sessionId) => {
+        let result = { kept: false };
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            if (sess.id !== sessionId) return sess;
+            const msgs = [...sess.messages];
+            const lastIdx = msgs.length - 1;
+            const last = msgs[lastIdx];
+            if (last === undefined || last.role !== "assistant") return sess;
+            const acted = (last.agent_events ?? []).some(
+              (e) => e.event === "paper_added" || e.event === "memory_saved",
+            );
+            if (acted) {
+              msgs[lastIdx] = {
+                ...last,
+                status: "stopped",
+                content: "",
+                agent_events: (last.agent_events ?? []).map((e) =>
+                  e.event === "confirm_request" &&
+                  (e.data.status ?? "pending") === "pending"
+                    ? { ...e, data: { ...e.data, status: "dismissed" } }
+                    : e,
+                ),
+              };
+              result = { kept: true };
+              return { ...sess, messages: msgs };
+            }
+            msgs[lastIdx] = { ...last, stopping: true };
+            return { ...sess, messages: msgs };
+          }),
+        }));
+        return result;
+      },
+
+      retractStopping: (sessionId) => {
+        let restored = "";
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            if (sess.id !== sessionId) return sess;
+            const idx = sess.messages.findIndex((m) => m.stopping);
+            if (idx < 0) return sess;
+            const msgs = [...sess.messages];
+            msgs[idx] = { ...msgs[idx]!, stopping: false, exiting: true };
+            const prev = msgs[idx - 1];
+            if (prev?.role === "user") {
+              msgs[idx - 1] = { ...prev, exiting: true };
+              restored = prev.content;
+            }
+            return { ...sess, messages: msgs };
+          }),
+        }));
+        return restored;
+      },
+
+      keepStopping: (sessionId, events) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            if (sess.id !== sessionId) return sess;
+            const idx = sess.messages.findIndex((m) => m.stopping);
+            if (idx < 0) return sess;
+            const msgs = [...sess.messages];
+            const m = msgs[idx]!;
+            msgs[idx] = {
+              ...m,
+              stopping: false,
+              status: "stopped",
+              content: "",
+              agent_events: events && events.length > 0 ? events : m.agent_events,
+            };
+            return { ...sess, messages: msgs };
+          }),
+        })),
+
+      removeExiting: (sessionId) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId
+              ? { ...sess, messages: sess.messages.filter((m) => !m.exiting) }
+              : sess,
+          ),
+        })),
+
       reset: () =>
         set({
           sessions: [],
@@ -490,11 +656,88 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
+      // An agent turn may search several times: each event is its own batch
+      // (one card list per search); `search_results` stays the flat union.
       setSearchResults: (sessionId, runId, candidates) =>
         set((s) => ({
-          sessions: patchMessageByRunId(s.sessions, sessionId, runId, {
-            search_results: candidates,
+          sessions: patchTurnMessage(s.sessions, sessionId, runId, (m) => {
+            const prior = m.search_result_batches ?? [];
+            // Idempotent: a replayed batch (same candidates) is not re-added.
+            const key = batchKey(candidates);
+            if (prior.some((b) => batchKey(b) === key)) return m;
+            const batches = [...prior, candidates];
+            return {
+              ...m,
+              search_result_batches: batches,
+              search_results: batches.flat(),
+            };
           }),
+        })),
+
+      applyAgentEvent: (sessionId, runId, name, data) => {
+        set((s) => {
+          let fn: ((m: ChatMessage) => ChatMessage) | null = null;
+          if (name === "agent_summary") {
+            const d = data as AgentSummary;
+            const summary: AgentSummary = {
+              papers_read: d.papers_read,
+              steps: d.steps,
+              tools: d.tools,
+            };
+            fn = (m) => ({ ...m, agent_summary: summary });
+          } else if (name === "answer_reset") {
+            // The streamed text was a tool-calling preamble: drop it.
+            fn = (m) => ({ ...m, content: "" });
+          } else if (AGENT_UI_EVENTS.has(name)) {
+            const ev = { event: name, data } as AgentUiEvent;
+            if (ev.event === "confirm_request" && !ev.data.status) {
+              ev.data = { ...ev.data, status: "pending" };
+            } else if (ev.event !== "confirm_request" && ev.data.undoable === undefined) {
+              ev.data = { ...ev.data, undoable: true };
+            }
+            const key = agentEventKey(ev);
+            // Idempotent: a replayed event keeps the card's local state.
+            fn = (m) =>
+              (m.agent_events ?? []).some((e) => agentEventKey(e) === key)
+                ? m
+                : { ...m, agent_events: [...(m.agent_events ?? []), ev] };
+          }
+          if (fn === null) return s;
+          return { sessions: patchTurnMessage(s.sessions, sessionId, runId, fn) };
+        });
+        // The agent changed this chat's papers / memories server-side: refresh
+        // the panels that only pull on session changes (live and reattach).
+        const backendId = get().sessions.find((x) => x.id === sessionId)
+          ?.backend_session_id;
+        if (backendId == null) return;
+        if (name === "paper_added") {
+          void listSessionReferences(backendId)
+            .then((refs) => get().setReferences(backendId, refs))
+            .catch(() => undefined);
+        } else if (name === "memory_saved") {
+          void useMemoriesStore
+            .getState()
+            .fetchMemories(backendId)
+            .catch(() => undefined);
+        }
+      },
+
+      patchAgentEvent: (sessionId, runId, index, patch) =>
+        set((s) => ({
+          sessions: patchTurnMessage(s.sessions, sessionId, runId, (m) => {
+            const events = [...(m.agent_events ?? [])];
+            const ev = events[index];
+            if (!ev) return m;
+            events[index] = { ...ev, data: { ...ev.data, ...patch } } as AgentUiEvent;
+            return { ...m, agent_events: events };
+          }),
+        })),
+
+      setAutoApprove: (sessionId, value) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId ? { ...sess, auto_approve: value } : sess,
+          ),
         })),
 
       setDeckOnMessage: (sessionId, deck) =>
@@ -583,6 +826,7 @@ export const useChatStore = create<ChatState>()(
                     forked_from_session_id:
                       summary.forked_from_session_id ?? null,
                     idea_id: summary.idea_id ?? null,
+                    auto_approve: summary.auto_approve ?? false,
                   }
                 : sess;
             });
@@ -604,6 +848,7 @@ export const useChatStore = create<ChatState>()(
               backend_session_id: summary.id,
               forked_from_session_id: summary.forked_from_session_id ?? null,
               idea_id: summary.idea_id ?? null,
+              auto_approve: summary.auto_approve ?? false,
             });
             nextId += 1;
           }
@@ -652,6 +897,8 @@ export const useChatStore = create<ChatState>()(
                 if (m.role === "assistant") {
                   if (m.run_status === "interrupted") status = "interrupted";
                   else if (m.run_status === "error") status = "error";
+                  // A stopped turn that had already acted keeps a stub.
+                  else if (m.run_status === "cancelled") status = "stopped";
                 }
                 return {
                   role: m.role as "user" | "assistant",
@@ -663,6 +910,13 @@ export const useChatStore = create<ChatState>()(
                     : {}),
                   ...(m.search_results
                     ? { search_results: m.search_results }
+                    : {}),
+                  ...(m.search_result_batches && m.search_result_batches.length > 0
+                    ? { search_result_batches: m.search_result_batches }
+                    : {}),
+                  ...(m.agent_summary ? { agent_summary: m.agent_summary } : {}),
+                  ...(m.agent_events && m.agent_events.length > 0
+                    ? { agent_events: m.agent_events }
                     : {}),
                   // Carry the replayed deck so the in-chat DeckChip survives a
                   // refresh — the message record is the robust source of truth
@@ -756,6 +1010,13 @@ export const useChatStore = create<ChatState>()(
               }
               break;
             }
+            case "agent_summary":
+            case "answer_reset":
+            case "paper_added":
+            case "memory_saved":
+            case "confirm_request":
+              store.applyAgentEvent(sessionId, run_id, event.event, data);
+              break;
             // "session" + unknown events: no-op (placeholder carries run_id)
             default:
               break;

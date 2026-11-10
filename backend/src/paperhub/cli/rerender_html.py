@@ -28,17 +28,24 @@ import aiosqlite
 from paperhub.config import load_settings
 from paperhub.pipelines.chunker import map_stripped_offsets_to_original
 from paperhub.pipelines.extract import extract_latex
+from paperhub.pipelines.figure_numbers import renumber_from_source
+from paperhub.pipelines.figure_wrappers import unwrap_figure_wrappers
 from paperhub.pipelines.figures import (
     rasterize_and_normalize_figures,
     strip_includegraphics_options,
 )
+from paperhub.pipelines.latex_to_asset import anchor_asset_figures
 from paperhub.pipelines.mathjax_macros import MacroValue, extract_macros_from_dir
 from paperhub.pipelines.renderer import (
     expand_preamble_macros,
     render_html,
     replace_symbol_macros,
 )
-from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.sentinels import (
+    inject_sentinels,
+    postprocess_figure_sentinels,
+    postprocess_sentinels,
+)
 from paperhub.pipelines.table_figures import rasterize_complex_tables
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 
@@ -109,6 +116,7 @@ async def _rerender_one(
     full_text = flat_path.read_text(encoding="utf-8")  # noqa: ASYNC240
     starts = map_stripped_offsets_to_original(full_text, stripped_starts)
     marked, _injected = inject_sentinels(full_text, starts)
+    marked, figures_anchored = anchor_asset_figures(marked, source_dir)
 
     # Recover author macros + paper preamble from the original source tree
     # (the body-only flattened .tex doesn't carry the preamble) so \vx,
@@ -139,6 +147,9 @@ async def _rerender_one(
     # Drop LaTeX width hints — pandoc would otherwise emit
     # style="width:50.0%" on figures using \\includegraphics[width=...]
     # and shrink them on the wide Citation Canvas.
+    # Unwrap \subfigure / \resizebox / \rule in figures:
+    # pandoc renders those figures with no image.
+    marked = unwrap_figure_wrappers(marked)
     marked = strip_includegraphics_options(marked)
 
     render_source = source_dir / "source.render.tex"
@@ -162,6 +173,12 @@ async def _rerender_one(
 
     raw_html = html_path.read_text(encoding="utf-8")  # noqa: ASYNC240
     new_html, dom_map = postprocess_sentinels(raw_html)
+    new_html, figures_in_html = postprocess_figure_sentinels(new_html)
+    new_html = renumber_from_source(
+        new_html, full_text)
+    if figures_anchored - figures_in_html:
+        _LOG.warning("pcid=%d: figure anchors lost in rendering: %s", pcid,
+                     sorted(figures_anchored - figures_in_html))
     html_path.write_text(new_html, encoding="utf-8")  # noqa: ASYNC240
 
     # Update dom_id for each chunk by its positional ordinal (id order).

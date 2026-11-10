@@ -19,6 +19,21 @@ With ``include_private`` off a sample is dropped, failing closed, when ANY
 message in it (history, answers, correction) cites a chunk of an
 ``is_private`` paper or a chunk id that no longer resolves, or its session has
 a private paper attached (see ``build_export``).
+
+Agent runs (``runs.mode = 'agent'``, H4) export their whole turn: the
+messages come from ``export_agent_trajectory`` (system, session state,
+conversation, user, the assistant tool calls with their tool results, the
+final answer) and the sample carries the tool schemas as ``tools``. SFT is
+``{"messages", "tools"}``; a correction pair's prompt is the trajectory up to
+the final answer; in a fork pair an agent answer is its own continuation
+(tool steps + answer). A turn that ``query_library`` answered directly
+(``answer_from_tool``) ends at that tool call: it is an SFT sample marked
+``answer_from_tool`` and never a DPO pair (its answer is the SQL agent's).
+A trajectory that touched a private or vanished chunk
+counts as private, like a citation of one; without ``include_private`` it is
+not rebuilt at all, and its ``<memories>`` block is withheld. A turn whose
+prompt fingerprint no longer matches the code is left out and counted
+(``agent_fingerprint_drops``). Pipeline runs export unchanged.
 """
 from __future__ import annotations
 
@@ -30,9 +45,16 @@ from typing import Any
 
 import aiosqlite
 
-from paperhub.feedback.citations import cited_chunk_ids
+from paperhub.feedback.citations import cited_chunk_ids, strip_unsourced
 from paperhub.feedback.forks import copied_runs
 from paperhub.feedback.models import ExportRequest
+from paperhub.feedback.trajectory import (
+    ConversationMismatch,
+    FingerprintMismatch,
+    Trajectory,
+    TrajectoryError,
+    agent_trajectory,
+)
 
 Message = dict[str, str]
 
@@ -55,6 +77,7 @@ class _Answer:
     answer: str
     model: str | None
     prefix_len: int  # messages (any role) before the question in the session
+    agent: bool = False  # runs.mode = 'agent'
 
 
 @dataclass
@@ -76,12 +99,19 @@ class ExportPlan:
     includes_private: bool
     dpo_from_corrections: int = 0
     dpo_from_forks: int = 0
+    agent_samples: int = 0  # samples built from agent-run trajectories
+    agent_fingerprint_drops: int = 0  # agent turns whose prompt/tools changed
+    agent_conversation_drops: int = 0  # agent turns whose history no longer rebuilds
+    fork_mode_mismatch_drops: int = 0  # fork pairs of a pipeline and an agent run
+    agent_prompt_mismatch_drops: int = 0  # agent fork pairs with different prompts
+    agent_tool_answer_pairs: int = 0  # DPO pairs left out: a tool wrote the answer
+    agent_tool_answer_samples: int = 0  # SFT samples ending at that tool call
 
 
 async def _answer(conn: aiosqlite.Connection, run_id: int) -> _Answer | None:
     """The run's question/answer and the session history before the question."""
     async with conn.execute(
-        "SELECT session_id FROM runs WHERE id = ?", (run_id,),
+        "SELECT session_id, mode FROM runs WHERE id = ?", (run_id,),
     ) as cur:
         row = await cur.fetchone()
     if row is None:
@@ -112,8 +142,9 @@ async def _answer(conn: aiosqlite.Connection, run_id: int) -> _Answer | None:
     ]
     return _Answer(
         run_id=run_id, session_id=int(row[0]), history=history,
-        question=turns[q_idx][1], answer=turns[a_idx][1],
+        question=turns[q_idx][1], answer=strip_unsourced(turns[a_idx][1]),
         model=await answering_model(conn, run_id), prefix_len=q_idx,
+        agent=row[1] == "agent",
     )
 
 
@@ -172,6 +203,17 @@ def _same_prompt(a: _Answer, b: _Answer) -> bool:
         x["role"] == y["role"] and x["content"].strip() == y["content"].strip()
         for x, y in zip(a.history, b.history, strict=True)
     )
+
+
+async def export_agent_trajectory(
+    conn: aiosqlite.Connection, run_id: int, *, include_private: bool = False,
+) -> dict[str, Any]:
+    """``{"messages": [...], "tools": [...]}`` of agent run ``run_id``, rebuilt
+    from its ``agent:step`` / ``tool:*`` records (``feedback.trajectory``).
+    Private documents' text is redacted unless ``include_private``. Raises
+    ``ValueError`` for a run that is not an answered agent run."""
+    return (await agent_trajectory(
+        conn, run_id, include_private=include_private)).as_dict()
 
 
 def _prompt(ans: _Answer, sources: Message | None) -> list[Message]:
@@ -323,11 +365,31 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
             private_sessions[sid] = await _session_has_private(conn, sid)
         return private_sessions[sid]
     answers: dict[int, _Answer | None] = {}
+    trajectories: dict[int, Trajectory | None] = {}
+    fingerprint_drops: set[int] = set()
+    conversation_drops: set[int] = set()
 
     async def ans(run_id: int) -> _Answer | None:
         if run_id not in answers:
-            answers[run_id] = await _answer(conn, run_id)
+            a = await _answer(conn, run_id)
+            if a is not None and a.agent:
+                # A private turn raises unless include_private: no sample.
+                try:
+                    trajectories[run_id] = await agent_trajectory(
+                        conn, run_id, include_private=opts.include_private)
+                except FingerprintMismatch:
+                    fingerprint_drops.add(run_id)
+                    a = None
+                except ConversationMismatch:
+                    conversation_drops.add(run_id)
+                    a = None
+                except TrajectoryError:
+                    a = None  # cannot be rebuilt: no sample (fails closed)
+            answers[run_id] = a
         return answers[run_id]
+
+    def traj(a: _Answer) -> Trajectory | None:
+        return trajectories.get(a.run_id) if a.agent else None
 
     candidates: list[tuple[_Sample, list[_Answer], str | None]] = []
     for run_id, (polarity, created_at, correction) in pol.items():
@@ -351,6 +413,7 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
                 created_at=created_at,
             ), [a], correction))
 
+    fork_mode_drops = prompt_drops = 0
     for orig_run, fork_run in await _fork_pairs(conn):
         p1, p2 = pol.get(orig_run), pol.get(fork_run)
         if p1 is None or p2 is None or p1[0] == p2[0]:
@@ -358,6 +421,17 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
         a1, a2 = await ans(orig_run), await ans(fork_run)
         if a1 is None or a2 is None or not _same_prompt(a1, a2):
             continue  # an edited fork is a different prompt: no pair
+        if a1.agent != a2.agent:
+            # A pipeline prompt has no tools or session state: an agent
+            # continuation does not answer it.
+            fork_mode_drops += 1
+            continue
+        t1, t2 = traj(a1), traj(a2)
+        if t1 is not None and t2 is not None and (
+                t1.messages[:t1.prompt_len] != t2.messages[:t2.prompt_len]):
+            # Same words, different session state (papers, memories, ...).
+            prompt_drops += 1
+            continue
         if any([await _history_has_down(conn, a.session_id, a.prefix_len, down)
                 for a in (a1, a2)]):
             continue  # same rule as SFT / correction pairs
@@ -373,7 +447,11 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
     all_ids = {i for s, _, _ in candidates for t in s.texts for i in cited_chunk_ids(t)}
     chunks = await _chunks(conn, all_ids)
 
-    plan = ExportPlan(options=opts, sft=[], dpo=[], includes_private=False)
+    plan = ExportPlan(options=opts, sft=[], dpo=[], includes_private=False,
+                      agent_fingerprint_drops=len(fingerprint_drops),
+                      agent_conversation_drops=len(conversation_drops),
+                      fork_mode_mismatch_drops=fork_mode_drops,
+                      agent_prompt_mismatch_drops=prompt_drops)
     for sample, pair, correction in sorted(candidates, key=lambda c: c[0].created_at):
         if not _passes(sample, opts):
             continue
@@ -382,35 +460,65 @@ async def build_export(conn: aiosqlite.Connection, opts: ExportRequest) -> Expor
         if opts.cited_only and not cited:
             continue
         all_cited = [i for t in sample.texts for i in cited_chunk_ids(t)]
+        trajs = [t for a in pair if (t := traj(a)) is not None]
         private = (
             any(i not in chunks or chunks[i].is_private for i in all_cited)
             or any([await session_private(a.session_id) for a in pair])
+            or any(t.private for t in trajs)
         )
         if private and not opts.include_private:
             continue
         plan.includes_private = plan.includes_private or private
+        if sample.kind != "sft" and any(t.answer_from_tool for t in trajs):
+            # The rated answer was written by the tool's agent (query_library
+            # with answer_user), not the core model: a preference over it
+            # belongs to that stage, so no DPO pair from the core trajectory.
+            plan.agent_tool_answer_pairs += 1
+            continue
         sources = _sources_message(cited, chunks)
         first = pair[0]
+        tools = {"tools": trajs[0].tools} if trajs else {}
+        plan.agent_samples += bool(trajs)
         if sample.kind == "sft":
+            if (t := traj(first)) is not None:
+                marker = ({"answer_from_tool": t.answer_from_tool}
+                          if t.answer_from_tool else {})
+                plan.agent_tool_answer_samples += bool(t.answer_from_tool)
+                plan.sft.append({"messages": t.messages, **tools, **marker})
+                continue
             plan.sft.append({"messages": [
                 *_prompt(first, sources), {"role": "assistant", "content": first.answer},
             ]})
         elif sample.kind == "dpo_correction":
             assert correction is not None
+            t = traj(first)
             plan.dpo.append({
-                "prompt": _prompt(first, sources),
+                "prompt": t.messages[:-1] if t else _prompt(first, sources),
                 "chosen": [{"role": "assistant", "content": correction}],
-                "rejected": [{"role": "assistant", "content": first.answer}],
+                "rejected": [t.messages[-1] if t else
+                             {"role": "assistant", "content": first.answer}],
+                **tools,
             })
             plan.dpo_from_corrections += 1
         else:
+            orig = traj(pair[2])
             plan.dpo.append({  # the ORIGINAL run's prompt text
-                "prompt": _prompt(pair[2], sources),
-                "chosen": [{"role": "assistant", "content": pair[0].answer}],
-                "rejected": [{"role": "assistant", "content": pair[1].answer}],
+                "prompt": orig.messages[:orig.prompt_len] if orig
+                else _prompt(pair[2], sources),
+                "chosen": _continuation(pair[0], traj(pair[0])),
+                "rejected": _continuation(pair[1], traj(pair[1])),
+                **tools,
             })
             plan.dpo_from_forks += 1
     return plan
+
+
+def _continuation(a: _Answer, t: Trajectory | None) -> list[dict[str, Any]]:
+    """What an answer adds after the prompt: an agent run's tool steps and
+    answer, else the answer alone."""
+    if t is None:
+        return [{"role": "assistant", "content": a.answer}]
+    return t.messages[t.prompt_len:]
 
 
 def utc_day(value: str) -> str:
@@ -504,6 +612,68 @@ def _dataset_card(plan: ExportPlan, created: str) -> str:
         '"rejected": [assistant]}`.',
         "",
     ]
+    if plan.agent_samples:
+        notes = [
+            f"- {plan.agent_samples} sample(s) are agent turns: after the "
+            "user's question come the assistant's tool calls, the tool results "
+            "it read and its answer, and the sample adds the tool schemas as "
+            '`"tools"`. The assistant turns after the question are the target; '
+            "the tool results are context.",
+            "- Agent messages use the OpenAI chat format: a tool-calling "
+            "assistant turn has `tool_calls` (ids numbered per export), its "
+            "`function.arguments` is a JSON string, and its `content` is null "
+            "unless the model wrote text before the calls; each result is a "
+            "`tool` message with its `tool_call_id`.",
+            "- The final assistant message is the answer after citation "
+            "validation: `[chunk:N]` markers for chunks the agent never read "
+            "were removed, so a rejected answer does not show them. The user "
+            "saw an `[unsourced:<reason>]` mark in their place; marks are not "
+            "model text and are left out of every exported answer.",
+            "- In a fork pair the prompt (system, session state, conversation, "
+            "question) is the original run's session state; each side's "
+            "continuation is its own tool steps and answer.",
+        ]
+        if not o.include_private:
+            notes.append(
+                "- Agent samples' `<memories>` block is withheld (replaced by a "
+                "fixed placeholder): a global memory may come from any chat and "
+                "its source is not tracked.")
+        lines[-1:-1] = notes
+    if plan.agent_tool_answer_samples:
+        lines[-1:-1] = [
+            f"- {plan.agent_tool_answer_samples} agent sample(s) carry "
+            '`"answer_from_tool"`: the answer of that turn was written by that tool '
+            "(query_library answering the user directly), so the sample ends "
+            "at the assistant's tool call, which is the core model's last "
+            "output and the target.",
+        ]
+    if plan.agent_tool_answer_pairs:
+        lines[-1:-1] = [
+            f"- {plan.agent_tool_answer_pairs} DPO pair(s) left out: the rated "
+            "answer was written by a tool's agent (query_library answering "
+            "directly), not the core model, so the preference is not about "
+            "the core trajectory.",
+        ]
+    if plan.fork_mode_mismatch_drops or plan.agent_prompt_mismatch_drops:
+        lines[-1:-1] = [
+            f"- {plan.fork_mode_mismatch_drops + plan.agent_prompt_mismatch_drops} "
+            "fork pair(s) left out: the two answers were not given the same "
+            f"prompt ({plan.fork_mode_mismatch_drops} mixed an earlier-flow "
+            f"answer with an agent one, {plan.agent_prompt_mismatch_drops} had a "
+            "different chat state).",
+        ]
+    if plan.agent_conversation_drops:
+        lines[-1:-1] = [
+            f"- {plan.agent_conversation_drops} agent turn(s) left out: the "
+            "chat's stored history no longer rebuilds the conversation the "
+            "turn saw.",
+        ]
+    if plan.agent_fingerprint_drops:
+        lines[-1:-1] = [
+            f"- {plan.agent_fingerprint_drops} agent turn(s) left out: the core "
+            "agent prompt or tool schemas changed since they ran, so they "
+            "cannot be rebuilt as the model saw them.",
+        ]
     return "\n".join(lines)
 
 

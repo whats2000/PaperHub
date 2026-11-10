@@ -4,7 +4,13 @@ import type { SettingsReadiness } from "./api";
 // is absent or rejected. Everything else a pre-flight ping can return — a
 // connection drop, a timeout, a rate limit, a momentary "model not found"
 // after the tab idled — is TRANSIENT and must not gate the UI.
-const HARD_ERRORS = new Set(["AuthenticationError", "PermissionDeniedError"]);
+const HARD_ERRORS = new Set([
+  "AuthenticationError",
+  "PermissionDeniedError",
+  // The core agent model answered but rejected a tools list: every chat turn
+  // is a tool-calling loop, so it cannot be used.
+  "ToolCallingUnsupported",
+]);
 
 /**
  * Whether readiness reflects a config problem the user must fix (missing or
@@ -17,7 +23,9 @@ const HARD_ERRORS = new Set(["AuthenticationError", "PermissionDeniedError"]);
  * Settings panel still shows the per-slot reason for any failure.
  */
 export function hasBlockingConfigIssue(r: SettingsReadiness): boolean {
-  const models = [r.models.small, r.models.flagship];
+  const models = [r.models.small, r.models.flagship, r.models.agent].filter(
+    (m): m is NonNullable<typeof m> => m != null,
+  );
   return models.some(
     (m) =>
       !m.key_ok &&

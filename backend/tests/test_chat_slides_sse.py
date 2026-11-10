@@ -1,8 +1,9 @@
-"""Tests for the `slides` intent SSE path (Task 10, Plan F).
+"""Tests for the slides SSE path (Task 10, Plan F; H4: the core agent's
+``create_deck`` tool).
 
-The ``report_stream`` shim is monkeypatched with a canned generator so the
-test does NOT require a real LLM, LaTeX compiler, or DB deck state.  The
-pattern mirrors ``test_chat_sse.py`` exactly.
+The ``report_stream`` shim is monkeypatched with a canned generator and the
+agent's model turns are scripted, so the test does NOT require a real LLM,
+LaTeX compiler, or DB deck state.  The pattern mirrors ``test_chat_sse.py``.
 """
 from collections.abc import AsyncIterator
 from typing import Any
@@ -15,6 +16,7 @@ from paperhub.agents.research import FinalOnlyMessage, ToolStepYield
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
+from tests.agent_script import answer, calls, script_agent
 
 
 class _FakeMcpRegistry:
@@ -62,24 +64,26 @@ async def _consume_sse(stream: AsyncIterator[bytes]) -> list[tuple[str, dict]]: 
 
 
 # ---------------------------------------------------------------------------
-# Task 10: slides intent → deck SSE event
+# Task 10: slides → deck SSE event (H4: via the create_deck tool)
 # ---------------------------------------------------------------------------
+
+_AGENT_REPLY = "Your deck is ready."
+
 
 async def test_chat_sse_slides_emits_deck_event(
     tmp_path: Any, monkeypatch: Any,
 ) -> None:
-    """slides intent must:
-    - route through report_stream (not the else-stub)
-    - emit a 'deck' SSE event whose data has page_count == 3
-    - emit a 'final' event whose content matches the FinalOnlyMessage
-    - NOT emit token events (deck is one-shot like paper_search)
+    """create_deck must:
+    - route through report_stream
+    - emit a 'deck' SSE event whose data has page_count == 3, before final
+    - hand the report's final text to the model as the tool result; the
+      agent's answer is the final content
     """
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides",'
-        '"confidence":0.95,"reasoning":"user wants slides"}',
-    )
+    seen = script_agent(monkeypatch, [
+        calls(("create_deck", {"brief": "the papers in this chat"})),
+        answer(_AGENT_REPLY),
+    ])
     await _bootstrap_schema(tmp_path)
 
     _canned_deck = {
@@ -122,7 +126,7 @@ async def test_chat_sse_slides_emits_deck_event(
             events = await _consume_sse(response.aiter_bytes())
 
     types = [t for t, _ in events]
-    assert "routing_decision" in types, f"missing routing_decision in {types}"
+    assert "routing_decision" not in types
     assert "deck" in types, f"missing deck event in {types}"
     assert "final" in types, f"missing final event in {types}"
 
@@ -132,16 +136,12 @@ async def test_chat_sse_slides_emits_deck_event(
         f"Expected page_count == 3 in deck event, got: {deck_payload}"
     )
 
-    # final content must match the FinalOnlyMessage
+    # The report's final text reached the model as the tool result; the
+    # agent's own answer is the final content.
+    tool_msgs = [m for m in seen[1]["messages"] if m.get("role") == "tool"]
+    assert _canned_final in tool_msgs[-1]["content"]
     final_payload = next(d for t, d in events if t == "final")
-    assert final_payload["content"] == _canned_final, (
-        f"Expected final.content == {_canned_final!r}, got: {final_payload['content']!r}"
-    )
-
-    # deck is one-shot — no token events
-    assert "token" not in types, (
-        f"Expected no token events for slides intent, got: {types}"
-    )
+    assert final_payload["content"] == _AGENT_REPLY
 
     # deck event must arrive before final
     deck_idx = types.index("deck")
@@ -156,11 +156,10 @@ async def test_chat_sse_slides_threads_current_view_page(
     into report_stream so the deck-command classifier can resolve "edit this
     slide" to the on-screen page."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides",'
-        '"confidence":0.95,"reasoning":"user wants slides"}',
-    )
+    script_agent(monkeypatch, [
+        calls(("create_deck", {"brief": "the papers in this chat"})),
+        answer(_AGENT_REPLY),
+    ])
     await _bootstrap_schema(tmp_path)
 
     captured: dict[str, Any] = {}
@@ -206,17 +205,17 @@ async def test_chat_sse_slides_tool_step_events_forwarded(
     """tool_step events from report_stream must be forwarded to the SSE stream
     before the final event (mirrors paper_search streaming contract)."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides",'
-        '"confidence":0.95,"reasoning":"user wants slides"}',
-    )
+    script_agent(monkeypatch, [
+        calls(("create_deck", {"brief": "the papers in this chat"})),
+        answer(_AGENT_REPLY),
+    ])
     await _bootstrap_schema(tmp_path)
 
     _canned_record: dict[str, Any] = {
         "run_id": 1,
         "branch": "",
-        "step_index": 0,
+        # High index: cannot collide with the agent's own trace rows.
+        "step_index": 100,
         "parent_step": None,
         "agent": "report",
         "tool": "report:plan",
@@ -263,6 +262,9 @@ async def test_chat_sse_slides_tool_step_events_forwarded(
 
     types = [t for t, _ in events]
     assert "tool_step" in types, f"Expected tool_step events, got: {types}"
+    report_steps = [d for t, d in events
+                    if t == "tool_step" and d["record"]["tool"] == "report:plan"]
+    assert len(report_steps) == 1
     assert "deck" in types, f"Expected deck event, got: {types}"
     assert "final" in types, f"Expected final event, got: {types}"
 

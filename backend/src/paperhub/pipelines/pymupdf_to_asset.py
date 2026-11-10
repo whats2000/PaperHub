@@ -10,6 +10,7 @@ font-size heading heuristic shared with the paper pipeline.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pymupdf
 
@@ -20,6 +21,19 @@ from paperhub.pipelines.paper_asset import (
     SectionAsset,
     paper_asset_dir,
 )
+
+
+def image_bbox(page: Any, xref: int) -> tuple[float, float, float, float] | None:
+    """Where an image is drawn on its page, in PDF points (its first
+    placement), or None when PyMuPDF reports none."""
+    try:
+        rects = page.get_image_rects(xref)
+    except Exception:  # noqa: BLE001 - a malformed image never fails the asset
+        return None
+    if not rects:
+        return None
+    r = rects[0]
+    return (float(r.x0), float(r.y0), float(r.x1), float(r.y1))
 
 
 def _image_ext(data: bytes) -> str:
@@ -70,6 +84,7 @@ def pymupdf_to_asset(pdf_path: Path, *, source_dir: Path) -> PaperAsset:
                         page=page_index,
                         section=None,
                         image_path=f"figures/{fname}",
+                        bbox=image_bbox(page, xref),
                     )
                 )
                 fig_n += 1

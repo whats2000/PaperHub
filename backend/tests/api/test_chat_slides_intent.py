@@ -1,13 +1,13 @@
-"""F4.5 wiring tests for the chat endpoint's ``slides`` intent branch.
+"""F4.5 wiring tests for the chat endpoint's slide-style intercept.
 
-Two behaviours are pinned here:
+Two behaviours are pinned here (H4: no router; the intercept is gated on
+the chat having a deck):
 
-1. A deterministic style-command message (``reset slide style``) MUST
-   short-circuit BEFORE the Report subgraph (``report_stream``) is invoked,
-   emit a plain-text confirmation reply, and finalise normally.
+1. A deterministic style-command message (``reset slide style``) in a chat
+   with a deck MUST short-circuit BEFORE the agent and the Report subgraph
+   (``report_stream``), emit a plain-text confirmation reply, and finalise.
 2. A non-style-command slides message (``generate slides for these papers``)
-   MUST fall through to ``report_stream`` — the slide pipeline is the
-   default path on the slides intent.
+   MUST reach ``report_stream`` through the agent's ``create_deck`` tool.
 
 The tests drive the real FastAPI app via ``httpx.ASGITransport`` (matching
 ``test_chat_mcp_headers.py``'s pattern) and assert by monkeypatching
@@ -28,6 +28,7 @@ from paperhub.agents.research import FinalOnlyMessage
 from paperhub.app import create_app
 from paperhub.config import load_settings
 from paperhub.db.migrate import apply_schema
+from tests.agent_script import answer, calls, script_agent
 
 
 class _FakeMcpRegistry:
@@ -72,13 +73,14 @@ async def _consume_sse(stream: AsyncIterator[bytes]) -> list[tuple[str, dict]]:
     return events
 
 
-def _route_slides(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force the router to land on the slides intent (no real LLM call)."""
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"slides",'
-        '"confidence":0.95,"reasoning":"slide intent"}',
-    )
+async def _seed_session_with_deck() -> None:
+    """Session 1 with a deck row, so the style intercept applies."""
+    settings = load_settings()
+    async with aiosqlite.connect(settings.db_path) as conn:
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1)")
+        await conn.execute(
+            "INSERT INTO decks (session_id, tex_path) VALUES (1, 'deck.tex')")
+        await conn.commit()
 
 
 @pytest.mark.asyncio
@@ -88,8 +90,9 @@ async def test_style_intercept_skips_report_graph(
     """``reset slide style`` short-circuits BEFORE ``report_stream`` runs."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
-    _route_slides(monkeypatch)
     await _bootstrap_schema()
+    await _seed_session_with_deck()
+    seen = script_agent(monkeypatch, [])  # any model call would fail
 
     called: dict[str, int] = {"report_stream": 0}
 
@@ -105,7 +108,7 @@ async def test_style_intercept_skips_report_graph(
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # noqa: SIM117
         async with client.stream(
             "POST", "/chat",
-            json={"session_id": None, "user_message": "reset slide style"},
+            json={"session_id": 1, "user_message": "reset slide style"},
         ) as response:
             events = await _consume_sse(response.aiter_bytes())
 
@@ -113,6 +116,7 @@ async def test_style_intercept_skips_report_graph(
     assert called["report_stream"] == 0, (
         "report_stream was invoked despite a deterministic style-command match"
     )
+    assert seen == [], "the intercept must not call the model"
 
     # The final SSE message must carry the intercept's confirmation reply.
     final_evts = [e for e in events if e[0] == "final"]
@@ -130,8 +134,11 @@ async def test_no_style_intercept_falls_through_to_report_graph(
     """A non-command slides message falls through to ``report_stream``."""
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
-    _route_slides(monkeypatch)
     await _bootstrap_schema()
+    script_agent(monkeypatch, [
+        calls(("create_deck", {"brief": "these papers"})),
+        answer("deck built"),
+    ])
 
     called: dict[str, int] = {"report_stream": 0}
 
@@ -157,8 +164,8 @@ async def test_no_style_intercept_falls_through_to_report_graph(
         "report_stream was not invoked for a non-command slides message"
     )
 
-    # The final reply is the LangGraph's final-only message, NOT the
-    # intercept's "reset" wording.
+    # The final reply is the agent's answer, NOT the intercept's "reset"
+    # wording.
     final_evts = [e for e in events if e[0] == "final"]
     assert final_evts, events
     final_text = final_evts[-1][1]["content"]

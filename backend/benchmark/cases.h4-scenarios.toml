@@ -1,0 +1,413 @@
+# H4 merge-gate scenario cases (SRS §III-10.4): 8 multi-turn R&D scenarios
+# x 3 cases, plus 6 simple turns timed by the latency gate (G-d).
+#
+# Every paper below is in the user's library (same paper_content ids and
+# chunk ids in the H4 copy and the v2.41.0 eval copy). Chunk ids quoted in
+# seeded assistant turns are real ids from those papers.
+#
+# Run (from backend/), H4 = candidate, v2.41.0 = baseline:
+#   scripts/run-benchmark.ps1 -Config benchmark/cases.h4-scenarios.toml -Judge `
+#     -BaseUrl http://127.0.0.1:8100 -DbPath D:/paperhub-h4-workspace/paperhub.db `
+#     -Compare http://127.0.0.1:8200 -CompareDbPath D:/paperhub-v241-eval-workspace/paperhub.db
+#
+# Scenarios 4 and 5 are H4-only in the gate: they count toward G-a but are
+# left out of the pairwise comparison (G-b). v2.41.0 still runs them; its
+# answers are recorded for reference.
+#
+# The scenario-5 cases MUTATE the library: they add Switch Transformers, MAE
+# and QLoRA to whichever copy runs them. On a re-run (or after an earlier
+# run) those papers are already present, so their rubrics also accept the
+# agent reporting "already in the library" without adding a duplicate.
+#
+# The G-d simple turns come first, so the library-count answers are read
+# before any scenario-5 case adds a paper to the H4 copy.
+
+[benchmark]
+name = "h4-scenarios"
+suite = "scenarios"
+base_url = "http://127.0.0.1:8100"
+db_path = "D:/paperhub-h4-workspace/paperhub.db"
+
+[papersets]
+gisc_yoloseg = [
+  "sha256:b973a48f4b473829bb30671bec295b5682f1ec9509748ad02576eb16a5c1a6f4",  # YOLOSeg (wafer die defects)
+  "sha256:471e47c7589a69ec5c096cc38e3ce9ddcf9e69a10def7e3f0a7c46dca6506699",  # Review of Ghost Imaging via Sparsity Constraints
+]
+yoloseg = [
+  "sha256:b973a48f4b473829bb30671bec295b5682f1ec9509748ad02576eb16a5c1a6f4",
+]
+livecell = [
+  "sha256:ade2a8b1d411f0fd0f98e33e582591df4ac9e62f37abadd823858a8071a2f8b4",  # LIVECell
+]
+collapse = [
+  "sha256:a461808d21b1715a74306506433662b1ad275f07340db54348138810c341a832",  # AI models collapse
+]
+moe3 = [
+  "arxiv:2202.09368",   # Expert Choice Routing
+  "arxiv:2408.15664",   # Auxiliary-Loss-Free Load Balancing
+  "arxiv:2412.14711",   # ReMoE
+]
+jepa = [
+  "arxiv:2301.08243",   # I-JEPA
+  "arxiv:2404.08471",   # V-JEPA
+]
+vla2 = [
+  "arxiv:2503.14734",   # GR00T N1
+  "arxiv:2510.10274",   # X-VLA
+]
+
+# ---------------------------------------------------------------------------
+# G-d simple turns (no scenario number: timed by G-d, not counted by G-a)
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "gd-chat-01-thanks"
+kind = "chitchat"
+prompt = "Hi! Thanks for the help yesterday."
+rubric = "A short, friendly reply. No claims about papers, no citations needed, no actions taken."
+
+[[cases]]
+id = "gd-chat-02-capabilities"
+kind = "chitchat"
+prompt = "What kinds of things can you help me with here?"
+rubric = "A short overview of what the assistant can do (read and cite papers in the library, compare them, search for and add papers, answer library questions, make slides, remember preferences). No invented paper content."
+
+[[cases]]
+id = "gd-chat-03-morning-zh"
+kind = "chitchat"
+prompt = "早安！"
+rubric = "A short friendly greeting, in Chinese (the user wrote Chinese). No paper claims, no actions."
+
+[[cases]]
+id = "gd-lib-01-total"
+kind = "library_count"
+prompt = "How many papers are in my library?"
+rubric = "States the library's paper count: 62 (56 arXiv papers + 6 PDF uploads) when this suite first ran. The scenario-5 cases add papers to the H4 copy, so on a re-run a higher count is correct when it matches the library at that moment (the trace's query_library result shows it). A count that matches neither is wrong."
+
+[[cases]]
+id = "gd-lib-02-year-2025"
+kind = "library_count"
+prompt = "How many papers in my library were published in 2025?"
+rubric = "21 papers (paper_content.year = 2025). Listing them is optional."
+
+[[cases]]
+id = "gd-lib-03-uploads"
+kind = "library_count"
+prompt = "How many of my library papers are PDF uploads rather than arXiv papers?"
+rubric = "6 PDF uploads (vs 56 arXiv papers). One of the six is marked private; mentioning that is optional. Naming the uploads is optional."
+
+# ---------------------------------------------------------------------------
+# Scenario 1 — follow-ups on the thread
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s1-01-run892"
+scenario = 1
+paperset = "gisc_yoloseg"
+prompt = '''給我更詳細實驗方法'''
+rubric = "Run 892's turn. The user asks for a more detailed EXPERIMENT METHOD for the idea under discussion: porting GISC's sparsity-constrained optimisation (data-fidelity term + sparsity regulariser, min mu1 f1{Y-AO} + mu2 f2{O}) into YOLOSeg for small low-contrast wafer-die defects. A correct answer designs how to test THAT port, e.g. where the sparsity term enters YOLOSeg (an L1 / sparsity regulariser on the mask or features added to its loss), the baseline (YOLOSeg's own setup: freeze detection then train segmentation, bce-dice mask loss, DDPM augmentation), the data (549 defective images split 90/10, 275 test images, 1232x972), the metrics YOLOSeg uses (AP@IoU=0.5 and IoU) and ablations (regulariser weight, with/without). Paper facts must be cited from the two papers' chunks. FAILS on_thread if it just describes each paper's own method separately (the run-892 bug). Answer in Traditional Chinese."
+turns = [
+  { user = '''我們來深入討論這個 idea：「Sparsity constraints for low-contrast segmentation」。
+機制來源：「A Review of Ghost Imaging via Sparsity Constraints」的 2. Theoretical Framework of GISC 段落。
+應用目標：「YOLOSeg with applications to wafer die particle defect segmentation」的 Image dataset 段落。
+為什麼可能搭得上：The target segmentation method struggles to isolate exceptionally small, low-contrast anomalies from dense background grids. Treating the low-contrast defect as a regularized optimization problem guided by sparsity constraints would mathematically isolate these subtle variations from the overriding background pattern.
+這個機制要怎麼移植過去？類比可能在哪裡不成立？''', assistant = '''這個將「稀疏性約束（Sparsity constraints）」引入「低對比度分割（Low-contrast segmentation）」的 idea 非常具備啟發性。我們結合這兩篇論文的內容，來探討如何移植此機制，以及類比可能面臨的挑戰。
+
+### 機制如何移植（How to Port the Mechanism）
+
+根據《A Review of Ghost Imaging via Sparsity Constraints》，鬼成像（Ghost Imaging, GI）的影像重建核心在於將其表述為一個最佳化問題：結合「數據保真項（data fidelity term）」與基於目標先驗資訊的「正則化項（regularization term）」（通常表現為稀疏性約束），透過求解例如 $\min \mu_1 f_1\{Y - AO\} + \mu_2 f_2\{O\}$ 的數學模型來濾除雜訊並重建微弱信號 [chunk:86149] (p.1)。
+
+在《YOLOSeg with applications to wafer die particle defect segmentation》中，晶圓晶粒（wafer die）的粒子缺陷具有兩個極端特徵：尺寸極小（佔全圖不到 0.02%）且與背景對比度極低（low contrast），其色調與晶圓表面高度相似 [chunk:82421]。
+
+**移植策略：**
+這兩者在數學結構上高度契合。我們可以將晶圓上重複且密集的背景網格視為「基底分量（或雜訊）」，而將微小且罕見的缺陷視為「稀疏信號」。在 YOLOSeg 這樣的深度學習模型訓練中，可以借鑒上述的稀疏約束優化框架 [chunk:86149] (p.1)，將稀疏性正則化（例如 $L_1$ 範數或基於壓縮感知/字典學習的損失項）整合進神經網路的損失函數（Loss function）中。這種數學約束能強制模型在特徵提取時，主動抑制大面積的平坦與重複背景紋理，從而將極小且低對比度的缺陷特徵從背景中「數學性地剝離」出來 [chunk:82421, 86149] (p.1)。
+
+### 類比可能不成立或面臨挑戰之處（Where the Analogy Might Break Down）
+
+儘管概念上相符，但在物理機制與算法架構的對接上，此類比可能在以下幾個層面不成立：
+
+1. **測量矩陣的物理基礎差異（Physical Measurement Matrix vs. Standard Images）：**
+   * 在《A Review of Ghost Imaging via Sparsity Constraints》中，優化模型 $\min \{Y - AO\}$ 裡的 $Y$ 來自測試臂（test arm）的實際強度波動測量，而測量矩陣 $A$ 則是由參考臂（reference arm）已知的光場強度分佈所構成，具有明確的物理光學基礎 [chunk:86149] (p.1)。
+   * 然而，在《YOLOSeg with applications to wafer die particle defect segmentation》中，影像資料是標準的單一光學圖像，不存在雙臂物理抽樣機制與測量矩陣 [chunk:82421]。若要套用此機制，必須人為構造測量矩陣（例如透過卷積操作或字典學習來模擬），這會失去 GI 原本基於物理光學抽樣的優勢。
+
+2. **背景並非純粹的隨機雜訊（Complex vs. Random Backgrounds）：**
+   * 鬼成像的稀疏約束通常建立在已知統計特性的光場散斑（speckle patterns）或均勻隨機背景上 [chunk:86149] (p.1)。
+   * 晶圓表面背景並非單純的均勻雜訊。《YOLOSeg with applications to wafer die particle defect segmentation》指出，晶圓的 pad 區域周圍存在許多「類似斑點的圖案（spot-like patterns）」，這些合法結構在視覺上極難與真實粒子缺陷區分 [chunk:82421]。若強行對整張影像施加全域稀疏性約束，模型可能會將正常的電路特徵誤判為雜訊而過度平滑，或將 pad 區的斑點錯誤地放大為稀疏缺陷。
+
+3. **優化框架的衝突（Iterative Optimization vs. End-to-End Deep Learning）：**
+   * GISC 使用的是基於壓縮感知（Compressive Sensing）等傳統數學優化理論，透過迭代求解極小值 [chunk:86149] (p.1)。
+   * 根據《YOLOSeg with applications to wafer die particle defect segmentation》的架構描述，YOLOSeg 是基於 YOLOv5s 的深度卷積神經網路 [chunk:82414]。將嚴格的數學迭代稀疏求解器直接嵌入端到端（End-to-End）的神經網路中，可能會與基於梯度下降的反向傳播機制產生衝突，導致模型訓練不穩定或難以收斂。''' },
+]
+
+[[cases]]
+id = "s1-02-remoe-sparsity"
+scenario = 1
+paperset = "moe3"
+prompt = "OK, but then what stops it from just switching on all the experts? How do they keep the compute at about k experts per token?"
+rubric = "About ReMoE (the paper under discussion), not Expert Choice's capacity or the bias method. Must state: ReMoE adds an L1 regularisation of the ReLU router outputs to the LM loss with an ADAPTIVE coefficient lambda_i, updated multiplicatively lambda_{i+1} = lambda_i * alpha^sign(target - S_i) toward a target sparsity 1 - k/E (lambda_0 = 1e-8, alpha = 1.2), so the average sparsity stays near the target and on average k experts are active, matching TopK's FLOPs. May add the load-balancing-refined L1 (weights f_{l,e}) and the three-stage training. Cited from ReMoE chunks."
+turns = [
+  { user = "How does ReMoE's routing differ from the usual TopK router?", assistant = "ReMoE replaces the Softmax + TopK router with a ReLU on the router logits, R(x) = ReLU(xW). TopK has a jump discontinuity at the k-th largest value; ReLU puts every breakpoint at 0, so the router is continuous and the whole training pipeline is fully differentiable [chunk:83677]. Because each expert's gate is decided independently, a token can go to a variable number of experts instead of exactly k, so harder tokens can get more compute [chunk:83678]." },
+]
+
+[[cases]]
+id = "s1-03-vla-second-one"
+scenario = 1
+paperset = "vla2"
+prompt = "What did the second one actually pretrain on, and how big was that pretraining run?"
+rubric = "'The second one' is X-VLA. Must answer about X-VLA, not GR00T N1: data = a weighted mixture of AGIBOT, Droid and the RoboMind sources with cross-domain / cross-trajectory shuffling; run = X-VLA-0.9B on 64 A100 GPUs, global batch 1024, about 4 days, 200K iterations. Welcome (not required): the per-source numbers (AGIBOT 141K trajectories / weight 0.4, Droid 45K, RoboMind-Franka 19K, -Dual-Franka 2K, -UR 25K, -Agilex 11K), AdamW lr 1e-4 / betas 0.9/0.95 / wd 0.01, bf16, 224x224 images. Any number given must be correct. Cited from X-VLA chunks (pretraining details)."
+turns = [
+  { user = "How do GR00T N1 and X-VLA each deal with robots that have different bodies?", assistant = "GR00T N1 keeps one shared backbone (the Eagle-2 VLM plus a DiT flow-matching action module) and handles embodiment differences at the edges: an MLP per embodiment projects that robot's state and action vectors into a shared embedding size before the DiT [chunk:82439]. X-VLA absorbs the heterogeneity with soft prompts instead: a learnable embedding per data source, randomly initialised and learned end to end, injected early into action generation [chunk:82290]. Its pretraining mixture covers seven hardware setups across five robots from AGIBOT-beta, RoboMind and Droid [chunk:82289]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 2 — cross-paper comparison with every cell cited
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s2-01-moe-balance-table"
+scenario = 2
+paperset = "moe3"
+prompt = "Make a comparison table of Expert Choice routing, the auxiliary-loss-free balancing strategy and ReMoE. Columns: routing rule, how load balance is achieved, whether an auxiliary/regularisation loss is used, and one known drawback. Cite every cell."
+rubric = "Three rows, four columns, a citation in every cell, each from the right paper (except the attributed critique allowed in the Expert Choice drawback cell below). Expert Choice: each expert picks its top-k tokens, k = n*c/e (capacity factor c); balanced by design; no auxiliary loss; drawback: the Expert Choice paper does not state its own limitations, so either the cell cites the aux-loss-free paper AND the answer attributes the point (conditions on future tokens / breaks causality) as THAT paper's critique of Expert Choice, or the answer honestly reports that Expert Choice states no drawback; a critique cited to the EC paper, or presented as EC's own admission, is misattributed. Aux-loss-free: top-K over gating score + per-expert bias b_i (bias only for selection, not in the gate weight); bias updated b_i += u*sign(e_i) from the previous batch's load; no auxiliary loss; drawback stated only if supported (else marked not reported). ReMoE: ReLU router; adaptive L1 regularisation keeps sparsity at 1-k/E and a load-balancing-refined L1 (f_{l,e} weights, same form as the Switch LB loss) balances load — so it DOES use a regularisation loss; drawback e.g. extra compute/memory in the early dense stages. Uncited or misattributed cells fail grounding."
+
+[[cases]]
+id = "s2-02-jepa-table"
+scenario = 2
+paperset = "jepa"
+prompt = "Now put it next to V-JEPA in a table: input modality, what is predicted and in which space, masking strategy, and pretraining data. Cite each cell."
+rubric = "'It' is I-JEPA (the model under discussion), so the table compares I-JEPA with V-JEPA. I-JEPA: images; predicts representations of target blocks (from an EMA target encoder) in representation space, not pixels; multi-block masking: 4 target blocks with scale 0.15-0.2 and aspect ratio 0.75-1.5, one context block with scale 0.85-1.0 minus overlaps; pretraining on ImageNet(-1K). V-JEPA: video; predicts features/representations of masked regions in latent space; multi-block masking with short-range (8 blocks, 15% of each frame) and long-range (2 blocks, 70%) masks repeated across the time axis, ~90% average masking ratio; VideoMix2M (~2M videos from HowTo100M, Kinetics-400/600/700, SSv2). Every cell cited from the matching paper; an unsupported cell must say not found rather than guess."
+turns = [
+  { user = "What exactly does I-JEPA predict, and in which space?", assistant = "I-JEPA predicts the representations of several target blocks of an image from a single context block. The targets are outputs of a target encoder (updated as an exponential moving average of the context encoder), so the prediction is made in representation space rather than pixel space [chunk:82575]. It samples 4 target blocks with random scale 0.15-0.2 and aspect ratio 0.75-1.5 [chunk:82576]." },
+]
+
+[[cases]]
+id = "s2-03-transformer-mamba"
+papers = ["arxiv:1706.03762", "arxiv:2312.00752"]
+scenario = 2
+prompt = "Put Attention Is All You Need and Mamba side by side: cost per layer as sequence length grows, cost per generated token at inference, which data modalities each paper evaluates on, and the longest context they report working. Cite every cell."
+rubric = "Transformer: self-attention O(n^2 * d) per layer, O(1) sequential ops; evaluated on WMT14 translation (En-De, En-Fr) and English constituency parsing; no long-context claim (say not reported if absent). Mamba: linear in sequence length in training, constant time per step at inference (no cache of previous elements); language, DNA (HG38 genomics) and audio; performance improves with context up to million-length sequences. Every cell cited from the right paper; 'not reported' is acceptable where the paper is silent, invention is not."
+
+# ---------------------------------------------------------------------------
+# Scenario 3 — evidence hunting with an honest negative
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s3-01-genomics-evidence"
+papers = ["arxiv:2312.00752", "arxiv:1706.03762"]
+scenario = 3
+prompt = "For my related-work section: did either of these papers run experiments on DNA or genomics data? If yes, which dataset and which tasks exactly?"
+rubric = "Mamba: yes — DNA pretraining on the HG38 human genome (~4.5B base-pair tokens, following HyenaDNA), scaling with model size and with sequence length (up to ~1M), and Great Apes DNA classification fine-tuning (5 species). Attention Is All You Need: NO genomics experiments — must say so plainly (it covers translation and constituency parsing). Inventing DNA results for the Transformer paper fails. Mamba facts cited."
+
+[[cases]]
+id = "s3-02-mt-evidence"
+papers = ["arxiv:1810.04805", "arxiv:2005.14165"]
+scenario = 3
+prompt = "Did BERT or GPT-3 evaluate on machine translation? I need the benchmarks and numbers, if any."
+rubric = "GPT-3: yes — WMT'14 Fr<->En, WMT'16 De<->En and WMT'16 Ro<->En, BLEU (multi-bleu with XLM tokenisation); few-shot GPT-3 beats prior unsupervised NMT by about 5 BLEU when translating INTO English; specific numbers only if quoted from cited chunks. BERT: NO machine-translation evaluation (MT appears only in related work / discussion) — must say so plainly. Fabricated BERT BLEU fails."
+
+[[cases]]
+id = "s3-03-yoloseg-speed"
+paperset = "yoloseg"
+scenario = 3
+prompt = "Our inspection line needs about 20 images per second, so for that model: does the paper report inference speed (FPS or ms per image) or the hardware it ran on?"
+rubric = "Honest negative: the paper reports NO FPS / latency and no inference or training hardware. What it does report and may be cited: parameter counts (YOLOSeg 7.15M; DDPM 7M used only for augmentation; YOLOv5s-seg 7.6M; Mask R-CNN 44M), input size 608x608, and only a qualitative remark that YOLOv5s-segmentation suits speed-prioritised tasks. Should say speed would have to be measured. Any invented FPS/ms number fails. ('That model' is YOLOSeg, the model under discussion; the seeded turn gave only architecture and parameter count, so it supplies no speed figure.)"
+turns = [
+  { user = "What does YOLOSeg build on, and how big is the model?", assistant = "YOLOSeg uses the YOLOv5s detector from the YOLOv5 family as its base detection model [chunk:82414], and adds a UNet-like structure to the segmentation head. The YOLOSeg network itself has 7.15 million parameters [chunk:82424]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 4 — idea -> experiment plan (H4-only in G-b)
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s4-01-remoe-bias-plan"
+papers = ["arxiv:2412.14711", "arxiv:2408.15664"]
+scenario = 4
+prompt = "Let's test it. Write me an experiment plan."
+rubric = "A concrete plan for ReMoE + auxiliary-loss-free bias balancing, grounded in both papers: Must: the variant (a per-expert bias that shifts each expert's ReLU gate / threshold, updated by u*sign(load error) from the previous batch, adaptive L1 kept for sparsity only); baselines (ReMoE with its load-balancing L1, TopK MoE); a setup matched to ReMoE (same model family and training corpus); metrics (validation loss/perplexity, a load-balance measure such as MaxVio from the aux-free paper, sparsity vs target); at least one ablation (e.g. bias rate u). Welcome (cited when given, not required): extra baselines (ReMoE with plain L1, TopK with the 0.01 LB loss); ReMoE's setup numbers (The Pile, 60k steps ~30B tokens, context 1024, batch 512, AdamW lr 5e-4 cosine, 182M/469M/978M backbones); downstream eval; lambda_0/alpha ablations. Facts from the papers cited; the plan's own choices must not be presented as paper results. Generic experiment advice without the two papers' specifics fails."
+turns = [
+  { user = "Could ReMoE use the auxiliary-loss-free bias balancing instead of its load-balancing L1 term?", assistant = "Plausibly, with one catch. ReMoE folds load balancing into its L1 regulariser by weighting each router output with the expert's activation ratio f_{l,e}; that has the same form as the Switch load-balancing loss, and because ReLU outputs can shrink to 0 it needs the adaptive lambda_i to avoid collapse [chunk:83681]. The auxiliary-loss-free method instead adds a per-expert bias b_i to the gating scores only for the top-K selection and nudges it by u*sign(load error) after each batch, so no balancing gradient touches the training objective [chunk:83602, 83603]. ReMoE has no top-K to bias, so the bias would have to shift each expert's ReLU threshold instead." },
+]
+
+[[cases]]
+id = "s4-02-ddpm-livecell-plan"
+papers = [
+  "sha256:b973a48f4b473829bb30671bec295b5682f1ec9509748ad02576eb16a5c1a6f4",
+  "sha256:ade2a8b1d411f0fd0f98e33e582591df4ac9e62f37abadd823858a8071a2f8b4",
+]
+scenario = 4
+prompt = "Turn this into an experiment plan I can actually run."
+rubric = "A plan for DDPM pseudo-cell augmentation on LIVECell, grounded in both papers: Must: data from LIVECell (target SH-SY5Y, the hardest cell type at 22-28% AP; its own splits/benchmarks); a baseline (LIVECell's anchor-based / anchor-free models); the augmentation done the YOLOSeg way (DDPM on cut-out object patches, auto-annotation, paste onto images, a sweep of the augmentation amount); metric = AP as LIVECell reports it; a no-augmentation control; at least one stated risk (e.g. dense/touching cells, phase-contrast appearance). Welcome (cited when given, not required): LIVECell totals (5,239 images, 1,686,352 cells, 8 cell types); fine-tuning from MS-COCO weights; 64x64 DDPM input, Otsu, sweep 1x to 2x with 1.25x as YOLOSeg's best; copy-paste of real cells as a control. Paper facts cited; generic plans fail."
+turns = [
+  { user = "Idea: YOLOSeg's DDPM defect augmentation might help LIVECell's hardest cell type. Does that make sense?", assistant = "It could. YOLOSeg trains a DDPM only on the defect patches cut out along their annotated contours, generates pseudo defects, auto-annotates them with Otsu binarisation and pastes them onto defect-free images [chunk:82418, 82426]. Augmenting the training set to 1.25x worked best, and DDPM raised IoU from 0.715 to 0.754 in their ablation [chunk:82426, 82423]. On LIVECell, SH-SY5Y is by far the hardest type, with detection and segmentation AP of 22-28% versus 64-66% for SkBr3 [chunk:82354]. The catch is that LIVECell cells are dense and touching, so pasted cells need realistic neighbours rather than an empty background." },
+]
+
+[[cases]]
+id = "s4-03-lora-xvla-plan"
+papers = ["arxiv:2510.10274", "arxiv:2106.09685"]
+scenario = 4
+prompt = "Draft the experiment plan: which arms to compare, the training settings for each (steps, batch size, what LoRA touches), the benchmarks to run, and what result would tell us the soft prompt is still needed."
+rubric = "A plan grounded in both papers: Must: arms (a) LoRA without training a new soft prompt and (b) LoRA + a new soft prompt (X-VLA's own PEFT setup: ~9M tunable params, ~1%), optionally (c) X-VLA's full two-step adaptation; training settings grounded in X-VLA's finetuning table (batch size, number of steps for PEFT) and LoRA's design (frozen W0, low-rank BA with B=0 init, rank r, which weight matrices); evaluation on benchmarks X-VLA reports for PEFT; a stated decision rule (e.g. arm (a) clearly below (b) => prompt needed). Welcome (cited when given, not required): batch 128 / 40K steps, Abs EEF, AdamW 1e-4, betas 0.9/0.95, bf16; alpha/r scaling; the specific benchmarks (LIBERO suites, Simpler-WidowX, an unseen real embodiment like the AIRBOT cloth pick); the 1,000-iteration prompts+heads-only step before warm-up. Should acknowledge X-VLA already reports LoRA PEFT results. Cited; generic advice fails."
+turns = [
+  { user = "What if we adapted X-VLA to our new robot arm with LoRA only, without training a new soft prompt?", assistant = "Worth testing. X-VLA's normal adaptation first trains only the soft prompts and action heads for 1,000 iterations with everything else frozen, then warms up into joint training [chunk:82313]. LoRA freezes the pretrained weight W0 and learns a low-rank update BA (rank r much smaller than the matrix), with B initialised to zero so training starts from the pretrained model [chunk:86413]. X-VLA already reports a LoRA run with about 9M trainable parameters, roughly 1% of the model [chunk:82301]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 5 — find missing work on the web, add it, read it, answer with it
+# (H4-only in G-b). None of these three papers is in a fresh library, but they are after a first run (see the header).
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s5-01-add-switch"
+papers = ["arxiv:2202.09368", "arxiv:2412.14711"]
+scenario = 5
+prompt = "The Switch Transformer paper isn't in my library. Find it, add it to this chat, and then explain how its expert capacity and load-balancing loss work compared with Expert Choice."
+rubric = "Must find Switch Transformers (Fedus et al., arXiv 2101.03961), ADD it to the chat and say so (visible, undoable action), then answer from its chunks: top-1 (switch) routing; expert capacity = (tokens per batch / number of experts) x capacity factor, overflow tokens are dropped / passed through the residual; auxiliary load-balancing loss alpha * N * sum_i f_i * P_i (alpha ~ 1e-2). Contrast with Expert Choice: experts pick their top-k tokens, k = n*c/e, balanced by design, no auxiliary loss. Switch claims must cite Switch chunks (not only Expert Choice / ReMoE ones). If the paper truly cannot be added, an honest report without invented Switch details is correct; claiming it was added when it was not fails. If the paper is already in the library (an earlier run added it), the agent correctly reporting that it is already there, adding no duplicate, and answering from its existing chunks also passes."
+turns = [
+  { user = "Why did Expert Choice move away from token-choice routing?", assistant = "Token-choice routers (as in GShard and Switch) pick the top-k experts per token, which tends to overload some experts and leave others idle; they add an auxiliary balancing loss, but that does not guarantee balance, and some experts exceed capacity by 20-40% [chunk:83583]. Expert Choice flips it: each expert picks its top-k tokens with k = n*c/e, which balances load by design and lets a token use a variable number of experts [chunk:83584]." },
+]
+
+[[cases]]
+id = "s5-02-add-mae"
+papers = ["arxiv:2301.08243"]
+scenario = 5
+prompt = "MAE isn't in my library. Find the paper (Masked Autoencoders Are Scalable Vision Learners), add it here, and tell me what masking ratio and reconstruction target MAE uses, versus I-JEPA."
+rubric = "Must find MAE (He et al., arXiv 2111.06377), ADD it and say so, then answer from its chunks: random patch masking at a high ratio (75%), the encoder sees only visible patches, a lightweight decoder reconstructs the masked patches' PIXELS (MSE on masked patches, optionally normalised pixels). Versus I-JEPA (cited from I-JEPA): predicts REPRESENTATIONS of 4 target blocks (scale 0.15-0.2) from one context block (scale 0.85-1.0), non-generative. MAE claims must cite MAE chunks. Honest failure report is acceptable; a false 'added' claim fails. If the paper is already in the library (an earlier run added it), the agent correctly reporting that it is already there, adding no duplicate, and answering from its existing chunks also passes."
+turns = [
+  { user = "How is I-JEPA different from masked autoencoders in one sentence?", assistant = "Its encoder/predictor layout resembles MAE, but I-JEPA is non-generative: it predicts the representations of target blocks rather than pixels [chunk:82575]." },
+]
+
+[[cases]]
+id = "s5-03-add-qlora"
+papers = ["arxiv:2106.09685"]
+scenario = 5
+prompt = "Can you find QLoRA, add it to this chat, and explain what it changes on top of LoRA — specifically NF4 and double quantization?"
+rubric = "Must find QLoRA (Dettmers et al., arXiv 2305.14314), ADD it and say so, then answer from its chunks: the frozen base model is quantised to 4-bit NormalFloat (NF4, suited to normally distributed weights) and LoRA adapters are trained by backpropagating through it; double quantization quantises the quantisation constants themselves (saving ~0.37 bits/parameter); paged optimizers handle memory spikes; enables finetuning a 65B model on a single 48GB GPU. LoRA basics (frozen W0 + BA) may cite LoRA. QLoRA claims must cite QLoRA chunks. Honest failure report is acceptable; a false 'added' claim fails. If the paper is already in the library (an earlier run added it), the agent correctly reporting that it is already there, adding no duplicate, and answering from its existing chunks also passes."
+turns = [
+  { user = "Remind me how LoRA works.", assistant = "LoRA freezes a pretrained weight W0 and learns its update as a low-rank product BA with rank r much smaller than the matrix; A gets a random Gaussian init and B starts at zero, so training begins from the pretrained model, and the update is scaled by alpha/r [chunk:86413]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 6 — reproduction checklist from scattered sections and tables
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s6-01-transformer-checklist"
+papers = ["arxiv:1706.03762"]
+scenario = 6
+prompt = "Give me a reproduction checklist for the base model: data and tokenisation, batching, hardware and schedule, optimizer and LR schedule, regularisation, inference/decoding settings, and the BLEU we should hit."
+rubric = "Base model checklist, each item cited: WMT 2014 En-De ~4.5M sentence pairs, BPE with a shared ~37,000-token vocabulary; batches of ~25,000 source + ~25,000 target tokens; 8 P100 GPUs, 100,000 steps (~12 h, ~0.4 s/step); Adam beta1 0.9, beta2 0.98, eps 1e-9, lr = d_model^-0.5 * min(step^-0.5, step * warmup^-1.5) with warmup 4000; residual dropout 0.1, label smoothing 0.1; average the last 5 checkpoints, beam size 4, length penalty 0.6, max output length input+50; target 27.3 BLEU on newstest2014 En-De (28.4 is the BIG model). Architecture (N=6, d_model 512, d_ff 2048, 8 heads) welcome. Mixing up base and big numbers fails."
+turns = [
+  { user = "We're re-implementing the base Transformer for WMT14 En-De next month.", assistant = "Good target. The base model uses d_model = 512 with a position-wise feed-forward inner size d_ff = 2048 [chunk:83659], and its self-attention layers cost O(n^2 * d) per layer with O(1) sequential operations [chunk:83660]." },
+]
+
+[[cases]]
+id = "s6-02-yoloseg-checklist"
+paperset = "yoloseg"
+scenario = 6
+prompt = "I want to reproduce YOLOSeg's main result. Build me a reproduction checklist from the paper — data, annotation, model, training tricks, hyperparameters, augmentation, evaluation — and flag anything the paper doesn't specify."
+rubric = "Checklist from scattered sections, each item cited. Must: 549 defective images split 90/10 train/val + 275 test images; polygon annotation converted to YOLO format; YOLOv5s backbone + UNet-like segmentation head, input 608x608; training tricks: freeze detection then train segmentation, bce-dice mask loss, auto-anchor, DDPM augmentation, mosaic/flip/affine OFF; SGD with a one-cycle schedule; evaluation AP@IoU=0.5 and IoU. MUST flag unspecified items, at least: number of epochs, batch size and training hardware. Inventing those fails. Welcome (cited when given, not required): 1232x972x3 image size; Labelme tooling and pad areas excluded; 3 anchors per head, NMS IoU 0.45; mask-loss weight 6; k-means 9 clusters + 1,000 GE evolutions; DDPM 64x64 input and 1.25x images; SGD momentum 0.937, lr 0.01 initial / 0.1 final factor, decay 0.0005; target ~0.821 AP / 0.732 IoU (Table 3). Any number given must be correct."
+
+[[cases]]
+id = "s6-03-xvla-checklist"
+papers = ["arxiv:2510.10274"]
+scenario = 6
+prompt = "I'll be reproducing that model from scratch. Make a reproduction checklist for its pretraining and its downstream finetuning: compute, optimizer, data mixture and sampling, image preprocessing, validation, and the finetuning recipe per benchmark."
+rubric = "'That model' is X-VLA (the soft-prompt model under discussion). Must (each item cited): X-VLA-0.9B on 64 A100s, global batch 1024, ~4 days, 200K iterations; AdamW with lr 1e-4, bf16; a data mixture over the AGIBOT / Droid / RoboMind sources with sampling weights and cross-domain/cross-trajectory shuffling; validation on held-out AGIBOT-beta trajectories with average L1 error; a two-step finetuning recipe (about 1,000 iterations prompts+heads only, then a warm-up into joint training) and per-benchmark finetuning settings. Welcome (cited when given, not required): AdamW betas 0.9/0.95 and wd 0.01; 224x224 images with ColorJitter(0.2,0.2,0.2,0); per-source weights (AGIBOT 141K/0.4, Droid 45K, RoboMind-Franka 19K/0.1, -Dual-Franka 2K/0.03, -UR 25K/0.1, -Agilex 11K/0.07); the 189 tasks x 3 validation split; batch 128 / 60K steps for most benchmarks, SoftFold 256 / 400K, PEFT 128 / 40K; control interface Abs EEF (Rel XYZ + Abs Rotation for Simpler-Google/Fractal). Any value given must be correct and cited; invented values fail."
+turns = [
+  { user = "How does X-VLA deal with robots that have different bodies?", assistant = "X-VLA uses soft prompts: domain-specific learnable parameters, one per data source, that absorb the differences between hardware setups. They are randomly initialised rather than hand-designed and optimised implicitly through end-to-end training, and they are injected early in action generation so the backbone becomes embodiment-aware [chunk:82290]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 7 — checking a pasted claim against the sources
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s7-01-transformer-claim"
+papers = ["arxiv:1706.03762"]
+scenario = 7
+prompt = "Fact-check this sentence from a blog post before I quote it: \"The base Transformer reached 28.4 BLEU on WMT14 English-German and trained in 3.5 days on 8 GPUs.\""
+rubric = "Partly wrong: 28.4 BLEU and 3.5 days are the BIG model (300K steps); the BASE model reached 27.3 BLEU after 100K steps / ~12 hours. '8 GPUs' is right (8 P100s). A corrected sentence is welcome. Each point cited (training schedule + results table)."
+
+[[cases]]
+id = "s7-02-livecell-claim"
+paperset = "livecell"
+scenario = 7
+prompt = "Thanks. Now check this sentence from my draft against the LIVECell paper: \"LIVECell contains about 1.6 million fluorescently labelled cells from eight cell types, and its baseline models were trained from scratch.\""
+rubric = "Right: ~1.6 million cells (1,686,352) from eight cell types (5,239 images). Wrong: the images are label-free phase-contrast, NOT fluorescently labelled; the baseline models were fine-tuned from MS-COCO 2017 pretrained weights (transfer learning), NOT trained from scratch. Each verdict cited."
+turns = [
+  { user = "How hard is the SH-SY5Y cell type in LIVECell compared with the others?", assistant = "SH-SY5Y is among the hardest: training and evaluating on a single cell type, detection and segmentation AP is only 22-28% for SH-SY5Y, versus 64-66% for SkBr3, which scored quite high [chunk:82354]." },
+]
+
+[[cases]]
+id = "s7-03-collapse-claim"
+paperset = "collapse"
+scenario = 7
+prompt = "A colleague's slide says: \"Shumailov et al. show that keeping 10% of the original data in every generation completely prevents model collapse.\" Is that what the paper says?"
+rubric = "No, overstated: in the OPT-125m experiments with 10% of the original data preserved (ten epochs), preservation gives better fine-tuning and only MINOR degradation — performance still degrades; both regimes degrade and collapse still shows (low-perplexity samples accumulate). It does not 'completely prevent' collapse. Cited from the language-model section."
+turns = [
+  { user = "What does the model collapse paper actually test on language models?", assistant = "They fine-tune OPT-125m on wikitext2 and train each new generation on text produced by the previous generation's model; the original fine-tuned model reaches 34 mean perplexity from a zero-shot 115 [chunk:82396]. Over the generations the models produce more of what the original model found likely while adding improbable sequences of their own, i.e. errors [chunk:82397, 82398]." },
+]
+
+# ---------------------------------------------------------------------------
+# Scenario 8 — slides on what was discussed, built from the papers
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "s8-01-jepa-deck"
+paperset = "jepa"
+scenario = 8
+prompt = "Make an 8-slide deck on what we just discussed — I-JEPA versus V-JEPA — for my reading group."
+rubric = "A compiled deck (page_count > 0) of about 8 content slides (7-10 pages incl. a title page is fine) whose title/subject is the I-JEPA vs V-JEPA comparison discussed (prediction in representation space, masking strategies, image vs video), built from both papers. A deck about only one paper or an unrelated subject fails; no deck fails."
+turns = [
+  { user = "What's the core difference between I-JEPA and V-JEPA?", assistant = "Both predict representations rather than pixels. I-JEPA predicts the representations of 4 target blocks (scale 0.15-0.2) of an image from one large context block (scale 0.85-1.0), using an EMA target encoder [chunk:82575, 82576]. V-JEPA does the same for video: its masks are spatial blocks repeated across the whole clip, short-range (8 blocks, 15% of each frame) and long-range (2 blocks, 70%), about 90% masked on average [chunk:77500], and it pretrains on VideoMix2M, about 2M videos [chunk:77502]." },
+]
+
+[[cases]]
+id = "s8-02-moe-balance-deck"
+papers = ["arxiv:2202.09368", "arxiv:2408.15664"]
+scenario = 8
+prompt = "Turn this comparison into a short presentation, about 8 slides."
+rubric = "A compiled deck of about 8 slides (7-10 pages incl. title) on the discussed comparison: Expert Choice routing vs auxiliary-loss-free bias balancing for MoE load balance, built from both papers. A generic MoE deck or one covering only one method fails; no deck fails."
+turns = [
+  { user = "Compare Expert Choice and the auxiliary-loss-free strategy for MoE load balancing.", assistant = "Expert Choice lets each expert pick its top-k tokens, k = n*c/e, so load is balanced by construction and tokens get a variable number of experts [chunk:83584]. The auxiliary-loss-free strategy keeps token-choice top-K but adds a per-expert bias to the scores used for selection, raising or lowering it after each batch by the expert's load, so no extra loss gradient is needed [chunk:83602, 83603]. The aux-free paper argues Expert Choice leaks future-token information because a token's experts depend on other tokens in the same sequence [chunk:83603]." },
+]
+
+[[cases]]
+id = "s8-03-gisc-idea-deck"
+paperset = "gisc_yoloseg"
+scenario = 8
+prompt = "把我們剛剛討論的這個 idea 做成 8 頁左右的簡報，給 lab meeting 用。"
+rubric = "A compiled deck of about 8 slides (7-10 pages incl. title) about the discussed IDEA — porting GISC's sparsity-constrained optimisation to YOLOSeg's small low-contrast wafer-defect segmentation (how to port it, where the analogy breaks) — built from both papers; Chinese content preferred (the user wrote Traditional Chinese). A deck that only summarises one paper, or the two papers separately without the idea, fails; no deck fails."
+turns = [
+  { user = '''我們來深入討論這個 idea：「Sparsity constraints for low-contrast segmentation」。
+機制來源：「A Review of Ghost Imaging via Sparsity Constraints」的 2. Theoretical Framework of GISC 段落。
+應用目標：「YOLOSeg with applications to wafer die particle defect segmentation」的 Image dataset 段落。
+為什麼可能搭得上：The target segmentation method struggles to isolate exceptionally small, low-contrast anomalies from dense background grids. Treating the low-contrast defect as a regularized optimization problem guided by sparsity constraints would mathematically isolate these subtle variations from the overriding background pattern.
+這個機制要怎麼移植過去？類比可能在哪裡不成立？''', assistant = '''這個將「稀疏性約束（Sparsity constraints）」引入「低對比度分割（Low-contrast segmentation）」的 idea 非常具備啟發性。我們結合這兩篇論文的內容，來探討如何移植此機制，以及類比可能面臨的挑戰。
+
+### 機制如何移植（How to Port the Mechanism）
+
+根據《A Review of Ghost Imaging via Sparsity Constraints》，鬼成像（Ghost Imaging, GI）的影像重建核心在於將其表述為一個最佳化問題：結合「數據保真項（data fidelity term）」與基於目標先驗資訊的「正則化項（regularization term）」（通常表現為稀疏性約束），透過求解例如 $\min \mu_1 f_1\{Y - AO\} + \mu_2 f_2\{O\}$ 的數學模型來濾除雜訊並重建微弱信號 [chunk:86149] (p.1)。
+
+在《YOLOSeg with applications to wafer die particle defect segmentation》中，晶圓晶粒（wafer die）的粒子缺陷具有兩個極端特徵：尺寸極小（佔全圖不到 0.02%）且與背景對比度極低（low contrast），其色調與晶圓表面高度相似 [chunk:82421]。
+
+**移植策略：**
+這兩者在數學結構上高度契合。我們可以將晶圓上重複且密集的背景網格視為「基底分量（或雜訊）」，而將微小且罕見的缺陷視為「稀疏信號」。在 YOLOSeg 這樣的深度學習模型訓練中，可以借鑒上述的稀疏約束優化框架 [chunk:86149] (p.1)，將稀疏性正則化（例如 $L_1$ 範數或基於壓縮感知/字典學習的損失項）整合進神經網路的損失函數（Loss function）中。這種數學約束能強制模型在特徵提取時，主動抑制大面積的平坦與重複背景紋理，從而將極小且低對比度的缺陷特徵從背景中「數學性地剝離」出來 [chunk:82421, 86149] (p.1)。
+
+### 類比可能不成立或面臨挑戰之處（Where the Analogy Might Break Down）
+
+儘管概念上相符，但在物理機制與算法架構的對接上，此類比可能在以下幾個層面不成立：
+
+1. **測量矩陣的物理基礎差異（Physical Measurement Matrix vs. Standard Images）：**
+   * 在《A Review of Ghost Imaging via Sparsity Constraints》中，優化模型 $\min \{Y - AO\}$ 裡的 $Y$ 來自測試臂（test arm）的實際強度波動測量，而測量矩陣 $A$ 則是由參考臂（reference arm）已知的光場強度分佈所構成，具有明確的物理光學基礎 [chunk:86149] (p.1)。
+   * 然而，在《YOLOSeg with applications to wafer die particle defect segmentation》中，影像資料是標準的單一光學圖像，不存在雙臂物理抽樣機制與測量矩陣 [chunk:82421]。若要套用此機制，必須人為構造測量矩陣（例如透過卷積操作或字典學習來模擬），這會失去 GI 原本基於物理光學抽樣的優勢。
+
+2. **背景並非純粹的隨機雜訊（Complex vs. Random Backgrounds）：**
+   * 鬼成像的稀疏約束通常建立在已知統計特性的光場散斑（speckle patterns）或均勻隨機背景上 [chunk:86149] (p.1)。
+   * 晶圓表面背景並非單純的均勻雜訊。《YOLOSeg with applications to wafer die particle defect segmentation》指出，晶圓的 pad 區域周圍存在許多「類似斑點的圖案（spot-like patterns）」，這些合法結構在視覺上極難與真實粒子缺陷區分 [chunk:82421]。若強行對整張影像施加全域稀疏性約束，模型可能會將正常的電路特徵誤判為雜訊而過度平滑，或將 pad 區的斑點錯誤地放大為稀疏缺陷。
+
+3. **優化框架的衝突（Iterative Optimization vs. End-to-End Deep Learning）：**
+   * GISC 使用的是基於壓縮感知（Compressive Sensing）等傳統數學優化理論，透過迭代求解極小值 [chunk:86149] (p.1)。
+   * 根據《YOLOSeg with applications to wafer die particle defect segmentation》的架構描述，YOLOSeg 是基於 YOLOv5s 的深度卷積神經網路 [chunk:82414]。將嚴格的數學迭代稀疏求解器直接嵌入端到端（End-to-End）的神經網路中，可能會與基於梯度下降的反向傳播機制產生衝突，導致模型訓練不穩定或難以收斂。''' },
+]

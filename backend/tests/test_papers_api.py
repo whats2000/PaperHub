@@ -1338,7 +1338,7 @@ async def test_document_mode_html_for_latex(
         r = await client.get(f"/papers/content/{pcid}/document")
 
     assert r.status_code == 200
-    assert r.json() == {"mode": "html"}
+    assert r.json() == {"mode": "html", "page_pdf": False}
 
 
 async def test_document_mode_pdf_for_pdf_render(
@@ -1378,7 +1378,7 @@ async def test_document_mode_pdf_for_pdf_render(
         r = await client.get(f"/papers/content/{pcid}/document")
 
     assert r.status_code == 200
-    assert r.json() == {"mode": "pdf"}
+    assert r.json() == {"mode": "pdf", "page_pdf": True}
 
 
 async def test_document_mode_pdf_ignores_subdir_pdfs(
@@ -1422,7 +1422,7 @@ async def test_document_mode_pdf_ignores_subdir_pdfs(
         r = await client.get(f"/papers/content/{pcid}/document")
 
     assert r.status_code == 200
-    assert r.json() == {"mode": "html"}
+    assert r.json() == {"mode": "html", "page_pdf": False}
 
 
 async def test_document_404_missing(

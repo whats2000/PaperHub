@@ -1,5 +1,5 @@
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -72,6 +72,35 @@ class FinalEvent(BaseModel):
     content: str
 
 
+class AgentSummary(BaseModel):
+    """The turn summary an agent run shows instead of the routing badge
+    (SRS §III-10.4), built from ``runs.agent_record_json``."""
+
+    papers_read: int
+    steps: int
+    tools: list[str]
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "AgentSummary":
+        papers = record.get("papers")
+        tools = record.get("tools")
+        steps = record.get("steps")
+        return cls(
+            papers_read=len({p for p in papers if isinstance(p, int)})
+            if isinstance(papers, list) else 0,
+            steps=steps if isinstance(steps, int) else 0,
+            # Distinct names in first-use order; the badge needs no repeats.
+            tools=list(dict.fromkeys(
+                str(t) for t in tools if isinstance(t, str)))
+            if isinstance(tools, list) else [],
+        )
+
+
+class AgentSummaryEvent(AgentSummary):
+    type: Literal["agent_summary"] = "agent_summary"
+    run_id: int
+
+
 class ErrorEvent(BaseModel):
     type: Literal["error"] = "error"
     run_id: int
@@ -87,6 +116,7 @@ SseEvent = (
     | SearchResultsEvent
     | FinalEvent
     | ErrorEvent
+    | AgentSummaryEvent
 )
 
 

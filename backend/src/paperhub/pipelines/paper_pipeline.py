@@ -51,11 +51,15 @@ from paperhub.pipelines.extract import (
     extract_pdf_page1_text,
     extract_pdf_with_headings,
 )
+from paperhub.pipelines.figure_merge import join_split_figures
+from paperhub.pipelines.figure_numbers import renumber_from_source
+from paperhub.pipelines.figure_pages import place_latex_figures
+from paperhub.pipelines.figure_wrappers import unwrap_figure_wrappers
 from paperhub.pipelines.figures import (
     rasterize_and_normalize_figures,
     strip_includegraphics_options,
 )
-from paperhub.pipelines.latex_to_asset import latex_source_to_asset
+from paperhub.pipelines.latex_to_asset import anchor_asset_figures, latex_source_to_asset
 from paperhub.pipelines.marker_blocks_to_chunks import (
     build_layout_index,
     marker_blocks_to_chunks,
@@ -67,6 +71,7 @@ from paperhub.pipelines.marker_client import (
 from paperhub.pipelines.marker_health import marker_available
 from paperhub.pipelines.marker_to_asset import marker_doc_to_asset
 from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
+from paperhub.pipelines.page_pdf import ensure_page_pdf
 from paperhub.pipelines.paper_asset import write_paper_asset
 from paperhub.pipelines.pymupdf_to_asset import pymupdf_to_asset
 from paperhub.pipelines.renderer import (
@@ -74,12 +79,32 @@ from paperhub.pipelines.renderer import (
     render_html,
     replace_symbol_macros,
 )
-from paperhub.pipelines.sentinels import inject_sentinels, postprocess_sentinels
+from paperhub.pipelines.sentinels import (
+    inject_sentinels,
+    postprocess_figure_sentinels,
+    postprocess_sentinels,
+)
 from paperhub.pipelines.table_figures import rasterize_complex_tables
 from paperhub.pipelines.tikz_figures import rasterize_tikz_figures
 from paperhub.pipelines.title_extract import llm_extract_title
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_page_pdf_logged(
+    main_tex: Path, arxiv_id: str | None, cache_dir: Path,
+) -> None:
+    """Make the page PDF and place the LaTeX figures on it; a failure is
+    logged, never fails the ingest."""
+    try:
+        if ensure_page_pdf(main_tex, arxiv_id, cache_dir) is None:
+            logger.warning("no page PDF for %s", cache_dir)
+            return
+        placed = place_latex_figures(cache_dir)
+        if placed is not None:
+            write_paper_asset(placed, cache_dir)
+    except Exception:  # noqa: BLE001 - the paper stays usable without it
+        logger.warning("page PDF failed for %s", cache_dir, exc_info=True)
 
 _PDF_DOWNLOAD_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 # Upper bound on the ingest-time arXiv metadata lookup. The arxiv library sets
@@ -229,8 +254,9 @@ class PaperPipeline:
         """Upsert a ``papers`` row for (session_id, paper_content_id), return its id."""
         async with write_transaction(self._conn):
             await self._conn.execute(
-                "INSERT OR IGNORE INTO papers (session_id, paper_content_id) "
-                "VALUES (?, ?)",
+                "INSERT INTO papers (session_id, paper_content_id) "
+                "VALUES (?, ?) ON CONFLICT (session_id, paper_content_id) "
+                "DO UPDATE SET enabled = 1",
                 (session_id, paper_content_id),
             )
         async with self._conn.execute(
@@ -344,6 +370,7 @@ class PaperPipeline:
             full_text, [c.char_start for c in chunks],
         )
         marked, _injected = inject_sentinels(full_text, starts)
+        marked, _figures = anchor_asset_figures(marked, cache_dir)
         # Pre-rasterise TikZ-drawn figures (forest/tikzpicture/etc.) to PNG
         # before pandoc sees them — pandoc has no TikZ executor and would
         # otherwise dump the raw source into the HTML (the survey taxonomy
@@ -359,6 +386,9 @@ class PaperPipeline:
         # Drop LaTeX column-width hints — pandoc would otherwise emit
         # style="width:50.0%" on every <img> and shrink high-DPI figures
         # to half-width on the wide Citation Canvas.
+        # Unwrap \subfigure / \resizebox / \rule in figures:
+        # pandoc renders those figures with no image.
+        marked = unwrap_figure_wrappers(marked)
         marked = strip_includegraphics_options(marked)
         html_path = cache_dir / "source.html"
         render_tex_path = cache_dir / "source.render.tex"
@@ -383,9 +413,14 @@ class PaperPipeline:
         # back to runtime text-search in the Citation Canvas.
         _raw_html = html_path.read_text(encoding="utf-8")
         _new_html, _dom_map = postprocess_sentinels(_raw_html)
+        _new_html, _ = postprocess_figure_sentinels(_new_html)
+        _new_html = renumber_from_source(
+            _new_html, full_text)
         html_path.write_text(_new_html, encoding="utf-8")
         for i, c in enumerate(chunks):
             c.dom_id = _dom_map.get(i)
+        # The page PDF the agent views and region citations open (§III-10.4).
+        await asyncio.to_thread(_ensure_page_pdf_logged, source_path, arxiv_id, cache_dir)
 
         # Metadata: use caller-supplied override when available (avoids an
         # arXiv API round-trip when the caller already has metadata from
@@ -531,6 +566,14 @@ class PaperPipeline:
             source_path = ext.main_path
             flat_path = cache_dir / "source.flattened.tex"
             flat_path.write_text(full_text, encoding="utf-8")
+            try:
+                write_paper_asset(
+                    latex_source_to_asset(source_dir, full_text, source_dir=cache_dir),
+                    cache_dir,
+                )
+            except Exception:
+                logger.warning("PaperAsset extraction failed for a LaTeX upload; "
+                               "continuing", exc_info=True)
 
             # Chunk first (offsets are relative to strip_latex_comments(full_text),
             # which chunk_text computes internally). Chunking before rendering lets
@@ -558,6 +601,7 @@ class PaperPipeline:
                 full_text, [c.char_start for c in chunks],
             )
             marked, _injected = inject_sentinels(full_text, starts)
+            marked, _figures = anchor_asset_figures(marked, cache_dir)
             marked = rasterize_tikz_figures(
                 marked, preamble=ext.preamble, out_dir=source_path.parent,
             )
@@ -565,6 +609,9 @@ class PaperPipeline:
             marked = rasterize_complex_tables(
                 marked, preamble=ext.preamble, out_dir=source_path.parent,
             )
+            # Unwrap \subfigure / \resizebox / \rule in figures:
+            # pandoc renders those figures with no image.
+            marked = unwrap_figure_wrappers(marked)
             marked = strip_includegraphics_options(marked)
             render_source = cache_dir / "source.render.tex"
             render_source.write_text(
@@ -587,9 +634,13 @@ class PaperPipeline:
             # to runtime text-search in the Citation Canvas.
             _raw_html = html_path.read_text(encoding="utf-8")
             _new_html, _dom_map = postprocess_sentinels(_raw_html)
+            _new_html, _ = postprocess_figure_sentinels(_new_html)
+            _new_html = renumber_from_source(
+                _new_html, full_text)
             html_path.write_text(_new_html, encoding="utf-8")
             for i, c in enumerate(chunks):
                 c.dom_id = _dom_map.get(i)
+            await asyncio.to_thread(_ensure_page_pdf_logged, source_path, None, cache_dir)
 
             pdf_headings: list[tuple[str, int]] = []
         else:
@@ -854,6 +905,8 @@ class PaperPipeline:
         inline_math_llm = await asyncio.to_thread(client.inline_math_llm)
         asset = marker_doc_to_asset(
             doc, source_dir=cache_dir, inline_math_llm=inline_math_llm)
+        # One figure Marker split into pieces becomes one figure again.
+        asset = join_split_figures(asset, doc.blocks, source_path, cache_dir)
         write_paper_asset(asset, cache_dir)
 
         # Re-chunk from Marker's block structure via the block-anchored

@@ -1,0 +1,270 @@
+# H4 evidence-page cases: questions whose answer sits where the old figure /
+# text pipeline failed — a later panel of a multi-panel figure, half of a
+# figure Marker split, a figure pandoc dropped from the HTML, a figure that is
+# commented out of the LaTeX, small print, and display equations Marker
+# transcribed wrongly or split, formulas as flattened text — plus text-only
+# regressions.
+#
+# Ground truth was read off the rendered page (the page PDF the agent views:
+# asset/paper.pdf for a LaTeX paper, the paper's own PDF otherwise) and checked
+# against the source. Each case carries its evidence location as a comment:
+# paper id, 1-based page, box in 0-1000 page coordinates. Formula cases come
+# from benchmark/marker_formula_audit.py --source chunks, hand-verified on the crops.
+#
+# A/B/C comparison (from backend/; see benchmark/README.md):
+#   scripts/run-benchmark.ps1 -Config benchmark/cases.h4-evidence.toml -Judge `
+#     -BaseUrl http://127.0.0.1:8100 -DbPath D:/paperhub-h4-workspace/paperhub.db
+
+[benchmark]
+name = "h4-evidence"
+suite = "evidence"
+base_url = "http://127.0.0.1:8100"
+db_path = "D:/paperhub-h4-workspace/paperhub.db"
+
+[papersets]
+livecell = [
+  "sha256:ade2a8b1d411f0fd0f98e33e582591df4ac9e62f37abadd823858a8071a2f8b4",  # 20 LIVECell (PDF)
+]
+gr00t = ["arxiv:2503.14734"]    # 25 GR00T N1
+p34 = ["arxiv:2404.08471"]      # V-JEPA (PDF-ingested arXiv paper)
+p35 = ["arxiv:2506.09985"]      # V-JEPA 2 (PDF-ingested arXiv paper)
+p36 = ["arxiv:2309.00810"]      # RenAIssance survey (PDF-ingested)
+p38 = ["arxiv:2203.14263"]      # General Survey on Attention Mechanisms (PDF-ingested)
+p39 = ["arxiv:2308.00055"]      # Isaac Sim AI-CPS
+p45 = ["arxiv:2406.01968"]      # Cross-embodiment skill transfer (PDF-ingested)
+p47 = ["arxiv:2202.09368"]      # Expert Choice Routing
+p56 = ["arxiv:2506.14038"]      # SimBal
+p61 = ["arxiv:2509.22093"]      # VLA-ADP
+p80 = ["arxiv:2106.04554"]      # A Survey of Transformers
+p81 = ["arxiv:2009.06732"]      # Efficient Transformers survey (PDF-ingested)
+p83 = ["arxiv:2512.07805"]      # GRAPE
+remoe = ["arxiv:2412.14711"]
+yoloseg = [
+  "sha256:b973a48f4b473829bb30671bec295b5682f1ec9509748ad02576eb16a5c1a6f4",  # YOLOSeg (PDF)
+]
+
+# ---------------------------------------------------------------------------
+# Figures: multi-panel, Marker-split, dropped, commented out, small print
+# ---------------------------------------------------------------------------
+
+# evidence: paper 39, page 9 (1-based, in asset/paper.pdf), box 176,297,822,673 (0-1000 page coords), Fig. 4 (d)-(h); target panels (e) Ball Catching and (f) Ball Pushing, row box 176,297,822,480
+# problem: multi-panel figure, old pipeline kept only the first panel(s)
+[[cases]]
+id = "ev-mp-39-fig4"
+kind = "multi_panel"
+paperset = "p39"
+prompt = '''In the Isaac Sim robotics-manipulation benchmark, look at the task illustrations. In the Ball Catching task, what does the robot hold in its gripper to catch the ball, and what shape is the target hole in the Ball Pushing task?'''
+rubric = "Fig. 4 panel (e) Ball Catching shows the Franka arm holding a small cyan/teal open-topped square box (a cup-like container) in its gripper; a red ball is held by a second arm in the background. Panel (f) Ball Pushing shows a red ball on top of a large light-blue box-shaped table with a SQUARE (rectangular) hole cut into its top surface. Correct answer: an open-top square box/cup-like container (cyan/teal), and a square/rectangular hole. The claim must be cited with a [fig:] or [view:] citation of Fig. 4 (or the page region holding it). FAILS if it only restates the text ('catch a ball using a tool', 'push a ball towards a target hole on a table') without naming the container and the hole's shape, answers from panels (a)-(c) (Point Reaching / Cube Stacking / Peg-in-Hole), says the figure does not show these tasks, or guesses a different tool (net, hand, basket, tray) or a round hole. Answer in English."
+# tex check: the task list (lines 488-503) only says BC catches the ball 'using a tool' and BP pushes it 'towards a target hole on a table'; no container description or hole shape appears anywhere in source.flattened.tex.
+
+# evidence: paper 80, page 9 (1-based, in asset/paper.pdf), box 107,123,909,282 (0-1000 page coords), printed Fig. 4 (c) dilated box 430,123,578,282 and (e) block local box 755,123,901,282
+# problem: multi-panel figure, old pipeline kept only the first panel(s)
+[[cases]]
+id = "ev-mp-80-fig4"
+kind = "multi_panel"
+paperset = "p80"
+prompt = '''在《A Survey of Transformers》介紹原子稀疏注意力模式（atomic sparse attention）的那張圖裡，block local 的示意矩陣被切成幾個區塊、每個區塊多大？dilated 的示意矩陣中，每個 query 最多會注意幾個 key、這些 key 之間怎麼間隔？'''
+rubric = "Printed Fig. 4 shows five 12x12 attention matrices (a) global, (b) band, (c) dilated, (d) random, (e) block local. Panel (e): 4 non-overlapping diagonal blocks, each 3x3 (3 queries x 3 keys) on a 12-token sequence. Panel (c): each query attends to at most 3 keys, at positions i-2, i, i+2 (every other key, one key skipped between attended keys; rows at the edges attend only 2). Correct answer: block local = 4 blocks of 3x3; dilated = up to 3 keys spaced 2 apart (gap of 1). Exact counts required (4 blocks, size 3, 3 keys, one skipped). The claim must be cited with a [fig:] or [view:] citation of Fig. 4 (or the page region holding it). FAILS if it describes panel (a) global (first row/column) or (b) band (contiguous diagonal) instead, only restates the text definitions ('non-overlapping query blocks', 'gaps of dilation w_d >= 1') without counts, says the figure has no such panels, or gives other counts. Answer in Traditional Chinese."
+# tex check: the Block Local / Dilated items (lines 514-516) define the patterns generically (w_d >= 1, 'several non-overlapping query blocks') and the panels are \includegraphics PDFs; no block count, block size, or window/key count is stated in prose or any table.
+
+# evidence: paper 56, page 6 (1-based, in asset/paper.pdf), box 529,178,781,343 (0-1000 page coords), Fig. 1 (b) MoE-L
+# problem: multi-panel figure, old pipeline kept only panel (a)
+[[cases]]
+id = "ev-mp-56-fig1"
+kind = "multi_panel"
+paperset = "p56"
+prompt = '''In the SimBal paper's validation-loss curves for the larger MoE-L model, what validation loss did SimBal and LBL each have at the very first plotted checkpoint, and roughly how many training tokens had been seen at that point?'''
+rubric = "Fig. 1 (b) MoE-L plots validation loss vs training tokens (x axis in units of 1e10). The first plotted checkpoint is at about 1.35e10 tokens (accept 1.2e10-1.5e10, i.e. ~12-15B tokens), where SimBal (blue) is about 2.37 (accept 2.36-2.38) and LBL (orange) is about 2.395 (accept 2.385-2.405); LBL is higher. The claim must be cited with a [fig:] or [view:] citation of Fig. 1 (or the page region holding it). FAILS if it reports panel (a) MoE-M values (first checkpoint ~0.4e10 tokens, SimBal ~2.89, LBL ~2.92), reports final losses/perplexities (e.g. ~2.12/2.14, 8.304/8.517) or the 50B/78.6B figures from the text instead of the first checkpoint, or says the MoE-L curve is not shown. Answer in English."
+# tex check: the prose (line 299) gives only the 50B vs 78.6B tokens-to-target and Table 4 gives final perplexities; no early-checkpoint loss value or the first checkpoint's token count appears in source.flattened.tex.
+
+# evidence: paper 83, page 9 (1-based, in asset/paper.pdf), box 508,661,813,872 (0-1000 page coords), printed Fig. 2 (b) Validation Loss, medium 353M models
+# problem: multi-panel figure, old pipeline kept only panel (a)
+[[cases]]
+id = "ev-mp-83-fig2"
+kind = "multi_panel"
+paperset = "p83"
+prompt = '''GRAPE 論文中 353M 中型模型的驗證損失（validation loss）曲線圖，訓練到最後（約 50B tokens）時，RoPE、AliBi、FoX、GRAPE-AP 四種位置編碼裡，哪一個驗證損失最低、哪一個最高？大約是多少？'''
+rubric = "Printed Fig. 2 (b) 'Medium Model, FineWeb-edu100B' validation loss vs training tokens (B). At the last plotted point (~49B tokens) the order from highest to lowest is GRAPE-AP (red) > FoX (orange) > RoPE (blue) > AliBi (green). Correct answer: lowest = AliBi at about 2.54 (accept 2.53-2.55); highest = GRAPE-AP at about 2.57 (accept 2.56-2.58). (RoPE is the highest curve for most of the earlier training, but not at the final point.) The claim must be cited with a [fig:] or [view:] citation of Fig. 2 (or the page region holding it). FAILS if it says GRAPE-AP has the lowest final validation loss (inferred from the prose 'GRAPE can keep a persistent edge'), answers from panel (a) training loss or from the large-model Fig. 3, answers with Table 1 accuracies, or says the validation panel is not available. Answer in Traditional Chinese."
+# tex check: the only prose about the curves (line 526) claims 'GRAPE can keep a persistent edge over other mechanisms' and RoPE instability in Fig. 3(a); no loss values or final-point ordering are stated, and Tables 1-2 contain only downstream accuracies.
+
+# evidence: paper 34, page 10 (1-based, in source.pdf -- PDF-ingested paper, no asset/paper.pdf), box 160,62,829,161 (0-1000 page coords), Fig. 6 (a) top diagram 'Visualization Methodology'
+# problem: Marker split Fig. 6 into a top and bottom image; the old pipeline attached the Fig. 6 caption only to the bottom image grid (fig-007), losing the top diagram (fig-006)
+[[cases]]
+id = "ev-ms-34-fig6"
+kind = "marker_split"
+paperset = "p34"
+prompt = '''In the V-JEPA paper, the figure that explains how the feature-space predictions are visualized includes a pipeline diagram. In that diagram, how many predicted tokens does the predictor output per frame, which part of the frame do they cover, and what is shown in the input video?'''
+rubric = "Fig. 6 (a) 'Visualization Methodology' diagram: masked input frames -> x-encoder -> predictor -> (dash-dotted arrow) -> decoder, with x-encoder and predictor inside a grey box labelled 'Frozen'. Each frame is a 3x3 patch grid; the top-left 2x2 region is masked (white). The x-encoder outputs the 5 visible patches (right column + bottom row); the predictor outputs 4 tokens forming a 2x2 block at the top-left (the masked region); the decoder output fills only that top-left 2x2 region. The input video shows a white fluffy dog (puppy) on grass. Correct answer: 4 tokens, 2x2 block covering the top-left masked region, input = white dog. The claim must be cited with a [fig:] or [view:] citation of Fig. 6 (or the page region holding it). FAILS if it describes the bottom image grid (kitchen/food-preparation frames and hands drawing on a notepad with blue bounding boxes) as the answer, says the figure contains only sample visualizations / no pipeline diagram, or gives a different token count, region, or subject. Answer in English."
+# text check (PDF paper, no .tex): source.html contains only the diagram's labels 'Frozen x-encoder predictor decoder' and the caption, which says the decoder is fed only the predicted representations for the missing regions; no grid size, token count, masked-region position, or 'dog/puppy' appears anywhere in the text.
+
+# evidence: paper 35, page 38 (1-based, in source.pdf -- PDF-ingested paper, no asset/paper.pdf), box 123,79,872,227 (0-1000 page coords), Fig. 14 (a) Grasp Cup
+# problem: Marker split Fig. 14; panels (a)+(b) became fig-013 without the caption, the Fig. 14 caption went to panel (c) only (fig-014), so panel (a) was lost
+[[cases]]
+id = "ev-ms-35-fig14"
+kind = "marker_split"
+paperset = "p35"
+prompt = '''V-JEPA 2 論文附錄中「抓杯子（Grasp Cup）」任務定義的示意圖裡，一共展示了幾組起始／目標影格？畫面中的杯子是什麼顏色？目標影格裡機械手臂處於什麼狀態？'''
+rubric = "Fig. 14 (a) Grasp Cup shows 10 Start Frame / Goal Frame pairs (2 rows x 5 pairs). The cups are pink and cream/beige (off-white). In each goal frame the robot gripper has been lowered onto the cup and is grasping it. Correct answer: 10 pairs; pink and cream/beige cups; goal frame = gripper grasping the cup (accept 'two colours: pink and white/beige'). The claim must be cited with a [fig:] or [view:] citation of Fig. 14 (or the page region holding it). FAILS if it answers from panel (c) Pick and Place (Start / Subgoal 1 / Subgoal 2 / Goal columns, 2 x 5 rows) or panel (b) Reach with Cup, says the grasp panel shows sub-goal images, says the figure does not include the grasp task, gives a different pair count, or only repeats the '10 trials' from the text without describing the panel. Answer in Traditional Chinese."
+# text check (PDF paper, no .tex): source.html mentions '10 trials' for the robot evaluation and the caption says grasp uses a single goal image, but never states the number of example pairs drawn, the cup colours (no 'pink', 'beige', 'cream', 'white' in the text), or the gripper state in the goal frames.
+
+# evidence: paper 47, page 2 (1-based, in the page PDF), box 192,104,804,241 (0-1000 page coords), Fig. 1
+# problem: pandoc dropped the figure from the HTML render
+# checked: grep of source.flattened.tex finds no "Soccer"/"Field" token example and no "0.65" router probability; the only prose for Fig. 1 is its one-line caption.
+[[cases]]
+id = "ev-drop-47-fig1"
+kind = "dropped"
+paperset = "p47"
+prompt = '''In the Expert Choice Routing paper, Figure 1 illustrates expert-choice routing on an 8-token sentence where each expert picks its top-k tokens. Which four tokens does FFN 2 pick? And in the conventional token-choice example drawn next to it, which expert is the token "We" routed to, and with what router probability?'''
+rubric = "Fig. 1 (page 2) shows, on the right, FFN 1 picking We / Like / To / Play and FFN 2 picking We / Like / Soccer / Field from the sentence 'We Like To Play Soccer In The Field'; on the left (conventional top-1 MoE), Token 1 'We' is routed to FFN 2 with p = 0.65 (Token 2 'Like' goes to FFN 1 with p = 0.8). Correct answer: FFN 2 picks We, Like, Soccer, Field (Tokens 1, 2, 5, 8); 'We' goes to FFN 2 with p = 0.65 (exact). The claim must be cited with a [fig:] or [view:] citation of Fig. 1. FAILS if FFN 2's tokens are given as We/Like/To/Play (FFN 1's set) or include In/The, if 'We' is said to go to FFN 1 or with p = 0.8, if the answer says the figure/details are not available, or if it invents values without citing the figure. Answer in English."
+
+# evidence: paper 61, page 7 (1-based, in the page PDF), box 180,354,820,468 (0-1000 page coords), Fig. 4 (LIBERO visualisation, figs/libero.png, \label{fig:liberoplot})
+# problem: pandoc dropped the figure from the HTML render (figures.json also carries it with an empty caption)
+# checked: grep of source.flattened.tex for "tomato", "black bowl", "drawer", "chocolate", "white mug" returns nothing; the instructions appear only inside the image.
+[[cases]]
+id = "ev-drop-61-libero"
+kind = "dropped"
+paperset = "p61"
+prompt = '''在 VLA-ADP（Action-aware Dynamic Pruning）論文中，有一張圖視覺化了 LIBERO 四種任務類型（Spatial、Object、Goal、Long）的代表範例。這四個範例分別給機器人下了什麼語言指令？其中哪一個範例需要開抽屜？'''
+rubric = "Figure 4 (page 7) shows four rollout strips, each captioned with its language instruction: (1) 'Pick up the black bowl next to the plate and place it on the plate.' (2) 'Pick up the tomato sauce and place it in the basket.' (3) 'Open the top drawer and put the bowl inside.' (4) 'Put the white mug on the plate and put the chocolate pudding to the right of the plate.' Correct answer: lists all four instructions (wording may be translated/paraphrased but the objects and targets must match: black bowl->plate, tomato sauce->basket, top drawer + bowl, white mug->plate + chocolate pudding right of plate) and names 'Open the top drawer and put the bowl inside' as the drawer example. Mapping each strip to a specific suite is NOT required (the figure does not label it); an answer that asserts a suite mapping is not penalised unless it contradicts the instructions. The claim must be cited with a [fig:] or [view:] citation of Fig. 4. FAILS if any instruction is invented or misses its objects, if the drawer example is wrong, or if the answer says the figure content is unavailable. Answer must be in Traditional Chinese (instruction quotes may stay in English)."
+
+# evidence: paper 25, page 15 (1-based, in the page PDF), box 160,720,870,855 (0-1000 page coords), Table 3 "Real-World Results"
+# problem: the per-category real-robot bar chart (\includegraphics{assets/real_gr1.pdf}, caption "Average policy success rate on real-world manipulation tasks with the GR-1 humanoid robots.", \label{fig:real_gr1}) is commented out in source.flattened.tex lines 592-597; source/assets/real_gr1.png/.pdf still exist in the source tree and its bars DISAGREE with the table (e.g. GR00T-2B Articulated 10% ~2% in the image vs 62.0% in Table 3). The label fig:real_gr1 is reused by the published Fig. 9 (Neural Trajectories Ablations), whose right panel is a different real-robot chart (Pick & Place / Industrial / Overall, 10% data, with/without neural trajectories, no Articulated bar).
+# checked: the table IS the answer here; Table 3 in asset/paper.pdf (page 15) prints GR00T-N1-2B (10% Data) Articulated = 62.0%, matching the LaTeX tabular; the prose only gives averages (+32.4% / +30.4% / 3.8%).
+[[cases]]
+id = "ev-commented-25-realgr1"
+kind = "commented_out"
+paperset = "gr00t"
+prompt = '''In GR00T N1's real-robot bar chart that compares GR00T-N1-2B against Diffusion Policy across the four GR-1 task categories (Pick-and-Place, Articulated, Industrial, Coordination) at 10% and full data, what success rate does GR00T-N1-2B reach on Articulated tasks with 10% of the data?'''
+rubric = "The published paper has no four-category real-robot bar chart: that figure (assets/real_gr1) is commented out in the LaTeX, and the only real-robot bar chart in the paper (Fig. 9, right panel) covers Pick & Place / Industrial / Overall for neural-trajectory co-training and has no Articulated bar. The numbers are in Table 3 'Real-World Results' (page 15): GR00T-N1-2B (10% Data) Articulated = 62.0% (exact; for context Diffusion Policy 10% = 14.3%, GR00T-N1-2B full data = 70.9%). Correct answer: says the paper presents these results as a table rather than such a chart (or that no such chart appears) and gives 62.0% from Table 3. The claim must be cited with a [chunk:] citation of Table 3 or a [view:] citation of the Table 3 region on page 15. FAILS if it describes or cites the commented-out chart image as part of the paper, if it reports ~2% (or any value read from the real_gr1 image), if it answers from Fig. 9 (e.g. 36.0 / 31.0 / 33.78), or if it gives any value other than 62.0%. Answer in English."
+
+# evidence: paper 20, page 5 (1-based, in the page PDF s41592-021-01249-6.pdf), box 437,63,848,354 (0-1000 page coords), Fig. 3e (anchor-free single cell-type transferability heatmap)
+# problem: small print — the heatmap cell values need zoom; in the chunks they exist only as an unordered dump of the heatmap's text labels with no row/column attachment
+# checked: '40.35' occurs only in chunk 82359, inside a scrambled sequence of heatmap numbers with no train/test labels; the prose (chunks 82352-82354) reports only averages (28-36%, ~10%) and the transferability index, never a single cell. Cell position confirmed from the PDF text layer: 40.35 sits at y=208 (same as the 'SkBr3' row label) under the 'Huh7' column label.
+[[cases]]
+id = "ev-small-20-fig3e"
+kind = "small_print"
+paperset = "livecell"
+prompt = '''在 LIVECell 論文的 Fig. 3e（anchor-free 模型的單一細胞類型可遷移性熱圖）中，用 SkBr3 訓練、在 Huh7 上測試的 AP 是多少？'''
+rubric = "Fig. 3e (page 5) is the anchor-free heatmap with rows = train set and columns = test set (A172, BT-474, BV-2, Huh7, MCF7, SH-SY5Y, SkBr3, SK-OV-3). The SkBr3 row reads 23.42, 23.46, 49.54, 40.35, 16.08, 13.21, (blank), 23.87. Correct answer: 40.35 AP (exact, tolerance 0.01). The claim must be cited with a [fig:] or [view:] citation of Fig. 3e. FAILS if it gives 36.41 (the anchor-based Fig. 3f cell), 56.44 (Huh7 train -> SkBr3 test, transposed), 43.64 (SK-OV-3 -> Huh7), 49.54 (SkBr3 -> BV-2), 62.94 (the max), any other value, or says the value cannot be read. Answer must be in Traditional Chinese."
+
+# case 5 (small_print, table-as-image) skipped: no table that exists only as an image was found in the validation copy (see report).
+
+# ---------------------------------------------------------------------------
+# Display equations, judged against what the agent reads (its chunks), from
+# the hand-verified formula audit: `formula_wrong` — the chunk's Marker LaTeX
+# changes the printed math; `formula_partial` — the chunk holds only part of
+# the equation; `formula_right` — the chunk is right; `formula_flat` — a
+# PyMuPDF paper whose chunk has the formula as flattened text (sub- and
+# superscripts lost). Reading the printed equation ([view:] of its region)
+# is what gets the first two right; the last two must not get worse.
+# ---------------------------------------------------------------------------
+
+# evidence: paper 38, page 5 (source.pdf), box 627,497,922,531, Eq. (9)
+# chunk 77833: \text{score}(\mathbf{c}_l^{(2)}, \mathbf{k}_l^{(1)}) — the printed first argument is c^{(2)} (no l), dimension notes dropped
+[[cases]]
+id = "ev-eq-38-score"
+kind = "formula_wrong"
+paperset = "p38"
+prompt = '''在 A General Survey on Attention Mechanisms 的多重表示（multi-representational）注意力段落中，式 (9) 的 e_l^{(1)} 是怎麼計算的？請照原文寫出式子，並標出每一項的維度。'''
+rubric = "Eq. (9) as printed: e_l^{(1)} = score(c^{(2)}, k_l^{(1)}), with the dimensions written under each term: e_l^{(1)} is 1×1, c^{(2)} is d_v^{(2)}×1, k_l^{(1)} is d_k^{(1)}×1. The first argument is c^{(2)} WITHOUT a subscript l. Correct answer gives that formula and those three dimensions. The claim must be cited with a [view:] of the equation's region (a [chunk:] alone is acceptable only if the stated formula and dimensions match the printed ones). FAILS if it writes c_l^{(2)} (the chunk's transcription), omits or invents dimensions, or changes the arguments. Answer in Traditional Chinese."
+
+# evidence: paper 38, page 6 (source.pdf), box 130,323,490,355, Eq. (12)
+# chunk 77834: A = \arctan(K^{(1)T} × W_A × K^{(2)}) — the printed function is act(), the activation function
+[[cases]]
+id = "ev-eq-38-coattn-act"
+kind = "formula_wrong"
+paperset = "p38"
+prompt = '''In A General Survey on Attention Mechanisms, Eq. (12) computes the affinity matrix A between two feature matrices. Write the equation as printed: which function is applied to K^(1)T × W_A × K^(2), and what are the dimensions of A?'''
+rubric = "Eq. (12) as printed: A = act(K^{(1)T} × W_A × K^{(2)}), with A of size n_f^{(1)} × n_f^{(2)} (K^{(1)T} is n_f^{(1)}×d_k^{(1)}, W_A is d_k^{(1)}×d_k^{(2)}, K^{(2)} is d_k^{(2)}×n_f^{(2)}). The function is act(), the (generic) activation function. Correct answer: act / an activation function, and A is n_f^{(1)} × n_f^{(2)}. The claim must be cited with a [view:] of the equation's region (a [chunk:] alone is acceptable only if the stated formula matches the printed one). FAILS if it says arctan / \\arctan (the chunk's transcription) or any other specific function, or gives other dimensions for A. Answer in English."
+
+# evidence: paper 38, page 10 (source.pdf), box 567,335,922,370, Eq. (27)
+# chunk 77852: align(e_l; e_l) — the printed second argument is the bold vector e (n_f×1), not e_l
+[[cases]]
+id = "ev-eq-38-align-args"
+kind = "formula_wrong"
+paperset = "p38"
+prompt = '''在 A General Survey on Attention Mechanisms 的局部（local）注意力段落，式 (27) 的 align 函式有哪兩個參數？各是什麼、維度多少？'''
+rubric = "Eq. (27) as printed: a_l = align(e_l; e) = exp(e_l) / Σ_{j=p−D}^{p+D} exp(e_j). The two arguments are e_l (the score of position l, 1×1) and the bold vector e (all the scores, n_f×1); a_l is 1×1. Correct answer names both arguments as different things (a scalar score and the score vector) with those dimensions, and may give the windowed softmax. The claim must be cited with a [view:] of the equation's region (a [chunk:] alone is acceptable only if the stated arguments match the printed ones). FAILS if it gives the two arguments as the same e_l (the chunk's transcription), omits the dimensions, or changes the sum's range p−D..p+D. Answer in Traditional Chinese."
+
+# evidence: paper 45, page 3 (source.pdf), box 536,878,912,925, Eq. (3)
+# chunk 77902 holds only the first line (the left side and the expectation's subscript); the bracketed body is on the next line
+[[cases]]
+id = "ev-eq-45-dyn-loss"
+kind = "formula_partial"
+paperset = "p45"
+prompt = '''In the cross-embodiment skill-transfer paper, write out the latent dynamics loss L_dyn of Eq. (3) in full, including both terms inside the expectation.'''
+rubric = "Eq. (3) as printed: L_dyn(T^z, T~^z, F^s, G^s) = E_{(s_k^s, a_k^s, s_{k+1}^s) ~ D^s} [ ||T^z(s_k^z, a_k^z) − s_{k+1}^z||_2^2 + ||T~^z(s_k^z, s_{k+1}^z) − a_k^z||_2^2 ]: a forward-dynamics term (predict s_{k+1}^z from s_k^z and a_k^z) plus an inverse-dynamics term (predict a_k^z from s_k^z and s_{k+1}^z), both squared L2, over source-domain transitions from D^s. Correct answer gives both terms and the expectation. The claim must be cited with a [view:] of the equation's region or [chunk:] citations covering both lines. FAILS if it gives only the left side and the expectation, invents the body, drops either term, or swaps which quantity each term predicts. Answer in English."
+
+# evidence: paper 36, page 3 (source.pdf), box 559,502,922,582, Eq. (4) — the chunk is right
+[[cases]]
+id = "ev-eq-36-vae-loss"
+kind = "formula_right"
+paperset = "p36"
+prompt = '''In the RenAIssance survey's VAE section, write out the loss in Eq. (4) exactly as printed, including the summation indices and the argument of the log-likelihood term.'''
+rubric = "Eq. (4) as printed: L(θ, x^i) = -1/2 Σ_{i=1}^{d} (μ_(i)^2 + σ_(i)^2 − log σ_(i)^2 − 1) + 1/L Σ_{i=1}^{L} (log P(x^i | z)). Both sums run over i (from 1 to d, and from 1 to L); the terms carry the subscript (i); the likelihood term is log P(x^i | z). Correct answer reproduces that structure (notation may be LaTeX or plain text). The claim must be cited with a [chunk:] or [view:] citation of the equation. FAILS if it gives the summation index as j, writes μ_j / σ_j, writes the likelihood as log P(x^{(i)} | z^{(l)}), or otherwise changes a term. Answer in English."
+
+# evidence: paper 36, page 5 (source.pdf), box 585,629,922,661, Eq. (15) — the chunk is right
+[[cases]]
+id = "ev-eq-36-prob-flow"
+kind = "formula_right"
+paperset = "p36"
+prompt = '''What is the probability-flow ODE given as Eq. (15) in the RenAIssance survey?'''
+rubric = "Eq. (15): dx = ( f(x, t) − (1/2) g_t^2 ∇_x log p_t(x) ) dt. Correct answer gives that equation (notation may vary). The claim must be cited with a [chunk:] or [view:] citation of the equation. FAILS if any term is changed or missing (e.g. the 1/2, the square on g_t, or the score term). Answer in English."
+
+# evidence: paper 81, page 22 (source.pdf), box 394,264,603,306 — PyMuPDF paper, flattened text
+[[cases]]
+id = "ev-eq-81-kernel-sim"
+kind = "formula_flat"
+paperset = "p81"
+prompt = '''In the Efficient Transformers survey's linear-attention discussion, the generalized attention output is written as V_i' = Σ_j f(Q_i, K_j) V_j / Σ_j f(Q_i, K_j). What is the function f in that formula as printed, and what does it represent?'''
+rubric = "The printed equation is V_i' = Σ_{j=1}^{p} sim(Q_i, K_j) V_j / Σ_{j=1}^{p} sim(Q_i, K_j): f is sim, a similarity function between query and key (softmax attention uses sim = exp(Q K^T); kernel methods replace it with φ(Q)φ(K)^T). Correct answer: sim / a similarity (kernel) function. The claim must be cited with a [chunk:] or [view:] citation. FAILS if it says the function is sine / \\sin or gives any other function. Answer in English."
+
+# evidence: paper 81, page 23 (source.pdf), box 386,270,853,286, Eq. (9) — PyMuPDF paper, flattened text "A = W2(σR(W1(X) + b)) + b"
+[[cases]]
+id = "ev-eq-81-synth-bias"
+kind = "formula_flat"
+paperset = "p81"
+prompt = '''In the Efficient Transformers survey, what is Equation (9) for the Synthesizer's dense attention matrix A, exactly as printed? Are the two bias terms written as different symbols?'''
+rubric = "Eq. (9) as printed: A = W_2(σ_R(W_1(X) + b)) + b — both bias terms are written with the same symbol b (no subscripts); σ_R is the ReLU. Correct answer gives that equation and says both are written b. The claim must be cited with a [chunk:] or [view:] citation. FAILS if it writes b_1 and b_2 or says the paper uses two distinct bias symbols. Answer in English."
+
+# evidence: paper 81, page 18 (source.pdf), box 427,646,853,681, Eq. (2) — PyMuPDF paper, flattened text
+[[cases]]
+id = "ev-eq-81-local-sum"
+kind = "formula_flat"
+paperset = "p81"
+prompt = '''在 Efficient Transformers 綜述中，式 (2) 如何以注意力權重計算輸出 X_i'？求和範圍是什麼？'''
+rubric = "Eq. (2): X_i' = Σ_{j ∈ C_i, j ≤ i} A_ij V_j — the sum runs over keys j in the subset C_i with j ≤ i (causal). Correct answer gives that formula and that range. The claim must be cited with a [chunk:] or [view:] citation of the equation. FAILS if the range is wrong (e.g. all j, or missing the j ≤ i condition) or the terms change. Answer in Traditional Chinese."
+
+# evidence: paper 81, page 22 (source.pdf), box 422,406,577,539, linear-attention equations — PyMuPDF paper, flattened text
+[[cases]]
+id = "ev-eq-81-linear-attn"
+kind = "formula_flat"
+paperset = "p81"
+prompt = '''In the Efficient Transformers survey, how is the linear-attention output V_i' written with the running sums S_p and Z_p, and how are S_p and Z_p defined?'''
+rubric = "V_i' = φ(Q_i)^T S_p / φ(Q_i)^T Z_p, with S_p := Σ_{j=1}^{p} φ(K_j) V_j^T and Z_p := Σ_{j=1}^{p} φ(K_j). Correct answer gives all three. The claim must be cited with a [chunk:] or [view:] citation of the equations. FAILS if a definition is wrong (e.g. V_j instead of V_j^T, or Z_p including V_j) or missing. Answer in English."
+
+
+# ---------------------------------------------------------------------------
+# Regression: answerable from the text / tables; no page view needed
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "ev-r1-livecell-cell-types"
+kind = "regression"
+paperset = "livecell"
+prompt = '''LIVECell 資料集包含哪幾種細胞株？'''
+rubric = "Eight cell types: A172, BT-474, BV-2, Huh7, MCF7, SH-SY5Y, SkBr3, SK-OV-3, cited from the paper's text. Answer in Traditional Chinese."
+
+[[cases]]
+id = "ev-r2-yoloseg-table3"
+kind = "regression"
+paperset = "yoloseg"
+prompt = '''In YOLOSeg's Table 3, which method has the highest IoU and which has the highest AP@IoU=0.5?'''
+rubric = "Highest IoU: YOLOSeg with DDPM image augmentation, 0.732 (DCGAN variant 0.722). Highest AP@IoU=0.5: Ultralytics's YOLOv5s-segmentation, 0.872 (but its IoU is only 0.433). Values must be cited from the table/text chunks or a [view:] of the table."
+
+[[cases]]
+id = "ev-r3-remoe-routing"
+kind = "regression"
+paperset = "remoe"
+prompt = '''How does ReMoE route tokens, and how does it control sparsity?'''
+rubric = "ReMoE replaces TopK + softmax routing with a ReLU router (fully differentiable), and controls sparsity with an adaptive L1 regularisation on the router outputs whose coefficient is adjusted to reach a target sparsity; cited from the paper."

@@ -51,3 +51,19 @@ describe("Composer i18n", () => {
     await i18n.changeLanguage("en");
   });
 });
+
+describe("Composer actions slot", () => {
+  it("renders extra actions in the tool row, beside send", () => {
+    render(
+      <Composer onSubmit={() => {}} disabled={false}
+        actions={<button type="button">Extra</button>} />,
+    );
+    const extra = screen.getByRole("button", { name: "Extra" });
+    const send = screen.getByRole("button", { name: "Send" });
+    // Same row as send: both live in the tool row's right cluster.
+    expect(extra.closest("[data-composer-actions]")).toBe(
+      send.closest("[data-composer-actions]"),
+    );
+    expect(extra.closest("[data-composer-actions]")).not.toBeNull();
+  });
+});

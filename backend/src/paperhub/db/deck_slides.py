@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import aiosqlite
 
+from paperhub.db.connection import write_lock
+
 
 @dataclass(frozen=True)
 class DeckSlideInput:
@@ -44,18 +46,19 @@ async def replace_deck_slides(
     conn: aiosqlite.Connection, *, deck_id: int, slides: list[DeckSlideInput]
 ) -> None:
     """Atomically replace all rows for a deck (used on generate + recreate)."""
-    await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
-    await conn.executemany(
-        "INSERT INTO deck_slides (deck_id, slide_index, frame_tex, note_text, "
-        "note_language, page_start, page_end, source_sections_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (deck_id, s.slide_index, s.frame_tex, s.note_text,
-             s.note_language, s.page_start, s.page_end, s.source_sections_json)
-            for s in slides
-        ],
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute("DELETE FROM deck_slides WHERE deck_id = ?", (deck_id,))
+        await conn.executemany(
+            "INSERT INTO deck_slides (deck_id, slide_index, frame_tex, note_text, "
+            "note_language, page_start, page_end, source_sections_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (deck_id, s.slide_index, s.frame_tex, s.note_text,
+                 s.note_language, s.page_start, s.page_end, s.source_sections_json)
+                for s in slides
+            ],
+        )
+        await conn.commit()
 
 
 async def get_deck_slides(
@@ -83,30 +86,32 @@ async def update_slide_note(
     conn: aiosqlite.Connection, *, deck_id: int, slide_index: int,
     note_text: str, note_language: str,
 ) -> None:
-    cur = await conn.execute(
-        "UPDATE deck_slides SET note_text = ?, note_language = ? "
-        "WHERE deck_id = ? AND slide_index = ?",
-        (note_text, note_language, deck_id, slide_index),
-    )
-    if cur.rowcount == 0:
-        raise ValueError(
-            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+    async with write_lock(conn):
+        cur = await conn.execute(
+            "UPDATE deck_slides SET note_text = ?, note_language = ? "
+            "WHERE deck_id = ? AND slide_index = ?",
+            (note_text, note_language, deck_id, slide_index),
         )
-    await conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(
+                f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+            )
+        await conn.commit()
 
 
 async def update_slide_frame(
     conn: aiosqlite.Connection, *, deck_id: int, slide_index: int, frame_tex: str
 ) -> None:
-    cur = await conn.execute(
-        "UPDATE deck_slides SET frame_tex = ? WHERE deck_id = ? AND slide_index = ?",
-        (frame_tex, deck_id, slide_index),
-    )
-    if cur.rowcount == 0:
-        raise ValueError(
-            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+    async with write_lock(conn):
+        cur = await conn.execute(
+            "UPDATE deck_slides SET frame_tex = ? WHERE deck_id = ? AND slide_index = ?",
+            (frame_tex, deck_id, slide_index),
         )
-    await conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(
+                f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+            )
+        await conn.commit()
 
 
 async def update_slide_grounding(
@@ -115,16 +120,17 @@ async def update_slide_grounding(
 ) -> None:
     """Set one slide's frame_tex + source grounding (the structured Sources
     editor: a comment-only change — no recompile)."""
-    cur = await conn.execute(
-        "UPDATE deck_slides SET frame_tex = ?, source_sections_json = ? "
-        "WHERE deck_id = ? AND slide_index = ?",
-        (frame_tex, source_sections_json, deck_id, slide_index),
-    )
-    if cur.rowcount == 0:
-        raise ValueError(
-            f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+    async with write_lock(conn):
+        cur = await conn.execute(
+            "UPDATE deck_slides SET frame_tex = ?, source_sections_json = ? "
+            "WHERE deck_id = ? AND slide_index = ?",
+            (frame_tex, source_sections_json, deck_id, slide_index),
         )
-    await conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(
+                f"no deck_slides row for deck_id={deck_id}, slide_index={slide_index}"
+            )
+        await conn.commit()
 
 
 async def rebuild_speaker_notes_json(
@@ -142,12 +148,13 @@ async def rebuild_speaker_notes_json(
         notes[str(r.page_start)] = r.note_text
         for p in range(r.page_start + 1, r.page_end + 1):
             notes[str(p)] = "(continued)"
-    await conn.execute(
-        "UPDATE decks SET speaker_notes_json = ?, updated_at = datetime('now') "
-        "WHERE id = ?",
-        (json.dumps(notes, ensure_ascii=False), deck_id),
-    )
-    await conn.commit()
+    async with write_lock(conn):
+        await conn.execute(
+            "UPDATE decks SET speaker_notes_json = ?, updated_at = datetime('now') "
+            "WHERE id = ?",
+            (json.dumps(notes, ensure_ascii=False), deck_id),
+        )
+        await conn.commit()
     return notes
 
 

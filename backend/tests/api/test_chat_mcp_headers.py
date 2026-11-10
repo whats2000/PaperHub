@@ -31,6 +31,7 @@ from paperhub.mcp.client_context import (
     ClientHeadersContext,
     current_client_headers_context,
 )
+from tests.agent_script import answer, calls, script_agent
 
 
 class _FakeMcpRegistry:
@@ -79,17 +80,15 @@ async def _consume_sse(stream: AsyncIterator[bytes]) -> list[tuple[str, dict]]:
 async def test_chat_endpoint_sets_client_headers_context_for_paper_search(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A paper_search-routed turn must run with the client_headers context
+    """A turn whose agent calls search_papers must run with the client_headers context
     set to ``(session_id, run_id)`` matching the chat endpoint's allocated
     ids. Captured at the moment the agent generator yields its first item.
     """
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search",'
-        '"confidence":0.95,"reasoning":"search intent"}',
-    )
+    script_agent(monkeypatch, [
+        calls(("search_papers", {"query": "papers"})), answer("done"),
+    ])
     await _bootstrap_schema()
 
     captured: dict[str, ClientHeadersContext | None] = {}
@@ -142,18 +141,18 @@ async def test_chat_endpoint_resets_context_on_error(
     """
     monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
-    monkeypatch.setenv(
-        "PAPERHUB_ROUTER_MOCK",
-        '{"intent":"paper_search",'
-        '"confidence":0.95,"reasoning":"search intent"}',
-    )
+    # The search tool runs, then the agent's next model call raises.
+    script_agent(monkeypatch, [
+        calls(("search_papers", {"query": "papers"})),
+        RuntimeError("simulated agent failure"),
+    ])
     await _bootstrap_schema()
 
     seen_in_agent: list[ClientHeadersContext | None] = []
 
     async def _exploding_paper_search(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
         seen_in_agent.append(current_client_headers_context())
-        raise RuntimeError("simulated agent failure")
+        raise RuntimeError("simulated tool failure")
         yield  # pragma: no cover — async-generator marker
 
     from paperhub.api import chat as chat_module

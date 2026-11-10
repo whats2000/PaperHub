@@ -1,6 +1,6 @@
 """Plan H2 feedback contract: reasons, stages and request/response models."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +24,42 @@ STAGE_OF_REASON: dict[str, str] = {
 
 Polarity = Literal["up", "down"]
 Stage = Literal["router", "retrieval", "citation", "answer"]
+
+# Agent runs (``runs.mode = 'agent'``, H4) have no router: the stage of a
+# trace row follows from what the step did. Choosing the wrong action (a
+# search instead of an answer, an unasked deck) is the router's old job.
+STAGE_OF_TOOL: dict[str, Stage] = {
+    "agent:step(no tools)": "answer",
+    "agent:gather": "retrieval",
+    **{f"tool:{t}": "retrieval" for t in (
+        "list_sections", "read_section", "read_chunks", "list_figures_tables",
+        "read_layout_object", "view_figure", "search_chunks", "gather",
+        "query_library",
+        "add_paper", "list_ideas")},
+    **{f"tool:{t}": "router" for t in (
+        "search_papers", "remember", "forget", "remove_paper", "propose_ideas")},
+    **{f"tool:{t}": "answer" for t in ("create_deck", "edit_slides", "write_notes")},
+}
+REASON_OF_STAGE: dict[Stage, str] = {
+    "router": "wrong_route",
+    "retrieval": "wrong_source",
+    "citation": "citation",
+    "answer": "factual",
+}
+
+
+def agent_stage(tool: str, result: dict[str, Any] | None) -> Stage | None:
+    """The stage an agent-run trace row belongs to. An ``agent:step`` that
+    called tools has none (its tools carry the stage); the answering step is
+    ``citation`` when ``validate_citations`` removed a marker from it."""
+    result = result or {}
+    if tool == "agent:step":
+        if result.get("citations_removed"):
+            return "citation"
+        if result.get("tool_calls"):
+            return None
+        return STAGE_OF_TOOL["agent:step(no tools)"]
+    return STAGE_OF_TOOL.get(tool)
 
 
 OTHER_TEXT_MAX = 500

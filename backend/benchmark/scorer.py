@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from paperhub.agents.core.citations import cited_figures, cited_views
+from paperhub.pipelines.page_pdf import page_pdf_path
+from paperhub.pipelines.paper_asset import read_paper_asset
+
 _CHUNK_RE = re.compile(r"\[chunk:\s*([0-9,\s]+)\]")
 
 
@@ -39,11 +43,35 @@ class CitedChunk:
 
 
 @dataclass
+class CitedFigure:
+    """A ``[fig:P/ID]`` the answer cites: the judge sees its image."""
+
+    key: str
+    paper_content_id: int
+    figure_id: str
+    caption: str
+    image_path: str | None  # absolute; None when the figure or file is gone
+
+
+@dataclass
+class CitedView:
+    """A ``[view:P/N/box]`` the answer cites: the judge sees that region."""
+
+    key: str
+    paper_content_id: int
+    page: int                 # 1-based
+    box: list[int]            # 0-1000 page coordinates
+    pdf_path: str | None      # the page PDF; None when the paper has none
+
+
+@dataclass
 class Grounding:
     run_id: int
     steps: list[StepInfo] = field(default_factory=list)
     cited_chunk_ids: list[int] = field(default_factory=list)
     cited_chunks: list[CitedChunk] = field(default_factory=list)
+    cited_figures: list[CitedFigure] = field(default_factory=list)
+    cited_views: list[CitedView] = field(default_factory=list)
     auto_checks: dict[str, bool] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
@@ -100,6 +128,38 @@ def _read_chunks(conn: sqlite3.Connection, ids: list[int]) -> list[CitedChunk]:
     return [by_id[c] for c in ids if c in by_id]
 
 
+def _read_views(conn: sqlite3.Connection, keys: list[str]) -> list[CitedView]:
+    out: list[CitedView] = []
+    for key in keys:
+        pid_s, page_s, box_s = key.split("/", 2)
+        row = conn.execute(
+            "SELECT source_dir_path FROM paper_content WHERE id = ?", (int(pid_s),)).fetchone()
+        pdf = page_pdf_path(Path(row[0])) if row and row[0] else None
+        out.append(CitedView(key=key, paper_content_id=int(pid_s), page=int(page_s),
+                             box=[int(v) for v in box_s.split(",")],
+                             pdf_path=str(pdf) if pdf else None))
+    return out
+
+
+def _read_figures(conn: sqlite3.Connection, keys: list[str]) -> list[CitedFigure]:
+    out: list[CitedFigure] = []
+    for key in keys:
+        pid_s, fid = key.split("/", 1)
+        pid = int(pid_s)
+        row = conn.execute(
+            "SELECT source_dir_path FROM paper_content WHERE id = ?", (pid,)).fetchone()
+        src = Path(row[0]) if row and row[0] else None
+        asset = read_paper_asset(src) if src is not None else None
+        fig = next((f for f in (asset.figures if asset else []) if f.id == fid), None)
+        path = fig.abs_image_path(src) if fig is not None and src is not None else None
+        out.append(CitedFigure(
+            key=key, paper_content_id=pid, figure_id=fid,
+            caption=fig.caption if fig is not None else "",
+            image_path=str(path) if path is not None and path.is_file() else None,
+        ))
+    return out
+
+
 def grounding_for(
     db_path: str | Path,
     run_id: int,
@@ -125,6 +185,8 @@ def grounding_for(
                         cited.append(cid)
         g.cited_chunk_ids = cited
         g.cited_chunks = _read_chunks(conn, cited)
+        g.cited_figures = _read_figures(conn, cited_figures(final_answer or ""))
+        g.cited_views = _read_views(conn, cited_views(final_answer or ""))
 
         # Deterministic signals, branched by intent ----------------------------
         # The auto-checks only flag *obvious* failures; the 0/1 correctness call

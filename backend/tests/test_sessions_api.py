@@ -894,3 +894,122 @@ async def test_list_sessions_returns_idea_id(
     assert by_id[2]["idea_id"] is None
     # One row per session: the idea id comes from a subquery, not a join.
     assert len(resp.json()) == 2
+
+
+async def test_agent_events_replay_joins_action_status_and_undo_state(
+    sessions_client: AsyncClient, tmp_path: Path
+) -> None:
+    """Ruling R11: an agent message replays its UI events. A confirm card
+    carries the pending action's current status (+ result or error); a
+    card whose action belongs to another session (a fork's copy) is
+    ``unavailable``. Chips are undoable only while their row is live in
+    this chat."""
+    import json
+
+    ui_events = [
+        {"event": "paper_added",
+         "data": {"papers_id": 1, "paper_content_id": 1, "title": "Mine"}},
+        {"event": "paper_added",
+         "data": {"papers_id": 2, "paper_content_id": 1, "title": "Theirs"}},
+        {"event": "memory_saved",
+         "data": {"memory_id": 1, "content": "likes X", "scope": "global"}},
+        {"event": "memory_saved",
+         "data": {"memory_id": 99, "content": "gone", "scope": "session"}},
+        {"event": "paper_added",
+         "data": {"papers_id": 3, "paper_content_id": 1, "title": "Disabled"}},
+        {"event": "memory_saved",
+         "data": {"memory_id": 2, "content": "fork's parent", "scope": "session"}},
+        {"event": "memory_saved",
+         "data": {"memory_id": 3, "content": "old", "scope": "session"}},
+        {"event": "confirm_request", "data": {
+            "action_id": "done1", "tool": "remove_paper",
+            "args_summary": "remove_paper(paper=1)", "reason": "asks"}},
+        {"event": "confirm_request", "data": {
+            "action_id": "fail1", "tool": "remove_paper",
+            "args_summary": "s", "reason": "r"}},
+        {"event": "confirm_request", "data": {
+            "action_id": "other", "tool": "remove_paper",
+            "args_summary": "s", "reason": "r"}},
+        {"event": "confirm_request", "data": {
+            "action_id": "claimed", "tool": "remove_paper",
+            "args_summary": "s", "reason": "r"}},
+    ]
+    record = {"tools": ["x"], "read": [], "cited": [], "papers": [],
+              "steps": 2, "ui_events": ui_events}
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute(
+            "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES (1, 'arxiv:1', 'arxiv', '1', 'T', '', '', ''), "
+            "(2, 'arxiv:2', 'arxiv', '2', 'U', '', '', '')")
+        await conn.execute("INSERT INTO chat_sessions (id) VALUES (1), (2)")
+        await conn.execute(
+            "INSERT INTO papers (id, session_id, paper_content_id, enabled) "
+            "VALUES (1, 1, 1, 1), (2, 2, 1, 1), (3, 1, 2, 0)")
+        await conn.execute(
+            "INSERT INTO memories (id, scope, session_id, content, status) "
+            "VALUES (1, 'global', NULL, 'likes X', 'active'), "
+            "(2, 'session', 2, 'p', 'active'), (3, 'session', 1, 'o', 'superseded')")
+        await conn.execute(
+            "INSERT INTO runs (id, session_id, status, mode, agent_record_json) "
+            "VALUES (1, 1, 'ok', 'agent', ?), (2, 2, 'ok', 'agent', NULL)",
+            (json.dumps(record),))
+        await conn.execute(
+            "INSERT INTO pending_actions (id, run_id, session_id, tool, args_json, "
+            "status, result_json) VALUES "
+            "('done1', 1, 1, 'remove_paper', '{}', 'done', ?), "
+            "('fail1', 1, 1, 'remove_paper', '{}', 'failed', ?), "
+            "('other', 2, 2, 'remove_paper', '{}', 'pending', NULL), "
+            "('claimed', 1, 1, 'remove_paper', '{}', 'pending', ?)",
+            (json.dumps({"content": "Removed.", "record": {"ok": True}}),
+             json.dumps({"error": "boom"}),
+             json.dumps({"claimed": True})))
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) VALUES "
+            "(1, 'user', 'q', 1), (1, 'assistant', 'a', 1)")
+        await conn.commit()
+
+    resp = await sessions_client.get("/sessions/1/messages")
+    assert resp.status_code == 200
+    user, assistant = resp.json()
+    assert user["agent_events"] is None
+    ev = assistant["agent_events"]
+    assert [e["event"] for e in ev] == [e["event"] for e in ui_events]
+    chips = [(e["data"].get("undoable"), e["data"].get("undone")) for e in ev[:7]]
+    assert chips == [
+        (True, False),   # live paper of this chat
+        (False, False),  # another chat's paper (a fork's copy)
+        (True, False),   # active global memory
+        (False, True),   # memory deleted (undone)
+        (False, True),   # paper disabled (undone)
+        (False, False),  # another chat's session memory
+        (False, True),   # memory superseded / no longer active
+    ]
+    assert ev[0]["data"]["title"] == "Mine"
+    done, failed, other, claimed = (e["data"] for e in ev[7:])
+    assert done["status"] == "done"
+    assert done["result"] == {"content": "Removed.", "record": {"ok": True}}
+    assert done["args_summary"] == "remove_paper(paper=1)"
+    assert failed["status"] == "failed" and failed["error"] == "boom"
+    assert other["status"] == "unavailable"
+    assert claimed["status"] == "running"
+
+
+async def test_resolve_history_db_fallback_uses_the_client_filter(
+    tmp_path: Path,
+) -> None:
+    """Review #7: the DB fallback leaves out what the client leaves out: an
+    errored turn's answer and empty stubs (a stopped turn)."""
+    db_path = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions (title) VALUES ('S')")
+        await conn.execute("INSERT INTO runs (session_id, status) VALUES (1, 'error')")
+        await conn.execute("INSERT INTO runs (session_id, status) VALUES (1, 'cancelled')")
+        await conn.executemany(
+            "INSERT INTO messages (session_id, role, content, run_id) VALUES (1, ?, ?, ?)",
+            [("user", "q1", 1), ("assistant", "Error: boom", 1),
+             ("user", "q2", 2), ("assistant", "", 2)])
+        await conn.commit()
+        assert await _resolve_history(conn, 1, []) == [
+            {"role": "user", "content": "q1"}, {"role": "user", "content": "q2"}]

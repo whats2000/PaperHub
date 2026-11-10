@@ -19,6 +19,7 @@
   "modelKeyMissing": "Missing provider key: {{keys}}",
   "modelUnusable": "This model isn't usable — check that the model name is available and the API key is valid.",
   "modelUnreachable": "Couldn't reach the provider just now — this is usually transient, try again.",
+  "modelNoTools": "This model can't call tools, which every chat turn needs — pick a model with tool (function) calling.",
   "modelChecking": "Checking model availability…",
   "getApiKey": "Get an API key",
   "welcome": {
@@ -175,6 +176,27 @@
     },
     "PAPERHUB_SLIDE_STYLE_PROFILE": {
       "label": "Slide style profile"
+    },
+    "PAPERHUB_AGENT_MODEL": {
+      "label": "Core agent",
+      "help": "The tool-calling agent that answers every chat turn. Defaults to the flagship tier."
+    },
+    "PAPERHUB_AGENT_GATHER_MODEL": {
+      "label": "Agent context gatherer",
+      "help": "Reads papers for the core agent's gather tools. Defaults to the small tier."
+    },
+    "PAPERHUB_AGENT_AUTOAPPROVE_MODEL": {
+      "label": "Agent auto-approver",
+      "help": "Judges whether an action the agent proposes matches what you asked. Defaults to the small tier."
+    },
+    "PAPERHUB_AGENT_MAX_STEPS": {
+      "label": "Agent max tool steps / turn"
+    },
+    "PAPERHUB_AGENT_MAX_TURN_TOKENS": {
+      "label": "Agent tool-result token budget / turn"
+    },
+    "PAPERHUB_AGENT_KEEP_TURNS": {
+      "label": "Agent conversation turns kept verbatim"
     }
   }
 }

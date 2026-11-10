@@ -1,4 +1,7 @@
 export const HIGHLIGHT_CLASS = "ph-cite-hl";
+/** Added with HIGHLIGHT_CLASS on a cited figure: a background tint can't show
+ *  through an image, so the figure is outlined instead. */
+export const FIGURE_HIGHLIGHT_CLASS = "ph-cite-fig";
 
 const HIGHLIGHT_STYLE_ID = "ph-cite-hl-style";
 
@@ -15,7 +18,11 @@ function ensureHighlightStyle(doc: Document): void {
   style.textContent =
     `.${HIGHLIGHT_CLASS} { background-color: #fde68a; color: inherit; ` +
     `border-radius: 2px; padding: 0 1px; ` +
-    `transition: background-color 0.3s ease; }`;
+    `transition: background-color 0.3s ease; }` +
+    `.${HIGHLIGHT_CLASS}.${FIGURE_HIGHLIGHT_CLASS} { display: block; ` +
+    `background-color: rgba(253, 230, 138, 0.35); outline: 3px solid #facc15; ` +
+    `outline-offset: 4px; border-radius: 4px; ` +
+    `transition: outline-color 0.3s ease, background-color 0.3s ease; }`;
   (doc.head ?? doc.documentElement).appendChild(style);
 }
 
@@ -297,9 +304,9 @@ export function clearHighlight(doc: Document): void {
     parent.removeChild(span);
     if (typeof parent.normalize === "function") parent.normalize();
   });
-  // Remove class-only highlights (text-search / section fallbacks).
+  // Remove class-only highlights (text-search / section / figure).
   doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((el) => {
-    el.classList.remove(HIGHLIGHT_CLASS);
+    el.classList.remove(HIGHLIGHT_CLASS, FIGURE_HIGHLIGHT_CLASS);
   });
 }
 
@@ -359,6 +366,32 @@ export function highlightChunkRange(
 
   const anchor = wrappers[0] ?? start;
   scrollIntoViewStable(anchor, behavior);
+  scheduleClear(doc, () => clearHighlight(doc));
+  return true;
+}
+
+/**
+ * A `[fig:]` citation: the render put an anchor (`phfig-NNN`) just before the
+ * figure, so the cited figure is the first `figure`, `div.figure*` (pandoc's
+ * `figure*` rendering) or bare `img` after it in document order. Outline it,
+ * scroll it into view, and clear it like any citation highlight. Returns
+ * whether the anchor and a figure after it were found.
+ */
+export function highlightFigure(
+  doc: Document,
+  anchorId: string,
+  behavior: ScrollBehavior = "smooth",
+): boolean {
+  const anchor = doc.getElementById(anchorId);
+  if (!anchor) return false;
+  const after = Array.from(
+    doc.querySelectorAll<HTMLElement>('figure, div[class^="figure"], img'),
+  ).find((el) => anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  if (!after) return false;
+  clearHighlight(doc);
+  ensureHighlightStyle(doc);
+  after.classList.add(HIGHLIGHT_CLASS, FIGURE_HIGHLIGHT_CLASS);
+  scrollIntoViewStable(after, behavior);
   scheduleClear(doc, () => clearHighlight(doc));
   return true;
 }

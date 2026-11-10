@@ -20,7 +20,10 @@ BEFORE the answer tokens.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+import contextlib
+import logging
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 
 import aiosqlite
@@ -33,6 +36,8 @@ from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.sql_domain import SqlPaperPick, SqlRoundAction
 from paperhub.tracing.tracer import Tracer
+
+_LOG = logging.getLogger(__name__)
 
 # Maximum query rounds before the loop forces a finalize. The Nth (last) round
 # is run with ``must_finalize=True`` so the model cannot request another query.
@@ -206,8 +211,14 @@ async def sql_agent_stream(
     conn: aiosqlite.Connection | None = None,
     recall_enabled: bool = True,
     emit_tool_steps: bool = False,
+    overlap_describe: bool = False,
 ) -> AsyncIterator[str | ToolStepYield | SearchResultsYield]:
     """Run the bounded ReAct loop for a ``library_stats`` turn.
+
+    ``overlap_describe`` (needs ``conn``, no ``emit_tool_steps``): the first
+    round reads the column lists from the local DB and runs while the traced
+    ``sql.describe`` calls -- whose first call reconnects the loopback MCP
+    session -- are still in flight; the first ``sql.query`` waits for them.
 
     Yields, in order: ``ToolStepYield`` (when ``emit_tool_steps``) as each agent
     step commits, then a ``SearchResultsYield`` curated from
@@ -247,11 +258,71 @@ async def sql_agent_stream(
             yield ToolStepYield(record=rec)
 
     # 1. Describe schemas once. These two columns lists are constant per turn.
-    pc_schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "paper_content"})
-    p_schema = await _mcp_call(tracer, registry, "sql.describe", {"table": "papers"})
+    async def describe() -> str:
+        pc = await _mcp_call(tracer, registry, "sql.describe", {"table": "paper_content"})
+        pp = await _mcp_call(tracer, registry, "sql.describe", {"table": "papers"})
+        return f"paper_content columns: {_cols(pc)}\npapers columns: {_cols(pp)}"
+
+    describing: asyncio.Task[str] | None = None
+    if overlap_describe and conn is not None and not emit_tool_steps:
+        describing = asyncio.create_task(describe())
+        table_schemas = await _local_table_schemas(conn)
+    else:
+        table_schemas = await describe()
     async for ev in _drain_new_steps():
         yield ev
-    table_schemas = f"paper_content columns: {_cols(pc_schema)}\npapers columns: {_cols(p_schema)}"
+    try:
+        async for item in _react_and_answer(
+            question=question, language=language, session_id=session_id,
+            model=model, adapter=adapter, tracer=tracer, registry=registry,
+            conn=conn, recall_enabled=recall_enabled, table_schemas=table_schemas,
+            describing=describing, drain=_drain_new_steps,
+        ):
+            yield item
+        if describing is not None:
+            try:
+                await describing
+            except Exception as exc:  # noqa: BLE001 - the answer stands
+                # The answer came from the local schema; the failed describe
+                # is on its own traced row (status error).
+                _LOG.warning("sql.describe failed after the answer: %s", exc)
+    finally:
+        if describing is not None:
+            if not describing.done():
+                describing.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await describing
+            elif not describing.cancelled():
+                describing.exception()  # retrieved: never logged as unhandled
+
+
+async def _local_table_schemas(conn: aiosqlite.Connection) -> str:
+    """The same column lists ``sql.describe`` returns, read from ``conn``."""
+    parts: list[str] = []
+    for table in ("paper_content", "papers"):
+        async with conn.execute(f"PRAGMA table_info({table})") as cur:
+            names = [str(r[1]) for r in await cur.fetchall()]
+        parts.append(f"{table} columns: {', '.join(names)}")
+    return "\n".join(parts)
+
+
+async def _react_and_answer(
+    *,
+    question: str,
+    language: str,
+    session_id: Any,
+    model: str,
+    adapter: LlmAdapter,
+    tracer: Tracer,
+    registry: _Registry,
+    conn: aiosqlite.Connection | None,
+    recall_enabled: bool,
+    table_schemas: str,
+    describing: asyncio.Task[str] | None,
+    drain: Callable[[], AsyncIterator[ToolStepYield]],
+) -> AsyncIterator[str | ToolStepYield | SearchResultsYield]:
+    """Steps 2-4 of :func:`sql_agent_stream`: memory, the ReAct loop, the answer."""
+    _drain_new_steps = drain
 
     # 2. Recalled-memory block (FR-10): the unconditional active-memory block so
     # a standing directive like "respond in Japanese" always surfaces. The
@@ -312,6 +383,8 @@ async def sql_agent_stream(
 
         # action == "query" (and not the must_finalize round, which coerced
         # above). Run the validated query and feed the rows back next round.
+        if describing is not None:
+            await describing  # the MCP session is reconnected by then
         result = await _mcp_call(tracer, registry, "sql.query", {"sql": action.sql or ""})
         async for ev in _drain_new_steps():
             yield ev

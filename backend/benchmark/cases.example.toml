@@ -10,6 +10,8 @@
 
 [benchmark]
 name = "paperhub-rag-qa"
+# The H4 merge gate's no-regression set (G-c).
+suite = "regression"
 base_url = "http://127.0.0.1:8000"
 db_path = "workspace/paperhub.db"
 

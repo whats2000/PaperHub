@@ -46,6 +46,9 @@ def test_pymupdf_to_asset_extracts_figures(tmp_path: Path) -> None:
         assert fig.caption == ""
         assert fig.section is None
         assert fig.abs_image_path(source_dir).exists()
+    # The image was placed at Rect(72, 140, 172, 240) on page 0.
+    assert asset.figures[0].page == 0
+    assert asset.figures[0].bbox == (72.0, 140.0, 172.0, 240.0)
 
 
 def test_pymupdf_to_asset_no_images(tmp_path: Path) -> None:
