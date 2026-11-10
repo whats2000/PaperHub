@@ -182,6 +182,7 @@ def test_pdflatex_runs_without_shell_escape_and_paranoid_file_access(
     src = tmp_path / "src"
     src.mkdir()
     (src / "main.tex").write_text("\documentclass{article}", encoding="utf-8")
+    monkeypatch.setattr(page_pdf.shutil, "which", lambda _name: "pdflatex")
     monkeypatch.setattr(page_pdf.subprocess, "run", run)
     assert compile_paper_pdf(src / "main.tex", tmp_path / "cache") is None
     cmd, env = seen[0]
