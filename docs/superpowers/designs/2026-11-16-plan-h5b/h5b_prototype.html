@@ -169,7 +169,9 @@ input { font: inherit; color: inherit; }
 .paper h3 { font-size: 17px; margin: 14px 0 8px; font-weight: 700; }
 .paper p { margin: 0 0 12px; position: relative; }
 .sec-mark { font-family: var(--font-sans); display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
-.cited { background: var(--cite-bg); outline: 1px solid var(--cite-line); border-radius: 1px; }
+/* The cited passage: highlighted only after a citation is clicked in the chat (as the shipped Citation Canvas does), never by default */
+.cited { border-radius: 1px; transition: background-color 400ms ease-out, outline-color 400ms ease-out; outline: 1px solid transparent; }
+.cited[data-on="true"] { background: var(--cite-bg); outline-color: var(--cite-line); }
 .hl { border-radius: 2px; cursor: pointer; transition: box-shadow 150ms ease-out; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .hl[data-c="green"] { background: color-mix(in srgb, var(--hl-green) var(--hl-alpha), transparent); }
 .hl[data-c="blue"] { background: color-mix(in srgb, var(--hl-blue) var(--hl-alpha), transparent); }
@@ -1235,6 +1237,14 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     }
     icons();
   });
+
+  /* ---------- a citation in the chat opens the paper at the cited passage and highlights it ---------- */
+  let citeT = null;
+  $$('#vChat .msg .cite, #vChat .cite').forEach(c => { if (c.closest('#notesPane, .gcard')) return; c.style.cursor = 'pointer'; c.addEventListener('click', () => {
+    if (doc !== 'xr') { doc = 'xr'; showDoc(); } show('reader');
+    const el = $('#paper .cited'); if (!el) return;
+    requestAnimationFrame(() => { scrollTo(el); el.dataset.on = 'true'; clearTimeout(citeT); citeT = setTimeout(() => { delete el.dataset.on; }, 4000); });
+  }); });
 
   /* ---------- highlighter (pen) mode ---------- */
   function setPen(c) {
