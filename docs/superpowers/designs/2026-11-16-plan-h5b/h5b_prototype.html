@@ -185,7 +185,22 @@ input { font: inherit; color: inherit; }
 .margin-ic:hover { color: var(--foreground); background: var(--accent); }
 /* Figure / equation: whole object marked in one click */
 .obj { position: relative; border-radius: 4px; transition: box-shadow 150ms ease-out; }
-.obj[data-marked] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--hl-green) 70%, transparent); }
+.obj[data-marked] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mc, var(--hl-green)) 70%, transparent); }
+/* Highlighter (pen) mode: every drag marks at once; strokes in one paragraph join; a click on a mark erases it */
+.pen-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.pen-btn[aria-pressed="true"] { background: var(--accent); color: var(--foreground); box-shadow: inset 0 -2px 0 var(--pen); }
+.pen-btn .pen-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--pen); display: none; }
+.pen-btn[aria-pressed="true"] .pen-dot { display: block; }
+.pen-colors { display: inline-flex; gap: 1px; overflow: hidden; max-width: 0; opacity: 0; transition: max-width 200ms ease-out, opacity 150ms ease-out; }
+.pen-colors[data-state="open"] { max-width: 120px; opacity: 1; }
+.pen-colors .swatch { height: 22px; padding: 0 4px; }
+.pen-colors .swatch[aria-pressed="true"] .dot { box-shadow: 0 0 0 2px var(--background), 0 0 0 3.5px var(--foreground); }
+.reader-body.pen-on ::selection { background: color-mix(in srgb, var(--pen) 45%, transparent); }
+.reader-body.pen-on .obj-btn { display: none; }
+.reader-body.pen-on .obj:hover { box-shadow: 0 0 0 2px var(--pen); cursor: pointer; }
+.reader-body.pen-on .obj[data-marked]:hover, .reader-body.pen-on .hl:hover, .reader-body.pen-on .qmark:hover { box-shadow: none; outline: 1.5px dashed var(--foreground); outline-offset: 1px; cursor: pointer; }
+.reader-body.pen-on .gpage[data-erase="true"] { cursor: pointer; }
+.gmark[data-erase="true"] { outline: 1.5px dashed oklch(0.35 0 0); }
 .obj-btn { position: absolute; top: 6px; right: 6px; z-index: 3; border: 1px solid var(--border); background: var(--popover); box-shadow: var(--shadow-sm); border-radius: 7px; padding: 2px 8px; font-family: var(--font-sans); font-size: 11.5px; display: inline-flex; gap: 4px; align-items: center;
   opacity: 0; transform: scale(0.95); transition: opacity 120ms ease-out, transform 120ms ease-out; }
 .obj:hover .obj-btn, .obj:focus-within .obj-btn { opacity: 1; transform: none; }
@@ -216,7 +231,7 @@ input { font: inherit; color: inherit; }
 .gmark[data-kind="quote"] { background: oklch(0.45 0 0); }
 .gmark[data-c="green"] { background: color-mix(in srgb, #2f9e63 26%, transparent); } .gmark[data-c="blue"] { background: color-mix(in srgb, #3b7dd8 26%, transparent); }
 .gmark[data-c="pink"] { background: color-mix(in srgb, #d6457e 26%, transparent); } .gmark[data-c="purple"] { background: color-mix(in srgb, #8b5cd6 26%, transparent); }
-.gmark[data-kind="box"], .gmark[data-kind="eq"] { outline: 1.5px solid color-mix(in srgb, #2f9e63 70%, transparent); background: transparent; }
+.gmark[data-kind="box"], .gmark[data-kind="eq"] { outline: 1.5px solid color-mix(in srgb, var(--mc, #2f9e63) 70%, transparent); background: transparent; }
 .gmark[data-hot="true"] { box-shadow: 0 0 0 1px oklch(0.55 0 0); } .gmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
 .gicon { position: absolute; pointer-events: auto; border: 0; background: transparent; color: oklch(0.5 0 0); border-radius: 4px; padding: 1px; display: inline-flex; font-family: var(--font-sans); }
 .gicon:hover { background: oklch(0.95 0 0); color: oklch(0.15 0 0); }
@@ -226,6 +241,9 @@ input { font: inherit; color: inherit; }
 .scan .scan-tbl { position: absolute; left: 14%; top: 48%; width: 72%; font-size: 1.6cqw; color: oklch(0.25 0 0); border-collapse: collapse; }
 .scan .scan-tbl td { border: 1px solid oklch(0.55 0 0 / 0.5); padding: 0.4cqw 1cqw; }
 .page-note { text-align: center; font-family: var(--font-sans); font-size: 11.5px; color: var(--muted-fg); margin: 0 14px 6px; }
+.reader-body.box-on .gpage { cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.reader-body.box-on .gpage .obj-btn { display: none; }
+.box-btn[aria-pressed="true"] { background: var(--accent); color: var(--foreground); box-shadow: inset 0 -2px 0 var(--foreground); }
 .drag-box { position: absolute; border: 1.5px dashed var(--hl-blue); background: color-mix(in srgb, var(--hl-blue) 12%, transparent); pointer-events: none; }
 
 /* Selection popover: below the selection; named colours */
@@ -263,9 +281,12 @@ input { font: inherit; color: inherit; }
 .n-sub { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 10px; flex-shrink: 0; font-size: 11.5px; color: var(--muted-fg); }
 .notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 30px 4px; }
 .blocks { display: flex; flex-direction: column; gap: 1px; }
-.blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
+.blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px; gap: 4px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
 .blk-row .handle { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); padding: 3px 0; border-radius: 4px; display: flex; justify-content: center; transition: opacity 120ms; }
 .blk-row:hover .handle { opacity: 1; }
+.blk-del { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 22px; height: 22px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms; }
+.blk-row:hover .blk-del, .blk-del:focus-visible { opacity: 1; } .blk-del:hover { background: var(--accent); color: var(--foreground); }
+.pieces { font-size: 10.5px; color: var(--muted-fg); margin-left: 4px; font-family: var(--font-sans); }
 .blk-row[data-link="true"] { background: var(--accent); box-shadow: 0 0 0 1px var(--ring); }
 .blk-row[data-flash="true"] { background: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
 .blk { padding: 2px 6px; min-width: 0; font-size: 13.5px; }
@@ -283,11 +304,11 @@ input { font: inherit; color: inherit; }
 .objblk .head { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted-fg); flex-wrap: wrap; }
 .objblk .fig-img { border: 0; border-radius: 0; height: 110px; }
 .objblk .cap { padding: 4px 8px 6px; font-size: 12.5px; }
-.objblk .eqrow { display: grid; grid-template-columns: minmax(0, 1fr) 42%; gap: 0; }
+.objblk .eqrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; }
 .objblk .eq-render { font-family: var(--font-math); font-size: 16px; padding: 10px 8px; text-align: center; }
 .objblk .eq-src { font-family: var(--font-mono); font-size: 11px; color: var(--muted-fg); padding: 0 8px 8px; word-break: break-all; }
-.objblk .crop { border-left: 1px solid var(--border); background: oklch(1 0 0); color: oklch(0.15 0 0); font-family: var(--font-math); font-size: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px; gap: 3px; }
-.objblk .crop small { font-family: var(--font-sans); font-size: 10px; color: oklch(0.45 0 0); }
+.objblk .crop { border-left: 1px solid var(--border); background: oklch(1 0 0); color: oklch(0.15 0 0); font-family: var(--font-math); font-size: 12px; display: block; text-align: center; padding: 10px 6px 6px; }
+.objblk .crop small { display: block; margin-top: 4px; font-family: var(--font-sans); font-size: 10px; color: oklch(0.45 0 0); }
 .objblk .ocr { padding: 6px 8px; font-size: 12.5px; }
 .model-mark { display: inline-flex; gap: 3px; align-items: center; font-size: 10.5px; color: var(--muted-fg); }
 .lost { border: 1px dashed var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 8px; padding: 5px 9px; font-size: 12px; }
@@ -329,7 +350,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2 sketch)</button>
   </div>
-  <span class="muted">Try: select paper text · click a highlight · hover Figure 3 → Mark · the PDF-only paper: Eq. (1) on page 2, drag a box on page 3, 文A translate · My marks · drag the panel edge wider</span>
+  <span class="muted">Try: select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
 </div>
 
 <div class="app">
@@ -424,7 +445,9 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
               <span id="fmtTabs"><button class="fmt" aria-selected="true">HTML</button><button class="fmt" aria-selected="false">PDF</button></span>
               <span class="doc-kind" id="docKind" hidden>PDF only · 18 pages</span>
               <span class="spacer"></span>
-              <button class="marks-btn" id="marksBtn" aria-expanded="false" aria-controls="marksMenu"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span id="marksCount">4</span><i data-lucide="chevron-down" class="icon-xs"></i></button>
+              <button class="marks-btn box-btn" id="boxBtn" aria-pressed="false" hidden title="Box: drag a rectangle on the page to quote a figure, an equation or any region. Esc to stop."><i data-lucide="square-dashed-mouse-pointer" class="icon-xs"></i>Box</button>
+              <span class="pen-wrap"><button class="marks-btn pen-btn" id="penBtn" aria-pressed="false" title="Highlighter: drag across words to mark them at once; click a figure or equation to mark it; click a mark to erase it. Esc to stop."><i data-lucide="highlighter" class="icon-xs"></i><span id="penLbl">Highlighter</span><span class="pen-dot"></span></button><span class="pen-colors" id="penColors" data-state="closed" role="group" aria-label="Highlighter colour"></span></span>
+              <button class="marks-btn" id="marksBtn" aria-expanded="false" aria-controls="marksMenu"><i data-lucide="layers" class="icon-xs"></i>My marks <span id="marksCount">4</span><i data-lucide="chevron-down" class="icon-xs"></i></button>
               <div class="marks-menu" id="marksMenu" data-state="closed" role="dialog" aria-label="My marks">
                 <div class="mm-h"><span>Colours — click a name to rename</span><span>show</span></div>
                 <div id="mmRows"></div>
@@ -474,7 +497,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
                   <div class="gblk" data-block="/page/1/Text/5" data-sec="2. Theoretical Framework of GISC" style="left:12.8%;top:25.3%;width:74.4%;height:2.8%">Since the sampling is always limited in practice, the solution of Equation (1) can be approximately presented as</div>
                   <div class="gmarks" id="gm-gp2"></div>
                 </div>
-                <p class="page-note">Page 2 of 18 · hover Eq. (1) → Mark equation</p>
+                <p class="page-note">Page 2 of 18 · hover Eq. (1) → Mark equation, or turn on Box and drag around it</p>
                 <div class="gpage scan" id="gp3">
                   <div class="scan-fig">[ scanned figure: GISC LiDAR schematic ]</div>
                   <div class="scan-cap">Figure 2. Schematic of the GISC LiDAR system.</div>
@@ -533,7 +556,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 </div>
 <div class="gcard" id="noteCardG" data-state="closed" role="dialog" aria-label="Note for this passage">
   <span class="gcard-arrow" id="noteArrow" aria-hidden="true"></span>
-  <div class="gcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span class="t" id="ncTitle"></span><button class="icon-btn" id="ncClose" aria-label="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
+  <div class="gcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span class="t" id="ncTitle"></span><button class="icon-btn" id="ncDel" aria-label="Delete this mark" title="Delete this mark (your own notes are kept)"><i data-lucide="trash-2" class="icon-xs"></i></button><button class="icon-btn" id="ncClose" aria-label="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
   <div class="gcard-b" id="ncBody"></div>
   <div class="gcard-f"><span class="muted">Edit right here · saved automatically</span><button class="btn" id="ncOpen"><i data-lucide="panel-right-open" class="icon-xs"></i>Open in Notes</button></div>
 </div>
@@ -599,6 +622,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   };
   const markNote = { m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
   let doc = 'xr', noteTab = 'paper', undone = false;
+  let pen = null, lastPen = null; const penMarks = {}; // highlighter colour; marks made with it (to join strokes)
   const curNoteKey = () => noteTab === 'chat' ? 'chat' : doc;
 
   const FIG_SVG = $('#fig3 svg').outerHTML;
@@ -608,15 +632,17 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     let inner;
     if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
     else if (b.type === 'h') inner = `<h4>${esc(b.text)}</h4>`;
-    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}<div>${chip(b.mark, b.src)}</div></div>`;
+    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}${b.pieces > 1 ? `<span class="pieces">· ${b.pieces} pieces</span>` : ''}<div>${chip(b.mark, b.src)}</div></div>`;
     else if (b.type === 'fig') inner = `<div class="objblk"><div class="head"><i data-lucide="image" class="icon-xs"></i>Figure 3 · ${esc(cname(b.c))}</div><div class="fig-img">${FIG_SVG}</div><div class="cap">Figure 3: Latency profiling and challenges during poses merge.<div>${chip(b.mark, 'Fig. 3 · p. 3')}</div></div></div>`;
     else if (b.type === 'eq') inner = `<div class="objblk"><div class="head"><i data-lucide="sigma" class="icon-xs"></i>Eq. (1)<span class="model-mark"><i data-lucide="sparkles" class="icon-xs"></i>LaTeX transcribed by the model · check it against the page</span></div><div class="eqrow"><div><div class="eq-render">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)</div><div class="eq-src" contenteditable="true" spellcheck="false">\\langle \\Delta I_t(x_t)\\,\\Delta I_r(x_r) \\rangle = O(x_t, x_r)</div></div><div class="crop" title="Crop of the page">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>), (1)<small>page 2 crop</small></div></div><div class="cap">${chip(b.mark, 'Eq. (1) · p. 2')}</div></div>`;
+    else if (b.type === 'box' && !b.scan) inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region · ${esc(b.where)}${b.c ? ' · ' + esc(cname(b.c)) : ''}<span class="model-mark"><i data-lucide="text" class="icon-xs"></i>Text under the box, from the page's text layer</span></div><div class="eqrow"><div class="ocr">${esc(b.text)}</div><div class="crop" style="font-family:var(--font-paper);font-size:9.5px;line-height:1.25;overflow:hidden">${esc(b.text.slice(0, 160))}<small>${esc(b.where)} crop</small></div></div><div class="cap">${chip(b.mark, b.where + ' · box')}</div></div>`;
     else if (b.type === 'box') inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region on a scanned page<span class="model-mark"><i data-lucide="scan-text" class="icon-xs"></i>OCR text · check numbers against the crop</span></div><div class="eqrow"><div class="ocr">Figure 2. Schematic of the GISC LiDAR system.<br>Range 1.0 km · Sampling 8000 frames · Resolution 0.8 m</div><div class="crop" style="font-family:var(--font-paper);font-size:10.5px;background:repeating-linear-gradient(0deg, oklch(0.97 0.01 85), oklch(0.97 0.01 85) 7px, oklch(0.93 0.01 85) 8px)">Range 1.0 km<br>Sampling 8000<br>Resolution 0.8 m<small>page 3 crop</small></div></div><div class="cap">${chip(b.mark, 'p. 3 · box')}</div></div>`;
     else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
     else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
     else if (b.sug) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
     else inner = `<div>${b.text}${tag}</div>`;
-    return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div></div>`;
+    const del = b.type === 'sec' ? '<span></span>' : `<button class="blk-del" data-del="${b.id}" aria-label="${b.mark ? 'Delete this mark' : 'Delete this block'}" title="${b.mark ? 'Delete this mark (removes it from the paper too)' : 'Delete this block'}"><i data-lucide="trash-2" class="icon-xs"></i></button>`;
+    return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div>${del}</div>`;
   }
   const visible = k => notes[k].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
   function renderNote() {
@@ -704,6 +730,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     $$('.paper-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.doc === doc)));
     const g = doc === 'ghost';
     $('#fmtTabs').hidden = g; $('#docKind').hidden = !g; $('#paper').hidden = g; $('#ghostView').hidden = !g;
+    $('#boxBtn').hidden = !g; if (!g && boxMode) setBox(false);
     closeCards(); renderNote(); renderMarksMenu(); requestAnimationFrame(drawGhostMarks);
   }
   $$('.paper-tab').forEach(b => b.addEventListener('click', () => { doc = b.dataset.doc; showDoc(); }));
@@ -784,11 +811,15 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 
   /* ---------- toast: where a new mark went ---------- */
   let toastT = null;
-  function toast(text, onShow) {
-    const t = $('#toast'); t.innerHTML = `<i data-lucide="check" class="icon-xs"></i>${esc(text)} <button type="button">Show</button>`; icons();
-    const rb = $('#readerBody').getBoundingClientRect(); t.style.left = (rb.left + 16) + 'px'; t.style.top = (rb.bottom - 52) + 'px';
-    t.dataset.state = 'open'; $('button', t).onclick = () => { t.dataset.state = 'closed'; onShow(); };
-    clearTimeout(toastT); toastT = setTimeout(() => { t.dataset.state = 'closed'; }, 3200);
+  // A toast with one action. If the action returns {text, onAct, label, icon}, the toast turns into that
+  // (so Undo becomes "Delete again" / "Apply again": an accidental Undo is one click back).
+  function toast(text, onAct, label = 'Show', icon = 'check', ms = 3200) {
+    const t = $('#toast'); t.innerHTML = `<i data-lucide="${icon}" class="icon-xs"></i><span class="tt">${esc(text)}</span> <button type="button">${esc(label)}</button>`; icons();
+    const host = readerVisible() ? $('#readerBody') : $('#notesBody'); const rb = host.getBoundingClientRect();
+    t.style.left = (rb.left + 16) + 'px'; t.style.top = (Math.min(rb.bottom, window.innerHeight) - 52) + 'px';
+    t.dataset.state = 'open';
+    $('button', t).onclick = () => { const next = onAct(); if (next) toast(next.text, next.onAct, next.label, next.icon, ms); else t.dataset.state = 'closed'; };
+    clearTimeout(toastT); toastT = setTimeout(() => { t.dataset.state = 'closed'; }, ms);
   }
   function revealBlock(k, id) {
     noteTab = 'paper'; $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.note === 'paper')));
@@ -809,12 +840,14 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     ids.forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); } });
   }
   function bindMark(el) {
-    const mark = el.dataset.mark;
-    el.addEventListener('mouseenter', () => { if (!marksOn()) return; if (notesVisible()) syncBlock(mark, true); });
-    el.addEventListener('mouseleave', () => syncBlock(mark, false));
+    if (el.dataset.bound) return; el.dataset.bound = 'true';
+    el.addEventListener('mouseenter', () => { const mark = el.dataset.mark; if (!marksOn() || !markNote[mark]) return; if (notesVisible()) syncBlock(mark, true); });
+    el.addEventListener('mouseleave', () => syncBlock(el.dataset.mark, false));
     el.addEventListener('click', e => {
-      if (!marksOn() || String(window.getSelection())) return;
+      const mark = el.dataset.mark;
+      if (!marksOn() || !markNote[mark] || String(window.getSelection())) return;
       e.stopPropagation();
+      if (pen) { erasePiece(el); return; }
       if (notesVisible()) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`)); return; }
       openNoteCard(mark, el.closest('p') || el, null);
     });
@@ -868,7 +901,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       if ((m.kind === 'hl' || m.kind === 'quote') && !m.rects) { const blk = $(`[data-block="${m.block}"]`, page); const r = blk && textRange(blk, m.text); m.rects = r ? rectsOf(r, page) : []; }
       const rects = m.kind === 'hl' || m.kind === 'quote' ? m.rects : [m.box];
       rects.forEach(r => {
-        const d = document.createElement('div'); d.className = 'gmark'; d.dataset.id = m.id; d.dataset.kind = m.kind; d.dataset.c = m.c;
+        const d = document.createElement('div'); d.className = 'gmark'; d.dataset.id = m.id; d.dataset.kind = m.kind; d.dataset.c = m.c; d.style.setProperty('--mc', `var(--hl-${m.c})`);
         const y = m.kind === 'quote' ? r.y + r.h - 0.0015 : r.y, h = m.kind === 'quote' ? 0.0012 : r.h;
         Object.assign(d.style, { left: r.x * 100 + '%', top: y * 100 + '%', width: r.w * 100 + '%', height: h * 100 + '%' }); layer.appendChild(d);
       });
@@ -888,15 +921,17 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     page.addEventListener('mousemove', e => {
       if (dragging) return;
       const m = marksOn() ? hit(page, e) : null;
-      $$('.gmark').forEach(d => { if (m && d.dataset.id === m.id) d.dataset.hot = 'true'; else delete d.dataset.hot; });
+      $$('.gmark').forEach(d => { if (m && d.dataset.id === m.id) { d.dataset.hot = 'true'; if (pen) d.dataset.erase = 'true'; else delete d.dataset.erase; } else { delete d.dataset.hot; delete d.dataset.erase; } });
+      page.dataset.erase = String(!!(m && pen));
       if (m) { if (notesVisible()) syncBlock(m.id, true); return; }
       syncBlock(null, false);
       const blk = e.target.closest('[data-block]');
       if (blk && TR[blk.dataset.block] && $('#trFab').getAttribute('aria-pressed') === 'true') openTranslation(blk);
     });
     page.addEventListener('click', e => {
-      if (String(window.getSelection()) || dragging || e.target.closest('.obj-btn')) return;
+      if (String(window.getSelection()) || dragging || boxMode || e.target.closest('.obj-btn')) return;
       const m = marksOn() ? hit(page, e) : null; if (!m) return;
+      if (pen) { eraseGhost(m, page, e); return; }
       if (notesVisible()) { flash($(`#notesBody .blk-row[data-id="${markNote[m.id][1][0]}"]`)); return; }
       const blk = m.block && $(`[data-block="${m.block}"]`); openNoteCard(m.id, blk || page, blk);
     });
@@ -920,8 +955,11 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   }
   function closePop() { pop.dataset.state = 'closed'; if (pending && pending.boxEl) pending.boxEl.remove(); pending = null; }
   const onSelect = container => setTimeout(() => {
+    if (boxMode && container.closest('.gpage')) return;
     const sel = window.getSelection(); if (!sel || sel.isCollapsed || !container.contains(sel.anchorNode)) { if (pending && pending.kind === 'text') closePop(); return; }
-    const range = sel.getRangeAt(0); openPop(range.getBoundingClientRect(), { kind: 'text', range, page: container.closest('.gpage') });
+    const range = sel.getRangeAt(0); const p = { kind: 'text', range, page: container.closest('.gpage') };
+    if (pen) { pending = p; createMark('hl', pen); return; }
+    openPop(range.getBoundingClientRect(), p);
   }, 0);
   $('#paper').addEventListener('mouseup', () => onSelect($('#paper')));
   $$('#gp1, #gp2').forEach(p => p.addEventListener('mouseup', () => onSelect(p)));
@@ -930,11 +968,19 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   $$('.obj-btn').forEach(b => b.addEventListener('click', e => {
     e.stopPropagation(); const obj = b.closest('.obj'); openPop(obj.getBoundingClientRect(), { kind: b.dataset.objbtn === 'eq1' ? 'eq' : 'fig', obj });
   }));
-  // Scanned page: drag a box.
-  (() => {
-    const page = $('#gp3'); let start = null, box = null;
+  // Drag a box: always on a scanned page; on a text page in Box mode (so it doesn't fight text selection).
+  let boxMode = false;
+  function setBox(on) {
+    boxMode = on; $('#readerBody').classList.toggle('box-on', on); $('#boxBtn').setAttribute('aria-pressed', String(on));
+    if (on) { window.getSelection().removeAllRanges(); closePop(); closeCards(); }
+  }
+  $('#boxBtn').addEventListener('click', () => setBox(!boxMode));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && boxMode) setBox(false); });
+  $$('#ghostView .gpage').forEach(page => {
+    let start = null, box = null;
     page.addEventListener('pointerdown', e => {
-      if (e.target.closest('.gicon')) return; const pb = page.getBoundingClientRect();
+      if (page.id !== 'gp3' && !boxMode) return;
+      if (e.target.closest('.gicon')) return; e.preventDefault(); const pb = page.getBoundingClientRect();
       start = { x: (e.clientX - pb.left) / pb.width, y: (e.clientY - pb.top) / pb.height }; dragging = false;
       box = document.createElement('div'); box.className = 'drag-box'; page.appendChild(box); page.setPointerCapture(e.pointerId);
     });
@@ -946,39 +992,71 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     });
     page.addEventListener('pointerup', () => {
       if (!start) return; start = null;
-      if (dragging && box.rect) openPop(box.getBoundingClientRect(), { kind: 'box', rect: box.rect, boxEl: box }); else box.remove();
+      if (dragging && box.rect) {
+        // A box that covers most of an equation snaps to it (an equation block, LaTeX + crop); otherwise a region.
+        const pb = page.getBoundingClientRect(), r = box.rect;
+        const eq = $$('.gblk.eq', page).find(el => { const f = frac(el, page); const ix = Math.max(0, Math.min(r.x + r.w, f.x + f.w) - Math.max(r.x, f.x)), iy = Math.max(0, Math.min(r.y + r.h, f.y + f.h) - Math.max(r.y, f.y)); return ix * iy > 0.5 * f.w * f.h; });
+        const p = eq ? { kind: 'eq', obj: eq, boxEl: box } : { kind: 'box', rect: r, boxEl: box, page };
+        if (pen) { pending = p; createMark('hl', pen); } else openPop(box.getBoundingClientRect(), p);
+      } else box.remove();
       setTimeout(() => { dragging = false; }, 0);
     });
-  })();
+  });
   function createMark(kind, c) {
     const p = pending; if (!p) return; const mark = 'u' + (++nid);
     if (p.kind === 'fig') {
       const id = insertUnder('xr', 'Background and Motivation', '§2 Background and Motivation', { id: 'f' + nid, type: 'fig', c: c || 'green', mark });
-      markNote[mark] = ['xr', [id]]; p.obj.dataset.marked = 'true'; p.obj.dataset.mark = mark; bindMark(p.obj);
+      markNote[mark] = ['xr', [id]]; p.obj.dataset.marked = 'true'; p.obj.dataset.mark = mark; p.obj.style.setProperty('--mc', `var(--hl-${c || 'green'})`); bindMark(p.obj);
       pop.dataset.state = 'closed'; pending = null; afterAdd('xr', id, '§2'); return;
     }
     if (p.kind === 'eq') {
+      if (p.boxEl) p.boxEl.remove();
       const id = insertUnder('ghost', '2. Theoretical Framework of GISC', '§2 Theoretical Framework of GISC', { id: 'e' + nid, type: 'eq', c: c || 'green', mark });
-      markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: 'gp2', kind: 'eq', c: c || 'green', block: '/page/1/Equation/3', box: frac(p.obj, $('#gp2')) });
+      markNote[mark] = ['ghost', [id]]; p.obj.dataset.mark = mark; gmarks.push({ id: mark, page: 'gp2', kind: 'eq', c: c || 'green', block: '/page/1/Equation/3', box: frac(p.obj, $('#gp2')) });
       pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, '§2'); return;
     }
+    if (p.kind === 'box' && p.page && p.page.id !== 'gp3') {
+      // The text layer under the box, block by block; the section of the block it covers most.
+      const r = p.rect; let best = null, bestA = 0; const parts = [];
+      $$('.gblk', p.page).forEach(el => { const f = frac(el, p.page); const ix = Math.max(0, Math.min(r.x + r.w, f.x + f.w) - Math.max(r.x, f.x)), iy = Math.max(0, Math.min(r.y + r.h, f.y + f.h) - Math.max(r.y, f.y)); if (ix * iy > 0) { parts.push(el.textContent.replace(/Mark equation/, '').trim()); if (el.dataset.sec && ix * iy > bestA) { bestA = ix * iy; best = el; } } });
+      const pageNo = p.page.id === 'gp1' ? 1 : 2; const sec = best ? best.dataset.sec : (pageNo === 1 ? 'Abstract' : '2. Theoretical Framework of GISC');
+      const secText = sec === 'Abstract' ? 'Abstract' : '§' + sec.replace(/^(\d+)\.\s*/, '$1 ');
+      const id = insertUnder('ghost', sec, secText, { id: 'x' + nid, type: 'box', c: c || 'blue', mark, where: 'p. ' + pageNo, text: parts.join(' ').slice(0, 400) || '(no text under the box)' });
+      markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: p.page.id, kind: 'box', c: c || 'blue', box: p.rect });
+      p.boxEl.remove(); pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, secText); return;
+    }
     if (p.kind === 'box') {
-      const id = insertUnder('ghost', '3. GISC LiDAR', '§3 GISC LiDAR (p. 3)', { id: 'x' + nid, type: 'box', c: c || 'blue', mark });
+      const id = insertUnder('ghost', '3. GISC LiDAR', '§3 GISC LiDAR (p. 3)', { id: 'x' + nid, type: 'box', scan: true, c: c || 'blue', mark });
       markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: 'gp3', kind: 'box', c: c || 'blue', box: p.rect });
       p.boxEl.remove(); pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, '§3'); return;
     }
     const text = p.range.toString();
+    if (!text.trim()) { pending = null; return; }
     if (p.page) { // PDF text layer
       const blk = (p.range.startContainer.parentElement || p.range.startContainer).closest('[data-block]');
+      const join = pen && kind === 'hl' && gmarks.find(g => g.pen && g.c === c && g.block === (blk && blk.dataset.block) && markNote[g.id]);
+      if (join) {
+        join.pieces.push({ text, rects: rectsOf(p.range, p.page) }); syncPieces(join);
+        window.getSelection().removeAllRanges(); pending = null; drawGhostMarks(); joinedToast(join.id); return;
+      }
       const sec = blk ? blk.dataset.sec : 'Abstract';
-      gmarks.push({ id: mark, page: p.page.id, kind: kind === 'quote' ? 'quote' : 'hl', c: kind === 'quote' ? 'none' : c, block: blk && blk.dataset.block, rects: rectsOf(p.range, p.page), text });
+      const rs = rectsOf(p.range, p.page);
+      gmarks.push({ id: mark, page: p.page.id, kind: kind === 'quote' ? 'quote' : 'hl', c: kind === 'quote' ? 'none' : c, block: blk && blk.dataset.block, rects: rs, text, pen: !!pen, pieces: [{ text, rects: rs }] });
       const secText = sec === 'Abstract' ? 'Abstract' : '§' + sec.replace(/^(\d+)\.\s*/, '$1 ');
       const id = insertUnder('ghost', sec, secText, { id: 'q' + nid, type: 'quote', c: kind === 'quote' ? 'none' : c, mark, src: (blk && blk.dataset.block.includes('/page/1/') ? 'p. 2' : 'p. 1'), text });
       markNote[mark] = ['ghost', [id]]; window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
       drawGhostMarks(); afterAdd('ghost', id, secText); return;
     }
+    const anc = p.range.commonAncestorContainer; const para = (anc.nodeType === 1 ? anc : anc.parentElement).closest('p, figcaption');
+    const join = pen && kind === 'hl' && Object.keys(penMarks).find(m => penMarks[m].c === c && penMarks[m].para === para && markNote[m]);
+    if (join) {
+      const sp = document.createElement('span'); sp.className = 'hl'; sp.dataset.mark = join; sp.dataset.c = c;
+      try { p.range.surroundContents(sp); } catch (e) { pending = null; return; }
+      bindMark(sp); window.getSelection().removeAllRanges(); pending = null; syncHtmlPieces(join); joinedToast(join, sp); return;
+    }
     const span = document.createElement('span'); span.className = kind === 'quote' ? 'qmark' : 'hl'; span.dataset.mark = mark; if (kind !== 'quote') span.dataset.c = c;
-    try { p.range.surroundContents(span); } catch (e) { return; }
+    try { p.range.surroundContents(span); } catch (e) { pending = null; return; }
+    if (pen) penMarks[mark] = { c, para };
     const id = insertUnder('xr', 'Background and Motivation', '§2 Background and Motivation', { id: 'q' + nid, type: 'quote', c: kind === 'quote' ? 'none' : c, mark, src: '§2 · p. 2', text });
     markNote[mark] = ['xr', [id]]; bindMark(span); window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
     afterAdd('xr', id, '§2');
@@ -1020,11 +1098,149 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   });
   $('#openNoteBtn').addEventListener('click', () => { if (doc !== 'xr') { doc = 'xr'; showDoc(); } revealBlock('xr', 'b11'); });
   $('#undoBtn').addEventListener('click', () => {
-    if (undone) return;
-    $$('#notesBody .blk-row').filter(r => ['b11', 'b12', 'b13'].includes(r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
-    setTimeout(() => { undone = true; renderNote(); renderMarksMenu(); }, reduce() ? 0 : 200);
-    $('#undoneWrap').dataset.state = 'open'; $('#noteCard').style.opacity = '0.55'; $('#undoBtn').disabled = true; $('#openNoteBtn').disabled = true;
+    const btn = $('#undoBtn');
+    if (!undone) {
+      $$('#notesBody .blk-row').filter(r => ['b11', 'b12', 'b13'].includes(r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
+      setTimeout(() => { undone = true; renderNote(); renderMarksMenu(); }, reduce() ? 0 : 200);
+      $('#undoneWrap').dataset.state = 'open'; $('#openNoteBtn').disabled = true;
+      btn.innerHTML = '<i data-lucide="redo-2" class="icon-sm"></i>Apply again'; btn.title = 'Put the 3 notes and the suggestion back';
+    } else {
+      undone = false; renderNote(); renderMarksMenu();
+      ['b11', 'b12', 'b13'].forEach(id => { const r = $(`#notesBody .blk-row[data-id="${id}"]`); if (r) r.classList.add('blk-enter'); });
+      $('#undoneWrap').dataset.state = 'closed'; $('#openNoteBtn').disabled = false;
+      btn.innerHTML = '<i data-lucide="undo-2" class="icon-sm"></i>Undo'; btn.title = '';
+    }
+    icons();
   });
+
+  /* ---------- highlighter (pen) mode ---------- */
+  function setPen(c) {
+    pen = c; if (c) lastPen = c; const rb = $('#readerBody');
+    rb.classList.toggle('pen-on', !!c); if (c) rb.style.setProperty('--pen', `var(--hl-${c})`);
+    $('#penBtn').style.setProperty('--pen', `var(--hl-${c || 'green'})`);
+    $('#penBtn').setAttribute('aria-pressed', String(!!c)); $('#penLbl').textContent = c ? `Highlighter: ${cname(c)}` : 'Highlighter';
+    $('#penColors').dataset.state = c ? 'open' : 'closed';
+    $$('#penColors .swatch').forEach(s => s.setAttribute('aria-pressed', String(s.dataset.c === c)));
+    if (c) { closePop(); closeCards(); }
+  }
+  $('#penColors').innerHTML = COLORS.map(x => `<button class="swatch" data-c="${x.c}" aria-pressed="false"><span class="dot" style="background:var(--hl-${x.c})"></span></button>`).join('');
+  $$('#penColors .swatch').forEach(s => { s.addEventListener('click', () => setPen(s.dataset.c)); s.addEventListener('mouseenter', () => { s.title = cname(s.dataset.c); }); });
+  $('#penBtn').addEventListener('click', () => setPen(pen ? null : (lastPen || 'green')));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && pen) setPen(null); });
+  // In pen mode a click on a figure or an equation marks it (or erases it if already marked).
+  $$('.obj').forEach(obj => obj.addEventListener('click', e => {
+    if (!pen || boxMode) return; e.stopImmediatePropagation(); e.preventDefault();
+    if (obj.dataset.mark && markNote[obj.dataset.mark]) { deleteMark(obj.dataset.mark); return; }
+    pending = { kind: obj.dataset.obj === 'eq1' ? 'eq' : 'fig', obj }; createMark('hl', pen);
+  }, true));
+
+  // Keep a joined mark's quote in step with its pieces (document order; "…" between them).
+  function quoteBlock(mark) { const e = markNote[mark]; return e && notes[e[0]].blocks.find(b => e[1].includes(b.id) && b.type === 'quote'); }
+  function syncHtmlPieces(mark) {
+    const parts = $$(`#paper .hl[data-mark="${mark}"]`).map(s => s.textContent.trim());
+    const b = quoteBlock(mark); if (b) { b.text = parts.join(' … '); b.pieces = parts.length; }
+    renderNote(); renderMarksMenu();
+  }
+  function syncPieces(g) {
+    const el = $(`[data-block="${g.block}"]`); const blkText = el ? el.textContent : '';
+    g.pieces.sort((a, b) => blkText.indexOf(a.text) - blkText.indexOf(b.text));
+    g.rects = g.pieces.flatMap(x => x.rects); g.text = g.pieces.map(x => x.text.trim()).join(' … ');
+    const b = quoteBlock(g.id); if (b) { b.text = g.text; b.pieces = g.pieces.length; }
+    renderNote(); renderMarksMenu();
+  }
+  // "Joined" toast: Split makes the newest piece its own mark.
+  function joinedToast(mark, span) {
+    const n = (quoteBlock(mark) || {}).pieces || 2;
+    toast(`Joined to the same mark · ${n} pieces`, () => { splitLast(mark, span); return null; }, 'Split', 'link-2', 5000);
+  }
+  function splitLast(mark, span) {
+    if (!markNote[mark]) return;
+    const [k] = markNote[mark]; const nm = 'u' + (++nid); const src = (quoteBlock(mark) || {}).src || '';
+    if (span) { // HTML piece
+      span.dataset.mark = nm; syncHtmlPieces(mark); penMarks[nm] = { c: span.dataset.c, para: null };
+      const id = insertUnder(k, 'Background and Motivation', '§2 Background and Motivation', { id: 'q' + nid, type: 'quote', c: span.dataset.c, mark: nm, src, text: span.textContent });
+      markNote[nm] = [k, [id]];
+    } else {
+      const g = gmarks.find(x => x.id === mark); if (!g || g.pieces.length < 2) return;
+      const last = g.pieces[g.pieces.length - 1]; g.pieces = g.pieces.slice(0, -1); syncPieces(g);
+      gmarks.push({ ...g, id: nm, pen: false, pieces: [last], rects: last.rects, text: last.text });
+      const el = $(`[data-block="${g.block}"]`); const sec = el ? el.dataset.sec : 'Abstract';
+      const id = insertUnder(k, sec, sec, { id: 'q' + nid, type: 'quote', c: g.c, mark: nm, src, text: last.text });
+      markNote[nm] = [k, [id]]; drawGhostMarks();
+    }
+    renderNote(); renderMarksMenu();
+  }
+  // Pen click on an HTML piece: drop that piece; the last piece takes the whole mark.
+  function erasePiece(el) {
+    const mark = el.dataset.mark, n = $$(`#paper .hl[data-mark="${mark}"]`).length;
+    if (n <= 1) { deleteMark(mark); return; }
+    const t = document.createTextNode(el.textContent);
+    const redo = () => { el.replaceWith(t); syncHtmlPieces(mark); return { text: 'Piece erased', onAct: undo, label: 'Undo', icon: 'eraser' }; };
+    const undo = () => { t.replaceWith(el); syncHtmlPieces(mark); $$(`#paper [data-mark="${mark}"]`).forEach(flash); return { text: 'Piece restored', onAct: redo, label: 'Erase again', icon: 'rotate-ccw' }; };
+    const first = redo(); toast(first.text, first.onAct, first.label, first.icon, 6000);
+  }
+  function eraseGhost(m, page, e) {
+    if (!m.pieces || m.pieces.length <= 1) { deleteMark(m.id); return; }
+    const pb = page.getBoundingClientRect(), x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
+    const i = Math.max(0, m.pieces.findIndex(pc => pc.rects.some(r => x >= r.x && x <= r.x + r.w && y >= r.y - 0.004 && y <= r.y + r.h + 0.004)));
+    const piece = m.pieces[i];
+    const redo = () => { m.pieces = m.pieces.filter(x => x !== piece); syncPieces(m); drawGhostMarks(); return { text: 'Piece erased', onAct: undo, label: 'Undo', icon: 'eraser' }; };
+    const undo = () => { m.pieces.push(piece); syncPieces(m); drawGhostMarks(); return { text: 'Piece restored', onAct: redo, label: 'Erase again', icon: 'rotate-ccw' }; };
+    const first = redo(); toast(first.text, first.onAct, first.label, first.icon, 6000);
+  }
+
+  /* ---------- delete a mark (paper + its quote/figure/equation block), Undo <-> Delete again ---------- */
+  function deleteMark(mark) {
+    const entry = markNote[mark]; if (!entry) return; const [k, ids] = entry; const list = notes[k].blocks;
+    const blocks = list.filter(b => ids.includes(b.id) && ['quote', 'fig', 'eq', 'box'].includes(b.type));
+    const spans = $$(`#paper .hl[data-mark="${mark}"], #paper .qmark[data-mark="${mark}"]`).map(s => [s, document.createTextNode(s.textContent)]);
+    const icos = $$(`#paper .margin-ic[data-mark="${mark}"]`);
+    const obj = $(`.obj[data-mark="${mark}"]`), objMarked = obj && obj.dataset.marked;
+    const g = gmarks.find(x => x.id === mark); let pos = [];
+    const apply = () => {
+      pos = blocks.map(b => list.indexOf(b));
+      $$('#notesBody .blk-row').filter(r => blocks.some(b => b.id === r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
+      spans.forEach(([s, t]) => { if (s.isConnected) s.replaceWith(t); }); icos.forEach(i => { i.hidden = true; });
+      if (obj) delete obj.dataset.marked; if (g) gmarks.splice(gmarks.indexOf(g), 1);
+      delete markNote[mark]; delete penMarks[mark]; closeCards(); drawGhostMarks();
+      setTimeout(() => { blocks.forEach(b => { const i = list.indexOf(b); if (i >= 0) list.splice(i, 1); }); renderNote(); renderMarksMenu(); }, reduce() ? 0 : 200);
+      return { text: 'Mark deleted · your own notes were kept', onAct: restore, label: 'Undo', icon: 'trash-2' };
+    };
+    const restore = () => {
+      blocks.map((b, j) => [pos[j], b]).sort((a, b) => a[0] - b[0]).forEach(([i, b]) => { if (!list.includes(b)) list.splice(Math.min(i, list.length), 0, b); });
+      spans.forEach(([s, t]) => { if (t.isConnected) t.replaceWith(s); }); icos.forEach(i => { i.hidden = false; });
+      if (obj && objMarked) obj.dataset.marked = objMarked; if (g && !gmarks.includes(g)) gmarks.push(g);
+      markNote[mark] = entry; drawGhostMarks(); renderNote(); renderMarksMenu();
+      blocks.forEach(b => { const r = $(`#notesBody .blk-row[data-id="${b.id}"]`); if (r) { r.classList.add('blk-enter'); flash(r); } });
+      $$(`#paper [data-mark="${mark}"]`).forEach(flash);
+      return { text: 'Mark restored', onAct: apply, label: 'Delete again', icon: 'rotate-ccw' };
+    };
+    const first = apply(); toast(first.text, first.onAct, first.label, first.icon, 6000);
+  }
+  // Delete a block from the note: a marked block deletes its mark; any other block is removed alone.
+  function deleteBlock(k, id) {
+    const list = notes[k].blocks, b = list.find(x => x.id === id); if (!b) return;
+    if (b.mark && markNote[b.mark] && ['quote', 'fig', 'eq', 'box'].includes(b.type)) { deleteMark(b.mark); return; }
+    let at = -1;
+    const apply = () => {
+      at = list.indexOf(b); const r = $(`#notesBody .blk-row[data-id="${id}"]`); if (r) r.classList.add('blk-exit');
+      setTimeout(() => { const i = list.indexOf(b); if (i >= 0) list.splice(i, 1); renderNote(); renderMarksMenu(); }, reduce() ? 0 : 200);
+      return { text: 'Block deleted', onAct: restore, label: 'Undo', icon: 'trash-2' };
+    };
+    const restore = () => {
+      if (!list.includes(b)) list.splice(Math.min(at, list.length), 0, b); renderNote();
+      const r = $(`#notesBody .blk-row[data-id="${id}"]`); if (r) { r.classList.add('blk-enter'); flash(r); }
+      return { text: 'Block restored', onAct: apply, label: 'Delete again', icon: 'rotate-ccw' };
+    };
+    const first = apply(); toast(first.text, first.onAct, first.label, first.icon, 6000);
+  }
+  document.addEventListener('click', e => {
+    const d = e.target.closest('.blk-del'); if (!d) return; e.stopPropagation();
+    const onPage = $('#vNotes').contains(d);
+    deleteBlock(onPage ? 'xr' : curNoteKey(), d.dataset.del);
+    if (onPage) setTimeout(renderPage, 220);
+  });
+  $('#ncDel').addEventListener('click', () => { const m = cardMark; closeCards(); deleteMark(m); });
 
   applyPanel(); renderNote(); renderMarksMenu(); renderPage(); icons();
 })();
