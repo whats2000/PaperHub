@@ -310,8 +310,58 @@ input { font: inherit; color: inherit; }
 .n-sub { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 10px; flex-shrink: 0; font-size: 11.5px; color: var(--muted-fg); }
 .notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 30px 4px; }
 .blocks { display: flex; flex-direction: column; gap: 1px; }
-.blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px; gap: 4px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
+.blk-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 24px; gap: 2px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
 .blk-row .handle { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); padding: 3px 0; border-radius: 4px; display: flex; justify-content: center; transition: opacity 120ms; }
+/* Notion-style gutter: + adds a block below (with the / menu), ⋮⋮ drags or opens the block menu */
+.gutter { display: flex; gap: 0; justify-content: flex-end; padding-top: 2px; }
+.gutter button { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 20px; height: 22px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms; padding: 0; }
+.gutter button:hover { background: var(--accent); color: var(--foreground); }
+.gutter [data-drag] { cursor: grab; }
+.blk-row:hover .gutter button, .blk-row:focus-within .gutter button { opacity: 1; }
+.blk-row.dragging { opacity: 0.35; }
+.drop-line { position: fixed; height: 3px; border-radius: 2px; background: var(--hl-blue); pointer-events: none; z-index: 70; display: none; }
+/* Editable text blocks */
+.ed { outline: none; min-height: 1.5em; white-space: pre-wrap; word-break: break-word; }
+.ed:empty::before { content: attr(data-ph); color: var(--muted-fg); opacity: 0; }
+.ed:empty:focus::before, .ed-h1:empty::before, .ed-h2:empty::before, .ed-h3:empty::before { opacity: 0.8; }
+.ed-h1 { font-size: 22px; font-weight: 700; line-height: 1.25; margin: 10px 0 2px; }
+.ed-h2 { font-size: 18px; font-weight: 650; line-height: 1.3; margin: 8px 0 2px; }
+.ed-h3 { font-size: 15px; font-weight: 600; line-height: 1.35; margin: 6px 0 1px; }
+.li { display: flex; gap: 6px; align-items: flex-start; }
+.li .bul { min-width: 16px; text-align: right; color: var(--foreground); line-height: 1.5; }
+.li input[type="checkbox"] { margin-top: 4px; width: 14px; height: 14px; accent-color: var(--hl-blue); }
+.li .ed { flex: 1; }
+.ed.done { text-decoration: line-through; color: var(--muted-fg); }
+.uq { border-left: 3px solid var(--foreground); padding-left: 10px; }
+.callout { display: flex; gap: 8px; background: var(--accent); border-radius: 6px; padding: 8px 10px; }
+.callout .ic { line-height: 1.5; }
+.callout .ed { flex: 1; }
+.ed code, .ed-inline code { font-family: var(--font-mono); font-size: 0.88em; background: var(--accent); color: #d6457e; border-radius: 4px; padding: 0 4px; }
+.ed-row { display: flex; gap: 4px; align-items: baseline; } .ed-row > .ed, .ed-row > .li, .ed-row > .uq, .ed-row > .callout { flex: 1; min-width: 0; }
+.ed:focus { box-shadow: none !important; } .ed .cite { line-height: 0; }
+.mention { display: inline; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 4px; padding: 0 4px; background: var(--accent); color: var(--foreground); font-size: 0.92em; cursor: pointer; text-decoration: none; border-bottom: 1px solid var(--border); }
+.mention:hover { background: color-mix(in srgb, var(--foreground) 12%, transparent); }
+.mathblk { border-radius: 6px; padding: 6px 8px; cursor: text; }
+.mathblk:hover { background: var(--accent); }
+.math-out { text-align: center; font-size: 17px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.math-src { display: none; font-family: var(--font-mono); font-size: 12px; color: var(--muted-fg); border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; outline: none; }
+.mathblk:focus-within .math-src, .mathblk[data-empty="true"] .math-src { display: block; }
+.math-src:empty::before { content: 'Type LaTeX, e.g. \\Delta d_2 > \\Delta d_1'; color: var(--muted-fg); }
+/* Menus: / commands, @ links, block menu; formatting bar */
+.ed-menu { position: fixed; z-index: 80; width: 300px; max-height: 340px; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; transform-origin: top left; transition: opacity 120ms ease-out, transform 120ms ease-out; }
+.ed-menu[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
+.em-h { font-size: 11px; color: var(--muted-fg); padding: 6px 8px 3px; }
+.em-i { width: 100%; border: 0; background: transparent; display: flex; gap: 9px; align-items: center; padding: 4px 8px; border-radius: 6px; text-align: left; color: var(--foreground); font-size: 13px; }
+.em-i .ico { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--background); flex-shrink: 0; }
+.em-i .tx { flex: 1; min-width: 0; } .em-i .tx small { display: block; color: var(--muted-fg); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.em-i kbd { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-fg); }
+.em-i[aria-selected="true"], .em-i:hover { background: var(--accent); }
+.em-empty { padding: 8px; color: var(--muted-fg); font-size: 12.5px; }
+.fmt-bar { position: fixed; z-index: 80; display: flex; gap: 1px; background: var(--popover); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-md); padding: 3px; transition: opacity 120ms ease-out, transform 120ms ease-out; }
+.fmt-bar[data-state="closed"] { opacity: 0; transform: translateY(4px); pointer-events: none; }
+.fmt-bar button { border: 0; background: transparent; color: var(--foreground); min-width: 28px; height: 26px; border-radius: 5px; font-size: 13px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.fmt-bar button:hover { background: var(--accent); }
+.fmt-bar .sep { width: 1px; background: var(--border); margin: 3px 2px; }
 .blk-row:hover .handle { opacity: 1; }
 .blk-del { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 22px; height: 22px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms; }
 .blk-row:hover .blk-del, .blk-del:focus-visible { opacity: 1; } .blk-del:hover { background: var(--accent); color: var(--foreground); }
@@ -427,7 +477,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2 sketch)</button>
   </div>
-  <span class="muted">Try: 文A on (then 繁中 ▾ → 日本語), the purple 文 beside the first paragraph, mark the translation · select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · Notes: type --- on the last line, Focus, fold a divider · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
+  <span class="muted">Try: the notes editor works like Notion (/ menu, # - 1. [] " $$ ---, @, Enter / Backspace, + and ⋮⋮ drag, select text for B i U) · 文A on (then 繁中 ▾ → 日本語), the purple 文 beside the first paragraph, mark the translation · select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · Notes: type --- on the last line, Focus, fold a divider · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
 </div>
 
 <div class="app">
@@ -648,6 +698,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 <div class="toast" id="toast" data-state="closed" role="status"></div>
 
 <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script>
 (() => {
   const $ = (s, r) => (r || document).querySelector(s);
@@ -689,7 +740,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       { id: 'b10', type: 'h', text: 'What we concluded' },
       { id: 'b11', type: 'p', ai: true, fresh: true, text: 'Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span>' },
       { id: 'b12', type: 'p', ai: true, fresh: true, text: 'Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span>' },
-      { id: 'b13', type: 'check', ai: true, fresh: true, text: 'Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.' },
+      { id: 'b13', type: 'todo', ai: true, fresh: true, text: 'Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.' },
     ] },
     ghost: { meta: 'PDF only · sections from its Marker blocks · revision 3', blocks: [
       { id: 'g-s0', type: 'sec', key: 'Abstract', text: 'Abstract' },
@@ -700,7 +751,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     ] },
     chat: { meta: 'This chat only · copied when the chat is forked', blocks: [
       { id: 'c1', type: 'p', text: 'Goal: decide if local pose prediction is worth trying on our Kinova teleop rig before the lab meeting.' },
-      { id: 'c2', type: 'check', text: 'Measure our own end-to-end latency on the 5 GHz network' },
+      { id: 'c2', type: 'todo', text: 'Measure our own end-to-end latency on the 5 GHz network' },
     ] },
   };
   const markNote = { t1: ['xr', ['bt1']], m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
@@ -729,18 +780,34 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     let inner;
     if (b.type === 'hr') inner = `<div class="divider-line"><button class="fold" data-fold="${b.id}" aria-expanded="${!folded.has(b.id)}" aria-label="Fold the part below this divider" title="Fold the part below"><i data-lucide="chevron-down" class="icon-xs"></i></button><hr></div>`;
     else if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
-    else if (b.type === 'h') inner = `<h4>${esc(b.text)}</h4>`;
     else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}${b.pieces > 1 ? `<span class="pieces">· ${b.pieces} pieces</span>` : ''}${b.tr ? `<span class="tr-tag" title="Marked on the ${esc(LANGS[b.tr])} translation"><b>文</b>Translated · ${esc(LANGS[b.tr])}</span>` : ''}<div>${chip(b.mark, b.src)}${b.tr ? `<button class="orig-btn" data-orig="${b.id}">Show original</button>` : ''}</div>${b.tr ? `<div class="collapse" data-state="closed"><div class="orig">${esc(b.orig || '')}</div></div>` : ''}</div>`;
     else if (b.type === 'fig') inner = `<div class="objblk"><div class="head"><i data-lucide="image" class="icon-xs"></i>Figure 3 · ${esc(cname(b.c))}</div><div class="fig-img">${FIG_SVG}</div><div class="cap">Figure 3: Latency profiling and challenges during poses merge.<div>${chip(b.mark, 'Fig. 3 · p. 3')}</div></div></div>`;
     else if (b.type === 'eq') inner = `<div class="objblk"><div class="head"><i data-lucide="sigma" class="icon-xs"></i>Eq. (1)<span class="model-mark"><i data-lucide="sparkles" class="icon-xs"></i>LaTeX transcribed by the model · check it against the page</span></div><div class="eqrow"><div><div class="eq-render">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)</div><div class="eq-src" contenteditable="true" spellcheck="false">\\langle \\Delta I_t(x_t)\\,\\Delta I_r(x_r) \\rangle = O(x_t, x_r)</div></div><div class="crop" title="Crop of the page">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>), (1)<small>page 2 crop</small></div></div><div class="cap">${chip(b.mark, 'Eq. (1) · p. 2')}</div></div>`;
     else if (b.type === 'box' && !b.scan) inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region · ${esc(b.where)}${b.c ? ' · ' + esc(cname(b.c)) : ''}<span class="model-mark"><i data-lucide="text" class="icon-xs"></i>Text under the box, from the page's text layer</span></div><div class="eqrow"><div class="ocr">${esc(b.text)}</div><div class="crop" style="font-family:var(--font-paper);font-size:9.5px;line-height:1.25;overflow:hidden">${esc(b.text.slice(0, 160))}<small>${esc(b.where)} crop</small></div></div><div class="cap">${chip(b.mark, b.where + ' · box')}</div></div>`;
     else if (b.type === 'box') inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region on a scanned page<span class="model-mark"><i data-lucide="scan-text" class="icon-xs"></i>OCR text · check numbers against the crop</span></div><div class="eqrow"><div class="ocr">Figure 2. Schematic of the GISC LiDAR system.<br>Range 1.0 km · Sampling 8000 frames · Resolution 0.8 m</div><div class="crop" style="font-family:var(--font-paper);font-size:10.5px;background:repeating-linear-gradient(0deg, oklch(0.97 0.01 85), oklch(0.97 0.01 85) 7px, oklch(0.93 0.01 85) 8px)">Range 1.0 km<br>Sampling 8000<br>Resolution 0.8 m<small>page 3 crop</small></div></div><div class="cap">${chip(b.mark, 'p. 3 · box')}</div></div>`;
     else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
-    else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
     else if (b.sug) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
-    else inner = b.ai ? `<div>${b.text}${tag}</div>` : `<div data-edit="${b.id}" contenteditable="true" spellcheck="false">${b.text}</div>`;
+    else inner = textBlockHtml(b, tag);
     const del = b.type === 'sec' ? '<span></span>' : `<button class="blk-del" data-del="${b.id}" aria-label="${b.mark ? 'Delete this mark' : 'Delete this block'}" title="${b.mark ? 'Delete this mark (removes it from the paper too)' : 'Delete this block'}"><i data-lucide="trash-2" class="icon-xs"></i></button>`;
-    return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div>${del}</div>`;
+    const gut = b.type === 'sec' ? '<span class="gutter"></span>' : `<span class="gutter"><button data-addafter="${b.id}" aria-label="Add a block below" title="Click to add a block below"><i data-lucide="plus" class="icon-sm"></i></button><button data-drag="${b.id}" aria-label="Drag to move, or click for the block menu" title="Drag to move · click for options"><i data-lucide="grip-vertical" class="icon-sm"></i></button></span>`;
+    return `<div class="blk-row" data-id="${b.id}">${gut}<div class="blk">${inner}</div>${del}</div>`;
+  }
+  // Notion-style text blocks: one contenteditable each; lists, to-dos, quotes, callouts, headings, equations.
+  const TEXT_TYPES = ['p', 'h', 'h1', 'h2', 'h3', 'bullet', 'num', 'todo', 'check', 'uquote', 'callout'];
+  const PH = { p: "Type '/' for commands", h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', h: 'Heading 3', bullet: 'List', num: 'List', todo: 'To-do', check: 'To-do', uquote: 'Empty quote', callout: 'Type something…' };
+  const mathHtml = tex => { try { return window.katex ? katex.renderToString(tex || '\\;', { output: 'mathml', displayMode: true, throwOnError: false }) : esc(tex); } catch (e) { return esc(tex); } };
+  function textBlockHtml(b, tag) {
+    if (b.type === 'math') return `<div class="mathblk" data-mathblk="${b.id}" data-empty="${!b.text}"><div class="math-out">${mathHtml(b.text)}</div><div class="math-src" contenteditable="true" spellcheck="false" data-mathsrc="${b.id}">${esc(b.text || '')}</div></div>`;
+    const t = b.type === 'h' ? 'h3' : b.type === 'check' ? 'todo' : b.type;
+    const cls = ['h1', 'h2', 'h3'].includes(t) ? 'ed-' + t : 'ed-p';
+    const ed = `<div class="ed ${cls}${t === 'todo' && b.done ? ' done' : ''}" data-edit="${b.id}" contenteditable="true" spellcheck="false" data-ph="${esc(PH[t] || '')}">${b.text || ''}</div>`;
+    let body = ed;
+    if (t === 'bullet') body = `<div class="li"><span class="bul">•</span>${ed}</div>`;
+    else if (t === 'num') body = `<div class="li"><span class="bul">${b._n || 1}.</span>${ed}</div>`;
+    else if (t === 'todo') body = `<div class="li"><input type="checkbox" data-chk="${b.id}" ${b.done ? 'checked' : ''} aria-label="Done">${ed}</div>`;
+    else if (t === 'uquote') body = `<div class="uq">${ed}</div>`;
+    else if (t === 'callout') body = `<div class="callout"><span class="ic">💡</span>${ed}</div>`;
+    return tag ? `<div class="ed-row">${body}${tag}</div>` : body;
   }
   const visible = k => notes[k].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
   // Parts: runs of blocks between section headings, sub-headings and dividers. A divider can fold the part below it.
@@ -764,7 +831,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   }
   function renderNote() {
     const k = curNoteKey();
-    $('#notesBody').innerHTML = `<div class="blocks">${segmentsHtml(visible(k), k)}</div><div class="newline" contenteditable="true" data-ph="Type here · --- makes a divider · / for blocks · @ links a paper or section"></div>`;
+    { let n = 0; notes[k].blocks.forEach(b => { if (b.type === 'num') b._n = ++n; else n = 0; }); }
+    $('#notesBody').innerHTML = `<div class="blocks">${segmentsHtml(visible(k), k)}</div><div class="newline" contenteditable="true" data-ph="Write, or type '/' for commands · @ links a paper or section · --- makes a divider"></div>`;
     requestAnimationFrame(applyFocus);
     $('#noteMeta').textContent = notes[k].meta;
     $('#paperNoteLabel').textContent = DOCS[doc].title; icons();
@@ -920,7 +988,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     $('#ncTitle').textContent = `${DOCS[k] ? DOCS[k].short : 'Note'} › ${sn.sec ? sn.sec.text.split(' ')[0] : ''}${sn.groups.length > 1 ? ` · note ${cur + 1} of ${sn.groups.length}` : ''}`;
     $('#ncTitle').title = sn.sec ? sn.sec.text : '';
     const rowsOf = g => g.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
-      const editable = b.type === 'p' && !b.sug;
+      const editable = TEXT_TYPES.includes(b.type) && !b.sug;
       if (b.type === 'hr') return '<hr class="nc-hr">';
       if (['quote', 'fig', 'eq', 'box'].includes(b.type)) {
         // A reference: the clicked one is highlighted; any other is a jumper to its passage on the paper.
@@ -937,7 +1005,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
         if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}</span>${txt}</div>`;
         return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage in the paper"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}<span class="go">Show<i data-lucide="arrow-up-right" class="icon-xs"></i></span></span>${txt}</button>`;
       }
-      const body = b.type === 'h' ? `<b>${esc(b.text)}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
+      const body = b.type === 'math' ? mathHtml(b.text) : ['h', 'h1', 'h2', 'h3'].includes(b.type) ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
     const snip = g => { const b = g.find(x => x.type !== 'sec' && x.text); return b ? b.text.replace(/<[^>]+>/g, '').slice(0, 60) : ''; };
@@ -1529,6 +1597,204 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   });
   $('#ncDel').addEventListener('click', () => { const m = cardMark; closeCards(); deleteMark(m); });
 
+  /* ---------- Notion-style editing in the notes pane ---------- */
+  const noteList = () => notes[curNoteKey()].blocks;
+  const blockOf = el => noteList().find(x => x.id === (el.dataset.edit || el.dataset.mathsrc));
+  const isText = b => b && TEXT_TYPES.includes(b.type) && !b.sug;
+  function caretOff(el) { const sl = getSelection(); if (!sl.rangeCount) return 0; const r = sl.getRangeAt(0); const pre = document.createRange(); pre.selectNodeContents(el); try { pre.setEnd(r.startContainer, r.startOffset); } catch (e) { return 0; } return pre.toString().length; }
+  function setCaret(el, off) {
+    const sl = getSelection(), r = document.createRange();
+    if (off === 'end') { r.selectNodeContents(el); r.collapse(false); sl.removeAllRanges(); sl.addRange(r); return; }
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n, acc = 0;
+    while ((n = w.nextNode())) { if (acc + n.length >= off) { r.setStart(n, off - acc); r.collapse(true); sl.removeAllRanges(); sl.addRange(r); return; } acc += n.length; }
+    r.selectNodeContents(el); r.collapse(off > 0 ? false : true); sl.removeAllRanges(); sl.addRange(r);
+  }
+  function focusBlock(id, off = 'end') { requestAnimationFrame(() => { const el = $(`#notesBody [data-edit="${id}"], #notesBody [data-mathsrc="${id}"]`); if (!el) return; el.focus(); setCaret(el, off); }); }
+  const newId = () => 'n' + (++nid);
+  function insertAfter(b, nb) { const list = noteList(); list.splice(list.indexOf(b) + 1, 0, nb); return nb; }
+  function prevText(b) { const list = noteList().filter(x => !(undone && x.fresh)); const i = list.indexOf(b); return i > 0 ? list[i - 1] : null; }
+
+  // Markdown shortcuts as in Notion: '# ' '## ' '### ' '- ' '* ' '1. ' '[] ' '" ' (and '---', '$$').
+  const MD = [[/^###[\s ]/, 'h3'], [/^##[\s ]/, 'h2'], [/^#[\s ]/, 'h1'], [/^[-*][\s ]/, 'bullet'], [/^1\.[\s ]/, 'num'], [/^\[\][\s ]/, 'todo'], [/^"[\s ]/, 'uquote']];
+  $('#notesBody').addEventListener('input', e => {
+    const ms = e.target.closest('[data-mathsrc]');
+    if (ms) { const b = blockOf(ms); b.text = ms.textContent; const blk = ms.closest('.mathblk'); $('.math-out', blk).innerHTML = mathHtml(b.text); blk.dataset.empty = String(!b.text); return; }
+    const ed = e.target.closest('[data-edit]'); if (!ed) return; const b = blockOf(ed); if (!b || b.type === 'hr') return;
+    const txt = ed.textContent;
+    if (txt === '$$') { b.type = 'math'; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
+    if (b.type === 'p' || b.type === 'bullet' || b.type === 'num' || b.type === 'todo') {
+      for (const [re, t] of MD) if (re.test(txt) && !(t === b.type)) {
+        if (['bullet', 'num', 'todo'].includes(b.type) && !['h1', 'h2', 'h3'].includes(t)) continue;
+        b.type = t; b.text = ed.innerHTML.replace(/^(###|##|#|-|\*|1\.|\[\]|")(&nbsp;|\s)/, ''); renderNote(); focusBlock(b.id, 0); return;
+      }
+    }
+    b.text = ed.innerHTML;
+    if (e.data === '/' || e.data === '@') { const off = caretOff(ed); if (off === 1 || /\s/.test(txt[off - 2] || ' ')) openMenu(e.data === '/' ? 'slash' : 'mention', ed, off - 1); }
+    else if (mState && mState.ed === ed) updateMenu();
+  });
+  $('#notesBody').addEventListener('change', e => {
+    const c = e.target.closest('[data-chk]'); if (!c) return; const b = noteList().find(x => x.id === c.dataset.chk); b.done = c.checked;
+    const ed = $(`#notesBody [data-edit="${b.id}"]`); if (ed) ed.classList.toggle('done', b.done);
+  });
+  $('#notesBody').addEventListener('keydown', e => {
+    const ed = e.target.closest('[data-edit]'); if (!ed) return; const b = blockOf(ed); if (!b) return;
+    if (mState && mState.ed === ed) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = (mState.items || []).length; if (n) { mState.idx = (mState.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; updateMenu(); } return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if ((mState.items || []).length) pickMenu(mState.idx); else closeMenu(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); return; }
+    }
+    const off = caretOff(ed), len = ed.textContent.length, sl = getSelection();
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      // An empty list item / to-do / quote turns back into text (as in Notion); otherwise split at the caret.
+      if (!len && ['bullet', 'num', 'todo', 'uquote', 'callout'].includes(b.type)) { b.type = 'p'; renderNote(); focusBlock(b.id, 0); return; }
+      const r = sl.getRangeAt(0); r.deleteContents(); const tail = document.createRange(); tail.setStart(r.endContainer, r.endOffset); tail.setEnd(ed, ed.childNodes.length);
+      const holder = document.createElement('div'); holder.appendChild(tail.extractContents());
+      b.text = ed.innerHTML; const keep = ['bullet', 'num', 'todo'].includes(b.type);
+      const nb = insertAfter(b, { id: newId(), type: keep ? b.type : 'p', text: holder.innerHTML });
+      renderNote(); focusBlock(nb.id, 0); return;
+    }
+    if (e.key === 'Backspace' && sl.isCollapsed && off === 0) {
+      if (b.type !== 'p') { e.preventDefault(); b.type = 'p'; b.text = ed.innerHTML; renderNote(); focusBlock(b.id, 0); return; }
+      const pv = prevText(b); if (!pv) return; e.preventDefault();
+      if (isText(pv)) { const at = new DOMParser().parseFromString(`<div>${pv.text || ''}</div>`, 'text/html').body.textContent.length; pv.text = (pv.text || '') + ed.innerHTML; noteList().splice(noteList().indexOf(b), 1); renderNote(); focusBlock(pv.id, at); }
+      else if (!len) { noteList().splice(noteList().indexOf(b), 1); renderNote(); }
+      return;
+    }
+    if (e.key === 'ArrowUp' && off === 0 || e.key === 'ArrowDown' && off === len) {
+      const eds = $$('#notesBody [data-edit]'); const i = eds.indexOf(ed); const to = eds[i + (e.key === 'ArrowUp' ? -1 : 1)];
+      if (to) { e.preventDefault(); to.focus(); setCaret(to, e.key === 'ArrowUp' ? 'end' : 0); }
+    }
+  });
+
+  // The / menu and the @ menu (one floating menu, anchored at the caret).
+  const SLASH = [
+    { k: 'p', name: 'Text', desc: 'Just start writing.', icon: 'type', g: 'Basic blocks' },
+    { k: 'h1', name: 'Heading 1', desc: 'Big section heading.', icon: 'heading-1', md: '#', g: 'Basic blocks' },
+    { k: 'h2', name: 'Heading 2', desc: 'Medium section heading.', icon: 'heading-2', md: '##', g: 'Basic blocks' },
+    { k: 'h3', name: 'Heading 3', desc: 'Small section heading.', icon: 'heading-3', md: '###', g: 'Basic blocks' },
+    { k: 'bullet', name: 'Bulleted list', desc: 'A simple bulleted list.', icon: 'list', md: '-', g: 'Basic blocks' },
+    { k: 'num', name: 'Numbered list', desc: 'A list with numbering.', icon: 'list-ordered', md: '1.', g: 'Basic blocks' },
+    { k: 'todo', name: 'To-do list', desc: 'Track tasks with a to-do list.', icon: 'square-check', md: '[]', g: 'Basic blocks' },
+    { k: 'uquote', name: 'Quote', desc: 'Capture a quote of your own.', icon: 'quote', md: '"', g: 'Basic blocks' },
+    { k: 'callout', name: 'Callout', desc: 'Make writing stand out.', icon: 'lightbulb', g: 'Basic blocks' },
+    { k: 'hr', name: 'Divider', desc: 'Split this section into notes.', icon: 'minus', md: '---', g: 'Basic blocks' },
+    { k: 'math', name: 'Equation', desc: 'A LaTeX equation, rendered.', icon: 'sigma', md: '$$', g: 'Basic blocks' },
+    { k: 'paperq', name: 'Quote from the paper', desc: 'Select text in the reader; it lands here.', icon: 'text-quote', g: 'PaperHub' },
+    { k: 'mention', name: 'Link a paper or section', desc: 'Same as typing @.', icon: 'at-sign', md: '@', g: 'PaperHub' },
+  ];
+  const MENTIONS = [
+    { name: 'Toward a Predictive XR… › §1 Introduction', doc: 'xr', icon: 'file-text', g: 'Papers and sections' },
+    { name: 'Toward a Predictive XR… › §2 Background and Motivation', doc: 'xr', icon: 'file-text', g: 'Papers and sections' },
+    { name: 'A Review of Ghost Imaging… › Abstract', doc: 'ghost', icon: 'file-text', g: 'Papers and sections' },
+    { name: 'A Review of Ghost Imaging… › §2 Theoretical Framework of GISC', doc: 'ghost', icon: 'file-text', g: 'Papers and sections' },
+    { name: 'Idea: Smooth pose merging with a Kalman blend', doc: null, icon: 'lightbulb', g: 'Ideas' },
+  ];
+  const menu = document.createElement('div'); menu.className = 'ed-menu'; menu.dataset.state = 'closed'; menu.setAttribute('role', 'listbox'); document.body.appendChild(menu);
+  let mState = null;
+  function openMenu(kind, ed, start) { mState = { kind, ed, start, idx: 0 }; updateMenu(); }
+  function closeMenu() { menu.dataset.state = 'closed'; mState = null; }
+  function updateMenu() {
+    if (!mState) return; const { kind, ed, start } = mState; const off = caretOff(ed), txt = ed.textContent;
+    if (!ed.isConnected || off <= start || txt[start] !== (kind === 'slash' ? '/' : '@')) { closeMenu(); return; }
+    const q = txt.slice(start + 1, off).toLowerCase(); if (kind === 'slash' && /\s\s/.test(q)) { closeMenu(); return; }
+    const items = (kind === 'slash' ? SLASH : MENTIONS).filter(it => it.name.toLowerCase().includes(q) || (it.md && q && it.md.startsWith(q)));
+    mState.items = items; mState.idx = Math.min(mState.idx, Math.max(0, items.length - 1));
+    let g = '', html = '';
+    items.forEach((it, i) => { if (it.g !== g) { g = it.g; html += `<div class="em-h">${esc(g)}</div>`; } html += `<button class="em-i" data-i="${i}" role="option" aria-selected="${i === mState.idx}"><span class="ico"><i data-lucide="${it.icon}" class="icon-sm"></i></span><span class="tx">${esc(it.name)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>${it.md ? `<kbd>${esc(it.md)}</kbd>` : ''}</button>`; });
+    menu.innerHTML = html || '<div class="em-empty">No results</div>'; icons();
+    const sl = getSelection(); let r = sl.rangeCount ? sl.getRangeAt(0).getBoundingClientRect() : null; if (!r || (!r.width && !r.height && !r.top)) r = ed.getBoundingClientRect();
+    menu.dataset.state = 'open'; const h = menu.offsetHeight;
+    menu.style.left = Math.min(r.left, innerWidth - 310) + 'px'; menu.style.top = (r.bottom + 6 + h > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6) + 'px';
+    const sel = $('.em-i[aria-selected="true"]', menu); if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+  menu.addEventListener('mousedown', e => { e.preventDefault(); if (!mState || mState.kind === 'block') return; const it = e.target.closest('.em-i[data-i]'); if (it) pickMenu(+it.dataset.i); });
+  document.addEventListener('mousedown', e => { if (mState && !menu.contains(e.target)) closeMenu(); });
+  function pickMenu(i) {
+    const { kind, ed, start } = mState; const it = mState.items[i]; const b = blockOf(ed); const off = caretOff(ed), txt = ed.textContent;
+    const before = txt.slice(0, start), after = txt.slice(off); closeMenu();
+    if (kind === 'mention' || it.k === 'mention') {
+      if (it.k === 'mention') { b.text = esc(before) + '@' + esc(after); renderNote(); requestAnimationFrame(() => { const e2 = $(`#notesBody [data-edit="${b.id}"]`); e2.focus(); setCaret(e2, before.length + 1); openMenu('mention', e2, before.length); }); return; }
+      const chip = `<span class="mention" contenteditable="false" data-doc="${it.doc || ''}">@${esc(it.name)}</span>`;
+      b.text = esc(before) + chip + ' ' + esc(after); renderNote(); focusBlock(b.id, before.length + it.name.length + 2); return;
+    }
+    const rest = before + after;
+    if (it.k === 'paperq') {
+      b.text = esc(rest); renderNote(); const pt = $(`#notesBody .blk-row[data-id="${b.id}"]`); const part = pt && pt.closest('.part'); if (part) setActive(part.dataset.key);
+      toast('Select text in the reader and choose Quote to note: it lands in this note', () => { show('reader'); return null; }, 'Go to the reader', 'text-quote', 6000); return;
+    }
+    if (it.k === 'hr') {
+      if (!rest.trim()) { b.type = 'hr'; b.text = ''; } else { b.text = esc(rest); insertAfter(b, { id: newId(), type: 'hr' }); }
+      const hr = b.type === 'hr' ? b : noteList()[noteList().indexOf(b) + 1]; const nb = insertAfter(hr, { id: newId(), type: 'p', text: '' }); renderNote(); focusBlock(nb.id, 0); return;
+    }
+    if (!rest.trim()) { b.type = it.k; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
+    b.text = esc(rest); const nb = insertAfter(b, { id: newId(), type: it.k, text: '' }); renderNote(); focusBlock(nb.id, 0);
+  }
+  document.addEventListener('click', e => { const m = e.target.closest('.mention'); if (!m || !m.dataset.doc) return; if (doc !== m.dataset.doc) { doc = m.dataset.doc; showDoc(); } show('reader'); });
+
+  // + adds a text block below with the / menu open; ⋮⋮ drags to reorder, or opens the block menu on click.
+  $('#notesBody').addEventListener('click', e => {
+    const add = e.target.closest('[data-addafter]'); if (!add) return; e.stopPropagation();
+    const b = noteList().find(x => x.id === add.dataset.addafter); const nb = insertAfter(b, { id: newId(), type: 'p', text: '/' }); renderNote();
+    requestAnimationFrame(() => { const ed = $(`#notesBody [data-edit="${nb.id}"]`); ed.focus(); setCaret(ed, 'end'); openMenu('slash', ed, 0); });
+  });
+  const dropLine = document.createElement('div'); dropLine.className = 'drop-line'; document.body.appendChild(dropLine);
+  let drag = null;
+  $('#notesBody').addEventListener('pointerdown', e => { const h = e.target.closest('[data-drag]'); if (!h) return; e.preventDefault(); drag = { id: h.dataset.drag, y0: e.clientY, on: false, row: h.closest('.blk-row'), h }; h.setPointerCapture(e.pointerId); });
+  $('#notesBody').addEventListener('pointermove', e => {
+    if (!drag) return; if (!drag.on && Math.abs(e.clientY - drag.y0) > 4) { drag.on = true; drag.row.classList.add('dragging'); }
+    if (!drag.on) return;
+    const rows = $$('#notesBody .blk-row').filter(r => r !== drag.row && r.offsetParent && r.getBoundingClientRect().height);
+    let tgt = rows.find(r => { const rr = r.getBoundingClientRect(); return e.clientY < rr.top + rr.height / 2; });
+    const rr = (tgt || rows[rows.length - 1]).getBoundingClientRect(); drag.before = tgt ? tgt.dataset.id : null;
+    Object.assign(dropLine.style, { display: 'block', left: rr.left + 44 + 'px', width: rr.width - 70 + 'px', top: (tgt ? rr.top - 2 : rr.bottom) + 'px' });
+  });
+  $('#notesBody').addEventListener('pointerup', () => {
+    if (!drag) return; const d = drag; drag = null; dropLine.style.display = 'none'; d.row.classList.remove('dragging');
+    if (!d.on) { openBlockMenu(d.id, d.h); return; }
+    const list = noteList(), b = list.find(x => x.id === d.id); list.splice(list.indexOf(b), 1);
+    const at = d.before ? list.findIndex(x => x.id === d.before) : list.length; list.splice(at < 0 ? list.length : at, 0, b);
+    renderNote(); const r = $(`#notesBody .blk-row[data-id="${b.id}"]`); if (r) { r.classList.add('blk-enter'); flash(r); }
+  });
+  function openBlockMenu(id, anchor) {
+    const b = noteList().find(x => x.id === id); const ref = ['quote', 'fig', 'eq', 'box', 'lost'].includes(b.type);
+    const turn = ref || b.type === 'hr' ? [] : SLASH.filter(x => !['paperq', 'mention', 'hr'].includes(x.k));
+    menu.innerHTML = (turn.length ? '<div class="em-h">Turn into</div>' + turn.map(x => `<button class="em-i" data-turn="${x.k}"><span class="ico"><i data-lucide="${x.icon}" class="icon-sm"></i></span><span class="tx">${esc(x.name)}</span></button>`).join('') : '') +
+      '<div class="em-h">Block</div>' + (ref ? '' : `<button class="em-i" data-dup="1"><span class="ico"><i data-lucide="copy" class="icon-sm"></i></span><span class="tx">Duplicate</span><kbd>Ctrl+D</kbd></button>`) +
+      `<button class="em-i" data-delb="1"><span class="ico"><i data-lucide="trash-2" class="icon-sm"></i></span><span class="tx">Delete${ref ? ' this mark' : ''}</span><kbd>Del</kbd></button>`;
+    icons(); const r = anchor.getBoundingClientRect(); menu.dataset.state = 'open'; mState = { kind: 'block', ed: null, items: [] };
+    menu.style.left = Math.max(8, r.left - 4) + 'px'; menu.style.top = Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8) + 'px';
+    menu.onmousedown = e => {
+      e.preventDefault(); const t = e.target.closest('.em-i'); if (!t) return; menu.onmousedown = null; closeMenu();
+      if (t.dataset.turn) { b.type = t.dataset.turn; if (b.type === 'math') b.text = ''; renderNote(); focusBlock(b.id); }
+      else if (t.dataset.dup) { const nb = insertAfter(b, { ...b, id: newId(), ai: false, fresh: false }); renderNote(); const r2 = $(`#notesBody .blk-row[data-id="${nb.id}"]`); if (r2) r2.classList.add('blk-enter'); }
+      else if (t.dataset.delb) deleteBlock(curNoteKey(), b.id);
+    };
+  }
+  menu.addEventListener('mousedown', e => { if (mState && mState.kind === 'block') return; }, true);
+  // Equations: click the rendered math to edit its LaTeX.
+  $('#notesBody').addEventListener('click', e => { const mb = e.target.closest('.mathblk'); if (!mb || e.target.closest('.math-src')) return; const src = $('.math-src', mb); src.focus(); setCaret(src, 'end'); });
+
+  // The formatting bar on a text selection: bold, italic, underline, strikethrough, code, link to a paper.
+  const fmt = document.createElement('div'); fmt.className = 'fmt-bar'; fmt.dataset.state = 'closed';
+  fmt.innerHTML = '<button data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button><button data-cmd="italic" title="Italic (Ctrl+I)"><i>i</i></button><button data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button><button data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button><button data-cmd="code" title="Inline code"><i data-lucide="code" class="icon-sm"></i></button><span class="sep"></span><button data-cmd="mention" title="Link a paper or section"><i data-lucide="at-sign" class="icon-sm"></i>Link</button>';
+  document.body.appendChild(fmt);
+  document.addEventListener('selectionchange', () => {
+    const sl = getSelection(); const ed = sl.rangeCount && !sl.isCollapsed && sl.anchorNode && (sl.anchorNode.nodeType === 1 ? sl.anchorNode : sl.anchorNode.parentElement).closest('#notesBody [data-edit]');
+    if (!ed) { fmt.dataset.state = 'closed'; return; }
+    const r = sl.getRangeAt(0).getBoundingClientRect(); fmt.dataset.state = 'open'; icons();
+    fmt.style.left = Math.max(8, Math.min(r.left + r.width / 2 - fmt.offsetWidth / 2, innerWidth - fmt.offsetWidth - 8)) + 'px'; fmt.style.top = Math.max(8, r.top - fmt.offsetHeight - 8) + 'px';
+  });
+  fmt.addEventListener('mousedown', e => {
+    e.preventDefault(); const bt = e.target.closest('[data-cmd]'); if (!bt) return; const sl = getSelection(); if (!sl.rangeCount) return;
+    const ed = (sl.anchorNode.nodeType === 1 ? sl.anchorNode : sl.anchorNode.parentElement).closest('[data-edit]'); if (!ed) return;
+    const cmd = bt.dataset.cmd;
+    if (cmd === 'code') document.execCommand('insertHTML', false, `<code>${esc(sl.toString())}</code>`);
+    else if (cmd === 'mention') { const r = sl.getRangeAt(0); r.collapse(false); sl.removeAllRanges(); sl.addRange(r); document.execCommand('insertText', false, ' @'); const b0 = blockOf(ed); b0.text = ed.innerHTML; openMenu('mention', ed, caretOff(ed) - 1); return; }
+    else document.execCommand(cmd);
+    const b = blockOf(ed); if (b) b.text = ed.innerHTML;
+  });
+
   /* ---------- parts of a note: the active part, Focus, folding, --- ---------- */
   function setActive(key) {
     if (!key || key === activeSeg) { applyFocus(); return; }
@@ -1583,6 +1849,13 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     const ed = e.target.closest('[data-edit]');
     if (ed && ed.textContent.trim() === '---') { const b = notes[k].blocks.find(x => x.id === ed.dataset.edit); if (b) toDivider(k, b, ed); return; }
     const nl = e.target.closest('.newline');
+    // Typing on the bottom line starts a real block (so every shortcut works); '-', '--' wait for a possible '---'.
+    const raw = nl ? nl.textContent.replace(/ /g, ' ') : '';
+    if (nl && raw.trim() && raw !== '-' && raw !== '--' && raw.trim() !== '---') {
+      const t = nl.textContent; const b = { id: 'n' + (++nid), type: 'p', text: esc(t) }; notes[k].blocks.push(b); renderNote();
+      requestAnimationFrame(() => { const ed = $(`#notesBody [data-edit="${b.id}"]`); if (!ed) return; ed.focus(); setCaret(ed, 'end'); ed.dispatchEvent(new InputEvent('input', { bubbles: true, data: t.slice(-1) })); });
+      return;
+    }
     if (nl && nl.textContent.trim() === '---') { const b = { id: 'd' + (++nid), type: 'p', text: '' }; notes[k].blocks.push(b); toDivider(k, b, nl); requestAnimationFrame(() => { const n2 = $('#notesBody .newline'); n2 && n2.focus(); }); }
   });
   $('#notesBody').addEventListener('keydown', e => {
