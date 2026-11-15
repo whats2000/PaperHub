@@ -198,10 +198,16 @@ input, textarea { font: inherit; color: inherit; }
 .pop .act:hover { background: var(--accent); }
 
 /* Note card from the margin icon (Reader only) */
-.hcard { position: absolute; z-index: 6; width: min(320px, calc(100% - 16px)); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-xl); font-family: var(--font-sans); font-size: 13px;
-  transform-origin: top right; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+/* Same placement as the PDF translation card (TranslationCard + lib/cardPlacement): fixed, in the
+   gutter LEFT of the reader (over the chat column), aligned with the paragraph, an arrow pointing
+   at it; glides between paragraphs; never over the paper. */
+.hcard { position: fixed; z-index: 50; width: 380px; background: var(--muted); border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-radius: 8px; box-shadow: var(--shadow-md); font-family: var(--font-sans); font-size: 13px;
+  transform-origin: top right; transition: opacity 150ms ease-out, transform 150ms ease-out, top 200ms ease-out, left 200ms ease-out; }
 .hcard[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
-.hcard-h { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
+.hcard-arrow { position: absolute; right: -6px; width: 10px; height: 10px; background: var(--muted); border-top: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-right: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); transform: rotate(45deg); transition: top 200ms ease-out; }
+.hcard-h { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
+.hcard-h .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hcard-h .icon-btn[aria-pressed="true"] { color: var(--foreground); background: var(--accent); }
 .hcard-b { max-height: 180px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
 .hcard-b .blk { padding: 3px 6px; border-radius: 6px; }
 .hcard-b .blk[data-target="true"] { outline: 2px solid var(--ring); outline-offset: -1px; }
@@ -409,7 +415,8 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
                 <button class="act"><i data-lucide="message-square-plus" class="icon-sm"></i>Add note</button>
               </div>
               <div class="hcard" id="hcard" data-state="closed" role="dialog" aria-label="Note for this passage">
-                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i>§2 Background and Motivation</div>
+                <span class="hcard-arrow" id="hcardArrow" aria-hidden="true"></span>
+                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span class="t">§2 Background and Motivation</span><button class="icon-btn" id="hcardPin" aria-pressed="false" aria-label="Pin" title="Pin"><i data-lucide="pin" class="icon-xs"></i></button><button class="icon-btn" id="hcardClose" aria-label="Close" title="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
                 <div class="hcard-b" id="hcardBody"></div>
                 <div class="hcard-f"><span class="muted" style="font-size:11.5px">You · 2 days ago</span><button class="btn" id="editInNotes"><i data-lucide="square-pen" class="icon-xs"></i>Edit in Notes</button></div>
               </div>
@@ -635,37 +642,54 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     (markNote[mark] || []).forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (!row) return; row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); });
   }
   function showCard(el, mark) {
-    clearTimeout(hideT); curMark = mark; const target = markNote[mark] || [];
+    clearTimeout(hideT); curMark = mark; curEl = el; const target = markNote[mark] || [];
     $('#hcardBody').innerHTML = visible('sec').filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 80))}…”</span>` : b.text}</div>`).join('');
-    const body = $('#readerBody').getBoundingClientRect();
-    const icon = el.classList.contains('margin-ic') ? el : ($('.margin-ic', el.closest('p')) || el);
-    const r = icon.getBoundingClientRect(), w = Math.min(320, body.width - 16);
-    let left = r.right - body.left + 6; if (left + w > body.width - 8) left = Math.max(8, r.left - body.left - w - 6);
-    hcard.style.left = left + 'px'; hcard.style.top = (r.top - body.top + $('#readerBody').scrollTop - 4) + 'px';
+    // In the gutter left of the reader, like the PDF translation card: aligned with the
+    // paragraph's top, clamped to the window, the arrow pointing at the paragraph.
+    const reader = $('#readerBody').getBoundingClientRect();
+    const para = (el.closest('p') || el).getBoundingClientRect();
+    const gap = 12, gutter = reader.left - gap * 2;
+    const w = Math.min(380, Math.max(240, gutter));
+    hcard.style.width = w + 'px';
+    hcard.style.left = Math.max(gap, reader.left - gap - w) + 'px';
+    const h = hcard.offsetHeight || 260;
+    const top = Math.min(Math.max(para.top, reader.top + 4), window.innerHeight - h - 8);
+    hcard.style.top = top + 'px';
+    $('#hcardArrow').style.top = Math.min(h - 20, Math.max(10, para.top + 10 - top)) + 'px';
     hcard.dataset.state = 'open';
     requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest' }); });
   }
-  const hideCard = () => { clearTimeout(openT); hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 180); };
+  // Hover shows it; a click on the mark pins it (as the translation card does); pinned, it
+  // stays until closed, Escape or an outside click.
+  let pinned = false;
+  const setPin = on => { pinned = on; $('#hcardPin').setAttribute('aria-pressed', String(on)); };
+  const closeCard = () => { setPin(false); hcard.dataset.state = 'closed'; };
+  const hideCard = () => { clearTimeout(openT); if (pinned) return; hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 250); };
+  $('#hcardPin').addEventListener('click', () => setPin(!pinned));
+  $('#hcardClose').addEventListener('click', closeCard);
+  $('#readerBody').addEventListener('scroll', () => { if (hcard.dataset.state === 'open' && curEl) showCard(curEl, curMark); });
+  let curEl = null;
   function bindMark(el) {
     const mark = el.dataset.mark, isIcon = el.classList.contains('margin-ic');
     el.addEventListener('mouseenter', () => {
       if (marksOff()) return;
       if (state.notes) { syncBlock(mark, true); return; }
-      if (isIcon) { clearTimeout(openT); openT = setTimeout(() => showCard(el, mark), 300); }
+      if (pinned) return;
+      clearTimeout(openT); openT = setTimeout(() => showCard(el, mark), isIcon ? 150 : 300);
     });
     el.addEventListener('mouseleave', () => { syncBlock(mark, false); hideCard(); });
     el.addEventListener('click', e => {
       if (marksOff() || String(window.getSelection())) return;
       if (state.notes) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [])[0]}"]`)); return; }
-      e.stopPropagation(); showCard(el, mark);
+      e.stopPropagation(); showCard(el, mark); setPin(true);
     });
   }
   $$('#paper [data-mark]').forEach(bindMark);
   hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
-  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark]')) hcard.dataset.state = 'closed'; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { hcard.dataset.state = 'closed'; $('#selPop').dataset.state = 'closed'; } });
+  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark]')) closeCard(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCard(); $('#selPop').dataset.state = 'closed'; } });
   $('#editInNotes').addEventListener('click', () => {
-    hcard.dataset.state = 'closed'; state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
+    closeCard(); state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
     const row = $(`#notesBody .blk-row[data-id="${(markNote[curMark] || [])[0]}"]`); scrollTo(row); flash(row);
   });
   $('#marksToggle').addEventListener('click', e => {
