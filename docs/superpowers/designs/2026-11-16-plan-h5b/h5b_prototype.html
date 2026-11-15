@@ -166,6 +166,29 @@ input { font: inherit; color: inherit; }
 .reader-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
 #readerPane { position: relative; } /* the translate button floats at the view's corner, not on the scrolling page */
 #readerPane > .translate-fab { right: 16px; bottom: 16px; }
+/* Language menu beside the pill (as the shipped TranslatePill) */
+.tr-lang { position: absolute; right: 52px; bottom: 18px; z-index: 4; border: 1px solid var(--border); background: var(--popover); color: var(--foreground); border-radius: 999px; padding: 2px 10px; font-size: 12px; display: inline-flex; gap: 3px; align-items: center; box-shadow: var(--shadow-sm); transition: opacity 150ms ease-out, transform 150ms ease-out; transform-origin: right center; }
+.tr-lang[data-state="closed"] { opacity: 0; transform: scale(0.95); pointer-events: none; }
+.tr-menu { position: absolute; right: 52px; bottom: 50px; z-index: 6; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; min-width: 130px; transform-origin: bottom right; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+.tr-menu[data-state="closed"] { opacity: 0; transform: scale(0.95); pointer-events: none; }
+.tr-menu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 6px; font-size: 12.5px; color: var(--foreground); }
+.tr-menu button:hover, .tr-menu button[aria-checked="true"] { background: var(--accent); }
+/* H1: the translation under each paragraph; it can be marked like the paper */
+.tr-para { font-family: var(--font-sans); font-size: 13.5px; line-height: 1.75; color: var(--foreground); border-left: 2px solid var(--border); padding: 2px 0 2px 10px; margin: -6px 0 14px; }
+.tr-enter { animation: blkIn 220ms ease-out; } .tr-exit { animation: blkOut 200ms ease-in forwards; }
+/* A mark on a translation that is not on screen (translation off, or another language): a 文 marker beside the paragraph */
+.tr-marker { position: absolute; right: -28px; top: 24px; width: 20px; height: 20px; padding: 0; border-radius: 5px; border: 1.5px solid var(--mc); background: color-mix(in srgb, var(--mc) 18%, var(--background)); color: var(--foreground); font: 600 11px/1 var(--font-sans); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; animation: blkIn 200ms ease-out; }
+.tr-marker:hover { background: color-mix(in srgb, var(--mc) 32%, var(--background)); }
+.gblk .tr-marker { right: -26px; top: 0; }
+.marks-off .tr-marker { visibility: hidden; }
+/* In the note: a quote taken from a translation */
+.tr-tag { display: inline-flex; gap: 3px; align-items: center; font-family: var(--font-sans); font-size: 10.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+.orig-btn { border: 0; background: transparent; color: var(--muted-fg); font-family: var(--font-sans); font-size: 11px; padding: 0 4px; text-decoration: underline; }
+.orig-btn:hover { color: var(--foreground); }
+.orig { font-family: var(--font-paper); font-size: 12.5px; color: var(--muted-fg); padding: 3px 0 2px; }
+.nc-tron { margin-top: 4px; border: 1px solid var(--border); background: var(--popover); color: var(--foreground); border-radius: 6px; padding: 2px 8px; font-family: var(--font-sans); font-size: 11.5px; display: inline-flex; gap: 4px; align-items: center; }
+.nc-tron:hover { background: var(--accent); }
+.nc-trnote { display: block; font-family: var(--font-sans); font-size: 11px; color: var(--muted-fg); margin-top: 3px; }
 .paper { font-family: var(--font-paper); font-size: 14.5px; line-height: 1.45; padding: 10px 34px 30px 12px; }
 .paper h2 { font-size: 22px; margin: 18px 0 10px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
 .paper h3 { font-size: 17px; margin: 14px 0 8px; font-weight: 700; }
@@ -404,7 +427,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2 sketch)</button>
   </div>
-  <span class="muted">Try: select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · Notes: type --- on the last line, Focus, fold a divider · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
+  <span class="muted">Try: 文A on (then 繁中 ▾ → 日本語), the purple 文 beside the first paragraph, mark the translation · select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · Notes: type --- on the last line, Focus, fold a divider · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
 </div>
 
 <div class="app">
@@ -513,9 +536,9 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
               <article class="paper" id="paper">
                 <h2>Background and Motivation <span class="sec-mark" title="This section has notes"><i data-lucide="notebook-pen" class="icon-xs"></i>notes</span></h2>
                 <h3>Challenges of latency optimization</h3>
-                <p>Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements. This is due to the large latency between a user motion and the visual feedback from the agent in the virtual space.</p>
+                <p data-tr="p1">Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements. This is due to the large latency between a user motion and the visual feedback from the agent in the virtual space.</p>
                 <p>As shown in the Fig. 3(A) gray bars, <span class="hl" data-c="blue" data-mark="m1">it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.</span> This large latency causes large user-agent motion mismatch and makes the user adjust based on the old poses from agent, which results in false adjustment. We find out that the dominant part of the latency is due to the network transmission, which can go up to 1 second since the data has to suffer from a two-way network delay.<button class="margin-ic" data-mark="m1" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
-                <p>Following this observation, <span class="hl" data-c="green" data-mark="m2">we believe the timely update of agent poses is more critical compared to pose accuracy.</span> Therefore, we opt for a duo-virtual spaces design which aims to avoid the network latency with a localization method running directly on XR.<button class="margin-ic" data-mark="m2" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button> <span class="cited">The agent keeps a second virtual space with the original user poses from XR, agent, and objects poses directly captured from agent sensors and uses this as a ground-truth state. We then make changes to the existing framework used in the previous experiment and record the end-to-end latency in Fig. 3 blue bars. <span class="qmark" data-mark="m3">We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</span></span></p>
+                <p data-tr="p3">Following this observation, <span class="hl" data-c="green" data-mark="m2">we believe the timely update of agent poses is more critical compared to pose accuracy.</span> Therefore, we opt for a duo-virtual spaces design which aims to avoid the network latency with a localization method running directly on XR.<button class="margin-ic" data-mark="m2" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button> <span class="cited">The agent keeps a second virtual space with the original user poses from XR, agent, and objects poses directly captured from agent sensors and uses this as a ground-truth state. We then make changes to the existing framework used in the previous experiment and record the end-to-end latency in Fig. 3 blue bars. <span class="qmark" data-mark="m3">We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</span></span></p>
                 <figure class="obj" id="fig3" data-obj="fig3" style="margin:4px 0 0">
                   <button class="obj-btn" data-objbtn="fig3"><i data-lucide="highlighter" class="icon-xs"></i>Mark figure</button>
                   <div class="fig-img" role="img" aria-label="Figure 3: latency bars and pose-merge drift">
@@ -528,7 +551,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
                   </div>
                   <figcaption class="caption">Figure 3: Latency profiling and challenges during poses merge.</figcaption>
                 </figure>
-                <p>However, this method faces <span class="hl" data-c="pink" data-mark="m4">significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations</span>, as shown in Fig. 3(B). If the prediction does not optimize for a smooth transition for the next state, the object will create a large euclidean distance Δd₂ compared to the optimized predicted pose euclidean distance Δd₁. Solving this issue is our ongoing work.<button class="margin-ic" data-mark="m4" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
+                <p data-tr="p4">However, this method faces <span class="hl" data-c="pink" data-mark="m4">significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations</span>, as shown in Fig. 3(B). If the prediction does not optimize for a smooth transition for the next state, the object will create a large euclidean distance Δd₂ compared to the optimized predicted pose euclidean distance Δd₁. Solving this issue is our ongoing work.<button class="margin-ic" data-mark="m4" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
               </article>
               <div id="ghostView" hidden>
                 <div class="gpage" id="gp1">
@@ -564,6 +587,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
             </div>
             <!-- Floats at the corner of the reader view (outside the scrolling paper), like the shipped TranslatePill -->
             <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
+            <button class="tr-lang" id="trLang" data-state="closed" aria-haspopup="menu" aria-expanded="false"><span class="lbl">繁中</span><i data-lucide="chevron-down" class="icon-xs"></i></button>
+            <div class="tr-menu" id="trMenu" data-state="closed" role="menu"><button role="menuitemradio" data-lang="zh-TW" aria-checked="true">繁體中文</button><button role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button></div>
           </div>
           <button class="divider" id="divider" aria-label="Resize Reader and Notes" hidden></button>
           <div class="pane" id="notesPane">
@@ -653,6 +678,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       { id: 's2', type: 'sec', key: 'Background and Motivation', text: '§2 Background and Motivation' },
       { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', src: '§2 · p. 2', text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
       { id: 'b3', type: 'p', text: 'Rapid tasks (catching, tracing lines) fail at this latency — matches what we saw with our Kinova setup.' },
+      { id: 'bt1', type: 'quote', c: 'purple', mark: 't1', src: '§2 · p. 2', tr: 'zh-TW', text: '使用者動作與虛擬空間中代理的視覺回饋之間存在很大的延遲', orig: 'This is due to the large latency between a user motion and the visual feedback from the agent in the virtual space.' },
       { id: 'd1', type: 'hr' },
       { id: 'b4', type: 'quote', c: 'green', mark: 'm2', src: '§2 · p. 2', text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
       { id: 'b6', type: 'quote', c: 'none', mark: 'm3', src: '§2 · p. 2', text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
@@ -677,9 +703,22 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       { id: 'c2', type: 'check', text: 'Measure our own end-to-end latency on the 5 GHz network' },
     ] },
   };
-  const markNote = { m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
+  const markNote = { t1: ['xr', ['bt1']], m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
   let doc = 'xr', noteTab = 'paper', undone = false;
   let activeSeg = 's2', focusOn = false; const folded = new Set(); // the part of the note you're in; Focus; folded dividers
+  // Translation (H1): the corner pill turns it on/off for the paper; the language menu picks the language.
+  const LANGS = { 'zh-TW': '繁中', ja: '日本語' };
+  let trOn = false, trLang = 'zh-TW';
+  const TRX = {
+    p1: { 'zh-TW': '雖然 ROS reality 實現了基本的可用性，但拋接球、綁鞋帶和描繪直線等任務仍無法完成，原因在於物體移動快速或需要精確操作。這是由於使用者動作與虛擬空間中代理的視覺回饋之間存在很大的延遲。',
+          ja: 'ROS reality は基本的な使いやすさを実現しているが、ボールを投げて受け取る、靴ひもを結ぶ、直線をなぞるといったタスクは、物体の素早い動きや精密な操作が必要なため、いまだに実現できない。これはユーザーの動作と仮想空間内のエージェントからの視覚的フィードバックとの間に大きな遅延があるためである。' },
+    p3: { 'zh-TW': '根據這項觀察，我們認為代理姿態的即時更新比姿態的準確度更為關鍵。因此，我們採用雙虛擬空間設計，以直接在 XR 上執行的定位方法來避免網路延遲。代理保留第二個虛擬空間，存放來自 XR 的原始使用者姿態，以及由代理感測器直接擷取的代理與物體姿態，並以此作為真實狀態。',
+          ja: 'この観察に基づき、我々はエージェントの姿勢をタイムリーに更新することが姿勢の精度よりも重要であると考える。そこで、XR 上で直接動作する位置推定手法によってネットワーク遅延を回避する、二重仮想空間の設計を採用する。' },
+    p4: { 'zh-TW': '然而，此方法在將真實姿態與各次校準的預測姿態合併時，會出現明顯的姿態漂移，如圖 3(B) 所示。若預測未針對下一狀態的平滑過渡進行最佳化，物體將產生比最佳化預測姿態的歐氏距離 Δd₁ 更大的歐氏距離 Δd₂。解決此問題是我們正在進行的工作。',
+          ja: 'しかし、この手法では、図 3(B) に示すように、各キャリブレーションにおいて真値の姿勢と予測姿勢を統合する際に大きな姿勢ドリフトが生じる。予測が次の状態への滑らかな遷移に最適化されていない場合、物体は最適化された予測姿勢のユークリッド距離 Δd₁ に比べて大きなユークリッド距離 Δd₂ を生じる。この問題の解決は今後の課題である。' },
+  };
+  // Marks made on a translation: the language, the source paragraph (HTML) or block (PDF), the words.
+  const trMarks = { t1: { lang: 'zh-TW', para: 'p1', text: '使用者動作與虛擬空間中代理的視覺回饋之間存在很大的延遲', c: 'purple' } };
   let pen = null, lastPen = null; const penMarks = {}; // highlighter colour; marks made with it (to join strokes)
   const curNoteKey = () => noteTab === 'chat' ? 'chat' : doc;
 
@@ -691,7 +730,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     if (b.type === 'hr') inner = `<div class="divider-line"><button class="fold" data-fold="${b.id}" aria-expanded="${!folded.has(b.id)}" aria-label="Fold the part below this divider" title="Fold the part below"><i data-lucide="chevron-down" class="icon-xs"></i></button><hr></div>`;
     else if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
     else if (b.type === 'h') inner = `<h4>${esc(b.text)}</h4>`;
-    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}${b.pieces > 1 ? `<span class="pieces">· ${b.pieces} pieces</span>` : ''}<div>${chip(b.mark, b.src)}</div></div>`;
+    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}${b.pieces > 1 ? `<span class="pieces">· ${b.pieces} pieces</span>` : ''}${b.tr ? `<span class="tr-tag" title="Marked on the ${esc(LANGS[b.tr])} translation"><b>文</b>Translated · ${esc(LANGS[b.tr])}</span>` : ''}<div>${chip(b.mark, b.src)}${b.tr ? `<button class="orig-btn" data-orig="${b.id}">Show original</button>` : ''}</div>${b.tr ? `<div class="collapse" data-state="closed"><div class="orig">${esc(b.orig || '')}</div></div>` : ''}</div>`;
     else if (b.type === 'fig') inner = `<div class="objblk"><div class="head"><i data-lucide="image" class="icon-xs"></i>Figure 3 · ${esc(cname(b.c))}</div><div class="fig-img">${FIG_SVG}</div><div class="cap">Figure 3: Latency profiling and challenges during poses merge.<div>${chip(b.mark, 'Fig. 3 · p. 3')}</div></div></div>`;
     else if (b.type === 'eq') inner = `<div class="objblk"><div class="head"><i data-lucide="sigma" class="icon-xs"></i>Eq. (1)<span class="model-mark"><i data-lucide="sparkles" class="icon-xs"></i>LaTeX transcribed by the model · check it against the page</span></div><div class="eqrow"><div><div class="eq-render">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)</div><div class="eq-src" contenteditable="true" spellcheck="false">\\langle \\Delta I_t(x_t)\\,\\Delta I_r(x_r) \\rangle = O(x_t, x_r)</div></div><div class="crop" title="Crop of the page">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>), (1)<small>page 2 crop</small></div></div><div class="cap">${chip(b.mark, 'Eq. (1) · p. 2')}</div></div>`;
     else if (b.type === 'box' && !b.scan) inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region · ${esc(b.where)}${b.c ? ' · ' + esc(cname(b.c)) : ''}<span class="model-mark"><i data-lucide="text" class="icon-xs"></i>Text under the box, from the page's text layer</span></div><div class="eqrow"><div class="ocr">${esc(b.text)}</div><div class="crop" style="font-family:var(--font-paper);font-size:9.5px;line-height:1.25;overflow:hidden">${esc(b.text.slice(0, 160))}<small>${esc(b.where)} crop</small></div></div><div class="cap">${chip(b.mark, b.where + ' · box')}</div></div>`;
@@ -889,6 +928,12 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
         const txt = b.type === 'quote' ? `“${esc(b.text.slice(0, 110))}${b.text.length > 110 ? '…' : ''}”` : b.type === 'fig' ? 'Figure 3: Latency profiling and challenges during poses merge.' : b.type === 'eq' ? '⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)' : esc((b.text || 'Region').slice(0, 110));
         const mc = b.c && b.c !== 'none' ? `var(--hl-${b.c})` : 'var(--muted-fg)';
         const icon = b.type === 'fig' ? 'image' : b.type === 'eq' ? 'sigma' : b.type === 'box' ? 'square-dashed' : 'quote';
+        if (b.tr) {
+          const tm = trMarks[b.mark], onScreen = trOn && tm && tm.lang === trLang;
+          const head = `<span class="nc-ref-tag"><b>文</b>From the ${esc(LANGS[b.tr])} translation · ${esc(src)}</span>`;
+          if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}">${head}${txt}${onScreen ? '' : `<span class="nc-trnote">${trOn ? `Marked in ${esc(LANGS[b.tr])}; the paper is showing ${esc(LANGS[trLang])}.` : 'Translation is off, so this mark is shown as 文 beside the paragraph.'}</span><button class="nc-tron" data-tron="${b.mark}"><i data-lucide="languages" class="icon-xs"></i>${trOn ? `Switch to ${esc(LANGS[b.tr])}` : 'Turn on translation'}</button>`}</div>`;
+          return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage">${head}${txt}</button>`;
+        }
         if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}</span>${txt}</div>`;
         return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage in the paper"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}<span class="go">Show<i data-lucide="arrow-up-right" class="icon-xs"></i></span></span>${txt}</button>`;
       }
@@ -902,6 +947,13 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       return `<button class="nc-other" data-g="${gi}" aria-expanded="false"><i data-lucide="chevron-right" class="icon-xs"></i>Note ${gi + 1} · ${n} block${n > 1 ? 's' : ''}<span>· ${esc(snip(g))}</span></button><div class="collapse" data-state="closed"><div class="nc-other-body">${rowsOf(g)}</div></div>`;
     }).join(''); icons();
     $$('#ncBody [data-jump]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); jumpToMark(btn.dataset.jump); }));
+    $$('#ncBody [data-tron]').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation(); const m = btn.dataset.tron, tm = trMarks[m]; closeCards(); setTr(true, tm.lang);
+      requestAnimationFrame(() => {
+        if (tm.pdf) { const blk = $(`[data-block="${tm.block}"]`); scrollTo(blk); setTimeout(() => openNoteCard(m, blk, blk), reduce() ? 0 : 380); }
+        else { const sp = $(`#paper .tr-para [data-mark="${m}"]`); scrollTo(sp); flash(sp); }
+      });
+    }));
     $$('#ncBody .nc-other').forEach(btn => btn.addEventListener('click', () => {
       const o = btn.getAttribute('aria-expanded') !== 'true'; btn.setAttribute('aria-expanded', String(o)); btn.nextElementSibling.dataset.state = o ? 'open' : 'closed'; setTimeout(placeCards, 210);
     }));
@@ -910,26 +962,38 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     }));
     nc.dataset.state = 'open';
     const tr = block && TR[block.dataset.block];
-    if (tr && $('#trFab').getAttribute('aria-pressed') === 'true') { $('#trText').textContent = tr; tc.dataset.state = 'open'; } else tc.dataset.state = 'closed';
+    if (tr && $('#trFab').getAttribute('aria-pressed') === 'true') { $('#trText').textContent = trTextFor(block.dataset.block); markTrCard(block.dataset.block); tc.dataset.state = 'open'; } else tc.dataset.state = 'closed';
     placeCards();
     requestAnimationFrame(() => { placeCards(); const t = $('[data-target="true"]', nc); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
   }
   // Jump from the card to another reference: scroll the paper to it, flash it, and re-point the card at it.
   function jumpToMark(mark) {
     if (!markNote[mark]) return; const [k] = markNote[mark]; if (k !== doc) { doc = k; showDoc(); }
+    const tm = trMarks[mark];
+    if (tm && !tm.pdf) { if (!trOn || trLang !== tm.lang) setTr(true, tm.lang); const sp = $(`#paper .tr-para [data-mark="${mark}"]`); if (sp) { scrollTo(sp); flash(sp); setTimeout(() => openNoteCard(mark, sp.closest('.tr-para'), null), reduce() ? 0 : 380); } return; }
     const g = gmarks.find(m => m.id === mark); let el, anchor, blk = null;
     if (g) { drawGhostMarks(); el = $(`.gmark[data-id="${mark}"]`); blk = g.block ? $(`[data-block="${g.block}"]`) : null; anchor = blk || el; $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
     else { el = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); anchor = el && (el.closest('p') || el); flash(el); }
     if (!el) return; scrollTo(el);
     setTimeout(() => openNoteCard(mark, anchor, blk), reduce() ? 0 : 380);
   }
+  const TRJA = { '/page/0/Text/9': '要旨：一次の場の相関に基づく従来のイメージング手法とは異なり、ゴーストイメージング（GI）は、物体が一方の光路にのみ現れる二つの光路の光場の高次相互相関によって画像情報を得る……' };
+  const trTextFor = bid => trLang === 'zh-TW' ? TR[bid] : (TRJA[bid] || '（このデモには日本語訳がありません）');
+  // Marks made in the PDF translation card show again whenever the card shows that block in that language.
+  function markTrCard(bid) {
+    Object.entries(trMarks).forEach(([m, tm]) => {
+      if (!tm.pdf || tm.block !== bid || tm.lang !== trLang || !markNote[m]) return;
+      const r = textRange($('#trText'), tm.text); if (!r) return;
+      const sp = document.createElement('span'); sp.className = tm.c === 'none' ? 'qmark' : 'hl'; sp.dataset.mark = m; sp.dataset.c = tm.c; r.surroundContents(sp);
+    });
+  }
   function openTranslation(block) {
     if (nc.dataset.state === 'open') return; // a note card is open: leave it
-    cardAnchor = block; $('#trText').textContent = TR[block.dataset.block]; tc.dataset.state = 'open'; placeCards();
+    cardAnchor = block; $('#trText').textContent = trTextFor(block.dataset.block); markTrCard(block.dataset.block); tc.dataset.state = 'open'; placeCards();
   }
   $('#ncClose').addEventListener('click', closeCards); $('#trClose').addEventListener('click', () => { tc.dataset.state = 'closed'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCards(); closePop(); closeMarksMenu(); } });
-  document.addEventListener('mousedown', e => { if (!nc.contains(e.target) && !tc.contains(e.target) && !e.target.closest('[data-mark], .gpage, .obj-btn')) closeCards(); });
+  document.addEventListener('mousedown', e => { if (!nc.contains(e.target) && !tc.contains(e.target) && !e.target.closest('[data-mark], .gpage, .obj-btn, #selPop, .tr-marker')) closeCards(); });
   $('#ncOpen').addEventListener('click', () => {
     const [k, ids] = markNote[cardMark] || [doc, []]; closeCards(); noteTab = 'paper'; $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.note === 'paper')));
     if (k !== doc) { doc = k; showDoc(); } renderNote(); show('notes');
@@ -993,6 +1057,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     $$('#mmRows [data-show]').forEach(cb => cb.addEventListener('change', () => { COLORS.find(x => x.c === cb.dataset.show).show = cb.checked; applyFilter(); }));
     const total = notes[doc].blocks.filter(b => ['quote', 'fig', 'eq', 'box'].includes(b.type) && !(undone && b.fresh)).length;
     $('#marksCount').textContent = String(total);
+    if (typeof renderTrMarkers === 'function') renderTrMarkers();
   }
   function applyFilter() {
     $$('#paper .hl').forEach(el => { el.dataset.dim = String(!COLORS.find(x => x.c === el.dataset.c).show); });
@@ -1064,11 +1129,47 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       const blk = m.block && $(`[data-block="${m.block}"]`); openNoteCard(m.id, blk || page, blk);
     });
   });
-  $('#trFab').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
-    if (!on) tc.dataset.state = 'closed';
-    if (on && doc === 'xr') toast('HTML papers show the translation under each paragraph (H1)', () => {});
-  });
+  function setTr(on, lang) {
+    if (lang) { trLang = lang; $('#trLang .lbl').textContent = LANGS[lang]; $$('#trMenu [data-lang]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.lang === lang))); }
+    $('#trCard .gcard-h .t').textContent = (trLang === 'ja' ? '日本語' : '繁體中文') + ' · translation';
+    trOn = on; $('#trFab').setAttribute('aria-pressed', String(on)); $('#trLang').dataset.state = on ? 'open' : 'closed';
+    $('#trMenu').dataset.state = 'closed'; $('#trLang').setAttribute('aria-expanded', 'false');
+    if (!on) tc.dataset.state = 'closed'; else if (tc.dataset.state === 'open' && cardAnchor && cardAnchor.dataset.block) { $('#trText').textContent = trTextFor(cardAnchor.dataset.block); markTrCard(cardAnchor.dataset.block); }
+    renderTranslations();
+  }
+  $('#trFab').addEventListener('click', () => setTr(!trOn));
+  $('#trLang').addEventListener('click', e => { e.stopPropagation(); const o = $('#trMenu').dataset.state !== 'open'; $('#trMenu').dataset.state = o ? 'open' : 'closed'; $('#trLang').setAttribute('aria-expanded', String(o)); });
+  $$('#trMenu [data-lang]').forEach(b => b.addEventListener('click', () => setTr(true, b.dataset.lang)));
+  document.addEventListener('click', e => { if (!e.target.closest('#trMenu, #trLang')) { $('#trMenu').dataset.state = 'closed'; $('#trLang').setAttribute('aria-expanded', 'false'); } });
+  // HTML papers: the translation under each paragraph, with the marks made on it in this language.
+  function renderTranslations() {
+    const old = $$('#paper .tr-para');
+    if (trOn) old.forEach(el => el.remove()); else old.forEach(el => { el.classList.add('tr-exit'); setTimeout(() => el.remove(), reduce() ? 0 : 200); });
+    if (trOn) $$('#paper p[data-tr]').forEach(p => {
+      const t = (TRX[p.dataset.tr] || {})[trLang]; if (!t) return;
+      const d = document.createElement('div'); d.className = 'tr-para tr-enter'; d.dataset.for = p.dataset.tr; d.lang = trLang; d.textContent = t; p.after(d);
+    });
+    if (trOn) Object.entries(trMarks).forEach(([m, tm]) => {
+      if (tm.pdf || tm.lang !== trLang || !markNote[m]) return;
+      const d = $(`#paper .tr-para[data-for="${tm.para}"]`); const r = d && textRange(d, tm.text); if (!r) return;
+      const sp = document.createElement('span'); sp.className = tm.c === 'none' ? 'qmark' : 'hl'; sp.dataset.mark = m; sp.dataset.c = tm.c; r.surroundContents(sp); bindMark(sp);
+    });
+    renderTrMarkers(); applyFocus();
+  }
+  // A mark on a translation that isn't on screen shows as 文 beside its paragraph (or PDF block); click opens its note card.
+  function renderTrMarkers() {
+    $$('.tr-marker').forEach(x => x.remove());
+    Object.entries(trMarks).forEach(([m, tm]) => {
+      if (!markNote[m]) return;
+      if (!tm.pdf && trOn && tm.lang === trLang && $(`#paper .tr-para [data-mark="${m}"]`)) return;
+      const host = tm.pdf ? $(`[data-block="${tm.block}"]`) : $(`#paper p[data-tr="${tm.para}"]`); if (!host) return;
+      const b = document.createElement('button'); b.className = 'tr-marker'; b.dataset.trm = m; b.textContent = '文';
+      b.style.setProperty('--mc', tm.c && tm.c !== 'none' ? `var(--hl-${tm.c})` : 'var(--muted-fg)');
+      b.title = `A mark on the ${LANGS[tm.lang]} translation — click to open its note`; b.setAttribute('aria-label', b.title);
+      b.addEventListener('click', e => { e.stopPropagation(); openNoteCard(m, host, tm.pdf ? host : null); });
+      host.appendChild(b);
+    });
+  }
 
   /* ---------- the mark popover: below the selection, named colours ---------- */
   const pop = $('#selPop'); let pending = null;
@@ -1090,6 +1191,13 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     openPop(range.getBoundingClientRect(), p);
   }, 0);
   $('#paper').addEventListener('mouseup', () => onSelect($('#paper')));
+  // Text in the PDF translation card can be marked too.
+  $('#trText').addEventListener('mouseup', () => setTimeout(() => {
+    const sel = window.getSelection(); if (!sel || sel.isCollapsed || !$('#trText').contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0); const pp = { kind: 'trcard', range, block: cardAnchor };
+    if (pen) { pending = pp; createMark('hl', pen); return; }
+    openPop(range.getBoundingClientRect(), pp);
+  }, 0));
   $$('#gp1, #gp2').forEach(p => p.addEventListener('mouseup', () => onSelect(p)));
   document.addEventListener('mousedown', e => { if (!pop.contains(e.target) && !e.target.closest('#paper, .gpage, .obj-btn')) closePop(); });
   // Figure / equation: one click on the object's mark button.
@@ -1158,6 +1266,15 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: 'gp3', kind: 'box', c: c || 'blue', box: p.rect });
       p.boxEl.remove(); pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, '§3'); return;
     }
+    if (p.kind === 'trcard') { // a mark in the PDF translation card
+      const blk = p.block, text = p.range.toString(); if (!text.trim() || !blk || !blk.dataset.block) { pending = null; return; }
+      const col = kind === 'quote' ? 'none' : c;
+      const sp = document.createElement('span'); sp.className = col === 'none' ? 'qmark' : 'hl'; sp.dataset.mark = mark; sp.dataset.c = col; try { p.range.surroundContents(sp); } catch (e) {}
+      trMarks[mark] = { lang: trLang, block: blk.dataset.block, text, c: col, pdf: true };
+      const sec = blk.dataset.sec || 'Abstract', secText = sec === 'Abstract' ? 'Abstract' : '§' + sec.replace(/^(\d+)\.\s*/, '$1 ');
+      const id = insertUnder('ghost', sec, secText, { id: 'q' + nid, type: 'quote', c: col, mark, src: blk.dataset.block.includes('/page/1/') ? 'p. 2' : 'p. 1', text, tr: trLang, orig: blk.textContent.replace('Mark equation', '').trim().slice(0, 320) });
+      markNote[mark] = ['ghost', [id]]; window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null; afterAdd('ghost', id, secText); return;
+    }
     const text = p.range.toString();
     if (!text.trim()) { pending = null; return; }
     if (p.page) { // PDF text layer
@@ -1175,7 +1292,19 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       markNote[mark] = ['ghost', [id]]; window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
       drawGhostMarks(); afterAdd('ghost', id, secText); return;
     }
-    const anc = p.range.commonAncestorContainer; const para = (anc.nodeType === 1 ? anc : anc.parentElement).closest('p, figcaption');
+    const anc = p.range.commonAncestorContainer;
+    const trp = (anc.nodeType === 1 ? anc : anc.parentElement).closest('.tr-para');
+    if (trp) { // a mark on the translation: keeps the language and the source paragraph
+      const col = kind === 'quote' ? 'none' : c;
+      const sp = document.createElement('span'); sp.className = col === 'none' ? 'qmark' : 'hl'; sp.dataset.mark = mark; sp.dataset.c = col;
+      try { p.range.surroundContents(sp); } catch (e) { pending = null; return; }
+      trMarks[mark] = { lang: trLang, para: trp.dataset.for, text, c: col };
+      const srcP = $(`#paper p[data-tr="${trp.dataset.for}"]`); const cl = srcP.cloneNode(true); cl.querySelectorAll('button').forEach(x => x.remove());
+      const id = insertUnder('xr', 'Background and Motivation', '§2 Background and Motivation', { id: 'q' + nid, type: 'quote', c: col, mark, src: '§2 · p. 2', text, tr: trLang, orig: cl.textContent.trim() });
+      markNote[mark] = ['xr', [id]]; bindMark(sp); window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
+      afterAdd('xr', id, '§2'); return;
+    }
+    const para = (anc.nodeType === 1 ? anc : anc.parentElement).closest('p, figcaption');
     const join = pen && kind === 'hl' && Object.keys(penMarks).find(m => penMarks[m].c === c && penMarks[m].para === para && markNote[m]);
     if (join) {
       const sp = document.createElement('span'); sp.className = 'hl'; sp.dataset.mark = join; sp.dataset.c = c;
@@ -1402,6 +1531,10 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     if (focusOn) { const sg = $(`#notesBody .part[data-key="${activeSeg}"]`); if (sg) sg.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && focusOn) { focusOn = false; $('#focusBtn').setAttribute('aria-pressed', 'false'); applyFocus(); } });
+  $('#notesBody').addEventListener('click', e => {
+    const ob = e.target.closest('[data-orig]'); if (!ob) return; e.stopPropagation();
+    const c = ob.parentElement.nextElementSibling; const o = c.dataset.state !== 'open'; c.dataset.state = o ? 'open' : 'closed'; ob.textContent = o ? 'Hide original' : 'Show original';
+  });
   $('#notesBody').addEventListener('focusin', e => { const sg = e.target.closest('.part'); if (sg) setActive(sg.dataset.key); });
   $('#notesBody').addEventListener('click', e => {
     const f = e.target.closest('[data-fold], [data-unfold]');
