@@ -2,40 +2,44 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: the app's own shell (sidebar + chat) with the H5b split right panel: Reader + Notes.
-   Tokens are PaperHub's shadcn "neutral" set (frontend/src/index.css), as in the H5a prototype.
-   Highlight palette (validated with the dataviz validator, both themes; yellow stays citations-only):
-   green / blue / pink / purple, drawn as low-alpha tints behind text. */
+/* Layout: mirrors the shipped chat page (frontend/src/pages/ChatPage.tsx): the 260px sidebar
+   (brand row, Ideas / Notes / Feedback, Chats | References tabs, New chat, time groups, account),
+   a header-less chat column whose composer icon row toggles the right panel, and the right panel
+   (the Citation Canvas, renamed Reader). H5b adds a Notes toggle to that icon row; with Reader and
+   Notes both on, the right panel splits (stacked at its usual width, side by side when wide).
+   Tokens: PaperHub's shadcn "neutral" set (frontend/src/index.css).
+   Highlight palette (dataviz validator, both themes; yellow stays citations-only): green / blue / pink / purple. */
 :root {
   --background: oklch(1 0 0); --foreground: oklch(0.145 0 0); --card: oklch(1 0 0); --popover: oklch(1 0 0);
   --primary: oklch(0.205 0 0); --primary-fg: oklch(0.985 0 0); --muted: oklch(0.97 0 0); --muted-fg: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0); --border: oklch(0.922 0 0); --ring: oklch(0.708 0 0);
+  --accent: oklch(0.97 0 0); --border: oklch(0.922 0 0); --ring: oklch(0.708 0 0); --sidebar: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325); --ok: oklch(0.527 0.154 150.069);
   --amber-bg: oklch(0.987 0.022 95.277); --amber-fg: oklch(0.473 0.137 46.201); --amber-border: oklch(0.924 0.12 95.746);
-  --hl-green: #2f9e63; --hl-blue: #3b7dd8; --hl-pink: #d6457e; --hl-purple: #8b5cd6;
-  --hl-alpha: 22%;
+  --cite-bg: oklch(0.945 0.09 98); --cite-line: oklch(0.80 0.15 90);
+  --hl-green: #2f9e63; --hl-blue: #3b7dd8; --hl-pink: #d6457e; --hl-purple: #8b5cd6; --hl-alpha: 22%;
   --ins: oklch(0.527 0.154 150.069); --del: oklch(0.577 0.245 27.325);
-  --overlay: oklch(0 0 0 / 0.4);
   --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif; --font-mono: 'Geist Mono', ui-monospace, monospace;
-  --font-paper: 'Charter', 'Iowan Old Style', Georgia, serif;
+  --font-paper: 'Times New Roman', Times, 'Noto Serif', serif;
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.06); --shadow-md: 0 4px 12px oklch(0 0 0 / 0.10); --shadow-xl: 0 20px 40px oklch(0 0 0 / 0.18);
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0); --popover: oklch(0.205 0 0);
   --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0); --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0);
+  --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
   --destructive: oklch(0.704 0.191 22.216); --ok: oklch(0.723 0.219 149.579);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
+  --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
   --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
-  --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); --overlay: oklch(0 0 0 / 0.6); color-scheme: dark; } }
+  --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); color-scheme: dark; } }
 :root[data-theme="dark"] {
   --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0); --popover: oklch(0.205 0 0);
   --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0); --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0);
+  --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
   --destructive: oklch(0.704 0.191 22.216); --ok: oklch(0.723 0.219 149.579);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
+  --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
   --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
-  --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); --overlay: oklch(0 0 0 / 0.6); color-scheme: dark; }
+  --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); color-scheme: dark; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
@@ -44,113 +48,144 @@ button { font: inherit; color: inherit; cursor: pointer; }
 input, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .icon { width: 16px; height: 16px; flex-shrink: 0; } .icon-sm { width: 14px; height: 14px; flex-shrink: 0; } .icon-xs { width: 12px; height: 12px; flex-shrink: 0; }
-.muted { color: var(--muted-fg); } .mono { font-family: var(--font-mono); font-size: 12px; }
+.muted { color: var(--muted-fg); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; } }
 
 /* Prototype bar (not product UI) */
 .proto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-bottom: 1px dashed var(--border); font-size: 12px;
-  padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  padding-block: 7px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .proto-bar .label { font-weight: 600; margin-right: 4px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; gap: 2px; background: var(--muted); }
 .seg button { border: 0; background: transparent; padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 5px; }
 .seg button[aria-pressed="true"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
-.seg.sm button { padding: 2px 7px; font-size: 11.5px; }
 
-/* App shell */
-.app { display: flex; height: calc(100% - 41px); min-height: 560px; }
-.sidebar { width: 216px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--muted); display: flex; flex-direction: column; padding: 8px; gap: 2px; }
-.sidebar .brand { font-weight: 600; padding: 6px 8px 10px; }
-.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; border: 0; background: transparent; text-align: left; width: 100%; }
+/* App shell — sidebar as shipped */
+.app { display: flex; height: calc(100% - 39px); min-height: 600px; }
+.sidebar { width: 260px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--sidebar); display: flex; flex-direction: column; }
+.brand-row { display: flex; align-items: center; gap: 6px; height: 56px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border); }
+.brand-row b { font-size: 18px; font-weight: 600; flex: 1; }
+.sb-nav { padding: 8px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--border); }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 6px; border: 0; background: transparent; text-align: left; width: 100%; font-size: 14px; }
 .nav-item:hover { background: var(--accent); }
-.nav-item[aria-current="true"] { background: var(--background); box-shadow: var(--shadow-sm); }
-.nav-item .new { margin-left: auto; font-size: 10.5px; color: var(--muted-fg); }
-.sidebar hr { border: 0; border-top: 1px solid var(--border); margin: 8px 0; width: 100%; }
-.chat-link { font-size: 13px; color: var(--muted-fg); padding: 5px 8px; border-radius: 6px; border: 0; background: transparent; width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-link.active { color: var(--foreground); background: var(--background); }
-.group-h { font-size: 11.5px; color: var(--muted-fg); padding: 8px 8px 2px; }
+.nav-item[aria-current="true"] { background: var(--accent); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-size: 11px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); text-align: center; }
+.nav-item .new { margin-left: auto; font-size: 10.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.sb-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+.sb-tab { border: 0; background: transparent; padding: 9px 0 8px; font-size: 13px; color: var(--muted-fg); display: inline-flex; justify-content: center; gap: 6px; align-items: center; border-bottom: 2px solid transparent; }
+.sb-tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--foreground); font-weight: 500; }
+.sb-tab .count { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--accent); }
+.new-chat { margin: 10px 12px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.kbd { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.chats { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px; display: flex; flex-direction: column; gap: 1px; }
+.group-h { font-size: 12px; color: var(--muted-fg); padding: 10px 8px 3px; display: flex; align-items: center; gap: 4px; }
+.chat-link { font-size: 14px; padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-link:hover { background: var(--accent); }
+.chat-link.active { background: var(--accent); font-weight: 500; }
+.account { border-top: 1px solid var(--border); padding: 10px 16px; display: flex; gap: 10px; align-items: center; }
+.avatar { width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
 .main { flex: 1; min-width: 0; display: flex; }
-.view { flex: 1; min-width: 0; display: flex; }
 
-/* Chat column */
-.chat-col { flex: 1 1 380px; min-width: 300px; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
-.chat-head { height: 3.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; padding: 0 14px; flex-shrink: 0; }
-.chat-head h2 { font-size: 14px; font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.thread { flex: 1; overflow-y: auto; padding: 16px 14px 24px; }
-.thread-inner { display: flex; flex-direction: column; gap: 16px; }
-.msg-user { align-self: flex-end; max-width: 85%; background: var(--muted); border-radius: 14px; padding: 8px 12px; }
-.msg-agent p { margin: 0 0 8px; }
-.cite { font-size: 0.75rem; vertical-align: super; line-height: 0; color: var(--foreground); font-weight: 500; }
-.note-cite { font-size: 0.75rem; vertical-align: super; line-height: 0; color: var(--foreground); font-weight: 500; white-space: nowrap; }
-.note-cite svg { width: 11px; height: 11px; vertical-align: -1px; margin-right: 2px; }
-.composer { border-top: 1px solid var(--border); padding: 10px 14px; flex-shrink: 0; }
-.composer-box { border: 1px solid var(--border); border-radius: 14px; padding: 8px 10px; color: var(--muted-fg); font-size: 13px; display: flex; align-items: center; gap: 8px; }
-.composer-box .chip { margin-left: auto; font-size: 11.5px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+/* Chat column — no header bar */
+.chat-col { flex: 1 1 520px; min-width: 340px; display: flex; flex-direction: column; }
+.thread { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
+.thread-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.msg-user { align-self: flex-end; max-width: 80%; background: var(--muted); border-radius: 16px; padding: 9px 14px; }
+.msg-agent p { margin: 0 0 10px; line-height: 1.75; }
+.cite { font-size: 0.75rem; vertical-align: super; line-height: 0; font-weight: 500; margin: 0 1px; white-space: nowrap; }
+.cite svg { width: 11px; height: 11px; vertical-align: -1px; margin-right: 1px; }
+.agent-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-fg); }
+.agent-tag { font-weight: 600; color: var(--foreground); background: var(--accent); border-radius: 6px; padding: 1px 8px; }
+.composer { padding: 10px 24px 14px; flex-shrink: 0; }
+.composer-box { max-width: 760px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; padding: 10px 12px 8px; }
+.composer-box .ph { color: var(--muted-fg); font-size: 14px; padding: 2px 4px 14px; }
+.comp-row { display: flex; align-items: center; gap: 4px; }
+.comp-btn { border: 0; background: transparent; width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-fg); position: relative; }
+.comp-btn:hover { background: var(--accent); color: var(--foreground); }
+.comp-btn[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
+.comp-btn .newdot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 999px; background: var(--hl-blue); }
+.comp-row .spacer { flex: 1; }
+.mode-chip { font-size: 12.5px; color: var(--muted-fg); display: inline-flex; gap: 5px; align-items: center; padding: 0 8px; }
+.send { width: 32px; height: 32px; border-radius: 999px; border: 0; background: var(--muted); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; }
 
 /* Agent note-change card (Do, show, undo) */
-.card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 10px 12px; font-size: 13px; }
+.card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 10px 12px; font-size: 13px; margin: 2px 0 10px; }
 .card-title { display: flex; align-items: center; gap: 6px; font-weight: 500; }
 .card-sub { color: var(--muted-fg); font-size: 12px; margin-top: 2px; }
 .diff { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .diff li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; align-items: start; }
-.diff .k-ins { color: var(--ins); } .diff .k-sug { color: var(--amber-fg); }
+.k-ins { color: var(--ins); } .k-sug { color: var(--amber-fg); }
 .card-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .btn { border: 1px solid var(--border); background: var(--background); border-radius: 7px; padding: 3px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
 .btn:hover { background: var(--accent); }
-.btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.btn:disabled { opacity: 0.5; cursor: default; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--muted-fg); }
-.btn-ghost:hover { color: var(--foreground); }
-.undone { color: var(--muted-fg); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+.undone { color: var(--muted-fg); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin: 0 0 10px; }
+.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 200ms ease-out, opacity 200ms ease-out; }
+.collapse > div { min-height: 0; overflow: hidden; }
+.collapse[data-state="closed"] { grid-template-rows: 0fr; opacity: 0; }
 
-/* Right panel: up to two panes */
-.panel { flex: 1.6 1 560px; min-width: 0; display: flex; flex-direction: column; background: var(--card); }
-.panel-bar { height: 2.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; padding: 0 8px; flex-shrink: 0; }
-.panel-bar .spacer { flex: 1; }
-.icon-btn { border: 0; background: transparent; border-radius: 6px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-fg); }
+/* Right panel: Reader, Notes, or both (split) */
+.panel { flex: 0 0 var(--panel-w, 34%); min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--card); position: relative;
+  transition: flex-basis 200ms ease-out; }
+.panel[data-closed="true"] { flex-basis: 0; border-left: 0; overflow: hidden; }
+.panel-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
+.panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.panes[data-orient="side"] { flex-direction: row; }
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 50%; transition: flex-basis 200ms ease-out, opacity 200ms ease-out; }
+.pane[data-hidden="true"] { flex-basis: 0 !important; flex-grow: 0; opacity: 0; pointer-events: none; }
+.divider { flex: 0 0 7px; cursor: row-resize; position: relative; border: 0; padding: 0; background: transparent; }
+.divider::before { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: var(--border); }
+.divider::after { content: ""; position: absolute; left: 50%; top: 1px; width: 28px; height: 5px; margin-left: -14px; border-radius: 3px; background: var(--border); }
+.divider:hover::after, .divider[data-drag="true"]::after { background: var(--ring); }
+.panes[data-orient="side"] .divider { cursor: col-resize; }
+.panes[data-orient="side"] .divider::before { left: 3px; right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
+.panes[data-orient="side"] .divider::after { left: 1px; top: 50%; width: 5px; height: 28px; margin: -14px 0 0; }
+
+/* Reader pane — as shipped: paper tabs + close, then HTML | PDF */
+.r-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); padding: 4px 6px; flex-shrink: 0; }
+.paper-tab { border: 0; font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 4px; background: transparent; color: var(--muted-fg); max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper-tab[aria-selected="true"] { background: var(--accent); color: var(--foreground); }
+.r-tabs .spacer, .r-sub .spacer { flex: 1; }
+.r-sub { display: flex; gap: 2px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 6px; flex-shrink: 0; }
+.fmt { border: 0; background: transparent; font-size: 12px; padding: 2px 8px; border-radius: 4px; color: var(--muted-fg); }
+.fmt[aria-selected="true"] { background: var(--accent); color: var(--foreground); font-weight: 500; }
+.icon-btn { border: 0; background: transparent; border-radius: 6px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-fg); }
 .icon-btn:hover { background: var(--accent); color: var(--foreground); }
-.icon-btn[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
-.panes { flex: 1; min-height: 0; display: flex; }
-.panes[data-orient="stacked"] { flex-direction: column; }
-.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
-  transition: flex-basis 200ms ease-out, opacity 200ms ease-out; }
-.pane[data-hidden="true"] { flex-basis: 0 !important; opacity: 0; pointer-events: none; }
-.divider { flex: 0 0 6px; cursor: col-resize; position: relative; background: transparent; border: 0; padding: 0; }
-.divider::before { content: ""; position: absolute; inset: 0 2px; background: var(--border); border-radius: 2px; }
-.divider:hover::before, .divider[data-drag="true"]::before { background: var(--ring); }
-.panes[data-orient="stacked"] .divider { cursor: row-resize; }
-.panes[data-orient="stacked"] .divider::before { inset: 2px 0; }
-.divider[hidden] { display: none; }
-
-/* Reader pane (the Citation Canvas, renamed Reader) */
-.reader-head { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); padding: 4px 6px; flex-shrink: 0; flex-wrap: wrap; }
-.paper-tab { font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 6px; background: var(--accent); max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reader-head .spacer { flex: 1; }
-.marks-toggle { font-size: 11.5px; border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 1px 8px; display: inline-flex; gap: 4px; align-items: center; color: var(--muted-fg); }
-.marks-toggle[aria-pressed="true"] { color: var(--foreground); }
-.marks-count { font-variant-numeric: tabular-nums; }
+.marks-btn { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); border-radius: 6px; padding: 2px 7px; display: inline-flex; gap: 4px; align-items: center; }
+.marks-btn:hover { background: var(--accent); color: var(--foreground); }
+.marks-btn[aria-pressed="false"] { text-decoration: line-through; }
 .reader-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
-.paper { font-family: var(--font-paper); font-size: 15px; line-height: 1.65; padding: 20px 40px 40px 28px; max-width: 680px; }
-.paper h3 { font-family: var(--font-sans); font-size: 15px; margin: 22px 0 8px; display: flex; align-items: center; gap: 8px; }
+.paper { font-family: var(--font-paper); font-size: 14.5px; line-height: 1.45; padding: 10px 34px 30px 10px; }
+.paper h2 { font-size: 22px; margin: 18px 0 10px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+.paper h3 { font-size: 17px; margin: 14px 0 8px; font-weight: 700; }
 .paper p { margin: 0 0 12px; position: relative; }
-.sec-mark { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; font-family: var(--font-sans); }
-.hl { border-radius: 2px; padding: 0 1px; cursor: pointer; transition: box-shadow 200ms ease-out; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.sec-mark { font-family: var(--font-sans); display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.cited { background: var(--cite-bg); outline: 1px solid var(--cite-line); border-radius: 1px; }
+.hl { border-radius: 2px; cursor: pointer; transition: box-shadow 150ms ease-out; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .hl[data-c="green"] { background: color-mix(in srgb, var(--hl-green) var(--hl-alpha), transparent); }
 .hl[data-c="blue"] { background: color-mix(in srgb, var(--hl-blue) var(--hl-alpha), transparent); }
 .hl[data-c="pink"] { background: color-mix(in srgb, var(--hl-pink) var(--hl-alpha), transparent); }
 .hl[data-c="purple"] { background: color-mix(in srgb, var(--hl-purple) var(--hl-alpha), transparent); }
 .qmark { text-decoration: underline; text-decoration-color: var(--muted-fg); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.hl:hover, .qmark:hover { box-shadow: 0 0 0 1px var(--ring); }
 .hl[data-flash="true"], .qmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
-.marks-off .hl { background: transparent; cursor: text; } .marks-off .qmark { text-decoration: none; } .marks-off .margin-ic, .marks-off .sec-mark { visibility: hidden; }
-.margin-ic { position: absolute; right: -30px; top: 2px; border: 0; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-sans); font-size: 10.5px; padding: 2px; border-radius: 5px; }
+.marks-off .hl { background: transparent; cursor: text; } .marks-off .qmark { text-decoration: none; cursor: text; }
+.marks-off .hl:hover, .marks-off .qmark:hover { box-shadow: none; } .marks-off .margin-ic, .marks-off .sec-mark { visibility: hidden; }
+.margin-ic { position: absolute; right: -28px; top: 1px; border: 0; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-sans); font-size: 10.5px; padding: 2px; border-radius: 5px; }
 .margin-ic:hover { color: var(--foreground); background: var(--accent); }
-.figure-ph { border: 1px solid var(--border); border-radius: 8px; height: 110px; display: flex; align-items: center; justify-content: center; color: var(--muted-fg); font-family: var(--font-sans); font-size: 12px; margin: 4px 0 6px; background: repeating-linear-gradient(135deg, transparent 0 8px, var(--muted) 8px 9px); }
-.caption { font-family: var(--font-sans); font-size: 12px; color: var(--muted-fg); margin: 0 0 14px; }
-.back-pill { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 4; border: 1px solid var(--border); background: var(--popover); box-shadow: var(--shadow-md); border-radius: 999px; padding: 3px 12px; font-size: 12px; display: inline-flex; gap: 5px; align-items: center;
+.fig { border: 1px solid var(--border); border-radius: 4px; height: 96px; display: flex; align-items: center; justify-content: center; color: var(--muted-fg); font-family: var(--font-sans); font-size: 12px; margin: 4px 0 4px; background: repeating-linear-gradient(135deg, transparent 0 8px, var(--muted) 8px 9px); }
+.caption { font-size: 13px; margin: 0 0 12px; }
+.translate-fab { position: absolute; right: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--popover); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; }
+.back-pill { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 4; border: 1px solid var(--border); background: var(--popover); box-shadow: var(--shadow-md); border-radius: 999px; padding: 3px 12px; font-size: 12px; display: inline-flex; gap: 5px; align-items: center; font-family: var(--font-sans);
   transition: opacity 200ms ease-out, transform 200ms ease-out; }
 .back-pill[data-state="closed"] { opacity: 0; transform: translate(-50%, -6px); pointer-events: none; }
+.pdf-page { margin: 14px auto; width: calc(100% - 28px); max-width: 460px; aspect-ratio: 0.77; background: var(--background); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; padding: 24px 24px; font-family: var(--font-paper); font-size: 8.5px; line-height: 1.45; overflow: hidden; }
+.pdf-page .cols { columns: 2; column-gap: 14px; } .pdf-page p { margin: 0 0 5px; }
+.pdf-mark { position: absolute; border-radius: 2px; }
 
 /* Selection popover */
-.pop { position: absolute; z-index: 6; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; align-items: center; gap: 2px;
-  transform-origin: bottom center; transition: opacity 150ms ease-out, transform 150ms ease-out; font-family: var(--font-sans); }
+.pop { position: absolute; z-index: 6; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; align-items: center; gap: 2px; font-family: var(--font-sans);
+  transform-origin: bottom center; transition: opacity 150ms ease-out, transform 150ms ease-out; }
 .pop[data-state="closed"] { opacity: 0; transform: scale(0.95); pointer-events: none; }
 .swatch { width: 22px; height: 22px; border-radius: 999px; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
 .swatch span { width: 14px; height: 14px; border-radius: 999px; display: block; }
@@ -159,206 +194,208 @@ input, textarea { font: inherit; color: inherit; }
 .pop .act { border: 0; background: transparent; border-radius: 6px; padding: 3px 8px; font-size: 12.5px; display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
 .pop .act:hover { background: var(--accent); }
 
-/* Hover card: the note behind a mark (read-only) */
-.hcard { position: absolute; z-index: 6; width: min(340px, calc(100% - 24px)); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-xl); font-family: var(--font-sans); font-size: 13px;
-  transform-origin: top left; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+/* Note card from the margin icon (Reader only) */
+.hcard { position: absolute; z-index: 6; width: min(320px, calc(100% - 16px)); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-xl); font-family: var(--font-sans); font-size: 13px;
+  transform-origin: top right; transition: opacity 150ms ease-out, transform 150ms ease-out; }
 .hcard[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
 .hcard-h { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
-.hcard-b { max-height: 190px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.hcard-b .blk { padding: 4px 6px; border-radius: 6px; }
+.hcard-b { max-height: 180px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.hcard-b .blk { padding: 3px 6px; border-radius: 6px; }
 .hcard-b .blk[data-target="true"] { outline: 2px solid var(--ring); outline-offset: -1px; }
 .hcard-f { border-top: 1px solid var(--border); padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; }
 
-/* Notes pane / editor */
-.notes-head { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); padding: 4px 8px; flex-shrink: 0; flex-wrap: wrap; }
-.note-tab { border: 0; background: transparent; font-size: 12px; padding: 3px 8px; border-radius: 6px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 4px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Notes pane */
+.n-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); padding: 4px 6px; flex-shrink: 0; }
+.note-tab { border: 0; background: transparent; font-size: 12px; padding: 3px 8px; border-radius: 4px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 4px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .note-tab[aria-selected="true"] { background: var(--accent); color: var(--foreground); font-weight: 500; }
-.follow { margin-left: auto; font-size: 11.5px; border: 0; background: transparent; color: var(--muted-fg); display: inline-flex; gap: 4px; align-items: center; border-radius: 6px; padding: 2px 6px; }
-.follow[aria-pressed="true"] { color: var(--foreground); }
-.notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 40px 8px; }
-.note-meta { font-size: 11.5px; color: var(--muted-fg); padding-left: 26px; margin-bottom: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.note-title { font-size: 18px; font-weight: 600; margin: 0 0 2px; padding-left: 26px; }
-.blocks { display: flex; flex-direction: column; gap: 2px; }
-.blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px; align-items: start; border-radius: 6px; position: relative; }
+.n-tabs .spacer { flex: 1; }
+.n-sub { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 8px; flex-shrink: 0; font-size: 11.5px; color: var(--muted-fg); }
+.follow { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); display: inline-flex; gap: 4px; align-items: center; border-radius: 6px; padding: 1px 6px; }
+.follow:hover { background: var(--accent); color: var(--foreground); }
+.notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 30px 4px; }
+.blocks { display: flex; flex-direction: column; gap: 1px; }
+.blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
 .blk-row .handle { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); padding: 3px 0; border-radius: 4px; display: flex; justify-content: center; transition: opacity 120ms; }
 .blk-row:hover .handle, .blk-row:focus-within .handle { opacity: 1; }
-.blk-row[data-flash="true"] { background: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
-.blk-row { transition: box-shadow 150ms ease-out, background 150ms ease-out; }
 .blk-row[data-link="true"] { background: var(--accent); box-shadow: 0 0 0 1px var(--ring); }
-.hl:hover, .qmark:hover { box-shadow: 0 0 0 1px var(--ring); }
-.marks-off .hl:hover, .marks-off .qmark:hover { box-shadow: none; }
-.blk { padding: 3px 6px; min-width: 0; }
-.blk h4 { margin: 8px 0 2px; font-size: 14.5px; }
-.blk.ai { position: relative; }
+.blk-row[data-flash="true"] { background: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+.blk { padding: 2px 6px; min-width: 0; font-size: 13.5px; }
+.blk h4 { margin: 8px 0 2px; font-size: 14px; }
 .ai-tag { display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; font-weight: 500; }
-.quote { border-left: 3px solid var(--muted-fg); padding: 2px 0 2px 10px; font-family: var(--font-paper); font-size: 14px; }
+.quote { border-left: 3px solid var(--muted-fg); padding: 1px 0 1px 10px; font-family: var(--font-paper); font-size: 14px; }
 .quote[data-c="green"] { border-left-color: var(--hl-green); } .quote[data-c="blue"] { border-left-color: var(--hl-blue); }
 .quote[data-c="pink"] { border-left-color: var(--hl-pink); } .quote[data-c="purple"] { border-left-color: var(--hl-purple); }
-.src-chip { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-family: var(--font-sans); font-size: 11.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; background: var(--background); }
+.src-chip { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-family: var(--font-sans); font-size: 11px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; background: var(--background); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-chip:hover { color: var(--foreground); }
-.lost { border: 1px dashed var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
-.lost .q { color: var(--foreground); font-family: var(--font-paper); font-size: 13.5px; margin-top: 3px; }
-.check { display: flex; gap: 8px; align-items: flex-start; }
-.check input { margin-top: 4px; }
+.lost { border: 1px dashed var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 8px; padding: 5px 9px; font-size: 12px; }
+.lost .q { color: var(--foreground); font-family: var(--font-paper); font-size: 13.5px; margin-top: 2px; }
+.check { display: flex; gap: 8px; align-items: flex-start; } .check input { margin-top: 4px; }
 ins.sug { text-decoration: none; background: color-mix(in srgb, var(--ins) 16%, transparent); border-bottom: 1px solid var(--ins); }
 del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
-.sug-bar { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--amber-fg); margin-top: 4px; flex-wrap: wrap; }
-.sug-bar .btns { display: inline-flex; gap: 4px; }
-.sug-bar .btn { padding: 1px 8px; font-size: 11.5px; }
-.placeholder { color: var(--muted-fg); font-size: 13px; padding: 3px 6px; }
-.blk-enter { animation: blkIn 220ms ease-out; }
-@keyframes blkIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-.blk-exit { animation: blkOut 200ms ease-in forwards; }
-@keyframes blkOut { to { opacity: 0; transform: translateY(-4px); } }
-
-/* Collapse helper (height, 200 ms) */
-.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 200ms ease-out, opacity 200ms ease-out; }
-.collapse > div { min-height: 0; overflow: hidden; }
-.collapse[data-state="closed"] { grid-template-rows: 0fr; opacity: 0; }
+.sug-bar { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--amber-fg); margin-top: 3px; flex-wrap: wrap; }
+.sug-bar .btns { display: inline-flex; gap: 4px; } .sug-bar .btn { padding: 0 8px; font-size: 11.5px; }
+.placeholder { color: var(--muted-fg); font-size: 12.5px; padding: 3px 6px 0 32px; }
+.blk-enter { animation: blkIn 220ms ease-out; } @keyframes blkIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.blk-exit { animation: blkOut 200ms ease-in forwards; } @keyframes blkOut { to { opacity: 0; transform: translateY(-4px); } }
 
 /* Notes page (H5b.2 sketch) */
 .notes-page { flex: 1; min-width: 0; display: flex; }
-.tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
 .tree .search { border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; font-size: 12.5px; color: var(--muted-fg); margin-bottom: 8px; display: flex; gap: 6px; align-items: center; }
-.tree-h { font-size: 11.5px; color: var(--muted-fg); padding: 8px 6px 2px; }
+.tree-h { font-size: 12px; color: var(--muted-fg); padding: 8px 6px 2px; }
 .tree-i { border: 0; background: transparent; text-align: left; font-size: 13px; padding: 4px 6px; border-radius: 6px; display: flex; gap: 6px; align-items: center; width: 100%; white-space: nowrap; overflow: hidden; }
-.tree-i span { overflow: hidden; text-overflow: ellipsis; }
-.tree-i.sub { padding-left: 24px; color: var(--muted-fg); }
+.tree-i span { overflow: hidden; text-overflow: ellipsis; } .tree-i.sub { padding-left: 26px; color: var(--muted-fg); }
 .tree-i[aria-current="true"] { background: var(--accent); color: var(--foreground); }
-.page-editor { flex: 1; min-width: 0; overflow-y: auto; padding: 24px clamp(16px, 5vw, 64px) 60px; }
-.page-editor .inner { max-width: 760px; }
+.page-editor { flex: 1; min-width: 0; overflow-y: auto; padding: 22px clamp(16px, 5vw, 60px) 60px; }
+.page-editor .inner { max-width: 740px; }
 .crumb { font-size: 12px; color: var(--muted-fg); margin-bottom: 10px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .page-actions { float: right; display: flex; gap: 6px; }
-.slash { margin: 4px 0 4px 26px; width: 280px; max-width: calc(100% - 26px); border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-md); padding: 4px; font-size: 13px; }
+.slash { margin: 4px 0 4px 26px; width: 290px; max-width: calc(100% - 26px); border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-md); padding: 4px; font-size: 13px; }
 .slash .row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; }
 .slash .row[aria-selected="true"] { background: var(--accent); }
 .slash .row small { display: block; color: var(--muted-fg); font-size: 11.5px; }
 .slash .ico { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
 .math { font-family: 'Cambria Math', 'STIX Two Math', serif; font-size: 15px; text-align: center; padding: 6px 0; }
 .backlinks { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; font-size: 12.5px; color: var(--muted-fg); }
-
-/* Image block (H5b.3 sketch) */
 .img-blk { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.img-blk .bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted-fg); }
-.img-blk .bar .seg { margin-left: auto; }
-.whiteboard { height: 150px; background: linear-gradient(180deg, color-mix(in srgb, var(--muted) 60%, transparent), var(--muted)); position: relative; }
+.img-blk .bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted-fg); flex-wrap: wrap; }
+.img-blk .bar .seg { margin-left: auto; } .img-blk .bar .seg button { padding: 1px 8px; font-size: 11.5px; }
+.whiteboard { height: 150px; background: var(--muted); position: relative; }
 .whiteboard svg { position: absolute; inset: 10px; width: calc(100% - 20px); height: calc(100% - 20px); }
 .transcript { padding: 8px 12px; font-size: 13px; }
 .transcript table { border-collapse: collapse; font-size: 12.5px; margin-top: 4px; }
 .transcript td, .transcript th { border: 1px solid var(--border); padding: 2px 8px; text-align: left; }
-.model-mark { font-size: 11px; color: var(--muted-fg); display: inline-flex; gap: 4px; align-items: center; }
 
-/* PDF marks (sketch) */
-.pdf-page { margin: 16px auto; width: min(520px, calc(100% - 32px)); aspect-ratio: 0.77; background: var(--background); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; padding: 28px 30px; font-family: var(--font-paper); font-size: 9.5px; line-height: 1.5; color: var(--foreground); overflow: hidden; }
-.pdf-page .col { columns: 2; column-gap: 18px; }
-.pdf-page p { margin: 0 0 6px; }
-.pdf-box { position: absolute; border-radius: 2px; }
-.pdf-box[data-c="blue"] { background: color-mix(in srgb, var(--hl-blue) var(--hl-alpha), transparent); }
-.pdf-uline { position: absolute; height: 1px; background: var(--muted-fg); }
-
-/* Narrow screens: panes become tabs */
-.pane-tabs { display: none; }
-@media (max-width: 860px) {
-  .sidebar { display: none; }
+@media (max-width: 900px) {
+  .sidebar, .tree { display: none; }
   .view-chat { flex-direction: column; }
-  .chat-col { flex: 0 0 auto; min-width: 0; height: 42%; border-right: 0; border-bottom: 1px solid var(--border); }
-  .panel { flex: 1 1 auto; }
-  .pane-tabs { display: inline-flex; }
-  .panes .divider { display: none; }
-  .tree { display: none; }
-  .paper { padding-right: 40px; }
+  .chat-col { min-width: 0; flex: 0 0 46%; }
+  .panel { flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--border); }
+  .paper { padding-right: 34px; }
 }
 </style>
 
 <div class="proto-bar" role="toolbar" aria-label="Prototype controls">
-  <span class="label">PaperHub · H5b notes prototype</span>
+  <span class="label">H5b notes · prototype</span>
   <div class="seg" id="viewSeg">
-    <button aria-pressed="true" data-view="chat">Chat with paper + notes</button>
+    <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2)</button>
-    <button aria-pressed="false" data-view="pdf">PDF marks</button>
   </div>
-  <span class="muted">Try: select text in the paper · hover a highlight (Paper + Notes) or its margin icon (Paper only) · click a quote's source chip · Undo in the agent card</span>
+  <span class="muted">Try: the reader and notes buttons in the composer · select paper text · hover a mark · a quote's source chip · Undo on the card · the PDF tab</span>
 </div>
 
 <div class="app">
-  <nav class="sidebar" aria-label="App">
-    <div class="brand">PaperHub</div>
-    <button class="nav-item"><i data-lucide="lightbulb" class="icon"></i>Ideas</button>
-    <button class="nav-item" id="navNotes"><i data-lucide="notebook-pen" class="icon"></i>Notes<span class="new">new</span></button>
-    <button class="nav-item"><i data-lucide="bar-chart-3" class="icon"></i>Feedback</button>
-    <hr>
-    <button class="nav-item" id="navChats" aria-current="true"><i data-lucide="message-square" class="icon"></i>Chats</button>
-    <div class="group-h">Today</div>
-    <button class="chat-link active">Sparse priors for tiny defects</button>
-    <button class="chat-link">Contrastive pretraining for wafers</button>
-    <div class="group-h">Previous 7 days</div>
-    <button class="chat-link">TR-0412 follow-up questions</button>
-  </nav>
+  <aside class="sidebar" aria-label="Sidebar">
+    <div class="brand-row"><b>PaperHub</b><button class="icon-btn" aria-label="Present"><i data-lucide="monitor" class="icon"></i></button><button class="icon-btn" aria-label="Collapse sidebar"><i data-lucide="chevrons-left" class="icon"></i></button></div>
+    <div class="sb-nav">
+      <button class="nav-item"><i data-lucide="lightbulb" class="icon"></i>Ideas</button>
+      <button class="nav-item" id="navNotes"><i data-lucide="notebook-pen" class="icon"></i>Notes<span class="new">New</span></button>
+      <button class="nav-item"><i data-lucide="bar-chart-3" class="icon"></i>Feedback<span class="count">1</span></button>
+    </div>
+    <div class="sb-tabs" role="tablist"><button class="sb-tab" role="tab" aria-selected="true" id="tabChats"><i data-lucide="message-square" class="icon-sm"></i>Chats</button><button class="sb-tab" role="tab" aria-selected="false"><i data-lucide="book-text" class="icon-sm"></i>References <span class="count">2</span></button></div>
+    <button class="new-chat"><i data-lucide="plus" class="icon"></i>New chat<span class="kbd">Ctrl+K</span></button>
+    <div class="chats">
+      <div class="group-h">Today <i data-lucide="chevron-down" class="icon-xs"></i></div>
+      <button class="chat-link active">Where does the XR latency drop of 83–89% come from?</button>
+      <button class="chat-link">In parallel, run two separate searches…</button>
+      <div class="group-h">Previous 7 days <i data-lucide="chevron-down" class="icon-xs"></i></div>
+      <button class="chat-link">What is this paper's main point?</button>
+      <div class="group-h">Previous 30 days <i data-lucide="chevron-down" class="icon-xs"></i></div>
+      <button class="chat-link">Find the paper "LoRA: Low-Rank Adaptation…"</button>
+      <button class="chat-link">Sparsity constraints for low-level defects</button>
+    </div>
+    <div class="account"><span class="avatar"><i data-lucide="user" class="icon-sm"></i></span>Account</div>
+  </aside>
 
   <main class="main">
-    <!-- ================= Chat view ================= -->
-    <section class="view view-chat" id="vChat">
+    <section class="view view-chat" id="vChat" style="flex:1;min-width:0;display:flex">
       <div class="chat-col">
-        <div class="chat-head"><h2>Sparse priors for tiny defects</h2><span class="muted" style="font-size:12px">2 papers</span></div>
         <div class="thread"><div class="thread-inner">
-          <div class="msg-user">Earlier we agreed GISC's contrastive prior is what keeps recall on objects under 16 px. Summarise what we concluded about §3 into my notes.</div>
+          <div class="msg-user">Where in the paper does the 83%–89% XR latency drop come from?</div>
+          <div class="msg-agent">
+            <p>It's in “Toward a Predictive eXtended Reality Teleoperation System with Duo-Virtual Spaces”, §2 Background and Motivation. With the duo-virtual spaces design, the end-to-end latency drops by 89%, 88% and 83% on the three EuRoC MAV trajectories they tested.<span class="cite">[1]</span> The introduction only quotes the headline “up to 89%”.<span class="cite">[2]</span></p>
+            <div class="agent-line"><span class="agent-tag">Agent</span>Worked 22.8 s: read 2 sections <i data-lucide="chevron-right" class="icon-xs"></i></div>
+          </div>
+          <div class="msg-user">Summarise what we concluded about §2 into my notes.</div>
           <div class="msg-agent" id="agentTurn">
             <div class="card" id="noteCard">
-              <div class="card-title"><i data-lucide="notebook-pen" class="icon-sm"></i>Updated your notes: “GISC · §3 Method”</div>
+              <div class="card-title"><i data-lucide="notebook-pen" class="icon-sm"></i>Updated your notes: §2 Background and Motivation</div>
               <div class="card-sub">3 blocks added under “What we concluded” · 1 change suggested on your block</div>
               <ul class="diff">
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>The contrastive prior raises recall on objects under 16 px (Table 2: 61.4 → 70.2 AP<sub>S</sub>).<span class="cite">[1]</span></span></li>
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>It costs 7% more training time; inference is unchanged.<span class="cite">[2]</span></span></li>
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Open question: does it hold on our dark-field images?</span></li>
-                <li><i data-lucide="pencil" class="icon-sm k-sug"></i><span>Suggested on your block: “3e-4” → “1e-4 (§3.2)” — waits for you in the note</span></li>
+                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span></span></li>
+                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span></span></li>
+                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.</span></li>
+                <li><i data-lucide="pencil" class="icon-sm k-sug"></i><span>Suggested on your block: “up to 83%” → “89%, 88% and 83% (three trajectories)”</span></li>
               </ul>
               <div class="card-actions">
                 <button class="btn" id="openNoteBtn"><i data-lucide="panel-right-open" class="icon-sm"></i>Open in notes</button>
                 <button class="btn btn-ghost" id="undoBtn"><i data-lucide="undo-2" class="icon-sm"></i>Undo</button>
               </div>
             </div>
-            <div class="collapse" id="undoneWrap" data-state="closed"><div><p class="undone" style="margin-top:8px"><i data-lucide="undo-2" class="icon-sm"></i>Undone: the 3 blocks and the suggestion were removed. Your own blocks were not touched.</p></div></div>
-            <p style="margin-top:10px">Added three cited blocks under <b>What we concluded</b> in §3's note. I didn't change your learning-rate line; I suggested a fix because §3.2 says 1e-4.<span class="note-cite">[<i data-lucide="notebook-pen"></i>1]</span></p>
+            <div class="collapse" id="undoneWrap" data-state="closed"><div><p class="undone"><i data-lucide="undo-2" class="icon-sm"></i>Undone: the 3 blocks and the suggestion were removed. Your own blocks were not touched.</p></div></div>
+            <p>I added three cited blocks under <b>What we concluded</b> in §2's note. Your line said “up to 83%”; I left it as you wrote it and suggested a correction, because the paper reports 89%, 88% and 83%.<span class="cite">[<i data-lucide="notebook-pen"></i>3]</span></p>
+            <div class="agent-line"><span class="agent-tag">Agent</span>Worked 9.4 s: read 1 section, updated 1 note <i data-lucide="chevron-right" class="icon-xs"></i></div>
           </div>
-          <div class="msg-user">What did I mark as the weak point of the prior?</div>
-          <div class="msg-agent"><p>You highlighted the sentence saying the prior assumes defects are sparse within each 64-px tile, and your note beside it says that fails on scratch defects that cross tiles.<span class="note-cite">[<i data-lucide="notebook-pen"></i>2]</span></p></div>
         </div></div>
-        <div class="composer"><div class="composer-box">Ask about this paper, or ask me to update your notes…<span class="chip">Ask first</span></div></div>
+        <div class="composer"><div class="composer-box">
+          <div class="ph">Ask about a paper, search, or chat… (Enter to send, Shift+Enter for a new line)</div>
+          <div class="comp-row">
+            <button class="comp-btn" aria-label="Attach paper"><i data-lucide="paperclip" class="icon"></i></button>
+            <button class="comp-btn" id="tglReader" aria-pressed="true" aria-label="Reader" title="Reader"><i data-lucide="book-open" class="icon"></i></button>
+            <button class="comp-btn" id="tglNotes" aria-pressed="true" aria-label="Notes" title="Notes"><i data-lucide="notebook-pen" class="icon"></i><span class="newdot" aria-hidden="true"></span></button>
+            <button class="comp-btn" aria-label="Translate"><i data-lucide="languages" class="icon"></i></button>
+            <button class="comp-btn" aria-label="Slides"><i data-lucide="presentation" class="icon"></i></button>
+            <span class="spacer"></span>
+            <span class="mode-chip"><i data-lucide="hand" class="icon-sm"></i>Ask first</span>
+            <button class="comp-btn" aria-label="Voice input"><i data-lucide="mic" class="icon"></i></button>
+            <button class="send" aria-label="Send"><i data-lucide="send" class="icon-sm"></i></button>
+          </div>
+        </div></div>
       </div>
 
       <div class="panel" id="panel">
-        <div class="panel-bar">
-          <div class="seg sm" id="paneSeg" role="group" aria-label="Panel view">
-            <button aria-pressed="false" data-pv="paper"><i data-lucide="book-open" class="icon-xs"></i>Paper</button>
-            <button aria-pressed="true" data-pv="both"><i data-lucide="columns-2" class="icon-xs"></i>Paper + Notes</button>
-            <button aria-pressed="false" data-pv="notes"><i data-lucide="notebook-pen" class="icon-xs"></i>Notes</button>
-          </div>
-          <span class="spacer"></span>
-          <button class="icon-btn" id="orientBtn" title="Stack panes" aria-label="Stack panes" aria-pressed="false"><i data-lucide="rows-2" class="icon-sm"></i></button>
-          <button class="icon-btn" id="swapBtn" title="Swap panes" aria-label="Swap panes"><i data-lucide="arrow-left-right" class="icon-sm"></i></button>
-          <button class="icon-btn" title="Close panel" aria-label="Close panel"><i data-lucide="x" class="icon-sm"></i></button>
-        </div>
-        <div class="panes" id="panes" data-orient="side">
-          <!-- Reader pane -->
-          <div class="pane" id="readerPane" style="flex:1 1 55%">
-            <div class="reader-head">
-              <span class="paper-tab" title="GISC: Sparse Instance Segmentation with Contrastive Priors">GISC: Sparse Instance Segmentation…</span>
-              <span class="paper-tab" style="background:transparent;color:var(--muted-fg)">TR-0412 Defect…</span>
+        <span class="panel-resize" id="panelResize" aria-hidden="true"></span>
+        <div class="panes" id="panes" data-orient="stacked">
+          <!-- Reader pane (the Citation Canvas, renamed Reader) -->
+          <div class="pane" id="readerPane">
+            <div class="r-tabs" role="tablist">
+              <button class="paper-tab" role="tab" aria-selected="false">Virtual Reality Based Robot Tel…</button>
+              <button class="paper-tab" role="tab" aria-selected="true">Toward a Predictive eXtended Reality…</button>
               <span class="spacer"></span>
-              <button class="marks-toggle" id="marksToggle" aria-pressed="true"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span class="marks-count">4</span></button>
+              <button class="icon-btn" aria-label="Close reader" id="closeReader"><i data-lucide="x" class="icon-sm"></i></button>
+            </div>
+            <div class="r-sub">
+              <button class="fmt" data-fmt="html" aria-selected="true">HTML</button><button class="fmt" data-fmt="pdf" aria-selected="false">PDF</button>
+              <span class="spacer"></span>
+              <button class="marks-btn" id="marksToggle" aria-pressed="true" title="Show my marks"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span id="marksCount">4</span></button>
             </div>
             <div class="reader-body" id="readerBody">
               <button class="back-pill" id="backPill" data-state="closed"><i data-lucide="corner-up-left" class="icon-xs"></i>Back to note</button>
               <article class="paper" id="paper">
-                <h3>3 Method <span class="sec-mark" title="This section has a note"><i data-lucide="notebook-pen" class="icon-xs"></i>note</span></h3>
-                <p>We segment each image into 64 × 64 pixel tiles and learn an embedding per tile. <span class="hl" data-c="blue" data-mark="m1">The prior assumes that defects are sparse within each tile, so at most a few pixels of a tile belong to an instance.</span> This assumption keeps the contrastive loss well conditioned.<button class="margin-ic" data-mark="m1" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
-                <p><span class="qmark" data-mark="m2">A contrastive prior pulls embeddings of the same instance together and pushes tiles without defects apart</span>, which preserves recall on objects under 16 px where the detection head alone fails.<button class="margin-ic" data-mark="m2" aria-label="2 notes on this passage"><i data-lucide="message-square-text" class="icon-xs"></i>2</button></p>
-                <h3>3.2 Training</h3>
-                <p id="selPara">We train for 40 epochs with AdamW at a learning rate of 1e-4 and a batch of 16 wafers. The contrastive weight λ is annealed from 0.1 to 0.5 over the first ten epochs, which avoids collapse early in training.</p>
-                <div class="figure-ph">Figure 3 · recall vs. object size</div>
-                <p class="caption">Figure 3: Recall by object size. The prior helps most below 16 px.</p>
-                <p>Training takes <span class="hl" data-c="green" data-mark="m3">7% longer than the baseline; inference cost is unchanged</span> since the prior is only used in the loss.<button class="margin-ic" data-mark="m3" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
+                <h2>Background and Motivation <span class="sec-mark" title="This section has a note"><i data-lucide="notebook-pen" class="icon-xs"></i>note</span></h2>
+                <h3>Challenges of latency optimization</h3>
+                <p>Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements. This is due to the large latency between a user motion and the visual feedback from the agent in the virtual space.</p>
+                <p>As shown in the Fig. 3(A) gray bars, <span class="hl" data-c="blue" data-mark="m1">it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.</span> This large latency causes large user-agent motion mismatch and makes the user adjust based on the old poses from agent, which results in false adjustment. We find out that the dominant part of the latency is due to the network transmission, which can go up to 1 second since the data has to suffer from a two-way network delay.<button class="margin-ic" data-mark="m1" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
+                <p>Following this observation, <span class="hl" data-c="green" data-mark="m2">we believe the timely update of agent poses is more critical compared to pose accuracy.</span> Therefore, we opt for a duo-virtual spaces design which aims to avoid the network latency with a localization method running directly on XR.<button class="margin-ic" data-mark="m2" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button> <span class="cited">The agent keeps a second virtual space with the original user poses from XR, agent, and objects poses directly captured from agent sensors and uses this as a ground-truth state. We then make changes to the existing framework used in the previous experiment and record the end-to-end latency in Fig. 3 blue bars. <span class="qmark" data-mark="m3">We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</span></span></p>
+                <div class="fig">figs/exp.pdf</div>
+                <p class="caption">Figure 3: Latency profiling and challenges during poses merge.</p>
+                <p>However, this method faces <span class="hl" data-c="pink" data-mark="m4">significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations</span>, as shown in Fig. 3(B). If the prediction does not optimize for a smooth transition for the next state, the object will create a large euclidean distance Δd₂ compared to the optimized predicted pose euclidean distance Δd₁. Solving this issue is our ongoing work.<button class="margin-ic" data-mark="m4" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
               </article>
+              <div id="pdfView" hidden>
+                <div class="pdf-page">
+                  <div style="font-family:var(--font-sans);font-weight:600;font-size:10px;margin-bottom:6px">2.2 Challenges of latency optimization</div>
+                  <div class="cols">
+                    <p>Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements.</p>
+                    <p>As shown in the Fig. 3(A) gray bars, it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR. This large latency causes large user-agent motion mismatch…</p>
+                    <p>Following this observation, we believe the timely update of agent poses is more critical compared to pose accuracy. Therefore, we opt for a duo-virtual spaces design…</p>
+                    <p>We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</p>
+                  </div>
+                  <div class="pdf-mark" style="left:24px;top:86px;width:46%;height:34px;background:color-mix(in srgb, var(--hl-blue) var(--hl-alpha), transparent)"></div>
+                  <div class="pdf-mark" style="left:52%;top:42px;width:44%;height:22px;background:color-mix(in srgb, var(--hl-green) var(--hl-alpha), transparent)"></div>
+                  <div class="pdf-mark" style="left:52%;top:94px;width:40%;height:1px;background:var(--muted-fg)"></div>
+                </div>
+                <p class="muted" style="text-align:center;font-size:12px;font-family:var(--font-sans);padding:0 16px">The PDF page is untouched: marks are drawn over the page region, under the translation card layer.</p>
+              </div>
               <div class="pop" id="selPop" data-state="closed" role="toolbar" aria-label="Selection">
                 <button class="swatch" title="Highlight green" aria-label="Highlight green" data-c="green"><span style="background:var(--hl-green)"></span></button>
                 <button class="swatch" title="Highlight blue" aria-label="Highlight blue" data-c="blue"><span style="background:var(--hl-blue)"></span></button>
@@ -366,57 +403,62 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
                 <button class="swatch" title="Highlight purple" aria-label="Highlight purple" data-c="purple"><span style="background:var(--hl-purple)"></span></button>
                 <span class="sep"></span>
                 <button class="act" id="quoteAct"><i data-lucide="text-quote" class="icon-sm"></i>Quote to note</button>
-                <button class="act" id="ask"><i data-lucide="message-square-plus" class="icon-sm"></i>Add note</button>
+                <button class="act"><i data-lucide="message-square-plus" class="icon-sm"></i>Add note</button>
               </div>
               <div class="hcard" id="hcard" data-state="closed" role="dialog" aria-label="Note for this passage">
-                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span id="hcardTitle">GISC · §3 Method</span></div>
+                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i>§2 Background and Motivation</div>
                 <div class="hcard-b" id="hcardBody"></div>
-                <div class="hcard-f"><span class="muted" style="font-size:11.5px" id="hcardMeta">You · 2 days ago</span><button class="btn" id="editInNotes"><i data-lucide="square-pen" class="icon-xs"></i>Edit in Notes</button></div>
+                <div class="hcard-f"><span class="muted" style="font-size:11.5px">You · 2 days ago</span><button class="btn" id="editInNotes"><i data-lucide="square-pen" class="icon-xs"></i>Edit in Notes</button></div>
               </div>
+              <button class="translate-fab" aria-label="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
             </div>
           </div>
-          <button class="divider" id="divider" aria-label="Resize panes"></button>
+          <button class="divider" id="divider" aria-label="Resize Reader and Notes"></button>
           <!-- Notes pane -->
-          <div class="pane" id="notesPane" style="flex:1 1 45%">
-            <div class="notes-head" role="tablist" aria-label="Notes in this chat">
-              <button class="note-tab" role="tab" aria-selected="true" data-note="sec"><i data-lucide="hash" class="icon-xs"></i>§3 Method</button>
+          <div class="pane" id="notesPane">
+            <div class="n-tabs" role="tablist" aria-label="Notes in this chat">
+              <button class="note-tab" role="tab" aria-selected="true" data-note="sec"><i data-lucide="hash" class="icon-xs"></i>§2 Background and Motivation</button>
               <button class="note-tab" role="tab" aria-selected="false" data-note="chat"><i data-lucide="message-square" class="icon-xs"></i>This chat</button>
               <button class="note-tab" role="tab" aria-selected="false" data-note="paper"><i data-lucide="file-text" class="icon-xs"></i>Paper</button>
-              <button class="follow" id="followBtn" aria-pressed="true" title="Follow the reader's section"><i data-lucide="link" class="icon-xs"></i>Follows reader</button>
+              <span class="spacer"></span>
+              <button class="icon-btn" id="orientBtn" aria-label="Side by side" title="Side by side"><i data-lucide="columns-2" class="icon-sm"></i></button>
+              <button class="icon-btn" id="swapBtn" aria-label="Swap Reader and Notes" title="Swap"><i data-lucide="arrow-up-down" class="icon-sm"></i></button>
+              <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
+            <div class="n-sub"><button class="follow" id="followBtn" aria-pressed="true"><i data-lucide="link" class="icon-xs"></i>Follows the reader's section</button><span style="margin-left:auto" id="noteMeta"></span></div>
             <div class="notes-body" id="notesBody"></div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ================= Notes page (H5b.2 sketch) ================= -->
-    <section class="view" id="vNotes" hidden>
+    <!-- Notes page (H5b.2 sketch) -->
+    <section class="view" id="vNotes" hidden style="flex:1;min-width:0;display:flex">
       <div class="notes-page">
         <nav class="tree" aria-label="Notes">
           <div class="search"><i data-lucide="search" class="icon-sm"></i>Search all notes</div>
           <div class="tree-h">Recent</div>
-          <button class="tree-i" aria-current="true"><i data-lucide="hash" class="icon-sm"></i><span>GISC · §3 Method</span></button>
-          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work draft</span></button>
+          <button class="tree-i" aria-current="true"><i data-lucide="hash" class="icon-sm"></i><span>XR duo-virtual · §2 Background…</span></button>
+          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work: XR teleoperation</span></button>
           <div class="tree-h">Papers</div>
-          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>GISC: Sparse Instance Segmentation…</span></button>
-          <button class="tree-i sub" aria-current="true"><span>§3 Method</span></button>
-          <button class="tree-i sub"><span>§5 Limitations</span></button>
-          <button class="tree-i"><i data-lucide="lock" class="icon-sm"></i><span>TR-0412 Defect segmentation report</span></button>
+          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>Toward a Predictive eXtended Reality…</span></button>
+          <button class="tree-i sub"><span>Introduction</span></button>
+          <button class="tree-i sub" aria-current="true"><span>Background and Motivation</span></button>
+          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>Virtual Reality Based Robot Teleoperation…</span></button>
           <div class="tree-h">Chats</div>
-          <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Sparse priors for tiny defects</span></button>
+          <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Where does the XR latency drop…</span></button>
           <div class="tree-h">Ideas</div>
-          <button class="tree-i"><i data-lucide="lightbulb" class="icon-sm"></i><span>Port GISC's prior to YOLOSeg</span></button>
+          <button class="tree-i"><i data-lucide="lightbulb" class="icon-sm"></i><span>Smooth pose merging with a Kalman blend</span></button>
           <div class="tree-h">Pages</div>
-          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work draft</span></button>
+          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work: XR teleoperation</span></button>
           <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Reading log · November</span></button>
           <div class="tree-h">Trash</div>
         </nav>
         <div class="page-editor"><div class="inner">
           <div class="page-actions"><button class="btn"><i data-lucide="history" class="icon-xs"></i>History</button><button class="btn"><i data-lucide="download" class="icon-xs"></i>Export</button></div>
-          <div class="crumb"><i data-lucide="file-text" class="icon-xs"></i>GISC: Sparse Instance Segmentation… <i data-lucide="chevron-right" class="icon-xs"></i> §3 Method</div>
-          <h1 style="font-size:24px;margin:0 0 4px">§3 Method</h1>
-          <div class="muted" style="font-size:12px;margin-bottom:14px">Shared by every chat that attaches this paper · edited by you and the assistant · revision 14</div>
+          <div class="crumb"><i data-lucide="file-text" class="icon-xs"></i>Toward a Predictive eXtended Reality… <i data-lucide="chevron-right" class="icon-xs"></i> Background and Motivation</div>
+          <h1 style="font-size:24px;margin:0 0 4px">Background and Motivation</h1>
+          <div class="muted" style="font-size:12px;margin-bottom:14px">Shared by every chat that attaches this paper · edited by you and the assistant · revision 9</div>
           <div class="blocks" id="pageBlocks"></div>
           <div class="slash" role="listbox" aria-label="Insert block">
             <div class="row" aria-selected="true"><span class="ico"><i data-lucide="text-quote" class="icon-sm"></i></span><span>Quote from a paper<small>Search → section → passage, kept anchored</small></span></div>
@@ -425,33 +467,8 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
             <div class="row"><span class="ico"><i data-lucide="image-plus" class="icon-sm"></i></span><span>Image<small>Photo or notebook page, transcribed</small></span></div>
             <div class="row"><span class="ico"><i data-lucide="file-symlink" class="icon-sm"></i></span><span>Link to page<small>[[…]] with a backlink</small></span></div>
           </div>
-          <div class="backlinks"><b style="color:var(--foreground);font-weight:500">Linked from</b> · Related work draft · Port GISC's prior to YOLOSeg</div>
+          <div class="backlinks"><b style="color:var(--foreground);font-weight:500">Linked from</b> · Related work: XR teleoperation · Smooth pose merging with a Kalman blend</div>
         </div></div>
-      </div>
-    </section>
-
-    <!-- ================= PDF marks (sketch) ================= -->
-    <section class="view" id="vPdf" hidden>
-      <div class="panel" style="flex:1">
-        <div class="reader-head">
-          <span class="paper-tab">TR-0412 Defect segmentation report</span><span class="muted" style="font-size:11.5px">PDF · page 4 of 11</span>
-          <span class="spacer"></span><button class="marks-toggle" aria-pressed="true"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span class="marks-count">2</span></button>
-        </div>
-        <div class="reader-body">
-          <div class="pdf-page">
-            <div style="font-family:var(--font-sans);font-weight:600;font-size:11px;margin-bottom:8px">4. Inspection setup</div>
-            <div class="col">
-              <p>The line inspects 300 mm wafers under dark-field illumination at 0.8 µm per pixel. Defects smaller than 10 µm are counted by a fixed-threshold detector tuned per lot.</p>
-              <p>We observed that scratch defects frequently cross tile boundaries and are split into several detections, inflating the count by up to 18% on lots with handling damage.</p>
-              <p>Recall below 10 µm drops sharply when the background texture changes between lots, which motivates a learned prior over defect shape.</p>
-              <p>Section 5 compares the threshold detector with two learned baselines on 1,240 annotated wafer maps.</p>
-            </div>
-            <div class="pdf-box" data-c="blue" style="left:30px;top:96px;width:44%;height:42px"></div>
-            <div class="pdf-uline" style="left:30px;top:178px;width:42%"></div>
-            <div class="pdf-uline" style="left:30px;top:192px;width:30%"></div>
-          </div>
-          <p class="muted" style="text-align:center;font-size:12px;padding:0 16px">On a PDF the page is untouched: marks are drawn over the page region from the stored Marker blocks, above the translation card layer.</p>
-        </div>
       </div>
     </section>
   </main>
@@ -465,60 +482,60 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   const icons = () => { try { window.lucide && lucide.createIcons(); } catch (e) {} };
   const reduce = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const flash = el => { if (!el) return; el.dataset.flash = 'true'; setTimeout(() => delete el.dataset.flash, 1200); };
+  const scrollTo = el => el && el.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' });
 
-  /* ---------- the §3 note: an ordered list of blocks with stable ids ---------- */
-  const SRC = 'GISC · §3 Method · p. 4';
-  let notes = {
-    sec: { title: '§3 Method', meta: 'Paper section note · shared by 2 chats · revision 14', blocks: [
-      { id: 'b1', type: 'h', text: 'Assumptions', by: 'you' },
-      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', text: 'The prior assumes that defects are sparse within each tile, so at most a few pixels of a tile belong to an instance.', by: 'you' },
-      { id: 'b3', type: 'p', text: 'Fails on scratches that cross tiles. TR-0412 §4 counts them split into several detections.', by: 'you' },
-      { id: 'b4', type: 'quote', c: 'none', mark: 'm2', text: 'A contrastive prior pulls embeddings of the same instance together and pushes tiles without defects apart', by: 'you' },
-      { id: 'b5', type: 'h', text: 'Training', by: 'you' },
-      { id: 'b6', type: 'p', text: 'They use AdamW, lr 3e-4, 40 epochs.', by: 'you', sug: { del: '3e-4', ins: '1e-4 (§3.2)' } },
-      { id: 'b7', type: 'lost', text: 'λ is fixed at 0.3 for all experiments', by: 'you' },
-      { id: 'b8', type: 'h', text: 'What we concluded', by: 'you' },
-      { id: 'b9', type: 'p', ai: true, text: 'The contrastive prior raises recall on objects under 16 px (Table 2: 61.4 → 70.2 AP<sub>S</sub>).<span class="cite">[1]</span>', by: 'ai', fresh: true },
-      { id: 'b10', type: 'p', ai: true, text: 'It costs 7% more training time; inference is unchanged.<span class="cite">[2]</span>', by: 'ai', fresh: true, mark: 'm3' },
-      { id: 'b11', type: 'check', ai: true, text: 'Open question: does it hold on our dark-field images?', by: 'ai', fresh: true },
+  /* ---------- notes: ordered blocks with stable ids ---------- */
+  const SRC = 'Toward a Predictive XR… · §2 · p. 2';
+  const notes = {
+    sec: { meta: 'Shared by 2 chats · revision 9', blocks: [
+      { id: 'b1', type: 'h', text: 'Why latency matters' },
+      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
+      { id: 'b3', type: 'p', text: 'Rapid tasks (catching, tracing lines) fail at this latency — matches what we saw with our Kinova setup.' },
+      { id: 'b4', type: 'quote', c: 'green', mark: 'm2', text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
+      { id: 'b5', type: 'h', text: 'Result' },
+      { id: 'b6', type: 'quote', c: 'none', mark: 'm3', text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
+      { id: 'b7', type: 'p', text: 'Latency reduced by up to 83% with local prediction.', sug: { del: 'up to 83%', ins: '89%, 88% and 83% (three trajectories)' } },
+      { id: 'b8', type: 'lost', text: 'the round-trip time is measured with NTP-synchronised clocks' },
+      { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
+      { id: 'b10', type: 'h', text: 'What we concluded' },
+      { id: 'b11', type: 'p', ai: true, fresh: true, text: 'Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span>' },
+      { id: 'b12', type: 'p', ai: true, fresh: true, text: 'Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span>' },
+      { id: 'b13', type: 'check', ai: true, fresh: true, text: 'Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.' },
     ] },
-    chat: { title: 'This chat', meta: 'Session note · copied when the chat is forked', blocks: [
-      { id: 'c1', type: 'p', text: 'Goal: pick a prior for YOLOSeg on the dark-field line before the 12/2 review.', by: 'you' },
-      { id: 'c2', type: 'check', text: 'Ask Wei for 50 annotated scratch maps', by: 'you' },
+    chat: { meta: 'This chat only · copied when the chat is forked', blocks: [
+      { id: 'c1', type: 'p', text: 'Goal: decide if local pose prediction is worth trying on our Kinova teleop rig before the lab meeting.' },
+      { id: 'c2', type: 'check', text: 'Measure our own end-to-end latency on the 5 GHz network' },
     ] },
-    paper: { title: 'GISC: Sparse Instance Segmentation with Contrastive Priors', meta: 'Paper note · shared by 2 chats', blocks: [
-      { id: 'p1', type: 'p', text: 'Read for the small-object prior. §3 and Table 2 are the parts that matter for us.', by: 'you' },
+    paper: { meta: 'Paper note · shared by 2 chats', blocks: [
+      { id: 'p1', type: 'p', text: 'Extended abstract, UC Riverside (2024). §2 has all the numbers; no full evaluation yet.' },
     ] },
   };
-  let curNote = 'sec';
-  let undone = false;
+  const markNote = { m1: ['b2', 'b3'], m2: ['b4'], m3: ['b6', 'b7'], m4: ['b9'] };
+  let curNote = 'sec', undone = false, nid = 100;
 
-  function blockHtml(b, opts = {}) {
+  function blockHtml(b, plain) {
     const tag = b.ai ? '<span class="ai-tag" title="Written by the assistant"><i data-lucide="sparkles" class="icon-xs"></i>AI</span>' : '';
     let inner;
     if (b.type === 'h') inner = `<h4>${b.text}</h4>`;
     else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}<div><button class="src-chip" data-mark="${b.mark}"><i data-lucide="file-text" class="icon-xs"></i>${SRC}</button></div></div>`;
-    else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: this passage wasn't found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
+    else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
     else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
-    else if (b.sug && !opts.plain) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del><ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
-    else inner = `<div>${b.text}${b.type !== 'check' ? tag : ''}</div>`;
-    return `<div class="blk-row ${b.fresh && opts.enter ? 'blk-enter' : ''}" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk ${b.ai ? 'ai' : ''}">${inner}</div></div>`;
+    else if (b.sug && !plain) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
+    else inner = `<div>${b.text}${tag}</div>`;
+    return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div></div>`;
   }
-  function renderNote(enter) {
-    const n = notes[curNote];
-    const blocks = n.blocks.filter(b => !(undone && b.fresh));
-    const shown = blocks.map(b => (undone && b.sug) ? { ...b, sug: null } : b);
-    $('#notesBody').innerHTML = `<h3 class="note-title">${esc(n.title)}</h3><div class="note-meta">${n.meta}</div><div class="blocks">${shown.map(b => blockHtml(b, { enter })).join('')}<div class="placeholder" style="padding-left:32px">Type / for blocks, @ to link a paper or section</div></div>`;
-    icons();
+  const visible = n => notes[n].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
+  function renderNote() {
+    $('#notesBody').innerHTML = `<div class="blocks">${visible(curNote).map(b => blockHtml(b)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
+    $('#noteMeta').textContent = notes[curNote].meta; icons();
   }
   function renderPage() {
-    const b = notes.sec.blocks.filter(x => x.type !== 'lost').slice(0, 6);
-    const math = { id: 'm', type: 'raw' };
-    $('#pageBlocks').innerHTML = b.map(x => blockHtml(x, { plain: true })).join('') +
-      `<div class="blk-row"><span></span><div class="blk"><div class="math">ℒ = ℒ<sub>seg</sub> + λ · ℒ<sub>con</sub>,&nbsp;&nbsp; λ: 0.1 → 0.5</div></div></div>` +
-      `<div class="blk-row"><span></span><div class="blk"><div class="img-blk"><div class="bar"><i data-lucide="image" class="icon-xs"></i>whiteboard-1114.jpg<span class="model-mark"><i data-lucide="sparkles" class="icon-xs"></i>transcribed by the model · edited by you</span><div class="seg sm"><button aria-pressed="false" data-iv="img">Image</button><button aria-pressed="true" data-iv="txt">Text</button></div></div>` +
-      `<div class="whiteboard" id="ivImg" hidden><svg viewBox="0 0 300 120" aria-label="Whiteboard sketch"><g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--muted-fg)"><rect x="12" y="20" width="70" height="40" rx="4"/><rect x="118" y="20" width="70" height="40" rx="4"/><rect x="224" y="20" width="64" height="40" rx="4"/><path d="M82 40h36M188 40h36"/><path d="M150 60v36h-90v-36"/></g><g font-size="10" fill="currentColor" style="color:var(--foreground)"><text x="22" y="44">backbone</text><text x="128" y="44">tile emb.</text><text x="232" y="44">seg head</text><text x="86" y="112">contrastive loss (train only)</text></g></svg></div>` +
-      `<div class="transcript" id="ivTxt"><b>Whiteboard, 14 Nov:</b> backbone → tile embeddings → seg head; contrastive loss on tile embeddings, training only.<table><tr><th>Option</th><th>Extra train time</th></tr><tr><td>GISC prior</td><td>+7%</td></tr><tr><td>L1 mask prior</td><td>+2%</td></tr></table></div></div></div></div>`;
+    $('#pageBlocks').innerHTML = visible('sec').filter(b => b.type !== 'lost').slice(0, 7).map(b => blockHtml(b, true)).join('') +
+      `<div class="blk-row"><span></span><div class="blk"><div class="math">latency reduction = 1 − T<sub>duo</sub> / T<sub>ROS Reality</sub></div></div></div>` +
+      `<div class="blk-row"><span></span><div class="blk"><div class="img-blk"><div class="bar"><i data-lucide="image" class="icon-xs"></i>lab-whiteboard-1114.jpg<span style="display:inline-flex;gap:4px;align-items:center"><i data-lucide="sparkles" class="icon-xs"></i>transcribed by the model · edited by you</span><div class="seg"><button aria-pressed="false" data-iv="img">Image</button><button aria-pressed="true" data-iv="txt">Text</button></div></div>` +
+      `<div class="whiteboard" id="ivImg" hidden><svg viewBox="0 0 300 120" role="img" aria-label="Whiteboard sketch of the two virtual spaces"><g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--muted-fg)"><rect x="10" y="18" width="110" height="46" rx="4"/><rect x="180" y="18" width="110" height="46" rx="4"/><path d="M120 34h60M180 50h-60"/></g><g font-size="10" fill="currentColor" style="color:var(--foreground)"><text x="18" y="38">XR: predicted</text><text x="18" y="52">agent + objects</text><text x="188" y="38">Agent: ground</text><text x="188" y="52">truth space</text><text x="126" y="30">user poses</text><text x="122" y="62">calibrate</text><text x="60" y="100">drift at each calibration → smooth blend?</text></g></svg></div>` +
+      `<div class="transcript" id="ivTxt"><b>Whiteboard, 14 Nov:</b> XR side predicts agent + objects; agent keeps the ground-truth space and sends periodic calibration. Drift at each calibration → try a smooth blend.<table><tr><th>Setup</th><th>Our latency</th></tr><tr><td>ROS Reality, 5 GHz</td><td>1.3 s</td></tr><tr><td>Local prediction</td><td>to measure</td></tr></table></div></div></div></div>`;
     icons();
     $$('[data-iv]').forEach(btn => btn.addEventListener('click', () => {
       $$('[data-iv]').forEach(x => x.setAttribute('aria-pressed', String(x === btn)));
@@ -527,27 +544,37 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   }
 
   /* ---------- views ---------- */
-  $$('#viewSeg button').forEach(b => b.addEventListener('click', () => {
-    $$('#viewSeg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    $('#vChat').hidden = b.dataset.view !== 'chat'; $('#vNotes').hidden = b.dataset.view !== 'notes'; $('#vPdf').hidden = b.dataset.view !== 'pdf';
-    $('#navNotes').setAttribute('aria-current', String(b.dataset.view === 'notes'));
-    $('#navChats').setAttribute('aria-current', String(b.dataset.view !== 'notes'));
-  }));
-  $('#navNotes').addEventListener('click', () => $('[data-view="notes"]').click());
-  $('#navChats').addEventListener('click', () => $('[data-view="chat"]').click());
+  function showView(v) {
+    $$('#viewSeg button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === v)));
+    $('#vChat').hidden = v !== 'chat'; $('#vNotes').hidden = v !== 'notes';
+    $('#navNotes').setAttribute('aria-current', String(v === 'notes'));
+  }
+  $$('#viewSeg button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+  $('#navNotes').addEventListener('click', () => showView('notes'));
+  $('#tabChats').addEventListener('click', () => showView('chat'));
 
-  /* ---------- panel: views, orientation, swap, divider ---------- */
-  const setPanes = pv => {
-    $$('#paneSeg button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.pv === pv)));
-    $('#readerPane').dataset.hidden = String(pv === 'notes');
-    $('#notesPane').dataset.hidden = String(pv === 'paper');
-    $('#divider').hidden = pv !== 'both';
-    try { localStorage.setItem('h5b-pv', pv); } catch (e) {}
-  };
-  $$('#paneSeg button').forEach(b => b.addEventListener('click', () => setPanes(b.dataset.pv)));
+  /* ---------- the composer toggles the right panel: Reader, Notes, or both ---------- */
+  const state = { reader: true, notes: true };
+  function applyPanel() {
+    $('#tglReader').setAttribute('aria-pressed', String(state.reader));
+    $('#tglNotes').setAttribute('aria-pressed', String(state.notes));
+    $('#readerPane').dataset.hidden = String(!state.reader);
+    $('#notesPane').dataset.hidden = String(!state.notes);
+    $('#divider').hidden = !(state.reader && state.notes);
+    $('#panel').dataset.closed = String(!state.reader && !state.notes);
+    // Two panes need room: the panel widens when both are on.
+    $('#panel').style.setProperty('--panel-w', state.reader && state.notes ? '44%' : '34%');
+    try { localStorage.setItem('h5b-panel', JSON.stringify(state)); } catch (e) {}
+  }
+  $('#tglReader').addEventListener('click', () => { state.reader = !state.reader; applyPanel(); });
+  $('#tglNotes').addEventListener('click', () => { state.notes = !state.notes; applyPanel(); });
+  $('#closeReader').addEventListener('click', () => { state.reader = false; applyPanel(); });
+  $('#closeNotes').addEventListener('click', () => { state.notes = false; applyPanel(); });
   $('#orientBtn').addEventListener('click', e => {
-    const p = $('#panes'); const st = p.dataset.orient !== 'stacked';
-    p.dataset.orient = st ? 'stacked' : 'side'; e.currentTarget.setAttribute('aria-pressed', String(st));
+    const p = $('#panes'); const side = p.dataset.orient !== 'side'; p.dataset.orient = side ? 'side' : 'stacked';
+    e.currentTarget.setAttribute('aria-label', side ? 'Stack' : 'Side by side'); e.currentTarget.title = side ? 'Stack' : 'Side by side';
+    e.currentTarget.innerHTML = `<i data-lucide="${side ? 'rows-2' : 'columns-2'}" class="icon-sm"></i>`;
+    $('#swapBtn').innerHTML = `<i data-lucide="${side ? 'arrow-left-right' : 'arrow-up-down'}" class="icon-sm"></i>`; icons();
   });
   $('#swapBtn').addEventListener('click', () => {
     const p = $('#panes'), r = $('#readerPane'), n = $('#notesPane'), d = $('#divider');
@@ -558,97 +585,87 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     d.addEventListener('pointerdown', e => { drag = true; d.dataset.drag = 'true'; d.setPointerCapture(e.pointerId); });
     d.addEventListener('pointerup', () => { drag = false; d.dataset.drag = 'false'; });
     d.addEventListener('pointermove', e => {
-      if (!drag) return; const p = $('#panes').getBoundingClientRect(); const st = $('#panes').dataset.orient === 'stacked';
-      const f = st ? (e.clientY - p.top) / p.height : (e.clientX - p.left) / p.width;
-      const first = $('#panes').firstElementChild, last = $('#panes').lastElementChild; const k = Math.min(0.8, Math.max(0.2, f));
-      first.style.flex = `1 1 ${k * 100}%`; last.style.flex = `1 1 ${(1 - k) * 100}%`;
+      if (!drag) return; const p = $('#panes'), box = p.getBoundingClientRect(), side = p.dataset.orient === 'side';
+      const k = Math.min(0.8, Math.max(0.2, side ? (e.clientX - box.left) / box.width : (e.clientY - box.top) / box.height));
+      p.firstElementChild.style.flexBasis = `${k * 100}%`; p.lastElementChild.style.flexBasis = `${(1 - k) * 100}%`;
+    });
+    const rz = $('#panelResize'); let rdrag = false;
+    rz.addEventListener('pointerdown', e => { rdrag = true; rz.setPointerCapture(e.pointerId); });
+    rz.addEventListener('pointerup', () => { rdrag = false; });
+    rz.addEventListener('pointermove', e => {
+      if (!rdrag) return; const m = $('.main').getBoundingClientRect();
+      const w = Math.min(0.7, Math.max(0.25, (m.right - e.clientX) / m.width)); $('#panel').style.setProperty('--panel-w', (w * 100) + '%');
     });
   })();
 
+  /* ---------- reader: HTML / PDF ---------- */
+  $$('.fmt').forEach(b => b.addEventListener('click', () => {
+    $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+    $('#paper').hidden = b.dataset.fmt !== 'html'; $('#pdfView').hidden = b.dataset.fmt !== 'pdf';
+  }));
+
   /* ---------- note tabs + follow ---------- */
   $$('.note-tab').forEach(t => t.addEventListener('click', () => {
-    $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x === t))); curNote = t.dataset.note; renderNote(false);
+    $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x === t))); curNote = t.dataset.note; renderNote();
   }));
   $('#followBtn').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
-    e.currentTarget.setAttribute('aria-pressed', String(on));
-    e.currentTarget.innerHTML = `<i data-lucide="${on ? 'link' : 'pin'}" class="icon-xs"></i>${on ? 'Follows reader' : 'Pinned'}`; icons();
+    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
+    e.currentTarget.innerHTML = `<i data-lucide="${on ? 'link' : 'pin'}" class="icon-xs"></i>${on ? "Follows the reader's section" : 'Pinned to this note'}`; icons();
   });
 
-  /* ---------- marks: hover card, flash, toggle ---------- */
-  const markNote = { m1: ['b2', 'b3'], m2: ['b4'], m3: ['b10'] };
-  const hcard = $('#hcard'); let hideT = null, curMark = null;
+  /* ---------- marks: never cover the text ---------- */
+  const hcard = $('#hcard'); let hideT = null, openT = null, curMark = null;
+  const marksOff = () => $('#paper').classList.contains('marks-off');
+  function syncBlock(mark, on) {
+    $$('.blk-row[data-link]').forEach(r => delete r.dataset.link);
+    if (!on || curNote !== 'sec') return;
+    (markNote[mark] || []).forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (!row) return; row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); });
+  }
   function showCard(el, mark) {
-    clearTimeout(hideT); curMark = mark;
-    const target = markNote[mark] || [];
-    const blocks = notes.sec.blocks.filter(b => !(undone && b.fresh));
-    $('#hcardBody').innerHTML = blocks.filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}…”</span>` : b.text}</div>`).join('');
-    // Beside the margin icon, never over the paragraph: the card's right edge
-    // sits just left of the icon, its top at the icon's line.
+    clearTimeout(hideT); curMark = mark; const target = markNote[mark] || [];
+    $('#hcardBody').innerHTML = visible('sec').filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 80))}…”</span>` : b.text}</div>`).join('');
     const body = $('#readerBody').getBoundingClientRect();
-    const icon = el.classList.contains('margin-ic') ? el : (el.closest('p') && $('.margin-ic', el.closest('p'))) || el;
-    const r = icon.getBoundingClientRect();
-    const w = Math.min(340, body.width - 24);
-    const right = r.right - body.left;
-    hcard.style.left = Math.max(8, Math.min(right + 8, body.width - w - 8)) + 'px';
-    if (right + 8 + w > body.width - 8) hcard.style.left = Math.max(8, r.left - body.left - w - 8) + 'px';
-    hcard.style.top = (r.top - body.top + $('#readerBody').scrollTop - 4) + 'px';
-    hcard.style.transformOrigin = 'top right';
+    const icon = el.classList.contains('margin-ic') ? el : ($('.margin-ic', el.closest('p')) || el);
+    const r = icon.getBoundingClientRect(), w = Math.min(320, body.width - 16);
+    let left = r.right - body.left + 6; if (left + w > body.width - 8) left = Math.max(8, r.left - body.left - w - 6);
+    hcard.style.left = left + 'px'; hcard.style.top = (r.top - body.top + $('#readerBody').scrollTop - 4) + 'px';
     hcard.dataset.state = 'open';
     requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest' }); });
-    $('#hcardMeta').textContent = mark === 'm3' ? 'Assistant · just now' : 'You · 2 days ago';
   }
   const hideCard = () => { clearTimeout(openT); hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 180); };
-  let openT = null;
-  const notesOpen = () => $('#notesPane').dataset.hidden !== 'true';
-  const marksOff = () => $('#paper').classList.contains('marks-off');
-  // Notes pane open: no popup — outline the linked block in the pane instead.
-  function syncBlock(mark, on) {
-    $$('.blk-row[data-link]').forEach(r => { delete r.dataset.link; });
-    if (!on) return;
-    if (curNote !== 'sec') return;
-    (markNote[mark] || []).forEach((id, i) => {
-      const row = $(`.blk-row[data-id="${id}"]`); if (!row) return;
-      row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
-    });
-  }
   function bindMark(el) {
     const mark = el.dataset.mark, isIcon = el.classList.contains('margin-ic');
     el.addEventListener('mouseenter', () => {
       if (marksOff()) return;
-      if (notesOpen()) { syncBlock(mark, true); return; }
+      if (state.notes) { syncBlock(mark, true); return; }
       if (isIcon) { clearTimeout(openT); openT = setTimeout(() => showCard(el, mark), 300); }
     });
     el.addEventListener('mouseleave', () => { syncBlock(mark, false); hideCard(); });
-    // A click (or tap) opens the card in Paper-only view, wherever the mark is.
     el.addEventListener('click', e => {
-      if (marksOff() || window.getSelection().toString()) return;
-      if (notesOpen()) { syncBlock(mark, true); const r = $(`.blk-row[data-id="${(markNote[mark] || [])[0]}"]`); if (r) { r.dataset.flash = 'true'; setTimeout(() => delete r.dataset.flash, 1200); } return; }
+      if (marksOff() || String(window.getSelection())) return;
+      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [])[0]}"]`)); return; }
       e.stopPropagation(); showCard(el, mark);
     });
   }
-  $$('[data-mark]', $('#paper')).forEach(bindMark);
+  $$('#paper [data-mark]').forEach(bindMark);
   hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
   document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark]')) hcard.dataset.state = 'closed'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { hcard.dataset.state = 'closed'; $('#selPop').dataset.state = 'closed'; } });
   $('#editInNotes').addEventListener('click', () => {
-    hcard.dataset.state = 'closed'; setPanes('both');
-    $('.note-tab[data-note="sec"]').click();
-    const id = (markNote[curMark] || [])[0]; const row = id && $(`.blk-row[data-id="${id}"]`);
-    if (row) { row.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' }); row.dataset.flash = 'true'; setTimeout(() => delete row.dataset.flash, 1200); }
+    hcard.dataset.state = 'closed'; state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
+    const row = $(`#notesBody .blk-row[data-id="${(markNote[curMark] || [])[0]}"]`); scrollTo(row); flash(row);
   });
   $('#marksToggle').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
-    e.currentTarget.setAttribute('aria-pressed', String(on)); $('#paper').classList.toggle('marks-off', !on);
+    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
+    $('#paper').classList.toggle('marks-off', !on);
   });
 
   /* ---------- quote source chip → reader, back pill ---------- */
   document.addEventListener('click', e => {
-    const chip = e.target.closest('.src-chip'); if (!chip) return;
-    setPanes('both');
+    const chip = e.target.closest('.src-chip'); if (!chip || !$('#vChat').contains(chip)) return;
+    state.reader = true; applyPanel(); $('.fmt[data-fmt="html"]').click();
     const mark = $(`#paper [data-mark="${chip.dataset.mark}"]:not(.margin-ic)`); if (!mark) return;
-    mark.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' });
-    mark.dataset.flash = 'true'; setTimeout(() => delete mark.dataset.flash, 1200);
+    scrollTo(mark); flash(mark);
     const pill = $('#backPill'); pill.dataset.state = 'open'; pill.dataset.from = chip.closest('.blk-row')?.dataset.id || '';
     const rb = $('#readerBody'); const start = rb.scrollTop;
     const onScroll = () => { if (Math.abs(rb.scrollTop - start) > 160) { pill.dataset.state = 'closed'; rb.removeEventListener('scroll', onScroll); } };
@@ -656,72 +673,58 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   });
   $('#backPill').addEventListener('click', e => {
     const id = e.currentTarget.dataset.from; e.currentTarget.dataset.state = 'closed';
-    const row = id && $(`.blk-row[data-id="${id}"]`);
-    if (row) { row.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' }); row.dataset.flash = 'true'; setTimeout(() => delete row.dataset.flash, 1200); }
+    const row = id && $(`#notesBody .blk-row[data-id="${id}"]`); scrollTo(row); flash(row);
   });
 
   /* ---------- selection popover: highlight / quote to note ---------- */
   const pop = $('#selPop'); let selRange = null;
-  $('#paper').addEventListener('mouseup', () => {
-    setTimeout(() => {
-      const sel = window.getSelection(); if (!sel || sel.isCollapsed || !$('#paper').contains(sel.anchorNode)) { pop.dataset.state = 'closed'; return; }
-      selRange = sel.getRangeAt(0); const r = selRange.getBoundingClientRect(), body = $('#readerBody').getBoundingClientRect();
-      pop.style.left = Math.max(8, Math.min(r.left - body.left + r.width / 2 - 150, body.width - 320)) + 'px';
-      pop.style.top = (r.top - body.top + $('#readerBody').scrollTop - 44) + 'px';
-      pop.dataset.state = 'open';
-    }, 0);
-  });
+  $('#paper').addEventListener('mouseup', () => setTimeout(() => {
+    const sel = window.getSelection(); if (!sel || sel.isCollapsed || !$('#paper').contains(sel.anchorNode)) { pop.dataset.state = 'closed'; return; }
+    selRange = sel.getRangeAt(0); const r = selRange.getBoundingClientRect(), body = $('#readerBody').getBoundingClientRect();
+    pop.style.left = Math.max(6, Math.min(r.left - body.left + r.width / 2 - 150, body.width - 316)) + 'px';
+    pop.style.top = (r.top - body.top + $('#readerBody').scrollTop - 44) + 'px'; pop.dataset.state = 'open';
+  }, 0));
   document.addEventListener('mousedown', e => { if (!pop.contains(e.target) && !$('#paper').contains(e.target)) pop.dataset.state = 'closed'; });
   function wrapSel(cls, attrs) {
     if (!selRange) return null; const span = document.createElement('span'); span.className = cls; Object.assign(span.dataset, attrs);
     try { selRange.surroundContents(span); } catch (e) { return null; }
     window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; return span;
   }
-  let nid = 100;
   function addQuote(text, c, mark) {
-    const sec = notes.sec.blocks; const at = sec.findIndex(b => b.id === 'b6');
-    sec.splice(at + 1, 0, { id: 'q' + (++nid), type: 'quote', c, mark, text, by: 'you', fresh: true });
-    $('.note-tab[data-note="sec"]').click(); renderNote(false);
-    const row = $(`.blk-row[data-id="q${nid}"]`); if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest' }); }
+    const id = 'q' + (++nid); const sec = notes.sec.blocks; const at = sec.findIndex(b => b.id === 'b10');
+    sec.splice(at, 0, { id, type: 'quote', c, mark, text }); markNote[mark] = [id];
+    state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
+    const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest' }); }
   }
   $$('.swatch', pop).forEach(s => s.addEventListener('click', () => {
     const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
     const span = wrapSel('hl', { c: s.dataset.c, mark }); if (!span) return;
-    markNote[mark] = ['q' + (nid + 1)]; addQuote(text, s.dataset.c, mark);
-    bindMark(span);
-    $('.marks-count').textContent = String(+$('.marks-count').textContent + 1);
+    bindMark(span); addQuote(text, s.dataset.c, mark); $('#marksCount').textContent = String(+$('#marksCount').textContent + 1);
   }));
   $('#quoteAct').addEventListener('click', () => {
     const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
-    const span = wrapSel('qmark', { mark }); if (!span) return;
-    markNote[mark] = ['q' + (nid + 1)]; addQuote(text, 'none', mark);
-    bindMark(span);
+    const span = wrapSel('qmark', { mark }); if (!span) return; bindMark(span); addQuote(text, 'none', mark);
   });
 
-  /* ---------- suggestions: accept / reject ---------- */
+  /* ---------- suggestions + agent card ---------- */
   $('#notesBody').addEventListener('click', e => {
     const acc = e.target.closest('[data-acc]'), rej = e.target.closest('[data-rej]'); if (!acc && !rej) return;
-    const b = notes.sec.blocks.find(x => x.id === (acc || rej).dataset[acc ? 'acc' : 'rej']);
-    if (acc) b.text = b.text.replace(b.sug.del, b.sug.ins); b.sug = null; renderNote(false);
+    const b = notes.sec.blocks.find(x => x.id === (acc ? acc.dataset.acc : rej.dataset.rej));
+    if (acc) b.text = b.text.replace(b.sug.del, b.sug.ins); b.sug = null; renderNote();
   });
-
-  /* ---------- agent card: open / undo ---------- */
   $('#openNoteBtn').addEventListener('click', () => {
-    setPanes('both'); $('.note-tab[data-note="sec"]').click();
-    const row = $('.blk-row[data-id="b9"]'); if (row) { row.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' }); row.dataset.flash = 'true'; setTimeout(() => delete row.dataset.flash, 1200); }
+    state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
+    const row = $('#notesBody .blk-row[data-id="b11"]'); scrollTo(row); flash(row);
   });
   $('#undoBtn').addEventListener('click', () => {
     if (undone) return;
-    $$('.blk-row').filter(r => ['b9', 'b10', 'b11'].includes(r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
-    setTimeout(() => { undone = true; renderNote(false); }, reduce() ? 0 : 200);
-    $('#undoneWrap').dataset.state = 'open';
-    const card = $('#noteCard'); card.style.opacity = '0.55'; $('#undoBtn').disabled = true; $('#openNoteBtn').disabled = true;
+    $$('#notesBody .blk-row').filter(r => ['b11', 'b12', 'b13'].includes(r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
+    setTimeout(() => { undone = true; renderNote(); renderPage(); }, reduce() ? 0 : 200);
+    $('#undoneWrap').dataset.state = 'open'; $('#noteCard').style.opacity = '0.55';
+    $('#undoBtn').disabled = true; $('#openNoteBtn').disabled = true;
   });
 
-  // Narrow screens: Paper + Notes falls back to one pane at a time.
-  const mq = window.matchMedia && matchMedia('(max-width: 860px)');
-  let saved = 'both'; try { saved = localStorage.getItem('h5b-pv') || 'both'; } catch (e) {}
-  setPanes(mq && mq.matches && saved === 'both' ? 'notes' : saved);
-  renderNote(true); renderPage(); icons();
+  try { const s = JSON.parse(localStorage.getItem('h5b-panel') || 'null'); if (s && typeof s.reader === 'boolean') Object.assign(state, s); } catch (e) {}
+  applyPanel(); renderNote(); renderPage(); icons();
 })();
 </script>
