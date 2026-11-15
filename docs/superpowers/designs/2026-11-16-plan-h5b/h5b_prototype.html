@@ -185,6 +185,33 @@ input, textarea { font: inherit; color: inherit; }
 .pdf-page { margin: 14px auto; width: calc(100% - 28px); max-width: 460px; aspect-ratio: 0.77; background: var(--background); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; padding: 24px 24px; font-family: var(--font-paper); font-size: 8.5px; line-height: 1.45; overflow: hidden; }
 .pdf-page .cols { columns: 2; column-gap: 14px; } .pdf-page p { margin: 0 0 5px; }
 .pdf-mark { position: absolute; border-radius: 2px; }
+/* PDF-only paper: a page drawn at Marker block positions (595 × 842 pt); the text is the text layer. */
+.gpage { margin: 14px auto 6px; width: calc(100% - 36px); max-width: 640px; aspect-ratio: 595 / 842; background: oklch(1 0 0); color: oklch(0.15 0 0); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; font-family: var(--font-paper); overflow: visible; container-type: inline-size; }
+.gblk { position: absolute; overflow: hidden; font-size: 1.62cqw; line-height: 1.24; text-align: justify; }
+.gblk.h { font-family: var(--font-sans); font-weight: 600; font-size: 1.9cqw; }
+.gblk.title { font-family: var(--font-sans); font-weight: 700; font-size: 3.4cqw; line-height: 1.15; text-align: left; }
+.gblk.small { font-size: 1.4cqw; color: oklch(0.35 0 0); text-align: left; }
+.gmarks { position: absolute; inset: 0; pointer-events: none; }
+.gmark { position: absolute; border-radius: 1px; transition: box-shadow 150ms ease-out; }
+.gmark[data-kind="quote"] { height: 1px !important; background: oklch(0.45 0 0); }
+.gmark[data-c="green"] { background: color-mix(in srgb, #2f9e63 26%, transparent); } .gmark[data-c="blue"] { background: color-mix(in srgb, #3b7dd8 26%, transparent); }
+.gmark[data-c="pink"] { background: color-mix(in srgb, #d6457e 26%, transparent); } .gmark[data-c="purple"] { background: color-mix(in srgb, #8b5cd6 26%, transparent); }
+.gmark[data-kind="box"] { outline: 1.5px solid color-mix(in srgb, #3b7dd8 70%, transparent); }
+.gmark[data-hot="true"] { box-shadow: 0 0 0 1px oklch(0.55 0 0); }
+.gmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
+.marks-off .gmark, .marks-off .gicon { visibility: hidden; }
+.gicon { position: absolute; pointer-events: auto; border: 0; background: transparent; color: oklch(0.5 0 0); border-radius: 4px; padding: 1px; display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-sans); font-size: 9px; }
+.gicon:hover { background: oklch(0.95 0 0); color: oklch(0.15 0 0); }
+.scan { background: repeating-linear-gradient(0deg, oklch(0.97 0.01 85), oklch(0.97 0.01 85) 11px, oklch(0.93 0.01 85) 12px); cursor: crosshair; user-select: none; }
+.scan .scan-fig { position: absolute; left: 14%; top: 16%; width: 72%; height: 30%; border: 1px solid oklch(0.6 0 0); display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-size: 2cqw; color: oklch(0.4 0 0); background: oklch(0.99 0 0); }
+.scan .scan-cap { position: absolute; left: 14%; top: 48%; width: 72%; font-size: 1.35cqw; color: oklch(0.3 0 0); }
+.scan .scan-lines { position: absolute; left: 10%; right: 10%; top: 58%; bottom: 8%; background: repeating-linear-gradient(180deg, oklch(0.55 0 0 / 0.35) 0 2px, transparent 2px 9px); }
+.page-note { text-align: center; font-family: var(--font-sans); font-size: 11.5px; color: var(--muted-fg); margin: 0 14px 6px; }
+.drag-box { position: absolute; border: 1.5px dashed var(--hl-blue); background: color-mix(in srgb, var(--hl-blue) 12%, transparent); pointer-events: none; }
+.r-sub .doc-kind { font-size: 11.5px; color: var(--muted-fg); padding: 2px 6px; }
+.hcard[data-mode="translation"] .hcard-f { display: none; }
+.tr-body { padding: 8px 10px 10px; font-size: 13px; line-height: 1.6; }
+.translate-fab[aria-pressed="true"] { color: var(--foreground); border-color: var(--ring); }
 
 /* Selection popover */
 .pop { position: absolute; z-index: 6; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; align-items: center; gap: 2px; font-family: var(--font-sans);
@@ -290,7 +317,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2)</button>
   </div>
-  <span class="muted">Try: the reader and notes buttons in the composer · select paper text · hover a mark · a quote's source chip · Undo on the card · the PDF tab</span>
+  <span class="muted">Try: the reader and notes buttons in the composer · select paper text · hover a mark · a quote's source chip · Undo on the card · the PDF-only paper tab (select text, drag a box on page 2, turn on translate)</span>
 </div>
 
 <div class="app">
@@ -368,13 +395,14 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
           <!-- Reader pane (the Citation Canvas, renamed Reader) -->
           <div class="pane" id="readerPane">
             <div class="r-tabs" role="tablist">
-              <button class="paper-tab" role="tab" aria-selected="false">Virtual Reality Based Robot Tel…</button>
-              <button class="paper-tab" role="tab" aria-selected="true">Toward a Predictive eXtended Reality…</button>
+              <button class="paper-tab" role="tab" aria-selected="true" data-doc="xr">Toward a Predictive eXtended Reality…</button>
+              <button class="paper-tab" role="tab" aria-selected="false" data-doc="ghost" title="A Review of Ghost Imaging via Sparsity Constraints (PDF only)">A Review of Ghost Imaging via…</button>
               <span class="spacer"></span>
               <button class="icon-btn" aria-label="Close reader" id="closeReader"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
             <div class="r-sub">
-              <button class="fmt" data-fmt="html" aria-selected="true">HTML</button><button class="fmt" data-fmt="pdf" aria-selected="false">PDF</button>
+              <span id="fmtTabs"><button class="fmt" data-fmt="html" aria-selected="true">HTML</button><button class="fmt" data-fmt="pdf" aria-selected="false">PDF</button></span>
+              <span class="doc-kind" id="docKind" hidden>PDF only · 18 pages</span>
               <span class="spacer"></span>
               <button class="marks-btn" id="marksToggle" aria-pressed="true" title="Show my marks"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span id="marksCount">4</span></button>
             </div>
@@ -403,7 +431,31 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
                   <div class="pdf-mark" style="left:52%;top:42px;width:44%;height:22px;background:color-mix(in srgb, var(--hl-green) var(--hl-alpha), transparent)"></div>
                   <div class="pdf-mark" style="left:52%;top:94px;width:40%;height:1px;background:var(--muted-fg)"></div>
                 </div>
-                <p class="muted" style="text-align:center;font-size:12px;font-family:var(--font-sans);padding:0 16px">The PDF page is untouched: marks are drawn over the page region, under the translation card layer.</p>
+                <p class="muted" style="text-align:center;font-size:12px;font-family:var(--font-sans);padding:0 16px">Marks made in the HTML view show here wherever their quoted text is found on the page.</p>
+              </div>
+              <!-- PDF-only paper (real: Appl. Sci. 2018, 8, 1379). Block positions from its Marker blocks.json. -->
+              <div id="ghostView" hidden>
+                <div class="gpage" id="gp1" data-page="1">
+                  <div class="gblk small" style="left:12.6%;top:3.9%;width:74.6%;height:1.3%">Review</div>
+                  <div class="gblk title" style="left:12.4%;top:6.4%;width:75%;height:6%">A Review of Ghost Imaging via Sparsity Constraints</div>
+                  <div class="gblk small" style="left:13.6%;top:14.6%;width:73%;height:4%">Shensheng Han *, Hong Yu, Xia Shen, Honglin Liu, Wenlin Gong and Zhentao Liu</div>
+                  <div class="gblk small" style="left:13.6%;top:19.8%;width:73%;height:4.2%">Shanghai Institute of Optics &amp; Fine Mechanics, Chinese Academy of Sciences, Shanghai 201800, China</div>
+                  <div class="gblk small" style="left:13.8%;top:26.5%;width:50%;height:1.2%">Received: 20 June 2018; Accepted: 27 July 2018; Published: 16 August 2018</div>
+                  <div class="gblk" data-block="/page/0/Text/9" data-sec="A Review of Ghost Imaging via Sparsity Constraints" style="left:13.6%;top:29%;width:73.8%;height:14.4%"><b>Abstract:</b> Different from conventional imaging methods, which are based on the first-order field correlation, ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path. As a new optical imaging technology, GI not only provides us new capabilities beyond the conventional imaging methods, but also gives out a new viewpoint of imaging physical mechanism. It may be applied to many potential applications, such as remote sensing, snap-shot spectral imaging, thermal X-ray diffraction imaging and imaging through scattering media. In this paper, we reviewed mainly our research work of ghost imaging via sparsity constraints (GISC) and discussed the application and theory prospect of GISC concisely.</div>
+                  <div class="gblk small" style="left:13.6%;top:45%;width:61%;height:1.3%"><b>Keywords:</b> imaging systems; ghost imaging; optimal estimation; coherence theory</div>
+                  <div class="gblk h" data-block="/page/0/SectionHeader/12" style="left:12.8%;top:51.1%;width:30%;height:1.6%">1. Introduction</div>
+                  <div class="gblk" data-block="/page/0/Text/13" data-sec="1. Introduction" style="left:12.4%;top:53.2%;width:75%;height:25.7%">With the concept of photon introduced by Albert Einstein in 1905, the statistical description of light wave is absolutely necessary for characterizing the fluctuation of light sources. Classical and quantum optical coherence theory were established by Emil Wolf in 1954 [1–4] and Roy J. Glauber in 1960 [5,6], respectively, to interpret the statistical properties of light fields. From the viewpoint of optical coherence theories, conventional imaging methods are based on the first-order correlation of light fields, and the attempt to extract spatial information of an object from high-order correlation of light fields can be traced back to the famous HBT experiment, which was conducted by R. Hanbury Brown and R. Q. Twiss in 1956 [7,8] based on the second-order autocorrelation of light fields in time domain. In 1995, Shih's group first demonstrated a novel imaging modality, called GI [9], by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object. The physics of GI has been thoroughly discussed in the past decades [10–17]. Theories and experiments have showed that both quantum two-photon interference and classical intensity-fluctuation correlations could be used for GI. In this review, for the sake of the consistency of the discussion, we focused on the GI researches performed by our group, which is mainly based on the classical coherence theory.</div>
+                  <div class="gblk" data-block="/page/0/Text/14" data-sec="1. Introduction" style="left:12.4%;top:78.9%;width:75%;height:12.7%">The remainder of the paper is organized as follows. In Section 2, we introduce the theoretical framework of GISC with an emphasis on that the ensemble average required by GI could hardly be satisfied in real applications. In Section 3, we present a brief review of application researches of GISC conducted in Shanghai Institute of Optics &amp; Fine Mechanics (SIOM), including two imaging applications in real space, GISC LiDAR [18,19] illuminated by pseudo-thermal light and GISC spectral camera [20] illuminated by natural light…</div>
+                  <div class="gmarks" id="gm1"></div>
+                </div>
+                <p class="page-note">Page 1 of 18</p>
+                <div class="gpage scan" id="gp2" data-page="2" data-scan="true">
+                  <div class="scan-fig">[ scanned figure: GISC LiDAR schematic ]</div>
+                  <div class="scan-cap">Figure 2. Schematic of the GISC LiDAR system (scanned page)</div>
+                  <div class="scan-lines"></div>
+                  <div class="gmarks" id="gm2"></div>
+                </div>
+                <p class="page-note">Scanned page (no text layer): drag a box to highlight a region. Its text comes from the OCR lines Marker read inside it. <i>This paper has a text layer on every page; this page is an illustration.</i></p>
               </div>
               <div class="pop" id="selPop" data-state="closed" role="toolbar" aria-label="Selection">
                 <button class="swatch" title="Highlight green" aria-label="Highlight green" data-c="green"><span style="background:var(--hl-green)"></span></button>
@@ -416,18 +468,19 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
               </div>
               <div class="hcard" id="hcard" data-state="closed" role="dialog" aria-label="Note for this passage">
                 <span class="hcard-arrow" id="hcardArrow" aria-hidden="true"></span>
-                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span class="t">§2 Background and Motivation</span><button class="icon-btn" id="hcardPin" aria-pressed="false" aria-label="Pin" title="Pin"><i data-lucide="pin" class="icon-xs"></i></button><button class="icon-btn" id="hcardClose" aria-label="Close" title="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
+                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm" id="hcardIcon"></i><span class="t" id="hcardTitle">§2 Background and Motivation</span><button class="icon-btn" id="hcardPin" aria-pressed="false" aria-label="Pin" title="Pin"><i data-lucide="pin" class="icon-xs"></i></button><button class="icon-btn" id="hcardClose" aria-label="Close" title="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
                 <div class="hcard-b" id="hcardBody"></div>
+                <div class="tr-body" id="trBody" hidden></div>
                 <div class="hcard-f"><span class="muted" style="font-size:11.5px">You · 2 days ago</span><button class="btn" id="editInNotes"><i data-lucide="square-pen" class="icon-xs"></i>Edit in Notes</button></div>
               </div>
-              <button class="translate-fab" aria-label="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
+              <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate (PDF: hover a paragraph)" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
             </div>
           </div>
           <button class="divider" id="divider" aria-label="Resize Reader and Notes"></button>
           <!-- Notes pane -->
           <div class="pane" id="notesPane">
             <div class="n-tabs" role="tablist" aria-label="Notes in this chat">
-              <button class="note-tab" role="tab" aria-selected="true" data-note="sec"><i data-lucide="hash" class="icon-xs"></i>§2 Background and Motivation</button>
+              <button class="note-tab" role="tab" aria-selected="true" data-note="sec" id="secTab"><i data-lucide="hash" class="icon-xs"></i><span id="secTabLabel">§2 Background and Motivation</span></button>
               <button class="note-tab" role="tab" aria-selected="false" data-note="chat"><i data-lucide="message-square" class="icon-xs"></i>This chat</button>
               <button class="note-tab" role="tab" aria-selected="false" data-note="paper"><i data-lucide="file-text" class="icon-xs"></i>Paper</button>
               <span class="spacer"></span>
@@ -493,52 +546,69 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   const reduce = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const flash = el => { if (!el) return; el.dataset.flash = 'true'; setTimeout(() => delete el.dataset.flash, 1200); };
-  const scrollTo = el => el && el.scrollIntoView({ block: 'center', behavior: reduce() ? 'auto' : 'smooth' });
+  // Vertical only: a jump must never shift anything sideways.
+  const scrollTo = el => el && el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
 
   /* ---------- notes: ordered blocks with stable ids ---------- */
-  const SRC = 'Toward a Predictive XR… · §2 · p. 2';
+  const XR_SRC = 'Toward a Predictive XR… · §2 · p. 2';
+  const G_SRC = 'A Review of Ghost Imaging… · §1 · p. 1';
   const notes = {
-    sec: { meta: 'Shared by 2 chats · revision 9', blocks: [
+    sec: { title: '§2 Background and Motivation', meta: 'Shared by 2 chats · revision 9', blocks: [
       { id: 'b1', type: 'h', text: 'Why latency matters' },
-      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
+      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', src: XR_SRC, text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
       { id: 'b3', type: 'p', text: 'Rapid tasks (catching, tracing lines) fail at this latency — matches what we saw with our Kinova setup.' },
-      { id: 'b4', type: 'quote', c: 'green', mark: 'm2', text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
+      { id: 'b4', type: 'quote', c: 'green', mark: 'm2', src: XR_SRC, text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
       { id: 'b5', type: 'h', text: 'Result' },
-      { id: 'b6', type: 'quote', c: 'none', mark: 'm3', text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
+      { id: 'b6', type: 'quote', c: 'none', mark: 'm3', src: XR_SRC, text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
       { id: 'b7', type: 'p', text: 'Latency reduced by up to 83% with local prediction.', sug: { del: 'up to 83%', ins: '89%, 88% and 83% (three trajectories)' } },
       { id: 'b8', type: 'lost', text: 'the round-trip time is measured with NTP-synchronised clocks' },
-      { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
+      { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', src: XR_SRC, text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
       { id: 'b10', type: 'h', text: 'What we concluded' },
       { id: 'b11', type: 'p', ai: true, fresh: true, text: 'Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span>' },
       { id: 'b12', type: 'p', ai: true, fresh: true, text: 'Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span>' },
       { id: 'b13', type: 'check', ai: true, fresh: true, text: 'Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.' },
     ] },
-    chat: { meta: 'This chat only · copied when the chat is forked', blocks: [
+    chat: { title: 'This chat', meta: 'This chat only · copied when the chat is forked', blocks: [
       { id: 'c1', type: 'p', text: 'Goal: decide if local pose prediction is worth trying on our Kinova teleop rig before the lab meeting.' },
       { id: 'c2', type: 'check', text: 'Measure our own end-to-end latency on the 5 GHz network' },
     ] },
-    paper: { meta: 'Paper note · shared by 2 chats', blocks: [
+    paper: { title: 'Toward a Predictive eXtended Reality…', meta: 'Paper note · shared by 2 chats', blocks: [
       { id: 'p1', type: 'p', text: 'Extended abstract, UC Riverside (2024). §2 has all the numbers; no full evaluation yet.' },
     ] },
+    gsec: { title: '§1 Introduction', meta: 'PDF-only paper · section from its Marker blocks · revision 3', blocks: [
+      { id: 'gs1', type: 'h', text: 'How GI works' },
+      { id: 'gs2', type: 'quote', c: 'none', mark: 'g2', src: G_SRC, text: 'by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object.' },
+      { id: 'gs3', type: 'p', text: 'Bucket detector + reference arm — the same split we would need for the dark-field line.' },
+    ] },
+    gpaper: { title: 'A Review of Ghost Imaging via Sparsity Constraints', meta: 'Paper note · PDF only (Appl. Sci. 2018, 8, 1379)', blocks: [
+      { id: 'gp1', type: 'h', text: 'Key idea' },
+      { id: 'gp2', type: 'quote', c: 'green', mark: 'g1', src: 'A Review of Ghost Imaging… · Abstract · p. 1', text: 'ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path.' },
+      { id: 'gp3', type: 'quote', c: 'blue', mark: 'g3', src: 'A Review of Ghost Imaging… · Figure 2 · p. 2 · box', box: true, text: 'Figure 2. Schematic of the GISC LiDAR system' },
+      { id: 'gp4', type: 'p', text: 'Check §3 for the LiDAR numbers before the review.' },
+    ] },
   };
-  const markNote = { m1: ['b2', 'b3'], m2: ['b4'], m3: ['b6', 'b7'], m4: ['b9'] };
-  let curNote = 'sec', undone = false, nid = 100;
+  // Which note and blocks each mark belongs to.
+  const markNote = { m1: ['sec', ['b2', 'b3']], m2: ['sec', ['b4']], m3: ['sec', ['b6', 'b7']], m4: ['sec', ['b9']],
+    g1: ['gpaper', ['gp2']], g2: ['gsec', ['gs2', 'gs3']], g3: ['gpaper', ['gp3']] };
+  let doc = 'xr', curNote = 'sec', undone = false, nid = 100;
+  const noteKey = tab => doc === 'ghost' ? ({ sec: 'gsec', paper: 'gpaper' }[tab] || tab) : tab;
 
   function blockHtml(b, plain) {
     const tag = b.ai ? '<span class="ai-tag" title="Written by the assistant"><i data-lucide="sparkles" class="icon-xs"></i>AI</span>' : '';
     let inner;
     if (b.type === 'h') inner = `<h4>${b.text}</h4>`;
-    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}<div><button class="src-chip" data-mark="${b.mark}"><i data-lucide="file-text" class="icon-xs"></i>${SRC}</button></div></div>`;
+    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${b.box ? '<i data-lucide="square-dashed" class="icon-xs" style="vertical-align:-1px;margin-right:4px"></i>' : ''}${esc(b.text)}<div><button class="src-chip" data-mark="${b.mark}"><i data-lucide="file-text" class="icon-xs"></i>${esc(b.src)}</button></div></div>`;
     else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
     else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
     else if (b.sug && !plain) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
     else inner = `<div>${b.text}${tag}</div>`;
     return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div></div>`;
   }
-  const visible = n => notes[n].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
+  const visible = k => notes[k].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
   function renderNote() {
-    $('#notesBody').innerHTML = `<div class="blocks">${visible(curNote).map(b => blockHtml(b)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
-    $('#noteMeta').textContent = notes[curNote].meta; icons();
+    const k = noteKey(curNote);
+    $('#notesBody').innerHTML = `<div class="blocks">${visible(k).map(b => blockHtml(b)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
+    $('#noteMeta').textContent = notes[k].meta; icons();
   }
   function renderPage() {
     $('#pageBlocks').innerHTML = visible('sec').filter(b => b.type !== 'lost').slice(0, 7).map(b => blockHtml(b, true)).join('') +
@@ -563,8 +633,11 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   $('#navNotes').addEventListener('click', () => showView('notes'));
   $('#tabChats').addEventListener('click', () => showView('chat'));
 
-  /* ---------- the composer toggles the right panel: Reader, Notes, or both ---------- */
+  /* ---------- right panel: Reader, Notes, or both ---------- */
   const state = { reader: true, notes: true };
+  // The panel width the user dragged, per combination; opening a pane never resets it.
+  const widths = { single: '34%', both: '44%' };
+  const combo = () => (state.reader && state.notes) ? 'both' : 'single';
   function applyPanel() {
     $('#tglReader').setAttribute('aria-pressed', String(state.reader));
     $('#tglNotes').setAttribute('aria-pressed', String(state.notes));
@@ -572,21 +645,21 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     $('#notesPane').dataset.hidden = String(!state.notes);
     $('#divider').hidden = !(state.reader && state.notes);
     $('#panel').dataset.closed = String(!state.reader && !state.notes);
-    // Two panes need room: the panel widens when both are on.
-    $('#panel').style.setProperty('--panel-w', state.reader && state.notes ? '44%' : '34%');
+    $('#panel').style.setProperty('--panel-w', widths[combo()]);
     try { localStorage.setItem('h5b-panel', JSON.stringify(state)); } catch (e) {}
   }
+  const open = (pane) => { if (state[pane]) return; state[pane] = true; applyPanel(); };
   $('#tglReader').addEventListener('click', () => { state.reader = !state.reader; applyPanel(); });
   $('#tglNotes').addEventListener('click', () => { state.notes = !state.notes; applyPanel(); });
   $('#closeReader').addEventListener('click', () => { state.reader = false; applyPanel(); });
   $('#closeNotes').addEventListener('click', () => { state.notes = false; applyPanel(); });
   $('#orientBtn').addEventListener('click', e => {
     const p = $('#panes'); const side = p.dataset.orient !== 'side'; p.dataset.orient = side ? 'side' : 'stacked';
-    // Inline heights from the stacked divider don't apply side by side.
     [$('#readerPane'), $('#notesPane')].forEach(x => { x.style.flexBasis = ''; });
     e.currentTarget.setAttribute('aria-label', side ? 'Stack' : 'Side by side'); e.currentTarget.title = side ? 'Stack' : 'Side by side';
     e.currentTarget.innerHTML = `<i data-lucide="${side ? 'rows-2' : 'columns-2'}" class="icon-sm"></i>`;
     $('#swapBtn').innerHTML = `<i data-lucide="${side ? 'arrow-left-right' : 'arrow-up-down'}" class="icon-sm"></i>`; icons();
+    requestAnimationFrame(drawGhostMarks);
   });
   $('#swapBtn').addEventListener('click', () => {
     const p = $('#panes'), r = $('#readerPane'), n = $('#notesPane'), d = $('#divider');
@@ -595,33 +668,42 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   (() => {
     const d = $('#divider'); let drag = false;
     d.addEventListener('pointerdown', e => { drag = true; d.dataset.drag = 'true'; d.setPointerCapture(e.pointerId); });
-    d.addEventListener('pointerup', () => { drag = false; d.dataset.drag = 'false'; });
+    d.addEventListener('pointerup', () => { drag = false; d.dataset.drag = 'false'; drawGhostMarks(); });
     d.addEventListener('pointermove', e => {
       if (!drag) return; const p = $('#panes'), box = p.getBoundingClientRect(), side = p.dataset.orient === 'side';
       if (side) {
-        // Trade width between the two: Notes' width is what's on its side of the divider.
         const notesFirst = p.firstElementChild.id === 'notesPane';
         const w = notesFirst ? e.clientX - box.left : box.right - e.clientX;
-        p.style.setProperty('--notes-w', Math.min(box.width - 240, Math.max(240, w)) + 'px');
-        return;
+        p.style.setProperty('--notes-w', Math.min(box.width - 240, Math.max(240, w)) + 'px'); return;
       }
       const k = Math.min(0.8, Math.max(0.2, (e.clientY - box.top) / box.height));
       p.firstElementChild.style.flexBasis = `${k * 100}%`; p.lastElementChild.style.flexBasis = `${(1 - k) * 100}%`;
     });
     const rz = $('#panelResize'); let rdrag = false;
     rz.addEventListener('pointerdown', e => { rdrag = true; rz.setPointerCapture(e.pointerId); });
-    rz.addEventListener('pointerup', () => { rdrag = false; });
+    rz.addEventListener('pointerup', () => { rdrag = false; drawGhostMarks(); });
     rz.addEventListener('pointermove', e => {
       if (!rdrag) return; const m = $('.main').getBoundingClientRect();
-      // Side by side, Notes keeps its px width, so this edge only resizes the Reader.
-      const w = Math.min(0.75, Math.max(0.25, (m.right - e.clientX) / m.width)); $('#panel').style.setProperty('--panel-w', (w * 100) + '%');
+      const w = Math.min(0.75, Math.max(0.25, (m.right - e.clientX) / m.width));
+      widths[combo()] = (w * 100) + '%'; $('#panel').style.setProperty('--panel-w', widths[combo()]);
     });
   })();
+  window.addEventListener('resize', () => drawGhostMarks());
 
-  /* ---------- reader: HTML / PDF ---------- */
+  /* ---------- reader: papers and HTML / PDF ---------- */
+  let fmt = 'html';
+  function showDoc() {
+    $$('.paper-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.doc === doc)));
+    const ghost = doc === 'ghost';
+    $('#fmtTabs').hidden = ghost; $('#docKind').hidden = !ghost;
+    $('#paper').hidden = ghost || fmt !== 'html'; $('#pdfView').hidden = ghost || fmt !== 'pdf'; $('#ghostView').hidden = !ghost;
+    $('#secTabLabel').textContent = ghost ? '§1 Introduction' : '§2 Background and Motivation';
+    $('#marksCount').textContent = String(ghost ? gmarks.length : $$('#paper .hl, #paper .qmark').length);
+    closeCard(); renderNote(); requestAnimationFrame(drawGhostMarks);
+  }
+  $$('.paper-tab').forEach(b => b.addEventListener('click', () => { doc = b.dataset.doc; showDoc(); }));
   $$('.fmt').forEach(b => b.addEventListener('click', () => {
-    $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x === b)));
-    $('#paper').hidden = b.dataset.fmt !== 'html'; $('#pdfView').hidden = b.dataset.fmt !== 'pdf';
+    fmt = b.dataset.fmt; $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x === b))); showDoc();
   }));
 
   /* ---------- note tabs + follow ---------- */
@@ -632,77 +714,248 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
     e.currentTarget.innerHTML = `<i data-lucide="${on ? 'link' : 'pin'}" class="icon-xs"></i>${on ? "Follows the reader's section" : 'Pinned to this note'}`; icons();
   });
+  const selectNoteTab = k => { const tab = k === 'chat' ? 'chat' : (k === 'sec' || k === 'gsec') ? 'sec' : 'paper'; $(`.note-tab[data-note="${tab}"]`).click(); };
 
-  /* ---------- marks: never cover the text ---------- */
-  const hcard = $('#hcard'); let hideT = null, openT = null, curMark = null;
-  const marksOff = () => $('#paper').classList.contains('marks-off');
-  function syncBlock(mark, on) {
-    $$('.blk-row[data-link]').forEach(r => delete r.dataset.link);
-    if (!on || curNote !== 'sec') return;
-    (markNote[mark] || []).forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (!row) return; row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); });
-  }
-  function showCard(el, mark) {
-    clearTimeout(hideT); curMark = mark; curEl = el; const target = markNote[mark] || [];
-    $('#hcardBody').innerHTML = visible('sec').filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 80))}…”</span>` : b.text}</div>`).join('');
-    // In the gutter left of the reader, like the PDF translation card: aligned with the
-    // paragraph's top, clamped to the window, the arrow pointing at the paragraph.
-    const reader = $('#readerBody').getBoundingClientRect();
-    const para = (el.closest('p') || el).getBoundingClientRect();
-    const gap = 12, gutter = reader.left - gap * 2;
-    const w = Math.min(380, Math.max(240, gutter));
-    hcard.style.width = w + 'px';
-    hcard.style.left = Math.max(gap, reader.left - gap - w) + 'px';
-    const h = hcard.offsetHeight || 260;
-    const top = Math.min(Math.max(para.top, reader.top + 4), window.innerHeight - h - 8);
-    hcard.style.top = top + 'px';
-    $('#hcardArrow').style.top = Math.min(h - 20, Math.max(10, para.top + 10 - top)) + 'px';
-    hcard.dataset.state = 'open';
-    requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest' }); });
-  }
-  // Hover shows it; a click on the mark pins it (as the translation card does); pinned, it
-  // stays until closed, Escape or an outside click.
-  let pinned = false;
+  /* ---------- the card slot left of the reader (shared with the PDF translation card) ---------- */
+  const hcard = $('#hcard'); let hideT = null, openT = null, curMark = null, anchorEl = null, pinned = false;
+  const marksOff = () => $('#readerBody').classList.contains('marks-off');
   const setPin = on => { pinned = on; $('#hcardPin').setAttribute('aria-pressed', String(on)); };
-  const closeCard = () => { setPin(false); hcard.dataset.state = 'closed'; };
-  const hideCard = () => { clearTimeout(openT); if (pinned) return; hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 250); };
+  function closeCard() { setPin(false); hcard.dataset.state = 'closed'; curMark = null; $$('.gmark[data-hot]').forEach(m => delete m.dataset.hot); }
+  const hideCard = () => { clearTimeout(openT); if (pinned) return; clearTimeout(hideT); hideT = setTimeout(() => { hcard.dataset.state = 'closed'; curMark = null; }, 250); };
   $('#hcardPin').addEventListener('click', () => setPin(!pinned));
   $('#hcardClose').addEventListener('click', closeCard);
-  $('#readerBody').addEventListener('scroll', () => { if (hcard.dataset.state === 'open' && curEl) showCard(curEl, curMark); });
-  let curEl = null;
+  // Same placement as the PDF translation card: in the gutter left of the reader, aligned
+  // with the paragraph, clamped to the window, the arrow pointing at the paragraph.
+  function placeCardAt(paraRect) {
+    const reader = $('#readerBody').getBoundingClientRect();
+    const gap = 12, w = Math.min(380, Math.max(240, reader.left - gap * 2));
+    hcard.style.width = w + 'px'; hcard.style.left = Math.max(gap, reader.left - gap - w) + 'px';
+    const h = hcard.offsetHeight || 260;
+    const top = Math.min(Math.max(paraRect.top, reader.top + 4), window.innerHeight - h - 8);
+    hcard.style.top = top + 'px';
+    $('#hcardArrow').style.top = Math.min(h - 20, Math.max(10, paraRect.top + 10 - top)) + 'px';
+    hcard.dataset.state = 'open';
+  }
+  function showNoteCard(mark, paraRect) {
+    clearTimeout(hideT); curMark = mark; hcard.dataset.mode = 'note';
+    const [k, target] = markNote[mark] || ['sec', []];
+    $('#hcardTitle').textContent = notes[k].title; $('#hcardBody').hidden = false; $('#trBody').hidden = true;
+    $('#hcardIcon').setAttribute('data-lucide', 'notebook-pen');
+    $('#hcardBody').innerHTML = visible(k).filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 80))}…”</span>` : b.text}</div>`).join('');
+    placeCardAt(paraRect);
+    requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  }
+  const TR = {
+    '/page/0/Text/9': '摘要：不同於基於一階場關聯的傳統成像方法，鬼成像（GI）透過兩條光路之光場的高階互關聯取得影像資訊，而物體只出現在其中一條光路。作為一種新的光學成像技術，GI 不僅提供超越傳統成像方法的新能力，也帶來理解成像物理機制的新觀點……',
+    '/page/0/Text/13': '隨著愛因斯坦於 1905 年提出光子的概念，以統計方式描述光波成為刻畫光源起伏的必要手段……1995 年，Shih 的團隊首次展示了一種稱為 GI 的新成像方式：將收集穿透或反射自物體之光的單像素（桶）光偵測器輸出，與照明未與物體互動之高空間解析度掃描光偵測器或陣列的輸出相關聯……',
+    '/page/0/Text/14': '本文其餘部分安排如下。第 2 節介紹 GISC 的理論框架，強調 GI 所需的系綜平均在實際應用中難以滿足。第 3 節簡要回顧 SIOM 進行的 GISC 應用研究……',
+  };
+  function showTranslation(blockEl) {
+    clearTimeout(hideT); curMark = null; hcard.dataset.mode = 'translation';
+    $('#hcardTitle').textContent = '繁體中文 · translation'; $('#hcardBody').hidden = true;
+    $('#trBody').hidden = false; $('#trBody').textContent = TR[blockEl.dataset.block] || '';
+    placeCardAt(blockEl.getBoundingClientRect());
+  }
+  hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
+  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark], .gpage')) closeCard(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCard(); $('#selPop').dataset.state = 'closed'; } });
+  $('#editInNotes').addEventListener('click', () => {
+    const m = curMark; closeCard(); open('notes'); const [k, ids] = markNote[m] || ['sec', []]; selectNoteTab(k);
+    const row = $(`#notesBody .blk-row[data-id="${ids[0]}"]`); scrollTo(row); flash(row);
+  });
+  $('#readerBody').addEventListener('scroll', () => { if (hcard.dataset.state === 'open' && anchorEl && pinned) placeCardAt(anchorEl.getBoundingClientRect()); });
+  $('#trFab').addEventListener('click', e => { const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on)); if (!on && hcard.dataset.mode === 'translation') closeCard(); });
+
+  /* ---------- HTML marks ---------- */
+  function syncBlock(mark, on) {
+    $$('.blk-row[data-link]').forEach(r => delete r.dataset.link);
+    if (!on) return; const [k, ids] = markNote[mark] || [];
+    if (k !== noteKey(curNote)) return;
+    ids.forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (!row) return; row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); });
+  }
   function bindMark(el) {
     const mark = el.dataset.mark, isIcon = el.classList.contains('margin-ic');
+    const para = () => (el.closest('p') || el).getBoundingClientRect();
     el.addEventListener('mouseenter', () => {
       if (marksOff()) return;
       if (state.notes) { syncBlock(mark, true); return; }
       if (pinned) return;
-      clearTimeout(openT); openT = setTimeout(() => showCard(el, mark), isIcon ? 150 : 300);
+      clearTimeout(openT); openT = setTimeout(() => { anchorEl = el.closest('p') || el; showNoteCard(mark, para()); }, isIcon ? 150 : 300);
     });
     el.addEventListener('mouseleave', () => { syncBlock(mark, false); hideCard(); });
     el.addEventListener('click', e => {
       if (marksOff() || String(window.getSelection())) return;
-      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [])[0]}"]`)); return; }
-      e.stopPropagation(); showCard(el, mark); setPin(true);
+      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`)); return; }
+      e.stopPropagation(); anchorEl = el.closest('p') || el; showNoteCard(mark, para()); setPin(true);
     });
   }
   $$('#paper [data-mark]').forEach(bindMark);
-  hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
-  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark]')) closeCard(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCard(); $('#selPop').dataset.state = 'closed'; } });
-  $('#editInNotes').addEventListener('click', () => {
-    closeCard(); state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
-    const row = $(`#notesBody .blk-row[data-id="${(markNote[curMark] || [])[0]}"]`); scrollTo(row); flash(row);
-  });
   $('#marksToggle').addEventListener('click', e => {
     const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
-    $('#paper').classList.toggle('marks-off', !on);
+    $('#readerBody').classList.toggle('marks-off', !on); $('#paper').classList.toggle('marks-off', !on);
   });
+
+  /* ---------- PDF-only marks: drawn over the page, hit-tested (the text layer stays selectable) ---------- */
+  const gmarks = [
+    { id: 'g1', page: 'gp1', kind: 'hl', c: 'green', block: '/page/0/Text/9', text: 'ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path.' },
+    { id: 'g2', page: 'gp1', kind: 'quote', c: 'none', block: '/page/0/Text/13', text: 'by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object.' },
+    { id: 'g3', page: 'gp2', kind: 'box', c: 'blue', box: { x: 0.12, y: 0.14, w: 0.76, h: 0.38 } },
+  ];
+  function textRange(el, text) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); const nodes = []; let all = '';
+    while (walker.nextNode()) { nodes.push([walker.currentNode, all.length]); all += walker.currentNode.textContent; }
+    const at = all.indexOf(text); if (at < 0) return null;
+    const pos = off => { for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i][1] <= off) return [nodes[i][0], off - nodes[i][1]]; };
+    const r = document.createRange(); const [sn, so] = pos(at); const [en, eo] = pos(at + text.length); r.setStart(sn, so); r.setEnd(en, eo); return r;
+  }
+  function rectsOf(range, page) {
+    const pb = page.getBoundingClientRect();
+    return [...range.getClientRects()].filter(r => r.width > 1).map(r => ({ x: (r.left - pb.left) / pb.width, y: (r.top - pb.top) / pb.height, w: r.width / pb.width, h: r.height / pb.height }));
+  }
+  function drawGhostMarks() {
+    if ($('#ghostView').hidden) return;
+    ['gm1', 'gm2'].forEach(id => { $('#' + id).innerHTML = ''; });
+    gmarks.forEach(m => {
+      const page = $('#' + m.page); const layer = $('.gmarks', page);
+      if (m.kind !== 'box' && !m.rects) { const blk = $(`[data-block="${m.block}"]`, page); const r = blk && textRange(blk, m.text); m.rects = r ? rectsOf(r, page) : []; }
+      const rects = m.kind === 'box' ? [m.box] : m.rects;
+      rects.forEach(r => {
+        const d = document.createElement('div'); d.className = 'gmark'; d.dataset.id = m.id; d.dataset.kind = m.kind; d.dataset.c = m.c;
+        d.style.left = r.x * 100 + '%'; d.style.top = (m.kind === 'quote' ? r.y + r.h - 0.002 : r.y) * 100 + '%'; d.style.width = r.w * 100 + '%'; d.style.height = r.h * 100 + '%';
+        layer.appendChild(d);
+      });
+      if (!rects.length) return;
+      const first = rects[0]; const icon = document.createElement('button'); icon.className = 'gicon'; icon.dataset.gm = m.id;
+      icon.setAttribute('aria-label', 'Note on this passage'); icon.style.left = '89%'; icon.style.top = (first.y * 100) + '%';
+      icon.innerHTML = `<i data-lucide="message-square-text" style="width:11px;height:11px"></i>`; layer.appendChild(icon);
+    });
+    icons();
+  }
+  const hitMark = (page, e) => {
+    const pb = page.getBoundingClientRect(); const x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
+    return gmarks.find(m => m.page === page.id && (m.kind === 'box' ? [m.box] : (m.rects || [])).some(r => x >= r.x && x <= r.x + r.w && y >= r.y - 0.004 && y <= r.y + r.h + 0.004));
+  };
+  let hotId = null;
+  function setHot(id) {
+    if (hotId === id) return; hotId = id;
+    $$('.gmark').forEach(d => { if (d.dataset.id === id) d.dataset.hot = 'true'; else delete d.dataset.hot; });
+  }
+  const gNoteRect = m => { const blk = m.block && $(`[data-block="${m.block}"]`); return (blk || $('#' + m.page)).getBoundingClientRect(); };
+  $$('#ghostView .gpage').forEach(page => {
+    page.addEventListener('mousemove', e => {
+      if (dragging) return;
+      const m = marksOff() ? null : hitMark(page, e) || (e.target.closest('.gicon') && gmarks.find(g => g.id === e.target.closest('.gicon').dataset.gm));
+      if (m) {
+        setHot(m.id);
+        if (state.notes) { syncBlock(m.id, true); return; }
+        if (pinned || curMark === m.id) return;
+        clearTimeout(openT); openT = setTimeout(() => { anchorEl = $(`[data-block="${m.block}"]`) || page; showNoteCard(m.id, gNoteRect(m)); }, 250);
+        return;
+      }
+      setHot(null); syncBlock(null, false);
+      const blk = e.target.closest('[data-block]');
+      if (blk && TR[blk.dataset.block] && $('#trFab').getAttribute('aria-pressed') === 'true') {
+        if (pinned && hcard.dataset.mode === 'note') return;
+        clearTimeout(openT); clearTimeout(hideT);
+        if (hcard.dataset.mode !== 'translation' || anchorEl !== blk || hcard.dataset.state !== 'open') { anchorEl = blk; showTranslation(blk); }
+        return;
+      }
+      hideCard();
+    });
+    page.addEventListener('mouseleave', () => { setHot(null); syncBlock(null, false); hideCard(); });
+    page.addEventListener('click', e => {
+      if (String(window.getSelection()) || dragging) return;
+      const m = hitMark(page, e) || (e.target.closest('.gicon') && gmarks.find(g => g.id === e.target.closest('.gicon').dataset.gm)); if (!m || marksOff()) return;
+      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${markNote[m.id][1][0]}"]`)); return; }
+      anchorEl = $(`[data-block="${m.block}"]`) || page; showNoteCard(m.id, gNoteRect(m)); setPin(true);
+    });
+  });
+
+  /* ---------- selection popover (HTML text, PDF text layer, or a box on a scanned page) ---------- */
+  const pop = $('#selPop'); let selRange = null, selPage = null, pendingBox = null, dragging = false;
+  function showPopAt(r) {
+    const body = $('#readerBody').getBoundingClientRect();
+    pop.style.left = Math.max(6, Math.min(r.left - body.left + r.width / 2 - 150, body.width - 316)) + 'px';
+    pop.style.top = (r.top - body.top + $('#readerBody').scrollTop - 44) + 'px'; pop.dataset.state = 'open';
+  }
+  function onSelect(container) {
+    setTimeout(() => {
+      const sel = window.getSelection(); if (!sel || sel.isCollapsed || !container.contains(sel.anchorNode)) { if (!pendingBox) pop.dataset.state = 'closed'; return; }
+      selRange = sel.getRangeAt(0); pendingBox = null; selPage = container.closest('.gpage'); showPopAt(selRange.getBoundingClientRect());
+    }, 0);
+  }
+  $('#paper').addEventListener('mouseup', () => onSelect($('#paper')));
+  $('#gp1').addEventListener('mouseup', () => onSelect($('#gp1')));
+  (() => {
+    const page = $('#gp2'); let start = null, box = null;
+    page.addEventListener('pointerdown', e => {
+      if (e.target.closest('.gicon')) return; const pb = page.getBoundingClientRect();
+      start = { x: (e.clientX - pb.left) / pb.width, y: (e.clientY - pb.top) / pb.height }; dragging = false;
+      box = document.createElement('div'); box.className = 'drag-box'; page.appendChild(box); page.setPointerCapture(e.pointerId);
+    });
+    page.addEventListener('pointermove', e => {
+      if (!start) return; const pb = page.getBoundingClientRect();
+      const x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
+      const r = { x: Math.min(start.x, x), y: Math.min(start.y, y), w: Math.abs(x - start.x), h: Math.abs(y - start.y) };
+      if (r.w > 0.02 || r.h > 0.02) dragging = true;
+      Object.assign(box.style, { left: r.x * 100 + '%', top: r.y * 100 + '%', width: r.w * 100 + '%', height: r.h * 100 + '%' }); box.rect = r;
+    });
+    page.addEventListener('pointerup', () => {
+      if (!start) return; start = null;
+      if (dragging && box.rect) { pendingBox = { page: 'gp2', rect: box.rect, el: box }; selRange = null; showPopAt(box.getBoundingClientRect()); }
+      else box.remove();
+      setTimeout(() => { dragging = false; }, 0);
+    });
+  })();
+  document.addEventListener('mousedown', e => {
+    if (pop.contains(e.target) || $('#paper').contains(e.target) || e.target.closest('.gpage')) return;
+    pop.dataset.state = 'closed'; if (pendingBox) { pendingBox.el.remove(); pendingBox = null; }
+  });
+  function addQuote(k, text, c, mark, extra = {}) {
+    const id = 'q' + (++nid); const list = notes[k].blocks;
+    const at = k === 'sec' ? list.findIndex(b => b.id === 'b10') : list.length;
+    list.splice(at, 0, { id, type: 'quote', c, mark, text, src: k === 'sec' ? XR_SRC : G_SRC, ...extra }); markNote[mark] = [k, [id]];
+    open('notes'); selectNoteTab(k);
+    const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  }
+  function markFromSelection(kind, c) {
+    const mark = 'u' + (++nid);
+    if (pendingBox) { // box highlight on a page with no text layer
+      gmarks.push({ id: mark, page: pendingBox.page, kind: 'box', c: c === 'none' ? 'blue' : c, box: pendingBox.rect });
+      pendingBox.el.remove(); pendingBox = null; pop.dataset.state = 'closed';
+      addQuote('gpaper', 'Figure 2. Schematic of the GISC LiDAR system (OCR text from the box)', c === 'none' ? 'blue' : c, mark, { box: true, src: 'A Review of Ghost Imaging… · p. 2 · box' });
+      drawGhostMarks(); $('#marksCount').textContent = String(gmarks.length); return;
+    }
+    if (!selRange) return; const text = selRange.toString();
+    if (selPage) { // PDF text layer: store rects as page fractions + the Marker block it falls in
+      const blk = (selRange.startContainer.parentElement || selRange.startContainer).closest('[data-block]');
+      const rects = rectsOf(selRange, selPage);
+      gmarks.push({ id: mark, page: selPage.id, kind, c, block: blk ? blk.dataset.block : null, rects, text });
+      window.getSelection().removeAllRanges(); pop.dataset.state = 'closed';
+      addQuote(blk && blk.dataset.sec === '1. Introduction' ? 'gsec' : 'gpaper', text, c, mark);
+      drawGhostMarks(); $('#marksCount').textContent = String(gmarks.length); return;
+    }
+    const span = document.createElement('span'); span.className = kind === 'hl' ? 'hl' : 'qmark'; span.dataset.mark = mark; if (kind === 'hl') span.dataset.c = c;
+    try { selRange.surroundContents(span); } catch (e) { return; }
+    window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; bindMark(span); addQuote('sec', text, c, mark);
+    $('#marksCount').textContent = String($$('#paper .hl, #paper .qmark').length);
+  }
+  $$('.swatch', pop).forEach(s => s.addEventListener('click', () => markFromSelection('hl', s.dataset.c)));
+  $('#quoteAct').addEventListener('click', () => markFromSelection('quote', 'none'));
 
   /* ---------- quote source chip → reader, back pill ---------- */
   document.addEventListener('click', e => {
     const chip = e.target.closest('.src-chip'); if (!chip || !$('#vChat').contains(chip)) return;
-    state.reader = true; applyPanel(); $('.fmt[data-fmt="html"]').click();
-    const mark = $(`#paper [data-mark="${chip.dataset.mark}"]:not(.margin-ic)`); if (!mark) return;
-    scrollTo(mark); flash(mark);
+    const mark = chip.dataset.mark; const g = gmarks.find(m => m.id === mark);
+    open('reader');
+    let target;
+    if (g) { if (doc !== 'ghost') { doc = 'ghost'; showDoc(); } target = $(`#${g.page}`); drawGhostMarks(); }
+    else { if (doc !== 'xr' || fmt !== 'html') { doc = 'xr'; fmt = 'html'; $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x.dataset.fmt === 'html'))); showDoc(); } target = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); }
+    if (!target) return;
+    requestAnimationFrame(() => {
+      if (g) { const d = $(`.gmark[data-id="${mark}"]`); scrollTo(d || target); $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
+      else { scrollTo(target); flash(target); }
+    });
     const pill = $('#backPill'); pill.dataset.state = 'open'; pill.dataset.from = chip.closest('.blk-row')?.dataset.id || '';
     const rb = $('#readerBody'); const start = rb.scrollTop;
     const onScroll = () => { if (Math.abs(rb.scrollTop - start) > 160) { pill.dataset.state = 'closed'; rb.removeEventListener('scroll', onScroll); } };
@@ -713,36 +966,6 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const row = id && $(`#notesBody .blk-row[data-id="${id}"]`); scrollTo(row); flash(row);
   });
 
-  /* ---------- selection popover: highlight / quote to note ---------- */
-  const pop = $('#selPop'); let selRange = null;
-  $('#paper').addEventListener('mouseup', () => setTimeout(() => {
-    const sel = window.getSelection(); if (!sel || sel.isCollapsed || !$('#paper').contains(sel.anchorNode)) { pop.dataset.state = 'closed'; return; }
-    selRange = sel.getRangeAt(0); const r = selRange.getBoundingClientRect(), body = $('#readerBody').getBoundingClientRect();
-    pop.style.left = Math.max(6, Math.min(r.left - body.left + r.width / 2 - 150, body.width - 316)) + 'px';
-    pop.style.top = (r.top - body.top + $('#readerBody').scrollTop - 44) + 'px'; pop.dataset.state = 'open';
-  }, 0));
-  document.addEventListener('mousedown', e => { if (!pop.contains(e.target) && !$('#paper').contains(e.target)) pop.dataset.state = 'closed'; });
-  function wrapSel(cls, attrs) {
-    if (!selRange) return null; const span = document.createElement('span'); span.className = cls; Object.assign(span.dataset, attrs);
-    try { selRange.surroundContents(span); } catch (e) { return null; }
-    window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; return span;
-  }
-  function addQuote(text, c, mark) {
-    const id = 'q' + (++nid); const sec = notes.sec.blocks; const at = sec.findIndex(b => b.id === 'b10');
-    sec.splice(at, 0, { id, type: 'quote', c, mark, text }); markNote[mark] = [id];
-    state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
-    const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest' }); }
-  }
-  $$('.swatch', pop).forEach(s => s.addEventListener('click', () => {
-    const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
-    const span = wrapSel('hl', { c: s.dataset.c, mark }); if (!span) return;
-    bindMark(span); addQuote(text, s.dataset.c, mark); $('#marksCount').textContent = String(+$('#marksCount').textContent + 1);
-  }));
-  $('#quoteAct').addEventListener('click', () => {
-    const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
-    const span = wrapSel('qmark', { mark }); if (!span) return; bindMark(span); addQuote(text, 'none', mark);
-  });
-
   /* ---------- suggestions + agent card ---------- */
   $('#notesBody').addEventListener('click', e => {
     const acc = e.target.closest('[data-acc]'), rej = e.target.closest('[data-rej]'); if (!acc && !rej) return;
@@ -750,7 +973,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     if (acc) b.text = b.text.replace(b.sug.del, b.sug.ins); b.sug = null; renderNote();
   });
   $('#openNoteBtn').addEventListener('click', () => {
-    state.notes = true; applyPanel(); $('.note-tab[data-note="sec"]').click();
+    open('notes'); if (doc !== 'xr') { doc = 'xr'; showDoc(); } selectNoteTab('sec');
     const row = $('#notesBody .blk-row[data-id="b11"]'); scrollTo(row); flash(row);
   });
   $('#undoBtn').addEventListener('click', () => {
