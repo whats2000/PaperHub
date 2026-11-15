@@ -2,31 +2,28 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: mirrors the shipped chat page (frontend/src/pages/ChatPage.tsx): the 260px sidebar
-   (brand row, Ideas / Notes / Feedback, Chats | References tabs, New chat, time groups, account),
-   a header-less chat column whose composer icon row toggles the right panel, and the right panel
-   (the Citation Canvas, renamed Reader). H5b adds a Notes toggle to that icon row; with Reader and
-   Notes both on, the right panel splits (stacked at its usual width, side by side when wide).
-   Tokens: PaperHub's shadcn "neutral" set (frontend/src/index.css).
-   Highlight palette (dataviz validator, both themes; yellow stays citations-only): green / blue / pink / purple. */
+/* Layout: mirrors the shipped chat page (sidebar, header-less chat, composer icon row that opens
+   the right panel, the reader's tab rows). H5b, revised after the 2026-11-16 simulated-user survey:
+   Notes opens from a composer button; with Reader and Notes both on, the panel shows them as tabs,
+   or side by side once it is wide; one note per paper organised by section headings.
+   Tokens: PaperHub's shadcn "neutral" set. Highlight colours (dataviz-validated, both themes;
+   yellow stays citations-only) have names the user can rename. */
 :root {
   --background: oklch(1 0 0); --foreground: oklch(0.145 0 0); --card: oklch(1 0 0); --popover: oklch(1 0 0);
   --primary: oklch(0.205 0 0); --primary-fg: oklch(0.985 0 0); --muted: oklch(0.97 0 0); --muted-fg: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0); --border: oklch(0.922 0 0); --ring: oklch(0.708 0 0); --sidebar: oklch(0.985 0 0);
-  --destructive: oklch(0.577 0.245 27.325); --ok: oklch(0.527 0.154 150.069);
   --amber-bg: oklch(0.987 0.022 95.277); --amber-fg: oklch(0.473 0.137 46.201); --amber-border: oklch(0.924 0.12 95.746);
   --cite-bg: oklch(0.945 0.09 98); --cite-line: oklch(0.80 0.15 90);
   --hl-green: #2f9e63; --hl-blue: #3b7dd8; --hl-pink: #d6457e; --hl-purple: #8b5cd6; --hl-alpha: 22%;
   --ins: oklch(0.527 0.154 150.069); --del: oklch(0.577 0.245 27.325);
   --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif; --font-mono: 'Geist Mono', ui-monospace, monospace;
-  --font-paper: 'Times New Roman', Times, 'Noto Serif', serif;
+  --font-paper: 'Times New Roman', Times, 'Noto Serif', serif; --font-math: 'Cambria Math', 'STIX Two Math', 'Times New Roman', serif;
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.06); --shadow-md: 0 4px 12px oklch(0 0 0 / 0.10); --shadow-xl: 0 20px 40px oklch(0 0 0 / 0.18);
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0); --popover: oklch(0.205 0 0);
   --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0); --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
-  --destructive: oklch(0.704 0.191 22.216); --ok: oklch(0.723 0.219 149.579);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
   --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
   --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
@@ -35,7 +32,6 @@
   --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0); --popover: oklch(0.205 0 0);
   --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0); --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
-  --destructive: oklch(0.704 0.191 22.216); --ok: oklch(0.723 0.219 149.579);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
   --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
   --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
@@ -45,13 +41,12 @@
 html, body { height: 100%; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; }
 button { font: inherit; color: inherit; cursor: pointer; }
-input, textarea { font: inherit; color: inherit; }
+input { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .icon { width: 16px; height: 16px; flex-shrink: 0; } .icon-sm { width: 14px; height: 14px; flex-shrink: 0; } .icon-xs { width: 12px; height: 12px; flex-shrink: 0; }
 .muted { color: var(--muted-fg); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; } }
 
-/* Prototype bar (not product UI) */
 .proto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-bottom: 1px dashed var(--border); font-size: 12px;
   padding-block: 7px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .proto-bar .label { font-weight: 600; margin-right: 4px; }
@@ -59,7 +54,7 @@ input, textarea { font: inherit; color: inherit; }
 .seg button { border: 0; background: transparent; padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 5px; }
 .seg button[aria-pressed="true"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
 
-/* App shell — sidebar as shipped */
+/* Shell — as shipped */
 .app { display: flex; height: calc(100% - 39px); min-height: 600px; }
 .sidebar { width: 260px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--sidebar); display: flex; flex-direction: column; }
 .brand-row { display: flex; align-items: center; gap: 6px; height: 56px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border); }
@@ -79,14 +74,12 @@ input, textarea { font: inherit; color: inherit; }
 .chats { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px; display: flex; flex-direction: column; gap: 1px; }
 .group-h { font-size: 12px; color: var(--muted-fg); padding: 10px 8px 3px; display: flex; align-items: center; gap: 4px; }
 .chat-link { font-size: 14px; padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-link:hover { background: var(--accent); }
 .chat-link.active { background: var(--accent); font-weight: 500; }
 .account { border-top: 1px solid var(--border); padding: 10px 16px; display: flex; gap: 10px; align-items: center; }
 .avatar { width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
 .main { flex: 1; min-width: 0; display: flex; }
 
-/* Chat column — no header bar */
-.chat-col { flex: 1 1 520px; min-width: 340px; display: flex; flex-direction: column; }
+.chat-col { flex: 1 1 480px; min-width: 320px; display: flex; flex-direction: column; }
 .thread { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
 .thread-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .msg-user { align-self: flex-end; max-width: 80%; background: var(--muted); border-radius: 16px; padding: 9px 14px; }
@@ -107,58 +100,71 @@ input, textarea { font: inherit; color: inherit; }
 .mode-chip { font-size: 12.5px; color: var(--muted-fg); display: inline-flex; gap: 5px; align-items: center; padding: 0 8px; }
 .send { width: 32px; height: 32px; border-radius: 999px; border: 0; background: var(--muted); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; }
 
-/* Agent note-change card (Do, show, undo) */
-.card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 10px 12px; font-size: 13px; margin: 2px 0 10px; }
-.card-title { display: flex; align-items: center; gap: 6px; font-weight: 500; }
-.card-sub { color: var(--muted-fg); font-size: 12px; margin-top: 2px; }
-.diff { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
-.diff li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; align-items: start; }
-.k-ins { color: var(--ins); } .k-sug { color: var(--amber-fg); }
-.card-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-.btn { border: 1px solid var(--border); background: var(--background); border-radius: 7px; padding: 3px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
+/* Agent change card: one line, details fold out */
+.card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 8px 10px; font-size: 13px; margin: 2px 0 10px; }
+.card-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-line .what { flex: 1; min-width: 200px; }
+.card-line .sug { color: var(--amber-fg); }
+.btn { border: 1px solid var(--border); background: var(--background); border-radius: 7px; padding: 2px 9px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
 .btn:hover { background: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--muted-fg); }
+.details-btn { border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; display: inline-flex; gap: 3px; align-items: center; padding: 2px 4px; border-radius: 5px; }
+.details-btn .chev { transition: transform 200ms ease-out; }
+.details-btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.diff { margin: 6px 0 2px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.diff li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; align-items: start; }
+.k-ins { color: var(--ins); } .k-sug { color: var(--amber-fg); }
 .undone { color: var(--muted-fg); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin: 0 0 10px; }
 .collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 200ms ease-out, opacity 200ms ease-out; }
 .collapse > div { min-height: 0; overflow: hidden; }
 .collapse[data-state="closed"] { grid-template-rows: 0fr; opacity: 0; }
 
-/* Right panel: Reader, Notes, or both (split) */
-.panel { flex: 0 0 var(--panel-w, 34%); min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--card); position: relative;
-  transition: flex-basis 200ms ease-out; }
+/* Right panel: Reader | Notes tabs, or side by side when wide */
+.panel { flex: 0 0 var(--panel-w, 38%); min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--card); position: relative; transition: flex-basis 200ms ease-out; }
 .panel[data-closed="true"] { flex-basis: 0; border-left: 0; overflow: hidden; }
 .panel-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
-.panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.panes[data-orient="side"] { flex-direction: row; }
-.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 50%; transition: flex-basis 200ms ease-out, opacity 200ms ease-out; }
-.pane[data-hidden="true"] { flex-basis: 0 !important; flex-grow: 0; opacity: 0; pointer-events: none; }
-/* Side by side: Notes keeps its own width; the panel's left edge resizes only the Reader. */
-.panes[data-orient="side"] #readerPane { flex: 1 1 auto; }
-.panes[data-orient="side"] #notesPane { flex: 0 0 var(--notes-w, 320px); }
-.divider { flex: 0 0 7px; cursor: row-resize; position: relative; border: 0; padding: 0; background: transparent; }
-.divider::before { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: var(--border); }
-.divider::after { content: ""; position: absolute; left: 50%; top: 1px; width: 28px; height: 5px; margin-left: -14px; border-radius: 3px; background: var(--border); }
-.divider:hover::after, .divider[data-drag="true"]::after { background: var(--ring); }
-.panes[data-orient="side"] .divider { cursor: col-resize; }
-.panes[data-orient="side"] .divider::before { left: 3px; right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
-.panes[data-orient="side"] .divider::after { left: 1px; top: 50%; width: 5px; height: 28px; margin: -14px 0 0; }
+.pane-tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.pane-tab { border: 0; background: transparent; font-size: 12.5px; padding: 5px 12px 6px; color: var(--muted-fg); border-bottom: 2px solid transparent; display: inline-flex; gap: 6px; align-items: center; }
+.pane-tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--foreground); font-weight: 500; }
+.panes { flex: 1; min-height: 0; display: flex; position: relative; overflow: hidden; }
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.panes[data-layout="tabs"] .pane { position: absolute; inset: 0; transition: opacity 200ms ease-out, transform 200ms ease-out; }
+.panes[data-layout="tabs"] .pane[data-active="false"] { opacity: 0; pointer-events: none; }
+.panes[data-layout="tabs"] #readerPane[data-active="false"] { transform: translateX(-12px); }
+.panes[data-layout="tabs"] #notesPane[data-active="false"] { transform: translateX(12px); }
+.panes[data-layout="side"] #readerPane { flex: 1 1 auto; }
+.panes[data-layout="side"] #notesPane { flex: 0 0 var(--notes-w, 340px); border-left: 1px solid var(--border); }
+.panes[data-layout="single"] .pane[data-on="false"] { display: none; }
+.panes[data-layout="single"] .pane { flex: 1 1 auto; }
+.divider { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; cursor: col-resize; border: 0; padding: 0; background: transparent; z-index: 2; }
+.divider:hover, .divider[data-drag="true"] { background: color-mix(in srgb, var(--ring) 40%, transparent); }
 
-/* Reader pane — as shipped: paper tabs + close, then HTML | PDF */
+/* Reader */
 .r-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); padding: 4px 6px; flex-shrink: 0; }
-.paper-tab { border: 0; font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 4px; background: transparent; color: var(--muted-fg); max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper-tab { border: 0; font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 4px; background: transparent; color: var(--muted-fg); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; gap: 4px; align-items: center; }
 .paper-tab[aria-selected="true"] { background: var(--accent); color: var(--foreground); }
-.r-tabs .spacer, .r-sub .spacer { flex: 1; }
-.r-sub { display: flex; gap: 2px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 6px; flex-shrink: 0; }
+.spacer { flex: 1; }
+.r-sub { display: flex; gap: 2px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 6px; flex-shrink: 0; position: relative; }
 .fmt { border: 0; background: transparent; font-size: 12px; padding: 2px 8px; border-radius: 4px; color: var(--muted-fg); }
 .fmt[aria-selected="true"] { background: var(--accent); color: var(--foreground); font-weight: 500; }
+.doc-kind { font-size: 11.5px; color: var(--muted-fg); padding: 2px 6px; }
 .icon-btn { border: 0; background: transparent; border-radius: 6px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-fg); }
 .icon-btn:hover { background: var(--accent); color: var(--foreground); }
 .marks-btn { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); border-radius: 6px; padding: 2px 7px; display: inline-flex; gap: 4px; align-items: center; }
-.marks-btn:hover { background: var(--accent); color: var(--foreground); }
-.marks-btn[aria-pressed="false"] { text-decoration: line-through; }
+.marks-btn:hover, .marks-btn[aria-expanded="true"] { background: var(--accent); color: var(--foreground); }
+.marks-menu { position: absolute; right: 6px; top: calc(100% + 4px); z-index: 20; width: 300px; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 8px; font-size: 12.5px;
+  transform-origin: top right; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+.marks-menu[data-state="closed"] { opacity: 0; transform: scale(0.95); pointer-events: none; }
+.mm-row { display: flex; align-items: center; gap: 8px; padding: 3px 2px; }
+.mm-dot { width: 12px; height: 12px; border-radius: 999px; flex-shrink: 0; }
+.mm-name { flex: 1; border: 1px solid transparent; background: transparent; border-radius: 5px; padding: 1px 5px; font-size: 12.5px; min-width: 0; }
+.mm-name:hover, .mm-name:focus { border-color: var(--border); background: var(--background); }
+.mm-count { font-variant-numeric: tabular-nums; color: var(--muted-fg); font-size: 11.5px; }
+.mm-h { font-size: 11.5px; color: var(--muted-fg); margin: 6px 2px 2px; display: flex; justify-content: space-between; }
+.mm-toggle { display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
 .reader-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
-.paper { font-family: var(--font-paper); font-size: 14.5px; line-height: 1.45; padding: 10px 34px 30px 10px; }
+.paper { font-family: var(--font-paper); font-size: 14.5px; line-height: 1.45; padding: 10px 34px 30px 12px; }
 .paper h2 { font-size: 22px; margin: 18px 0 10px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
 .paper h3 { font-size: 17px; margin: 14px 0 8px; font-weight: 700; }
 .paper p { margin: 0 0 12px; position: relative; }
@@ -170,99 +176,120 @@ input, textarea { font: inherit; color: inherit; }
 .hl[data-c="pink"] { background: color-mix(in srgb, var(--hl-pink) var(--hl-alpha), transparent); }
 .hl[data-c="purple"] { background: color-mix(in srgb, var(--hl-purple) var(--hl-alpha), transparent); }
 .qmark { text-decoration: underline; text-decoration-color: var(--muted-fg); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
-.hl:hover, .qmark:hover { box-shadow: 0 0 0 1px var(--ring); }
-.hl[data-flash="true"], .qmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
-.marks-off .hl { background: transparent; cursor: text; } .marks-off .qmark { text-decoration: none; cursor: text; }
-.marks-off .hl:hover, .marks-off .qmark:hover { box-shadow: none; } .marks-off .margin-ic, .marks-off .sec-mark { visibility: hidden; }
+.hl:hover, .qmark:hover, .hl[data-hot="true"], .qmark[data-hot="true"] { box-shadow: 0 0 0 1px var(--ring); }
+.hl[data-flash="true"], .qmark[data-flash="true"], figure[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
+.marks-off .hl { background: transparent !important; cursor: text; } .marks-off .qmark { text-decoration: none; cursor: text; }
+.marks-off .margin-ic, .marks-off .sec-mark, .marks-off .gmark, .marks-off .gicon { visibility: hidden; }
+.hl[data-dim="true"] { background: transparent !important; } .gmark[data-dim="true"] { visibility: hidden; }
 .margin-ic { position: absolute; right: -28px; top: 1px; border: 0; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-sans); font-size: 10.5px; padding: 2px; border-radius: 5px; }
 .margin-ic:hover { color: var(--foreground); background: var(--accent); }
-.fig { border: 1px solid var(--border); border-radius: 4px; height: 96px; display: flex; align-items: center; justify-content: center; color: var(--muted-fg); font-family: var(--font-sans); font-size: 12px; margin: 4px 0 4px; background: repeating-linear-gradient(135deg, transparent 0 8px, var(--muted) 8px 9px); }
-.caption { font-size: 13px; margin: 0 0 12px; }
-.translate-fab { position: absolute; right: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--popover); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; }
+/* Figure / equation: whole object marked in one click */
+.obj { position: relative; border-radius: 4px; transition: box-shadow 150ms ease-out; }
+.obj[data-marked] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--hl-green) 70%, transparent); }
+.obj-btn { position: absolute; top: 6px; right: 6px; z-index: 3; border: 1px solid var(--border); background: var(--popover); box-shadow: var(--shadow-sm); border-radius: 7px; padding: 2px 8px; font-family: var(--font-sans); font-size: 11.5px; display: inline-flex; gap: 4px; align-items: center;
+  opacity: 0; transform: scale(0.95); transition: opacity 120ms ease-out, transform 120ms ease-out; }
+.obj:hover .obj-btn, .obj:focus-within .obj-btn { opacity: 1; transform: none; }
+.fig-img { border: 1px solid var(--border); border-radius: 4px; height: 128px; position: relative; background: var(--background); overflow: hidden; }
+.fig-img svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.caption { font-size: 13px; margin: 4px 0 12px; }
+.translate-fab { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--popover); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; }
+.translate-fab[aria-pressed="true"] { color: var(--foreground); border-color: var(--ring); }
 .back-pill { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 4; border: 1px solid var(--border); background: var(--popover); box-shadow: var(--shadow-md); border-radius: 999px; padding: 3px 12px; font-size: 12px; display: inline-flex; gap: 5px; align-items: center; font-family: var(--font-sans);
   transition: opacity 200ms ease-out, transform 200ms ease-out; }
 .back-pill[data-state="closed"] { opacity: 0; transform: translate(-50%, -6px); pointer-events: none; }
-.pdf-page { margin: 14px auto; width: calc(100% - 28px); max-width: 460px; aspect-ratio: 0.77; background: var(--background); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; padding: 24px 24px; font-family: var(--font-paper); font-size: 8.5px; line-height: 1.45; overflow: hidden; }
-.pdf-page .cols { columns: 2; column-gap: 14px; } .pdf-page p { margin: 0 0 5px; }
-.pdf-mark { position: absolute; border-radius: 2px; }
-/* PDF-only paper: a page drawn at Marker block positions (595 × 842 pt); the text is the text layer. */
-.gpage { margin: 14px auto 6px; width: calc(100% - 36px); max-width: 640px; aspect-ratio: 595 / 842; background: oklch(1 0 0); color: oklch(0.15 0 0); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; font-family: var(--font-paper); overflow: visible; container-type: inline-size; }
+/* "Saved to …" confirmation */
+.toast { position: fixed; z-index: 60; background: var(--foreground); color: var(--background); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; box-shadow: var(--shadow-md);
+  transition: opacity 200ms ease-out, transform 200ms ease-out; }
+.toast[data-state="closed"] { opacity: 0; transform: translateY(6px); pointer-events: none; }
+.toast button { border: 0; background: transparent; color: inherit; text-decoration: underline; padding: 0; font-size: 12.5px; }
+
+/* PDF pages (react-pdf text layer stands in as positioned text) */
+.gpage { margin: 14px auto 6px; width: calc(100% - 36px); max-width: 640px; aspect-ratio: 595 / 842; background: oklch(1 0 0); color: oklch(0.15 0 0); border: 1px solid var(--border); box-shadow: var(--shadow-sm); position: relative; font-family: var(--font-paper); container-type: inline-size; }
 .gblk { position: absolute; overflow: hidden; font-size: 1.62cqw; line-height: 1.24; text-align: justify; }
 .gblk.h { font-family: var(--font-sans); font-weight: 600; font-size: 1.9cqw; }
 .gblk.title { font-family: var(--font-sans); font-weight: 700; font-size: 3.4cqw; line-height: 1.15; text-align: left; }
 .gblk.small { font-size: 1.4cqw; color: oklch(0.35 0 0); text-align: left; }
+.gblk.eq { overflow: visible; font-family: var(--font-math); font-size: 2.1cqw; display: flex; align-items: center; justify-content: center; text-align: center; }
+.gblk.eq .obj-btn { top: -4px; right: -4px; }
 .gmarks { position: absolute; inset: 0; pointer-events: none; }
 .gmark { position: absolute; border-radius: 1px; transition: box-shadow 150ms ease-out; }
-.gmark[data-kind="quote"] { height: 1px !important; background: oklch(0.45 0 0); }
+.gmark[data-kind="quote"] { background: oklch(0.45 0 0); }
 .gmark[data-c="green"] { background: color-mix(in srgb, #2f9e63 26%, transparent); } .gmark[data-c="blue"] { background: color-mix(in srgb, #3b7dd8 26%, transparent); }
 .gmark[data-c="pink"] { background: color-mix(in srgb, #d6457e 26%, transparent); } .gmark[data-c="purple"] { background: color-mix(in srgb, #8b5cd6 26%, transparent); }
-.gmark[data-kind="box"] { outline: 1.5px solid color-mix(in srgb, #3b7dd8 70%, transparent); }
-.gmark[data-hot="true"] { box-shadow: 0 0 0 1px oklch(0.55 0 0); }
-.gmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
-.marks-off .gmark, .marks-off .gicon { visibility: hidden; }
-.gicon { position: absolute; pointer-events: auto; border: 0; background: transparent; color: oklch(0.5 0 0); border-radius: 4px; padding: 1px; display: inline-flex; align-items: center; gap: 1px; font-family: var(--font-sans); font-size: 9px; }
+.gmark[data-kind="box"], .gmark[data-kind="eq"] { outline: 1.5px solid color-mix(in srgb, #2f9e63 70%, transparent); background: transparent; }
+.gmark[data-hot="true"] { box-shadow: 0 0 0 1px oklch(0.55 0 0); } .gmark[data-flash="true"] { box-shadow: 0 0 0 3px var(--ring); }
+.gicon { position: absolute; pointer-events: auto; border: 0; background: transparent; color: oklch(0.5 0 0); border-radius: 4px; padding: 1px; display: inline-flex; font-family: var(--font-sans); }
 .gicon:hover { background: oklch(0.95 0 0); color: oklch(0.15 0 0); }
 .scan { background: repeating-linear-gradient(0deg, oklch(0.97 0.01 85), oklch(0.97 0.01 85) 11px, oklch(0.93 0.01 85) 12px); cursor: crosshair; user-select: none; }
-.scan .scan-fig { position: absolute; left: 14%; top: 16%; width: 72%; height: 30%; border: 1px solid oklch(0.6 0 0); display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-size: 2cqw; color: oklch(0.4 0 0); background: oklch(0.99 0 0); }
-.scan .scan-cap { position: absolute; left: 14%; top: 48%; width: 72%; font-size: 1.35cqw; color: oklch(0.3 0 0); }
-.scan .scan-lines { position: absolute; left: 10%; right: 10%; top: 58%; bottom: 8%; background: repeating-linear-gradient(180deg, oklch(0.55 0 0 / 0.35) 0 2px, transparent 2px 9px); }
+.scan .scan-fig { position: absolute; left: 14%; top: 14%; width: 72%; height: 26%; border: 1px solid oklch(0.6 0 0); display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-size: 2cqw; color: oklch(0.4 0 0); background: oklch(0.99 0 0); }
+.scan .scan-cap { position: absolute; left: 14%; top: 42%; width: 72%; font-size: 1.5cqw; color: oklch(0.3 0 0); }
+.scan .scan-tbl { position: absolute; left: 14%; top: 48%; width: 72%; font-size: 1.6cqw; color: oklch(0.25 0 0); border-collapse: collapse; }
+.scan .scan-tbl td { border: 1px solid oklch(0.55 0 0 / 0.5); padding: 0.4cqw 1cqw; }
 .page-note { text-align: center; font-family: var(--font-sans); font-size: 11.5px; color: var(--muted-fg); margin: 0 14px 6px; }
 .drag-box { position: absolute; border: 1.5px dashed var(--hl-blue); background: color-mix(in srgb, var(--hl-blue) 12%, transparent); pointer-events: none; }
-.r-sub .doc-kind { font-size: 11.5px; color: var(--muted-fg); padding: 2px 6px; }
-.hcard[data-mode="translation"] .hcard-f { display: none; }
-.tr-body { padding: 8px 10px 10px; font-size: 13px; line-height: 1.6; }
-.translate-fab[aria-pressed="true"] { color: var(--foreground); border-color: var(--ring); }
 
-/* Selection popover */
+/* Selection popover: below the selection; named colours */
 .pop { position: absolute; z-index: 6; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; align-items: center; gap: 2px; font-family: var(--font-sans);
-  transform-origin: bottom center; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+  transform-origin: top center; transition: opacity 150ms ease-out, transform 150ms ease-out; }
 .pop[data-state="closed"] { opacity: 0; transform: scale(0.95); pointer-events: none; }
-.swatch { width: 22px; height: 22px; border-radius: 999px; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
-.swatch span { width: 14px; height: 14px; border-radius: 999px; display: block; }
-.swatch:hover { background: var(--accent); }
+.swatch { height: 26px; border-radius: 999px; border: 0; background: transparent; display: inline-flex; align-items: center; gap: 0; padding: 0 5px; font-size: 12px; transition: gap 120ms ease-out; }
+.swatch span.dot { width: 14px; height: 14px; border-radius: 999px; display: block; flex-shrink: 0; }
+.swatch .nm { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width 150ms ease-out; }
+.swatch:hover, .swatch:focus-visible { background: var(--accent); gap: 5px; }
+.swatch:hover .nm, .swatch:focus-visible .nm { max-width: 90px; }
 .pop .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .pop .act { border: 0; background: transparent; border-radius: 6px; padding: 3px 8px; font-size: 12.5px; display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
 .pop .act:hover { background: var(--accent); }
 
-/* Note card from the margin icon (Reader only) */
-/* Same placement as the PDF translation card (TranslationCard + lib/cardPlacement): fixed, in the
-   gutter LEFT of the reader (over the chat column), aligned with the paragraph, an arrow pointing
-   at it; glides between paragraphs; never over the paper. */
-.hcard { position: fixed; z-index: 50; width: 380px; background: var(--muted); border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-radius: 8px; box-shadow: var(--shadow-md); font-family: var(--font-sans); font-size: 13px;
+/* Cards in the gutter left of the reader (placed like the PDF translation card); they stack */
+.gcard { position: fixed; z-index: 50; width: 380px; background: var(--muted); border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-radius: 8px; box-shadow: var(--shadow-md); font-family: var(--font-sans); font-size: 13px;
   transform-origin: top right; transition: opacity 150ms ease-out, transform 150ms ease-out, top 200ms ease-out, left 200ms ease-out; }
-.hcard[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
-.hcard-arrow { position: absolute; right: -6px; width: 10px; height: 10px; background: var(--muted); border-top: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-right: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); transform: rotate(45deg); transition: top 200ms ease-out; }
-.hcard-h { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
-.hcard-h .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hcard-h .icon-btn[aria-pressed="true"] { color: var(--foreground); background: var(--accent); }
-.hcard-b { max-height: 180px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
-.hcard-b .blk { padding: 3px 6px; border-radius: 6px; }
-.hcard-b .blk[data-target="true"] { outline: 2px solid var(--ring); outline-offset: -1px; }
-.hcard-f { border-top: 1px solid var(--border); padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; }
+.gcard[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
+.gcard-arrow { position: absolute; right: -6px; width: 10px; height: 10px; background: var(--muted); border-top: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-right: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); transform: rotate(45deg); }
+.gcard-h { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
+.gcard-h .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcard-b { max-height: 210px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
+.gcard-b .blk { padding: 3px 6px; border-radius: 6px; }
+.gcard-b .blk[contenteditable="true"]:focus { outline: 1px solid var(--ring); background: var(--background); }
+.gcard-b .blk[data-target="true"] { outline: 2px solid var(--ring); outline-offset: -1px; }
+.gcard-f { border-top: 1px solid var(--border); padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
+.tr-body { padding: 8px 10px 10px; font-size: 13px; line-height: 1.6; }
 
 /* Notes pane */
 .n-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); padding: 4px 6px; flex-shrink: 0; }
-.note-tab { border: 0; background: transparent; font-size: 12px; padding: 3px 8px; border-radius: 4px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 4px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-tab { border: 0; background: transparent; font-size: 12px; padding: 3px 8px; border-radius: 4px; color: var(--muted-fg); display: inline-flex; align-items: center; gap: 4px; max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .note-tab[aria-selected="true"] { background: var(--accent); color: var(--foreground); font-weight: 500; }
-.n-tabs .spacer { flex: 1; }
-.n-sub { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 8px; flex-shrink: 0; font-size: 11.5px; color: var(--muted-fg); }
-.follow { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); display: inline-flex; gap: 4px; align-items: center; border-radius: 6px; padding: 1px 6px; }
-.follow:hover { background: var(--accent); color: var(--foreground); }
+.note-tab.secondary { margin-left: 4px; }
+.n-sub { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--border); padding: 3px 10px; flex-shrink: 0; font-size: 11.5px; color: var(--muted-fg); }
 .notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 30px 4px; }
 .blocks { display: flex; flex-direction: column; gap: 1px; }
 .blk-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
 .blk-row .handle { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); padding: 3px 0; border-radius: 4px; display: flex; justify-content: center; transition: opacity 120ms; }
-.blk-row:hover .handle, .blk-row:focus-within .handle { opacity: 1; }
+.blk-row:hover .handle { opacity: 1; }
 .blk-row[data-link="true"] { background: var(--accent); box-shadow: 0 0 0 1px var(--ring); }
 .blk-row[data-flash="true"] { background: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
 .blk { padding: 2px 6px; min-width: 0; font-size: 13.5px; }
-.blk h4 { margin: 8px 0 2px; font-size: 14px; }
+.blk h3 { margin: 12px 0 2px; font-size: 15px; display: flex; gap: 6px; align-items: baseline; }
+.blk h3 .sec-tag { font-size: 10.5px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.blk h4 { margin: 6px 0 1px; font-size: 13.5px; }
 .ai-tag { display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; font-weight: 500; }
 .quote { border-left: 3px solid var(--muted-fg); padding: 1px 0 1px 10px; font-family: var(--font-paper); font-size: 14px; }
 .quote[data-c="green"] { border-left-color: var(--hl-green); } .quote[data-c="blue"] { border-left-color: var(--hl-blue); }
 .quote[data-c="pink"] { border-left-color: var(--hl-pink); } .quote[data-c="purple"] { border-left-color: var(--hl-purple); }
+.cname { font-family: var(--font-sans); font-size: 10.5px; color: var(--muted-fg); margin-left: 6px; }
 .src-chip { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-family: var(--font-sans); font-size: 11px; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; background: var(--background); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-chip:hover { color: var(--foreground); }
+.objblk { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--background); }
+.objblk .head { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted-fg); flex-wrap: wrap; }
+.objblk .fig-img { border: 0; border-radius: 0; height: 110px; }
+.objblk .cap { padding: 4px 8px 6px; font-size: 12.5px; }
+.objblk .eqrow { display: grid; grid-template-columns: minmax(0, 1fr) 42%; gap: 0; }
+.objblk .eq-render { font-family: var(--font-math); font-size: 16px; padding: 10px 8px; text-align: center; }
+.objblk .eq-src { font-family: var(--font-mono); font-size: 11px; color: var(--muted-fg); padding: 0 8px 8px; word-break: break-all; }
+.objblk .crop { border-left: 1px solid var(--border); background: oklch(1 0 0); color: oklch(0.15 0 0); font-family: var(--font-math); font-size: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px; gap: 3px; }
+.objblk .crop small { font-family: var(--font-sans); font-size: 10px; color: oklch(0.45 0 0); }
+.objblk .ocr { padding: 6px 8px; font-size: 12.5px; }
+.model-mark { display: inline-flex; gap: 3px; align-items: center; font-size: 10.5px; color: var(--muted-fg); }
 .lost { border: 1px dashed var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 8px; padding: 5px 9px; font-size: 12px; }
 .lost .q { color: var(--foreground); font-family: var(--font-paper); font-size: 13.5px; margin-top: 2px; }
 .check { display: flex; gap: 8px; align-items: flex-start; } .check input { margin-top: 4px; }
@@ -286,38 +313,23 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 .page-editor .inner { max-width: 740px; }
 .crumb { font-size: 12px; color: var(--muted-fg); margin-bottom: 10px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .page-actions { float: right; display: flex; gap: 6px; }
-.slash { margin: 4px 0 4px 26px; width: 290px; max-width: calc(100% - 26px); border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-md); padding: 4px; font-size: 13px; }
-.slash .row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; }
-.slash .row[aria-selected="true"] { background: var(--accent); }
-.slash .row small { display: block; color: var(--muted-fg); font-size: 11.5px; }
-.slash .ico { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
-.math { font-family: 'Cambria Math', 'STIX Two Math', serif; font-size: 15px; text-align: center; padding: 6px 0; }
-.backlinks { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; font-size: 12.5px; color: var(--muted-fg); }
-.img-blk { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.img-blk .bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted-fg); flex-wrap: wrap; }
-.img-blk .bar .seg { margin-left: auto; } .img-blk .bar .seg button { padding: 1px 8px; font-size: 11.5px; }
-.whiteboard { height: 150px; background: var(--muted); position: relative; }
-.whiteboard svg { position: absolute; inset: 10px; width: calc(100% - 20px); height: calc(100% - 20px); }
-.transcript { padding: 8px 12px; font-size: 13px; }
-.transcript table { border-collapse: collapse; font-size: 12.5px; margin-top: 4px; }
-.transcript td, .transcript th { border: 1px solid var(--border); padding: 2px 8px; text-align: left; }
+.sketch-note { margin-top: 16px; font-size: 12.5px; color: var(--muted-fg); border-top: 1px solid var(--border); padding-top: 10px; }
 
 @media (max-width: 900px) {
   .sidebar, .tree { display: none; }
   .view-chat { flex-direction: column; }
   .chat-col { min-width: 0; flex: 0 0 46%; }
   .panel { flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--border); }
-  .paper { padding-right: 34px; }
 }
 </style>
 
 <div class="proto-bar" role="toolbar" aria-label="Prototype controls">
-  <span class="label">H5b notes · prototype</span>
+  <span class="label">H5b notes · prototype (after the user survey)</span>
   <div class="seg" id="viewSeg">
     <button aria-pressed="true" data-view="chat">Chat page</button>
-    <button aria-pressed="false" data-view="notes">Notes page (H5b.2)</button>
+    <button aria-pressed="false" data-view="notes">Notes page (H5b.2 sketch)</button>
   </div>
-  <span class="muted">Try: the reader and notes buttons in the composer · select paper text · hover a mark · a quote's source chip · Undo on the card · the PDF-only paper tab (select text, drag a box on page 2, turn on translate)</span>
+  <span class="muted">Try: select paper text · click a highlight · hover Figure 3 → Mark · the PDF-only paper: Eq. (1) on page 2, drag a box on page 3, 文A translate · My marks · drag the panel edge wider</span>
 </div>
 
 <div class="app">
@@ -353,23 +365,26 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
             <div class="agent-line"><span class="agent-tag">Agent</span>Worked 22.8 s: read 2 sections <i data-lucide="chevron-right" class="icon-xs"></i></div>
           </div>
           <div class="msg-user">Summarise what we concluded about §2 into my notes.</div>
-          <div class="msg-agent" id="agentTurn">
+          <div class="msg-agent">
             <div class="card" id="noteCard">
-              <div class="card-title"><i data-lucide="notebook-pen" class="icon-sm"></i>Updated your notes: §2 Background and Motivation</div>
-              <div class="card-sub">3 blocks added under “What we concluded” · 1 change suggested on your block</div>
-              <ul class="diff">
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span></span></li>
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span></span></li>
-                <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.</span></li>
-                <li><i data-lucide="pencil" class="icon-sm k-sug"></i><span>Suggested on your block: “up to 83%” → “89%, 88% and 83% (three trajectories)”</span></li>
-              </ul>
-              <div class="card-actions">
-                <button class="btn" id="openNoteBtn"><i data-lucide="panel-right-open" class="icon-sm"></i>Open in notes</button>
+              <div class="card-line">
+                <i data-lucide="notebook-pen" class="icon-sm"></i>
+                <span class="what">Added 3 notes under <b>§2</b> in the paper's note · <span class="sug">1 suggestion on your text</span></span>
+                <button class="btn" id="openNoteBtn">Open in notes</button>
                 <button class="btn btn-ghost" id="undoBtn"><i data-lucide="undo-2" class="icon-sm"></i>Undo</button>
               </div>
+              <button class="details-btn" id="detailsBtn" aria-expanded="false" aria-controls="detailsWrap"><i data-lucide="chevron-right" class="icon-xs chev"></i>Details</button>
+              <div class="collapse" id="detailsWrap" data-state="closed"><div>
+                <ul class="diff">
+                  <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span></span></li>
+                  <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span></span></li>
+                  <li><i data-lucide="plus" class="icon-sm k-ins"></i><span>Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.</span></li>
+                  <li><i data-lucide="pencil" class="icon-sm k-sug"></i><span>Suggested on your line: <del class="sug">up to 83%</del> <ins class="sug">89%, 88% and 83% (three trajectories)</ins></span></li>
+                </ul>
+              </div></div>
             </div>
-            <div class="collapse" id="undoneWrap" data-state="closed"><div><p class="undone"><i data-lucide="undo-2" class="icon-sm"></i>Undone: the 3 blocks and the suggestion were removed. Your own blocks were not touched.</p></div></div>
-            <p>I added three cited blocks under <b>What we concluded</b> in §2's note. Your line said “up to 83%”; I left it as you wrote it and suggested a correction, because the paper reports 89%, 88% and 83%.<span class="cite">[<i data-lucide="notebook-pen"></i>3]</span></p>
+            <div class="collapse" id="undoneWrap" data-state="closed"><div><p class="undone"><i data-lucide="undo-2" class="icon-sm"></i>Undone: the 3 notes and the suggestion were removed. Your own text was not touched.</p></div></div>
+            <p>I put three cited notes under <b>§2 Background and Motivation</b> in this paper's note. Your line said “up to 83%”; I left it as you wrote it and suggested a correction, because the paper reports 89%, 88% and 83%.<span class="cite">[<i data-lucide="notebook-pen"></i>3]</span></p>
             <div class="agent-line"><span class="agent-tag">Agent</span>Worked 9.4 s: read 1 section, updated 1 note <i data-lucide="chevron-right" class="icon-xs"></i></div>
           </div>
         </div></div>
@@ -391,8 +406,13 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 
       <div class="panel" id="panel">
         <span class="panel-resize" id="panelResize" aria-hidden="true"></span>
-        <div class="panes" id="panes" data-orient="stacked">
-          <!-- Reader pane (the Citation Canvas, renamed Reader) -->
+        <div class="pane-tabs" id="paneTabs" role="tablist" aria-label="Right panel">
+          <button class="pane-tab" role="tab" data-pane="reader" aria-selected="true"><i data-lucide="book-open" class="icon-sm"></i>Reader</button>
+          <button class="pane-tab" role="tab" data-pane="notes" aria-selected="false"><i data-lucide="notebook-pen" class="icon-sm"></i>Notes</button>
+          <span class="spacer"></span>
+          <span class="muted" style="font-size:11px;align-self:center;padding-right:6px">Wider panel → side by side</span>
+        </div>
+        <div class="panes" id="panes" data-layout="tabs">
           <div class="pane" id="readerPane">
             <div class="r-tabs" role="tablist">
               <button class="paper-tab" role="tab" aria-selected="true" data-doc="xr">Toward a Predictive eXtended Reality…</button>
@@ -401,141 +421,128 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
               <button class="icon-btn" aria-label="Close reader" id="closeReader"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
             <div class="r-sub">
-              <span id="fmtTabs"><button class="fmt" data-fmt="html" aria-selected="true">HTML</button><button class="fmt" data-fmt="pdf" aria-selected="false">PDF</button></span>
+              <span id="fmtTabs"><button class="fmt" aria-selected="true">HTML</button><button class="fmt" aria-selected="false">PDF</button></span>
               <span class="doc-kind" id="docKind" hidden>PDF only · 18 pages</span>
               <span class="spacer"></span>
-              <button class="marks-btn" id="marksToggle" aria-pressed="true" title="Show my marks"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span id="marksCount">4</span></button>
+              <button class="marks-btn" id="marksBtn" aria-expanded="false" aria-controls="marksMenu"><i data-lucide="highlighter" class="icon-xs"></i>My marks <span id="marksCount">4</span><i data-lucide="chevron-down" class="icon-xs"></i></button>
+              <div class="marks-menu" id="marksMenu" data-state="closed" role="dialog" aria-label="My marks">
+                <div class="mm-h"><span>Colours — click a name to rename</span><span>show</span></div>
+                <div id="mmRows"></div>
+                <div class="mm-toggle"><input type="checkbox" id="showMarks" checked><label for="showMarks">Show my marks on the paper</label></div>
+              </div>
             </div>
             <div class="reader-body" id="readerBody">
               <button class="back-pill" id="backPill" data-state="closed"><i data-lucide="corner-up-left" class="icon-xs"></i>Back to note</button>
               <article class="paper" id="paper">
-                <h2>Background and Motivation <span class="sec-mark" title="This section has a note"><i data-lucide="notebook-pen" class="icon-xs"></i>note</span></h2>
+                <h2>Background and Motivation <span class="sec-mark" title="This section has notes"><i data-lucide="notebook-pen" class="icon-xs"></i>notes</span></h2>
                 <h3>Challenges of latency optimization</h3>
                 <p>Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements. This is due to the large latency between a user motion and the visual feedback from the agent in the virtual space.</p>
-                <p>As shown in the Fig. 3(A) gray bars, <span class="hl" data-c="blue" data-mark="m1">it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.</span> This large latency causes large user-agent motion mismatch and makes the user adjust based on the old poses from agent, which results in false adjustment. We find out that the dominant part of the latency is due to the network transmission, which can go up to 1 second since the data has to suffer from a two-way network delay.<button class="margin-ic" data-mark="m1" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
-                <p>Following this observation, <span class="hl" data-c="green" data-mark="m2">we believe the timely update of agent poses is more critical compared to pose accuracy.</span> Therefore, we opt for a duo-virtual spaces design which aims to avoid the network latency with a localization method running directly on XR.<button class="margin-ic" data-mark="m2" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button> <span class="cited">The agent keeps a second virtual space with the original user poses from XR, agent, and objects poses directly captured from agent sensors and uses this as a ground-truth state. We then make changes to the existing framework used in the previous experiment and record the end-to-end latency in Fig. 3 blue bars. <span class="qmark" data-mark="m3">We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</span></span></p>
-                <div class="fig">figs/exp.pdf</div>
-                <p class="caption">Figure 3: Latency profiling and challenges during poses merge.</p>
-                <p>However, this method faces <span class="hl" data-c="pink" data-mark="m4">significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations</span>, as shown in Fig. 3(B). If the prediction does not optimize for a smooth transition for the next state, the object will create a large euclidean distance Δd₂ compared to the optimized predicted pose euclidean distance Δd₁. Solving this issue is our ongoing work.<button class="margin-ic" data-mark="m4" aria-label="1 note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
-              </article>
-              <div id="pdfView" hidden>
-                <div class="pdf-page">
-                  <div style="font-family:var(--font-sans);font-weight:600;font-size:10px;margin-bottom:6px">2.2 Challenges of latency optimization</div>
-                  <div class="cols">
-                    <p>Although ROS reality enables basic usability, tasks like tossing and catching balls, tying shoe laces, and tracing straight lines are still unachievable due to their rapid objects movement or precise manipulation requirements.</p>
-                    <p>As shown in the Fig. 3(A) gray bars, it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR. This large latency causes large user-agent motion mismatch…</p>
-                    <p>Following this observation, we believe the timely update of agent poses is more critical compared to pose accuracy. Therefore, we opt for a duo-virtual spaces design…</p>
-                    <p>We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</p>
+                <p>As shown in the Fig. 3(A) gray bars, <span class="hl" data-c="blue" data-mark="m1">it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.</span> This large latency causes large user-agent motion mismatch and makes the user adjust based on the old poses from agent, which results in false adjustment. We find out that the dominant part of the latency is due to the network transmission, which can go up to 1 second since the data has to suffer from a two-way network delay.<button class="margin-ic" data-mark="m1" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
+                <p>Following this observation, <span class="hl" data-c="green" data-mark="m2">we believe the timely update of agent poses is more critical compared to pose accuracy.</span> Therefore, we opt for a duo-virtual spaces design which aims to avoid the network latency with a localization method running directly on XR.<button class="margin-ic" data-mark="m2" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button> <span class="cited">The agent keeps a second virtual space with the original user poses from XR, agent, and objects poses directly captured from agent sensors and uses this as a ground-truth state. We then make changes to the existing framework used in the previous experiment and record the end-to-end latency in Fig. 3 blue bars. <span class="qmark" data-mark="m3">We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.</span></span></p>
+                <figure class="obj" id="fig3" data-obj="fig3" style="margin:4px 0 0">
+                  <button class="obj-btn" data-objbtn="fig3"><i data-lucide="highlighter" class="icon-xs"></i>Mark figure</button>
+                  <div class="fig-img" role="img" aria-label="Figure 3: latency bars and pose-merge drift">
+                    <svg viewBox="0 0 400 128" preserveAspectRatio="none" aria-hidden="true">
+                      <g font-family="Geist, sans-serif" font-size="9" fill="currentColor" style="color:var(--muted-fg)"><text x="8" y="14">(A) End-to-end latency (s)</text><text x="230" y="14">(B) Pose merge</text><text x="20" y="122">Traj 1</text><text x="80" y="122">Traj 2</text><text x="140" y="122">Traj 3</text></g>
+                      <g><rect x="18" y="30" width="18" height="80" rx="2" fill="#9aa0a6"/><rect x="40" y="101" width="18" height="9" rx="2" fill="#3b7dd8"/><rect x="78" y="34" width="18" height="76" rx="2" fill="#9aa0a6"/><rect x="100" y="101" width="18" height="9" rx="2" fill="#3b7dd8"/><rect x="138" y="40" width="18" height="70" rx="2" fill="#9aa0a6"/><rect x="160" y="98" width="18" height="12" rx="2" fill="#3b7dd8"/></g>
+                      <g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--foreground)"><path d="M240 100 C 270 90, 290 60, 320 52"/><path d="M320 52 L 350 30" stroke-dasharray="3 3"/><path d="M320 52 L 352 70"/></g>
+                      <g font-family="Geist, sans-serif" font-size="9" fill="currentColor" style="color:var(--muted-fg)"><text x="356" y="30">Δd₂</text><text x="356" y="74">Δd₁</text></g>
+                    </svg>
                   </div>
-                  <div class="pdf-mark" style="left:24px;top:86px;width:46%;height:34px;background:color-mix(in srgb, var(--hl-blue) var(--hl-alpha), transparent)"></div>
-                  <div class="pdf-mark" style="left:52%;top:42px;width:44%;height:22px;background:color-mix(in srgb, var(--hl-green) var(--hl-alpha), transparent)"></div>
-                  <div class="pdf-mark" style="left:52%;top:94px;width:40%;height:1px;background:var(--muted-fg)"></div>
-                </div>
-                <p class="muted" style="text-align:center;font-size:12px;font-family:var(--font-sans);padding:0 16px">Marks made in the HTML view show here wherever their quoted text is found on the page.</p>
-              </div>
-              <!-- PDF-only paper (real: Appl. Sci. 2018, 8, 1379). Block positions from its Marker blocks.json. -->
+                  <figcaption class="caption">Figure 3: Latency profiling and challenges during poses merge.</figcaption>
+                </figure>
+                <p>However, this method faces <span class="hl" data-c="pink" data-mark="m4">significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations</span>, as shown in Fig. 3(B). If the prediction does not optimize for a smooth transition for the next state, the object will create a large euclidean distance Δd₂ compared to the optimized predicted pose euclidean distance Δd₁. Solving this issue is our ongoing work.<button class="margin-ic" data-mark="m4" aria-label="Open the note on this passage"><i data-lucide="message-square-text" class="icon-xs"></i></button></p>
+              </article>
               <div id="ghostView" hidden>
-                <div class="gpage" id="gp1" data-page="1">
+                <div class="gpage" id="gp1">
                   <div class="gblk small" style="left:12.6%;top:3.9%;width:74.6%;height:1.3%">Review</div>
                   <div class="gblk title" style="left:12.4%;top:6.4%;width:75%;height:6%">A Review of Ghost Imaging via Sparsity Constraints</div>
                   <div class="gblk small" style="left:13.6%;top:14.6%;width:73%;height:4%">Shensheng Han *, Hong Yu, Xia Shen, Honglin Liu, Wenlin Gong and Zhentao Liu</div>
                   <div class="gblk small" style="left:13.6%;top:19.8%;width:73%;height:4.2%">Shanghai Institute of Optics &amp; Fine Mechanics, Chinese Academy of Sciences, Shanghai 201800, China</div>
-                  <div class="gblk small" style="left:13.8%;top:26.5%;width:50%;height:1.2%">Received: 20 June 2018; Accepted: 27 July 2018; Published: 16 August 2018</div>
-                  <div class="gblk" data-block="/page/0/Text/9" data-sec="A Review of Ghost Imaging via Sparsity Constraints" style="left:13.6%;top:29%;width:73.8%;height:14.4%"><b>Abstract:</b> Different from conventional imaging methods, which are based on the first-order field correlation, ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path. As a new optical imaging technology, GI not only provides us new capabilities beyond the conventional imaging methods, but also gives out a new viewpoint of imaging physical mechanism. It may be applied to many potential applications, such as remote sensing, snap-shot spectral imaging, thermal X-ray diffraction imaging and imaging through scattering media. In this paper, we reviewed mainly our research work of ghost imaging via sparsity constraints (GISC) and discussed the application and theory prospect of GISC concisely.</div>
-                  <div class="gblk small" style="left:13.6%;top:45%;width:61%;height:1.3%"><b>Keywords:</b> imaging systems; ghost imaging; optimal estimation; coherence theory</div>
-                  <div class="gblk h" data-block="/page/0/SectionHeader/12" style="left:12.8%;top:51.1%;width:30%;height:1.6%">1. Introduction</div>
-                  <div class="gblk" data-block="/page/0/Text/13" data-sec="1. Introduction" style="left:12.4%;top:53.2%;width:75%;height:25.7%">With the concept of photon introduced by Albert Einstein in 1905, the statistical description of light wave is absolutely necessary for characterizing the fluctuation of light sources. Classical and quantum optical coherence theory were established by Emil Wolf in 1954 [1–4] and Roy J. Glauber in 1960 [5,6], respectively, to interpret the statistical properties of light fields. From the viewpoint of optical coherence theories, conventional imaging methods are based on the first-order correlation of light fields, and the attempt to extract spatial information of an object from high-order correlation of light fields can be traced back to the famous HBT experiment, which was conducted by R. Hanbury Brown and R. Q. Twiss in 1956 [7,8] based on the second-order autocorrelation of light fields in time domain. In 1995, Shih's group first demonstrated a novel imaging modality, called GI [9], by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object. The physics of GI has been thoroughly discussed in the past decades [10–17]. Theories and experiments have showed that both quantum two-photon interference and classical intensity-fluctuation correlations could be used for GI. In this review, for the sake of the consistency of the discussion, we focused on the GI researches performed by our group, which is mainly based on the classical coherence theory.</div>
-                  <div class="gblk" data-block="/page/0/Text/14" data-sec="1. Introduction" style="left:12.4%;top:78.9%;width:75%;height:12.7%">The remainder of the paper is organized as follows. In Section 2, we introduce the theoretical framework of GISC with an emphasis on that the ensemble average required by GI could hardly be satisfied in real applications. In Section 3, we present a brief review of application researches of GISC conducted in Shanghai Institute of Optics &amp; Fine Mechanics (SIOM), including two imaging applications in real space, GISC LiDAR [18,19] illuminated by pseudo-thermal light and GISC spectral camera [20] illuminated by natural light…</div>
-                  <div class="gmarks" id="gm1"></div>
+                  <div class="gblk" data-block="/page/0/Text/9" data-sec="Abstract" style="left:13.6%;top:29%;width:73.8%;height:14.4%"><b>Abstract:</b> Different from conventional imaging methods, which are based on the first-order field correlation, ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path. As a new optical imaging technology, GI not only provides us new capabilities beyond the conventional imaging methods, but also gives out a new viewpoint of imaging physical mechanism. It may be applied to many potential applications, such as remote sensing, snap-shot spectral imaging, thermal X-ray diffraction imaging and imaging through scattering media. In this paper, we reviewed mainly our research work of ghost imaging via sparsity constraints (GISC) and discussed the application and theory prospect of GISC concisely.</div>
+                  <div class="gblk h" style="left:12.8%;top:51.1%;width:30%;height:1.6%">1. Introduction</div>
+                  <div class="gblk" data-block="/page/0/Text/13" data-sec="1. Introduction" style="left:12.4%;top:53.2%;width:75%;height:25.7%">With the concept of photon introduced by Albert Einstein in 1905, the statistical description of light wave is absolutely necessary for characterizing the fluctuation of light sources. Classical and quantum optical coherence theory were established by Emil Wolf in 1954 [1–4] and Roy J. Glauber in 1960 [5,6], respectively, to interpret the statistical properties of light fields. From the viewpoint of optical coherence theories, conventional imaging methods are based on the first-order correlation of light fields, and the attempt to extract spatial information of an object from high-order correlation of light fields can be traced back to the famous HBT experiment, which was conducted by R. Hanbury Brown and R. Q. Twiss in 1956 [7,8] based on the second-order autocorrelation of light fields in time domain. In 1995, Shih's group first demonstrated a novel imaging modality, called GI [9], by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object. The physics of GI has been thoroughly discussed in the past decades [10–17]. Theories and experiments have showed that both quantum two-photon interference and classical intensity-fluctuation correlations could be used for GI.</div>
+                  <div class="gmarks" id="gm-gp1"></div>
                 </div>
                 <p class="page-note">Page 1 of 18</p>
-                <div class="gpage scan" id="gp2" data-page="2" data-scan="true">
-                  <div class="scan-fig">[ scanned figure: GISC LiDAR schematic ]</div>
-                  <div class="scan-cap">Figure 2. Schematic of the GISC LiDAR system (scanned page)</div>
-                  <div class="scan-lines"></div>
-                  <div class="gmarks" id="gm2"></div>
+                <div class="gpage" id="gp2">
+                  <div class="gblk small" style="left:12.8%;top:6.8%;width:74.4%;height:1%">Appl. Sci. 2018, 8, 1379 · 2 of 18</div>
+                  <div class="gblk h" style="left:12.4%;top:10.7%;width:40%;height:1.6%">2. Theoretical Framework of GISC</div>
+                  <div class="gblk" data-block="/page/1/Text/2" data-sec="2. Theoretical Framework of GISC" style="left:16.5%;top:13.1%;width:34%;height:1.4%">According to GI theory [10,16,17,23], we have</div>
+                  <div class="gblk eq obj" data-obj="eq1" data-block="/page/1/Equation/3" style="left:39.7%;top:15.6%;width:47.6%;height:2%">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>),&nbsp;&nbsp;&nbsp;&nbsp;(1)<button class="obj-btn" data-objbtn="eq1"><i data-lucide="sigma" class="icon-xs"></i>Mark equation</button></div>
+                  <div class="gblk" data-block="/page/1/Text/4" data-sec="2. Theoretical Framework of GISC" style="left:12.8%;top:18.9%;width:74.6%;height:6.2%">where ΔI<sub>t</sub>(x<sub>t</sub>) and ΔI<sub>r</sub>(x<sub>r</sub>) are intensity fluctuations of a test and a reference arms, respectively, O(x<sub>t</sub>, x<sub>r</sub>) is a representation of an object's image (such as an image in the real or Fourier-transform space), ⟨…⟩ is the ensemble average. When the intensity in the test arm is detected by a bucket or point detector and the corresponding coordinate x<sub>t</sub> is fixed, O(x<sub>t</sub>, x<sub>r</sub>) can be expressed…</div>
+                  <div class="gblk" data-block="/page/1/Text/5" data-sec="2. Theoretical Framework of GISC" style="left:12.8%;top:25.3%;width:74.4%;height:2.8%">Since the sampling is always limited in practice, the solution of Equation (1) can be approximately presented as</div>
+                  <div class="gmarks" id="gm-gp2"></div>
                 </div>
-                <p class="page-note">Scanned page (no text layer): drag a box to highlight a region. Its text comes from the OCR lines Marker read inside it. <i>This paper has a text layer on every page; this page is an illustration.</i></p>
+                <p class="page-note">Page 2 of 18 · hover Eq. (1) → Mark equation</p>
+                <div class="gpage scan" id="gp3">
+                  <div class="scan-fig">[ scanned figure: GISC LiDAR schematic ]</div>
+                  <div class="scan-cap">Figure 2. Schematic of the GISC LiDAR system.</div>
+                  <table class="scan-tbl"><tr><td>Range</td><td>1.0 km</td></tr><tr><td>Sampling</td><td>8000 frames</td></tr><tr><td>Resolution</td><td>0.8 m</td></tr></table>
+                  <div class="gmarks" id="gm-gp3"></div>
+                </div>
+                <p class="page-note">A scanned page (no text layer): drag a box to mark a region; its OCR text appears in the note beside the crop. <i>Illustration — this paper has a text layer on every page.</i></p>
               </div>
-              <div class="pop" id="selPop" data-state="closed" role="toolbar" aria-label="Selection">
-                <button class="swatch" title="Highlight green" aria-label="Highlight green" data-c="green"><span style="background:var(--hl-green)"></span></button>
-                <button class="swatch" title="Highlight blue" aria-label="Highlight blue" data-c="blue"><span style="background:var(--hl-blue)"></span></button>
-                <button class="swatch" title="Highlight pink" aria-label="Highlight pink" data-c="pink"><span style="background:var(--hl-pink)"></span></button>
-                <button class="swatch" title="Highlight purple" aria-label="Highlight purple" data-c="purple"><span style="background:var(--hl-purple)"></span></button>
-                <span class="sep"></span>
-                <button class="act" id="quoteAct"><i data-lucide="text-quote" class="icon-sm"></i>Quote to note</button>
-                <button class="act"><i data-lucide="message-square-plus" class="icon-sm"></i>Add note</button>
-              </div>
-              <div class="hcard" id="hcard" data-state="closed" role="dialog" aria-label="Note for this passage">
-                <span class="hcard-arrow" id="hcardArrow" aria-hidden="true"></span>
-                <div class="hcard-h"><i data-lucide="notebook-pen" class="icon-sm" id="hcardIcon"></i><span class="t" id="hcardTitle">§2 Background and Motivation</span><button class="icon-btn" id="hcardPin" aria-pressed="false" aria-label="Pin" title="Pin"><i data-lucide="pin" class="icon-xs"></i></button><button class="icon-btn" id="hcardClose" aria-label="Close" title="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
-                <div class="hcard-b" id="hcardBody"></div>
-                <div class="tr-body" id="trBody" hidden></div>
-                <div class="hcard-f"><span class="muted" style="font-size:11.5px">You · 2 days ago</span><button class="btn" id="editInNotes"><i data-lucide="square-pen" class="icon-xs"></i>Edit in Notes</button></div>
-              </div>
-              <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate (PDF: hover a paragraph)" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
+              <div class="pop" id="selPop" data-state="closed" role="toolbar" aria-label="Mark selection"></div>
+              <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
             </div>
           </div>
-          <button class="divider" id="divider" aria-label="Resize Reader and Notes"></button>
-          <!-- Notes pane -->
+          <button class="divider" id="divider" aria-label="Resize Reader and Notes" hidden></button>
           <div class="pane" id="notesPane">
-            <div class="n-tabs" role="tablist" aria-label="Notes in this chat">
-              <button class="note-tab" role="tab" aria-selected="true" data-note="sec" id="secTab"><i data-lucide="hash" class="icon-xs"></i><span id="secTabLabel">§2 Background and Motivation</span></button>
-              <button class="note-tab" role="tab" aria-selected="false" data-note="chat"><i data-lucide="message-square" class="icon-xs"></i>This chat</button>
-              <button class="note-tab" role="tab" aria-selected="false" data-note="paper"><i data-lucide="file-text" class="icon-xs"></i>Paper</button>
+            <div class="n-tabs" role="tablist" aria-label="Notes">
+              <button class="note-tab" role="tab" aria-selected="true" data-note="paper" id="paperNoteTab"><i data-lucide="file-text" class="icon-xs"></i><span id="paperNoteLabel">Toward a Predictive eXtended Reality…</span></button>
+              <button class="note-tab secondary" role="tab" aria-selected="false" data-note="chat"><i data-lucide="message-square" class="icon-xs"></i>This chat</button>
               <span class="spacer"></span>
-              <button class="icon-btn" id="orientBtn" aria-label="Side by side" title="Side by side"><i data-lucide="columns-2" class="icon-sm"></i></button>
-              <button class="icon-btn" id="swapBtn" aria-label="Swap Reader and Notes" title="Swap"><i data-lucide="arrow-up-down" class="icon-sm"></i></button>
               <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
-            <div class="n-sub"><button class="follow" id="followBtn" aria-pressed="true"><i data-lucide="link" class="icon-xs"></i>Follows the reader's section</button><span style="margin-left:auto" id="noteMeta"></span></div>
+            <div class="n-sub"><i data-lucide="link" class="icon-xs"></i><span id="followLbl">Shows the section you're reading</span><span class="spacer"></span><span id="noteMeta"></span></div>
             <div class="notes-body" id="notesBody"></div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Notes page (H5b.2 sketch) -->
     <section class="view" id="vNotes" hidden style="flex:1;min-width:0;display:flex">
       <div class="notes-page">
         <nav class="tree" aria-label="Notes">
           <div class="search"><i data-lucide="search" class="icon-sm"></i>Search all notes</div>
-          <div class="tree-h">Recent</div>
-          <button class="tree-i" aria-current="true"><i data-lucide="hash" class="icon-sm"></i><span>XR duo-virtual · §2 Background…</span></button>
-          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work: XR teleoperation</span></button>
           <div class="tree-h">Papers</div>
-          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>Toward a Predictive eXtended Reality…</span></button>
-          <button class="tree-i sub"><span>Introduction</span></button>
-          <button class="tree-i sub" aria-current="true"><span>Background and Motivation</span></button>
-          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>Virtual Reality Based Robot Teleoperation…</span></button>
+          <button class="tree-i" aria-current="true"><i data-lucide="file-text" class="icon-sm"></i><span>Toward a Predictive eXtended Reality…</span></button>
+          <button class="tree-i sub"><span>§1 Introduction</span></button>
+          <button class="tree-i sub"><span>§2 Background and Motivation</span></button>
+          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>A Review of Ghost Imaging via…</span></button>
           <div class="tree-h">Chats</div>
           <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Where does the XR latency drop…</span></button>
           <div class="tree-h">Ideas</div>
           <button class="tree-i"><i data-lucide="lightbulb" class="icon-sm"></i><span>Smooth pose merging with a Kalman blend</span></button>
           <div class="tree-h">Pages</div>
           <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work: XR teleoperation</span></button>
-          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Reading log · November</span></button>
           <div class="tree-h">Trash</div>
         </nav>
         <div class="page-editor"><div class="inner">
-          <div class="page-actions"><button class="btn"><i data-lucide="history" class="icon-xs"></i>History</button><button class="btn"><i data-lucide="download" class="icon-xs"></i>Export</button></div>
-          <div class="crumb"><i data-lucide="file-text" class="icon-xs"></i>Toward a Predictive eXtended Reality… <i data-lucide="chevron-right" class="icon-xs"></i> Background and Motivation</div>
-          <h1 style="font-size:24px;margin:0 0 4px">Background and Motivation</h1>
-          <div class="muted" style="font-size:12px;margin-bottom:14px">Shared by every chat that attaches this paper · edited by you and the assistant · revision 9</div>
+          <div class="page-actions"><button class="btn"><i data-lucide="history" class="icon-xs"></i>History</button><button class="btn"><i data-lucide="download" class="icon-xs"></i>Export (.md / .docx)</button></div>
+          <div class="crumb"><i data-lucide="file-text" class="icon-xs"></i>Papers <i data-lucide="chevron-right" class="icon-xs"></i> Toward a Predictive eXtended Reality…</div>
+          <h1 style="font-size:24px;margin:0 0 4px">Toward a Predictive eXtended Reality Teleoperation System with Duo-Virtual Spaces</h1>
+          <div class="muted" style="font-size:12px;margin-bottom:14px">One note for the paper, organised by its sections · shared by every chat that attaches it</div>
           <div class="blocks" id="pageBlocks"></div>
-          <div class="slash" role="listbox" aria-label="Insert block">
-            <div class="row" aria-selected="true"><span class="ico"><i data-lucide="text-quote" class="icon-sm"></i></span><span>Quote from a paper<small>Search → section → passage, kept anchored</small></span></div>
-            <div class="row"><span class="ico"><i data-lucide="image" class="icon-sm"></i></span><span>Figure<small>A paper figure with its caption</small></span></div>
-            <div class="row"><span class="ico"><i data-lucide="sigma" class="icon-sm"></i></span><span>Math<small>KaTeX, inline or block</small></span></div>
-            <div class="row"><span class="ico"><i data-lucide="image-plus" class="icon-sm"></i></span><span>Image<small>Photo or notebook page, transcribed</small></span></div>
-            <div class="row"><span class="ico"><i data-lucide="file-symlink" class="icon-sm"></i></span><span>Link to page<small>[[…]] with a backlink</small></span></div>
-          </div>
-          <div class="backlinks"><b style="color:var(--foreground);font-weight:500">Linked from</b> · Related work: XR teleoperation · Smooth pose merging with a Kalman blend</div>
+          <p class="sketch-note">H5b.2 sketch, to be redesigned from the shipped Ideas / Feedback pages before H5b.2 is planned.</p>
         </div></div>
       </div>
     </section>
   </main>
 </div>
+<div class="gcard" id="noteCardG" data-state="closed" role="dialog" aria-label="Note for this passage">
+  <span class="gcard-arrow" id="noteArrow" aria-hidden="true"></span>
+  <div class="gcard-h"><i data-lucide="notebook-pen" class="icon-sm"></i><span class="t" id="ncTitle"></span><button class="icon-btn" id="ncClose" aria-label="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
+  <div class="gcard-b" id="ncBody"></div>
+  <div class="gcard-f"><span class="muted">Edit right here · saved automatically</span><button class="btn" id="ncOpen"><i data-lucide="panel-right-open" class="icon-xs"></i>Open in Notes</button></div>
+</div>
+<div class="gcard" id="trCard" data-state="closed" role="dialog" aria-label="Translation">
+  <span class="gcard-arrow" id="trArrow" aria-hidden="true"></span>
+  <div class="gcard-h"><i data-lucide="languages" class="icon-sm"></i><span class="t">繁體中文 · translation</span><button class="icon-btn" id="trClose" aria-label="Close"><i data-lucide="x" class="icon-xs"></i></button></div>
+  <div class="tr-body" id="trText"></div>
+</div>
+<div class="toast" id="toast" data-state="closed" role="status"></div>
 
 <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
 <script>
@@ -546,415 +553,451 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   const reduce = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const flash = el => { if (!el) return; el.dataset.flash = 'true'; setTimeout(() => delete el.dataset.flash, 1200); };
-  // Vertical only: a jump must never shift anything sideways.
   const scrollTo = el => el && el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
 
-  /* ---------- notes: ordered blocks with stable ids ---------- */
-  const XR_SRC = 'Toward a Predictive XR… · §2 · p. 2';
-  const G_SRC = 'A Review of Ghost Imaging… · §1 · p. 1';
+  /* ---------- named colours (renameable) ---------- */
+  const COLORS = [
+    { c: 'green', name: 'Key result', show: true }, { c: 'blue', name: 'Method', show: true },
+    { c: 'purple', name: 'Question', show: true }, { c: 'pink', name: 'Disagree', show: true },
+  ];
+  const cname = c => (COLORS.find(x => x.c === c) || {}).name || '';
+
+  /* ---------- one note per paper, organised by section headings ---------- */
+  const DOCS = {
+    xr: { title: 'Toward a Predictive eXtended Reality Teleoperation System with Duo-Virtual Spaces', short: 'XR teleoperation paper', src: 'Toward a Predictive XR…' },
+    ghost: { title: 'A Review of Ghost Imaging via Sparsity Constraints', short: 'Ghost imaging review', src: 'A Review of Ghost Imaging…' },
+  };
+  let nid = 100;
   const notes = {
-    sec: { title: '§2 Background and Motivation', meta: 'Shared by 2 chats · revision 9', blocks: [
-      { id: 'b1', type: 'h', text: 'Why latency matters' },
-      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', src: XR_SRC, text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
+    xr: { meta: 'Shared by 2 chats · revision 9', blocks: [
+      { id: 's1', type: 'sec', key: 'Introduction', text: '§1 Introduction' },
+      { id: 'a1', type: 'p', text: 'Headline claim: “up to 89%” lower latency. The per-trajectory numbers are in §2.' },
+      { id: 's2', type: 'sec', key: 'Background and Motivation', text: '§2 Background and Motivation' },
+      { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', src: '§2 · p. 2', text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
       { id: 'b3', type: 'p', text: 'Rapid tasks (catching, tracing lines) fail at this latency — matches what we saw with our Kinova setup.' },
-      { id: 'b4', type: 'quote', c: 'green', mark: 'm2', src: XR_SRC, text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
-      { id: 'b5', type: 'h', text: 'Result' },
-      { id: 'b6', type: 'quote', c: 'none', mark: 'm3', src: XR_SRC, text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
+      { id: 'b4', type: 'quote', c: 'green', mark: 'm2', src: '§2 · p. 2', text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
+      { id: 'b6', type: 'quote', c: 'none', mark: 'm3', src: '§2 · p. 2', text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
       { id: 'b7', type: 'p', text: 'Latency reduced by up to 83% with local prediction.', sug: { del: 'up to 83%', ins: '89%, 88% and 83% (three trajectories)' } },
       { id: 'b8', type: 'lost', text: 'the round-trip time is measured with NTP-synchronised clocks' },
-      { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', src: XR_SRC, text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
+      { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', src: '§2 · p. 3', text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
       { id: 'b10', type: 'h', text: 'What we concluded' },
       { id: 'b11', type: 'p', ai: true, fresh: true, text: 'Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span>' },
       { id: 'b12', type: 'p', ai: true, fresh: true, text: 'Predicting agent and object poses locally on the XR side cuts latency by 89% / 88% / 83%.<span class="cite">[1]</span>' },
       { id: 'b13', type: 'check', ai: true, fresh: true, text: 'Open: pose drift when merging ground truth with predictions (Fig. 3B) is unsolved.' },
     ] },
-    chat: { title: 'This chat', meta: 'This chat only · copied when the chat is forked', blocks: [
+    ghost: { meta: 'PDF only · sections from its Marker blocks · revision 3', blocks: [
+      { id: 'g-s0', type: 'sec', key: 'Abstract', text: 'Abstract' },
+      { id: 'gq1', type: 'quote', c: 'green', mark: 'g1', src: 'Abstract · p. 1', text: 'ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path.' },
+      { id: 'g-s1', type: 'sec', key: '1. Introduction', text: '§1 Introduction' },
+      { id: 'gq2', type: 'quote', c: 'none', mark: 'g2', src: '§1 · p. 1', text: 'by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object.' },
+      { id: 'gp3', type: 'p', text: 'Bucket detector + reference arm — the same split we would need for the dark-field line.' },
+    ] },
+    chat: { meta: 'This chat only · copied when the chat is forked', blocks: [
       { id: 'c1', type: 'p', text: 'Goal: decide if local pose prediction is worth trying on our Kinova teleop rig before the lab meeting.' },
       { id: 'c2', type: 'check', text: 'Measure our own end-to-end latency on the 5 GHz network' },
     ] },
-    paper: { title: 'Toward a Predictive eXtended Reality…', meta: 'Paper note · shared by 2 chats', blocks: [
-      { id: 'p1', type: 'p', text: 'Extended abstract, UC Riverside (2024). §2 has all the numbers; no full evaluation yet.' },
-    ] },
-    gsec: { title: '§1 Introduction', meta: 'PDF-only paper · section from its Marker blocks · revision 3', blocks: [
-      { id: 'gs1', type: 'h', text: 'How GI works' },
-      { id: 'gs2', type: 'quote', c: 'none', mark: 'g2', src: G_SRC, text: 'by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object.' },
-      { id: 'gs3', type: 'p', text: 'Bucket detector + reference arm — the same split we would need for the dark-field line.' },
-    ] },
-    gpaper: { title: 'A Review of Ghost Imaging via Sparsity Constraints', meta: 'Paper note · PDF only (Appl. Sci. 2018, 8, 1379)', blocks: [
-      { id: 'gp1', type: 'h', text: 'Key idea' },
-      { id: 'gp2', type: 'quote', c: 'green', mark: 'g1', src: 'A Review of Ghost Imaging… · Abstract · p. 1', text: 'ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path.' },
-      { id: 'gp3', type: 'quote', c: 'blue', mark: 'g3', src: 'A Review of Ghost Imaging… · Figure 2 · p. 2 · box', box: true, text: 'Figure 2. Schematic of the GISC LiDAR system' },
-      { id: 'gp4', type: 'p', text: 'Check §3 for the LiDAR numbers before the review.' },
-    ] },
   };
-  // Which note and blocks each mark belongs to.
-  const markNote = { m1: ['sec', ['b2', 'b3']], m2: ['sec', ['b4']], m3: ['sec', ['b6', 'b7']], m4: ['sec', ['b9']],
-    g1: ['gpaper', ['gp2']], g2: ['gsec', ['gs2', 'gs3']], g3: ['gpaper', ['gp3']] };
-  let doc = 'xr', curNote = 'sec', undone = false, nid = 100;
-  const noteKey = tab => doc === 'ghost' ? ({ sec: 'gsec', paper: 'gpaper' }[tab] || tab) : tab;
+  const markNote = { m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
+  let doc = 'xr', noteTab = 'paper', undone = false;
+  const curNoteKey = () => noteTab === 'chat' ? 'chat' : doc;
 
-  function blockHtml(b, plain) {
+  const FIG_SVG = $('#fig3 svg').outerHTML;
+  function blockHtml(b, k) {
     const tag = b.ai ? '<span class="ai-tag" title="Written by the assistant"><i data-lucide="sparkles" class="icon-xs"></i>AI</span>' : '';
+    const chip = (mark, src) => `<button class="src-chip" data-mark="${mark}"><i data-lucide="file-text" class="icon-xs"></i>${esc(DOCS[k] ? DOCS[k].src : '')} · ${esc(src)}</button>`;
     let inner;
-    if (b.type === 'h') inner = `<h4>${b.text}</h4>`;
-    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${b.box ? '<i data-lucide="square-dashed" class="icon-xs" style="vertical-align:-1px;margin-right:4px"></i>' : ''}${esc(b.text)}<div><button class="src-chip" data-mark="${b.mark}"><i data-lucide="file-text" class="icon-xs"></i>${esc(b.src)}</button></div></div>`;
+    if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
+    else if (b.type === 'h') inner = `<h4>${esc(b.text)}</h4>`;
+    else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}<div>${chip(b.mark, b.src)}</div></div>`;
+    else if (b.type === 'fig') inner = `<div class="objblk"><div class="head"><i data-lucide="image" class="icon-xs"></i>Figure 3 · ${esc(cname(b.c))}</div><div class="fig-img">${FIG_SVG}</div><div class="cap">Figure 3: Latency profiling and challenges during poses merge.<div>${chip(b.mark, 'Fig. 3 · p. 3')}</div></div></div>`;
+    else if (b.type === 'eq') inner = `<div class="objblk"><div class="head"><i data-lucide="sigma" class="icon-xs"></i>Eq. (1)<span class="model-mark"><i data-lucide="sparkles" class="icon-xs"></i>LaTeX transcribed by the model · check it against the page</span></div><div class="eqrow"><div><div class="eq-render">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)</div><div class="eq-src" contenteditable="true" spellcheck="false">\\langle \\Delta I_t(x_t)\\,\\Delta I_r(x_r) \\rangle = O(x_t, x_r)</div></div><div class="crop" title="Crop of the page">⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>), (1)<small>page 2 crop</small></div></div><div class="cap">${chip(b.mark, 'Eq. (1) · p. 2')}</div></div>`;
+    else if (b.type === 'box') inner = `<div class="objblk"><div class="head"><i data-lucide="square-dashed" class="icon-xs"></i>Region on a scanned page<span class="model-mark"><i data-lucide="scan-text" class="icon-xs"></i>OCR text · check numbers against the crop</span></div><div class="eqrow"><div class="ocr">Figure 2. Schematic of the GISC LiDAR system.<br>Range 1.0 km · Sampling 8000 frames · Resolution 0.8 m</div><div class="crop" style="font-family:var(--font-paper);font-size:10.5px;background:repeating-linear-gradient(0deg, oklch(0.97 0.01 85), oklch(0.97 0.01 85) 7px, oklch(0.93 0.01 85) 8px)">Range 1.0 km<br>Sampling 8000<br>Resolution 0.8 m<small>page 3 crop</small></div></div><div class="cap">${chip(b.mark, 'p. 3 · box')}</div></div>`;
     else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
     else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
-    else if (b.sug && !plain) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
+    else if (b.sug) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
     else inner = `<div>${b.text}${tag}</div>`;
     return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div></div>`;
   }
   const visible = k => notes[k].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
   function renderNote() {
-    const k = noteKey(curNote);
-    $('#notesBody').innerHTML = `<div class="blocks">${visible(k).map(b => blockHtml(b)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
-    $('#noteMeta').textContent = notes[k].meta; icons();
+    const k = curNoteKey();
+    $('#notesBody').innerHTML = `<div class="blocks">${visible(k).map(b => blockHtml(b, k)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
+    $('#noteMeta').textContent = notes[k].meta;
+    $('#paperNoteLabel').textContent = DOCS[doc].title; icons();
   }
-  function renderPage() {
-    $('#pageBlocks').innerHTML = visible('sec').filter(b => b.type !== 'lost').slice(0, 7).map(b => blockHtml(b, true)).join('') +
-      `<div class="blk-row"><span></span><div class="blk"><div class="math">latency reduction = 1 − T<sub>duo</sub> / T<sub>ROS Reality</sub></div></div></div>` +
-      `<div class="blk-row"><span></span><div class="blk"><div class="img-blk"><div class="bar"><i data-lucide="image" class="icon-xs"></i>lab-whiteboard-1114.jpg<span style="display:inline-flex;gap:4px;align-items:center"><i data-lucide="sparkles" class="icon-xs"></i>transcribed by the model · edited by you</span><div class="seg"><button aria-pressed="false" data-iv="img">Image</button><button aria-pressed="true" data-iv="txt">Text</button></div></div>` +
-      `<div class="whiteboard" id="ivImg" hidden><svg viewBox="0 0 300 120" role="img" aria-label="Whiteboard sketch of the two virtual spaces"><g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--muted-fg)"><rect x="10" y="18" width="110" height="46" rx="4"/><rect x="180" y="18" width="110" height="46" rx="4"/><path d="M120 34h60M180 50h-60"/></g><g font-size="10" fill="currentColor" style="color:var(--foreground)"><text x="18" y="38">XR: predicted</text><text x="18" y="52">agent + objects</text><text x="188" y="38">Agent: ground</text><text x="188" y="52">truth space</text><text x="126" y="30">user poses</text><text x="122" y="62">calibrate</text><text x="60" y="100">drift at each calibration → smooth blend?</text></g></svg></div>` +
-      `<div class="transcript" id="ivTxt"><b>Whiteboard, 14 Nov:</b> XR side predicts agent + objects; agent keeps the ground-truth space and sends periodic calibration. Drift at each calibration → try a smooth blend.<table><tr><th>Setup</th><th>Our latency</th></tr><tr><td>ROS Reality, 5 GHz</td><td>1.3 s</td></tr><tr><td>Local prediction</td><td>to measure</td></tr></table></div></div></div></div>`;
-    icons();
-    $$('[data-iv]').forEach(btn => btn.addEventListener('click', () => {
-      $$('[data-iv]').forEach(x => x.setAttribute('aria-pressed', String(x === btn)));
-      $('#ivImg').hidden = btn.dataset.iv !== 'img'; $('#ivTxt').hidden = btn.dataset.iv !== 'txt';
-    }));
+  function renderPage() { $('#pageBlocks').innerHTML = visible('xr').map(b => blockHtml(b, 'xr')).join(''); icons(); }
+
+  // Insert a block under a section heading of a paper's note, creating the heading if missing.
+  function insertUnder(k, secKey, secText, block) {
+    const list = notes[k].blocks;
+    let at = list.findIndex(b => b.type === 'sec' && b.key === secKey);
+    if (at < 0) { list.push({ id: 'sec' + (++nid), type: 'sec', key: secKey, text: secText, fresh2: true }); at = list.length - 1; }
+    let end = at + 1; while (end < list.length && list[end].type !== 'sec' && list[end].type !== 'h') end++;
+    list.splice(end, 0, block); return block.id;
   }
 
   /* ---------- views ---------- */
   function showView(v) {
     $$('#viewSeg button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === v)));
-    $('#vChat').hidden = v !== 'chat'; $('#vNotes').hidden = v !== 'notes';
-    $('#navNotes').setAttribute('aria-current', String(v === 'notes'));
+    $('#vChat').hidden = v !== 'chat'; $('#vNotes').hidden = v !== 'notes'; $('#navNotes').setAttribute('aria-current', String(v === 'notes'));
+    if (v === 'notes') renderPage();
   }
   $$('#viewSeg button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
   $('#navNotes').addEventListener('click', () => showView('notes'));
   $('#tabChats').addEventListener('click', () => showView('chat'));
 
-  /* ---------- right panel: Reader, Notes, or both ---------- */
-  const state = { reader: true, notes: true };
-  // The panel width the user dragged, per combination; opening a pane never resets it.
-  const widths = { single: '34%', both: '44%' };
+  /* ---------- right panel: tabs, or side by side when wide ---------- */
+  const state = { reader: true, notes: true, active: 'reader' };
+  const widths = { single: '38%', both: '42%' };
+  const SIDE_MIN = 780;
   const combo = () => (state.reader && state.notes) ? 'both' : 'single';
+  let layout = 'tabs';
   function applyPanel() {
     $('#tglReader').setAttribute('aria-pressed', String(state.reader));
     $('#tglNotes').setAttribute('aria-pressed', String(state.notes));
-    $('#readerPane').dataset.hidden = String(!state.reader);
-    $('#notesPane').dataset.hidden = String(!state.notes);
-    $('#divider').hidden = !(state.reader && state.notes);
-    $('#panel').dataset.closed = String(!state.reader && !state.notes);
-    $('#panel').style.setProperty('--panel-w', widths[combo()]);
-    try { localStorage.setItem('h5b-panel', JSON.stringify(state)); } catch (e) {}
+    const panel = $('#panel'); panel.dataset.closed = String(!state.reader && !state.notes);
+    panel.style.setProperty('--panel-w', widths[combo()]);
+    // Decide from the target width (the panel animates toward it), not the current one.
+    const target = $('.main').getBoundingClientRect().width * parseFloat(widths[combo()]) / 100;
+    layout = combo() === 'single' ? 'single' : (target >= SIDE_MIN ? 'side' : 'tabs');
+    $('#panes').dataset.layout = layout;
+    $('#paneTabs').hidden = layout !== 'tabs';
+    if (!state[state.active]) state.active = state.reader ? 'reader' : 'notes';
+    $('#readerPane').dataset.on = String(state.reader); $('#notesPane').dataset.on = String(state.notes);
+    $('#readerPane').dataset.active = String(layout !== 'tabs' || state.active === 'reader');
+    $('#notesPane').dataset.active = String(layout !== 'tabs' || state.active === 'notes');
+    $$('.pane-tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.pane === state.active)));
+    const d = $('#divider'); d.hidden = layout !== 'side';
+    const placeDivider = () => { if (layout === 'side') d.style.left = $('#readerPane').getBoundingClientRect().width + 'px'; drawGhostMarks(); };
+    requestAnimationFrame(placeDivider); setTimeout(placeDivider, 230);
   }
-  const open = (pane) => { if (state[pane]) return; state[pane] = true; applyPanel(); };
-  $('#tglReader').addEventListener('click', () => { state.reader = !state.reader; applyPanel(); });
-  $('#tglNotes').addEventListener('click', () => { state.notes = !state.notes; applyPanel(); });
+  // Is the notes pane visible right now (so hovering a mark can outline its block)?
+  const notesVisible = () => state.notes && (layout === 'side' || layout === 'single' || state.active === 'notes');
+  const readerVisible = () => state.reader && (layout !== 'tabs' || state.active === 'reader');
+  function show(pane) { state[pane] = true; state.active = pane; applyPanel(); }
+  $$('.pane-tab').forEach(t => t.addEventListener('click', () => { state.active = t.dataset.pane; applyPanel(); }));
+  $('#tglReader').addEventListener('click', () => { state.reader = !state.reader; if (state.reader) state.active = 'reader'; applyPanel(); });
+  $('#tglNotes').addEventListener('click', () => { state.notes = !state.notes; if (state.notes) state.active = 'notes'; applyPanel(); });
   $('#closeReader').addEventListener('click', () => { state.reader = false; applyPanel(); });
   $('#closeNotes').addEventListener('click', () => { state.notes = false; applyPanel(); });
-  $('#orientBtn').addEventListener('click', e => {
-    const p = $('#panes'); const side = p.dataset.orient !== 'side'; p.dataset.orient = side ? 'side' : 'stacked';
-    [$('#readerPane'), $('#notesPane')].forEach(x => { x.style.flexBasis = ''; });
-    e.currentTarget.setAttribute('aria-label', side ? 'Stack' : 'Side by side'); e.currentTarget.title = side ? 'Stack' : 'Side by side';
-    e.currentTarget.innerHTML = `<i data-lucide="${side ? 'rows-2' : 'columns-2'}" class="icon-sm"></i>`;
-    $('#swapBtn').innerHTML = `<i data-lucide="${side ? 'arrow-left-right' : 'arrow-up-down'}" class="icon-sm"></i>`; icons();
-    requestAnimationFrame(drawGhostMarks);
-  });
-  $('#swapBtn').addEventListener('click', () => {
-    const p = $('#panes'), r = $('#readerPane'), n = $('#notesPane'), d = $('#divider');
-    if (p.firstElementChild === r) { p.insertBefore(n, r); p.insertBefore(d, r); } else { p.insertBefore(r, n); p.insertBefore(d, n); }
-  });
   (() => {
-    const d = $('#divider'); let drag = false;
-    d.addEventListener('pointerdown', e => { drag = true; d.dataset.drag = 'true'; d.setPointerCapture(e.pointerId); });
-    d.addEventListener('pointerup', () => { drag = false; d.dataset.drag = 'false'; drawGhostMarks(); });
-    d.addEventListener('pointermove', e => {
-      if (!drag) return; const p = $('#panes'), box = p.getBoundingClientRect(), side = p.dataset.orient === 'side';
-      if (side) {
-        const notesFirst = p.firstElementChild.id === 'notesPane';
-        const w = notesFirst ? e.clientX - box.left : box.right - e.clientX;
-        p.style.setProperty('--notes-w', Math.min(box.width - 240, Math.max(240, w)) + 'px'); return;
-      }
-      const k = Math.min(0.8, Math.max(0.2, (e.clientY - box.top) / box.height));
-      p.firstElementChild.style.flexBasis = `${k * 100}%`; p.lastElementChild.style.flexBasis = `${(1 - k) * 100}%`;
-    });
-    const rz = $('#panelResize'); let rdrag = false;
-    rz.addEventListener('pointerdown', e => { rdrag = true; rz.setPointerCapture(e.pointerId); });
-    rz.addEventListener('pointerup', () => { rdrag = false; drawGhostMarks(); });
+    const rz = $('#panelResize'); let drag = false;
+    rz.addEventListener('pointerdown', e => { drag = true; rz.setPointerCapture(e.pointerId); });
+    rz.addEventListener('pointerup', () => { drag = false; applyPanel(); });
     rz.addEventListener('pointermove', e => {
-      if (!rdrag) return; const m = $('.main').getBoundingClientRect();
-      const w = Math.min(0.75, Math.max(0.25, (m.right - e.clientX) / m.width));
-      widths[combo()] = (w * 100) + '%'; $('#panel').style.setProperty('--panel-w', widths[combo()]);
+      if (!drag) return; const m = $('.main').getBoundingClientRect();
+      widths[combo()] = Math.min(75, Math.max(25, (m.right - e.clientX) / m.width * 100)) + '%'; applyPanel();
+    });
+    const d = $('#divider'); let dd = false;
+    d.addEventListener('pointerdown', e => { dd = true; d.dataset.drag = 'true'; d.setPointerCapture(e.pointerId); });
+    d.addEventListener('pointerup', () => { dd = false; d.dataset.drag = 'false'; applyPanel(); });
+    d.addEventListener('pointermove', e => {
+      if (!dd) return; const p = $('#panes').getBoundingClientRect();
+      $('#panes').style.setProperty('--notes-w', Math.min(p.width - 280, Math.max(260, p.right - e.clientX)) + 'px');
+      d.style.left = $('#readerPane').getBoundingClientRect().width + 'px';
     });
   })();
-  window.addEventListener('resize', () => drawGhostMarks());
+  window.addEventListener('resize', applyPanel);
 
-  /* ---------- reader: papers and HTML / PDF ---------- */
-  let fmt = 'html';
+  /* ---------- papers ---------- */
   function showDoc() {
     $$('.paper-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.doc === doc)));
-    const ghost = doc === 'ghost';
-    $('#fmtTabs').hidden = ghost; $('#docKind').hidden = !ghost;
-    $('#paper').hidden = ghost || fmt !== 'html'; $('#pdfView').hidden = ghost || fmt !== 'pdf'; $('#ghostView').hidden = !ghost;
-    $('#secTabLabel').textContent = ghost ? '§1 Introduction' : '§2 Background and Motivation';
-    $('#marksCount').textContent = String(ghost ? gmarks.length : $$('#paper .hl, #paper .qmark').length);
-    closeCard(); renderNote(); requestAnimationFrame(drawGhostMarks);
+    const g = doc === 'ghost';
+    $('#fmtTabs').hidden = g; $('#docKind').hidden = !g; $('#paper').hidden = g; $('#ghostView').hidden = !g;
+    closeCards(); renderNote(); renderMarksMenu(); requestAnimationFrame(drawGhostMarks);
   }
   $$('.paper-tab').forEach(b => b.addEventListener('click', () => { doc = b.dataset.doc; showDoc(); }));
-  $$('.fmt').forEach(b => b.addEventListener('click', () => {
-    fmt = b.dataset.fmt; $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x === b))); showDoc();
-  }));
 
-  /* ---------- note tabs + follow ---------- */
+  /* ---------- notes tabs; the note follows the section being read ---------- */
   $$('.note-tab').forEach(t => t.addEventListener('click', () => {
-    $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x === t))); curNote = t.dataset.note; renderNote();
+    $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x === t))); noteTab = t.dataset.note; renderNote();
   }));
-  $('#followBtn').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
-    e.currentTarget.innerHTML = `<i data-lucide="${on ? 'link' : 'pin'}" class="icon-xs"></i>${on ? "Follows the reader's section" : 'Pinned to this note'}`; icons();
+  let followT = null;
+  $('#readerBody').addEventListener('scroll', () => {
+    clearTimeout(followT); followT = setTimeout(() => {
+      if (noteTab !== 'paper' || !notesVisible()) return;
+      const rb = $('#readerBody').getBoundingClientRect();
+      const blk = $$(doc === 'ghost' ? '#ghostView [data-sec]' : '#paper h2').find(el => el.getBoundingClientRect().bottom > rb.top + 40);
+      const key = doc === 'ghost' ? blk && blk.dataset.sec : 'Background and Motivation';
+      const h = key && $(`#notesBody h3[data-sec-key="${CSS.escape(key)}"]`);
+      if (h) h.closest('.blk-row').scrollIntoView({ block: 'start', behavior: reduce() ? 'auto' : 'smooth' });
+    }, 150);
+    if (cardAnchor && $('#noteCardG').dataset.state === 'open') placeCards();
   });
-  const selectNoteTab = k => { const tab = k === 'chat' ? 'chat' : (k === 'sec' || k === 'gsec') ? 'sec' : 'paper'; $(`.note-tab[data-note="${tab}"]`).click(); };
 
-  /* ---------- the card slot left of the reader (shared with the PDF translation card) ---------- */
-  const hcard = $('#hcard'); let hideT = null, openT = null, curMark = null, anchorEl = null, pinned = false;
-  const marksOff = () => $('#readerBody').classList.contains('marks-off');
-  const setPin = on => { pinned = on; $('#hcardPin').setAttribute('aria-pressed', String(on)); };
-  function closeCard() { setPin(false); hcard.dataset.state = 'closed'; curMark = null; $$('.gmark[data-hot]').forEach(m => delete m.dataset.hot); }
-  const hideCard = () => { clearTimeout(openT); if (pinned) return; clearTimeout(hideT); hideT = setTimeout(() => { hcard.dataset.state = 'closed'; curMark = null; }, 250); };
-  $('#hcardPin').addEventListener('click', () => setPin(!pinned));
-  $('#hcardClose').addEventListener('click', closeCard);
-  // Same placement as the PDF translation card: in the gutter left of the reader, aligned
-  // with the paragraph, clamped to the window, the arrow pointing at the paragraph.
-  function placeCardAt(paraRect) {
-    const reader = $('#readerBody').getBoundingClientRect();
-    const gap = 12, w = Math.min(380, Math.max(240, reader.left - gap * 2));
-    hcard.style.width = w + 'px'; hcard.style.left = Math.max(gap, reader.left - gap - w) + 'px';
-    const h = hcard.offsetHeight || 260;
-    const top = Math.min(Math.max(paraRect.top, reader.top + 4), window.innerHeight - h - 8);
-    hcard.style.top = top + 'px';
-    $('#hcardArrow').style.top = Math.min(h - 20, Math.max(10, paraRect.top + 10 - top)) + 'px';
-    hcard.dataset.state = 'open';
-  }
-  function showNoteCard(mark, paraRect) {
-    clearTimeout(hideT); curMark = mark; hcard.dataset.mode = 'note';
-    const [k, target] = markNote[mark] || ['sec', []];
-    $('#hcardTitle').textContent = notes[k].title; $('#hcardBody').hidden = false; $('#trBody').hidden = true;
-    $('#hcardIcon').setAttribute('data-lucide', 'notebook-pen');
-    $('#hcardBody').innerHTML = visible(k).filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 80))}…”</span>` : b.text}</div>`).join('');
-    placeCardAt(paraRect);
-    requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
-  }
+  /* ---------- cards in the gutter left of the reader; they stack ---------- */
+  const nc = $('#noteCardG'), tc = $('#trCard'); let cardAnchor = null, cardMark = null;
   const TR = {
-    '/page/0/Text/9': '摘要：不同於基於一階場關聯的傳統成像方法，鬼成像（GI）透過兩條光路之光場的高階互關聯取得影像資訊，而物體只出現在其中一條光路。作為一種新的光學成像技術，GI 不僅提供超越傳統成像方法的新能力，也帶來理解成像物理機制的新觀點……',
-    '/page/0/Text/13': '隨著愛因斯坦於 1905 年提出光子的概念，以統計方式描述光波成為刻畫光源起伏的必要手段……1995 年，Shih 的團隊首次展示了一種稱為 GI 的新成像方式：將收集穿透或反射自物體之光的單像素（桶）光偵測器輸出，與照明未與物體互動之高空間解析度掃描光偵測器或陣列的輸出相關聯……',
-    '/page/0/Text/14': '本文其餘部分安排如下。第 2 節介紹 GISC 的理論框架，強調 GI 所需的系綜平均在實際應用中難以滿足。第 3 節簡要回顧 SIOM 進行的 GISC 應用研究……',
+    '/page/0/Text/9': '摘要：不同於基於一階場關聯的傳統成像方法，鬼成像（GI）透過兩條光路之光場的高階互關聯取得影像資訊，而物體只出現在其中一條光路……',
+    '/page/0/Text/13': '……1995 年，Shih 的團隊首次展示了一種稱為 GI 的新成像方式：將收集穿透或反射自物體之光的單像素（桶）光偵測器輸出，與照明未與物體互動之高空間解析度掃描光偵測器或陣列的輸出相關聯……',
+    '/page/1/Text/4': '其中 ΔI_t(x_t) 與 ΔI_r(x_r) 分別為測試臂與參考臂的強度起伏，O(x_t, x_r) 代表物體的影像（例如實空間或傅立葉空間中的影像），⟨…⟩ 為系綜平均……',
   };
-  function showTranslation(blockEl) {
-    clearTimeout(hideT); curMark = null; hcard.dataset.mode = 'translation';
-    $('#hcardTitle').textContent = '繁體中文 · translation'; $('#hcardBody').hidden = true;
-    $('#trBody').hidden = false; $('#trBody').textContent = TR[blockEl.dataset.block] || '';
-    placeCardAt(blockEl.getBoundingClientRect());
+  function placeCards() {
+    if (!cardAnchor) return;
+    const reader = $('#readerBody').getBoundingClientRect(), para = cardAnchor.getBoundingClientRect();
+    const gap = 12, w = Math.min(380, Math.max(240, reader.left - gap * 2)), left = Math.max(gap, reader.left - gap - w);
+    let top = Math.min(Math.max(para.top, reader.top + 4), window.innerHeight - 160);
+    const open = c => c.dataset.state === 'open';
+    [nc, tc].forEach(c => { c.style.width = w + 'px'; c.style.left = left + 'px'; });
+    if (open(nc)) {
+      nc.style.top = top + 'px'; $('#noteArrow').style.top = Math.min(nc.offsetHeight - 20, Math.max(10, para.top + 10 - top)) + 'px';
+      top += nc.offsetHeight + 8; $('#trArrow').hidden = true;
+    } else $('#trArrow').hidden = false;
+    if (open(tc)) { tc.style.top = Math.min(top, window.innerHeight - tc.offsetHeight - 8) + 'px'; $('#trArrow').style.top = '14px'; }
   }
-  hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
-  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark], .gpage')) closeCard(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCard(); $('#selPop').dataset.state = 'closed'; } });
-  $('#editInNotes').addEventListener('click', () => {
-    const m = curMark; closeCard(); open('notes'); const [k, ids] = markNote[m] || ['sec', []]; selectNoteTab(k);
+  function closeCards() { nc.dataset.state = 'closed'; tc.dataset.state = 'closed'; cardAnchor = null; cardMark = null; $$('[data-hot]').forEach(x => delete x.dataset.hot); }
+  function openNoteCard(mark, anchor, block) {
+    cardMark = mark; cardAnchor = anchor;
+    const [k, ids] = markNote[mark] || [doc, []];
+    // The section this mark sits in: its heading and blocks, the quoting block outlined, editable in place.
+    const list = visible(k); const i0 = list.findIndex(b => ids.includes(b.id));
+    let s0 = i0; while (s0 > 0 && list[s0].type !== 'sec') s0--;
+    let e0 = i0 + 1; while (e0 < list.length && list[e0].type !== 'sec') e0++;
+    const part = list.slice(Math.max(0, s0), e0);
+    $('#ncTitle').textContent = `${DOCS[k] ? DOCS[k].short : 'Note'} › ${(list[s0] && list[s0].type === 'sec') ? list[s0].text : ''}`;
+    $('#ncBody').innerHTML = part.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
+      const editable = b.type === 'p' && !b.sug;
+      const body = b.type === 'h' ? `<b>${esc(b.text)}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
+      return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
+    }).join('');
+    $$('#ncBody [contenteditable]').forEach(el => el.addEventListener('blur', () => {
+      const b = notes[k].blocks.find(x => x.id === el.dataset.bid); if (b) { b.text = el.innerHTML; renderNote(); }
+    }));
+    nc.dataset.state = 'open';
+    const tr = block && TR[block.dataset.block];
+    if (tr && $('#trFab').getAttribute('aria-pressed') === 'true') { $('#trText').textContent = tr; tc.dataset.state = 'open'; } else tc.dataset.state = 'closed';
+    placeCards();
+    requestAnimationFrame(() => { placeCards(); const t = $('[data-target="true"]', nc); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  }
+  function openTranslation(block) {
+    if (nc.dataset.state === 'open') return; // a note card is open: leave it
+    cardAnchor = block; $('#trText').textContent = TR[block.dataset.block]; tc.dataset.state = 'open'; placeCards();
+  }
+  $('#ncClose').addEventListener('click', closeCards); $('#trClose').addEventListener('click', () => { tc.dataset.state = 'closed'; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCards(); closePop(); closeMarksMenu(); } });
+  document.addEventListener('mousedown', e => { if (!nc.contains(e.target) && !tc.contains(e.target) && !e.target.closest('[data-mark], .gpage, .obj-btn')) closeCards(); });
+  $('#ncOpen').addEventListener('click', () => {
+    const [k, ids] = markNote[cardMark] || [doc, []]; closeCards(); noteTab = 'paper'; $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.note === 'paper')));
+    if (k !== doc) { doc = k; showDoc(); } renderNote(); show('notes');
     const row = $(`#notesBody .blk-row[data-id="${ids[0]}"]`); scrollTo(row); flash(row);
   });
-  $('#readerBody').addEventListener('scroll', () => { if (hcard.dataset.state === 'open' && anchorEl && pinned) placeCardAt(anchorEl.getBoundingClientRect()); });
-  $('#trFab').addEventListener('click', e => { const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on)); if (!on && hcard.dataset.mode === 'translation') closeCard(); });
+
+  /* ---------- toast: where a new mark went ---------- */
+  let toastT = null;
+  function toast(text, onShow) {
+    const t = $('#toast'); t.innerHTML = `<i data-lucide="check" class="icon-xs"></i>${esc(text)} <button type="button">Show</button>`; icons();
+    const rb = $('#readerBody').getBoundingClientRect(); t.style.left = (rb.left + 16) + 'px'; t.style.top = (rb.bottom - 52) + 'px';
+    t.dataset.state = 'open'; $('button', t).onclick = () => { t.dataset.state = 'closed'; onShow(); };
+    clearTimeout(toastT); toastT = setTimeout(() => { t.dataset.state = 'closed'; }, 3200);
+  }
+  function revealBlock(k, id) {
+    noteTab = 'paper'; $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x.dataset.note === 'paper')));
+    renderNote(); show('notes'); const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.classList.add('blk-enter'); scrollTo(row); flash(row); }
+  }
+  function afterAdd(k, id, secText) {
+    renderNote(); renderMarksMenu();
+    const row = notesVisible() && $(`#notesBody .blk-row[data-id="${id}"]`);
+    if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    toast(`Saved to ${DOCS[k].short} › ${secText}`, () => revealBlock(k, id));
+  }
 
   /* ---------- HTML marks ---------- */
   function syncBlock(mark, on) {
     $$('.blk-row[data-link]').forEach(r => delete r.dataset.link);
-    if (!on) return; const [k, ids] = markNote[mark] || [];
-    if (k !== noteKey(curNote)) return;
-    ids.forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (!row) return; row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); });
+    if (!on || noteTab !== 'paper') return; const [k, ids] = markNote[mark] || [];
+    if (k !== doc) return;
+    ids.forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); } });
   }
   function bindMark(el) {
-    const mark = el.dataset.mark, isIcon = el.classList.contains('margin-ic');
-    const para = () => (el.closest('p') || el).getBoundingClientRect();
-    el.addEventListener('mouseenter', () => {
-      if (marksOff()) return;
-      if (state.notes) { syncBlock(mark, true); return; }
-      if (pinned) return;
-      clearTimeout(openT); openT = setTimeout(() => { anchorEl = el.closest('p') || el; showNoteCard(mark, para()); }, isIcon ? 150 : 300);
-    });
-    el.addEventListener('mouseleave', () => { syncBlock(mark, false); hideCard(); });
+    const mark = el.dataset.mark;
+    el.addEventListener('mouseenter', () => { if (!marksOn()) return; if (notesVisible()) syncBlock(mark, true); });
+    el.addEventListener('mouseleave', () => syncBlock(mark, false));
     el.addEventListener('click', e => {
-      if (marksOff() || String(window.getSelection())) return;
-      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`)); return; }
-      e.stopPropagation(); anchorEl = el.closest('p') || el; showNoteCard(mark, para()); setPin(true);
+      if (!marksOn() || String(window.getSelection())) return;
+      e.stopPropagation();
+      if (notesVisible()) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`)); return; }
+      openNoteCard(mark, el.closest('p') || el, null);
     });
   }
   $$('#paper [data-mark]').forEach(bindMark);
-  $('#marksToggle').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
-    $('#readerBody').classList.toggle('marks-off', !on); $('#paper').classList.toggle('marks-off', !on);
-  });
+  const marksOn = () => $('#showMarks').checked;
 
-  /* ---------- PDF-only marks: drawn over the page, hit-tested (the text layer stays selectable) ---------- */
+  /* ---------- My marks menu: named colours, rename, filter ---------- */
+  function countFor(c) {
+    const k = doc; return notes[k].blocks.filter(b => !(undone && b.fresh) && (b.c === c)).length;
+  }
+  function renderMarksMenu() {
+    $('#mmRows').innerHTML = COLORS.map(x => `<div class="mm-row"><span class="mm-dot" style="background:var(--hl-${x.c})"></span><input class="mm-name" data-c="${x.c}" value="${esc(x.name)}" aria-label="Name for this colour"><span class="mm-count">${countFor(x.c)}</span><input type="checkbox" data-show="${x.c}" ${x.show ? 'checked' : ''} aria-label="Show ${esc(x.name)}"></div>`).join('');
+    $$('#mmRows .mm-name').forEach(inp => inp.addEventListener('input', () => { COLORS.find(x => x.c === inp.dataset.c).name = inp.value; renderNote(); }));
+    $$('#mmRows [data-show]').forEach(cb => cb.addEventListener('change', () => { COLORS.find(x => x.c === cb.dataset.show).show = cb.checked; applyFilter(); }));
+    const total = notes[doc].blocks.filter(b => ['quote', 'fig', 'eq', 'box'].includes(b.type) && !(undone && b.fresh)).length;
+    $('#marksCount').textContent = String(total);
+  }
+  function applyFilter() {
+    $$('#paper .hl').forEach(el => { el.dataset.dim = String(!COLORS.find(x => x.c === el.dataset.c).show); });
+    $$('.gmark[data-c]').forEach(el => { const col = COLORS.find(x => x.c === el.dataset.c); el.dataset.dim = String(!!col && !col.show); });
+  }
+  const mm = $('#marksMenu');
+  const closeMarksMenu = () => { mm.dataset.state = 'closed'; $('#marksBtn').setAttribute('aria-expanded', 'false'); };
+  $('#marksBtn').addEventListener('click', e => { e.stopPropagation(); const o = mm.dataset.state !== 'open'; renderMarksMenu(); mm.dataset.state = o ? 'open' : 'closed'; $('#marksBtn').setAttribute('aria-expanded', String(o)); });
+  document.addEventListener('click', e => { if (!mm.contains(e.target) && !e.target.closest('#marksBtn')) closeMarksMenu(); });
+  $('#showMarks').addEventListener('change', () => { $('#readerBody').classList.toggle('marks-off', !marksOn()); if (!marksOn()) closeCards(); });
+
+  /* ---------- PDF marks (text layer), equation and scanned-box marks ---------- */
   const gmarks = [
-    { id: 'g1', page: 'gp1', kind: 'hl', c: 'green', block: '/page/0/Text/9', text: 'ghost imaging (GI) obtains the image information through high-order mutual-correlation of light fields from two paths with an object appearing in only one path.' },
-    { id: 'g2', page: 'gp1', kind: 'quote', c: 'none', block: '/page/0/Text/13', text: 'by correlating an output of a single-pixel (bucket) photodetector, which collected light transmitted through or reflected from an object, with an output from a high spatial-resolution scanning photodetector or photodetector array whose illumination has not interacted with the object.' },
-    { id: 'g3', page: 'gp2', kind: 'box', c: 'blue', box: { x: 0.12, y: 0.14, w: 0.76, h: 0.38 } },
+    { id: 'g1', page: 'gp1', kind: 'hl', c: 'green', block: '/page/0/Text/9', text: notes.ghost.blocks[1].text },
+    { id: 'g2', page: 'gp1', kind: 'quote', c: 'none', block: '/page/0/Text/13', text: notes.ghost.blocks[3].text },
   ];
   function textRange(el, text) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); const nodes = []; let all = '';
-    while (walker.nextNode()) { nodes.push([walker.currentNode, all.length]); all += walker.currentNode.textContent; }
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); const nodes = []; let all = '';
+    while (w.nextNode()) { nodes.push([w.currentNode, all.length]); all += w.currentNode.textContent; }
     const at = all.indexOf(text); if (at < 0) return null;
     const pos = off => { for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i][1] <= off) return [nodes[i][0], off - nodes[i][1]]; };
-    const r = document.createRange(); const [sn, so] = pos(at); const [en, eo] = pos(at + text.length); r.setStart(sn, so); r.setEnd(en, eo); return r;
+    const r = document.createRange(); const [a, ao] = pos(at), [b, bo] = pos(at + text.length); r.setStart(a, ao); r.setEnd(b, bo); return r;
   }
   function rectsOf(range, page) {
     const pb = page.getBoundingClientRect();
     return [...range.getClientRects()].filter(r => r.width > 1).map(r => ({ x: (r.left - pb.left) / pb.width, y: (r.top - pb.top) / pb.height, w: r.width / pb.width, h: r.height / pb.height }));
   }
+  function frac(el, page) { const r = el.getBoundingClientRect(), pb = page.getBoundingClientRect(); return { x: (r.left - pb.left) / pb.width, y: (r.top - pb.top) / pb.height, w: r.width / pb.width, h: r.height / pb.height }; }
   function drawGhostMarks() {
     if ($('#ghostView').hidden) return;
-    ['gm1', 'gm2'].forEach(id => { $('#' + id).innerHTML = ''; });
+    $$('#ghostView .gmarks').forEach(l => { l.innerHTML = ''; });
     gmarks.forEach(m => {
-      const page = $('#' + m.page); const layer = $('.gmarks', page);
-      if (m.kind !== 'box' && !m.rects) { const blk = $(`[data-block="${m.block}"]`, page); const r = blk && textRange(blk, m.text); m.rects = r ? rectsOf(r, page) : []; }
-      const rects = m.kind === 'box' ? [m.box] : m.rects;
+      const page = $('#' + m.page), layer = $('.gmarks', page);
+      if ((m.kind === 'hl' || m.kind === 'quote') && !m.rects) { const blk = $(`[data-block="${m.block}"]`, page); const r = blk && textRange(blk, m.text); m.rects = r ? rectsOf(r, page) : []; }
+      const rects = m.kind === 'hl' || m.kind === 'quote' ? m.rects : [m.box];
       rects.forEach(r => {
         const d = document.createElement('div'); d.className = 'gmark'; d.dataset.id = m.id; d.dataset.kind = m.kind; d.dataset.c = m.c;
-        d.style.left = r.x * 100 + '%'; d.style.top = (m.kind === 'quote' ? r.y + r.h - 0.002 : r.y) * 100 + '%'; d.style.width = r.w * 100 + '%'; d.style.height = r.h * 100 + '%';
-        layer.appendChild(d);
+        const y = m.kind === 'quote' ? r.y + r.h - 0.0015 : r.y, h = m.kind === 'quote' ? 0.0012 : r.h;
+        Object.assign(d.style, { left: r.x * 100 + '%', top: y * 100 + '%', width: r.w * 100 + '%', height: h * 100 + '%' }); layer.appendChild(d);
       });
       if (!rects.length) return;
-      const first = rects[0]; const icon = document.createElement('button'); icon.className = 'gicon'; icon.dataset.gm = m.id;
-      icon.setAttribute('aria-label', 'Note on this passage'); icon.style.left = '89%'; icon.style.top = (first.y * 100) + '%';
-      icon.innerHTML = `<i data-lucide="message-square-text" style="width:11px;height:11px"></i>`; layer.appendChild(icon);
+      const ic = document.createElement('button'); ic.className = 'gicon'; ic.dataset.gm = m.id; ic.setAttribute('aria-label', 'Open the note on this mark');
+      ic.style.left = '89%'; ic.style.top = (rects[0].y * 100) + '%'; ic.innerHTML = '<i data-lucide="message-square-text" style="width:11px;height:11px"></i>'; layer.appendChild(ic);
     });
-    icons();
+    icons(); applyFilter();
   }
-  const hitMark = (page, e) => {
-    const pb = page.getBoundingClientRect(); const x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
-    return gmarks.find(m => m.page === page.id && (m.kind === 'box' ? [m.box] : (m.rects || [])).some(r => x >= r.x && x <= r.x + r.w && y >= r.y - 0.004 && y <= r.y + r.h + 0.004));
+  const hit = (page, e) => {
+    const pb = page.getBoundingClientRect(), x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
+    const ic = e.target.closest && e.target.closest('.gicon'); if (ic) return gmarks.find(g => g.id === ic.dataset.gm);
+    return gmarks.find(m => m.page === page.id && (m.rects || [m.box]).some(r => r && x >= r.x && x <= r.x + r.w && y >= r.y - 0.004 && y <= r.y + r.h + 0.004));
   };
-  let hotId = null;
-  function setHot(id) {
-    if (hotId === id) return; hotId = id;
-    $$('.gmark').forEach(d => { if (d.dataset.id === id) d.dataset.hot = 'true'; else delete d.dataset.hot; });
-  }
-  const gNoteRect = m => { const blk = m.block && $(`[data-block="${m.block}"]`); return (blk || $('#' + m.page)).getBoundingClientRect(); };
+  let dragging = false;
   $$('#ghostView .gpage').forEach(page => {
     page.addEventListener('mousemove', e => {
       if (dragging) return;
-      const m = marksOff() ? null : hitMark(page, e) || (e.target.closest('.gicon') && gmarks.find(g => g.id === e.target.closest('.gicon').dataset.gm));
-      if (m) {
-        setHot(m.id);
-        if (state.notes) { syncBlock(m.id, true); return; }
-        if (pinned || curMark === m.id) return;
-        clearTimeout(openT); openT = setTimeout(() => { anchorEl = $(`[data-block="${m.block}"]`) || page; showNoteCard(m.id, gNoteRect(m)); }, 250);
-        return;
-      }
-      setHot(null); syncBlock(null, false);
+      const m = marksOn() ? hit(page, e) : null;
+      $$('.gmark').forEach(d => { if (m && d.dataset.id === m.id) d.dataset.hot = 'true'; else delete d.dataset.hot; });
+      if (m) { if (notesVisible()) syncBlock(m.id, true); return; }
+      syncBlock(null, false);
       const blk = e.target.closest('[data-block]');
-      if (blk && TR[blk.dataset.block] && $('#trFab').getAttribute('aria-pressed') === 'true') {
-        if (pinned && hcard.dataset.mode === 'note') return;
-        clearTimeout(openT); clearTimeout(hideT);
-        if (hcard.dataset.mode !== 'translation' || anchorEl !== blk || hcard.dataset.state !== 'open') { anchorEl = blk; showTranslation(blk); }
-        return;
-      }
-      hideCard();
+      if (blk && TR[blk.dataset.block] && $('#trFab').getAttribute('aria-pressed') === 'true') openTranslation(blk);
     });
-    page.addEventListener('mouseleave', () => { setHot(null); syncBlock(null, false); hideCard(); });
     page.addEventListener('click', e => {
-      if (String(window.getSelection()) || dragging) return;
-      const m = hitMark(page, e) || (e.target.closest('.gicon') && gmarks.find(g => g.id === e.target.closest('.gicon').dataset.gm)); if (!m || marksOff()) return;
-      if (state.notes) { flash($(`#notesBody .blk-row[data-id="${markNote[m.id][1][0]}"]`)); return; }
-      anchorEl = $(`[data-block="${m.block}"]`) || page; showNoteCard(m.id, gNoteRect(m)); setPin(true);
+      if (String(window.getSelection()) || dragging || e.target.closest('.obj-btn')) return;
+      const m = marksOn() ? hit(page, e) : null; if (!m) return;
+      if (notesVisible()) { flash($(`#notesBody .blk-row[data-id="${markNote[m.id][1][0]}"]`)); return; }
+      const blk = m.block && $(`[data-block="${m.block}"]`); openNoteCard(m.id, blk || page, blk);
     });
   });
+  $('#trFab').addEventListener('click', e => {
+    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on));
+    if (!on) tc.dataset.state = 'closed';
+    if (on && doc === 'xr') toast('HTML papers show the translation under each paragraph (H1)', () => {});
+  });
 
-  /* ---------- selection popover (HTML text, PDF text layer, or a box on a scanned page) ---------- */
-  const pop = $('#selPop'); let selRange = null, selPage = null, pendingBox = null, dragging = false;
-  function showPopAt(r) {
+  /* ---------- the mark popover: below the selection, named colours ---------- */
+  const pop = $('#selPop'); let pending = null;
+  pop.innerHTML = COLORS.map(x => `<button class="swatch" data-c="${x.c}"><span class="dot" style="background:var(--hl-${x.c})"></span><span class="nm"></span></button>`).join('') +
+    '<span class="sep"></span><button class="act" data-act="quote"><i data-lucide="text-quote" class="icon-sm"></i>Quote to note</button><button class="act" data-act="note"><i data-lucide="message-square-plus" class="icon-sm"></i>Add note</button>';
+  function openPop(rect, p) {
+    pending = p; $$('.swatch', pop).forEach(s => { const n = cname(s.dataset.c); $('.nm', s).textContent = n; s.title = 'Highlight: ' + n; s.setAttribute('aria-label', 'Highlight: ' + n); });
+    $('[data-act="quote"]', pop).hidden = p.kind === 'fig' || p.kind === 'eq' || p.kind === 'box';
     const body = $('#readerBody').getBoundingClientRect();
-    pop.style.left = Math.max(6, Math.min(r.left - body.left + r.width / 2 - 150, body.width - 316)) + 'px';
-    pop.style.top = (r.top - body.top + $('#readerBody').scrollTop - 44) + 'px'; pop.dataset.state = 'open';
+    pop.style.left = Math.max(6, Math.min(rect.left - body.left + rect.width / 2 - 160, body.width - 360)) + 'px';
+    pop.style.top = (rect.bottom - body.top + $('#readerBody').scrollTop + 8) + 'px'; pop.dataset.state = 'open';
   }
-  function onSelect(container) {
-    setTimeout(() => {
-      const sel = window.getSelection(); if (!sel || sel.isCollapsed || !container.contains(sel.anchorNode)) { if (!pendingBox) pop.dataset.state = 'closed'; return; }
-      selRange = sel.getRangeAt(0); pendingBox = null; selPage = container.closest('.gpage'); showPopAt(selRange.getBoundingClientRect());
-    }, 0);
-  }
+  function closePop() { pop.dataset.state = 'closed'; if (pending && pending.boxEl) pending.boxEl.remove(); pending = null; }
+  const onSelect = container => setTimeout(() => {
+    const sel = window.getSelection(); if (!sel || sel.isCollapsed || !container.contains(sel.anchorNode)) { if (pending && pending.kind === 'text') closePop(); return; }
+    const range = sel.getRangeAt(0); openPop(range.getBoundingClientRect(), { kind: 'text', range, page: container.closest('.gpage') });
+  }, 0);
   $('#paper').addEventListener('mouseup', () => onSelect($('#paper')));
-  $('#gp1').addEventListener('mouseup', () => onSelect($('#gp1')));
+  $$('#gp1, #gp2').forEach(p => p.addEventListener('mouseup', () => onSelect(p)));
+  document.addEventListener('mousedown', e => { if (!pop.contains(e.target) && !e.target.closest('#paper, .gpage, .obj-btn')) closePop(); });
+  // Figure / equation: one click on the object's mark button.
+  $$('.obj-btn').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); const obj = b.closest('.obj'); openPop(obj.getBoundingClientRect(), { kind: b.dataset.objbtn === 'eq1' ? 'eq' : 'fig', obj });
+  }));
+  // Scanned page: drag a box.
   (() => {
-    const page = $('#gp2'); let start = null, box = null;
+    const page = $('#gp3'); let start = null, box = null;
     page.addEventListener('pointerdown', e => {
       if (e.target.closest('.gicon')) return; const pb = page.getBoundingClientRect();
       start = { x: (e.clientX - pb.left) / pb.width, y: (e.clientY - pb.top) / pb.height }; dragging = false;
       box = document.createElement('div'); box.className = 'drag-box'; page.appendChild(box); page.setPointerCapture(e.pointerId);
     });
     page.addEventListener('pointermove', e => {
-      if (!start) return; const pb = page.getBoundingClientRect();
-      const x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
+      if (!start) return; const pb = page.getBoundingClientRect(), x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
       const r = { x: Math.min(start.x, x), y: Math.min(start.y, y), w: Math.abs(x - start.x), h: Math.abs(y - start.y) };
       if (r.w > 0.02 || r.h > 0.02) dragging = true;
       Object.assign(box.style, { left: r.x * 100 + '%', top: r.y * 100 + '%', width: r.w * 100 + '%', height: r.h * 100 + '%' }); box.rect = r;
     });
     page.addEventListener('pointerup', () => {
       if (!start) return; start = null;
-      if (dragging && box.rect) { pendingBox = { page: 'gp2', rect: box.rect, el: box }; selRange = null; showPopAt(box.getBoundingClientRect()); }
-      else box.remove();
+      if (dragging && box.rect) openPop(box.getBoundingClientRect(), { kind: 'box', rect: box.rect, boxEl: box }); else box.remove();
       setTimeout(() => { dragging = false; }, 0);
     });
   })();
-  document.addEventListener('mousedown', e => {
-    if (pop.contains(e.target) || $('#paper').contains(e.target) || e.target.closest('.gpage')) return;
-    pop.dataset.state = 'closed'; if (pendingBox) { pendingBox.el.remove(); pendingBox = null; }
-  });
-  function addQuote(k, text, c, mark, extra = {}) {
-    const id = 'q' + (++nid); const list = notes[k].blocks;
-    const at = k === 'sec' ? list.findIndex(b => b.id === 'b10') : list.length;
-    list.splice(at, 0, { id, type: 'quote', c, mark, text, src: k === 'sec' ? XR_SRC : G_SRC, ...extra }); markNote[mark] = [k, [id]];
-    open('notes'); selectNoteTab(k);
-    const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
-  }
-  function markFromSelection(kind, c) {
-    const mark = 'u' + (++nid);
-    if (pendingBox) { // box highlight on a page with no text layer
-      gmarks.push({ id: mark, page: pendingBox.page, kind: 'box', c: c === 'none' ? 'blue' : c, box: pendingBox.rect });
-      pendingBox.el.remove(); pendingBox = null; pop.dataset.state = 'closed';
-      addQuote('gpaper', 'Figure 2. Schematic of the GISC LiDAR system (OCR text from the box)', c === 'none' ? 'blue' : c, mark, { box: true, src: 'A Review of Ghost Imaging… · p. 2 · box' });
-      drawGhostMarks(); $('#marksCount').textContent = String(gmarks.length); return;
+  function createMark(kind, c) {
+    const p = pending; if (!p) return; const mark = 'u' + (++nid);
+    if (p.kind === 'fig') {
+      const id = insertUnder('xr', 'Background and Motivation', '§2 Background and Motivation', { id: 'f' + nid, type: 'fig', c: c || 'green', mark });
+      markNote[mark] = ['xr', [id]]; p.obj.dataset.marked = 'true'; p.obj.dataset.mark = mark; bindMark(p.obj);
+      pop.dataset.state = 'closed'; pending = null; afterAdd('xr', id, '§2'); return;
     }
-    if (!selRange) return; const text = selRange.toString();
-    if (selPage) { // PDF text layer: store rects as page fractions + the Marker block it falls in
-      const blk = (selRange.startContainer.parentElement || selRange.startContainer).closest('[data-block]');
-      const rects = rectsOf(selRange, selPage);
-      gmarks.push({ id: mark, page: selPage.id, kind, c, block: blk ? blk.dataset.block : null, rects, text });
-      window.getSelection().removeAllRanges(); pop.dataset.state = 'closed';
-      addQuote(blk && blk.dataset.sec === '1. Introduction' ? 'gsec' : 'gpaper', text, c, mark);
-      drawGhostMarks(); $('#marksCount').textContent = String(gmarks.length); return;
+    if (p.kind === 'eq') {
+      const id = insertUnder('ghost', '2. Theoretical Framework of GISC', '§2 Theoretical Framework of GISC', { id: 'e' + nid, type: 'eq', c: c || 'green', mark });
+      markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: 'gp2', kind: 'eq', c: c || 'green', block: '/page/1/Equation/3', box: frac(p.obj, $('#gp2')) });
+      pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, '§2'); return;
     }
-    const span = document.createElement('span'); span.className = kind === 'hl' ? 'hl' : 'qmark'; span.dataset.mark = mark; if (kind === 'hl') span.dataset.c = c;
-    try { selRange.surroundContents(span); } catch (e) { return; }
-    window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; bindMark(span); addQuote('sec', text, c, mark);
-    $('#marksCount').textContent = String($$('#paper .hl, #paper .qmark').length);
+    if (p.kind === 'box') {
+      const id = insertUnder('ghost', '3. GISC LiDAR', '§3 GISC LiDAR (p. 3)', { id: 'x' + nid, type: 'box', c: c || 'blue', mark });
+      markNote[mark] = ['ghost', [id]]; gmarks.push({ id: mark, page: 'gp3', kind: 'box', c: c || 'blue', box: p.rect });
+      p.boxEl.remove(); pop.dataset.state = 'closed'; pending = null; drawGhostMarks(); afterAdd('ghost', id, '§3'); return;
+    }
+    const text = p.range.toString();
+    if (p.page) { // PDF text layer
+      const blk = (p.range.startContainer.parentElement || p.range.startContainer).closest('[data-block]');
+      const sec = blk ? blk.dataset.sec : 'Abstract';
+      gmarks.push({ id: mark, page: p.page.id, kind: kind === 'quote' ? 'quote' : 'hl', c: kind === 'quote' ? 'none' : c, block: blk && blk.dataset.block, rects: rectsOf(p.range, p.page), text });
+      const secText = sec === 'Abstract' ? 'Abstract' : '§' + sec.replace(/^(\d+)\.\s*/, '$1 ');
+      const id = insertUnder('ghost', sec, secText, { id: 'q' + nid, type: 'quote', c: kind === 'quote' ? 'none' : c, mark, src: (blk && blk.dataset.block.includes('/page/1/') ? 'p. 2' : 'p. 1'), text });
+      markNote[mark] = ['ghost', [id]]; window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
+      drawGhostMarks(); afterAdd('ghost', id, secText); return;
+    }
+    const span = document.createElement('span'); span.className = kind === 'quote' ? 'qmark' : 'hl'; span.dataset.mark = mark; if (kind !== 'quote') span.dataset.c = c;
+    try { p.range.surroundContents(span); } catch (e) { return; }
+    const id = insertUnder('xr', 'Background and Motivation', '§2 Background and Motivation', { id: 'q' + nid, type: 'quote', c: kind === 'quote' ? 'none' : c, mark, src: '§2 · p. 2', text });
+    markNote[mark] = ['xr', [id]]; bindMark(span); window.getSelection().removeAllRanges(); pop.dataset.state = 'closed'; pending = null;
+    afterAdd('xr', id, '§2');
   }
-  $$('.swatch', pop).forEach(s => s.addEventListener('click', () => markFromSelection('hl', s.dataset.c)));
-  $('#quoteAct').addEventListener('click', () => markFromSelection('quote', 'none'));
+  $$('.swatch', pop).forEach(s => s.addEventListener('click', () => createMark('hl', s.dataset.c)));
+  $('[data-act="quote"]', pop).addEventListener('click', () => createMark('quote', 'none'));
+  $('[data-act="note"]', pop).addEventListener('click', () => createMark('hl', 'purple'));
 
-  /* ---------- quote source chip → reader, back pill ---------- */
+  /* ---------- source chip → reader; back pill ---------- */
   document.addEventListener('click', e => {
     const chip = e.target.closest('.src-chip'); if (!chip || !$('#vChat').contains(chip)) return;
-    const mark = chip.dataset.mark; const g = gmarks.find(m => m.id === mark);
-    open('reader');
-    let target;
-    if (g) { if (doc !== 'ghost') { doc = 'ghost'; showDoc(); } target = $(`#${g.page}`); drawGhostMarks(); }
-    else { if (doc !== 'xr' || fmt !== 'html') { doc = 'xr'; fmt = 'html'; $$('.fmt').forEach(x => x.setAttribute('aria-selected', String(x.dataset.fmt === 'html'))); showDoc(); } target = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); }
-    if (!target) return;
+    const mark = chip.dataset.mark, g = gmarks.find(m => m.id === mark), [k] = markNote[mark] || ['xr'];
+    if (k !== doc) { doc = k; showDoc(); }
+    show('reader');
     requestAnimationFrame(() => {
-      if (g) { const d = $(`.gmark[data-id="${mark}"]`); scrollTo(d || target); $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
-      else { scrollTo(target); flash(target); }
+      let target;
+      if (g) { drawGhostMarks(); target = $(`.gmark[data-id="${mark}"]`); $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
+      else { target = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); flash(target); }
+      scrollTo(target);
     });
     const pill = $('#backPill'); pill.dataset.state = 'open'; pill.dataset.from = chip.closest('.blk-row')?.dataset.id || '';
     const rb = $('#readerBody'); const start = rb.scrollTop;
@@ -962,29 +1005,28 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     setTimeout(() => rb.addEventListener('scroll', onScroll), 700);
   });
   $('#backPill').addEventListener('click', e => {
-    const id = e.currentTarget.dataset.from; e.currentTarget.dataset.state = 'closed';
+    const id = e.currentTarget.dataset.from; e.currentTarget.dataset.state = 'closed'; show('notes');
     const row = id && $(`#notesBody .blk-row[data-id="${id}"]`); scrollTo(row); flash(row);
   });
 
   /* ---------- suggestions + agent card ---------- */
   $('#notesBody').addEventListener('click', e => {
     const acc = e.target.closest('[data-acc]'), rej = e.target.closest('[data-rej]'); if (!acc && !rej) return;
-    const b = notes.sec.blocks.find(x => x.id === (acc ? acc.dataset.acc : rej.dataset.rej));
+    const b = notes.xr.blocks.find(x => x.id === (acc ? acc.dataset.acc : rej.dataset.rej));
     if (acc) b.text = b.text.replace(b.sug.del, b.sug.ins); b.sug = null; renderNote();
   });
-  $('#openNoteBtn').addEventListener('click', () => {
-    open('notes'); if (doc !== 'xr') { doc = 'xr'; showDoc(); } selectNoteTab('sec');
-    const row = $('#notesBody .blk-row[data-id="b11"]'); scrollTo(row); flash(row);
+  $('#detailsBtn').addEventListener('click', e => {
+    const o = e.currentTarget.getAttribute('aria-expanded') !== 'true'; e.currentTarget.setAttribute('aria-expanded', String(o)); $('#detailsWrap').dataset.state = o ? 'open' : 'closed';
   });
+  $('#openNoteBtn').addEventListener('click', () => { if (doc !== 'xr') { doc = 'xr'; showDoc(); } revealBlock('xr', 'b11'); });
   $('#undoBtn').addEventListener('click', () => {
     if (undone) return;
     $$('#notesBody .blk-row').filter(r => ['b11', 'b12', 'b13'].includes(r.dataset.id)).forEach(r => r.classList.add('blk-exit'));
-    setTimeout(() => { undone = true; renderNote(); renderPage(); }, reduce() ? 0 : 200);
-    $('#undoneWrap').dataset.state = 'open'; $('#noteCard').style.opacity = '0.55';
-    $('#undoBtn').disabled = true; $('#openNoteBtn').disabled = true;
+    setTimeout(() => { undone = true; renderNote(); renderMarksMenu(); }, reduce() ? 0 : 200);
+    $('#undoneWrap').dataset.state = 'open'; $('#noteCard').style.opacity = '0.55'; $('#undoBtn').disabled = true; $('#openNoteBtn').disabled = true;
   });
 
-  try { const s = JSON.parse(localStorage.getItem('h5b-panel') || 'null'); if (s && typeof s.reader === 'boolean') Object.assign(state, s); } catch (e) {}
-  applyPanel(); renderNote(); renderPage(); icons();
+  applyPanel(); renderNote(); renderMarksMenu(); renderPage(); icons();
 })();
+
 </script>
