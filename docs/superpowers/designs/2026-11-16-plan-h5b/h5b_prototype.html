@@ -164,6 +164,8 @@ input { font: inherit; color: inherit; }
 .mm-h { font-size: 11.5px; color: var(--muted-fg); margin: 6px 2px 2px; display: flex; justify-content: space-between; }
 .mm-toggle { display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
 .reader-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+#readerPane { position: relative; } /* the translate button floats at the view's corner, not on the scrolling page */
+#readerPane > .translate-fab { right: 16px; bottom: 16px; }
 .paper { font-family: var(--font-paper); font-size: 14.5px; line-height: 1.45; padding: 10px 34px 30px 12px; }
 .paper h2 { font-size: 22px; margin: 18px 0 10px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
 .paper h3 { font-size: 17px; margin: 14px 0 8px; font-weight: 700; }
@@ -559,8 +561,9 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
                 <p class="page-note">A scanned page (no text layer): drag a box to mark a region; its OCR text appears in the note beside the crop. <i>Illustration — this paper has a text layer on every page.</i></p>
               </div>
               <div class="pop" id="selPop" data-state="closed" role="toolbar" aria-label="Mark selection"></div>
-              <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
             </div>
+            <!-- Floats at the corner of the reader view (outside the scrolling paper), like the shipped TranslatePill -->
+            <button class="translate-fab" id="trFab" aria-pressed="false" aria-label="Translate" title="Translate"><i data-lucide="languages" class="icon-sm"></i></button>
           </div>
           <button class="divider" id="divider" aria-label="Resize Reader and Notes" hidden></button>
           <div class="pane" id="notesPane">
