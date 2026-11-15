@@ -967,10 +967,29 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     requestAnimationFrame(() => { placeCards(); const t = $('[data-target="true"]', nc); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
   }
   // Jump from the card to another reference: scroll the paper to it, flash it, and re-point the card at it.
+  // Showing a mark made on a translation: if its words aren't on screen, turn translation on in its language
+  // (and say so, with Turn off), then scroll to it and flash it. reopenCard re-points the note card at it.
+  function showTrMark(mark, reopenCard) {
+    const tm = trMarks[mark]; if (!tm) return;
+    const was = { on: trOn, lang: trLang };
+    if (!trOn || trLang !== tm.lang) {
+      setTr(true, tm.lang);
+      toast(`Translation turned on (${LANGS[tm.lang]}) to show this mark`, () => { setTr(was.on, was.lang); return null; }, was.on ? `Back to ${LANGS[was.lang]}` : 'Turn off', 'languages', 6000);
+    }
+    requestAnimationFrame(() => {
+      if (tm.pdf) {
+        const blk = $(`[data-block="${tm.block}"]`); if (!blk) return; scrollTo(blk);
+        setTimeout(() => { if (reopenCard) openNoteCard(mark, blk, blk); else { closeCards(); openTranslation(blk); } flash($(`#trText [data-mark="${mark}"]`)); }, reduce() ? 0 : 380);
+      } else {
+        const sp = $(`#paper .tr-para [data-mark="${mark}"]`); if (!sp) return; scrollTo(sp); flash(sp);
+        if (reopenCard) setTimeout(() => openNoteCard(mark, sp.closest('.tr-para'), null), reduce() ? 0 : 380);
+      }
+    });
+  }
   function jumpToMark(mark) {
     if (!markNote[mark]) return; const [k] = markNote[mark]; if (k !== doc) { doc = k; showDoc(); }
     const tm = trMarks[mark];
-    if (tm && !tm.pdf) { if (!trOn || trLang !== tm.lang) setTr(true, tm.lang); const sp = $(`#paper .tr-para [data-mark="${mark}"]`); if (sp) { scrollTo(sp); flash(sp); setTimeout(() => openNoteCard(mark, sp.closest('.tr-para'), null), reduce() ? 0 : 380); } return; }
+    if (tm) { showTrMark(mark, true); return; }
     const g = gmarks.find(m => m.id === mark); let el, anchor, blk = null;
     if (g) { drawGhostMarks(); el = $(`.gmark[data-id="${mark}"]`); blk = g.block ? $(`[data-block="${g.block}"]`) : null; anchor = blk || el; $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
     else { el = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); anchor = el && (el.closest('p') || el); flash(el); }
@@ -1328,7 +1347,10 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     const mark = chip.dataset.mark, g = gmarks.find(m => m.id === mark), [k] = markNote[mark] || ['xr'];
     if (k !== doc) { doc = k; showDoc(); }
     show('reader');
-    requestAnimationFrame(() => {
+    const tm = trMarks[mark];
+    if (tm) { // a mark made on a translation: turn translation on in its language, then show it
+      showTrMark(mark);
+    } else requestAnimationFrame(() => {
       let target;
       if (g) { drawGhostMarks(); target = $(`.gmark[data-id="${mark}"]`); $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
       else { target = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); flash(target); }
