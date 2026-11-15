@@ -266,10 +266,13 @@ input { font: inherit; color: inherit; }
 .gcard-arrow { position: absolute; right: -6px; width: 10px; height: 10px; background: var(--muted); border-top: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); border-right: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent); transform: rotate(45deg); }
 .gcard-h { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--border); font-weight: 500; }
 .gcard-h .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gcard-b { max-height: 210px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
-.gcard-b .blk { padding: 3px 6px; border-radius: 6px; }
+.gcard-b { max-height: 260px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
+.gcard-b > * { flex-shrink: 0; } /* folded note lines must not be squeezed by the scroll box */
+.gcard-b .blk { padding: 3px 6px; border-radius: 6px; line-height: 1.55; }
+.gcard-b .cite { line-height: 0; }
 .gcard-b .blk[contenteditable="true"]:focus { outline: 1px solid var(--ring); background: var(--background); }
-.gcard-b .blk[data-target="true"] { outline: 2px solid var(--ring); outline-offset: -1px; }
+/* The quoting block: a stronger tint inside the current note's band, no outline (no boxes inside a box) */
+.gcard-b .blk[data-target="true"] { background: color-mix(in srgb, var(--foreground) 9%, transparent); }
 .gcard-f { border-top: 1px solid var(--border); padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
 .tr-body { padding: 8px 10px 10px; font-size: 13px; line-height: 1.6; }
 
@@ -328,14 +331,25 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 [data-edit] { outline: none; border-radius: 4px; } [data-edit]:focus { box-shadow: 0 0 0 1px var(--border); }
 /* Dividers split a section into parts; the part you're in is marked; Focus fades the rest (note and paper) */
 .divider-line { display: flex; align-items: center; gap: 4px; padding: 7px 0; }
-.divider-line hr { flex: 1; border: 0; border-top: 1px solid color-mix(in srgb, var(--foreground) 28%, transparent); margin: 0; }
+.divider-line hr { flex: 1; border: 0; border-top: 1px solid color-mix(in srgb, var(--foreground) 28%, transparent); margin: 0; transition: border-color 200ms ease-out, box-shadow 200ms ease-out; }
+/* The dividers around the note you're in (a hovered or clicked reference, the cursor) darken: they frame the note instead of a band */
+.blk-row[data-edge="true"] .divider-line hr { border-top-color: color-mix(in srgb, var(--foreground) 70%, transparent); box-shadow: 0 1px 0 color-mix(in srgb, var(--foreground) 35%, transparent); }
 .fold { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 20px; height: 20px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms, transform 200ms ease-out; flex-shrink: 0; }
 .blk-row:hover .fold, .fold:focus-visible, .fold[aria-expanded="false"] { opacity: 1; }
 .fold:hover { background: var(--accent); color: var(--foreground); }
 .fold[aria-expanded="false"] { transform: rotate(-90deg); }
 .part { border-radius: 6px; transition: background 200ms ease-out, box-shadow 200ms ease-out, opacity 200ms ease-out; }
-.part[data-active="true"] { background: color-mix(in srgb, var(--accent) 75%, transparent); box-shadow: inset 2px 0 0 var(--ring); }
-.notes-body.focus-on .part:not([data-active="true"]) { opacity: 0.45; cursor: pointer; }
+/* No band in the notes editor (you are already looking at the note); Focus fades the other notes, section headings stay */
+.notes-body.focus-on .part:not([data-active="true"]) .blk-row:not(:has(h3)) { opacity: 0.45; cursor: pointer; }
+.notes-body.focus-on .part .blk-row { transition: opacity 200ms ease-out; }
+/* The note card: the current note stands out; the section's other notes fold to one line each */
+.nc-cur { border-radius: 6px; background: color-mix(in srgb, var(--foreground) 6%, transparent); box-shadow: inset 2px 0 0 var(--ring); padding: 2px 0; margin: 2px 0; }
+.nc-other { width: 100%; border: 0; background: transparent; color: var(--muted-fg); font-size: 11.5px; text-align: left; padding: 3px 8px; border-radius: 5px; display: flex; gap: 5px; align-items: center; white-space: nowrap; overflow: hidden; }
+.nc-other span { overflow: hidden; text-overflow: ellipsis; }
+.nc-other:hover { background: var(--accent); color: var(--foreground); }
+.nc-other[aria-expanded="true"] svg { transform: rotate(90deg); }
+.nc-other svg { transition: transform 200ms ease-out; flex-shrink: 0; }
+.nc-other-body { opacity: 0.75; }
 .part-sum { border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; padding: 2px 6px 4px 32px; display: inline-flex; gap: 5px; align-items: center; }
 .part-sum:hover { color: var(--foreground); }
 .focus-btn { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); border-radius: 6px; padding: 1px 7px; display: inline-flex; gap: 4px; align-items: center; }
@@ -653,7 +667,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   };
   const markNote = { m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
   let doc = 'xr', noteTab = 'paper', undone = false;
-  let activeSeg = 'b2', focusOn = false; const folded = new Set(); // the part of the note you're in; Focus; folded dividers
+  let activeSeg = 's2', focusOn = false; const folded = new Set(); // the part of the note you're in; Focus; folded dividers
   let pen = null, lastPen = null; const penMarks = {}; // highlighter colour; marks made with it (to join strokes)
   const curNoteKey = () => noteTab === 'chat' ? 'chat' : doc;
 
@@ -684,15 +698,16 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const close = () => {
       if (!seg) return;
       const ids = seg.blocks.map(b => b.id), key = ids[0], isFold = seg.hr && folded.has(seg.hr.id);
-      const nMarks = seg.blocks.filter(b => b.mark).length;
+      const nMarks = seg.blocks.filter(b => b.mark).length, nBlocks = seg.blocks.filter(b => b.type !== 'sec').length;
       html += `<div class="part" data-key="${key}" data-ids="${ids.join(' ')}" data-active="${key === activeSeg}">` +
-        (seg.hr ? `<div class="collapse" data-state="${isFold ? 'open' : 'closed'}"><div><button class="part-sum" data-unfold="${seg.hr.id}"><i data-lucide="chevron-right" class="icon-xs"></i>${seg.blocks.length} block${seg.blocks.length > 1 ? 's' : ''}${nMarks ? ` · ${nMarks} mark${nMarks > 1 ? 's' : ''}` : ''}</button></div></div>` : '') +
+        (seg.hr ? `<div class="collapse" data-state="${isFold ? 'open' : 'closed'}"><div><button class="part-sum" data-unfold="${seg.hr.id}"><i data-lucide="chevron-right" class="icon-xs"></i>${nBlocks} block${nBlocks > 1 ? 's' : ''}${nMarks ? ` · ${nMarks} mark${nMarks > 1 ? 's' : ''}` : ''}</button></div></div>` : '') +
         `<div class="collapse" data-state="${isFold ? 'closed' : 'open'}"><div>${seg.rows.join('')}</div></div></div>`;
       seg = null;
     };
     list.forEach(b => {
-      if (['sec', 'h', 'hr'].includes(b.type)) { close(); html += blockHtml(b, k); prevHr = b.type === 'hr' ? b : null; }
-      else { if (!seg) seg = { hr: prevHr, rows: [], blocks: [] }; seg.rows.push(blockHtml(b, k)); seg.blocks.push(b); }
+      if (b.type === 'hr') { close(); html += blockHtml(b, k); prevHr = b; return; }
+      if (b.type === 'sec') { close(); prevHr = null; }
+      if (!seg) seg = { hr: prevHr, rows: [], blocks: [] }; seg.rows.push(blockHtml(b, k)); seg.blocks.push(b);
     });
     close(); return html;
   }
@@ -706,12 +721,27 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   function renderPage() { $('#pageBlocks').innerHTML = visible('xr').map(b => blockHtml(b, 'xr')).join(''); icons(); }
 
   // Insert a block under a section heading of a paper's note, creating the heading if missing.
+  // A section's notes: the runs of blocks between its heading, its dividers and the next section heading.
+  function sectionNotes(list, i) {
+    let s0 = i; while (s0 > 0 && list[s0].type !== 'sec') s0--;
+    let e0 = i + 1; while (e0 < list.length && list[e0].type !== 'sec') e0++;
+    const groups = [[]]; for (let j = s0; j < e0; j++) { const b = list[j]; if (b.type === 'hr') groups.push([]); else groups[groups.length - 1].push(b); }
+    return { sec: list[s0] && list[s0].type === 'sec' ? list[s0] : null, groups, start: s0, end: e0 };
+  }
+  // New blocks go to the note you're working in when it is in the same section; otherwise to the end of the section.
   function insertUnder(k, secKey, secText, block) {
     const list = notes[k].blocks;
     let at = list.findIndex(b => b.type === 'sec' && b.key === secKey);
     if (at < 0) { list.push({ id: 'sec' + (++nid), type: 'sec', key: secKey, text: secText, fresh2: true }); at = list.length - 1; }
-    let end = at + 1; while (end < list.length && list[end].type !== 'sec' && list[end].type !== 'h') end++;
+    let end = at + 1; while (end < list.length && list[end].type !== 'sec') end++;
+    const ai = list.findIndex(b => b.id === activeSeg);
+    if (ai >= at && ai < end) { let e = ai + 1; while (e < end && list[e].type !== 'hr') e++; end = e; }
     list.splice(end, 0, block); return block.id;
+  }
+  function noteLabel(k, id) {
+    const list = notes[k].blocks, i = list.findIndex(b => b.id === id); if (i < 0) return '';
+    const { groups } = sectionNotes(list, i); if (groups.length < 2) return '';
+    return ` · note ${groups.findIndex(g => g.some(b => b.id === id)) + 1} of ${groups.length}`;
   }
 
   /* ---------- views ---------- */
@@ -799,7 +829,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       const blk = $$(doc === 'ghost' ? '#ghostView [data-sec]' : '#paper h2').find(el => el.getBoundingClientRect().bottom > rb.top + 40);
       const key = doc === 'ghost' ? blk && blk.dataset.sec : 'Background and Motivation';
       const h = key && $(`#notesBody h3[data-sec-key="${CSS.escape(key)}"]`);
-      if (h) { const row = h.closest('.blk-row'); row.scrollIntoView({ block: 'start', behavior: reduce() ? 'auto' : 'smooth' }); let n = row.nextElementSibling; while (n && !n.classList.contains('part')) n = n.nextElementSibling; if (n && !focusOn) setActive(n.dataset.key); }
+      if (h) { const row = h.closest('.blk-row'); row.scrollIntoView({ block: 'start', behavior: reduce() ? 'auto' : 'smooth' }); const n = row.closest('.part'); if (n && !focusOn) setActive(n.dataset.key); }
     }, 150);
     if (cardAnchor && $('#noteCardG').dataset.state === 'open') placeCards();
   });
@@ -819,6 +849,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const open = c => c.dataset.state === 'open';
     [nc, tc].forEach(c => { c.style.width = w + 'px'; c.style.left = left + 'px'; });
     if (open(nc)) {
+      top = Math.max(8, Math.min(top, window.innerHeight - nc.offsetHeight - 8)); // keep the whole card on screen
       nc.style.top = top + 'px'; $('#noteArrow').style.top = Math.min(nc.offsetHeight - 20, Math.max(10, para.top + 10 - top)) + 'px';
       top += nc.offsetHeight + 8; $('#trArrow').hidden = true;
     } else $('#trArrow').hidden = false;
@@ -833,13 +864,25 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     let s0 = i0; while (s0 > 0 && list[s0].type !== 'sec') s0--;
     let e0 = i0 + 1; while (e0 < list.length && list[e0].type !== 'sec') e0++;
     const part = list.slice(Math.max(0, s0), e0);
-    $('#ncTitle').textContent = `${DOCS[k] ? DOCS[k].short : 'Note'} › ${(list[s0] && list[s0].type === 'sec') ? list[s0].text : ''}`;
-    $('#ncBody').innerHTML = part.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
+    const sn = sectionNotes(list, Math.max(0, i0)), cur = Math.max(0, sn.groups.findIndex(g => g.some(b => ids.includes(b.id))));
+    // Short title so "note N of M" always shows: paper › §N · note N of M (full section name in the tooltip).
+    $('#ncTitle').textContent = `${DOCS[k] ? DOCS[k].short : 'Note'} › ${sn.sec ? sn.sec.text.split(' ')[0] : ''}${sn.groups.length > 1 ? ` · note ${cur + 1} of ${sn.groups.length}` : ''}`;
+    $('#ncTitle').title = sn.sec ? sn.sec.text : '';
+    const rowsOf = g => g.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
       const editable = b.type === 'p' && !b.sug;
       if (b.type === 'hr') return '<hr class="nc-hr">';
       const body = b.type === 'h' ? `<b>${esc(b.text)}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
+    const snip = g => { const b = g.find(x => x.type !== 'sec' && x.text); return b ? b.text.replace(/<[^>]+>/g, '').slice(0, 60) : ''; };
+    $('#ncBody').innerHTML = sn.groups.map((g, gi) => {
+      const n = g.filter(b => b.type !== 'sec').length; if (!n) return '';
+      if (gi === cur) return `<div class="nc-cur">${rowsOf(g)}</div>`;
+      return `<button class="nc-other" data-g="${gi}" aria-expanded="false"><i data-lucide="chevron-right" class="icon-xs"></i>Note ${gi + 1} · ${n} block${n > 1 ? 's' : ''}<span>· ${esc(snip(g))}</span></button><div class="collapse" data-state="closed"><div class="nc-other-body">${rowsOf(g)}</div></div>`;
+    }).join(''); icons();
+    $$('#ncBody .nc-other').forEach(btn => btn.addEventListener('click', () => {
+      const o = btn.getAttribute('aria-expanded') !== 'true'; btn.setAttribute('aria-expanded', String(o)); btn.nextElementSibling.dataset.state = o ? 'open' : 'closed'; setTimeout(placeCards, 210);
+    }));
     $$('#ncBody [contenteditable]').forEach(el => el.addEventListener('blur', () => {
       const b = notes[k].blocks.find(x => x.id === el.dataset.bid); if (b) { b.text = el.innerHTML; renderNote(); }
     }));
@@ -882,7 +925,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     renderNote(); renderMarksMenu();
     const row = notesVisible() && $(`#notesBody .blk-row[data-id="${id}"]`);
     if (row) { row.classList.add('blk-enter'); row.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
-    toast(`Saved to ${DOCS[k].short} › ${secText}`, () => revealBlock(k, id));
+    toast(`Saved to ${DOCS[k].short} › ${secText}${noteLabel(k, id)}`, () => revealBlock(k, id));
   }
 
   /* ---------- HTML marks ---------- */
@@ -1303,6 +1346,10 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   }
   // With Focus on: the note's other parts fade, and on the paper only the marks quoted in this part keep their colour.
   function applyFocus() {
+    // Frame the current note: darken the dividers just above and below it.
+    $$('#notesBody .blk-row[data-edge]').forEach(r => { delete r.dataset.edge; });
+    const cp = $(`#notesBody .part[data-key="${activeSeg}"]`);
+    if (cp) [cp.previousElementSibling, cp.nextElementSibling].forEach(n => { if (n && n.classList.contains('blk-row')) n.dataset.edge = 'true'; });
     $('#notesBody').classList.toggle('focus-on', focusOn);
     const sg = $(`#notesBody .part[data-key="${activeSeg}"]`);
     const ids = new Set(sg ? sg.dataset.ids.split(' ') : []);
