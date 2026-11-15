@@ -96,6 +96,20 @@ describe("agent turns (H4)", () => {
     expect(last().agent_events![1]!.data).toMatchObject({ status: "done" });
   });
 
+  it("paused / resumed mark the turn's message, live and on rejoin (H5a)", () => {
+    const s = useChatStore.getState();
+    const cards = [{ kind: "action", id: "a1", tool: "remove_paper" }];
+    s.applyAgentEvent(1, 7, "paused", { run_id: 7, cards });
+    expect(last().paused).toEqual(cards);
+    s.applyAgentEvent(1, 7, "resumed", { run_id: 7 });
+    expect(last().paused).toBeNull();
+    // The reattach poller's events take the same path.
+    s.applyRunEvent(1, { event: "paused", data: JSON.stringify({ run_id: 7, cards }) });
+    expect(last().paused).toEqual(cards);
+    s.finaliseMessage(1, 7, "Done.");
+    expect(last().paused).toBeNull();
+  });
+
   it("keeps one search batch per search_results event", () => {
     const s = useChatStore.getState();
     const c = (id: string) => ({
@@ -212,5 +226,74 @@ describe("agent turn replay is idempotent (reattach restarts at cursor 0)", () =
     expect(after.agent_events).toEqual(before.agent_events);
     expect(after.search_result_batches).toEqual(before.search_result_batches);
     expect(after.agent_summary).toEqual(before.agent_summary);
+  });
+});
+
+describe("session activity time (sidebar order)", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+  });
+  const summary = (id: number, updated_at: string) => ({
+    id,
+    title: `Chat ${id}`,
+    created_at: "2026-11-01 00:00:00",
+    updated_at,
+    message_count: 1,
+  });
+
+  it("puts a new chat first, stamped now", () => {
+    const before = Date.now();
+    const a = useChatStore.getState().newSession();
+    const b = useChatStore.getState().newSession();
+    const sessions = useChatStore.getState().sessions;
+    expect(sessions.map((s) => s.id)).toEqual([b, a]);
+    expect(Date.parse(sessions[0]!.updated_at!)).toBeGreaterThanOrEqual(before);
+  });
+
+  it("stamps a forked chat", () => {
+    const id = useChatStore.getState().addForkedSession(99, "Fork");
+    expect(useChatStore.getState().sessions.find((s) => s.id === id)?.updated_at).toBeTruthy();
+  });
+
+  it("restamps a chat when a message is added or an answer completes", () => {
+    const id = useChatStore.getState().newSession();
+    useChatStore.setState((s) => ({
+      sessions: s.sessions.map((x) => (x.id === id ? { ...x, updated_at: "2020-01-01T00:00:00.000Z" } : x)),
+    }));
+    useChatStore.getState().appendMessage(id, { role: "user", content: "hi", run_id: null });
+    const t1 = useChatStore.getState().sessions[0]!.updated_at!;
+    expect(t1 > "2020-01-01T00:00:00.000Z").toBe(true);
+    useChatStore.setState((s) => ({
+      sessions: s.sessions.map((x) => ({ ...x, updated_at: "2020-01-01T00:00:00.000Z" })),
+    }));
+    useChatStore.getState().appendMessage(id, { role: "assistant", content: "", run_id: 7, status: "streaming" });
+    useChatStore.setState((s) => ({
+      sessions: s.sessions.map((x) => ({ ...x, updated_at: "2020-01-01T00:00:00.000Z" })),
+    }));
+    useChatStore.getState().finaliseMessage(id, 7, "done");
+    expect(useChatStore.getState().sessions[0]!.updated_at! > "2020-01-01T00:00:00.000Z").toBe(true);
+  });
+
+  it("takes the backend's updated_at (UTC without a zone) on sync, keeping the later one", () => {
+    const local = useChatStore.getState().addForkedSession(901, "Mine");
+    useChatStore.setState((s) => ({
+      sessions: s.sessions.map((x) => ({ ...x, updated_at: "2026-11-10T05:00:00.000Z" })),
+    }));
+    useChatStore.getState().reconcileBackendSessions([
+      summary(901, "2026-11-09 08:00:00"), // older than local: local wins
+      summary(902, "2026-11-12 08:30:00"), // new from the backend: parsed as UTC
+    ]);
+    const sessions = useChatStore.getState().sessions;
+    expect(sessions.find((s) => s.id === local)?.updated_at).toBe("2026-11-10T05:00:00.000Z");
+    expect(sessions.find((s) => s.backend_session_id === 902)?.updated_at).toBe(
+      "2026-11-12T08:30:00.000Z",
+    );
+    useChatStore.getState().reconcileBackendSessions([
+      summary(901, "2026-11-13 09:15:00"), // newer on the backend (another device)
+      summary(902, "2026-11-12 08:30:00"),
+    ]);
+    expect(useChatStore.getState().sessions.find((s) => s.id === local)?.updated_at).toBe(
+      "2026-11-13T09:15:00.000Z",
+    );
   });
 });

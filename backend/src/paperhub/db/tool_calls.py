@@ -9,7 +9,7 @@ import aiosqlite
 _COLS = (
     "run_id", "branch", "step_index", "parent_step", "agent", "tool", "model",
     "args_redacted_json", "result_summary_json", "latency_ms",
-    "token_in", "token_out", "status", "error",
+    "token_in", "token_out", "status", "error", "tool_call_id",
 )
 
 
@@ -26,7 +26,7 @@ async def drain_tool_calls_since(
     async with conn.execute(
         "SELECT run_id, branch, step_index, parent_step, agent, tool, model, "
         "args_redacted_json, result_summary_json, latency_ms, token_in, token_out, "
-        "status, error "
+        "status, error, tool_call_id "
         "FROM tool_calls WHERE run_id = ? AND step_index > ? ORDER BY step_index",
         (run_id, after_step),
     ) as cur:

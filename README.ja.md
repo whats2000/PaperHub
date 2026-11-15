@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-2484%20backend%20%2B%201116%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.42.0%20(SRS%20v2.42.0)-success)
+![Tests](https://img.shields.io/badge/tests-2805%20backend%20%2B%201292%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.43.0%20(SRS%20v2.43.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · **日本語** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
@@ -136,7 +136,7 @@ PaperHub は **UX ファースト**で設計されています。検索された
 
 ### 🐳 Docker で実行(推奨 — とにかくアプリを使う)
 
-PaperHub を開発するのではなく*実行*したいだけなら、スタック全体がコンテナで動作します — **Python、Node、LaTeX のインストールは不要**です。必要なのは [Docker](https://docs.docker.com/get-docker/) と LLM キーだけです。1 回の `docker compose up` で 5 つのサービス(バックエンド、モデルサーバー、Marker PDF 取り込み、Web 検索、Web UI)がすべて立ち上がるので、スライド(**中国語/CJK** を含む)、RAG、Web 発見がそのまま動作します。
+PaperHub を開発するのではなく*実行*したいだけなら、スタック全体がコンテナで動作します — **Python、Node、LaTeX のインストールは不要**です。必要なのは [Docker](https://docs.docker.com/get-docker/) と LLM キーだけです。1 回の `docker compose up` で 5 つのサービス(バックエンド、モデルサーバー、Marker PDF 取り込み、Web 検索、Web UI)がすべて立ち上がるので、スライド(**中国語/CJK** を含む)、RAG、論文の発見がそのまま動作します。Compose は**デプロイプロファイル**で動きます([オンプレミスへのデプロイ](#-オンプレミスへのデプロイ)を参照):外部送信レビューはオン、公開 Web 検索は誰かが設定でオンにするまでオフ、許可リストのホストにだけ接続し、保護・モデル・信頼できる検索の設定は `backend/.env` からのみ設定できます(設定パネルではロック表示)。
 
 ```bash
 git clone https://github.com/whats2000/PaperHub.git
@@ -237,6 +237,20 @@ uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if alr
 ```
 
 立ち上がると、バックエンドの MCP レジストリが `web.search` / `web.fetch` を自動公開します。停止しているときは、エージェントは論文のみのフローにフォールバックします — 設定不要です。起動されたデーモンはデタッチされるためバックエンドの `--reload` を生き延びます。明示的な終了は `start.ps1` の役割です(さもなければ再起動時にクリアされます)。`PATH` 上に Node 18+ が必要です。(`paperhub-papers` MCP の面はインプロセスで `/mcp` に提供され、インストールは不要です。)
+
+---
+
+## 🏢 オンプレミスへのデプロイ
+
+PaperHub はローカルモデルで動かし、承認していない外部通信を一切行わないように作られています。`PAPERHUB_PROFILE=deployment` を設定すると(Docker の `backend` サービスは設定済み)安全な既定値になります:外部送信レビューはオン、公開 Web 検索はオフ、ホスト許可リストは論文ソース(arXiv、Semantic Scholar、DOI でオープンアクセス PDF を探す Unpaywall)のみ、新しいアップロードは非公開。
+
+- **本当の境界はネットワークです。** アプリ内のチェックポイントは PaperHub が送る内容をレビューして記録しますが、他に何も外に出ないことを保証できるのはファイアウォールやプロキシの送信ルールだけです。論文ソース(`export.arxiv.org`、`arxiv.org`、`api.semanticscholar.org`、`api.unpaywall.org`)と自分のモデル・検索ホストだけを許可してください。
+- **信頼できる検索。** 非公開の内容を含みうる検索は、自分で運用する検索サービスにだけ送られます:`backend/.env` で `PAPERHUB_TRUSTED_SEARCH_URL` を設定します。そのホストは自動的に許可リストに加わりますが、許可リストがロックされていて URL がロックされていない場合は例外です。その場合 URL は設定パネルから変更できるため、ホストを許可リストに載せる必要があります(Docker の既定では両方ロックされるので、`.env` の URL は許可されます)。公開 Web 検索は誰かがオンにしない限りオフのままです。
+- **ロックされた設定。** `PAPERHUB_LOCKED_SETTINGS` は環境変数でしか設定できない設定キーのカンマ区切りリストです:設定パネルには「デプロイ担当者が設定」と表示され、保存は拒否され、以前パネルから保存した値も無視されます。ロックされていて未設定のキーは既定値のままです。Docker の `backend` サービスは、外部送信レビューのスイッチ、判断できない場合の扱い、許可リスト、ログの保存期間、信頼できる検索の URL、そしてすべてのモデル設定(`PAPERHUB_MODEL_SMALL`、`PAPERHUB_MODEL_FLAGSHIP`、タスクごとの `PAPERHUB_*_MODEL`、`PAPERHUB_OUTBOUND_REVIEW_MODEL`、`PAPERHUB_MARKER_LLM_MODEL`)をロックします。変更は `backend/.env` で行い、再起動してください。
+- **ローカルモデル。** モデル設定を自前の実行環境に向けてください(`ollama/…`、`hosted_vllm/…`、`lm_studio/…`、またはプライベートアドレスの `OPENAI_API_BASE` を使う `openai/…`)。レディネスチェックはローカルでないモデルに解決される設定をすべて一覧表示します(警告のみで、ブロックはしません)。外部送信レビューがオンのとき、そのようなプロバイダーへの呼び出しは宛先だけが記録されます(`(content not logged)`)。Marker の任意の LLM 処理は専用コンテナで動くため外部送信ログには含まれません。`PAPERHUB_MARKER_LLM_MODEL` がクラウドモデルに解決される場合、レディネスチェックがそれを示します。
+- **使う前にモデルを確認してください:** `cd backend; uv run paperhub-model-check [--model M] [--context 32000] [--json]` は設定済みの各モデルに 4 つのチェックを行い、1 つでも失敗すると終了コード 1 で終わります。
+- **モデルの最低要件:** 信頼できる複数ステップのツール呼び出し(コアエージェントはターンをまたいでツールを連鎖させます)、約 32k トークン以上のコンテキストウィンドウ、構造化出力(ネイティブの JSON schema、少なくとも JSON モードに従うこと)、図やページ画像を読むための視覚機能(テキスト専用モデルでもチャットはできますが、エージェントは証拠ページを読めません。`PAPERHUB_AGENT_VISION=0` で無効化できます)。
+- **ローカルモデルで確認すべき Gemini 向けの調整。** いくつかの schema は Gemini の `responseSchema` 向けに書かれており、Gemini は既定値を持つ任意フィールドを落とします:`backend/src/paperhub/models/domain.py` の `DeckCommand.target_page` と、`backend/src/paperhub/models/sql_domain.py` の SQL エージェントの `sql` / `answer` / `papers` は既定値なしの必須フィールドで、モデルは使わない分岐に `null` / `[]` を出力する必要があります。schema の強制が弱いローカル環境では誤った値を出したり省略したりすることがあります。`paperhub-model-check` と数回の実際の対話で分かります。
 
 ---
 
@@ -350,7 +364,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 ドキュメント
 
-- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.42.0** まで提供)。
+- **[システム要求仕様書(SRS)](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — 信頼できるアーキテクチャ、スキーマ、スコープ、受け入れ基準(**v2.43.0** まで提供)。
 - **[実装プラン](docs/superpowers/plans/)** — サブプロジェクトごとに 1 つ、それぞれ TDD で実行。
 - **[バックエンド開発者向けドキュメント](backend/README.md)** — バックエンド固有の注記。
 
@@ -366,7 +380,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.42.0}
+  version = {2.43.0}
 }
 ```
 

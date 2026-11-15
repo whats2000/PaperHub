@@ -77,7 +77,8 @@
     "stopping": "停止しています…",
     "copy": "メッセージをコピー",
     "fork": "このメッセージからフォーク",
-    "forkTitle": "ここからフォーク — 新しいチャットに分岐してこのメッセージを編集"
+    "forkTitle": "ここからフォーク — 新しいチャットに分岐してこのメッセージを編集",
+    "sentSearch": "送信した検索：{{text}}"
   },
   "routing": {
     "paper_search": "論文検索",
@@ -121,7 +122,111 @@
     "empty": "記録されたステップはありません。",
     "retry": "再試行",
     "agentStep": "ステップ {{n}}",
-    "answer": "回答"
+    "answer": "回答",
+    "paused": "一時停止中 · 確認待ち",
+    "tl": {
+      "technical": "技術ビュー",
+      "rawSteps": "生のステップを表示（{{count}}）",
+      "backToActivity": "アクティビティ表示に戻る",
+      "head": {
+        "worked": "{{duration}} 作業",
+        "workedParts": "{{duration}} 作業：{{parts}}",
+        "workedNoTime": "完了",
+        "workedNoTimeParts": "完了：{{parts}}",
+        "readSections_one": "{{count}} 節を読んだ",
+        "readSections_other": "{{count}} 節を読んだ",
+        "searches_one": "{{count}} 回検索",
+        "searches_other": "{{count}} 回検索",
+        "paused_one": "一時停止中、{{count}} 件の確認待ち",
+        "paused_other": "一時停止中、{{count}} 件の確認待ち",
+        "stopped": "停止しました。待機中のものは送信も実行もしていません。",
+        "working": "作業中…"
+      },
+      "answer": "回答を書きました",
+      "writing": "回答を書いています…",
+      "thinking": "考えています…",
+      "goToCard": "カードへ移動",
+      "details": "詳細",
+      "queriesDetails": "クエリと詳細",
+      "d": {
+        "tool": "ツール",
+        "calledIn": "呼び出し元",
+        "calledInValue": "エージェントのステップ {{n}} · {{model}}",
+        "status": "状態",
+        "internal": "内部ステップ"
+      },
+      "unknownPaper": "論文 {{id}}",
+      "title": {
+        "list_sections": "{{paper}} の節を一覧表示",
+        "read_section": "{{paper}} の「{{section}}」を読んだ",
+        "read_chunks_one": "{{count}} 段落を読んだ",
+        "read_chunks_other": "{{count}} 段落を読んだ",
+        "search_chunks": "このチャットの論文で「{{query}}」を検索",
+        "list_figures_tables": "{{paper}} の図表を一覧表示",
+        "read_layout_object": "{{paper}} の {{label}} を読んだ",
+        "view_figure": "{{paper}} の {{figure}} を見た",
+        "view_page": "{{paper}} の {{page}} ページを見た",
+        "zoom": "{{paper}} の {{page}} ページを拡大",
+        "view_chunk": "段落 {{id}} を元のページで見た",
+        "gather_one": "{{count}} 本の論文から段落を収集",
+        "gather_other": "{{count}} 本の論文から段落を収集",
+        "query_library": "論文ライブラリに質問：「{{question}}」",
+        "search_papers": "論文を検索：「{{query}}」",
+        "search_papers_pending": "論文を検索：「{{query}}」",
+        "search_papers_running": "論文を検索中：「{{query}}」",
+        "add_paper": "{{title}} をこのチャットに追加",
+        "add_paper_failed": "{{title}} をこのチャットに追加",
+        "remember": "記憶に保存：「{{fact}}」",
+        "forget": "記憶 {{id}} を消去",
+        "forget_pending": "記憶 {{id}} を消去",
+        "remove_paper": "「{{paper}}」をこのチャットから削除",
+        "remove_paper_pending": "「{{paper}}」をこのチャットから削除",
+        "list_ideas": "アイデアを一覧表示",
+        "propose_ideas": "「{{problem}}」のアイデア生成を開始",
+        "create_deck": "スライドを作成",
+        "edit_slides": "スライドを編集",
+        "write_notes": "スピーカーノートを作成"
+      },
+      "sub": {
+        "passages_one": "{{count}} 段落",
+        "passages_other": "{{count}} 段落",
+        "hits_one": "{{count}} 件",
+        "hits_other": "{{count}} 件",
+        "waitingSearch": "確認待ちです。まだ何も送信していません。",
+        "waiting": "確認待ちです。",
+        "stopped": "未実行：このターンは停止されました。",
+        "stoppedSearch": "未検索：このターンは停止されました。",
+        "declined": "未検索：許可されませんでした。",
+        "declinedNote": "未検索。エージェントへの指示：「{{note}}」",
+        "dismissed": "未実行：却下しました。",
+        "confirmed": "確認済みです。",
+        "autoApproved": "自動承認されました。",
+        "pending": "未実行：確認を待っていました。",
+        "allowedEdited": "許可する前にクエリを編集しました。",
+        "found_one": "{{count}} 本の論文が見つかりました。",
+        "found_other": "{{count}} 本の論文が見つかりました。",
+        "sent_one": "{{count}} 件のクエリを送信",
+        "sent_other": "{{count}} 件のクエリを送信",
+        "rewritten": "（うち {{count}} 件は書き換え済み）",
+        "notSent": "{{count}} 件は未送信",
+        "timedOut": "{{count}} 件はタイムアウト",
+        "heldWaiting": "{{count}} 件は確認待ち"
+      },
+      "lookups_one": "見つかった論文 {{count}} 本を ID でも照会しました（{{ids}}）。ID の照会は確認なしで送信されます。",
+      "lookups_other": "見つかった論文 {{count}} 本を ID でも照会しました（{{ids}}）。ID の照会は確認なしで送信されます。",
+      "q": {
+        "sent": "送信済み",
+        "rewritten": "送信前に書き換え：{{reason}}",
+        "sentAfterOk": "確認後に送信",
+        "sentAfterEdit": "編集後に送信",
+        "blockedTerm": "未送信：機密語 {{term}} を含む",
+        "blocked": "未送信：ブロック",
+        "held": "確認待ち：{{reason}}",
+        "declined": "未送信：送信しないことにしました",
+        "stopped": "未送信：このターンは停止されました",
+        "timeout": "検索サービスがタイムアウトしました"
+      }
+    }
   },
   "panel": {
     "memory": "メモリ",
@@ -133,9 +238,7 @@
     "papers_one": "{{count}} 本の論文を読了",
     "papers_other": "{{count}} 本の論文を読了",
     "steps_one": "{{count}} ステップ",
-    "steps_other": "{{count}} ステップ",
-    "tools": "使用したツール：{{tools}}",
-    "noTools": "ツールを使わずに回答"
+    "steps_other": "{{count}} ステップ"
   },
   "agentEvent": {
     "paperAdded": "論文を追加しました",
@@ -173,17 +276,99 @@
     "menuTitle": "承認モード",
     "ask": {
       "title": "先に確認",
-      "desc": "論文の削除や記憶の消去の前に確認します",
-      "tooltip": "論文ライブラリや記憶を変更する操作（論文の削除、記憶の消去）はあなたの確認を待ちます。このチャットのみに適用され、これが既定です。"
+      "desc": "PaperHub の外での検索、論文の削除、記憶の消去の前に確認します",
+      "tooltip": "エージェントによる PaperHub の外での検索と、論文ライブラリや記憶を変更する操作（論文の削除、記憶の消去）はあなたの確認を待ちます。このチャットのみに適用され、これが既定です。"
     },
     "auto": {
       "title": "自動承認",
-      "desc": "簡易チェックを通った操作はそのまま実行し、リスクがあるときだけ確認します",
-      "tooltip": "オンにすると、通常は確認が必要な操作（論文の削除、記憶の消去）を確認なしで実行できるか、簡易チェックで判断します。このチャットのみに適用され、既定ではオフです。"
+      "desc": "検索はそのまま実行（フラグが立ったクエリだけプライバシーガードが確認）、簡易チェックを通った操作も実行",
+      "tooltip": "検索は確認カードなしで実行され、プライバシーガードがすべてのクエリをチェックし、フラグが立ったものだけ確認します。通常は確認が必要な操作（論文の削除、記憶の消去）は、確認なしで実行できるか簡易チェックで判断します。このチャットのみに適用され、既定ではオフです。"
     },
-    "failed": "自動承認を変更できませんでした"
+    "failed": "自動承認を変更できませんでした",
+    "searchesAllowed": "このチャットの検索は確認なしで実行されます。",
+    "askAgain": "確認に戻す"
   },
   "proposals": {
     "label": "おすすめの次の質問"
+  },
+  "outbound": {
+    "dest": {
+      "publicSearch": "公開ウェブ検索",
+      "trusted": "信頼済みの検索",
+      "semanticScholar": "Semantic Scholar"
+    },
+    "chip": {
+      "title": "実際に送信した検索",
+      "whatChanged": "変更内容",
+      "sent": "送信",
+      "written": "元の文面",
+      "why": "理由",
+      "to": "送信先"
+    },
+    "blocked": {
+      "term": "未送信：<q>{{text}}</q> に機密語（<b>{{term}}</b>）が含まれています。",
+      "reason": "未送信：<q>{{text}}</q>。{{reason}}"
+    },
+    "held": {
+      "title": "この検索には確認が必要です",
+      "textLabel": "検索テキスト",
+      "why": "確認する理由：",
+      "to": "送信先：",
+      "sendAsShown": "このまま送信",
+      "edit": "編集して送信",
+      "sendEdited": "編集したテキストを送信",
+      "cancelEdit": "編集をやめる",
+      "discard": "送信しない",
+      "sent": "送信済み",
+      "sentEdited": "編集して送信済み",
+      "discarded": "未送信。この検索は送信しないことにしました。",
+      "approvedNotRun": "承認済み、まだ実行していません",
+      "run": "検索を実行",
+      "unavailable": "この検索はもう利用できません。",
+      "sensitive": "機密語（{{term}}）が含まれているため送信できません。編集してもう一度お試しください。",
+      "sensitiveNoTerm": "機密語が含まれているため送信できません。編集してもう一度お試しください。",
+      "empty": "送信する内容がありません。",
+      "stale": "この検索はすでに処理されています。",
+      "alreadyRun": "この検索はすでに実行されています。",
+      "failed": "送信できませんでした。もう一度お試しください。",
+      "runFailed": "検索を開始できませんでした。もう一度お試しください。",
+      "discardFailed": "破棄できませんでした。もう一度お試しください。",
+      "retryUnavailable": "この検索はここでは再試行できません。カードの「検索を実行」を使ってください。"
+    },
+    "ask": {
+      "title": "この検索を許可しますか？",
+      "textLabel": "検索クエリ",
+      "whyText": "このチャットでは「先に確認」がオンです。まだ何も送信していません。",
+      "followUps": "この検索は、ここから作った追加のクエリも送信することがあります。どれも機密語と非公開の資料について引き続きチェックされます。",
+      "noDestination": "許可された検索サービスがありません",
+      "allow": "許可",
+      "allowEdited": "編集した検索を許可",
+      "allowChat": "このチャットの検索を許可",
+      "edit": "編集して許可",
+      "deny": "許可しない",
+      "denyLabel": "代わりにしてほしいことをエージェントに伝える（任意）",
+      "denyPlaceholder": "例：このチャットにある論文だけを使って。",
+      "cancel": "キャンセル",
+      "allowed": "許可済み",
+      "allowedEdited": "編集して許可済み",
+      "allowedChat": "このチャットの以降の検索は確認しません",
+      "allowedBySetting": "このチャットでは検索が許可されています",
+      "alsoAllows": "待機中の {{count}} 件も許可",
+      "declined": "未検索。この検索を許可しませんでした。",
+      "declinedNote": "未検索。エージェントへの指示：",
+      "stopped": "未検索。このターンは停止されました。",
+      "ended": "未検索。決める前にこのターンが終了しました。",
+      "unavailable": "この検索はもう利用できません。",
+      "chatAllowed": "このチャットの検索は確認なしで実行されます。操作は引き続き確認します。",
+      "noteTooLong": "メモが長すぎます（最大 1,000 文字）。",
+      "stale": "この検索はすでに決定されています。",
+      "failed": "サーバーに接続できませんでした。もう一度お試しください。"
+    }
+  },
+  "paused": {
+    "line_one": "一時停止中 · {{count}} 件が確認待ちです。決めていただき次第、続けます。",
+    "line_other": "一時停止中 · {{count}} 件が確認待ちです。決めていただき次第、続けます。",
+    "pill_one": "一時停止中 · 確認待ち",
+    "pill_other": "一時停止中 · {{count}} 件の確認が必要です"
   }
 }

@@ -78,6 +78,8 @@ class MCPServerConfig:
     launch: list[str] = field(default_factory=list)
     launch_env: dict[str, str] = field(default_factory=dict)
     launch_ready_timeout: float = _DEFAULT_LAUNCH_READY_TIMEOUT
+    # Reaches the public web: gated by the "public web search" setting.
+    public_web: bool = False
 
     @property
     def has_launch(self) -> bool:
@@ -261,6 +263,12 @@ def _parse_block(idx: int, block: dict[str, Any]) -> MCPServerConfig:
             f"{prefix}: 'launch_env' set without 'launch' — no subprocess to apply env to"
         )
 
+    # ``public_web``: absent -> a server named "web" counts as public (backward
+    # compatible with configs written before the key existed).
+    public_web_raw = block.get("public_web", name == "web")
+    if not isinstance(public_web_raw, bool):
+        raise ValueError(f"{prefix}: 'public_web' must be true or false")
+
     return MCPServerConfig(
         name=name,
         transport=transport,
@@ -273,4 +281,5 @@ def _parse_block(idx: int, block: dict[str, Any]) -> MCPServerConfig:
         launch=launch,
         launch_env=launch_env,
         launch_ready_timeout=launch_ready_timeout,
+        public_web=public_web_raw,
     )

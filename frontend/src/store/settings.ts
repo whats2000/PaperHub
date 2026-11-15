@@ -3,12 +3,16 @@ import { create } from "zustand";
 
 import {
   getModelOptions,
+  getOutboundDestinations,
   getReadiness,
+  getTrustedSearchStatus,
   getSettings,
   patchSettings,
+  type OutboundDestination,
   type SettingsConfig,
   type SettingsModelOptions,
   type SettingsReadiness,
+  type TrustedSearchStatus,
 } from "../lib/api";
 import { hasBlockingConfigIssue } from "../lib/readiness";
 
@@ -64,10 +68,18 @@ interface SettingsState {
   readinessChecking: boolean;
   /** Per-provider model autocomplete options; null until fetched. */
   modelOptions: SettingsModelOptions | null;
+  /** Hosts PaperHub may contact (Privacy & outbound); null until fetched. */
+  destinations: OutboundDestination[] | null;
+  /** Last probe of the trusted search service; null until fetched. */
+  trustedStatus: TrustedSearchStatus | null;
   /** The first-run tour auto-shows while not ready unless the user dismisses it
    *  (per browser session). Reopenable from the account menu. */
   welcomeDismissed: boolean;
+  /** Where the next open lands (Sidebar "Held searches"); `nonce` re-applies it. */
+  target: { section: string | null; tab: "all" | "held"; nonce: number };
   open: () => void;
+  /** Open Settings on a given section (and Outbound log tab). */
+  openAt: (section: string, tab?: "all" | "held") => void;
   close: () => void;
   dismissWelcome: () => void;
   reopenWelcome: () => void;
@@ -77,6 +89,8 @@ interface SettingsState {
   /** Live re-verify (Settings open / after save) — always pings. */
   fetchReadiness: () => Promise<void>;
   fetchModelOptions: () => Promise<void>;
+  fetchDestinations: () => Promise<void>;
+  fetchTrustedStatus: () => Promise<void>;
   save: (patch: Record<string, string | null>) => Promise<void>;
 }
 
@@ -89,11 +103,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   readiness: null,
   readinessChecking: false,
   modelOptions: null,
+  destinations: null,
+  trustedStatus: null,
   welcomeDismissed: false,
+  target: { section: null, tab: "all", nonce: 0 },
+  openAt: (section, tab = "all") => {
+    set((s) => ({ target: { section, tab, nonce: s.target.nonce + 1 } }));
+    get().open();
+  },
   open: () => {
     set({ isOpen: true });
     if (!get().config) void get().fetchConfig();
     void get().fetchModelOptions();
+    void get().fetchDestinations();
     // Opening Settings is the moment to show real, fresh per-slot status.
     void get().fetchReadiness();
   },
@@ -147,6 +169,20 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       // Autocomplete is best-effort; keep any prior options on failure.
     }
   },
+  fetchDestinations: async () => {
+    try {
+      set({ destinations: await getOutboundDestinations() });
+    } catch {
+      // Informational list; keep any prior value on failure.
+    }
+  },
+  fetchTrustedStatus: async () => {
+    try {
+      set({ trustedStatus: await getTrustedSearchStatus() });
+    } catch {
+      set({ trustedStatus: null });
+    }
+  },
   save: async (patch) => {
     const res = await patchSettings(patch);
     set((s) => ({
@@ -155,6 +191,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // Refresh masked values, the gate, and provider options (a new key may
     // unlock providers / flip readiness green).
     await get().fetchConfig();
-    await Promise.all([get().fetchReadiness(), get().fetchModelOptions()]);
+    // A changed trusted-search URL is re-probed (and the host list follows it).
+    if ("PAPERHUB_TRUSTED_SEARCH_URL" in patch) set({ trustedStatus: null });
+    await Promise.all([
+      get().fetchReadiness(),
+      get().fetchModelOptions(),
+      get().fetchDestinations(),
+      "PAPERHUB_TRUSTED_SEARCH_URL" in patch ? get().fetchTrustedStatus() : Promise.resolve(),
+    ]);
   },
 }));

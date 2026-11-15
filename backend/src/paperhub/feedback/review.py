@@ -253,6 +253,9 @@ async def _agent_trace(
         elif tool == "tool:read_chunks":
             chunk_reads += [i for i in result.get("chunk_ids") or []
                             if isinstance(i, int)]
+        elif tool == "tool:search_papers" and result.get("declined"):
+            # H5a: Ask first, and the user did not allow it.
+            searches.append(f'search: "{result.get("query")}" -> not allowed by the user')
         elif tool == "tool:search_papers":
             cards = result.get("candidates")
             n = len(cards) if isinstance(cards, list) else 0

@@ -6,10 +6,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ActionNotPending, confirmAction, dismissAction, getAction } from "@/lib/api";
 import { prefersReducedMotion } from "@/lib/motion";
+import { useNavStore } from "@/store/nav";
 import type { ConfirmRequestData } from "@/types/domain";
 
 // Matches duration-200 plus a margin: unmount even if no transitionend fires.
 const EXIT_FALLBACK_MS = 250;
+// The jump ring holds this long, then fades over its 1 s transition.
+const FLASH_HOLD_MS = 400;
 /** How often a `running` card re-reads its action (another tab executing). */
 export const RUNNING_POLL_MS = 2000;
 const TERMINAL = new Set(["done", "failed", "dismissed"]);
@@ -73,10 +76,13 @@ function reasonText(data: ConfirmRequestData, t: TFn): string | null {
 
 /**
  * A confirm-tier action the agent asked the user to approve (H4): the action
- * summary and the agent's reason, with Confirm / Dismiss. Confirm runs the
- * tool directly (no LLM) and the card then shows the result; Dismiss
- * collapses the card into a muted "Dismissed: …" line. Enters with fade +
- * zoom; exits by collapsing its height so the content below glides up.
+ * summary and the agent's reason, with Confirm / Dismiss. The turn pauses on
+ * the card (H5a): Confirm hands the decision to it, the run runs the action
+ * and the card then shows the result (with no live turn waiting, the backend
+ * runs it directly); Dismiss collapses the card into a muted "Dismissed: …"
+ * line and the turn continues. Enters with fade + zoom; exits by collapsing
+ * its height so the content below glides up. A jump from the "needs your
+ * OK" pill scrolls to it, rings it briefly and focuses Confirm.
  */
 export function ConfirmActionCard({
   data,
@@ -94,6 +100,10 @@ export function ConfirmActionCard({
   const [closing, setClosing] = useState(false);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finished = useRef(false);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusId = useNavStore((s) => s.focusHeldId);
   // One request at a time, even if a second click lands before the
   // disabled state renders.
   const inFlight = useRef(false);
@@ -108,9 +118,32 @@ export function ConfirmActionCard({
   useEffect(
     () => () => {
       if (exitTimer.current !== null) clearTimeout(exitTimer.current);
+      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
     },
     [],
   );
+
+  // A jump to this card ("needs your OK" pill): scroll it to the centre,
+  // ring it briefly and focus Confirm. Consumed once.
+  const pending = status === "pending";
+  useEffect(() => {
+    const group = groupRef.current;
+    if (focusId !== data.action_id || !pending || !group) return;
+    const jump = setTimeout(() => {
+      useNavStore.getState().setFocusHeldId(null);
+      const reduce = prefersReducedMotion();
+      group.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      primaryRef.current?.focus({ preventScroll: true });
+      if (reduce) return;
+      group.dataset.flash = "true";
+      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => {
+        flashTimer.current = null;
+        delete group.dataset.flash;
+      }, FLASH_HOLD_MS);
+    }, 0);
+    return () => clearTimeout(jump);
+  }, [focusId, data.action_id, pending]);
 
   // `running`: another tab (or a crashed request) holds the action. Re-read it
   // until it ends, so the spinner never outlives the action.
@@ -193,6 +226,7 @@ export function ConfirmActionCard({
     setBusy("confirm");
     try {
       const res = await confirmAction(data.action_id);
+      useNavStore.getState().refreshHeld();
       if (res.status === "done") {
         onChange({ status: "done", result: res.result });
         onDone?.();
@@ -214,6 +248,7 @@ export function ConfirmActionCard({
     setBusy("dismiss");
     try {
       await dismissAction(data.action_id);
+      useNavStore.getState().refreshHeld();
       setClosing(true);
       if (prefersReducedMotion()) finishExit();
       else exitTimer.current = setTimeout(finishExit, EXIT_FALLBACK_MS);
@@ -243,9 +278,12 @@ export function ConfirmActionCard({
     >
       <div className="min-h-0 overflow-hidden">
         <div
+          ref={groupRef}
+          data-action-id={data.action_id}
           role="group"
           aria-label={t("confirm.title")}
-          className="not-prose mt-2 origin-top rounded-lg border border-border bg-card p-3 text-sm shadow-sm animate-in fade-in-0 zoom-in-95 duration-200 motion-reduce:animate-none"
+          // Inset: the collapse wrapper's overflow-hidden would clip an outer ring.
+          className="not-prose mt-2 origin-top rounded-lg border border-border bg-card p-3 text-sm shadow-sm ring-0 ring-amber-300 ring-inset transition-[box-shadow] ease-out [transition-duration:1s] animate-in fade-in-0 zoom-in-95 animation-duration-200 motion-reduce:animate-none motion-reduce:transition-none data-[flash=true]:ring-[3px] data-[flash=true]:[transition-duration:0s] dark:ring-amber-700"
         >
           <div className="flex items-center gap-2 font-medium">
             <ShieldQuestion className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -261,6 +299,7 @@ export function ConfirmActionCard({
           {status === "pending" && (
             <div className="mt-3 flex gap-2">
               <Button
+                ref={primaryRef}
                 type="button"
                 size="sm"
                 disabled={busy !== null || closing}

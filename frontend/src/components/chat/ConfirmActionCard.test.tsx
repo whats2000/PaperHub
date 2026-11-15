@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { ConfirmActionCard } from "@/components/chat/ConfirmActionCard";
 import { API_BASE_URL } from "@/lib/api";
+import { useNavStore } from "@/store/nav";
 import type { ConfirmRequestData } from "@/types/domain";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
@@ -68,6 +69,18 @@ function Harness({
 }
 
 describe("ConfirmActionCard", () => {
+  it("a jump from the pill scrolls to the card, rings it and focuses Confirm", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    useNavStore.setState({ focusHeldId: "a1" });
+    render(<Harness />);
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    await waitFor(() => expect(confirm).toHaveFocus());
+    expect(scroll).toHaveBeenCalled();
+    expect(useNavStore.getState().focusHeldId).toBeNull();
+    expect(screen.getByRole("group").dataset.actionId).toBe("a1");
+  });
+
   it("names the target in words (not the raw call), enters with fade + zoom", () => {
     render(<Harness />);
     expect(screen.getByText(SUMMARY)).toBeInTheDocument();

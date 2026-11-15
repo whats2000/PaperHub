@@ -75,6 +75,7 @@ timeout_seconds = 8.0
 
 [[server]]
 name = "web"
+public_web = true  # reaches the public web: gated by the "public web search" setting
 transport = "streamable_http"
 url = "http://localhost:3000/mcp"
 expose = ["search", "fetchWebContent"]

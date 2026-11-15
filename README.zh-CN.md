@@ -14,8 +14,8 @@
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-2484%20backend%20%2B%201116%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.42.0%20(SRS%20v2.42.0)-success)
+![Tests](https://img.shields.io/badge/tests-2805%20backend%20%2B%201292%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.43.0%20(SRS%20v2.43.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 [English](README.md) · [日本語](README.ja.md) · [繁體中文](README.zh-TW.md) · **简体中文**
@@ -136,7 +136,7 @@ PaperHub 以**用户体验优先**的理念构建。每个被检索到的文本�
 
 ### 🐳 用 Docker 运行（推荐——只想使用应用）
 
-如果你想*运行* PaperHub 而不是开发它，整套技术栈都在容器中运行——**无需安装 Python、Node 或 LaTeX**。你只需要 [Docker](https://docs.docker.com/get-docker/) 和一个 LLM 密钥。一条 `docker compose up` 就会启动全部五个服务（后端、模型服务器、Marker PDF 解析、Web 检索，以及 Web UI），因此幻灯片（含**中文/CJK**）、RAG 和 Web 发现都开箱即用。
+如果你想*运行* PaperHub 而不是开发它，整套技术栈都在容器中运行——**无需安装 Python、Node 或 LaTeX**。你只需要 [Docker](https://docs.docker.com/get-docker/) 和一个 LLM 密钥。一条 `docker compose up` 就会启动全部五个服务（后端、模型服务器、Marker PDF 解析、Web 检索，以及 Web UI），因此幻灯片（含**中文/CJK**）、RAG 和论文发现都开箱即用。Compose 使用**部署配置**（见[本地部署](#-本地部署)）：外发审查开启、公开 Web 检索保持关闭直到有人在设置中开启、只能连接允许列表上的主机，而防护、模型和可信检索的设置只能通过 `backend/.env` 设置（设置面板会显示为锁定）。
 
 ```bash
 git clone https://github.com/whats2000/PaperHub.git
@@ -237,6 +237,20 @@ uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if alr
 ```
 
 当它启动后，后端的 MCP 注册表会自动暴露 `web.search` / `web.fetch`。当它未启动时，智能体会回退到仅论文的流程——无需任何配置。被启动的守护进程是分离（detached）的，因此能在后端 `--reload` 时存活；显式关闭是 `start.ps1` 的职责（否则它们会在重启时清除）。需要 `PATH` 上有 Node 18+。（`paperhub-papers` MCP 接口在进程内于 `/mcp` 提供服务；无需安装。）
+
+---
+
+## 🏢 本地部署
+
+PaperHub 的设计是搭配本地模型运行，且不发送任何你未批准的外发流量。设置 `PAPERHUB_PROFILE=deployment`（Docker 的 `backend` 服务已设置）即可获得安全默认值：外发审查开启、公开 Web 检索关闭、主机允许列表只含论文来源（arXiv、Semantic Scholar，以及按 DOI 查询开放获取 PDF 的 Unpaywall）、新上传的文档默认为私密。
+
+- **网络才是真正的边界。** 应用内的检查点会审查并记录 PaperHub 发出的内容，但只有防火墙或代理上的出站规则才能保证没有其他内容外流。只放行论文来源（`export.arxiv.org`、`arxiv.org`、`api.semanticscholar.org`、`api.unpaywall.org`）以及你自己的模型和检索主机。
+- **可信检索。** 可能携带私密内容的检索只会发往你自行部署的检索服务：在 `backend/.env` 中设置 `PAPERHUB_TRUSTED_SEARCH_URL`。它的主机会自动加入允许列表，除非允许列表已锁定而该网址没有锁定；这时网址可以在设置面板中修改，因此它的主机必须列在允许列表中（Docker 默认两者都锁定，所以 `.env` 中的网址会被放行）。公开 Web 检索保持关闭，除非有人手动开启。
+- **锁定的设置。** `PAPERHUB_LOCKED_SETTINGS` 是以逗号分隔的设置键列表，这些设置只能由环境变量决定：设置面板会将它们显示为“由部署者设置”，保存会被拒绝，之前从面板保存的值也会被忽略。锁定但未设置的键使用默认值。Docker 的 `backend` 服务锁定了外发审查开关、不确定时的处理方式、允许列表、日志保留天数、可信检索网址，以及所有模型设置（`PAPERHUB_MODEL_SMALL`、`PAPERHUB_MODEL_FLAGSHIP`、各任务的 `PAPERHUB_*_MODEL`、`PAPERHUB_OUTBOUND_REVIEW_MODEL`、`PAPERHUB_MARKER_LLM_MODEL`）；请在 `backend/.env` 中修改后重启。
+- **本地模型。** 将模型设置指向自行部署的运行环境（`ollama/…`、`hosted_vllm/…`、`lm_studio/…`，或搭配私有地址 `OPENAI_API_BASE` 的 `openai/…`）。就绪检查会列出每个仍解析为非本地模型的设置（只是警告，不会阻止）；外发审查开启时，对这类提供商的调用只记录目的地（`(content not logged)`）。Marker 的可选 LLM 处理在它自己的容器中运行，不在外发日志内；当 `PAPERHUB_MARKER_LLM_MODEL` 解析为云端模型时，就绪检查会列出它。
+- **先检查你的模型** 再依赖它们：`cd backend; uv run paperhub-model-check [--model M] [--context 32000] [--json]` 会对每个已配置的模型运行四项检查，任何一项失败即以代码 1 退出。
+- **模型最低要求：** 可靠的多步工具调用（核心代理会跨轮次串联工具）；至少约 32k tokens 的上下文窗口；结构化输出（原生 JSON schema，或至少能遵守 JSON 模式）；以及读取图表和页面图像的视觉能力（纯文本模型可以聊天，但代理无法读取证据页面；设置 `PAPERHUB_AGENT_VISION=0` 以禁用）。
+- **需要在本地模型上验证的 Gemini 专属适配。** 有几个 schema 是为 Gemini 的 `responseSchema` 编写的，它会丢弃带默认值的可选字段：`backend/src/paperhub/models/domain.py` 中的 `DeckCommand.target_page`，以及 `backend/src/paperhub/models/sql_domain.py` 中 SQL 代理的 `sql` / `answer` / `papers` 都是必填且无默认值，模型必须为未使用的分支输出 `null` / `[]`。schema 约束较弱的本地运行环境可能输出错误或省略它们；`paperhub-model-check` 和几次实际对话就能看出来。
 
 ---
 
@@ -350,7 +364,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 文档
 
-- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.42.0**）。
+- **[系统需求规格说明书（System Requirements Specification）](docs/superpowers/specs/2026-05-17-paperhub-srs.md)**——权威的架构、模式、范围和验收标准（已交付至 **v2.43.0**）。
 - **[实现计划](docs/superpowers/plans/)**——每个子项目一份，均通过 TDD 执行。
 - **[后端开发者文档](backend/README.md)**——后端专属说明。
 
@@ -366,7 +380,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.42.0}
+  version = {2.43.0}
 }
 ```
 

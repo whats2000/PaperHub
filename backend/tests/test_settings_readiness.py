@@ -193,3 +193,22 @@ async def test_transient_failure_of_the_tools_ping_is_not_tool_unsupported(
     monkeypatch.setattr(sr.litellm, "acompletion", ping)
     result = await sr.compute_readiness(["GEMINI_API_KEY"])
     assert result["models"]["agent"]["error"] == "Timeout"
+
+
+@pytest.mark.asyncio
+async def test_readiness_lists_non_local_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sr._reset_cache_for_tests()
+
+    async def _ok(model: str, **_k: object) -> dict[str, object]:
+        return {"model": model, "key_ok": True, "missing_keys": [], "error": None, "detail": None}
+
+    monkeypatch.setattr(sr, "_model_check", _ok)
+    monkeypatch.setenv("PAPERHUB_MODEL_SMALL", "ollama/small")
+    monkeypatch.setenv("PAPERHUB_MODEL_FLAGSHIP", "ollama/big")
+    monkeypatch.setenv("PAPERHUB_MARKER_LLM_MODEL", "ollama/vl")
+    monkeypatch.setenv("PAPERHUB_TRANSLATE_MODEL", "gemini/gemini-2.5-flash")
+    result = await sr.compute_readiness([])
+    assert result["non_local"] == [
+        {"key": "PAPERHUB_TRANSLATE_MODEL", "model": "gemini/gemini-2.5-flash"}]

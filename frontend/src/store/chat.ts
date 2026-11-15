@@ -12,8 +12,10 @@ import type {
   DeckEventData,
   AgentSummary,
   AgentUiEvent,
+  PausedCard,
 } from "@/types/domain";
 import { createBackendSession, listSessionReferences } from "@/lib/api";
+import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
 import { useSlidesStore } from "@/store/slides";
@@ -74,6 +76,9 @@ interface ChatState {
   deleteSession: (sessionId: number) => ChatSession | null;
   restoreSession: (session: ChatSession, atIndex: number) => void;
   removeMessage: (sessionId: number, messageIndex: number) => void;
+  /** A held-search follow-up failed before any event: drop its optimistic
+   *  assistant placeholder and "Sent search:" user bubble. */
+  dropFailedHeldTurn: (sessionId: number) => void;
   toggleSidebar: () => void;
   setSidebarTab: (tab: "chats" | "references") => void;
   setComposerDraft: (text: string) => void;
@@ -100,7 +105,8 @@ interface ChatState {
   ) => void;
   setDeckOnMessage: (sessionId: number, deck: DeckEventData | null) => void;
   /** Agent turns (H4): apply one agent SSE event — `agent_summary`,
-   *  `answer_reset`, `paper_added`, `memory_saved`, `confirm_request` —
+   *  `answer_reset`, `paper_added`, `memory_saved`, `confirm_request`,
+   *  the outbound events and H5a's `paused` / `resumed` —
    *  to the turn's assistant message (by run id, else the last assistant
    *  message: the UI events carry no run id). Shared by the live stream and
    *  the reattach poller. Unknown names are ignored. */
@@ -120,6 +126,9 @@ interface ChatState {
   ) => void;
   /** Per-chat auto-approve switch (mirrors `chat_sessions.auto_approve`). */
   setAutoApprove: (sessionId: number, value: boolean) => void;
+  /** Ask first's "Allow searches in this chat" (mirrors
+   *  `chat_sessions.allow_searches`), set by the search card. */
+  setAllowSearches: (sessionId: number, value: boolean) => void;
   /** Remove the trailing streaming assistant placeholder AND its paired user
    *  message (never leave a user message without a reply). Returns the user
    *  message text so the caller can restore it to the composer. */
@@ -187,11 +196,18 @@ function patchTurnMessage(
   });
 }
 
-const AGENT_UI_EVENTS = new Set(["paper_added", "memory_saved", "confirm_request"]);
+const AGENT_UI_EVENTS = new Set([
+  "paper_added",
+  "memory_saved",
+  "confirm_request",
+  "outbound_rewritten",
+  "outbound_blocked",
+  "outbound_held",
+]);
 
 /** The identity of an agent UI event: replays (the reattach poller restarts
  *  at cursor 0) must not add the same card twice. */
-function agentEventKey(ev: AgentUiEvent): string {
+export function agentEventKey(ev: AgentUiEvent): string {
   switch (ev.event) {
     case "confirm_request":
       return `confirm:${ev.data.action_id}`;
@@ -199,6 +215,18 @@ function agentEventKey(ev: AgentUiEvent): string {
       return `paper:${ev.data.papers_id}`;
     case "memory_saved":
       return `memory:${ev.data.memory_id}`;
+    // A log row written off the event loop has no id yet (null): fall back
+    // to the text so two such events never collapse into one.
+    case "outbound_rewritten":
+      return ev.data.log_id != null
+        ? `rewritten:${ev.data.log_id}`
+        : `rewritten:text:${JSON.stringify([ev.data.original_text, ev.data.sent_text])}`;
+    case "outbound_blocked":
+      return ev.data.log_id != null
+        ? `blocked:${ev.data.log_id}`
+        : `blocked:text:${JSON.stringify(ev.data.text)}`;
+    case "outbound_held":
+      return `held:${ev.data.held_id}`;
   }
 }
 
@@ -245,9 +273,10 @@ export const useChatStore = create<ChatState>()(
         useNavStore.getState().setPage("chat");
         const id = get()._nextId;
         set((s) => ({
+          // Newest first: a new chat starts at the top of Today.
           sessions: [
+            { id, title: "New chat", messages: [], backend_session_id: null, updated_at: nowIso() },
             ...s.sessions,
-            { id, title: "New chat", messages: [], backend_session_id: null },
           ],
           activeSessionId: id,
           _nextId: s._nextId + 1,
@@ -274,6 +303,7 @@ export const useChatStore = create<ChatState>()(
               backend_session_id: backendId,
               forked_from_session_id: forkedFromSessionId,
               idea_id: ideaId,
+              updated_at: nowIso(),
             },
             ...s.sessions,
           ],
@@ -302,6 +332,7 @@ export const useChatStore = create<ChatState>()(
                 ? deriveTitle(message.content)
                 : sess.title,
               messages: [...sess.messages, message],
+              updated_at: nowIso(),
             };
           }),
         })),
@@ -377,12 +408,14 @@ export const useChatStore = create<ChatState>()(
             .find((x) => x.id === sessionId)
             ?.messages.find((m) => m.run_id === run_id && m.role === "assistant");
           const trace = (msg?.trace ?? []).filter((r) => r.step_index >= 0);
+          const at = nowIso();
           return {
             sessions: patchMessageByRunId(s.sessions, sessionId, run_id, {
               content,
               status: "ok",
               trace,
-            }),
+              paused: null,
+            }).map((sess) => (sess.id === sessionId ? { ...sess, updated_at: at } : sess)),
           };
         }),
 
@@ -397,6 +430,7 @@ export const useChatStore = create<ChatState>()(
               status: "error",
               error,
               trace,
+              paused: null,
             }),
           };
         }),
@@ -484,6 +518,19 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      dropFailedHeldTurn: (sessionId) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) => {
+            if (sess.id !== sessionId) return sess;
+            const msgs = [...sess.messages];
+            const last = msgs[msgs.length - 1];
+            if (last?.role === "assistant" && last.run_id === null) msgs.pop();
+            const user = msgs[msgs.length - 1];
+            if (user?.role === "user" && user.approved_held_id) msgs.pop();
+            return { ...sess, messages: msgs };
+          }),
+        })),
+
       toggleSidebar: () =>
         set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
@@ -534,6 +581,7 @@ export const useChatStore = create<ChatState>()(
                 ...last,
                 status: "stopped",
                 content: "",
+                paused: null,
                 agent_events: (last.agent_events ?? []).map((e) =>
                   e.event === "confirm_request" &&
                   (e.data.status ?? "pending") === "pending"
@@ -544,7 +592,7 @@ export const useChatStore = create<ChatState>()(
               result = { kept: true };
               return { ...sess, messages: msgs };
             }
-            msgs[lastIdx] = { ...last, stopping: true };
+            msgs[lastIdx] = { ...last, stopping: true, paused: null };
             return { ...sess, messages: msgs };
           }),
         }));
@@ -688,25 +736,50 @@ export const useChatStore = create<ChatState>()(
           } else if (name === "answer_reset") {
             // The streamed text was a tool-calling preamble: drop it.
             fn = (m) => ({ ...m, content: "" });
+          } else if (name === "paused") {
+            // H5a: the run waits on these cards until the user decides.
+            const cards = ((data as { cards?: PausedCard[] }).cards ?? []).slice();
+            fn = (m) => ({ ...m, paused: cards });
+          } else if (name === "resumed") {
+            fn = (m) => ({ ...m, paused: null });
           } else if (AGENT_UI_EVENTS.has(name)) {
             const ev = { event: name, data } as AgentUiEvent;
             if (ev.event === "confirm_request" && !ev.data.status) {
               ev.data = { ...ev.data, status: "pending" };
-            } else if (ev.event !== "confirm_request" && ev.data.undoable === undefined) {
+            } else if (
+              (ev.event === "paper_added" || ev.event === "memory_saved") &&
+              ev.data.undoable === undefined
+            ) {
               ev.data = { ...ev.data, undoable: true };
             }
             const key = agentEventKey(ev);
-            // Idempotent: a replayed event keeps the card's local state.
-            fn = (m) =>
-              (m.agent_events ?? []).some((e) => agentEventKey(e) === key)
-                ? m
-                : { ...m, agent_events: [...(m.agent_events ?? []), ev] };
+            if (ev.event === "outbound_held") {
+              // R30: a repeat of the same held search (more ids merged in)
+              // REPLACES the card in place; never a second card.
+              const held = ev.data;
+              fn = (m) => {
+                const events = m.agent_events ?? [];
+                const at = events.findIndex((e) => agentEventKey(e) === key);
+                if (at < 0) return { ...m, agent_events: [...events, ev] };
+                const next = [...events];
+                next[at] = { event: "outbound_held", data: held };
+                return { ...m, agent_events: next };
+              };
+            } else {
+              // Idempotent: a replayed event keeps the card's local state.
+              fn = (m) =>
+                (m.agent_events ?? []).some((e) => agentEventKey(e) === key)
+                  ? m
+                  : { ...m, agent_events: [...(m.agent_events ?? []), ev] };
+            }
           }
           if (fn === null) return s;
           return { sessions: patchTurnMessage(s.sessions, sessionId, runId, fn) };
         });
         // The agent changed this chat's papers / memories server-side: refresh
         // the panels that only pull on session changes (live and reattach).
+        // The sidebar's waiting counts follow a pause or a resume.
+        if (name === "paused" || name === "resumed") useNavStore.getState().refreshHeld();
         const backendId = get().sessions.find((x) => x.id === sessionId)
           ?.backend_session_id;
         if (backendId == null) return;
@@ -737,6 +810,13 @@ export const useChatStore = create<ChatState>()(
         set((s) => ({
           sessions: s.sessions.map((sess) =>
             sess.id === sessionId ? { ...sess, auto_approve: value } : sess,
+          ),
+        })),
+
+      setAllowSearches: (sessionId, value) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId ? { ...sess, allow_searches: value } : sess,
           ),
         })),
 
@@ -827,6 +907,12 @@ export const useChatStore = create<ChatState>()(
                       summary.forked_from_session_id ?? null,
                     idea_id: summary.idea_id ?? null,
                     auto_approve: summary.auto_approve ?? false,
+                    allow_searches: summary.allow_searches ?? false,
+                    // Last activity: the later of this device's and the DB's.
+                    updated_at: laterIso(
+                      sess.updated_at,
+                      parseBackendTime(summary.updated_at),
+                    ),
                   }
                 : sess;
             });
@@ -849,6 +935,8 @@ export const useChatStore = create<ChatState>()(
               forked_from_session_id: summary.forked_from_session_id ?? null,
               idea_id: summary.idea_id ?? null,
               auto_approve: summary.auto_approve ?? false,
+              allow_searches: summary.allow_searches ?? false,
+              updated_at: parseBackendTime(summary.updated_at),
             });
             nextId += 1;
           }
@@ -915,6 +1003,7 @@ export const useChatStore = create<ChatState>()(
                     ? { search_result_batches: m.search_result_batches }
                     : {}),
                   ...(m.agent_summary ? { agent_summary: m.agent_summary } : {}),
+                  ...(m.approved_held_id ? { approved_held_id: m.approved_held_id } : {}),
                   ...(m.agent_events && m.agent_events.length > 0
                     ? { agent_events: m.agent_events }
                     : {}),
@@ -1012,9 +1101,14 @@ export const useChatStore = create<ChatState>()(
             }
             case "agent_summary":
             case "answer_reset":
+            case "paused":
+            case "resumed":
             case "paper_added":
             case "memory_saved":
             case "confirm_request":
+            case "outbound_rewritten":
+            case "outbound_blocked":
+            case "outbound_held":
               store.applyAgentEvent(sessionId, run_id, event.event, data);
               break;
             // "session" + unknown events: no-op (placeholder carries run_id)

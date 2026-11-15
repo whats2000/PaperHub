@@ -1,6 +1,7 @@
 """Tests for `paperhub.mcp.registry.MCPRegistry`."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -570,3 +571,173 @@ async def test_startup_skips_launch_when_binary_not_on_path(
     assert any("not on PATH" in r.message for r in caplog.records)
 
 
+async def test_web_server_skipped_when_public_search_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While public web search is off the ``web`` server is not in the palette
+    and cannot be called; callers already degrade when it is unreachable."""
+    web_tools = [{"type": "function", "function": {
+        "name": "web.search", "description": "", "parameters": {"type": "object"}}}]
+    web = _FakeClient("web", tools=web_tools, call_result="hit")
+    dead = _FakeClient("dead", connect_exc=MCPUnavailableError("daemon down"))
+    _patch_clients(monkeypatch, {"web": web, "dead": dead})
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "0")
+
+    reg = MCPRegistry()
+    await reg.startup(_write_two_server_toml(tmp_path))
+    assert await reg.aggregate_tool_schemas() == []
+    assert not await reg.has_tool("web.search")
+    with pytest.raises(MCPUnavailableError):
+        await reg.call("web.search", {"q": "x"})
+    assert web.connect_calls == 0
+
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+    assert [s["function"]["name"] for s in await reg.aggregate_tool_schemas()] == [
+        "web.search"]
+    assert await reg.call("web.search", {"q": "x"}) == "hit"
+
+
+_WEB_LAUNCH_TOML = """
+[[server]]
+name = "web"
+transport = "streamable_http"
+url = "http://localhost:3000/mcp"
+expose = ["search"]
+launch = ["npx", "-y", "open-websearch@latest"]
+"""
+
+
+class _LaunchStub:
+    """Stubs the detached launcher; ``ready`` is what wait_until_reachable returns
+    (an Event it waits on, or a plain bool)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, ready: Any = True) -> None:
+        from paperhub.mcp import registry as registry_mod
+
+        self.launched: list[str] = []
+        self.ready = ready
+
+        class _Proc:
+            pid = 1
+
+        def _launch(cmd: Any, env: Any, *, label: str = "") -> Any:
+            self.launched.append(label)
+            return _Proc()
+
+        async def _unreachable(host: str, port: int) -> bool:
+            return False
+
+        async def _wait(host: str, port: int, deadline: float) -> bool:
+            if isinstance(self.ready, asyncio.Event):
+                await self.ready.wait()
+                return True
+            return bool(self.ready)
+
+        monkeypatch.setattr(registry_mod, "launch_detached", _launch)
+        monkeypatch.setattr(registry_mod, "tcp_reachable", _unreachable)
+        monkeypatch.setattr(registry_mod, "wait_until_reachable", _wait)
+        monkeypatch.setattr(registry_mod, "terminate", lambda proc: None)
+
+
+async def _web_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> MCPRegistry:
+    cfg = tmp_path / "mcp_servers.toml"
+    cfg.write_text(_WEB_LAUNCH_TOML, encoding="utf-8")
+    web = _FakeClient("web", tools=[{"type": "function", "function": {
+        "name": "web.search", "description": "", "parameters": {"type": "object"}}}])
+    _patch_clients(monkeypatch, {"web": web})
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "0")
+    reg = MCPRegistry()
+    await reg.startup(cfg)
+    return reg
+
+
+async def _settle(reg: MCPRegistry) -> None:
+    await asyncio.gather(*reg._launch_tasks.values())
+
+
+async def test_public_web_server_launched_when_switched_on_at_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipped at boot (search off), launched in the background on enable; the
+    turn that triggers it is not delayed, the next rebuild has the server."""
+    stub = _LaunchStub(monkeypatch)
+    reg = await _web_registry(tmp_path, monkeypatch)
+    assert stub.launched == []
+    assert await reg.aggregate_tool_schemas() == []
+    assert stub.launched == []
+
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+    assert await reg.aggregate_tool_schemas() == []  # launch started, not awaited
+    await _settle(reg)
+    assert stub.launched == ["web"]
+    assert [s["function"]["name"] for s in await reg.aggregate_tool_schemas()] == [
+        "web.search"]
+    assert reg._deferred_launch == []  # success clears the deferral
+    await reg.aggregate_tool_schemas()
+    assert stub.launched == ["web"]  # launched once
+
+
+async def test_rebuild_during_inflight_launch_neither_blocks_nor_relaunches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = asyncio.Event()
+    stub = _LaunchStub(monkeypatch, ready=gate)
+    reg = await _web_registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+    monkeypatch.setattr(MCPRegistry, "_RELAUNCH_AFTER_SECONDS", 0.0)
+
+    # Not blocked by the (never-finishing-yet) launch.
+    assert await asyncio.wait_for(reg.aggregate_tool_schemas(), 2) == []
+    assert await asyncio.wait_for(reg.aggregate_tool_schemas(), 2) == []
+    assert stub.launched == ["web"]  # no second launch while one is in flight
+
+    gate.set()
+    await _settle(reg)
+    assert len(await reg.aggregate_tool_schemas()) == 1
+
+
+async def test_failed_runtime_launch_is_retried_after_the_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stub = _LaunchStub(monkeypatch, ready=False)
+    reg = await _web_registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+
+    await reg.aggregate_tool_schemas()
+    await _settle(reg)
+    assert stub.launched == ["web"]
+    assert [c.name for c in reg._deferred_launch] == ["web"]  # still deferred
+
+    await reg.aggregate_tool_schemas()  # inside the 60 s window: no retry
+    await _settle(reg)
+    assert stub.launched == ["web"]
+
+    monkeypatch.setattr(MCPRegistry, "_RELAUNCH_AFTER_SECONDS", 0.0)
+    stub.ready = True
+    await reg.aggregate_tool_schemas()
+    await _settle(reg)
+    assert stub.launched == ["web", "web"]
+    assert reg._deferred_launch == []
+    assert len(await reg.aggregate_tool_schemas()) == 1
+
+
+async def test_shutdown_cancels_an_inflight_runtime_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A background launch still waiting for the daemon is cancelled and
+    awaited on shutdown (no "Task was destroyed but it is pending")."""
+    gate = asyncio.Event()  # never set: the launch waits forever
+    _LaunchStub(monkeypatch, ready=gate)
+    reg = await _web_registry(tmp_path, monkeypatch)
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+    await reg.aggregate_tool_schemas()
+    (task,) = reg._launch_tasks.values()
+    await asyncio.sleep(0)
+    assert not task.done()
+    await asyncio.wait_for(reg.shutdown(), 2)
+    assert task.cancelled()
+    assert reg._launch_tasks == {}

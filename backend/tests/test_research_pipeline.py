@@ -12,7 +12,6 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import aiosqlite
-import pytest
 
 from paperhub.agents.research_pipeline import (
     CanonicalIdentity,
@@ -25,95 +24,15 @@ from paperhub.agents.research_pipeline import (
 )
 from paperhub.pipelines.arxiv_client import ArxivResult
 from paperhub.tracing.tracer import Tracer
+from tests._research_stubs import (
+    StubRegistry,
+    async_completion_mock,
+    dev_gate,
+    msg,
+    tool_call,
+)
 
 # ───────────────────────────── helpers ─────────────────────────────
-
-
-def _msg(content: str | None = None, tool_calls: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    m: dict[str, Any] = {"role": "assistant", "content": content}
-    if tool_calls:
-        m["tool_calls"] = tool_calls
-    return {"choices": [{"message": m}]}
-
-
-def _tool_call(call_id: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": call_id,
-        "type": "function",
-        "function": {"name": name, "arguments": json.dumps(args)},
-    }
-
-
-def _async_completion_mock(seq: list[dict[str, Any]]) -> AsyncMock:
-    return AsyncMock(side_effect=seq)
-
-
-class _StubRegistry:
-    """In-memory MCP registry: stub web.search + papers.search_semantic_scholar."""
-
-    def __init__(
-        self,
-        web_hits: list[dict[str, Any]] | None = None,
-        ss_hits: list[dict[str, Any]] | None = None,
-        has_web_search: bool = True,
-    ) -> None:
-        self.web_hits = web_hits or []
-        self.ss_hits = ss_hits or []
-        self._has_web = has_web_search
-        self.call_log: list[tuple[str, dict[str, Any]]] = []
-
-    async def has_tool(self, name: str) -> bool:
-        if name == "web.search":
-            return self._has_web
-        return True
-
-    async def aggregate_tool_schemas(self) -> list[dict[str, Any]]:
-        if self._has_web:
-            return [{
-                "type": "function",
-                "function": {
-                    "name": "web.search",
-                    "description": "Web search",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
-                },
-            }]
-        return []
-
-    async def call(self, name: str, args: dict[str, Any]) -> Any:
-        self.call_log.append((name, args))
-        if name == "web.search":
-            return list(self.web_hits)
-        if name == "papers.search_semantic_scholar":
-            return list(self.ss_hits)
-        raise RuntimeError(f"_StubRegistry: unknown tool {name!r}")
-
-
-@pytest.fixture
-async def migrated_db() -> aiosqlite.Connection:
-    """In-memory SQLite with the project schema applied."""
-    from paperhub.db.migrate import apply_schema
-
-    conn = await aiosqlite.connect(":memory:")
-    await apply_schema(conn)
-    # Seed a chat_sessions + runs row so the tracer has a foreign key target.
-    await conn.execute("INSERT INTO chat_sessions DEFAULT VALUES")
-    await conn.execute(
-        "INSERT INTO runs (session_id, status) VALUES (1, 'running')",
-    )
-    await conn.commit()
-    try:
-        yield conn
-    finally:
-        await conn.close()
-
-
-@pytest.fixture
-def fake_tracer(migrated_db: aiosqlite.Connection) -> Tracer:
-    return Tracer(conn=migrated_db, run_id=1, branch="")
 
 
 # ───────────────────────────── Parser ─────────────────────────────
@@ -127,7 +46,7 @@ async def test_parse_arxiv_id_shortcircuits_without_llm(
     Mixed-content messages with both IDs and natural language still
     go through the LLM so any non-ID paper hints get parsed too."""
     comp = AsyncMock()
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             "arxiv:1706.03762",
             tracer=fake_tracer, model="m",
@@ -143,10 +62,10 @@ async def test_parse_natural_language_single_paper(
     fake_tracer: Tracer,
 ) -> None:
     """LLM returns one ParsedRequest for a single-paper natural-language query."""
-    comp = _async_completion_mock([
-        _msg(content='[{"hint": "mamba paper", "kind": "natural_language"}]'),
+    comp = async_completion_mock([
+        msg(content='[{"hint": "mamba paper", "kind": "natural_language"}]'),
     ])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             "find the mamba paper",
             tracer=fake_tracer, model="m",
@@ -164,8 +83,8 @@ async def test_parse_trace_records_raw_llm_content(
     requests, so a post-hoc eval can see what the model actually emitted
     vs what was parsed out — not just the deduped result."""
     raw = '[{"hint": "mamba paper", "kind": "natural_language"}]'
-    comp = _async_completion_mock([_msg(content=raw)])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock([msg(content=raw)])
+    with patch("litellm.acompletion", new=comp):
         await parse_user_message(
             "find the mamba paper", tracer=fake_tracer, model="m",
         )
@@ -203,8 +122,8 @@ async def test_synthesize_trace_records_resolved_and_not_found_ids(
         ),
     ]
     not_found = [ParsedRequest(hint="some imaginary paper", kind="natural_language")]
-    comp = _async_completion_mock([_msg(content="Here is what I found...")])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock([msg(content="Here is what I found...")])
+    with patch("litellm.acompletion", new=comp):
         await synthesize_prose(
             resolved, not_found,
             user_message="find mamba and an imaginary paper",
@@ -235,8 +154,8 @@ async def test_parse_multi_paper_fanout(
         {"hint": "DDPM", "kind": "natural_language"},
         {"hint": "Vaswani 2017", "kind": "natural_language"},
     ]
-    comp = _async_completion_mock([_msg(content=json.dumps(raw))])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock([msg(content=json.dumps(raw))])
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             "Mamba, DDPM, and Vaswani 2017",
             tracer=fake_tracer, model="m",
@@ -249,8 +168,8 @@ async def test_parse_empty_for_non_paper_search(
     fake_tracer: Tracer,
 ) -> None:
     """Parser returns [] when the message isn't a paper-search query."""
-    comp = _async_completion_mock([_msg(content="[]")])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock([msg(content="[]")])
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             "compare these two papers",
             tracer=fake_tracer, model="m",
@@ -262,10 +181,10 @@ async def test_parse_tolerates_prose_around_json(
     fake_tracer: Tracer,
 ) -> None:
     """Parser extracts the JSON array even if the LLM wraps it in prose."""
-    comp = _async_completion_mock([_msg(
+    comp = async_completion_mock([msg(
         content='Here are the requests: [{"hint": "DDPM", "kind": "natural_language"}]',
     )])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             "DDPM",
             tracer=fake_tracer, model="m",
@@ -295,8 +214,8 @@ async def test_parse_downgrades_bibtex_cite_key_to_natural_language(
         '{"hint": "li2026optimusvla", "kind": "quoted_title"}, '
         '{"hint": "Attention Is All You Need", "kind": "quoted_title"}]'
     )
-    comp = _async_completion_mock([_msg(content=raw)])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock([msg(content=raw)])
+    with patch("litellm.acompletion", new=comp):
         out = await parse_user_message(
             r"\cite{pei2026actionaware} and \cite{li2026optimusvla} and the "
             r"paper titled \"Attention Is All You Need\"",
@@ -333,10 +252,10 @@ async def test_discover_shortcircuits_for_arxiv_id(
     fake_tracer: Tracer,
 ) -> None:
     """arxiv_id / doi / quoted_title requests skip web.search entirely."""
-    reg = _StubRegistry()
+    reg = StubRegistry()
     out = await discover_canonical(
         ParsedRequest(hint="1706.03762", kind="arxiv_id"),
-        tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+        tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
     )
     assert out is not None
     assert out.title == "1706.03762"
@@ -349,17 +268,17 @@ async def test_discover_natural_language_multi_angle_then_returns_identity(
     fake_tracer: Tracer,
 ) -> None:
     """Discoverer issues web.search, reads results, returns CanonicalIdentity."""
-    reg = _StubRegistry(web_hits=[
+    reg = StubRegistry(web_hits=[
         {"title": "Mamba: Linear-Time Sequence Modeling", "url": "https://arxiv.org/abs/2312.00752"},
     ])
     # 1) LLM responds with a tool call to the structured-output wrapper.
     # 2) After tool result, LLM emits canonical identity JSON.
     seq = [
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "paperhub.search_web",
             {"paper_hint": "mamba paper", "extra_terms": ["foundational"]},
         )]),
-        _msg(content=json.dumps({
+        msg(content=json.dumps({
             "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
             "author_surname": "Gu",
             "year": 2023,
@@ -367,11 +286,11 @@ async def test_discover_natural_language_multi_angle_then_returns_identity(
             "rationale": "Multiple hits pointed to Gu & Dao 2023.",
         })),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="mamba paper", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is not None
     assert out.title.startswith("Mamba")
@@ -387,19 +306,19 @@ async def test_discover_returns_none_when_llm_says_not_found(
     fake_tracer: Tracer,
 ) -> None:
     """Title=null in the canonical identity payload → returns None."""
-    reg = _StubRegistry(web_hits=[])
+    reg = StubRegistry(web_hits=[])
     seq = [
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "paperhub.search_web",
             {"paper_hint": "foo", "extra_terms": []},
         )]),
-        _msg(content='{"title": null, "reason": "no usable hits"}'),
+        msg(content='{"title": null, "reason": "no usable hits"}'),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="obscure paper", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is None
 
@@ -418,7 +337,7 @@ async def test_discover_trace_records_full_context(
         "url": "https://arxiv.org/abs/2312.00752",
         "snippet": "Mamba is a state-space model with selective scans.",
     }
-    reg = _StubRegistry(web_hits=[web_hit])
+    reg = StubRegistry(web_hits=[web_hit])
     identity_json = json.dumps({
         "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
         "author_surname": "Gu",
@@ -427,17 +346,17 @@ async def test_discover_trace_records_full_context(
         "rationale": "Top hit names Gu & Dao 2023.",
     })
     seq = [
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "paperhub.search_web",
             {"paper_hint": "mamba paper", "extra_terms": []},
         )]),
-        _msg(content=identity_json),
+        msg(content=identity_json),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="mamba paper", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is not None
 
@@ -461,11 +380,11 @@ async def test_discover_trace_records_full_context(
     assert "Linear-Time" in plan_rows[1]["result"].get("content", ""), (
         f"discover_plan finalize must record full content; got {plan_rows[1]['result']!r}"
     )
-    # web-call row: top hits stored verbatim (not just count).
-    assert web_rows[0]["result"].get("top"), (
-        f"web.search must record top hits; got {web_rows[0]['result']!r}"
+    # web-call row: every hit stored verbatim (not just count).
+    assert web_rows[0]["result"].get("results"), (
+        f"web.search must record every hit; got {web_rows[0]['result']!r}"
     )
-    assert web_rows[0]["result"]["top"][0]["url"] == web_hit["url"]
+    assert web_rows[0]["result"]["results"][0]["url"] == web_hit["url"]
 
 
 async def test_discover_wrapper_strips_quotes_from_paper_hint(
@@ -480,31 +399,31 @@ async def test_discover_wrapper_strips_quotes_from_paper_hint(
     returns 0 hits for ``"MolmoACT2"`` and 10 hits for the bare token
     — so this sanitiser is the difference between finding the paper
     and a confabulated NotFound."""
-    reg = _StubRegistry(web_hits=[
+    reg = StubRegistry(web_hits=[
         {"title": "MolmoAct 2", "url": "https://arxiv.org/abs/2605.02881"},
     ])
     seq = [
         # Adversarial LLM: tries to inject quotes into paper_hint AND
         # uses boolean OR syntax in extra_terms.
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "paperhub.search_web",
             {
                 "paper_hint": '"MolmoACT2"',
                 "extra_terms": ['"paper"', "OR", "arxiv"],
             },
         )]),
-        _msg(content=json.dumps({
+        msg(content=json.dumps({
             "title": "MolmoAct 2: Action Reasoning Models",
             "arxiv_id": "2605.02881",
             "confidence": "high",
             "rationale": "arxiv hit",
         })),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="MolmoACT2", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is not None
     # The underlying web.search must have been called with a query
@@ -530,22 +449,22 @@ async def test_discover_rejects_off_palette_tool_calls(
     wrapper (e.g. directly calls web.search by name), the orchestrator
     must NOT dispatch — that would bypass the query sanitiser. Return
     an error tool message so the LLM corrects on the next turn."""
-    reg = _StubRegistry(web_hits=[
+    reg = StubRegistry(web_hits=[
         {"title": "should not appear", "url": "https://example.com"},
     ])
     seq = [
         # Adversarial: LLM tries to call web.search directly with a
         # quoted query, hoping to bypass the wrapper.
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "web.search", {"query": '"MolmoACT2"'},
         )]),
-        _msg(content='{"title": null, "reason": "tool error"}'),
+        msg(content='{"title": null, "reason": "tool error"}'),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         await discover_canonical(
             ParsedRequest(hint="MolmoACT2", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     # web.search must NOT have been dispatched.
     assert not [n for n, _ in reg.call_log if n == "web.search"], (
@@ -559,12 +478,12 @@ async def test_discover_falls_back_when_web_not_in_registry(
     """No web.search → discover skips the LLM and returns a low-confidence
     fallback CanonicalIdentity built from the raw hint, so the Resolver
     still gets a chance to land the paper via Semantic Scholar."""
-    reg = _StubRegistry(has_web_search=False)
+    reg = StubRegistry(has_web_search=False)
     comp = AsyncMock()
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="mamba", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is not None
     assert out.title == "mamba"
@@ -583,7 +502,7 @@ async def test_resolver_calls_ss_exactly_once(
     This is the architectural property the v2.7 refactor enforces:
     SS rate-limiting protection is structural, not a prompt rule.
     """
-    reg = _StubRegistry(ss_hits=[
+    reg = StubRegistry(ss_hits=[
         {
             "paper_id": "arxiv:2312.00752",
             "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
@@ -599,7 +518,7 @@ async def test_resolver_calls_ss_exactly_once(
     )
     req = ParsedRequest(hint="mamba paper", kind="natural_language")
     out = await resolve_via_ss(
-        req, identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        req, identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
     )
     assert out is not None
     assert out.paper_id == "arxiv:2312.00752"
@@ -610,12 +529,12 @@ async def test_resolver_calls_ss_exactly_once(
     assert len(ss_calls) == 1
 
 
-class _EnvelopeStubRegistry(_StubRegistry):
-    """Like ``_StubRegistry`` but returns the FastMCP envelope shape
+class _EnvelopeStubRegistry(StubRegistry):
+    """Like ``StubRegistry`` but returns the FastMCP envelope shape
     (``{"result": [...]}``) that production ``MCPClient.call_tool``
     actually surfaces for handlers declared as ``-> list[dict]``.
 
-    The bare-list ``_StubRegistry`` masks a real production bug: every
+    The bare-list ``StubRegistry`` masks a real production bug: every
     ``mcp_registry.call("papers.search_semantic_scholar", ...)`` returns
     a dict in prod (FastMCP wraps list returns), and the resolver's
     ``isinstance(hits, list)`` check evaluates False — silently dropping
@@ -659,7 +578,7 @@ async def test_resolver_title_only_unwraps_fastmcp_envelope(
     )
     out = await resolve_via_ss(
         ParsedRequest(hint="global prior paper", kind="natural_language"),
-        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
     )
     assert out is not None, (
         "resolver must unwrap FastMCP's {\"result\": [...]} envelope; "
@@ -691,7 +610,7 @@ async def test_resolver_arxiv_id_unwraps_fastmcp_envelope(
 
     out = await resolve_via_ss(
         ParsedRequest(hint="X-VLA", kind="natural_language"),
-        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         arxiv_lookup=_should_not_be_called,
     )
     assert out is not None
@@ -704,12 +623,12 @@ async def test_resolver_returns_none_when_ss_empty(
     """SS empty → Resolver returns None; the subgraph treats this as
     'kick back to Discoverer' (or, after MAX_REFINEMENT_LOOPS, as
     NotFound)."""
-    reg = _StubRegistry(ss_hits=[])
+    reg = StubRegistry(ss_hits=[])
     out = await resolve_via_ss(
         ParsedRequest(hint="obscure", kind="natural_language"),
         CanonicalIdentity(title="some title", author_surname=None, year=None,
                           confidence="low"),
-        tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
     )
     assert out is None
     # Still exactly one SS call attempted.
@@ -723,7 +642,7 @@ async def test_resolver_uses_arxiv_id_when_present(
     """When the Discoverer extracted an arxiv ID, the Resolver queries
     SS with ``arXiv:<id>`` (much more reliable than title match) and
     returns the SS hit on success."""
-    reg = _StubRegistry(ss_hits=[
+    reg = StubRegistry(ss_hits=[
         {"paper_id": "arxiv:2510.10274", "title": "X-VLA",
          "year": 2025, "arxiv_id": "2510.10274"},
     ])
@@ -734,7 +653,7 @@ async def test_resolver_uses_arxiv_id_when_present(
     )
     out = await resolve_via_ss(
         ParsedRequest(hint="X-VLA", kind="natural_language"),
-        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
     )
     assert out is not None
     assert out.paper_id == "arxiv:2510.10274"
@@ -751,7 +670,7 @@ async def test_resolver_verifies_arxiv_id_when_ss_misses(
     title/meta — the LLM's guessed title is discarded. This is the fix
     for the title-mismatch bug: SS/arXiv sources preserve the real
     paper name; the LLM never determines it."""
-    reg = _StubRegistry(ss_hits=[])  # SS misses
+    reg = StubRegistry(ss_hits=[])  # SS misses
     identity = CanonicalIdentity(
         # The LLM's guess — deliberately wrong to prove it's discarded.
         title="WRONG LLM-GUESSED TITLE",
@@ -769,7 +688,7 @@ async def test_resolver_verifies_arxiv_id_when_ss_misses(
 
     out = await resolve_via_ss(
         ParsedRequest(hint="X-VLA", kind="natural_language"),
-        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         arxiv_lookup=fake_lookup,
     )
     assert out is not None, "verified ResolvedPaper expected on arXiv hit"
@@ -793,7 +712,7 @@ async def test_resolver_emits_unverified_arxiv_id_for_download_gate(
     bogus id simply fails to download and never lands; a real-but-unindexed
     paper gets through. Ingest replaces the hint title with arXiv's
     authoritative one, so any paraphrase is only ever transient."""
-    reg = _StubRegistry(ss_hits=[])  # SS misses
+    reg = StubRegistry(ss_hits=[])  # SS misses
     identity = CanonicalIdentity(
         title="Load Balancing MoE with Similarity Preserving Routers",
         author_surname="Omi", year=2025, confidence="high",
@@ -805,7 +724,7 @@ async def test_resolver_emits_unverified_arxiv_id_for_download_gate(
 
     out = await resolve_via_ss(
         ParsedRequest(hint="load balancing moe", kind="natural_language"),
-        identity, tracer=fake_tracer, mcp_registry=reg,  # type: ignore[arg-type]
+        identity, tracer=fake_tracer, mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         arxiv_lookup=fake_lookup,
     )
     assert out is not None, "unverified-but-plausible id must be EMITTED, not dropped"
@@ -824,7 +743,7 @@ async def test_resolver_extracts_arxiv_id_from_evidence_safety_net(
     contained an arxiv URL, the server-side parser must extract it
     anyway. This is the safety net that prevents an LLM lapse from
     costing us the arxiv-id resolution path."""
-    reg = _StubRegistry(web_hits=[
+    reg = StubRegistry(web_hits=[
         {"title": "X-VLA paper",
          "url": "https://arxiv.org/abs/2510.10274",
          "snippet": "X-VLA on arxiv"},
@@ -836,17 +755,17 @@ async def test_resolver_extracts_arxiv_id_from_evidence_safety_net(
         "rationale": "found on arxiv",
     })
     seq = [
-        _msg(tool_calls=[_tool_call(
+        msg(tool_calls=[tool_call(
             "c1", "paperhub.search_web",
             {"paper_hint": "X-VLA", "extra_terms": ["arxiv"]},
         )]),
-        _msg(content=identity_json),
+        msg(content=identity_json),
     ]
-    comp = _async_completion_mock(seq)
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    comp = async_completion_mock(seq)
+    with patch("litellm.acompletion", new=comp):
         out = await discover_canonical(
             ParsedRequest(hint="X-VLA", kind="natural_language"),
-            tracer=fake_tracer, model="m", mcp_registry=reg,  # type: ignore[arg-type]
+            tracer=fake_tracer, model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
         )
     assert out is not None
     assert out.arxiv_id == "2510.10274", (
@@ -870,10 +789,10 @@ async def test_synthesizer_writes_prose_for_resolved_set(
             meta={"title": "Mamba"},
         ),
     ]
-    comp = _async_completion_mock([
-        _msg(content="The Mamba paper by Gu & Dao (2023) introduced selective SSMs..."),
+    comp = async_completion_mock([
+        msg(content="The Mamba paper by Gu & Dao (2023) introduced selective SSMs..."),
     ])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         prose = await synthesize_prose(
             resolved, [],
             user_message="the mamba paper",
@@ -890,13 +809,13 @@ async def test_synthesizer_handles_all_not_found(
     prose. The synthesizer prompt's contract is that it must say so AND
     ask one clarifying question."""
     not_found = [ParsedRequest(hint="quantum cucumber paper", kind="natural_language")]
-    comp = _async_completion_mock([
-        _msg(content=(
+    comp = async_completion_mock([
+        msg(content=(
             "I couldn't find a clear match for 'quantum cucumber paper'. "
             "Do you have an arxiv ID or the lead author's name?"
         )),
     ])
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         prose = await synthesize_prose(
             [], not_found,
             user_message="find the quantum cucumber paper",
@@ -929,11 +848,11 @@ async def test_paper_search_finalize_records_emitted_candidates(
     # arxiv_id path: parse is deterministic (no LLM), discover short-
     # circuits (no LLM), resolve queries SS once, finalize builds the
     # candidate + calls synthesize (the single LLM turn).
-    reg = _StubRegistry(ss_hits=[
+    reg = StubRegistry(ss_hits=[
         {"paper_id": "arxiv:2312.00752", "title": "Mamba",
          "year": 2023, "arxiv_id": "2312.00752"},
     ])
-    comp = _async_completion_mock([_msg(content="Found Mamba.")])
+    comp = async_completion_mock([msg(content="Found Mamba.")])
 
     deps = ResearchDeps(
         adapter=MagicMock(),
@@ -951,7 +870,7 @@ async def test_paper_search_finalize_records_emitted_candidates(
         "user_message": "2312.00752",
         "history": [],
     }
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         async for _mode, _payload in graph.astream(
             state, stream_mode=["custom", "values"],
         ):
@@ -981,11 +900,11 @@ async def test_parse_resolves_topic_from_brief(
     a non-empty request list from the Parser.  The behavioural change is at
     the call site in research_graph.py (effective_query → parse_user_message);
     this test pins the contract that the Parser handles a topical brief."""
-    comp = _async_completion_mock([
-        _msg(content='[{"hint":"discrete diffusion distillation","kind":"natural_language"}]'),
+    comp = async_completion_mock([
+        msg(content='[{"hint":"discrete diffusion distillation","kind":"natural_language"}]'),
     ])
     brief = "recommend representative papers on discrete diffusion distillation"
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         reqs = await parse_user_message(
             brief, tracer=fake_tracer, model="gpt-4o-mini",
         )
@@ -1034,7 +953,7 @@ async def test_paper_search_subgraph_uses_suggest_slots(
           "authors": ["Jones"], "has_open_pdf": True, "abstract": "B."}],
     ]
 
-    class _CyclingRegistry(_StubRegistry):
+    class _CyclingRegistry(StubRegistry):
         async def call(self, name: str, args: dict[str, Any]) -> Any:
             self.call_log.append((name, args))
             if name == "papers.search_semantic_scholar":
@@ -1048,10 +967,10 @@ async def test_paper_search_subgraph_uses_suggest_slots(
     captured_candidates: list[Any] = []
 
     comp_responses = [
-        _msg(content=two_angle_parse),           # call 0: parse (suggest slot)
-        _msg(content="Here are suggested papers about discrete diffusion."),  # call 1: synthesize
+        msg(content=two_angle_parse),           # call 0: parse (suggest slot)
+        msg(content="Here are suggested papers about discrete diffusion."),  # call 1: synthesize
     ]
-    comp = _async_completion_mock(comp_responses)
+    comp = async_completion_mock(comp_responses)
 
     deps = ResearchDeps(
         adapter=MagicMock(),
@@ -1073,7 +992,7 @@ async def test_paper_search_subgraph_uses_suggest_slots(
         "history": [],
     }
 
-    with patch("paperhub.agents.research_pipeline.litellm.acompletion", new=comp):
+    with patch("litellm.acompletion", new=comp):
         async for mode, payload in graph.astream(
             state, stream_mode=["custom", "values"],
         ):
@@ -1114,7 +1033,7 @@ async def test_parse_uses_provided_slot(
         }
 
     with patch(
-        "paperhub.agents.research_pipeline.litellm.acompletion",
+        "litellm.acompletion",
         new=fake_acompletion,
     ):
         reqs = await parse_user_message(
@@ -1146,3 +1065,105 @@ def test_dataclasses_serialise_via_asdict() -> None:
     assert d["paper_id"] == "arxiv:2312.00752"
     assert d["request"]["kind"] == "natural_language"
     assert d["identity"]["confidence"] == "high"
+
+
+def _recording_completion(seq: list[dict[str, Any]]) -> tuple[AsyncMock, list[list[dict[str, Any]]]]:
+    """A litellm stub that snapshots the messages of every call."""
+    import copy
+
+    seen: list[list[dict[str, Any]]] = []
+    replies = iter(seq)
+
+    async def reply(*_a: Any, **kw: Any) -> dict[str, Any]:
+        seen.append(copy.deepcopy(kw["messages"]))
+        return next(replies)
+
+    return AsyncMock(side_effect=reply), seen
+
+
+def _model_tool_call_ids(seq: list[dict[str, Any]]) -> set[str]:
+    return {c["id"] for r in seq for c in r["choices"][0]["message"].get("tool_calls") or []}
+
+
+async def test_pinned_discover_never_fabricates_a_model_tool_call(
+    fake_tracer: Tracer,
+) -> None:
+    """Run 914: Gemini rejects an assistant functionCall the model did not
+    produce. The pinned (approved) search runs directly and its results
+    reach the model as a user-role message."""
+    reg = StubRegistry(web_hits=[
+        {"title": "Auxiliary-Loss-Free Load Balancing", "url": "https://arxiv.org/abs/2408.15664"},
+    ])
+    seq = [msg(content=json.dumps({
+        "title": "Auxiliary-Loss-Free Load Balancing", "author_surname": None,
+        "year": None, "confidence": "medium", "rationale": "the approved search's top hit"}))]
+    comp, seen = _recording_completion(seq)
+    q = "mixture of experts load balancing loss arxiv"
+    with patch("litellm.acompletion", new=comp):
+        out = await discover_canonical(
+            ParsedRequest(hint=q, kind="natural_language"), tracer=fake_tracer,
+            model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
+            pinned_query=q,
+        )
+    assert [a["query"] for n, a in reg.call_log if n == "web.search"] == [q]
+    assert len(seen) == 1
+    assert all(not m.get("tool_calls") and m["role"] != "tool" for m in seen[0])
+    last = seen[0][-1]
+    assert last["role"] == "user" and q in last["content"]
+    assert "<search_results>" in last["content"] and "2408.15664" in last["content"]
+    assert out is not None and out.arxiv_id == "2408.15664"  # evidence includes the results
+
+
+async def test_pinned_discover_followup_search_keeps_only_model_calls(
+    fake_tracer: Tracer,
+) -> None:
+    """After the pinned search the model may search once more (the cap is
+    shared); its history holds only the tool calls it returned itself."""
+    reg = StubRegistry(web_hits=[{"title": "T", "url": "https://x.org/t"}])
+    seq = [
+        msg(tool_calls=[tool_call("m1", "paperhub.search_web",
+                                  {"paper_hint": "moe balancing", "extra_terms": ["arxiv"]})]),
+        msg(tool_calls=[tool_call("m2", "paperhub.search_web",
+                                  {"paper_hint": "moe", "extra_terms": []})]),
+        msg(content='{"title": "T", "confidence": "low", "rationale": "r"}'),
+    ]
+    comp, seen = _recording_completion(seq)
+    with patch("litellm.acompletion", new=comp):
+        await discover_canonical(
+            ParsedRequest(hint="moe", kind="natural_language"), tracer=fake_tracer,
+            model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
+            pinned_query="approved moe query",
+        )
+    produced = _model_tool_call_ids(seq)
+    for messages in seen:
+        for m in messages:
+            for c in m.get("tool_calls") or []:
+                assert c["id"] in produced
+    # The pinned search plus ONE model search (cap 2); the second call is refused.
+    assert len([n for n, _ in reg.call_log if n == "web.search"]) == 2
+
+
+async def test_pinned_search_trace_rebuilds_the_message_the_model_saw(
+    fake_tracer: Tracer, migrated_db: aiosqlite.Connection,
+) -> None:
+    """Record principle: the search step keeps every result the model saw
+    (not only the top 5), so the user-role message rebuilds from the trace."""
+    from paperhub.agents.research_pipeline import search_results_message
+
+    hits = [{"title": f"Paper {i}", "url": f"https://arxiv.org/abs/2401.0000{i}"}
+            for i in range(7)]
+    reg = StubRegistry(web_hits=hits)
+    comp, seen = _recording_completion([msg(content='{"title": "Paper 6", "confidence": "low"}')])
+    with patch("litellm.acompletion", new=comp):
+        await discover_canonical(
+            ParsedRequest(hint="q", kind="natural_language"), tracer=fake_tracer,
+            model="m", mcp_registry=reg, outbound=dev_gate(fake_tracer),  # type: ignore[arg-type]
+            pinned_query="approved q",
+        )
+    async with migrated_db.execute(
+        "SELECT args_redacted_json, result_summary_json FROM tool_calls "
+        "WHERE tool = 'paper_search:paperhub.search_web'") as cur:
+        (args, result), = [(json.loads(a), json.loads(r)) for a, r in await cur.fetchall()]
+    assert args["pinned"] is True and args["built_query"] == "approved q"
+    assert result["count"] == 7 and result["results"] == hits
+    assert search_results_message(result["results"]) in seen[0][-1]["content"]

@@ -139,7 +139,7 @@ async def _classify(
     )
 
 
-async def _create_pending(
+async def create_pending(
     ctx: ToolContext, tool: str, args: dict[str, Any],
 ) -> str:
     action_id = uuid.uuid4().hex
@@ -179,7 +179,7 @@ async def gate(
                 reason = f"classifier failed ({type(exc).__name__}); asking the user"
                 reason_kind = "classifier_failed"
         if decision != "run":
-            pending_id = await _create_pending(ctx, spec.name, args)
+            pending_id = await create_pending(ctx, spec.name, args)
         step.record_result({
             "tool": spec.name, "args": args, "args_summary": summary,
             "auto_approve": auto, "decision": decision, "reason": reason,

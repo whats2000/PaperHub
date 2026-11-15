@@ -77,7 +77,8 @@
     "stopping": "正在停止…",
     "copy": "复制消息",
     "fork": "从此消息分叉",
-    "forkTitle": "从此处分叉 — 新建对话并编辑此消息"
+    "forkTitle": "从此处分叉 — 新建对话并编辑此消息",
+    "sentSearch": "已发送搜索：{{text}}"
   },
   "routing": {
     "paper_search": "论文搜索",
@@ -121,7 +122,111 @@
     "empty": "没有记录任何步骤。",
     "retry": "重试",
     "agentStep": "第 {{n}} 步",
-    "answer": "回答"
+    "answer": "回答",
+    "paused": "已暂停 · 等待你确认",
+    "tl": {
+      "technical": "技术视图",
+      "rawSteps": "查看原始步骤（{{count}}）",
+      "backToActivity": "返回活动视图",
+      "head": {
+        "worked": "工作了 {{duration}}",
+        "workedParts": "工作了 {{duration}}：{{parts}}",
+        "workedNoTime": "已完成",
+        "workedNoTimeParts": "已完成：{{parts}}",
+        "readSections_one": "读了 {{count}} 个章节",
+        "readSections_other": "读了 {{count}} 个章节",
+        "searches_one": "搜索了 {{count}} 次",
+        "searches_other": "搜索了 {{count}} 次",
+        "paused_one": "已暂停，{{count}} 个项目等待你确认",
+        "paused_other": "已暂停，{{count}} 个项目等待你确认",
+        "stopped": "已停止。等待中的项目都没有发送或执行。",
+        "working": "处理中…"
+      },
+      "answer": "写好了回答",
+      "writing": "正在写回答…",
+      "thinking": "思考中…",
+      "goToCard": "前往卡片",
+      "details": "详细信息",
+      "queriesDetails": "查询与详细信息",
+      "d": {
+        "tool": "工具",
+        "calledIn": "调用于",
+        "calledInValue": "代理第 {{n}} 步 · {{model}}",
+        "status": "状态",
+        "internal": "内部步骤"
+      },
+      "unknownPaper": "论文 {{id}}",
+      "title": {
+        "list_sections": "列出了 {{paper}} 的章节",
+        "read_section": "读了 {{paper}} 的“{{section}}”",
+        "read_chunks_one": "读了 {{count}} 个段落",
+        "read_chunks_other": "读了 {{count}} 个段落",
+        "search_chunks": "在此对话的论文中搜索“{{query}}”",
+        "list_figures_tables": "列出了 {{paper}} 的图表",
+        "read_layout_object": "读了 {{paper}} 的 {{label}}",
+        "view_figure": "看了 {{paper}} 的 {{figure}}",
+        "view_page": "看了 {{paper}} 的第 {{page}} 页",
+        "zoom": "放大查看 {{paper}} 的第 {{page}} 页",
+        "view_chunk": "在原页面上看了段落 {{id}}",
+        "gather_one": "从 {{count}} 篇论文收集段落",
+        "gather_other": "从 {{count}} 篇论文收集段落",
+        "query_library": "查询你的论文库：“{{question}}”",
+        "search_papers": "搜索了论文：“{{query}}”",
+        "search_papers_pending": "搜索论文：“{{query}}”",
+        "search_papers_running": "正在搜索论文：“{{query}}”",
+        "add_paper": "将 {{title}} 加入此对话",
+        "add_paper_failed": "将 {{title}} 加入此对话",
+        "remember": "存入记忆：“{{fact}}”",
+        "forget": "删除了记忆 {{id}}",
+        "forget_pending": "删除记忆 {{id}}",
+        "remove_paper": "从此对话移除了“{{paper}}”",
+        "remove_paper_pending": "从此对话移除“{{paper}}”",
+        "list_ideas": "列出了点子",
+        "propose_ideas": "开始为“{{problem}}”生成点子",
+        "create_deck": "制作了幻灯片",
+        "edit_slides": "编辑了幻灯片",
+        "write_notes": "写了演讲者备注"
+      },
+      "sub": {
+        "passages_one": "{{count}} 个段落",
+        "passages_other": "{{count}} 个段落",
+        "hits_one": "{{count}} 条结果",
+        "hits_other": "{{count}} 条结果",
+        "waitingSearch": "等待你同意，尚未发送任何内容。",
+        "waiting": "等待你确认。",
+        "stopped": "未执行：这一轮已停止。",
+        "stoppedSearch": "未搜索：这一轮已停止。",
+        "declined": "未搜索：你没有允许。",
+        "declinedNote": "未搜索。你告诉代理：“{{note}}”",
+        "dismissed": "未执行：你已忽略。",
+        "confirmed": "你已确认。",
+        "autoApproved": "已自动批准。",
+        "pending": "未执行：当时在等待你确认。",
+        "allowedEdited": "你在允许前编辑了查询。",
+        "found_one": "找到 {{count}} 篇论文。",
+        "found_other": "找到 {{count}} 篇论文。",
+        "sent_one": "发送 {{count}} 条查询",
+        "sent_other": "发送 {{count}} 条查询",
+        "rewritten": "（{{count}} 条先改写）",
+        "notSent": "{{count}} 条未发送",
+        "timedOut": "{{count}} 条超时",
+        "heldWaiting": "{{count}} 条等待你确认"
+      },
+      "lookups_one": "另外按 ID 查询了 {{count}} 篇找到的论文（{{ids}}）。ID 查询不经审查直接发送。",
+      "lookups_other": "另外按 ID 查询了 {{count}} 篇找到的论文（{{ids}}）。ID 查询不经审查直接发送。",
+      "q": {
+        "sent": "已发送",
+        "rewritten": "发送前已改写：{{reason}}",
+        "sentAfterOk": "经你同意后发送",
+        "sentAfterEdit": "经你编辑后发送",
+        "blockedTerm": "未发送：含有敏感词 {{term}}",
+        "blocked": "未发送：已拦截",
+        "held": "等待你确认：{{reason}}",
+        "declined": "未发送：你选择不发送",
+        "stopped": "未发送：这一轮已停止",
+        "timeout": "搜索服务超时"
+      }
+    }
   },
   "panel": {
     "memory": "记忆",
@@ -133,9 +238,7 @@
     "papers_one": "读了 {{count}} 篇论文",
     "papers_other": "读了 {{count}} 篇论文",
     "steps_one": "{{count}} 步",
-    "steps_other": "{{count}} 步",
-    "tools": "使用的工具：{{tools}}",
-    "noTools": "未使用工具直接回答"
+    "steps_other": "{{count}} 步"
   },
   "agentEvent": {
     "paperAdded": "已添加论文",
@@ -173,17 +276,99 @@
     "menuTitle": "批准模式",
     "ask": {
       "title": "先询问",
-      "desc": "移除论文或删除记忆前先问你",
-      "tooltip": "会更改论文库或记忆的操作（移除论文、删除记忆）都会等你确认。仅应用于此对话，这是默认模式。"
+      "desc": "在 PaperHub 外搜索、移除论文或删除记忆前先问你",
+      "tooltip": "代理在 PaperHub 外的搜索，以及会更改论文库或记忆的操作（移除论文、删除记忆）都会等你同意。仅应用于此对话，这是默认模式。"
     },
     "auto": {
       "title": "自动批准",
-      "desc": "通过快速检查的操作直接执行，有风险时才询问",
-      "tooltip": "开启后，原本需要你确认的操作（移除论文、删除记忆）会先经过快速检查，决定能否不经询问直接执行。仅应用于此对话，默认关闭。"
+      "desc": "搜索直接执行（隐私防护只对被标记的查询询问）；通过快速检查的操作直接执行",
+      "tooltip": "搜索不显示确认卡片；隐私防护会检查每一条查询，只对被标记的询问。原本需要你确认的操作（移除论文、删除记忆）会先经过快速检查，决定能否不经询问直接执行。仅应用于此对话，默认关闭。"
     },
-    "failed": "无法更改自动批准设置"
+    "failed": "无法更改自动批准设置",
+    "searchesAllowed": "此对话中的搜索不再询问。",
+    "askAgain": "恢复询问"
   },
   "proposals": {
     "label": "建议的后续问题"
+  },
+  "outbound": {
+    "dest": {
+      "publicSearch": "公开网络搜索",
+      "trusted": "受信任的搜索",
+      "semanticScholar": "Semantic Scholar"
+    },
+    "chip": {
+      "title": "实际发出的搜索",
+      "whatChanged": "变更内容",
+      "sent": "已发送",
+      "written": "原来的写法",
+      "why": "原因",
+      "to": "目的地"
+    },
+    "blocked": {
+      "term": "未发送：<q>{{text}}</q> 含有敏感词（<b>{{term}}</b>）。",
+      "reason": "未发送：<q>{{text}}</q>。{{reason}}"
+    },
+    "held": {
+      "title": "这项搜索需要你的同意",
+      "textLabel": "搜索文字",
+      "why": "询问原因：",
+      "to": "目的地：",
+      "sendAsShown": "按原样发送",
+      "edit": "编辑后再发送",
+      "sendEdited": "发送编辑后的文字",
+      "cancelEdit": "取消编辑",
+      "discard": "不要发送",
+      "sent": "已发送",
+      "sentEdited": "已发送（你编辑过）",
+      "discarded": "未发送。你选择不发送这项搜索。",
+      "approvedNotRun": "已批准，尚未执行",
+      "run": "执行搜索",
+      "unavailable": "这项搜索已不可用。",
+      "sensitive": "内容含有敏感词（{{term}}），无法发送。请编辑后重试。",
+      "sensitiveNoTerm": "内容含有敏感词，无法发送。请编辑后重试。",
+      "empty": "没有可发送的内容。",
+      "stale": "这项搜索已处理过了。",
+      "alreadyRun": "这项搜索已执行过了。",
+      "failed": "无法发送，请重试。",
+      "runFailed": "无法开始搜索，请重试。",
+      "discardFailed": "无法丢弃，请重试。",
+      "retryUnavailable": "无法在此重试这项搜索。请使用该卡片上的“执行搜索”。"
+    },
+    "ask": {
+      "title": "允许这项搜索吗？",
+      "textLabel": "搜索查询",
+      "whyText": "此对话开启了“先询问”。尚未发送任何内容。",
+      "followUps": "这项搜索可能还会据此发送它自己写的后续查询，每一条仍会检查你的敏感词与私密资料。",
+      "noDestination": "没有允许的搜索服务",
+      "allow": "允许",
+      "allowEdited": "允许编辑后的搜索",
+      "allowChat": "允许此对话中的搜索",
+      "edit": "编辑后再允许",
+      "deny": "不允许",
+      "denyLabel": "告诉代理改做什么（选填）",
+      "denyPlaceholder": "例如：只用这个对话里已有的论文。",
+      "cancel": "取消",
+      "allowed": "已允许",
+      "allowedEdited": "已允许（你编辑过）",
+      "allowedChat": "此对话之后的搜索不再询问",
+      "allowedBySetting": "此对话已允许搜索",
+      "alsoAllows": "也允许等待中的 {{count}} 项",
+      "declined": "未搜索。你没有允许这项搜索。",
+      "declinedNote": "未搜索。你告诉代理：",
+      "stopped": "未搜索。这一轮已停止。",
+      "ended": "未搜索。你决定之前这一轮已结束。",
+      "unavailable": "这项搜索已不可用。",
+      "chatAllowed": "此对话中的搜索现在不再询问，操作仍会询问。",
+      "noteTooLong": "说明太长（最多 1,000 个字符）。",
+      "stale": "这项搜索已经决定过了。",
+      "failed": "无法连接到服务器，请重试。"
+    }
+  },
+  "paused": {
+    "line_one": "已暂停 · {{count}} 个项目等待你确认。你决定后我就会继续。",
+    "line_other": "已暂停 · {{count}} 个项目等待你确认。你决定后我就会继续。",
+    "pill_one": "已暂停 · 等待你确认",
+    "pill_other": "已暂停 · {{count}} 个项目需要你确认"
   }
 }

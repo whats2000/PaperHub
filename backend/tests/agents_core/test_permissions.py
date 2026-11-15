@@ -248,3 +248,106 @@ async def test_confirmed_forget_reports_the_memory_and_refuses_hidden_ids(
     assert out.record["content"] == "NTU student" and out.record["scope"] == "session"
     gone = await reg.execute_confirmed(ctx, "b", "forget", {"memory_id": 7})
     assert gone.record.get("error")
+
+
+# ---- H5a: a live turn pauses on the confirmation card ----------------------
+
+
+async def _paused(
+    conn: aiosqlite.Connection, tracer: Tracer,
+) -> tuple[Any, list[tuple[str, dict[str, Any]]], list[dict[str, Any]], str]:
+    import asyncio
+
+    from paperhub import approvals
+
+    stream: list[tuple[str, dict[str, Any]]] = []
+    approvals.open_run(tracer.run_id, lambda n, d: stream.append((n, d)))
+    ctx, reg, ran = _setup(conn, tracer, _Adapter(ApproveDecision(run=True, reason="x")))
+    shown: list[tuple[str, dict[str, Any]]] = []
+
+    async def emit(n: str, p: dict[str, Any]) -> None:
+        shown.append((n, p))
+
+    ctx.emit = emit
+    task = asyncio.create_task(
+        reg.run(ctx, ToolCall(id="c", name="danger", arguments={"k": 1})))
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if shown:
+            break
+    assert shown and shown[0][0] == "confirm_request", "card not shown before the wait"
+    action_id = str(shown[0][1]["action_id"])
+    await asyncio.sleep(0.01)
+    assert not task.done(), "the call must wait for the user"
+    assert stream[-1][0] == "paused"
+    assert stream[-1][1]["cards"] == [
+        {"kind": "action", "id": action_id, "tool": "danger", "call_id": "c"}]
+    return task, stream, ran, action_id
+
+
+async def test_confirm_in_a_live_turn_waits_then_runs_in_the_run(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub import approvals
+    from paperhub.approvals import ApprovalDecision
+
+    try:
+        task, stream, ran, action_id = await _paused(migrated_db, fake_tracer)
+        await migrated_db.execute(
+            "UPDATE pending_actions SET result_json = '{\"claimed\": true}'")
+        await migrated_db.commit()
+        done = approvals.deliver(f"action:{action_id}", ApprovalDecision(True))
+        assert done is not None
+        out = await task
+        assert ran == [{"k": 1}]
+        assert out.content == "done"
+        assert out.record["confirm"]["decision"] == "confirmed"
+        assert await done == {"status": "done", "result": {
+            "content": "done", "record": {"ok": True}}}
+        rows = await _rows(migrated_db,
+                           "SELECT status, result_json FROM pending_actions")
+        assert rows[0][0] == "done"
+        assert stream[-1][0] == "resumed"
+        waits = await _rows(
+            migrated_db,
+            "SELECT result_summary_json FROM tool_calls "
+            "WHERE tool='agent:await_approval'")
+        rec = json.loads(waits[0][0])
+        assert rec["kind"] == "action" and rec["id"] == action_id
+        assert rec["decision"] == "approved" and "waited_ms" in rec
+    finally:
+        approvals.close_run(fake_tracer.run_id)
+
+
+async def test_dismiss_in_a_live_turn_tells_the_model_it_was_not_done(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub import approvals
+    from paperhub.approvals import ApprovalDecision
+
+    try:
+        task, _stream, ran, action_id = await _paused(migrated_db, fake_tracer)
+        approvals.deliver(f"action:{action_id}", ApprovalDecision(False))
+        out = await task
+        assert ran == []
+        assert "was not done" in out.content and "danger" in out.content
+        assert out.record["confirm"]["decision"] == "dismissed"
+    finally:
+        approvals.close_run(fake_tracer.run_id)
+
+
+async def test_stop_ends_the_wait(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    import asyncio
+
+    from paperhub import approvals
+
+    try:
+        task, _stream, ran, _aid = await _paused(migrated_db, fake_tracer)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert ran == []
+    finally:
+        approvals.close_run(fake_tracer.run_id)

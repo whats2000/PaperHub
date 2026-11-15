@@ -22,6 +22,7 @@ from paperhub.feedback.review import maybe_review_fork
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import AgentSummary, SearchCandidateModel
+from paperhub.outbound import held
 
 router = APIRouter()
 
@@ -59,6 +60,8 @@ class SessionSummary(BaseModel):
     idea_id: int | None = None
     # H4: this chat's auto-approve switch for confirm-tier agent actions.
     auto_approve: bool = False
+    # H5a: Ask first's "Allow searches in this chat" (searches stop asking).
+    allow_searches: bool = False
 
 
 class RoutingDecisionOut(BaseModel):
@@ -203,12 +206,45 @@ async def _replay_agent_events(
         conn,
         "SELECT id, scope, session_id, status FROM memories WHERE id IN ({ids})",
         _int_ids(flat, "memory_saved", "memory_id"))
+    held_ids = sorted({str(e["data"].get("held_id")) for e in flat
+                       if e["event"] == "outbound_held"})
+    held_rows: dict[str, tuple[Any, ...]] = {}
+    if held_ids:
+        async with conn.execute(
+            "SELECT id, status, sent_text, "
+            "(reserved_at IS NOT NULL OR consumed_at IS NOT NULL) "
+            "FROM held_requests WHERE id IN "
+            f"({','.join('?' * len(held_ids))})", held_ids,  # noqa: S608
+        ) as cur:
+            held_rows = {str(r[0]): tuple(r) for r in await cur.fetchall()}
 
     out: list[list[dict[str, Any]] | None] = []
     for events in per_run:
         replayed: list[dict[str, Any]] = []
+        held_at: dict[str, int] = {}
         for e in events:
             name, data = str(e["event"]), dict(e["data"])
+            if name == "outbound_held":
+                # A repeat with the same held_id updates that card (more
+                # held ids for the same text): keep one card, latest data,
+                # with the user's decision made since (Plan H5a).
+                hid = str(data.get("held_id"))
+                row = held_rows.get(hid)
+                if row is not None:
+                    data["status"] = row[1]
+                    if row[1] == "sent":
+                        data["sent_text"] = row[2]
+                        # The follow-up turn holds or spent the approval
+                        # (a failed one released it): drives the UI's
+                        # "Approved, not run yet" state.
+                        data["ran"] = bool(row[3])
+                card = {"event": name, "data": data}
+                if hid in held_at:
+                    replayed[held_at[hid]] = card
+                else:
+                    held_at[hid] = len(replayed)
+                    replayed.append(card)
+                continue
             if name == "confirm_request":
                 data.update(actions.get(
                     str(data.get("action_id")), {"status": "unavailable"}))
@@ -243,6 +279,9 @@ class MessageOut(BaseModel):
     # Agent runs: the tool UI events (paper/memory chips, confirm cards) in
     # stream order, each confirm card joined with its action's current state.
     agent_events: list[dict[str, Any]] | None = None
+    # A user turn that ran an approved held search (Plan H5a): Retry re-runs
+    # it through this id, never as plain text.
+    approved_held_id: str | None = None
 
 
 @router.post("/sessions", response_model=CreateSessionResponse, status_code=201)
@@ -286,7 +325,7 @@ async def list_sessions() -> list[SessionSummary]:
                    -- a session belongs to at most one idea in practice.
                    (SELECT MIN(i.idea_id) FROM idea_sessions i
                     WHERE i.session_id = s.id) AS idea_id,
-                   s.auto_approve
+                   s.auto_approve, s.allow_searches
             FROM chat_sessions s
             LEFT JOIN messages m ON m.session_id = s.id
             WHERE s.deleted_at IS NULL AND s.internal = 0
@@ -310,6 +349,7 @@ async def list_sessions() -> list[SessionSummary]:
             forked_from_session_id=int(r[5]) if r[5] is not None else None,
             idea_id=int(r[6]) if r[6] is not None else None,
             auto_approve=bool(r[7]),
+            allow_searches=bool(r[8]),
         )
         for r in rows
     ]
@@ -317,36 +357,46 @@ async def list_sessions() -> list[SessionSummary]:
 
 class PatchSessionRequest(BaseModel):
     auto_approve: bool | None = None
+    #: H5a: "Allow searches in this chat" (set by the search card; the
+    #: approval-mode menu turns it off again).
+    allow_searches: bool | None = None
 
 
 class PatchSessionResponse(BaseModel):
     id: int
     auto_approve: bool
+    allow_searches: bool = False
 
 
 @router.patch("/sessions/{session_id}", response_model=PatchSessionResponse)
 async def patch_session(
     session_id: int, req: PatchSessionRequest,
 ) -> PatchSessionResponse:
-    """Update per-chat settings (currently the agent auto-approve switch)."""
+    """Update per-chat settings (the agent auto-approve switch and Ask
+    first's "Allow searches in this chat")."""
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
         async with conn.execute(
-            "SELECT auto_approve FROM chat_sessions "
+            "SELECT auto_approve, allow_searches FROM chat_sessions "
             "WHERE id = ? AND deleted_at IS NULL", (session_id,),
         ) as cur:
             row = await cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
-        value = bool(row[0])
+        value, searches = bool(row[0]), bool(row[1])
         if req.auto_approve is not None:
             value = req.auto_approve
+        if req.allow_searches is not None:
+            searches = req.allow_searches
+        if req.auto_approve is not None or req.allow_searches is not None:
             async with write_transaction(conn):
                 await conn.execute(
-                    "UPDATE chat_sessions SET auto_approve = ? WHERE id = ?",
-                    (int(value), session_id),
+                    "UPDATE chat_sessions SET auto_approve = ?, allow_searches = ? "
+                    "WHERE id = ?",
+                    (int(value), int(searches), session_id),
                 )
-    return PatchSessionResponse(id=session_id, auto_approve=value)
+    return PatchSessionResponse(
+        id=session_id, auto_approve=value, allow_searches=searches)
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
@@ -376,7 +426,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                    r.deck_version_id,
                    d.id, d.run_id, d.page_count, d.plan_json, d.status,
                    d.speaker_notes_json, d.contributing_paper_ids_json,
-                   r.status, r.mode, r.agent_record_json
+                   r.status, r.mode, r.agent_record_json, r.approved_held_id
             FROM messages m
             LEFT JOIN runs r ON r.id = m.run_id
             LEFT JOIN decks d ON d.session_id = m.session_id
@@ -388,7 +438,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
             rows = await cur.fetchall()
         # Agent runs' UI events need live lookups (action status, undo).
         agent_runs: dict[int, str | None] = {}
-        for (role_, _c, run_id_, *_rest, run_mode_, agent_record_) in rows:
+        for (role_, _c, run_id_, *_rest, run_mode_, agent_record_, _held) in rows:
             if role_ == "assistant" and run_mode_ == "agent" and run_id_ is not None:
                 agent_runs.setdefault(int(run_id_), agent_record_)
         replayed = await _replay_agent_events(
@@ -414,6 +464,7 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
         run_status,
         run_mode,
         agent_record_json,
+        approved_held_id,
     ) in rows:
         decision: RoutingDecisionOut | None = None
         summary: AgentSummary | None = None
@@ -466,6 +517,10 @@ async def get_session_messages(session_id: int) -> list[MessageOut]:
                 content=str(content),
                 run_id=int(run_id) if run_id is not None else None,
                 run_status=str(run_status) if run_status is not None else None,
+                approved_held_id=(
+                    str(approved_held_id)
+                    if role == "user" and approved_held_id is not None else None
+                ),
                 created_at=str(created_at),
                 routing_decision=decision,
                 agent_summary=summary,
@@ -609,6 +664,10 @@ async def delete_session(session_id: int) -> None:
                 "DELETE FROM chat_sessions WHERE id = ?", (session_id,),
             )
         await conn.commit()
+        # Plan H5a: a deleted chat's held searches can no longer be sent
+        # (Undo does not bring them back).
+        await held.discard_pending(conn, session_id=session_id,
+                                   reason="the chat was deleted")
 
 
 @router.post("/sessions/{session_id}/restore", status_code=204)

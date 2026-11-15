@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from paperhub.outbound.destinations import OutboundBlocked, check_destination
+
 UNPAYWALL_BASE = "https://api.unpaywall.org/v2"
 _TIMEOUT_S = 8.0
 
@@ -28,6 +30,10 @@ async def find_oa_pdf_urls_by_doi(doi: str, *, email: str) -> list[str]:
     Never raises (Unpaywall outages return [], not exception)."""
     url = f"{UNPAYWALL_BASE}/{doi}"
     params = {"email": email}
+    try:
+        check_destination(url, caller="unpaywall.find_oa_pdf_urls_by_doi", kind="unpaywall")
+    except OutboundBlocked:
+        return []
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             resp = await client.get(url, params=params)

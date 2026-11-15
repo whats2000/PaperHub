@@ -1,5 +1,31 @@
 [
   {
+    "version": "2.43.0",
+    "date": "2026-11-15",
+    "highlights": {
+      "en": [
+        "You approve what leaves your machine: in Ask first mode every web search waits for your OK — allow it, allow searches for the whole chat, edit it first, or decline with a note the assistant follows. The turn pauses until you decide, then continues in place.",
+        "Private material stays private: before a query is sent, a privacy check rewrites, holds or blocks it if it would reveal a private document or a sensitive term, and tells you why. Every send is listed in Settings › Outbound log; Settings › Privacy & outbound sets sensitive terms, trusted search and allowed destinations, and deployers can lock settings for on-prem use.",
+        "Easier to follow: each turn's activity reads as a plain-language timeline, citations show as bracketed [1] markers, and chats are grouped by date."
+      ],
+      "zh-TW": [
+        "送出去的內容由你決定：在「先詢問」模式下，每次網路搜尋都會等你同意——可以允許、允許此對話的所有搜尋、先編輯再允許，或拒絕並留下一句話讓助理照做。對話會暫停直到你決定，之後原地繼續。",
+        "私有資料不外流：查詢送出前會經過隱私檢查，若會透露私有文件或敏感詞，就會改寫、暫留或擋下，並說明原因。所有送出紀錄都在「設定 › 對外記錄」；「設定 › 隱私與對外連線」可設定敏感詞、可信搜尋與允許的目的地，部署者也能為內部部署鎖定設定。",
+        "更容易看懂：每一輪的活動以白話時間軸呈現，引用改為方括號 [1] 標記，對話也依日期分組。"
+      ],
+      "zh-CN": [
+        "发出去的内容由你决定：在“先询问”模式下，每次网络搜索都会等你同意——可以允许、允许此对话的所有搜索、先编辑再允许，或拒绝并留一句话让助理照做。对话会暂停直到你决定，之后原地继续。",
+        "私有资料不外泄：查询发出前会经过隐私检查，若会透露私有文档或敏感词，就会改写、暂留或拦截，并说明原因。所有发送记录都在“设置 › 对外记录”；“设置 › 隐私与对外连接”可设置敏感词、可信搜索与允许的目的地，部署者也能为内部部署锁定设置。",
+        "更容易看懂：每一轮的活动以通俗的时间线呈现，引用改为方括号 [1] 标记，对话也按日期分组。"
+      ],
+      "ja": [
+        "外部に出すものはあなたが決めます：「先に確認」モードでは、すべての Web 検索があなたの許可を待ちます。許可する、このチャットの検索をすべて許可する、編集してから許可する、またはアシスタントが従うメモを添えて拒否する、から選べます。決めるまでターンは一時停止し、その場で再開します。",
+        "非公開の資料は外に出しません：クエリを送る前にプライバシーチェックが働き、非公開文書や機密語が漏れる場合は書き換え・保留・ブロックし、その理由を示します。送信はすべて「設定 › 外部通信ログ」に記録され、「設定 › プライバシーと外部通信」で機密語・信頼できる検索・許可する送信先を設定できます。オンプレミス向けにデプロイ担当者が設定をロックすることもできます。",
+        "わかりやすく：各ターンの処理は平易なタイムラインで表示され、引用は角括弧の [1] 表記になり、チャットは日付ごとにまとまります。"
+      ]
+    }
+  },
+  {
     "version": "2.42.0",
     "date": "2026-11-10",
     "highlights": {

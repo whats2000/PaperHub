@@ -32,6 +32,7 @@ import tiktoken
 from paperhub.db.connection import write_transaction
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.models.domain import SectionEntry
+from paperhub.outbound.destinations import httpx_async_request_hook
 from paperhub.pipelines.arxiv_client import (
     _TRANSIENT_DOWNLOAD_EXCEPTIONS,
     TarballCorrupt,
@@ -764,11 +765,15 @@ class PaperPipeline:
         sha256-keyed cache (same as user PDF uploads), so the same URL
         downloaded twice deduplicates at ``paper_content``.
         """
-        # 1. Fetch PDF bytes.
+        # 1. Fetch PDF bytes. The allowlist is checked on the first request and
+        # on every redirect hop (a request hook), so a redirect cannot reach an
+        # unlisted host.
         async with httpx.AsyncClient(
             timeout=_PDF_DOWNLOAD_TIMEOUT,
             follow_redirects=True,
             headers={"User-Agent": _PDF_USER_AGENT},
+            event_hooks={"request": [httpx_async_request_hook(
+                "paper_pipeline.ingest_pdf_from_url", "oa_download")]},
         ) as client:
             resp = await client.get(pdf_url)
         resp.raise_for_status()

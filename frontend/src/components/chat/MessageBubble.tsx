@@ -30,10 +30,15 @@ import { ViewCitationMarker } from "@/components/canvas/ViewCitationMarker";
 import { UnsourcedMarker } from "@/components/canvas/UnsourcedMarker";
 import { AgentEventChip, type ChipEvent } from "@/components/chat/AgentEventChip";
 import { ConfirmActionCard } from "@/components/chat/ConfirmActionCard";
+import { HeldSearchCard } from "@/components/chat/HeldSearchCard";
+import { OutboundBlockedLine } from "@/components/chat/OutboundBlockedLine";
+import { OutboundChip } from "@/components/chat/OutboundChip";
+import { PausedLine } from "@/components/chat/PausedLine";
+import { SearchApprovalCard } from "@/components/chat/SearchApprovalCard";
 import { ProposalButtons } from "@/components/chat/ProposalButtons";
 import { splitProposals } from "@/lib/proposals";
 import { listSessionReferences } from "@/lib/api";
-import { useChatStore } from "@/store/chat";
+import { agentEventKey, useChatStore } from "@/store/chat";
 import { useMemoriesStore } from "@/store/memories";
 
 interface Props {
@@ -62,7 +67,15 @@ interface Props {
   /** Merge a patch into this message's agent UI event at `index` (a confirm
    *  card's status/result, a chip's undone flag). */
   onPatchEvent?: (index: number, patch: Record<string, unknown>) => void;
+  /** Texts of the chat's "Sent search: <text>" turns (H5a): a sent held
+   *  card whose text is missing here was approved but never run. */
+  followUpTexts?: string[];
+  /** Start the follow-up turn of an approved held search (rejects on 409). */
+  onRunHeld?: (heldId: string, text: string) => Promise<void>;
 }
+
+/** The user message the backend stores for an approved held search. */
+export const SENT_SEARCH_PREFIX = "Sent search: ";
 
 /** After a confirmed action ran, refresh the panels it may have changed. */
 function refreshAfterAction(sessionId: number | null | undefined): void {
@@ -86,6 +99,8 @@ export function MessageBubble({
   onSend,
   sendDisabled = false,
   onPatchEvent,
+  followUpTexts = [],
+  onRunHeld,
 }: Props) {
   const { t } = useTranslation("chat");
   const { t: tStates } = useTranslation("states");
@@ -99,6 +114,9 @@ export function MessageBubble({
   const isStreamingEmpty =
     isStreaming && !splitProposals(message.content).body;
   const isStreamingWithContent = isStreaming && !isStreamingEmpty;
+  // H5a: the run waits on its cards; the paused line stands where the answer
+  // will stream (no typing dots meanwhile).
+  const pausedCount = isStreaming && !message.stopping ? (message.paused ?? []).length : 0;
   // Copy is offered on completed assistant messages AND on the user's own
   // input bubbles (always copyable). Fork (rollback) is user-only.
   const canCopy =
@@ -130,9 +148,27 @@ export function MessageBubble({
       (x): x is { ev: ChipEvent; index: number } =>
         x.ev.event === "paper_added" || x.ev.event === "memory_saved",
     );
+  // H5a outbound notes (rewritten chip, held card, blocked line), in the
+  // order the checkpoint decided, shown above the answer.
+  const outboundEvents = agentEvents
+    .map((ev, index) => ({ ev, index }))
+    .filter(
+      (x) =>
+        x.ev.event === "outbound_rewritten" ||
+        x.ev.event === "outbound_blocked" ||
+        x.ev.event === "outbound_held",
+    );
   const confirmEvents = agentEvents
     .map((ev, index) => ({ ev, index }))
     .filter((x) => x.ev.event === "confirm_request");
+  // Ask-first search cards still waiting (pending) in this turn.
+  const waitingSearchIds = confirmEvents.flatMap(({ ev }) =>
+    ev.event === "confirm_request" &&
+    ev.data.tool === "search_papers" &&
+    (ev.data.status ?? "pending") === "pending"
+      ? [ev.data.action_id]
+      : [],
+  );
 
   // The research card owns the waiting state; nothing to show in the bubble
   // until content or search results arrive.
@@ -152,6 +188,78 @@ export function MessageBubble({
           isUser ? "max-w-[80%]" : "w-full pl-1 pr-8 sm:pl-2 sm:pr-12"
         } ${isStreamingEmpty ? "min-w-[64px]" : ""}`}
       >
+        {outboundEvents.length > 0 && (
+          <div className="mb-1">
+            {outboundEvents.map(({ ev, index }) => {
+              if (ev.event === "outbound_rewritten") {
+                return <OutboundChip key={`${agentEventKey(ev)}#${index}`} data={ev.data} />;
+              }
+              if (ev.event === "outbound_blocked") {
+                return <OutboundBlockedLine key={`${agentEventKey(ev)}#${index}`} data={ev.data} />;
+              }
+              if (ev.event === "outbound_held") {
+                const sentText = ev.data.sent_text ?? ev.data.text;
+                return (
+                  <HeldSearchCard
+                    key={`held-${ev.data.held_id}`}
+                    data={ev.data}
+                    followUpRan={ev.data.ran === true || followUpTexts.includes(sentText)}
+                    onChange={(patch) => onPatchEvent?.(index, patch)}
+                    onRun={(id, text) => onRunHeld?.(id, text) ?? Promise.resolve()}
+                  />
+                );
+              }
+              return null;
+            })}
+          </div>
+        )}
+        {/* Confirm-tier actions waiting for the user: like held searches, above
+            the answer, which the run writes once they are decided (H5a). */}
+        {confirmEvents.length > 0 && (
+          <div className="mb-1">
+            {confirmEvents.map(({ ev, index }) =>
+              ev.event === "confirm_request" && ev.data.tool === "search_papers" ? (
+                // Ask first: the agent's search waits for the user's OK.
+                <SearchApprovalCard
+                  key={ev.data.action_id}
+                  data={ev.data}
+                  onChange={(patch) => onPatchEvent?.(index, patch)}
+                  waitingSiblings={
+                    waitingSearchIds.filter((id) => id !== ev.data.action_id).length
+                  }
+                  onAlsoAllowed={(items) => {
+                    // "Allow searches in this chat" settled these cards too.
+                    for (const item of items) {
+                      const at = confirmEvents.find(
+                        (c) =>
+                          c.ev.event === "confirm_request" &&
+                          c.ev.data.action_id === item.action_id,
+                      );
+                      if (!at) continue;
+                      onPatchEvent?.(at.index, {
+                        status: "running",
+                        result: {
+                          decision: "allowed",
+                          text: item.text,
+                          allow_chat: true,
+                          by_chat_setting: true,
+                        },
+                      });
+                    }
+                  }}
+                />
+              ) : ev.event === "confirm_request" ? (
+                <ConfirmActionCard
+                  key={ev.data.action_id}
+                  data={ev.data}
+                  onChange={(patch) => onPatchEvent?.(index, patch)}
+                  onDone={() => refreshAfterAction(backendSessionId)}
+                />
+              ) : null,
+            )}
+          </div>
+        )}
+        {isAssistant && <PausedLine count={pausedCount} />}
         <div
           className={
             isUser
@@ -203,11 +311,18 @@ export function MessageBubble({
               {t("bubble.stopped", "Stopped. What already ran is below; you can undo it.")}
             </p>
           ) : isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <p className="whitespace-pre-wrap">
+              {message.content.startsWith(SENT_SEARCH_PREFIX)
+                ? t("bubble.sentSearch", "Sent search: {{text}}", {
+                    text: message.content.slice(SENT_SEARCH_PREFIX.length),
+                  })
+                : message.content}
+            </p>
           ) : isStreamingEmpty ? (
             // Pre-token waiting state — tight three-dot cluster so it reads
-            // as a real "…" typing indicator, not stretched apart.
-            <LoadingDots ariaLabel={tStates("loading.streaming")} />
+            // as a real "…" typing indicator, not stretched apart. Paused:
+            // the paused line above says what the turn waits for.
+            pausedCount > 0 ? null : <LoadingDots ariaLabel={tStates("loading.streaming")} />
           ) : (
             // react-markdown renders to React elements (no dangerouslySetInnerHTML).
             // Raw HTML in source is not rendered as HTML by default — exactly what
@@ -334,18 +449,6 @@ export function MessageBubble({
               />
             ))}
           </div>
-        )}
-
-        {/* Confirm-tier actions waiting for the user. */}
-        {confirmEvents.map(({ ev, index }) =>
-          ev.event === "confirm_request" ? (
-            <ConfirmActionCard
-              key={ev.data.action_id}
-              data={ev.data}
-              onChange={(patch) => onPatchEvent?.(index, patch)}
-              onDone={() => refreshAfterAction(backendSessionId)}
-            />
-          ) : null,
         )}
 
         {/* Deck chip — rendered when a slide deck has been generated for this

@@ -79,13 +79,24 @@ class AgentSummary(BaseModel):
     papers_read: int
     steps: int
     tools: list[str]
+    #: H5a wave 3: the activity timeline's header ("Worked 10.6 s: read 2
+    #: sections, ran 1 search") before the trace is loaded. ``duration_ms``
+    #: is None for runs recorded before it.
+    sections_read: int = 0
+    searches: int = 0
+    duration_ms: int | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> "AgentSummary":
         papers = record.get("papers")
         tools = record.get("tools")
         steps = record.get("steps")
+        calls = [str(t) for t in tools] if isinstance(tools, list) else []
+        duration = record.get("duration_ms")
         return cls(
+            sections_read=calls.count("read_section"),
+            searches=calls.count("search_papers"),
+            duration_ms=duration if isinstance(duration, int) else None,
             papers_read=len({p for p in papers if isinstance(p, int)})
             if isinstance(papers, list) else 0,
             steps=steps if isinstance(steps, int) else 0,

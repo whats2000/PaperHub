@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 import httpx
 
+from paperhub.outbound.destinations import check_destination
 from paperhub.pipelines.author_names import clean_author_names
 
 API_BASE = "https://api.semanticscholar.org/graph/v1"
@@ -80,6 +81,8 @@ async def _get_with_retry(
     url: str, params: dict[str, str], headers: dict[str, str],
     timeout_cfg: httpx.Timeout,
     *,
+    caller: str,
+    kind: str,
     attempts: list[int] | None = None,
 ) -> httpx.Response:
     """GET ``url`` through the shared pacing lock, retrying on HTTP 429.
@@ -91,6 +94,8 @@ async def _get_with_retry(
     retrying caller doesn't block others.
     """
     global _last_request_ts
+    # The one gate every Semantic Scholar request passes (outbound allowlist).
+    check_destination(url, caller=caller, kind=kind)
     resp: httpx.Response | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         async with _pace_lock:
@@ -115,6 +120,7 @@ async def _get_with_retry(
     return resp
 async def _get_checked(
     url: str, params: dict[str, str], diag: dict[str, Any] | None, label: str,
+    *, caller: str, kind: str,
 ) -> httpx.Response:
     """GET with pacing + 429 retry, fill ``diag`` with the transport facts
     (``url_path``, ``http_status``, ``attempts``, ``retry_after``, plus
@@ -122,7 +128,9 @@ async def _get_checked(
     SemanticScholarRateLimitError, any other non-2xx as HTTPStatusError whose
     message carries the body head (S2 explains a 400 there)."""
     attempts: list[int] = []
-    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT, attempts=attempts)
+    resp = await _get_with_retry(
+        url, params, _headers(), _TIMEOUT, caller=caller, kind=kind, attempts=attempts,
+    )
     if diag is not None:
         diag.update({
             "url_path": httpx.URL(url).path,
@@ -289,6 +297,7 @@ async def find_related(
 
     resp = await _get_checked(
         url, params, diag, f"find_related({mode}) for {arxiv_id}",
+        caller="semantic_scholar.find_related", kind="s2_related",
     )
     raw = resp.json().get(items_key) or []
     items = [(r.get(sub_key) if sub_key else r) for r in raw]
@@ -307,7 +316,10 @@ async def search_papers(
     """
     url = f"{API_BASE}/paper/search"
     params = {"query": query, "limit": str(max_results), "fields": _SEARCH_FIELDS}
-    resp = await _get_checked(url, params, diag, f"search_papers({query!r})")
+    resp = await _get_checked(
+        url, params, diag, f"search_papers({query!r})",
+        caller="semantic_scholar.search_papers", kind="s2_search",
+    )
     data = resp.json().get("data") or []
     return [_coerce_hit(item) for item in data if item]
 
@@ -318,7 +330,10 @@ async def fetch_paper_metadata(paper_id: str) -> SemanticScholarMetadata:
     """
     url = f"{API_BASE}/paper/{paper_id}"
     params = {"fields": _SEARCH_FIELDS}
-    resp = await _get_with_retry(url, params, _headers(), _TIMEOUT)
+    resp = await _get_with_retry(
+        url, params, _headers(), _TIMEOUT,
+        caller="semantic_scholar.fetch_paper_metadata", kind="s2_lookup",
+    )
     if resp.status_code == 429:
         raise SemanticScholarRateLimitError(
             f"Semantic Scholar rate-limited fetch_paper_metadata({paper_id!r})",

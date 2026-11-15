@@ -11,7 +11,14 @@
     "noChats": "尚無對話。",
     "deleteChat": "刪除對話：{{title}}",
     "forkedFrom": "{{title}}（從 {{parent}} 分支）",
-    "fromIdea": "從 idea 開啟"
+    "fromIdea": "從 idea 開啟",
+    "group": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "d7": "過去 7 天",
+      "d30": "過去 30 天",
+      "older": "更早"
+    }
   },
   "sessionToast": {
     "deleteFailed": "刪除對話失敗",

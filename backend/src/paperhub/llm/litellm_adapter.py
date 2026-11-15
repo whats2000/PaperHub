@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from paperhub.config import llm_timeout_s, small_tier_model
 from paperhub.llm.adapter import ToolCall, ToolTurn
 from paperhub.llm.prompts.registry import PromptRegistry
+from paperhub.outbound.llm_destinations import note_llm_destination
 from paperhub.tracing.tracer import note_llm_usage, note_model_fallback
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,11 @@ async def _acompletion_noted(*, model: str, **kwargs: Any) -> Any:
     """``litellm.acompletion`` that notes the call's token usage (reasoning
     tokens included) and latency on the active trace step."""
     started = time.monotonic()
-    response = await litellm.acompletion(model=model, **kwargs)
+    try:
+        response = await litellm.acompletion(model=model, **kwargs)
+    finally:
+        # The request left the device whether or not the call succeeded.
+        await note_llm_destination(model)
     usage = response.get("usage") if isinstance(response, dict) else getattr(
         response, "usage", None)
     note_llm_usage(model, usage, int((time.monotonic() - started) * 1000))
@@ -354,9 +359,13 @@ class LiteLlmAdapter:
             for attempt in range(1, max_attempts + 1):
                 emitted_any = False
                 try:
-                    response = await litellm.acompletion(
-                        model=m, messages=messages, stream=True, **base,
-                    )
+                    try:
+                        response = await litellm.acompletion(
+                            model=m, messages=messages, stream=True, **base,
+                        )
+                    finally:
+                        # The request left the device even if it raised.
+                        await note_llm_destination(m)
                     async for chunk in response:
                         delta = chunk["choices"][0].get("delta", {}).get("content") or ""
                         if delta:
@@ -423,10 +432,14 @@ class LiteLlmAdapter:
                 try:
                     tool_kw: dict[str, Any] = (
                         {"tools": tools, "tool_choice": tool_choice} if tools else {})
-                    response = await litellm.acompletion(
-                        model=m, messages=messages, stream=True,
-                        stream_options={"include_usage": True}, **tool_kw, **base,
-                    )
+                    try:
+                        response = await litellm.acompletion(
+                            model=m, messages=messages, stream=True,
+                            stream_options={"include_usage": True}, **tool_kw, **base,
+                        )
+                    finally:
+                        # The request left the device even if it raised.
+                        await note_llm_destination(m)
                     parts: list[str] = []
                     slots: list[dict[str, str]] = []
                     by_index: dict[int, dict[str, str]] = {}

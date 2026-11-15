@@ -303,9 +303,9 @@ async def run_gather_context(
     read_chunk_ids: list[int] = []
 
     if llm_acompletion is None:
-        import litellm
+        from paperhub.outbound.llm_destinations import acompletion_noted
 
-        llm_acompletion = litellm.acompletion
+        llm_acompletion = acompletion_noted
 
     async with tracer.step(
         agent="report", tool="report:gather_context", model=model

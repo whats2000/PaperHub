@@ -23,9 +23,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import aiosqlite
-import litellm
 
 from paperhub.llm.prompts.registry import PromptRegistry
+from paperhub.outbound.llm_destinations import acompletion_noted
 from paperhub.tracing.tracer import Tracer
 
 __all__ = [
@@ -493,7 +493,7 @@ async def run_paper_qa_subagent(
         # margin. Force-stop fires after dispatch in the iteration where read_count
         # hits max — the LLM doesn't get an extra response turn after exhaustion.
         for iteration in range(max_section_reads + 2):
-            response = await litellm.acompletion(
+            response = await acompletion_noted(
                 model=model,
                 messages=messages,
                 tools=_TOOL_SCHEMAS,

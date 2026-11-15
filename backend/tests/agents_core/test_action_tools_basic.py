@@ -146,6 +146,43 @@ async def test_query_library_record_has_sql_rows_and_cards(
     assert evts[0][1]["candidates"][0]["paper_id"] == f"library:{pcid}"
 
 
+async def test_query_library_tracks_private_rows_and_cards(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer, tmp_path: Path
+) -> None:
+    """Final review Issue 4: rows and cards of a private paper read through
+    query_library join the turn's private material."""
+    from paperhub.outbound.context import begin_turn, current_private
+
+    pcid = await _paper(migrated_db, "2401.0009")
+    await migrated_db.execute(
+        "UPDATE paper_content SET is_private = 1, title = 'Internal Wafer Yield Review', "
+        "abstract = 'Line three yield fell after the reflow change in May.' WHERE id = ?",
+        (pcid,))
+    await migrated_db.execute("INSERT OR IGNORE INTO chat_sessions (id) VALUES (1)")
+    await migrated_db.commit()
+
+    class _Rows:
+        async def call(self, name: str, args: dict[str, Any]) -> Any:
+            if name == "sql.describe":
+                return {"columns": [{"name": "id", "type": "INTEGER"}]}
+            return {"columns": ["title", "abstract"], "rows": [[
+                "Internal Wafer Yield Review",
+                "Line three yield fell after the reflow change in May."]]}
+
+    adapter = _SqlAdapter([
+        SqlRoundAction(action="query", sql="SELECT title, abstract FROM paper_content",
+                       answer=None, papers=[]),
+        SqlRoundAction(action="finalize", sql=None, answer="One review.",
+                       papers=[SqlPaperPick(paper_content_id=pcid, reason="r")]),
+    ])
+    begin_turn()
+    ctx = _ctx(migrated_db, fake_tracer, tmp_path, adapter=adapter, registry=_Rows())
+    await _run(ctx, "query_library", question="what is in my reviews?")
+    items = current_private()
+    assert f"doc:{pcid}" in [i.ref for i in items]
+    assert any("reflow change" in i.text for i in items)
+
+
 async def test_search_papers_does_not_attach(
     migrated_db: aiosqlite.Connection, fake_tracer: Tracer, tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -442,3 +479,20 @@ async def test_deck_tools_are_serial(tmp_path: Path) -> None:
     reg = build_default_registry(_settings(tmp_path))
     assert {n for n in reg.names() if reg.get(n).serial} == {
         "create_deck", "edit_slides", "write_notes"}
+
+
+async def test_add_paper_blocked_destination_is_a_tool_error(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from paperhub.outbound.destinations import OutboundBlocked
+
+    async def fake_add(paper_id: str, **kw: Any) -> AddResult:
+        raise OutboundBlocked("api.semanticscholar.org")
+
+    monkeypatch.setattr(action_tools, "add_paper_to_session_dispatch", fake_add)
+    ctx = _ctx(migrated_db, fake_tracer, tmp_path)
+    out = await _run(ctx, "add_paper", paper_id="ss:abc")
+    assert out.record.get("error")
+    assert "api.semanticscholar.org" in out.content
+    assert out.events == []

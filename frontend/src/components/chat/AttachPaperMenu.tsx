@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ingestPaper, parseArxivId, uploadPdf } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+import { useSettingsStore } from "@/store/settings";
 import type { IngestResult, ReferenceItem } from "@/types/domain";
 
 /** Snapshot the currently-active backend_session_id from the store. Reading
@@ -71,17 +72,37 @@ export function AttachPaperMenu() {
   const [busy, setBusy] = useState(false);
   const [arxivInput, setArxivInput] = useState("");
   const [arxivError, setArxivError] = useState<string | null>(null);
-  const [isPrivate, setIsPrivate] = useState(false);
+  // null = follow the "new uploads are private" default from settings; a tick
+  // or untick overrides it for this upload only.
+  const privateDefault = useSettingsStore(
+    (s) =>
+      s.config?.categories
+        .find((c) => c.key === "privacy_outbound")
+        ?.fields.find((f) => f.key === "PAPERHUB_PRIVATE_UPLOAD_DEFAULT")?.value === "1",
+  );
+  const settingsLoaded = useSettingsStore((s) => s.config !== null);
+  const fetchSettings = useSettingsStore((s) => s.fetchConfig);
+  const [privateOverride, setPrivateOverride] = useState<boolean | null>(null);
+  // Until the default is known (loading, or unreadable after one retry) the
+  // privacy default is unknown: fail closed and show checked; the user can
+  // still untick it, and it follows the real default once loaded.
+  const isPrivate = privateOverride ?? (!settingsLoaded || privateDefault);
   const privateHelpId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function loadSettings() {
+    await fetchSettings();
+    if (useSettingsStore.getState().config === null) await fetchSettings();
+  }
 
   // Reset transient state when the menu is closed.
   function handleOpenChange(next: boolean) {
     setOpen(next);
+    if (next && !settingsLoaded) void loadSettings();
     if (!next) {
       setArxivInput("");
       setArxivError(null);
-      setIsPrivate(false);
+      setPrivateOverride(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -98,7 +119,7 @@ export function AttachPaperMenu() {
     const toastId = toast.loading(t("toast.processing"));
     // Snapshot + reset: the flag applies to this upload only, win or lose.
     const markPrivate = isPrivate;
-    setIsPrivate(false);
+    setPrivateOverride(null);
     try {
       // Lazy-create the backend session so the FIRST attach in a fresh chat
       // works (no message required). After this, the active session carries
@@ -228,7 +249,7 @@ export function AttachPaperMenu() {
                   id={`${privateHelpId}-box`}
                   type="checkbox"
                   checked={isPrivate}
-                  onChange={(e) => setIsPrivate(e.target.checked)}
+                  onChange={(e) => setPrivateOverride(e.target.checked)}
                   disabled={busy || !hasActiveSession}
                   aria-describedby={privateHelpId}
                   className="mt-0.5 h-3.5 w-3.5 accent-foreground disabled:cursor-not-allowed disabled:opacity-50"

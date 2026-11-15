@@ -7,6 +7,7 @@ import { SettingsModal } from "@/components/settings/SettingsModal";
 import { WelcomeModal } from "@/components/settings/WelcomeModal";
 import { Toaster } from "@/components/ui/sonner";
 import { useFeedbackBadge } from "@/hooks/useFeedbackBadge";
+import { useHeldBadge } from "@/hooks/useHeldBadge";
 import { ChatPage } from "@/pages/ChatPage";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { IdeasPage } from "@/pages/IdeasPage";
@@ -18,6 +19,8 @@ function App() {
   const page = useNavStore((s) => s.page);
   // Sidebar Feedback badge = confirmation queue length (mount, each turn, 60 s).
   useFeedbackBadge();
+  // Sidebar "Held searches" entry = pending held outbound searches (30 s + focus).
+  useHeldBadge();
   // Probe the first-run config gate once on boot — drives the composer lock and
   // the onboarding tour. Uses the verified cache (skips the live ping) when the
   // config was confirmed good recently.

@@ -26,6 +26,7 @@ from paperhub.api import decks as decks_api
 from paperhub.api import feedback as feedback_api
 from paperhub.api import ideation as ideation_api
 from paperhub.api import memories as memories_api
+from paperhub.api import outbound as outbound_api
 from paperhub.api import papers as papers_api
 from paperhub.api import sessions as sessions_api
 from paperhub.api import settings as settings_api
@@ -53,6 +54,8 @@ from paperhub.mcp import (
     mount_paperhub_papers_on,
 )
 from paperhub.mcp.config import ensure_config_seeded, resolve_config_path
+from paperhub.outbound.log import run_prune_loop
+from paperhub.outbound.policy import load_policy
 from paperhub.pipelines.arxiv_metadata_backfill import run_backfill as run_arxiv_backfill
 from paperhub.pipelines.author_names import repair_author_lists
 from paperhub.pipelines.marker_worker import build_worker_pipeline
@@ -198,6 +201,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             name="paperhub-citation-edges",
         )
 
+    # Outbound audit-log retention (Plan H5a): prune at startup, then daily.
+    # Own short-lived connections per pass, so nothing to close on shutdown.
+    app.state.outbound_prune_stop = asyncio.Event()
+    app.state.outbound_prune_task = asyncio.create_task(
+        run_prune_loop(
+            app.state.outbound_prune_stop,
+            lambda: load_policy().log_retention_days,
+        ),
+        name="paperhub-outbound-log-prune",
+    )
+
     # The dense-vector RAG stack (embedder + reranker + Chroma) was removed, so
     # there is no model pre-warm to wait on. Defer the "ready" banner to a
     # background task so it lands AFTER uvicorn logs "Application startup
@@ -274,6 +288,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 citation_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await citation_task
+        prune_stop = app.state.outbound_prune_stop
+        prune_task = app.state.outbound_prune_task
+        prune_stop.set()
+        with contextlib.suppress(asyncio.TimeoutError, Exception):
+            await asyncio.wait_for(prune_task, timeout=5.0)
+        if not prune_task.done():
+            prune_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await prune_task
         citation_conn = app.state.citation_conn
         if citation_conn is not None:
             with contextlib.suppress(Exception):
@@ -405,6 +428,7 @@ def create_app() -> FastAPI:
     app.include_router(version_api.router)
     app.include_router(translations_api.router)
     app.include_router(feedback_api.router)
+    app.include_router(outbound_api.router)
     app.include_router(ideation_api.router)
     # Mount the in-process `paperhub-papers` FastMCP server at /mcp.
     # External MCP clients (Claude Desktop, Cursor) and the agent (post

@@ -85,51 +85,59 @@ const agentTrace: ToolCallRecord[] = [
 ];
 
 describe("AgentSummaryBadge", () => {
-  it("reads 'Agent · read n papers · s steps', pluralised", () => {
+  it("shows the Agent tag and the turn summary; amber while paused", () => {
     const { rerender } = render(
-      <AgentSummaryBadge
-        summary={{ papers_read: 2, steps: 4, tools: ["read_section"] }}
-        open={false}
-        onToggle={() => undefined}
-      />,
+      <AgentSummaryBadge label="Worked 1.2 s: read 2 sections" open={false} onToggle={() => undefined} />,
     );
     expect(screen.getByText("Agent")).toBeInTheDocument();
-    expect(screen.getByText("read 2 papers · 4 steps")).toBeInTheDocument();
+    expect(screen.getByText("Worked 1.2 s: read 2 sections")).toBeInTheDocument();
     rerender(
       <AgentSummaryBadge
-        summary={{ papers_read: 1, steps: 1, tools: [] }}
+        label="Paused, waiting for your OK on 1 item"
+        phase="paused"
         open={false}
         onToggle={() => undefined}
       />,
     );
-    expect(screen.getByText("read 1 paper · 1 step")).toBeInTheDocument();
+    expect(screen.getByRole("button")).toHaveAttribute("data-phase", "paused");
+    expect(screen.getByText("Agent").className).toContain("bg-amber-50");
   });
 
-  it("clicking it toggles the turn's trace, with agent step and tool rows", async () => {
+  it("is the turn's trace toggle: the timeline, or the raw steps behind a link", async () => {
     const user = userEvent.setup();
     render(
       <TraceInline
         trace={agentTrace}
         sessionId={1}
         runId={9}
-        badge={({ open, toggle }) => (
-          <AgentSummaryBadge
-            summary={{ papers_read: 1, steps: 2, tools: ["read_section", "gather"] }}
-            open={open}
-            onToggle={toggle}
-          />
-        )}
+        agent={{ summary: { papers_read: 1, steps: 2, tools: ["read_section", "gather"] }, status: "ok" }}
       />,
     );
-    const badge = screen.getByRole("button", { name: /read 1 paper/ });
-    expect(badge).toHaveAttribute("aria-expanded", "false");
+    const toggle = screen.getByRole("button", { name: /Worked 240 ms: read 1 section/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     // The summary IS the trace toggle: no second "Trace" button beside it.
-    expect(screen.getAllByRole("button", { expanded: false })).toEqual([badge]);
     expect(screen.queryByRole("button", { name: /^Trace/ })).toBeNull();
-    expect(screen.queryByText(/Step 1/)).toBeNull();
+    // The raw view is a quiet link after the last step, inside the fold —
+    // nothing on the header row (it overlapped the copy/feedback actions).
+    expect(screen.queryByRole("button", { name: /View raw steps/ })).toBeNull();
+    // No hover popup of raw tool ids: the open trace says what the agent did.
+    await user.hover(toggle);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(screen.queryByText(/Tools used/)).toBeNull();
 
-    await user.click(badge);
-    expect(badge).toHaveAttribute("aria-expanded", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const timeline = screen.getByTestId("activity-timeline");
+    expect(within(timeline).getByText("Read “Method” in paper 3")).toBeInTheDocument();
+    expect(within(timeline).getByText("Wrote the answer")).toBeInTheDocument();
+    expect(screen.queryByText(/Step 1 → /)).toBeNull();
+
+    // Technical view: the raw step list, as before.
+    await user.click(screen.getByRole("button", { name: /View raw steps/ }));
+    expect(screen.getByRole("button", { name: "Back to activity view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByText(/Step 1 → read_section, gather/)).toBeInTheDocument();
     expect(screen.getByText(/Step 2 → answer/)).toBeInTheDocument();
     expect(screen.getByText('paper=3 · section="Method"', { exact: false })).toBeInTheDocument();
@@ -138,18 +146,20 @@ describe("AgentSummaryBadge", () => {
       'brief="Collect every reported BLEU score for the base and big Trans…"',
     );
     expect(gatherRow.textContent).toContain("ids=4");
-
-    // A step's tool calls sit indented under it; the step rows do not.
     const rowOf = (text: RegExp | string) =>
       screen.getByText(text, { selector: "span" }).closest("li")!;
     expect(rowOf(/Step 1 → /)).not.toHaveAttribute("data-nested");
-    expect(rowOf(/Step 2 → /)).not.toHaveAttribute("data-nested");
     expect(rowOf("read_section")).toHaveAttribute("data-nested");
-    expect(gatherRow.closest("li")).toHaveAttribute("data-nested");
+
+    // The way back sits in the same spot.
+    await user.click(screen.getByRole("button", { name: "Back to activity view" }));
+    expect(screen.getByTestId("activity-timeline")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /View raw steps/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /View raw steps/ }));
 
     // Closing collapses the list back into the toggle, then unmounts it.
-    await user.click(badge);
-    expect(badge).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     const list = screen.getByTestId("trace-list");
     expect(list).toHaveAttribute("data-state", "closed");
     expect(list.className).toContain("data-[state=closed]:grid-rows-[0fr]");
@@ -214,14 +224,19 @@ describe("agent turns in the thread", () => {
           content: "new answer",
           run_id: 2,
           status: "ok",
-          agent_summary: { papers_read: 2, steps: 3, tools: ["read_section"] },
+          agent_summary: {
+            papers_read: 2, steps: 3, tools: ["read_section"], sections_read: 2,
+            searches: 1, duration_ms: 10600,
+          },
         },
       ],
     };
     render(<ChatThread session={session} />);
     expect(screen.getByText("Paper Q&A")).toBeInTheDocument();
     expect(screen.getAllByText("Agent")).toHaveLength(1);
-    expect(screen.getByText("read 2 papers · 3 steps")).toBeInTheDocument();
+    expect(
+      screen.getByText("Worked 10.6 s: read 2 sections, ran 1 search"),
+    ).toBeInTheDocument();
     const newAnswer = screen.getByText("new answer").closest("div.space-y-1")!;
     expect(within(newAnswer as HTMLElement).queryByText("Paper Q&A")).toBeNull();
   });

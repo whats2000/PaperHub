@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -37,6 +37,22 @@ describe("SettingsModal", () => {
     await userEvent.click(screen.getByText("Integrations"));
     // Secret renders as not-set with a Replace affordance, never a value.
     expect(screen.getByText(/not set/i)).toBeInTheDocument();
+  });
+
+  it("gives every nav section an icon", async () => {
+    render(<SettingsModal />);
+    await screen.findByText("Integrations");
+    const nav = screen.getByRole("navigation");
+    const icons: Record<string, string> = {
+      "Models & providers": "lucide-cpu",
+      Integrations: "lucide-plug",
+      System: "lucide-settings-2",
+      "Outbound log": "lucide-scroll-text",
+    };
+    for (const [name, cls] of Object.entries(icons)) {
+      const btn = within(nav).getByRole("button", { name });
+      expect(btn.querySelector("svg")).toHaveClass(cls);
+    }
   });
 
   it("explains provider credentials with a LiteLLM docs link", async () => {

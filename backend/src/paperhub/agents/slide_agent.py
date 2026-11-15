@@ -528,9 +528,9 @@ async def run_slide_agent(
     reg = registry or PromptRegistry()
     prompt = reg.get("slides_agent/v1")
     if llm_acompletion is None:
-        import litellm
+        from paperhub.outbound.llm_destinations import acompletion_noted
 
-        llm_acompletion = litellm.acompletion
+        llm_acompletion = acompletion_noted
 
     state = DeckState(
         deck_tex=existing_deck_tex or "",

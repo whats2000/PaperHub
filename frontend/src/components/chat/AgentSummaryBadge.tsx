@@ -2,59 +2,54 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { AgentSummary } from "@/types/domain";
+import type { TurnPhase } from "@/lib/activityTimeline";
+import { cn } from "@/lib/utils";
 
 /**
- * The turn summary of an agent turn (H4), in the routing badge's place:
- * `Agent · read 2 papers · 4 steps`. It is the turn's only trace toggle
- * (it replaces the Trace button); the tooltip lists the tools the agent used.
+ * The agent turn's trace toggle (H4; FR-02 activity timeline, H5a): the
+ * "Agent" tag and the turn summary ("Worked 10.6 s: read 2 sections, ran 1
+ * search", "Paused, waiting for your OK on 2 items", "Stopped…"). The tag
+ * turns amber while the turn waits for the user. No hover popup: the open
+ * trace already says, in plain words, what the agent did.
  */
 export function AgentSummaryBadge({
-  summary,
+  label,
+  phase = "worked",
   open,
   onToggle,
 }: {
-  summary: AgentSummary;
+  label: string;
+  phase?: TurnPhase;
   open: boolean;
   onToggle: () => void;
 }) {
   const { t } = useTranslation("chat");
   const Icon = open ? ChevronDown : ChevronRight;
-  const tools =
-    summary.tools.length > 0
-      ? t("agentSummary.tools", { tools: summary.tools.join(", ") })
-      : t("agentSummary.noTools");
+  const body = (
+    <>
+      <Badge
+        variant="secondary"
+        className={cn(
+          "transition-colors duration-200 motion-reduce:transition-none",
+          phase === "paused" &&
+            "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200",
+        )}
+      >
+        {t("agentSummary.label")}
+      </Badge>
+      <span className="min-w-0">{label}</span>
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+    </>
+  );
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              onClick={onToggle}
-              aria-expanded={open}
-              className="inline-flex items-center gap-1.5 rounded-sm text-xs text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <Badge variant="secondary">{t("agentSummary.label")}</Badge>
-          <span>
-            {t("agentSummary.papers", { count: summary.papers_read })}
-            {" · "}
-            {t("agentSummary.steps", { count: summary.steps })}
-          </span>
-          <Icon className="h-3 w-3" aria-hidden />
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="max-w-xs text-sm">{tools}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      data-phase={phase}
+      className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-left text-xs text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {body}
+    </button>
   );
 }

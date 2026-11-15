@@ -51,11 +51,16 @@ async def test_agent_columns_added_after_runs_rebuild(tmp_path: Path) -> None:
             assert "agent_record_json" in runs
             sess = await _cols(conn, "chat_sessions")
             assert sess["auto_approve"][2:5] == ("INTEGER", 1, "0")
+            # H5a wave 3: "Allow searches in this chat", off for every chat.
+            assert sess["allow_searches"][2:5] == ("INTEGER", 1, "0")
             pa = await _cols(conn, "pending_actions")
             assert {"id", "run_id", "session_id", "tool", "args_json", "status",
                     "result_json", "created_at"} <= set(pa)
     async with aiosqlite.connect(legacy) as conn, conn.execute("SELECT mode FROM runs") as cur:
         assert [r[0] for r in await cur.fetchall()] == ["pipeline"]
+    async with aiosqlite.connect(legacy) as conn, conn.execute(
+            "SELECT allow_searches FROM chat_sessions") as cur:
+        assert [r[0] for r in await cur.fetchall()] == [0]
 
 
 @pytest.mark.asyncio

@@ -142,7 +142,7 @@ async def test_subagent_loop_lists_sections_reads_picks_chunks_and_stops(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Attention Is All You Need",
@@ -195,7 +195,7 @@ async def test_subagent_loop_stops_at_max_section_reads_and_returns_what_it_read
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Big Paper",
@@ -234,7 +234,7 @@ async def test_subagent_read_section_unknown_returns_error_to_llm_not_crash(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Methods Paper",
@@ -290,7 +290,7 @@ async def test_subagent_handles_malformed_tool_call_arguments(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Methods Paper",
@@ -375,7 +375,7 @@ async def test_read_section_includes_page_when_chunk_has_page(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Page Test Paper",
@@ -416,7 +416,7 @@ async def test_read_section_omits_page_when_chunk_has_null_page(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Page Test Paper",
@@ -454,7 +454,7 @@ async def test_picked_chunk_carries_page(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Page Test Paper",
@@ -489,7 +489,7 @@ async def test_picked_chunk_page_is_none_for_non_marker_chunk(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Page Test Paper",
@@ -622,7 +622,7 @@ async def test_list_figures_tables_then_read_layout_object_picks_and_cites(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Tables Paper",
@@ -692,7 +692,7 @@ async def test_list_figures_tables_exposes_citable_chunk_id(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Tables Paper",
@@ -742,7 +742,7 @@ async def test_subagent_autofetches_cited_figure_chunk_without_read(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Transformer",
@@ -805,7 +805,7 @@ async def test_subagent_does_not_autofetch_foreign_or_nonexistent_chunk(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid_a,
             title="Paper A",
@@ -850,7 +850,7 @@ async def test_read_layout_object_unknown_label_returns_not_found(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Tables Paper",
@@ -891,7 +891,7 @@ async def test_read_layout_object_case_insensitive_label_match(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="Tables Paper",
@@ -925,7 +925,7 @@ async def test_list_figures_tables_null_layout_returns_none_marker(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         picks = await run_paper_qa_subagent(
             paper_content_id=pcid,
             title="No Layout Paper",
@@ -1027,7 +1027,7 @@ async def test_subagent_sees_and_records_the_recent_conversation(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         await run_paper_qa_subagent(
             paper_content_id=pcid, title="YOLOSeg",
             user_message="Detailed experimental method for porting GISC to YOLOSeg",
@@ -1063,7 +1063,7 @@ async def test_subagent_first_message_marks_no_conversation(
 
     from paperhub.agents.paper_qa_subagent import run_paper_qa_subagent
 
-    with patch("paperhub.agents.paper_qa_subagent.litellm.acompletion", new=mock_completion):
+    with patch("litellm.acompletion", new=mock_completion):
         await run_paper_qa_subagent(
             paper_content_id=pcid, title="P", user_message="What is the method?",
             tracer=fake_tracer, model="stub", conn=migrated_db, max_section_reads=2,

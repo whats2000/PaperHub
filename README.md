@@ -14,8 +14,8 @@ Multi-agent tool routing · in-repo RAG knowledge base · agentic per-paper retr
 ![Vite](https://img.shields.io/badge/Vite-Tailwind-646CFF?logo=vite&logoColor=white)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
 ![Types](https://img.shields.io/badge/types-mypy%20--strict-2A6DB2)
-![Tests](https://img.shields.io/badge/tests-2484%20backend%20%2B%201116%20frontend-brightgreen)
-![Status](https://img.shields.io/badge/release-v2.42.0%20(SRS%20v2.42.0)-success)
+![Tests](https://img.shields.io/badge/tests-2805%20backend%20%2B%201292%20frontend-brightgreen)
+![Status](https://img.shields.io/badge/release-v2.43.0%20(SRS%20v2.43.0)-success)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 **English** · [日本語](README.ja.md) · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
@@ -136,7 +136,7 @@ PaperHub is built **UX-first**. Every retrieved chunk has a clickable provenance
 
 ### 🐳 Run with Docker (recommended — just use the app)
 
-If you want to *run* PaperHub rather than develop it, the whole stack runs in containers — **no Python, Node, or LaTeX to install**. You only need [Docker](https://docs.docker.com/get-docker/) and an LLM key. One `docker compose up` brings up all five services (backend, model-server, Marker PDF ingestion, web-search, and the web UI), so slides (incl. **Chinese/CJK**), RAG, and web discovery all work out of the box.
+If you want to *run* PaperHub rather than develop it, the whole stack runs in containers — **no Python, Node, or LaTeX to install**. You only need [Docker](https://docs.docker.com/get-docker/) and an LLM key. One `docker compose up` brings up all five services (backend, model-server, Marker PDF ingestion, web-search, and the web UI), so slides (incl. **Chinese/CJK**), RAG, and paper discovery work out of the box. Compose runs the **deployment profile** (see [Deploying on-prem](#-deploying-on-prem)): outbound review is on, public web search stays off until someone switches it on in Settings, only the listed hosts may be contacted, and the protection, model and trusted-search settings are set from `backend/.env` only (the Settings panel shows them locked).
 
 ```bash
 git clone https://github.com/whats2000/PaperHub.git
@@ -243,6 +243,20 @@ uv run paperhub-mcp-up          # launches open-websearch on :3000 (skips if alr
 ```
 
 When it's up, the backend's MCP registry auto-exposes `web.search` / `web.fetch`. When it's down, the agent falls back to a papers-only flow — no config needed. Spawned daemons are detached so they survive backend `--reload`; explicit teardown is `start.ps1`'s job (otherwise they clear at reboot). Requires Node 18+ on `PATH`. (The `paperhub-papers` MCP surface ships in-process at `/mcp`; no install required.)
+
+---
+
+## 🏢 Deploying on-prem
+
+PaperHub is built to run with local models and no outbound traffic you did not approve. Set `PAPERHUB_PROFILE=deployment` (the Docker `backend` service does) for the safe defaults: outbound review on, public web search off, a host allowlist of the paper sources (arXiv, Semantic Scholar, and Unpaywall for open-access PDFs by DOI), new uploads private.
+
+- **The network is the real boundary.** The in-app checkpoint reviews and logs what PaperHub sends, but only an egress rule at your firewall or proxy can guarantee nothing else leaves. Allow just the paper sources (`export.arxiv.org`, `arxiv.org`, `api.semanticscholar.org`, `api.unpaywall.org`) and your own model and search hosts.
+- **Trusted search.** Searches that may carry private context go only to a search service you run: set `PAPERHUB_TRUSTED_SEARCH_URL` in `backend/.env`. Its host joins the allowlist automatically unless the allowlist is locked and the URL is not; then the URL could be changed from the Settings panel, so its host must be listed in the allowlist (the Docker default locks both, so the URL from `.env` is admitted). Public web search stays off unless a person switches it on.
+- **Locked settings.** `PAPERHUB_LOCKED_SETTINGS` is a comma-separated list of setting keys that only the environment may set: the Settings panel shows them as "Set by the deployer", saving one is refused, and an older value saved from the panel is ignored. A locked key left unset keeps its default. The Docker `backend` service locks the outbound review switch, the unsure policy, the allowlist, the log retention, the trusted-search URL and every model setting (`PAPERHUB_MODEL_SMALL`, `PAPERHUB_MODEL_FLAGSHIP`, each per-task `PAPERHUB_*_MODEL`, `PAPERHUB_OUTBOUND_REVIEW_MODEL`, `PAPERHUB_MARKER_LLM_MODEL`); change them in `backend/.env` and restart.
+- **Local models.** Point the model settings at a self-hosted runtime (`ollama/…`, `hosted_vllm/…`, `lm_studio/…`, or `openai/…` with an `OPENAI_API_BASE` on a private address). Readiness lists every setting that still resolves to a non-local model (a warning, never a block), and with outbound review on, calls to such a provider are logged by destination only (`(content not logged)`). Marker's optional LLM pass runs in its own container and is not in the outbound log; readiness names `PAPERHUB_MARKER_LLM_MODEL` when it resolves to a cloud model.
+- **Check your models** before relying on them: `cd backend; uv run paperhub-model-check [--model M] [--context 32000] [--json]` runs four checks per configured model and exits 1 if any fails.
+- **Minimum model requirements:** reliable multi-step tool calling (the core agent chains tools across turns); a context window of at least ~32k tokens; structured output (native JSON schema, or at least obedient JSON mode); and vision for reading figures and page images (a text-only model works for chat, but the agent cannot read evidence pages; set `PAPERHUB_AGENT_VISION=0` to disable it).
+- **Gemini-specific accommodations to verify on a local model.** Several schemas are written for Gemini's `responseSchema`, which drops optional fields that have a default: `DeckCommand.target_page` in `backend/src/paperhub/models/domain.py` and the SQL agent's `sql` / `answer` / `papers` in `backend/src/paperhub/models/sql_domain.py` are required with no default, and the model must emit `null` / `[]` for the unused branch. A local runtime with weaker schema enforcement may emit them wrongly or omit them; `paperhub-model-check` and a few real turns will show it.
 
 ---
 
@@ -356,7 +370,7 @@ scripts/run-benchmark.ps1 -Resume <prior.json>   # retry only failed cases after
 
 ## 📖 Documentation
 
-- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (shipped through **v2.42.0**).
+- **[System Requirements Specification](docs/superpowers/specs/2026-05-17-paperhub-srs.md)** — authoritative architecture, schema, scope, and acceptance criteria (shipped through **v2.43.0**).
 - **[Implementation plans](docs/superpowers/plans/)** — one per sub-project, each executed via TDD.
 - **[Backend developer docs](backend/README.md)** — backend-specific notes.
 
@@ -372,7 +386,7 @@ If you use PaperHub in your research or build on it, please cite it:
   title   = {{PaperHub: A Provenance-First Multi-Agent Research Assistant for Grounded Paper Q\&A and Slide Generation}},
   year    = {2026},
   url     = {https://github.com/whats2000/PaperHub},
-  version = {2.42.0}
+  version = {2.43.0}
 }
 ```
 

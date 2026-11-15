@@ -77,7 +77,8 @@
     "stopping": "正在停止…",
     "copy": "複製訊息",
     "fork": "從此訊息分支",
-    "forkTitle": "從此處分支 — 開新對話並編輯此訊息"
+    "forkTitle": "從此處分支 — 開新對話並編輯此訊息",
+    "sentSearch": "已送出搜尋：{{text}}"
   },
   "routing": {
     "paper_search": "論文搜尋",
@@ -121,7 +122,111 @@
     "empty": "沒有記錄任何步驟。",
     "retry": "重試",
     "agentStep": "第 {{n}} 步",
-    "answer": "回答"
+    "answer": "回答",
+    "paused": "已暫停 · 等待你確認",
+    "tl": {
+      "technical": "技術檢視",
+      "rawSteps": "檢視原始步驟（{{count}}）",
+      "backToActivity": "返回活動檢視",
+      "head": {
+        "worked": "工作了 {{duration}}",
+        "workedParts": "工作了 {{duration}}：{{parts}}",
+        "workedNoTime": "已完成",
+        "workedNoTimeParts": "已完成：{{parts}}",
+        "readSections_one": "讀了 {{count}} 個章節",
+        "readSections_other": "讀了 {{count}} 個章節",
+        "searches_one": "搜尋了 {{count}} 次",
+        "searches_other": "搜尋了 {{count}} 次",
+        "paused_one": "已暫停，{{count}} 個項目等待你確認",
+        "paused_other": "已暫停，{{count}} 個項目等待你確認",
+        "stopped": "已停止。等待中的項目都沒有送出或執行。",
+        "working": "處理中…"
+      },
+      "answer": "寫好了回答",
+      "writing": "正在寫回答…",
+      "thinking": "思考中…",
+      "goToCard": "前往卡片",
+      "details": "詳細資料",
+      "queriesDetails": "查詢與詳細資料",
+      "d": {
+        "tool": "工具",
+        "calledIn": "呼叫於",
+        "calledInValue": "代理第 {{n}} 步 · {{model}}",
+        "status": "狀態",
+        "internal": "內部步驟"
+      },
+      "unknownPaper": "論文 {{id}}",
+      "title": {
+        "list_sections": "列出了 {{paper}} 的章節",
+        "read_section": "讀了 {{paper}} 的「{{section}}」",
+        "read_chunks_one": "讀了 {{count}} 個段落",
+        "read_chunks_other": "讀了 {{count}} 個段落",
+        "search_chunks": "在此對話的論文中搜尋「{{query}}」",
+        "list_figures_tables": "列出了 {{paper}} 的圖表",
+        "read_layout_object": "讀了 {{paper}} 的 {{label}}",
+        "view_figure": "看了 {{paper}} 的 {{figure}}",
+        "view_page": "看了 {{paper}} 的第 {{page}} 頁",
+        "zoom": "放大檢視 {{paper}} 的第 {{page}} 頁",
+        "view_chunk": "在原頁面上看了段落 {{id}}",
+        "gather_one": "從 {{count}} 篇論文蒐集段落",
+        "gather_other": "從 {{count}} 篇論文蒐集段落",
+        "query_library": "查詢你的論文庫：「{{question}}」",
+        "search_papers": "搜尋了論文：「{{query}}」",
+        "search_papers_pending": "搜尋論文：「{{query}}」",
+        "search_papers_running": "正在搜尋論文：「{{query}}」",
+        "add_paper": "將 {{title}} 加入此對話",
+        "add_paper_failed": "將 {{title}} 加入此對話",
+        "remember": "存入記憶：「{{fact}}」",
+        "forget": "刪除了記憶 {{id}}",
+        "forget_pending": "刪除記憶 {{id}}",
+        "remove_paper": "從此對話移除了「{{paper}}」",
+        "remove_paper_pending": "從此對話移除「{{paper}}」",
+        "list_ideas": "列出了點子",
+        "propose_ideas": "開始為「{{problem}}」產生點子",
+        "create_deck": "製作了投影片",
+        "edit_slides": "編輯了投影片",
+        "write_notes": "寫了講者備忘稿"
+      },
+      "sub": {
+        "passages_one": "{{count}} 個段落",
+        "passages_other": "{{count}} 個段落",
+        "hits_one": "{{count}} 筆結果",
+        "hits_other": "{{count}} 筆結果",
+        "waitingSearch": "等待你同意，尚未送出任何內容。",
+        "waiting": "等待你確認。",
+        "stopped": "未執行：這一輪已停止。",
+        "stoppedSearch": "未搜尋：這一輪已停止。",
+        "declined": "未搜尋：你沒有允許。",
+        "declinedNote": "未搜尋。你告訴代理：「{{note}}」",
+        "dismissed": "未執行：你已略過。",
+        "confirmed": "你已確認。",
+        "autoApproved": "已自動核准。",
+        "pending": "未執行：當時在等待你確認。",
+        "allowedEdited": "你在允許前編輯了查詢。",
+        "found_one": "找到 {{count}} 篇論文。",
+        "found_other": "找到 {{count}} 篇論文。",
+        "sent_one": "送出 {{count}} 則查詢",
+        "sent_other": "送出 {{count}} 則查詢",
+        "rewritten": "（{{count}} 則先改寫）",
+        "notSent": "{{count}} 則未送出",
+        "timedOut": "{{count}} 則逾時",
+        "heldWaiting": "{{count}} 則等待你確認"
+      },
+      "lookups_one": "另外依 ID 查詢了 {{count}} 篇找到的論文（{{ids}}）。ID 查詢不經審查直接送出。",
+      "lookups_other": "另外依 ID 查詢了 {{count}} 篇找到的論文（{{ids}}）。ID 查詢不經審查直接送出。",
+      "q": {
+        "sent": "已送出",
+        "rewritten": "送出前已改寫：{{reason}}",
+        "sentAfterOk": "經你同意後送出",
+        "sentAfterEdit": "經你編輯後送出",
+        "blockedTerm": "未送出：含有敏感詞 {{term}}",
+        "blocked": "未送出：已封鎖",
+        "held": "等待你確認：{{reason}}",
+        "declined": "未送出：你選擇不送出",
+        "stopped": "未送出：這一輪已停止",
+        "timeout": "搜尋服務逾時"
+      }
+    }
   },
   "panel": {
     "memory": "記憶",
@@ -133,9 +238,7 @@
     "papers_one": "讀了 {{count}} 篇論文",
     "papers_other": "讀了 {{count}} 篇論文",
     "steps_one": "{{count}} 步",
-    "steps_other": "{{count}} 步",
-    "tools": "使用的工具：{{tools}}",
-    "noTools": "未使用工具直接回答"
+    "steps_other": "{{count}} 步"
   },
   "agentEvent": {
     "paperAdded": "已加入論文",
@@ -173,17 +276,99 @@
     "menuTitle": "核准模式",
     "ask": {
       "title": "先詢問",
-      "desc": "移除論文或刪除記憶前先問你",
-      "tooltip": "會變更論文庫或記憶的操作（移除論文、刪除記憶）都會等你確認。僅套用於此對話，這是預設模式。"
+      "desc": "在 PaperHub 外搜尋、移除論文或刪除記憶前先問你",
+      "tooltip": "代理在 PaperHub 外的搜尋，以及會變更論文庫或記憶的操作（移除論文、刪除記憶）都會等你同意。僅套用於此對話，這是預設模式。"
     },
     "auto": {
       "title": "自動核准",
-      "desc": "通過快速檢查的操作直接執行，有風險時才詢問",
-      "tooltip": "開啟後，原本需要你確認的操作（移除論文、刪除記憶）會先經過快速檢查，決定能否不經詢問直接執行。僅套用於此對話，預設為關閉。"
+      "desc": "搜尋直接執行（隱私防護只對被標記的查詢詢問）；通過快速檢查的操作直接執行",
+      "tooltip": "搜尋不顯示確認卡片；隱私防護會檢查每一則查詢，只對被標記的詢問。原本需要你確認的操作（移除論文、刪除記憶）會先經過快速檢查，決定能否不經詢問直接執行。僅套用於此對話，預設為關閉。"
     },
-    "failed": "無法變更自動核准設定"
+    "failed": "無法變更自動核准設定",
+    "searchesAllowed": "此對話中的搜尋不再詢問。",
+    "askAgain": "恢復詢問"
   },
   "proposals": {
     "label": "建議的後續問題"
+  },
+  "outbound": {
+    "dest": {
+      "publicSearch": "公開網路搜尋",
+      "trusted": "受信任的搜尋",
+      "semanticScholar": "Semantic Scholar"
+    },
+    "chip": {
+      "title": "實際送出的搜尋",
+      "whatChanged": "變更內容",
+      "sent": "已送出",
+      "written": "原本的寫法",
+      "why": "原因",
+      "to": "目的地"
+    },
+    "blocked": {
+      "term": "未送出：<q>{{text}}</q> 含有敏感詞（<b>{{term}}</b>）。",
+      "reason": "未送出：<q>{{text}}</q>。{{reason}}"
+    },
+    "held": {
+      "title": "這項搜尋需要你的同意",
+      "textLabel": "搜尋文字",
+      "why": "詢問原因：",
+      "to": "目的地：",
+      "sendAsShown": "照原樣送出",
+      "edit": "編輯後再送出",
+      "sendEdited": "送出編輯後的文字",
+      "cancelEdit": "取消編輯",
+      "discard": "不要送出",
+      "sent": "已送出",
+      "sentEdited": "已送出（你編輯過）",
+      "discarded": "未送出。你選擇不送出這項搜尋。",
+      "approvedNotRun": "已核准，尚未執行",
+      "run": "執行搜尋",
+      "unavailable": "這項搜尋已無法使用。",
+      "sensitive": "內容含有敏感詞（{{term}}），無法送出。請編輯後再試。",
+      "sensitiveNoTerm": "內容含有敏感詞，無法送出。請編輯後再試。",
+      "empty": "沒有可送出的內容。",
+      "stale": "這項搜尋已處理過了。",
+      "alreadyRun": "這項搜尋已執行過了。",
+      "failed": "無法送出，請再試一次。",
+      "runFailed": "無法開始搜尋，請再試一次。",
+      "discardFailed": "無法捨棄，請再試一次。",
+      "retryUnavailable": "無法在此重試這項搜尋。請使用該卡片上的「執行搜尋」。"
+    },
+    "ask": {
+      "title": "允許這項搜尋嗎？",
+      "textLabel": "搜尋查詢",
+      "whyText": "此對話開啟了「先詢問」。尚未送出任何內容。",
+      "followUps": "這項搜尋可能還會依此送出它自己寫的後續查詢，每一則仍會檢查你的敏感詞與私密資料。",
+      "noDestination": "沒有允許的搜尋服務",
+      "allow": "允許",
+      "allowEdited": "允許編輯後的搜尋",
+      "allowChat": "允許此對話中的搜尋",
+      "edit": "編輯後再允許",
+      "deny": "不允許",
+      "denyLabel": "告訴代理改做什麼（選填）",
+      "denyPlaceholder": "例如：只用這個對話裡已有的論文。",
+      "cancel": "取消",
+      "allowed": "已允許",
+      "allowedEdited": "已允許（你編輯過）",
+      "allowedChat": "此對話之後的搜尋不再詢問",
+      "allowedBySetting": "此對話已允許搜尋",
+      "alsoAllows": "也允許等待中的 {{count}} 項",
+      "declined": "未搜尋。你沒有允許這項搜尋。",
+      "declinedNote": "未搜尋。你告訴代理：",
+      "stopped": "未搜尋。這一輪已停止。",
+      "ended": "未搜尋。你決定之前這一輪已結束。",
+      "unavailable": "這項搜尋已無法使用。",
+      "chatAllowed": "此對話中的搜尋現在不再詢問，操作仍會詢問。",
+      "noteTooLong": "說明太長（最多 1,000 個字元）。",
+      "stale": "這項搜尋已經決定過了。",
+      "failed": "無法連線到伺服器，請再試一次。"
+    }
+  },
+  "paused": {
+    "line_one": "已暫停 · {{count}} 個項目等待你確認。你決定後我就會繼續。",
+    "line_other": "已暫停 · {{count}} 個項目等待你確認。你決定後我就會繼續。",
+    "pill_one": "已暫停 · 等待你確認",
+    "pill_other": "已暫停 · {{count}} 個項目需要你確認"
   }
 }

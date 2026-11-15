@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sqlite3
 import sys
 from pathlib import Path
 
+from paperhub.config import load_settings
 from paperhub.mcp.config import (
     MCPServerConfig,
     ensure_config_seeded,
@@ -42,6 +45,7 @@ from paperhub.mcp.launcher import (
     terminate,
     wait_until_reachable,
 )
+from paperhub.outbound.policy import load_policy, locked_keys
 
 _LOG = logging.getLogger("paperhub.mcp_up")
 
@@ -49,6 +53,26 @@ _LOG = logging.getLogger("paperhub.mcp_up")
 # started. scripts/start.ps1 reads it to tree-kill them on Ctrl+C. Gitignored
 # alongside the toml; rewritten every run.
 _PORTS_FILENAME = ".mcp_daemon_ports"
+
+
+def _env_with_settings_overlay() -> dict[str, str]:
+    """os.environ plus the unlocked rows of the workspace ``settings`` table, the
+    same precedence the backend applies at boot (a locked key stays env-only), so
+    a Settings-panel choice also steers what this launcher starts."""
+    env = dict(os.environ)
+    try:
+        con = sqlite3.connect(load_settings().db_path, timeout=5.0)
+        try:
+            rows = con.execute("SELECT key, value FROM settings").fetchall()
+        finally:
+            con.close()
+    except (sqlite3.Error, OSError):
+        return env  # no DB yet / no table: env alone
+    locked = locked_keys(env)
+    for key, value in rows:
+        if key not in locked and isinstance(value, str):
+            env[key] = value
+    return env
 
 
 def _ports_file() -> Path:
@@ -92,7 +116,11 @@ async def _amain() -> int:
         return 0
 
     configs = load_mcp_servers(path)
-    launchable = [c for c in configs if c.has_launch]
+    web_on = load_policy(_env_with_settings_overlay()).public_web_search
+    skipped = [c.name for c in configs if c.has_launch and c.public_web and not web_on]
+    if skipped:
+        _LOG.info("public web search is off; not launching: %s", ", ".join(skipped))
+    launchable = [c for c in configs if c.has_launch and (web_on or not c.public_web)]
     if not launchable:
         _LOG.info("no launchable MCP servers in %s (none declare `launch`)", path.name)
         return 0

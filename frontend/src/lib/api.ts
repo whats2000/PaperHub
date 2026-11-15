@@ -601,13 +601,17 @@ export async function fetchRunTrace(
 export interface SettingsField {
   key: string;
   label: string;
-  type: "string" | "int" | "bool" | "email" | "enum" | "secret";
+  type: "string" | "int" | "bool" | "email" | "enum" | "secret" | "string_list";
   value?: string | null;
   is_set?: boolean;
   is_default?: boolean;
   secret: boolean;
   restart_required: boolean;
   read_only?: boolean;
+  /** Pinned by the deployer (env-only): shown disabled, never PATCHed. */
+  locked?: boolean;
+  /** When the settings row was last written (UTC, "YYYY-MM-DD HH:MM:SS"); null if never. */
+  updated_at?: string | null;
   help?: string;
   /** Seldom-configured (e.g. per-slot model overrides); shown under a
    * collapsed disclosure in the modal rather than inline. */
@@ -674,6 +678,9 @@ export interface SettingsReadiness {
      *  pre-flighted with a tools list: it must support tool calling. */
     agent?: SettingsModelCheck;
   };
+  /** Settings that point at a non-local (cloud) model: a warning, never a
+   *  refusal. Absent on an older backend. */
+  non_local?: { key: string; model: string }[];
 }
 
 export interface SettingsModelCheck {
@@ -742,9 +749,11 @@ export class ActionNotPending extends Error {
   }
 }
 
-export type ConfirmActionResult =
+/** `resumed`: a paused run got the decision and ran the action itself. */
+export type ConfirmActionResult = (
   | { status: "done"; result: { content: string; record?: Record<string, unknown> } }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string }
+) & { resumed?: boolean };
 
 async function postAction<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, { method: "POST" });
@@ -756,7 +765,8 @@ async function postAction<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Run a pending confirm-tier action directly (no LLM). */
+/** Confirm a pending confirm-tier action: the paused run runs it, or (no
+ *  live run waiting) the backend runs it directly (no LLM). */
 export async function confirmAction(actionId: string): Promise<ConfirmActionResult> {
   return postAction<ConfirmActionResult>(
     `/chat/actions/${encodeURIComponent(actionId)}/confirm`,
@@ -772,11 +782,23 @@ export async function getAction(actionId: string): Promise<{
   return apiFetch(`/chat/actions/${encodeURIComponent(actionId)}`);
 }
 
-/** Dismiss a pending confirm-tier action. */
+/** Dismiss a pending confirm-tier action (a paused run resumes). */
 export async function dismissAction(actionId: string): Promise<void> {
-  await postAction<{ status: string }>(
+  await postAction<{ status: string; resumed?: boolean }>(
     `/chat/actions/${encodeURIComponent(actionId)}/dismiss`,
   );
+}
+
+/** H5a: one card a paused run waits on (GET /chat/paused), persisted state. */
+export interface PausedRow {
+  session_id: number;
+  run_id: number;
+  kind: "held" | "action" | "search";
+  id: string;
+}
+
+export async function getPausedCards(): Promise<PausedRow[]> {
+  return apiFetch<PausedRow[]>("/chat/paused");
 }
 
 /** Turn the per-chat agent auto-approve switch on or off. */
@@ -787,6 +809,65 @@ export async function setSessionAutoApprove(
   return apiFetch<{ id: number; auto_approve: boolean }>(`/sessions/${sessionId}`, {
     method: "PATCH",
     body: JSON.stringify({ auto_approve: autoApprove }),
+  });
+}
+
+/** H5a: turn Ask first's "Allow searches in this chat" on or off. */
+export async function setSessionAllowSearches(
+  sessionId: number,
+  allow: boolean,
+): Promise<{ id: number; allow_searches: boolean }> {
+  return apiFetch<{ id: number; allow_searches: boolean }>(`/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ allow_searches: allow }),
+  });
+}
+
+/** H5a: the paused run got the OK and now runs the search itself. */
+/** A waiting search card that "Allow searches in this chat" also allowed. */
+export interface AlsoAllowed {
+  action_id: string;
+  text: string;
+}
+
+export interface AllowSearchResult {
+  status: "allowed";
+  text: string;
+  edited: boolean;
+  allow_chat: boolean;
+  resumed: boolean;
+  /** The chat's other waiting search cards the chat-wide allow settled. */
+  also_allowed?: AlsoAllowed[];
+}
+
+/** Allow an Ask-first search: as shown, edited (`text`), or for every later
+ *  search in this chat (`allowChat`). Errors: `API 422` (`sensitive_term`,
+ *  `empty_text`) and `API 409` (`turn_ended`, already decided). */
+export async function allowSearch(
+  actionId: string,
+  opts: { text?: string; allowChat?: boolean } = {},
+): Promise<AllowSearchResult> {
+  return apiFetch<AllowSearchResult>(
+    `/chat/actions/${encodeURIComponent(actionId)}/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(opts.text === undefined ? {} : { text: opts.text }),
+        allow_chat: opts.allowChat === true,
+      }),
+    },
+  );
+}
+
+/** "Don't allow" an Ask-first search, with the user's optional note for the
+ *  agent. */
+export async function dismissSearch(
+  actionId: string,
+  note?: string,
+): Promise<{ status: string; resumed?: boolean }> {
+  return apiFetch(`/chat/actions/${encodeURIComponent(actionId)}/dismiss`, {
+    method: "POST",
+    body: JSON.stringify(note ? { note } : {}),
   });
 }
 
@@ -1036,4 +1117,123 @@ export async function getFigureMeta(paperContentId: number, figureId: string): P
 
 export function figureImageUrl(paperContentId: number, figureId: string): string {
   return `${API_BASE_URL}/papers/content/${paperContentId}/figures/${encodeURIComponent(figureId)}/image`;
+}
+
+export interface OutboundDestination {
+  host: string;
+  source: "paper_source" | "trusted_search" | "public_search" | "deployer";
+}
+
+/** The hosts PaperHub may contact (`*` = any host, i.e. dev). */
+export async function getOutboundDestinations(): Promise<OutboundDestination[]> {
+  return apiFetch<OutboundDestination[]>("/outbound/destinations");
+}
+
+export interface TrustedSearchStatus {
+  reachable: boolean;
+  http_status?: number;
+  error?: string;
+}
+
+/** Probe the configured trusted search service (short timeout, never throws server-side). */
+export async function getTrustedSearchStatus(): Promise<TrustedSearchStatus> {
+  return apiFetch<TrustedSearchStatus>("/outbound/trusted-search/status");
+}
+
+export type OutboundDecision =
+  | "sent"
+  | "rewritten"
+  | "asked_sent"
+  | "asked_discarded"
+  | "blocked"
+  | "held";
+
+export interface OutboundLogRow {
+  id: number;
+  created_at: string;
+  owner_id: number;
+  actor: "user" | "agent" | "system" | "deployer";
+  caller: string;
+  kind: string;
+  destination: string;
+  sent_text: string | null;
+  original_text: string | null;
+  decision: OutboundDecision;
+  stage: string;
+  reason: string | null;
+  run_id: number | null;
+  session_id: number | null;
+}
+
+export interface OutboundLogFilters {
+  decision?: string;
+  destination?: string;
+  since?: string;
+  limit?: number;
+}
+
+function logQuery(f: OutboundLogFilters): string {
+  const p = new URLSearchParams();
+  if (f.decision) p.set("decision", f.decision);
+  if (f.destination) p.set("destination", f.destination);
+  if (f.since) p.set("since", f.since);
+  if (f.limit) p.set("limit", String(f.limit));
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+/** Every outbound request PaperHub made, newest first. */
+export async function getOutboundLog(f: OutboundLogFilters = {}): Promise<OutboundLogRow[]> {
+  return apiFetch<OutboundLogRow[]>(`/outbound/log${logQuery(f)}`);
+}
+
+/** The same rows as a CSV blob (the page saves it; no navigation). */
+export async function getOutboundLogCsv(f: OutboundLogFilters = {}): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/outbound/log.csv${logQuery(f)}`);
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text().catch(() => "")}`);
+  return res.blob();
+}
+
+export interface HeldSearch {
+  id: string;
+  created_at: string;
+  caller: string;
+  kind: string | null;
+  destination: string;
+  text: string;
+  reason: string | null;
+  unattended: boolean;
+  run_id: number | null;
+  session_id: number | null;
+}
+
+export async function getHeldSearches(): Promise<HeldSearch[]> {
+  return apiFetch<HeldSearch[]>("/outbound/held");
+}
+
+export async function getHeldCount(): Promise<number> {
+  return (await apiFetch<{ count: number }>("/outbound/held/count")).count;
+}
+
+export async function sendHeld(
+  id: string,
+  text?: string,
+): Promise<{
+  status: string;
+  held_id: string;
+  held_ids: string[];
+  text: string;
+  /** A paused run got the decision and sends it itself: no follow-up turn. */
+  resumed?: boolean;
+}> {
+  return apiFetch(`/outbound/held/${encodeURIComponent(id)}/send`, {
+    method: "POST",
+    body: JSON.stringify(text === undefined ? {} : { text }),
+  });
+}
+
+export async function discardHeld(
+  id: string,
+): Promise<{ status: string; held_ids: string[]; resumed?: boolean }> {
+  return apiFetch(`/outbound/held/${encodeURIComponent(id)}/discard`, { method: "POST" });
 }

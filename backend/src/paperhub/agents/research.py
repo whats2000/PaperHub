@@ -43,6 +43,15 @@ class ToolStepYield:
     record: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class OutboundEventYield:
+    """An outbound checkpoint decision the chat shows (Plan H5a):
+    ``outbound_rewritten`` / ``outbound_blocked`` / ``outbound_held``."""
+
+    name: str
+    data: dict[str, Any]
+
+
 @dataclass
 class SearchCandidate:
     """One Add-as-reference card. v2.7 builds these deterministically in

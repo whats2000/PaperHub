@@ -1,0 +1,1291 @@
+<title>PaperHub Outbound Protection</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the app's own shell — a slim prototype bar, then a sidebar + main region per view.
+   Tokens are PaperHub's shadcn "neutral" set (frontend/src/index.css), converted 1:1. */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-fg: oklch(0.985 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-fg: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --border: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --amber-bg: oklch(0.987 0.022 95.277);
+  --amber-fg: oklch(0.473 0.137 46.201);
+  --amber-border: oklch(0.924 0.12 95.746);
+  --ok: oklch(0.527 0.154 150.069);
+  --overlay: oklch(0 0 0 / 0.4);
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --radius: 0.625rem;
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.06);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.10);
+  --shadow-xl: 0 20px 40px oklch(0 0 0 / 0.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0);
+    --popover: oklch(0.205 0 0); --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0);
+    --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0); --accent: oklch(0.269 0 0);
+    --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --destructive: oklch(0.704 0.191 22.216);
+    --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
+    --ok: oklch(0.723 0.219 149.579); --overlay: oklch(0 0 0 / 0.6); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0);
+  --popover: oklch(0.205 0 0); --primary: oklch(0.922 0 0); --primary-fg: oklch(0.205 0 0);
+  --muted: oklch(0.269 0 0); --muted-fg: oklch(0.708 0 0); --accent: oklch(0.269 0 0);
+  --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --destructive: oklch(0.704 0.191 22.216);
+  --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
+  --ok: oklch(0.723 0.219 149.579); --overlay: oklch(0 0 0 / 0.6); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; }
+button { font: inherit; color: inherit; cursor: pointer; }
+input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.icon { width: 16px; height: 16px; flex-shrink: 0; }
+.icon-sm { width: 14px; height: 14px; flex-shrink: 0; }
+.muted { color: var(--muted-fg); }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* Prototype bar (not product UI) */
+.proto-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-bottom: 1px dashed var(--border);
+  padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); font-size: 12px; }
+.proto-bar .label { font-weight: 600; margin-right: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; gap: 2px; background: var(--muted); }
+.seg button { border: 0; background: transparent; padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--muted-fg); }
+.seg button[aria-pressed="true"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
+.proto-bar .spacer { flex: 1; }
+
+/* App shell */
+.app { display: flex; height: calc(100% - 41px); min-height: 520px; }
+.sidebar { width: 232px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--muted); display: flex; flex-direction: column; padding: 8px; gap: 2px; }
+.sidebar .brand { font-weight: 600; padding: 6px 8px 10px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; border: 0; background: transparent; text-align: left; width: 100%; }
+.nav-item:hover { background: var(--accent); }
+.nav-item[aria-current="true"] { background: var(--background); box-shadow: var(--shadow-sm); }
+.nav-item .count { margin-left: auto; font-size: 11px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--foreground); color: var(--background); text-align: center; }
+.sidebar hr { border: 0; border-top: 1px solid var(--border); margin: 8px 0; width: 100%; }
+.chat-link { font-size: 13px; color: var(--muted-fg); padding: 5px 8px; border-radius: 6px; border: 0; background: transparent; width: 100%; text-align: left; display: flex; align-items: center; gap: 6px; }
+.chat-link > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.chat-link:hover { background: var(--accent); }
+.chat-link.active { color: var(--foreground); background: var(--background); }
+.chat-link.fork { padding-left: 22px; }
+/* Fix 3: a chat with a search waiting for the user's OK carries an amber marker */
+.held-mark { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--amber-fg); background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: 999px; padding: 0 6px; flex-shrink: 0; }
+/* Fix 4: chats grouped by last activity, newest first; groups collapse toward their header */
+.chats { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.chat-group-h { display: flex; align-items: center; gap: 4px; border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); padding: 8px 8px 2px; width: 100%; text-align: left; }
+.chat-group-h .chev { transition: transform 200ms ease-out; }
+.chat-group-h[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Chat */
+.chat-head { height: 3.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; flex-shrink: 0; }
+.chat-head h2 { font-size: 14px; font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ref-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted-fg); white-space: nowrap; }
+.thread { flex: 1; overflow-y: auto; padding: 20px 16px 32px; }
+.thread-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.msg-user { align-self: flex-end; max-width: 80%; background: var(--muted); border-radius: 14px; padding: 8px 12px; }
+.msg-agent { display: flex; flex-direction: column; gap: 6px; }
+.badge-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-fg); }
+.turn-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; background: transparent; color: var(--muted-fg); font-size: 12px; }
+/* Activity trace: one node per thing the agent did, built from tool_calls rows */
+.turn-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.turn-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; padding: 2px 4px 2px 0; border-radius: 6px; cursor: pointer; text-align: left; }
+.turn-toggle:hover { color: var(--foreground); }
+.turn-toggle:focus-visible, .tl-link:focus-visible, .tech-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.turn-toggle .chev { transition: transform 200ms ease-out; flex-shrink: 0; }
+.turn-toggle[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.turn-toggle .agent-tag { border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; color: var(--foreground); font-weight: 500; }
+.turn-toggle[data-phase="paused"] .agent-tag { border-color: var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); }
+.tl-rawlink { display: block; margin: 8px 0 0 30px; border: 0; background: transparent; color: var(--muted-fg); font-size: 11px; cursor: pointer; padding: 0; text-underline-offset: 2px; }
+.tl-rawlink:hover { color: var(--foreground); text-decoration: underline; }
+.tl-rawlink:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.tech-switch { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--muted-fg); font-size: 11px; cursor: pointer; padding: 2px 0; }
+.tech-switch .knob { width: 22px; height: 12px; border-radius: 999px; background: var(--border); position: relative; transition: background 150ms ease-out; }
+.tech-switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 999px; background: var(--background); transition: transform 150ms ease-out; }
+.tech-switch[aria-checked="true"] .knob { background: var(--foreground); }
+.tech-switch[aria-checked="true"] .knob::after { transform: translateX(10px); }
+.tl { list-style: none; margin: 8px 0 2px; padding: 0; }
+.tl-node { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding-bottom: 10px; }
+.tl-node::before { content: ""; position: absolute; left: 9.5px; top: 22px; bottom: 2px; width: 1px; background: var(--border); }
+.tl-node:last-child { padding-bottom: 0; }
+.tl-node:last-child::before { display: none; }
+.tl-mark { grid-row: 1 / span 4; width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; background: var(--background); color: var(--muted-fg); border: 1px solid var(--border); }
+.tl-mark svg { width: 11px; height: 11px; }
+.tl-node[data-state="running"] .tl-mark svg { animation: spin 1s linear infinite; }
+.tl-node[data-state="waiting"] .tl-mark { background: var(--amber-bg); color: var(--amber-fg); border-color: var(--amber-border); }
+.tl-node[data-state="waiting"] .tl-mark svg { animation: pulse 1.6s ease-in-out infinite; }
+.tl-node[data-state="failed"] .tl-mark { color: var(--destructive); border-color: var(--destructive); }
+.tl-title { font-size: 13px; line-height: 20px; color: var(--foreground); overflow-wrap: anywhere; min-width: 0; }
+.tl-node[data-state="skipped"] .tl-title { color: var(--muted-fg); }
+.tl-title .lit { font-family: var(--font-mono); font-size: 12px; }
+.tl-time { font-size: 12px; line-height: 20px; color: var(--muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-sub { grid-column: 2 / span 2; font-size: 12px; color: var(--muted-fg); }
+.tl-sub .attn { color: var(--amber-fg); }
+.tl-sub .bad { color: var(--destructive); }
+.tl-links { grid-column: 2 / span 2; display: flex; gap: 12px; margin-top: 2px; }
+.tl-link { border: 0; background: transparent; padding: 0; font-size: 12px; color: var(--muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.tl-link:hover { color: var(--foreground); }
+.tl-link .chev { transition: transform 200ms ease-out; }
+.tl-link[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.tl-detail { grid-column: 2 / span 2; }
+.tl-qs { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.tl-q { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; font-size: 12px; }
+.tl-q > svg { width: 12px; height: 12px; margin-top: 2px; color: var(--muted-fg); }
+.tl-q .qt { font-family: var(--font-mono); color: var(--foreground); overflow-wrap: anywhere; }
+.tl-q .qt del { color: var(--muted-fg); }
+.tl-q .qo { grid-column: 2; color: var(--muted-fg); }
+.tl-q[data-o="held"] .qo, .tl-q[data-o="timeout"] .qo { color: var(--amber-fg); }
+.tl-q[data-o="blocked"] .qo, .tl-q[data-o="declined"] .qo { color: var(--destructive); }
+.tl-tech { margin-top: 8px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; font-size: 11px; color: var(--muted-fg); }
+.tl-tech dt { margin: 0; } .tl-tech dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.tl-raw { list-style: none; margin: 8px 0 2px; padding: 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted-fg); display: flex; flex-direction: column; gap: 2px; }
+.tl-raw li { display: grid; grid-template-columns: 2.5em minmax(0, 1fr) auto; gap: 8px; }
+.tl-raw li[data-st="error"] { color: var(--destructive); }
+.tl-raw li[data-st="waiting"] { color: var(--amber-fg); }
+.tl-raw .rt { color: var(--foreground); overflow-wrap: anywhere; }
+.answer p { margin: 0 0 8px; }
+.cite { font-size: 11px; vertical-align: super; color: var(--muted-fg); }
+
+/* Outbound events in the thread */
+.ob-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--muted); padding: 2px 10px; font-size: 12px; color: var(--muted-fg); align-self: flex-start; border-style: solid; }
+.ob-chip b { font-weight: 500; color: var(--foreground); }
+.ob-chip .q { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--foreground); }
+.ob-chip button { border: 0; background: transparent; color: var(--muted-fg); padding: 0 2px; display: inline-flex; }
+.ob-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms ease-out; }
+.ob-detail[data-open="true"] { grid-template-rows: 1fr; }
+.ob-detail > div { min-height: 0; overflow: hidden; }
+.ob-detail .box { margin-top: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; }
+.ob-detail .k { color: var(--muted-fg); }
+.ob-detail del { color: var(--muted-fg); text-decoration-color: var(--muted-fg); }
+.card { border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow-sm); font-size: 13px; }
+.card-title { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.sent-text { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); padding: 6px 8px; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.sent-text[contenteditable="true"] { background: var(--background); outline: 2px solid var(--ring); outline-offset: 0; }
+.reason { margin-top: 6px; font-size: 12px; color: var(--muted-fg); }
+.reason b { color: var(--foreground); font-weight: 500; }
+.btn-row { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.btn { border: 1px solid var(--border); background: var(--background); border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+.btn:hover { background: var(--accent); }
+.btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary); opacity: 0.9; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--muted-fg); }
+.collapse { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 200ms ease-out, opacity 200ms ease-out; }
+.collapse[data-state="closed"] { grid-template-rows: 0fr; opacity: 0; }
+.collapse > div { min-height: 0; overflow: hidden; }
+.enter { animation: enter 200ms ease-out; transform-origin: top left; }
+@keyframes enter { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: none; } }
+.blocked-line { font-size: 12px; color: var(--muted-fg); display: flex; gap: 6px; align-items: flex-start; }
+.blocked-line .q { font-family: var(--font-mono); font-size: 11.5px; color: var(--foreground); }
+.progress-line { font-size: 12px; color: var(--muted-fg); display: flex; align-items: center; gap: 6px; }
+.spin { animation: spin 1s linear infinite; }
+.pulse { color: var(--amber-fg); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+#turn[data-mode="ask"] .auto-only, #turn[data-mode="auto"] .ask-only { display: none !important; }
+.muted-note { font-size: 11px; }
+.deny-label { display: block; margin-top: 10px; font-size: 12px; color: var(--muted-fg); }
+.deny-text { width: 100%; margin-top: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); padding: 6px 8px; font: inherit; font-size: 12px; resize: vertical; box-sizing: border-box; }
+.mode-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.mode-btn:hover { color: var(--foreground); background: var(--muted); }
+.mode-btn + .stop-btn { margin-left: 4px; }
+.undo-link { color: inherit; text-decoration: underline; }
+.paused-line { font-size: 12px; color: var(--amber-fg); display: flex; align-items: center; gap: 6px; margin: 0; }
+.composer-box { display: flex; align-items: center; gap: 8px; }
+.stop-btn { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border); background: var(--foreground); color: var(--background); cursor: pointer; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+.stop-btn[data-state="closed"] { opacity: 0; transform: scale(.9); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.composer { border-top: 1px solid var(--border); padding: 12px 16px; flex-shrink: 0; }
+.composer-box { max-width: 720px; margin: 0 auto; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: var(--muted-fg); display: flex; align-items: center; gap: 8px; }
+
+/* Settings modal (mirrors components/settings/SettingsModal.tsx) */
+.backdrop { position: absolute; inset: 0; background: var(--overlay); display: grid; place-items: center; padding: 16px; }
+.view-settings { position: relative; flex: 1; }
+.modal { display: flex; width: 900px; max-width: 100%; height: 100%; max-height: 640px; background: var(--background); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-xl); overflow: hidden; }
+.modal nav { width: 200px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 8px; overflow-y: auto; }
+.modal nav h2 { font-size: 14px; font-weight: 600; margin: 0; padding: 4px 8px 8px; }
+.modal nav button { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+.modal nav button[aria-current="true"] { background: var(--accent); font-weight: 500; }
+.modal .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pane-head { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 10px 12px; }
+.pane-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pane-head .spacer { flex: 1; }
+/* Fix 1: the cloud-model notice is one line inside the scrolling body; the list is grouped by
+   model and opens on demand, so it never pins over the settings or the log. */
+.amber { border: 1px solid var(--amber-border); background: color-mix(in oklab, var(--amber-bg) 60%, transparent); color: var(--amber-fg); border-radius: 8px; padding: 8px 10px; font-size: 12px; margin-bottom: 12px; }
+.amber .row { display: flex; gap: 8px; align-items: center; }
+.amber .row b { flex: 1; min-width: 0; font-weight: 500; }
+.amber .row button { border: 0; background: transparent; color: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.amber .row button .chev { transition: transform 200ms ease-out; }
+.amber .row button[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.amber dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.amber dt code { font-family: var(--font-mono); font-size: 11.5px; }
+.amber dd { margin: 0; color: var(--foreground); opacity: 0.85; }
+.pane-body { flex: 1; overflow-y: auto; padding: 12px; }
+.group { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 16px; }
+.group:first-child { margin-top: 0; }
+.group > header { border-bottom: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 40%, transparent); padding: 10px 16px; }
+.group > header h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.group > header p { margin: 2px 0 0; font-size: 12px; color: var(--muted-fg); }
+.group .fields { padding: 16px 16px 0; }
+.field { margin-bottom: 16px; }
+.field-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.field label, .field .lbl { font-size: 14px; font-weight: 500; display: block; }
+.help { margin: 2px 0 0; font-size: 12px; color: var(--muted-fg); }
+.locked .lbl, .locked label { color: var(--muted-fg); }
+.lock-note { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: var(--muted-fg); border: 1px dashed var(--border); border-radius: 6px; padding: 1px 6px; }
+.switch { position: relative; width: 36px; height: 20px; border-radius: 999px; border: 0; background: var(--border); flex-shrink: 0; transition: background 150ms; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--background); box-shadow: var(--shadow-sm); transition: transform 150ms ease-out; }
+.switch[aria-checked="true"] { background: var(--primary); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.text-input { height: 32px; width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 0 10px; font-size: 13px; margin-top: 6px; }
+.text-input:disabled { background: var(--muted); color: var(--muted-fg); }
+.status-ok { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ok); margin-top: 4px; }
+.terms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.term { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 4px 1px 8px; font-size: 12px; background: var(--muted); }
+.term button { border: 0; background: transparent; padding: 0; display: inline-flex; color: var(--muted-fg); }
+.terms input { border: 0; outline: 0; background: transparent; flex: 1; min-width: 120px; font-size: 13px; }
+.dest-list { margin: 6px 0 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 6px; }
+.dest-list li { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; border-top: 1px solid var(--border); }
+.dest-list li:first-child { border-top: 0; }
+.dest-list .src { margin-left: auto; font-size: 11px; color: var(--muted-fg); }
+.warn-panel { margin-top: 10px; border: 1px solid var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; }
+.warn-panel .btn-row { margin-top: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 0 8px; font-size: 11.5px; border: 1px solid var(--border); white-space: nowrap; }
+.pill.on { border-color: transparent; background: var(--primary); color: var(--primary-fg); }
+
+/* Outbound log */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding: 0 12px; }
+.tabs button { border: 0; background: transparent; padding: 8px 10px; font-size: 13px; color: var(--muted-fg); border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; gap: 6px; align-items: center; }
+.tabs button[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--foreground); font-weight: 500; }
+.tabs .count { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--muted); }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; align-items: center; }
+.filters select { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 0 8px; font-size: 12.5px; }
+/* Fix 2: the log is a stacked list, not a wide table — each entry wraps inside the pane, so
+   there is never a horizontal scroll. Line 1: decision · destination · time. Line 2: the text.
+   Line 3: who decided · which chat (a link). */
+.log-list { list-style: none; margin: 0 12px 12px; padding: 0; border: 1px solid var(--border); border-radius: 8px; }
+.log-row { padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12.5px; min-width: 0; }
+.log-row:first-child { border-top: 0; }
+.log-row .l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.log-row .dest { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.log-row .time { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted-fg); font-size: 11.5px; white-space: nowrap; }
+.log-row .q { display: block; margin-top: 3px; font-family: var(--font-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.log-row .orig { font-family: var(--font-mono); font-size: 11px; color: var(--muted-fg); text-decoration: line-through; display: block; margin-top: 2px; overflow-wrap: anywhere; }
+.log-row .l3 { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--muted-fg); }
+.log-row .l3 .why { color: var(--foreground); opacity: 0.85; }
+.chat-jump { border: 0; background: transparent; padding: 0; color: var(--muted-fg); font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border); }
+.chat-jump:hover { color: var(--foreground); text-decoration-color: currentColor; }
+.log-row .held-row-actions { margin-top: 8px; }
+.log-row.leaving { display: grid; grid-template-rows: 0fr; opacity: 0; padding-block: 0; transition: grid-template-rows 200ms ease-out, opacity 200ms ease-out, padding 200ms ease-out; }
+.log-row.leaving > * { overflow: hidden; min-height: 0; }
+/* Fix 3: in the chat, a pill above the composer points at a waiting card scrolled out of view,
+   and a jump lands on the card with a brief ring. */
+.needs-ok-pill { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--amber-border); background: var(--amber-bg); color: var(--amber-fg); border-radius: 999px; padding: 4px 12px; font-size: 12px; box-shadow: var(--shadow-md); transition: opacity 200ms ease-out, transform 200ms ease-out; }
+.needs-ok-pill[data-state="closed"] { opacity: 0; transform: translate(-50%, 8px); pointer-events: none; }
+.thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.card.flash { animation: flash 1.4s ease-out; }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--amber-border); } 100% { box-shadow: var(--shadow-sm); } }
+.dec { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.dec.blocked { color: var(--destructive); }
+.dec.held, .dec.asked { color: var(--amber-fg); }
+.held-row-actions { display: flex; gap: 6px; }
+.empty { padding: 24px; text-align: center; color: var(--muted-fg); font-size: 13px; }
+.note-foot { padding: 0 12px 12px; font-size: 12px; color: var(--muted-fg); }
+
+/* Toast */
+.toast-wrap { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { background: var(--popover); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-md); padding: 8px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; transition: opacity 200ms, transform 200ms; }
+.toast[data-leaving="true"] { opacity: 0; transform: translateY(6px); }
+
+@media (max-width: 760px) {
+  .sidebar { display: none; }
+  .modal nav { display: none; }
+  .backdrop { padding: 0; }
+  .modal { border-radius: 0; max-height: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <span class="label">H5a prototype</span>
+  <div class="seg" id="viewSeg">
+    <button data-view="chat" aria-pressed="true">Chat</button>
+    <button data-view="settings" aria-pressed="false">Settings › Privacy</button>
+    <button data-view="log" aria-pressed="false">Outbound log</button>
+  </div>
+  <span class="spacer"></span>
+  <div class="seg" id="themeSeg" aria-label="Theme">
+    <button data-theme-set="light" aria-pressed="false">Light</button>
+    <button data-theme-set="dark" aria-pressed="false">Dark</button>
+  </div>
+  <button class="btn btn-ghost" id="resetBtn"><i data-lucide="rotate-ccw" class="icon-sm"></i>Reset</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar" aria-label="Sidebar">
+    <div class="brand">PaperHub</div>
+    <button class="nav-item"><i data-lucide="square-pen" class="icon"></i>New chat</button>
+    <button class="nav-item"><i data-lucide="lightbulb" class="icon"></i>Ideas</button>
+    <button class="nav-item"><i data-lucide="message-square-heart" class="icon"></i>Feedback</button>
+    <button class="nav-item" data-goto="log-held" id="heldNav"><i data-lucide="clock" class="icon"></i>Held searches<span class="count" id="heldCount">2</span></button>
+    <hr>
+    <div class="chats" id="chatList" aria-label="Chats"></div>
+    <button class="nav-item" data-goto="settings"><i data-lucide="settings" class="icon"></i>Settings</button>
+  </aside>
+
+  <main class="main">
+    <!-- CHAT -->
+    <section class="view" id="view-chat">
+      <header class="chat-head">
+        <i data-lucide="lightbulb" class="icon muted"></i>
+        <h2>Wafer defects × sparsity priors</h2>
+        <span class="ref-chip"><i data-lucide="lock" class="icon-sm"></i>TR-0412 Defect segmentation report</span>
+        <span class="ref-chip">GISC: sparse instance segmentation</span>
+      </header>
+      <div class="thread-wrap">
+      <div class="thread" id="thread">
+        <div class="thread-inner" id="threadInner">
+          <div class="msg-user">Find recent papers that put sparsity constraints on segmentation of very small defects, close to the setup in our TR-0412 report.</div>
+
+          <div class="msg-agent" id="turn" data-mode="ask">
+            <div class="turn-head">
+              <button class="turn-toggle" id="traceToggle" aria-expanded="true" aria-controls="traceWrap"><i data-lucide="chevron-down" class="icon-sm chev"></i><span class="agent-tag">Agent</span><span id="turnSummary"></span></button>
+            </div>
+            <div class="collapse" id="traceWrap" data-state="open"><div><div id="traceHost"></div></div></div>
+
+            <!-- Ask first: the agent's search call waits for the user -->
+            <div class="collapse ask-only" id="askCardWrap" data-state="open"><div>
+              <div class="card enter" role="group" aria-label="Allow this search?" id="askCard">
+                <div class="card-title"><i data-lucide="globe" class="icon muted"></i>Allow this search?</div>
+                <div class="sent-text" id="askText" spellcheck="false">sparsity prior segmentation of very small defects</div>
+                <p class="reason"><b>To:</b> public web search and Semantic Scholar</p>
+                <p class="reason"><b>Why you're asked:</b> Ask first is on for this chat. Nothing has been sent.</p>
+                <p class="reason muted-note">The search may also send follow-up queries it writes from this one. Each is still checked for your sensitive terms and private material.</p>
+                <div class="btn-row" id="askBtns">
+                  <button class="btn btn-primary" id="askAllowBtn"><i data-lucide="check" class="icon-sm"></i>Allow</button>
+                  <button class="btn" id="askAllowChatBtn">Allow searches in this chat</button>
+                  <button class="btn" id="askEditBtn"><i data-lucide="pencil" class="icon-sm"></i>Edit, then allow</button>
+                  <button class="btn btn-ghost" id="askDenyBtn" aria-expanded="false" aria-controls="askDenyBox">Don't allow</button>
+                </div>
+                <div class="collapse" id="askDenyBox" data-state="closed" inert><div>
+                  <label class="deny-label" for="askDenyText">Tell the agent what to do instead (optional)</label>
+                  <textarea class="deny-text" id="askDenyText" rows="2" placeholder="e.g. Only use papers already in this chat."></textarea>
+                  <div class="btn-row"><button class="btn btn-primary" id="askDenyConfirm">Don't allow</button><button class="btn btn-ghost" id="askDenyCancel">Cancel</button></div>
+                </div></div>
+              </div>
+            </div></div>
+            <p class="blocked-line ask-only" id="askDone" hidden></p>
+
+            <!-- Auto: a rewritten search -->
+            <div class="auto-only">
+              <span class="ob-chip enter">
+                <i data-lucide="shield-check" class="icon-sm"></i><b>Search sent as</b>
+                <span class="q">sparsity constraint segmentation small defects</span>
+                <button aria-expanded="false" aria-controls="rwDetail" id="rwBtn" title="What changed"><i data-lucide="chevron-down" class="icon-sm"></i></button>
+              </span>
+              <div class="ob-detail" id="rwDetail" data-open="false"><div>
+                <div class="box">
+                  <span class="k">Sent</span><span class="mono">sparsity constraint segmentation small defects</span>
+                  <span class="k">Written</span><del class="mono">sparsity-constrained segmentation for KESTREL wafer micro-defects under dark-field illumination</del>
+                  <span class="k">Why</span><span>Removed a product name and the inspection setup from your private report TR-0412.</span>
+                  <span class="k">To</span><span>Semantic Scholar</span>
+                </div>
+              </div></div>
+            </div>
+
+            <!-- Auto: the guard flagged a search -->
+            <div class="collapse auto-only" id="heldCardWrap" data-state="open"><div>
+              <div class="card enter" role="group" aria-label="This search needs your OK" id="heldCard">
+                <div class="card-title"><i data-lucide="shield-question" class="icon muted"></i>This search needs your OK</div>
+                <div class="sent-text" id="heldText" spellcheck="false">dark-field micro-defect segmentation sparsity prior 2025</div>
+                <p class="reason"><b>Why you're asked:</b> it may reveal the inspection setup in TR-0412, a private document. Nothing has been sent.</p>
+                <p class="reason"><b>To:</b> public web search</p>
+                <div class="btn-row" id="heldBtns">
+                  <button class="btn btn-primary" id="sendBtn"><i data-lucide="send" class="icon-sm"></i>Send as shown</button>
+                  <button class="btn" id="editBtn"><i data-lucide="pencil" class="icon-sm"></i>Edit, then send</button>
+                  <button class="btn btn-ghost" id="discardBtn">Don't send</button>
+                </div>
+              </div>
+            </div></div>
+            <p class="blocked-line auto-only" id="heldDone" hidden></p>
+
+            <!-- Blocked -->
+            <p class="blocked-line enter auto-only"><i data-lucide="shield-x" class="icon-sm"></i><span>Not sent: <span class="q">KESTREL v3 defect dataset</span> contains a sensitive term (<b>KESTREL</b>).</span></p>
+
+            <!-- Ask-first action: the same pause, the same signals -->
+            <p class="blocked-line auto-only"><i data-lucide="check" class="icon-sm"></i><span>Auto-approved: removed “GISC: sparse instance segmentation” from this chat. <a href="#" class="undo-link">Undo</a></span></p>
+            <div class="collapse ask-only" id="actionCardWrap" data-state="open"><div>
+              <div class="card enter" role="group" aria-label="Confirm this action" id="actionCard" data-action-id="a1">
+                <div class="card-title"><i data-lucide="shield-question" class="icon muted"></i>Confirm this action</div>
+                <p class="reason">Remove “GISC: sparse instance segmentation” from this chat</p>
+                <p class="reason"><b>Why:</b> Ask first is on for this chat.</p>
+                <div class="btn-row">
+                  <button class="btn btn-primary" id="actConfirmBtn">Confirm</button>
+                  <button class="btn btn-ghost" id="actDismissBtn">Dismiss</button>
+                </div>
+              </div>
+            </div></div>
+            <p class="blocked-line ask-only" id="actionDone" hidden></p>
+
+            <!-- Paused: no answer until every card in the turn is decided -->
+            <div class="collapse" id="pausedWrap" data-state="open"><div>
+              <p class="paused-line" id="pausedLine"><i data-lucide="clock" class="icon-sm pulse"></i><span id="pausedText">Paused · 2 items wait for your OK. I'll continue as soon as you decide.</span></p>
+            </div></div>
+            <div class="answer" id="answer" hidden></div>
+          </div>
+        </div>
+      </div>
+      <button class="needs-ok-pill" id="needsOkPill" data-state="closed" tabindex="-1"><i data-lucide="shield-question" class="icon-sm"></i>A search needs your OK<i data-lucide="arrow-up" class="icon-sm"></i></button>
+      </div>
+      <div class="composer"><div class="composer-box"><i data-lucide="paperclip" class="icon"></i><span>Ask about your papers…</span><button class="mode-btn" id="modeBtn" title="Approval mode (prototype: switches the example turn)"><i data-lucide="hand" class="icon-sm"></i><span>Ask first</span></button><button class="stop-btn" id="stopBtn" title="Stop" aria-label="Stop"><i data-lucide="square" class="icon-sm"></i></button></div></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view view-settings" id="view-settings" hidden>
+      <div class="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <nav aria-label="Settings sections">
+            <h2 id="settingsTitle">Settings</h2>
+            <button><i data-lucide="cpu" class="icon-sm"></i>Models &amp; providers</button><button><i data-lucide="bot" class="icon-sm"></i>Agents &amp; memory</button><button><i data-lucide="plug" class="icon-sm"></i>Integrations</button>
+            <button aria-current="true"><i data-lucide="shield" class="icon-sm"></i>Privacy &amp; outbound</button>
+            <button><i data-lucide="settings-2" class="icon-sm"></i>System</button>
+            <button data-goto="log"><i data-lucide="scroll-text" class="icon-sm"></i>Outbound log</button>
+          </nav>
+          <div class="pane">
+            <div class="pane-head">
+              <h3>Privacy &amp; outbound</h3>
+              <span class="pill"><i data-lucide="lock" class="icon-sm"></i>4 set by the deployer</span>
+              <span class="spacer"></span>
+              <button class="btn btn-ghost" aria-label="Close settings" data-goto="chat"><i data-lucide="x" class="icon"></i></button>
+            </div>
+            <div class="pane-body">
+              <div class="amber" role="status">
+                <div class="row">
+                  <i data-lucide="triangle-alert" class="icon-sm"></i>
+                  <b>22 settings use a cloud model, so some text may leave this device.</b>
+                  <button aria-expanded="false" aria-controls="cloudList" id="cloudBtn">Show which<i data-lucide="chevron-down" class="icon-sm chev"></i></button>
+                </div>
+                <div class="collapse" id="cloudList" data-state="closed" inert><div>
+                  <dl>
+                    <dt><code>gemini-3.5-flash-lite</code></dt><dd>13 settings: small tier, router, chitchat, paper_qa subagent, SQL agent, memory, translation, mechanism cards, context gatherer, auto-approver, slide resolver, review, Marker accuracy pass (server environment)</dd>
+                    <dt><code>gemini-3.8-flash</code></dt><dd>9 settings: flagship tier, paper_qa finalizer, feedback reviewer, ideation, core agent, slides, slide edit, slide notes, agent vision (server environment)</dd>
+                  </dl>
+                </div></div>
+              </div>
+              <section class="group">
+                <header><h4>Outbound review</h4><p>Every search or fetch that carries your text is checked before it leaves this device.</p></header>
+                <div class="fields">
+                  <div class="field locked">
+                    <div class="field-row"><div><span class="lbl">Review outbound searches</span><p class="help">Rewrites or holds a query that would reveal your private documents, notes or experiments.</p><span class="lock-note"><i data-lucide="lock" class="icon-sm"></i>Set by the deployer</span></div>
+                    <button class="switch" role="switch" aria-checked="true" disabled aria-label="Review outbound searches"></button></div>
+                  </div>
+                  <div class="field locked">
+                    <span class="lbl">When the review isn't sure</span>
+                    <div class="seg" style="margin-top:6px"><button aria-pressed="true" disabled>Ask me</button><button aria-pressed="false" disabled>Don't send</button></div>
+                    <div><span class="lock-note"><i data-lucide="lock" class="icon-sm"></i>Set by the deployer</span></div>
+                  </div>
+                  <div class="field">
+                    <label for="termInput">Sensitive terms</label>
+                    <p class="help">Never sent anywhere: product names, project names, customers. Matched without case.</p>
+                    <div class="terms" id="terms"><input id="termInput" placeholder="Add a term, then Enter"></div>
+                  </div>
+                  <div class="field">
+                    <div class="field-row"><div><span class="lbl">New uploads are private</span><p class="help">Ticks "private document" on the upload form by default. You can still untick it for a public paper.</p></div>
+                    <button class="switch" role="switch" aria-checked="true" data-toggle aria-label="New uploads are private"></button></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="group">
+                <header><h4>Web search</h4><p>Two ways to search the web. Both go through the outbound review.</p></header>
+                <div class="fields">
+                  <div class="field">
+                    <label for="endpoint">Trusted search service</label>
+                    <p class="help">Your organisation's search service. Queries stay on your network.</p>
+                    <input class="text-input" id="endpoint" value="https://search.lab.internal">
+                    <span class="status-ok"><i data-lucide="circle-check" class="icon-sm"></i>Reachable</span>
+                  </div>
+                  <div class="field" id="publicField">
+                    <div class="field-row"><div><span class="lbl">Public web search</span><p class="help">Bing, DuckDuckGo and other public engines. Finds more, including new and trending work.</p></div>
+                    <button class="switch" role="switch" aria-checked="false" id="publicSwitch" aria-label="Public web search"></button></div>
+                    <div class="collapse" id="publicWarnWrap" data-state="closed"><div>
+                      <div class="warn-panel" role="alertdialog" aria-labelledby="pwTitle">
+                        <b id="pwTitle">Your search text will leave this device.</b>
+                        <p style="margin:4px 0 0">Queries go to public search engines outside your organisation. Each one is still reviewed first, but you take the risk of what a query reveals about your work.</p>
+                        <div class="btn-row"><button class="btn btn-primary" id="pwOn">Turn on public search</button><button class="btn" id="pwCancel">Keep it off</button></div>
+                      </div>
+                    </div></div>
+                    <div class="collapse" id="publicOnWrap" data-state="closed"><div>
+                      <p class="help" style="margin-top:6px"><i data-lucide="triangle-alert" class="icon-sm" style="vertical-align:-2px"></i> On. Queries reach public engines after review. Turned on by you, today 10:42.</p>
+                    </div></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="group">
+                <header><h4>Allowed destinations</h4><p>PaperHub only contacts these hosts. Anything else is blocked.</p></header>
+                <div class="fields">
+                  <div class="field locked">
+                    <ul class="dest-list" id="destList">
+                      <li><i data-lucide="globe" class="icon-sm"></i>export.arxiv.org<span class="src">Paper source</span></li>
+                      <li><i data-lucide="globe" class="icon-sm"></i>api.semanticscholar.org<span class="src">Paper source</span></li>
+                      <li><i data-lucide="globe" class="icon-sm"></i>search.lab.internal<span class="src">Trusted search</span></li>
+                    </ul>
+                    <span class="lock-note"><i data-lucide="lock" class="icon-sm"></i>Set by the deployer</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="group">
+                <header><h4>Outbound log</h4><p>Everything that left this device, kept for review.</p></header>
+                <div class="fields">
+                  <div class="field locked">
+                    <label for="retention">Keep entries for</label>
+                    <input class="text-input" id="retention" value="365 days" disabled style="max-width:160px">
+                    <div><span class="lock-note"><i data-lucide="lock" class="icon-sm"></i>Set by the deployer</span></div>
+                  </div>
+                  <div class="field"><button class="btn" data-goto="log"><i data-lucide="scroll-text" class="icon-sm"></i>Open the outbound log</button></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section class="view view-settings" id="view-log" hidden>
+      <div class="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logTitle">
+          <nav aria-label="Settings sections">
+            <h2>Settings</h2>
+            <button><i data-lucide="cpu" class="icon-sm"></i>Models &amp; providers</button><button><i data-lucide="bot" class="icon-sm"></i>Agents &amp; memory</button><button><i data-lucide="plug" class="icon-sm"></i>Integrations</button>
+            <button data-goto="settings"><i data-lucide="shield" class="icon-sm"></i>Privacy &amp; outbound</button>
+            <button><i data-lucide="settings-2" class="icon-sm"></i>System</button>
+            <button aria-current="true"><i data-lucide="scroll-text" class="icon-sm"></i>Outbound log</button>
+          </nav>
+          <div class="pane">
+            <div class="pane-head">
+              <h3 id="logTitle">Outbound log</h3>
+              <span class="spacer"></span>
+              <button class="btn" id="exportBtn"><i data-lucide="download" class="icon-sm"></i>Export CSV</button>
+              <button class="btn btn-ghost" aria-label="Close settings" data-goto="chat"><i data-lucide="x" class="icon"></i></button>
+            </div>
+            <div class="tabs" role="tablist">
+              <button role="tab" aria-selected="true" data-tab="all">Everything sent</button>
+              <button role="tab" aria-selected="false" data-tab="held">Held<span class="count" id="heldTabCount">2</span></button>
+            </div>
+            <div id="tab-all" style="flex:1;overflow-y:auto">
+              <div class="filters">
+                <select aria-label="Decision" id="fDec"><option value="">All decisions</option><option>Sent</option><option>Rewritten</option><option>Asked</option><option>Blocked</option></select>
+                <select aria-label="Destination" id="fDest"><option value="">All destinations</option><option>Semantic Scholar</option><option>arXiv</option><option>Trusted search</option><option>Public web search</option><option>Cloud model</option><option>Hand-over export</option></select>
+                <select aria-label="Period"><option>Last 30 days</option><option>Last 7 days</option><option>Today</option></select>
+              </div>
+              <ul class="log-list" id="logBody" aria-label="Outbound log entries"></ul>
+              <p class="note-foot">Logged by PaperHub for its own requests. Network-level egress control is set up by your deployer.</p>
+            </div>
+            <div id="tab-held" hidden style="flex:1;overflow-y:auto">
+              <p class="help" style="padding:10px 12px">Searches the review wasn't sure about. Nothing here has been sent. A search from a chat is decided in that chat.</p>
+              <ul class="log-list" id="heldBody" aria-label="Held searches"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script>
+(function () {
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const reduce = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const icons = () => { try { window.lucide && window.lucide.createIcons(); } catch (e) {} };
+
+  /* ---------- views ---------- */
+  const VIEWS = ['chat', 'settings', 'log'];
+  function show(view, tab) {
+    if (!VIEWS.includes(view)) view = 'chat';
+    VIEWS.forEach(v => { $('#view-' + v).hidden = v !== view; });
+    $$('#viewSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+    if (view === 'log') setTab(tab || 'all');
+    if (location.hash.slice(1) !== view) history.replaceState(null, '', '#' + view);
+    setTimeout(() => typeof updatePill === 'function' && updatePill(), 0);
+  }
+  $$('#viewSeg button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+  document.addEventListener('click', e => {
+    const g = e.target.closest('[data-goto]');
+    if (!g) return;
+    const t = g.dataset.goto;
+    if (t === 'log-held') show('log', 'held'); else show(t);
+  });
+  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#view-chat').hidden === false) show('chat'); });
+
+  /* ---------- theme ---------- */
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    $$('#themeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)));
+  }
+  $$('#themeSeg button').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.themeSet)));
+  const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  $$('#themeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeSet === (sysDark ? 'dark' : 'light'))));
+
+  /* ---------- toast ---------- */
+  function toast(text, icon) {
+    const el = document.createElement('div');
+    el.className = 'toast enter';
+    el.innerHTML = `<i data-lucide="${icon || 'check'}" class="icon-sm"></i><span></span>`;
+    el.querySelector('span').textContent = text;
+    $('#toasts').appendChild(el); icons();
+    setTimeout(() => { el.dataset.leaving = 'true'; setTimeout(() => el.remove(), reduce() ? 0 : 220); }, 2600);
+  }
+
+  /* ---------- chat ---------- */
+  $('#traceToggle').addEventListener('click', e => {
+    const open = e.currentTarget.getAttribute('aria-expanded') !== 'true';
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+    const w = $('#traceWrap'); w.dataset.state = open ? 'open' : 'closed'; w.inert = !open;
+  });
+  $('#traceHost').addEventListener('click', e => {
+    if (!e.target.closest('.tl-rawlink')) return;
+    tech = !tech; renderTrace();
+    const h = $('#traceHost'); h.classList.remove('enter'); void h.offsetWidth; h.classList.add('enter');
+  });
+  $('#rwBtn').addEventListener('click', e => {
+    const d = $('#rwDetail'); const open = d.dataset.open !== 'true';
+    d.dataset.open = String(open); e.currentTarget.setAttribute('aria-expanded', String(open));
+    e.currentTarget.innerHTML = `<i data-lucide="${open ? 'chevron-up' : 'chevron-down'}" class="icon-sm"></i>`; icons();
+  });
+
+  let heldInChat = true;
+  function closeHeld(line) {
+    const wrap = $('#heldCardWrap');
+    const done = () => { const p = $('#heldDone'); p.innerHTML = line; p.hidden = false; p.classList.add('enter'); icons(); };
+    wrap.dataset.state = 'closed';
+    if (reduce()) done(); else setTimeout(done, 200);
+    heldInChat = false; renderHeld();
+  }
+  /* ---------- the paused run: every card decided -> the same run resumes ---------- */
+  // mode: the chat's approval chip. Ask first: the agent's search call and
+  // its actions wait for the user. Auto: only what the guard flags waits.
+  let mode = 'ask';
+  let actionPending = true, heldSent = null, actionDone = null, stopped = false;
+  let askPending = true, askResult = null;  // 'allowed' | 'allowed-chat' | 'denied' | 'denied-note'
+  const waitingCount = () => waitingCards().length;
+  function setTrace() { renderTrace(); }
+
+  /* ---------- the activity trace ----------
+     Built ONLY from rows shaped like the real tool_calls records
+     (tool, args_redacted_json, result_summary_json, status, latency_ms) plus
+     the live `paused` cards, by the same mapping the app uses:
+       - a `tool:<name>` row starts a node; the rows after it that are not
+         `tool:*` or `agent:step` (its pipeline steps, outbound reviews,
+         approval waits) belong to it and roll up into its summary;
+       - `agent:step` rows are not nodes: their model and step number go to
+         the next nodes' Details; the final step (an `answer`) is the
+         "Wrote the answer" node;
+       - a sub-step failure never makes the node red; only a failed tool
+         call does. */
+  let tech = false, phase = 'paused', stoppedWith = null;
+  const openNodes = new Set();
+  const PAPERS = { 12: 'TR-0412 Defect segmentation report', 7: 'GISC: sparse instance segmentation' };
+  const DEST = { 'public-web-search': ['globe', 'public web search'], 'api.semanticscholar.org': ['graduation-cap', 'Semantic Scholar'] };
+  function R(tool, args, result, latency, status) { return { tool, args, result: result || {}, latency_ms: latency || 0, status: status || 'ok' }; }
+  const rev = (text, dest, res) => R('outbound:review', { request: { text, destination: dest } }, res, 0);
+  const web = (q, res, st) => R('paper_search:paperhub.search_web', { built_query: q }, res, 900, st);
+  function traceRows() {
+    const rows = [
+      R('agent:step', { step: 1 }, { model: 'gemini/gemini-3.8-flash', tool_calls: [{ name: 'read_section' }, { name: 'read_section' }, { name: 'search_papers' }, { name: 'remove_paper' }] }, 1800),
+      R('tool:read_section', { paper: 12, section: '2 Inspection setup' }, { chunk_ids: [812, 813] }, 400),
+      R('tool:read_section', { paper: 7, section: '3 Method' }, { chunk_ids: [301, 302, 303] }, 600),
+    ];
+    const Q = $('#askText').textContent.trim();
+    if (mode === 'ask') {
+      if (askPending && !stopped) rows.push(R('tool:search_papers', { query: Q, mode: 'search' }, {}, 0, 'waiting'));
+      else if (stoppedWith && stoppedWith.ask) rows.push(R('tool:search_papers', { query: Q }, { stopped: true }, 0, 'stopped'));
+      else if (askResult === 'denied' || askResult === 'denied-note') {
+        rows.push(R('tool:search_papers', { query: Q }, { declined: true, note: $('#askDenyText').value.trim() || null }, 0));
+        rows.push(R('agent:await_approval', { kind: 'search' }, { decision: 'declined', waited_ms: 21000 }));
+      } else {
+        rows.push(R('tool:search_papers', { query: Q, mode: 'search' }, {}, 3400));
+        rows.push(R('agent:await_approval', { kind: 'search' }, { decision: 'approved', edited: Q !== ASK_Q, waited_ms: 21000 }));
+        rows.push(R('paper_search:parse', {}, {}, 700));
+        rows.push(rev(Q + ' arxiv', 'public-web-search', { stage: 'review', decision: 'send', sent_text: Q + ' arxiv' }));
+        rows.push(web(Q + ' arxiv', { summary: { totalResults: 8 } }));
+        rows.push(rev('sparse prior instance segmentation tiny objects', 'api.semanticscholar.org', { stage: 'review', decision: 'send', sent_text: 'sparse prior instance segmentation tiny objects' }));
+        rows.push(rev('dark-field micro-defect sparsity TR-0412 setup', 'public-web-search', { stage: 'review', decision: 'send', sent_text: 'micro-defect segmentation sparsity', reason: 'Removed the inspection setup from your private report TR-0412.' }));
+        rows.push(web('micro-defect segmentation sparsity', { summary: { error: 'MCP tool web.search timed out after 8.0s' } }, 'error'));
+        rows.push(rev('KESTREL wafer defect sparsity', 'public-web-search', { stage: 'terms', decision: 'block', term: 'KESTREL' }));
+        ['arXiv:2403.01234', 'arXiv:2311.04410', 'arXiv:2502.11873'].forEach(id => rows.push(rev(id, 'api.semanticscholar.org', { stage: 'exact_id', decision: 'send', sent_text: id })));
+        rows.push(R('paper_search:finalize', {}, { emitted_candidates: [{}, {}, {}] }, 300));
+      }
+      if (actionPending && !stopped) rows.push(R('tool:remove_paper', { paper: 7 }, {}, 0, 'waiting'));
+      else if (stoppedWith && stoppedWith.action) rows.push(R('tool:remove_paper', { paper: 7 }, { stopped: true }, 0, 'stopped'));
+      else rows.push(R('tool:remove_paper', { paper: 7 }, actionDone ? { removed: true, confirm: { decision: 'confirmed' } } : { confirm: { decision: 'dismissed' } }, actionDone ? 200 : 0));
+    } else {
+      const held = 'dark-field micro-defect segmentation sparsity prior 2025';
+      const sentHeld = heldSent || held;
+      const heldStopped = !!(stoppedWith && stoppedWith.held);
+      rows.push(R('tool:search_papers', { query: 'sparsity constraints small defect segmentation', mode: 'search' }, heldStopped ? { stopped: true } : {}, heldInChat && !stopped ? 0 : 4100, heldInChat && !stopped ? 'waiting' : heldStopped ? 'stopped' : 'ok'));
+      rows.push(R('paper_search:parse', {}, {}, 700));
+      rows.push(rev('sparsity-constrained segmentation for KESTREL wafer micro-defects under dark-field illumination', 'api.semanticscholar.org', { stage: 'review', decision: 'send', sent_text: 'sparsity constraint segmentation small defects', reason: 'Removed a product name and the inspection setup from your private report TR-0412.' }));
+      rows.push(rev(held, 'public-web-search', { stage: 'review', decision: 'ask', reason: 'it may reveal the inspection setup in TR-0412, a private document', held_id: 'h1' }));
+      if (!heldInChat && !heldStopped) {
+        rows.push(R('agent:await_approval', { kind: 'held', id: 'h1' }, { decision: heldSent ? 'approved' : 'declined', edited: heldSent && heldSent !== held }));
+        if (heldSent) { rows.push(rev(sentHeld, 'public-web-search', { stage: 'user', decision: 'send', sent_text: sentHeld })); rows.push(web(sentHeld, { summary: { totalResults: 6 } })); }
+      }
+      rows.push(rev('KESTREL v3 defect dataset', 'public-web-search', { stage: 'terms', decision: 'block', term: 'KESTREL' }));
+      if (!heldInChat && !heldStopped) rows.push(R('paper_search:finalize', {}, { emitted_candidates: heldSent ? [{}, {}, {}, {}, {}] : [{}, {}, {}] }, 300));
+      rows.push(R('tool:remove_paper', { paper: 7 }, { removed: true, auto_approved: true }, 300));
+      rows.push(R('agent:approve', { tool: 'remove_paper' }, { decision: 'allow' }, 600));
+    }
+    if (phase === 'writing') rows.push(R('agent:step', { step: 2 }, { writing: true }, 0, 'running'));
+    if (phase === 'done') rows.push(R('agent:step', { step: 2 }, { model: 'gemini/gemini-3.8-flash', answer: '…', finish_reason: 'stop' }, 4200));
+    return rows;
+  }
+  const fmt = ms => ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms > 0 ? ms + ' ms' : '';
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // One query that left (or tried to leave) PaperHub, with its outcome.
+  function queries(children, stoppedRun) {
+    const out = [], lookups = [];
+    children.forEach((r, i) => {
+      if (r.tool !== 'outbound:review') return;
+      const res = r.result, text = r.args.request.text, dest = r.args.request.destination;
+      if (res.stage === 'exact_id') { lookups.push(text); return; }
+      if (res.stage === 'user') return;  // the approved re-send of a held query
+      const q = { text, dest, sent: res.sent_text };
+      if (res.decision === 'block') { q.o = 'blocked'; q.why = res.term ? `Not sent: contains the sensitive term ${res.term}` : 'Not sent: blocked'; }
+      else if (res.decision === 'ask' || res.decision === 'hold') {
+        const wait = children.find(c => c.tool === 'agent:await_approval' && c.args.id === res.held_id);
+        if (!wait && stoppedRun) { q.o = 'declined'; q.why = 'Not sent: the turn was stopped'; }
+        else if (!wait) { q.o = 'held'; q.why = 'Waiting for your OK: ' + res.reason; }
+        else if (wait.result.decision === 'approved') { q.o = 'sent'; q.why = wait.result.edited ? 'Sent after your edit' : 'Sent after your OK'; q.sent = children.find(c => c.tool === 'outbound:review' && c.result.stage === 'user')?.result.sent_text || text; }
+        else { q.o = 'declined'; q.why = 'Not sent: you chose not to'; }
+      } else if (res.sent_text !== text) { q.o = 'rewritten'; q.rewritten = true; q.why = 'Rewritten before sending: ' + res.reason.replace(/\.$/, ''); }
+      else { q.o = 'sent'; q.why = 'Sent'; }
+      const failed = children.find(c => c.tool.endsWith('search_web') && c.args.built_query === (q.sent || text) && c.status === 'error');
+      if (failed && (q.o === 'sent' || q.o === 'rewritten')) { q.o = 'timeout'; q.why = (q.why === 'Sent' ? '' : q.why + '. ') + 'The search service timed out'; }
+      out.push(q);
+    });
+    return { out, lookups };
+  }
+  function nodeView(n) {
+    const r = n.row, name = r.tool.slice(5), a = r.args, res = r.result;
+    const v = { icon: 'circle', title: esc(name), sub: '', time: fmt(r.latency_ms), state: r.status === 'error' ? 'failed' : r.status === 'stopped' ? 'skipped' : r.status === 'ok' ? 'done' : r.status, qs: null };
+    if (name === 'read_section') { v.icon = 'book-open'; v.title = `Read “${esc(a.section)}” in ${esc(PAPERS[a.paper])}`; v.sub = `${res.chunk_ids.length} passages`; }
+    if (name === 'remove_paper') {
+      v.icon = 'file-minus'; const t = esc(PAPERS[a.paper]);
+      if (r.status === 'waiting') { v.title = `Remove “${t}” from this chat`; v.sub = '<span class="attn">Waiting for your OK.</span>'; v.card = '#actionCard'; }
+      else if (r.status === 'stopped') { v.title = `Remove “${t}” from this chat`; v.sub = 'Not run: the turn was stopped.'; }
+      else if (res.removed) { v.title = `Removed “${t}” from this chat`; v.sub = res.auto_approved ? 'Auto-approved. You can undo it.' : 'You confirmed it.'; }
+      else { v.title = `Remove “${t}” from this chat`; v.sub = 'Not done: you dismissed it.'; v.state = 'skipped'; }
+    }
+    if (name === 'search_papers') {
+      v.icon = 'search'; v.title = `Searched papers for <span class="lit">“${esc(a.query)}”</span>`;
+      if (r.status === 'waiting' && mode === 'ask') { v.title = `Search papers for <span class="lit">“${esc(a.query)}”</span>`; v.sub = '<span class="attn">Waiting for your OK before anything is sent.</span>'; v.card = '#askCard'; return v; }
+      if (r.status === 'waiting') v.title = `Searching papers for <span class="lit">“${esc(a.query)}”</span>`;
+      if (r.status === 'stopped' && mode === 'ask') { v.title = `Search papers for <span class="lit">“${esc(a.query)}”</span>`; v.sub = 'Not searched: the turn was stopped.'; return v; }
+      if (res.declined) { v.title = `Search papers for <span class="lit">“${esc(a.query)}”</span>`; v.state = 'skipped'; v.sub = res.note ? `Not searched. You told the agent: “${esc(res.note)}”` : 'Not searched: you didn’t allow it.'; return v; }
+      const { out, lookups } = queries(n.children, r.status === 'stopped');
+      if (r.status === 'stopped') v.state = 'done';
+      const fin = n.children.find(c => c.tool === 'paper_search:finalize');
+      const c = o => out.filter(q => q.o === o).length;
+      const sent = out.filter(q => ['sent', 'rewritten', 'timeout'].includes(q.o)).length;
+      const parts = [];
+      if (fin) parts.push(`Found ${fin.result.emitted_candidates.length} papers.`);
+      const rw = out.filter(q => q.rewritten).length;
+      const bits = [`${sent} ${sent === 1 ? 'query' : 'queries'} sent${rw ? ` (${rw} rewritten first)` : ''}`];
+      if (c('blocked') + c('declined')) bits.push(`<span class="bad">${c('blocked') + c('declined')} not sent</span>`);
+      if (c('timeout')) bits.push(`<span class="attn">${c('timeout')} timed out</span>`);
+      if (c('held')) bits.push(`<span class="attn">${c('held')} waiting for your OK</span>`);
+      parts.push(bits.join(', ') + '.');
+      v.sub = parts.join(' ');
+      if (c('held')) v.card = '#heldCard';
+      v.qs = out; v.lookups = lookups;
+    }
+    return v;
+  }
+  function buildTimeline(rows) {
+    const nodes = []; let cur = null, step = null;
+    rows.forEach((r, i) => {
+      if (r.tool === 'agent:step') {
+        if (r.result.answer != null || r.result.writing) { cur = null; nodes.push({ answer: true, row: r }); }
+        else step = r;
+        return;
+      }
+      if (r.tool.startsWith('tool:')) { cur = { row: r, children: [], step, idx: i }; nodes.push(cur); return; }
+      if (cur) cur.children.push(r);
+    });
+    return nodes;
+  }
+  function renderTrace() {
+    const host = $('#traceHost'); if (!host) return;
+    const rows = traceRows();
+    const nodes = buildTimeline(rows);
+    const waiting = nodes.filter(n => !n.answer && nodeView(n).state === 'waiting').length;
+    const reads = nodes.filter(n => !n.answer && n.row.tool === 'tool:read_section').length;
+    const searches = nodes.filter(n => !n.answer && n.row.tool === 'tool:search_papers').length;
+    const total = rows.reduce((s, r) => s + (r.tool.startsWith('tool:') || r.tool === 'agent:step' ? r.latency_ms : 0), 0);
+    const tg = $('#traceToggle'); tg.dataset.phase = stopped ? 'stopped' : waiting ? 'paused' : phase;
+    $('#turnSummary').textContent = stopped ? 'Stopped. Nothing waiting was sent or run.'
+      : waiting ? `Paused, waiting for your OK on ${waiting} ${waiting === 1 ? 'item' : 'items'}`
+      : phase === 'writing' ? 'Writing the answer…'
+      : `Worked ${fmt(total)}: read ${reads} sections, ran ${searches} ${searches === 1 ? 'search' : 'searches'}`;
+    if (tech) {
+      host.innerHTML = '<ol class="tl-raw">' + rows.map((r, i) => `<li data-st="${r.status}"><span>#${i}</span><span class="rt">${esc(r.tool)}${r.result.model ? ' · ' + esc(r.result.model) : ''}${r.result.summary && r.result.summary.error ? ' · ' + esc(r.result.summary.error) : ''}</span><span>${fmt(r.latency_ms) || '—'} ${r.status}</span></li>`).join('') + '</ol>' + '<button class="tl-rawlink" aria-pressed="true">Back to activity view</button>';
+      return;
+    }
+    const ol = document.createElement('ol'); ol.className = 'tl';
+    nodes.forEach((n, k) => {
+      const li = document.createElement('li'); li.className = 'tl-node';
+      if (n.answer) {
+        const writing = n.row.status === 'running';
+        li.dataset.state = writing ? 'running' : 'done';
+        li.innerHTML = `<span class="tl-mark"><i data-lucide="${writing ? 'loader-2' : 'pen-line'}"></i></span><span class="tl-title">${writing ? 'Writing the answer…' : 'Wrote the answer'}</span><span class="tl-time">${fmt(n.row.latency_ms)}</span>`;
+        ol.appendChild(li); return;
+      }
+      const v = nodeView(n); const key = 'n' + n.idx;
+      li.dataset.state = v.state;
+      const markIcon = v.state === 'waiting' ? 'clock' : v.state === 'failed' ? 'x' : v.state === 'skipped' ? 'circle-slash' : v.icon;
+      const hasDetail = true, open = openNodes.has(key);
+      let html = `<span class="tl-mark"><i data-lucide="${markIcon}"></i></span><span class="tl-title">${v.title}</span><span class="tl-time">${v.state === 'waiting' ? '' : v.time}</span>`;
+      if (v.sub) html += `<div class="tl-sub">${v.sub}</div>`;
+      html += '<div class="tl-links">';
+      if (v.card) html += `<button class="tl-link" data-card="${v.card}"><i data-lucide="corner-down-right" class="icon-sm"></i>Go to card</button>`;
+      if (hasDetail) html += `<button class="tl-link" data-node="${key}" aria-expanded="${open}"><i data-lucide="chevron-down" class="icon-sm chev"></i>${v.qs ? 'Queries and details' : 'Details'}</button>`;
+      html += '</div>';
+      let det = '';
+      if (v.qs) {
+        det += '<ul class="tl-qs">' + v.qs.map(q => {
+          const [ic, dn] = DEST[q.dest] || ['globe', q.dest];
+          const txt = q.o === 'rewritten' ? `${esc(q.sent)}<br><del>${esc(q.text)}</del>` : q.o === 'timeout' && q.sent !== q.text ? `${esc(q.sent)}<br><del>${esc(q.text)}</del>` : esc(q.text);
+          return `<li class="tl-q" data-o="${q.o}"><i data-lucide="${ic}"></i><span class="qt">${txt}</span><span class="qo">${esc(dn)} · ${esc(q.why)}</span></li>`;
+        }).join('') + '</ul>';
+        if (v.lookups && v.lookups.length) det += `<p class="tl-sub" style="margin-top:6px">Also looked up ${v.lookups.length} found papers by ID (${v.lookups.map(esc).join(', ')}). ID lookups are sent without review.</p>`;
+      }
+      const st = n.step && n.step.result;
+      det += `<dl class="tl-tech"><dt>Tool</dt><dd>${esc(n.row.tool)}</dd>${st ? `<dt>Called in</dt><dd>agent step ${n.step.args.step} · ${esc(st.model)}</dd>` : ''}<dt>Status</dt><dd>${esc(n.row.status)}${n.row.latency_ms ? ' · ' + fmt(n.row.latency_ms) : ''}</dd>${n.children.length ? `<dt>Internal steps</dt><dd>${n.children.length} (${[...new Set(n.children.map(c => c.tool))].map(esc).join(', ')})</dd>` : ''}</dl>`;
+      html += `<div class="tl-detail collapse" data-state="${open ? 'open' : 'closed'}" ${open ? '' : 'inert'}><div>${det}</div></div>`;
+      li.innerHTML = html; ol.appendChild(li);
+    });
+    // The raw list is a last-resort view: a quiet link after the last step.
+    const raw = document.createElement('button'); raw.className = 'tl-rawlink'; raw.setAttribute('aria-pressed', 'false');
+    raw.textContent = `View raw steps (${rows.length})`;
+    host.replaceChildren(ol, raw); icons();
+    ol.querySelectorAll('[data-node]').forEach(b => b.addEventListener('click', () => {
+      const key = b.dataset.node, open = !openNodes.has(key);
+      open ? openNodes.add(key) : openNodes.delete(key);
+      b.setAttribute('aria-expanded', String(open));
+      const d = b.closest('.tl-node').querySelector('.tl-detail'); d.dataset.state = open ? 'open' : 'closed'; d.inert = !open;
+      if (open) setTimeout(() => d.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }), reduce() ? 0 : 210);
+    }));
+    ol.querySelectorAll('[data-card]').forEach(b => b.addEventListener('click', () => {
+      const card = $(b.dataset.card); const pair = waitingCards().find(p => p[0] === card); focusCard(pair);
+    }));
+  }
+  function afterDecision() {
+    renderChats(); updatePill();
+    const n = waitingCount();
+    if (n > 0) { $('#pausedText').textContent = `Paused · ${n} item${n > 1 ? 's wait' : ' waits'} for your OK. I'll continue as soon as you decide.`; return; }
+    resume();
+  }
+  function resume() {
+    $('#pausedWrap').dataset.state = 'closed';
+    phase = 'writing'; renderTrace();
+    const a = $('#answer');
+    setTimeout(() => {
+      a.hidden = false; a.classList.add('enter');
+      a.innerHTML = '<p class="progress-line"><i data-lucide="loader-2" class="icon-sm spin"></i>Continuing…</p>'; icons();
+      setTimeout(() => {
+        const three = `Three papers fit your setup best: a sparse-prior instance segmentation method that keeps recall on objects under 16 px<span class="cite">[1]</span>, a top-k mask sparsity loss for tiny-object segmentation<span class="cite">[2]</span>, and a survey section on sparsity for industrial defect inspection<span class="cite">[3]</span>.`;
+        if (mode === 'auto') {
+          const found = heldSent
+            ? `The search you sent found two more: a dark-field inspection paper that adds an L1 mask prior and reports +4.1 recall on defects under 10 µm<span class="cite">[4]</span>, and a 2025 workshop paper on sparse attention for wafer maps<span class="cite">[5]</span>. The first is the closest match to your setup.`
+            : `You chose not to send the dark-field search, so these come only from the search that was sent.`;
+          a.innerHTML = `<p>${three}</p><p>${found}</p><p>I removed GISC from this chat (auto-approved; you can undo it above).</p>`;
+        } else {
+          const body = askResult === 'denied-note'
+            ? `<p>I didn't search, as you asked. From the two papers already in this chat: TR-0412 uses a fixed threshold for defects under 10 µm<span class="cite">[1]</span>, and GISC's sparse instance prior<span class="cite">[2]</span> is the closest method to adapt.</p>`
+            : askResult === 'denied'
+              ? `<p>You didn't allow the search, so I can only use the papers in this chat. GISC's sparse instance prior<span class="cite">[1]</span> is the closest method to your setup in TR-0412<span class="cite">[2]</span>.</p>`
+              : `<p>${three}</p>`;
+          a.innerHTML = body + `<p>${actionDone ? 'I removed GISC from this chat as you confirmed.' : 'GISC stays in this chat; you dismissed removing it.'}</p>`;
+        }
+        $('#stopBtn').dataset.state = 'closed';
+        phase = 'done'; renderTrace();
+        $('#thread').scrollTo({ top: $('#thread').scrollHeight, behavior: reduce() ? 'auto' : 'smooth' });
+      }, 1200);
+    }, reduce() ? 0 : 200);
+  }
+  function closeAction(line) {
+    actionPending = false;
+    $('#actionCardWrap').dataset.state = 'closed';
+    const done = () => { const p = $('#actionDone'); p.innerHTML = line; p.hidden = false; p.classList.add('enter'); icons(); };
+    if (reduce()) done(); else setTimeout(done, 200);
+  }
+  $('#actConfirmBtn').addEventListener('click', () => {
+    actionDone = true; closeAction('<i data-lucide="check" class="icon-sm"></i><span>Done: removed “GISC: sparse instance segmentation” from this chat.</span>');
+    setTrace('traceAction', 'confirmed · done', '0.2 s'); afterDecision();
+  });
+  $('#actDismissBtn').addEventListener('click', () => {
+    actionDone = false; closeAction('<i data-lucide="circle-slash" class="icon-sm"></i><span>Dismissed: remove “GISC: sparse instance segmentation”.</span>');
+    setTrace('traceAction', 'dismissed', '—'); afterDecision();
+  });
+  /* ---------- Ask first: the search card ---------- */
+  const ASK_Q = 'sparsity prior segmentation of very small defects';
+  function closeAsk(line) {
+    askPending = false;
+    $('#askCardWrap').dataset.state = 'closed';
+    const done = () => { const p = $('#askDone'); p.innerHTML = line; p.hidden = false; p.classList.add('enter'); icons(); const q = p.querySelector('.q'); if (q) q.textContent = $('#askText').textContent.trim(); };
+    if (reduce()) done(); else setTimeout(done, 200);
+  }
+  function allowSearch(forChat) {
+    const edited = $('#askText').textContent.trim() !== ASK_Q;
+    askResult = forChat ? 'allowed-chat' : 'allowed';
+    closeAsk(`<i data-lucide="check" class="icon-sm"></i><span>Allowed${edited ? ' after your edit' : ''}: <span class="q"></span>${forChat ? ' · later searches in this chat won\u2019t ask' : ''}</span>`);
+    if (forChat) { $('#modeBtn').title = 'Ask first · searches allowed in this chat'; toast('Searches in this chat now run without asking. Actions still ask.', 'globe'); }
+    setTrace('traceAsk', 'allowed · 4 queries sent', '3.4 s'); afterDecision();
+  }
+  $('#askAllowBtn').addEventListener('click', () => allowSearch(false));
+  $('#askAllowChatBtn').addEventListener('click', () => allowSearch(true));
+  $('#askEditBtn').addEventListener('click', e => {
+    const t = $('#askText'); const editing = t.getAttribute('contenteditable') === 'true';
+    if (!editing) { t.setAttribute('contenteditable', 'true'); t.focus(); document.getSelection().selectAllChildren(t); e.currentTarget.innerHTML = '<i data-lucide="x" class="icon-sm"></i>Cancel edit'; $('#askAllowBtn').innerHTML = '<i data-lucide="check" class="icon-sm"></i>Allow edited search'; }
+    else { t.setAttribute('contenteditable', 'false'); t.textContent = ASK_Q; e.currentTarget.innerHTML = '<i data-lucide="pencil" class="icon-sm"></i>Edit, then allow'; $('#askAllowBtn').innerHTML = '<i data-lucide="check" class="icon-sm"></i>Allow'; }
+    icons();
+  });
+  function setDeny(open) {
+    const box = $('#askDenyBox'); box.dataset.state = open ? 'open' : 'closed'; box.inert = !open;
+    $('#askDenyBtn').setAttribute('aria-expanded', String(open));
+    if (open) setTimeout(() => { $('#askDenyText').focus({ preventScroll: true }); box.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); }, reduce() ? 0 : 200);
+  }
+  $('#askDenyBtn').addEventListener('click', () => setDeny($('#askDenyBox').dataset.state !== 'open'));
+  $('#askDenyCancel').addEventListener('click', () => setDeny(false));
+  $('#askDenyConfirm').addEventListener('click', () => {
+    const note = $('#askDenyText').value.trim();
+    askResult = note ? 'denied-note' : 'denied';
+    closeAsk(note ? '<i data-lucide="circle-slash" class="icon-sm"></i><span>Not searched. You told the agent: <span class="note"></span></span>' : '<i data-lucide="circle-slash" class="icon-sm"></i><span>Not searched. You didn\u2019t allow this search.</span>');
+    if (note) setTimeout(() => { const n = $('#askDone .note'); if (n) n.textContent = note; }, reduce() ? 0 : 210);
+    setTrace('traceAsk', note ? 'not allowed · with your note' : 'not allowed', '—'); afterDecision();
+  });
+  $('#modeBtn').addEventListener('click', () => {
+    mode = mode === 'ask' ? 'auto' : 'ask';
+    $('#modeBtn').innerHTML = mode === 'ask' ? '<i data-lucide="hand" class="icon-sm"></i><span>Ask first</span>' : '<i data-lucide="zap" class="icon-sm"></i><span>Auto</span>';
+    reset(); toast(mode === 'ask' ? 'Ask first: the agent\u2019s searches and actions wait for you.' : 'Auto: only a search the privacy guard flags waits for you, with the reason.', mode === 'ask' ? 'hand' : 'zap');
+  });
+
+  $('#stopBtn').addEventListener('click', () => {
+    if (stopped) return; stopped = true;
+    stoppedWith = { ask: askPending, action: actionPending, held: heldInChat };
+    $('#stopBtn').dataset.state = 'closed';
+    if (mode === 'auto' && heldInChat) closeHeld('<i data-lucide="circle-slash" class="icon-sm"></i><span>Not sent. The turn was stopped.</span>');
+    if (mode === 'ask' && askPending) closeAsk('<i data-lucide="circle-slash" class="icon-sm"></i><span>Not searched. The turn was stopped.</span>');
+    if (mode === 'ask' && actionPending) closeAction('<i data-lucide="circle-slash" class="icon-sm"></i><span>Not run. The turn was stopped.</span>');
+    $('#pausedText').textContent = 'Stopped. Nothing waiting was sent or run.';
+    renderTrace();
+    renderChats(); updatePill();
+  });
+
+  $('#sendBtn').addEventListener('click', () => {
+    const text = $('#heldText').textContent.trim();
+    const edited = text !== 'dark-field micro-defect segmentation sparsity prior 2025';
+    heldSent = text;
+    closeHeld(`<i data-lucide="send" class="icon-sm"></i><span>Sent${edited ? ' after your edit' : ''}: <span class="q"></span></span>`);
+    setTimeout(() => { const q = $('#heldDone .q'); if (q) q.textContent = text; }, reduce() ? 0 : 210);
+    addLog({ time: 'today 10:47', to: 'Public web search', q: text, dec: 'asked', decLabel: 'Asked · you sent it', by: 'You' });
+    setTrace('traceHeld', 'sent after your OK', '1.8 s'); afterDecision();
+  });
+  $('#editBtn').addEventListener('click', e => {
+    const t = $('#heldText'); const editing = t.getAttribute('contenteditable') === 'true';
+    if (!editing) { t.setAttribute('contenteditable', 'true'); t.focus(); document.getSelection().selectAllChildren(t); e.currentTarget.innerHTML = '<i data-lucide="x" class="icon-sm"></i>Cancel edit'; $('#sendBtn').innerHTML = '<i data-lucide="send" class="icon-sm"></i>Send edited text'; }
+    else { t.setAttribute('contenteditable', 'false'); t.textContent = 'dark-field micro-defect segmentation sparsity prior 2025'; e.currentTarget.innerHTML = '<i data-lucide="pencil" class="icon-sm"></i>Edit, then send'; $('#sendBtn').innerHTML = '<i data-lucide="send" class="icon-sm"></i>Send as shown'; }
+    icons();
+  });
+  $('#discardBtn').addEventListener('click', () => {
+    closeHeld('<i data-lucide="circle-slash" class="icon-sm"></i><span>Not sent. You chose not to send this search.</span>');
+    addLog({ time: 'today 10:47', to: 'Public web search', q: 'dark-field micro-defect segmentation sparsity prior 2025', dec: 'blocked', decLabel: 'Asked · not sent', by: 'You' });
+    setTrace('traceHeld', 'not sent: you chose not to', '—'); afterDecision();
+  });
+
+  /* ---------- settings ---------- */
+  const TERMS0 = ['KESTREL', 'Project Osprey', 'TSMC-N2 line', 'Customer A12'];
+  let terms = TERMS0.slice();
+  function renderTerms() {
+    const box = $('#terms'); $$('.term', box).forEach(n => n.remove());
+    terms.forEach((t, i) => {
+      const s = document.createElement('span'); s.className = 'term enter';
+      s.innerHTML = `<span></span><button aria-label="Remove term"><i data-lucide="x" class="icon-sm"></i></button>`;
+      s.querySelector('span').textContent = t;
+      s.querySelector('button').addEventListener('click', () => { terms.splice(i, 1); renderTerms(); });
+      box.insertBefore(s, $('#termInput'));
+    });
+    icons();
+  }
+  $('#termInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.value.trim()) { terms.push(e.target.value.trim()); e.target.value = ''; renderTerms(); }
+  });
+  $$('[data-toggle]').forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', String(s.getAttribute('aria-checked') !== 'true'))));
+
+  const pubSwitch = $('#publicSwitch');
+  pubSwitch.addEventListener('click', () => {
+    if (pubSwitch.getAttribute('aria-checked') === 'true') {
+      pubSwitch.setAttribute('aria-checked', 'false');
+      $('#publicOnWrap').dataset.state = 'closed';
+      setDest(false); toast('Public web search is off');
+    } else {
+      $('#publicWarnWrap').dataset.state = 'open';
+      setTimeout(() => $('#pwOn').focus(), reduce() ? 0 : 200);
+    }
+  });
+  $('#pwCancel').addEventListener('click', () => { $('#publicWarnWrap').dataset.state = 'closed'; pubSwitch.focus(); });
+  $('#pwOn').addEventListener('click', () => {
+    $('#publicWarnWrap').dataset.state = 'closed';
+    pubSwitch.setAttribute('aria-checked', 'true');
+    setTimeout(() => { $('#publicOnWrap').dataset.state = 'open'; }, reduce() ? 0 : 200);
+    setDest(true); toast('Public web search is on', 'triangle-alert');
+  });
+  function setDest(on) {
+    const list = $('#destList'); const ex = $('#pubDest');
+    if (on && !ex) { const li = document.createElement('li'); li.id = 'pubDest'; li.className = 'enter'; li.innerHTML = '<i data-lucide="globe" class="icon-sm"></i>Public search engines<span class="src">Added by you · public web search</span>'; list.appendChild(li); icons(); }
+    if (!on && ex) ex.remove();
+  }
+
+  /* ---------- log ---------- */
+  const LOG0 = [
+    { time: 'today 10:46', to: 'Semantic Scholar', q: 'sparsity constraint segmentation small defects', orig: 'sparsity-constrained segmentation for KESTREL wafer micro-defects under dark-field illumination', dec: 'rewritten', decLabel: 'Rewritten', by: 'Review (small model)', chat: 'Wafer defects × sparsity priors' },
+    { time: 'today 10:46', to: 'Public web search', q: 'KESTREL v3 defect dataset', dec: 'blocked', decLabel: 'Blocked', by: 'Sensitive term', chat: 'Wafer defects × sparsity priors' },
+    { time: 'today 10:45', to: 'arXiv', q: 'id 2511.04217', dec: 'sent', decLabel: 'Sent', by: 'Exact id, no text', chat: 'Wafer defects × sparsity priors' },
+    { time: 'today 09:12', to: 'Trusted search', q: 'one-step diffusion policy distillation', dec: 'sent', decLabel: 'Sent', by: 'Review (small model)', chat: 'Diffusion policy reading' },
+    { time: 'yesterday 17:30', to: 'Hand-over export', q: 'Experiment #7 instruction · 3.1 kB · filter on', dec: 'sent', decLabel: 'Copied', by: 'Review + filter', chat: '' },
+    { time: 'yesterday 16:02', to: 'Cloud model', q: 'gemini/gemini-3.5-flash (content not logged)', dec: 'sent', decLabel: 'Sent', by: 'Not reviewed', chat: 'Reranker ideas from anchor boxes' },
+    { time: '2 days ago', to: 'Semantic Scholar', q: 'anchor box interaction reranking image retrieval', dec: 'sent', decLabel: 'Sent', by: 'Review (small model)', chat: 'Reranker ideas from anchor boxes' },
+  ];
+  let log = LOG0.slice();
+  const HELD0 = [
+    { time: 'today 10:46', to: 'Public web search', chat: 'Wafer defects × sparsity priors', q: 'dark-field micro-defect segmentation sparsity prior 2025', why: 'May reveal the inspection setup in TR-0412, a private document' },
+    { time: 'today 06:00', to: 'Semantic Scholar', from: 'Trending watch', q: 'wafer defect inspection sparse segmentation 2025', why: 'Built from a domain that includes a private report' },
+    { time: 'yesterday 06:00', to: 'Semantic Scholar', from: 'Trending watch', q: 'dark-field illumination defect detection', why: 'Review timed out' },
+  ];
+  let held = HELD0.slice();
+  const decIcon = { sent: 'check', rewritten: 'pen-line', blocked: 'shield-x', asked: 'shield-question', held: 'clock' };
+  function addLog(row) { log.unshift(Object.assign({ chat: 'Wafer defects × sparsity priors' }, row)); renderLog(); }
+  const CHAT_TITLES = new Set(['Wafer defects × sparsity priors', 'Reranker ideas from anchor boxes', 'Diffusion policy reading']);
+  /* A chat name in the log is a link that opens that chat (Fix 3). */
+  function chatCell(name) {
+    if (!name || !CHAT_TITLES.has(name)) { const s = document.createElement('span'); s.textContent = name || 'No chat'; return s; }
+    const b = document.createElement('button'); b.className = 'chat-jump';
+    b.innerHTML = '<i data-lucide="message-square" class="icon-sm"></i><span></span>';
+    b.querySelector('span').textContent = name;
+    b.addEventListener('click', () => openChat(name, false));
+    return b;
+  }
+  function renderLog() {
+    const fd = $('#fDec').value, ft = $('#fDest').value;
+    const map = { Sent: 'sent', Rewritten: 'rewritten', Asked: 'asked', Blocked: 'blocked' };
+    const rows = log.filter(r => (!fd || r.dec === map[fd]) && (!ft || r.to === ft));
+    const ul = $('#logBody'); ul.innerHTML = '';
+    if (!rows.length) { ul.innerHTML = '<li class="empty">Nothing matches these filters.</li>'; return; }
+    rows.forEach(r => {
+      const li = document.createElement('li'); li.className = 'log-row';
+      li.innerHTML = `<div class="l1"><span class="dec ${r.dec}"><i data-lucide="${decIcon[r.dec]}" class="icon-sm"></i><span></span></span><span class="dest"></span><span class="time"></span></div><span class="q"></span><div class="l3"><span class="by"></span></div>`;
+      li.querySelector('.dec span').textContent = r.decLabel; li.querySelector('.dest').textContent = r.to;
+      li.querySelector('.time').textContent = r.time; li.querySelector('.q').textContent = r.q;
+      if (r.orig) { const o = document.createElement('span'); o.className = 'orig'; o.textContent = r.orig; li.querySelector('.q').after(o); }
+      li.querySelector('.by').textContent = r.by; li.querySelector('.l3').appendChild(chatCell(r.chat));
+      ul.appendChild(li);
+    });
+    icons();
+  }
+  function removeHeldRow(li, i, after) {
+    li.classList.add('leaving');
+    setTimeout(() => { held.splice(i, 1); renderHeld(); after && after(); }, reduce() ? 0 : 200);
+  }
+  function renderHeld() {
+    const ul = $('#heldBody'); ul.innerHTML = '';
+    const rows = held.filter(h => !(h.chat && !heldInChat));
+    if (!rows.length) { ul.innerHTML = '<li class="empty">No held searches.</li>'; updateHeldCounts(); return; }
+    rows.forEach(h => {
+      const i = held.indexOf(h);
+      const li = document.createElement('li'); li.className = 'log-row enter';
+      li.innerHTML = `<div class="l1"><span class="dec held"><i data-lucide="clock" class="icon-sm"></i><span>Waiting for your OK</span></span><span class="dest"></span><span class="time"></span></div><span class="q"></span><div class="l3"><span class="why"></span><span class="from"></span></div><div class="held-row-actions btn-row"></div>`;
+      li.querySelector('.dest').textContent = h.to; li.querySelector('.time').textContent = h.time;
+      li.querySelector('.q').textContent = h.q; li.querySelector('.why').textContent = h.why;
+      const acts = li.querySelector('.held-row-actions');
+      if (h.chat) {
+        li.querySelector('.from').appendChild(chatCell(h.chat));
+        // A chat's search is decided in its chat, where the follow-up turn runs.
+        acts.innerHTML = '<button class="btn btn-primary"><i data-lucide="message-square-share" class="icon-sm"></i>Open in chat to decide</button>';
+        acts.firstChild.addEventListener('click', () => openChat(h.chat, true));
+      } else {
+        li.querySelector('.from').textContent = 'From ' + h.from;
+        acts.innerHTML = '<button class="btn btn-primary">Send</button><button class="btn btn-ghost">Discard</button>';
+        const [send, drop] = acts.querySelectorAll('button');
+        send.addEventListener('click', () => removeHeldRow(li, i, () => { addLog({ time: 'today 10:50', to: h.to, q: h.q, dec: 'asked', decLabel: 'Held · you sent it', by: 'You', chat: '' }); toast('Sent. Results appear on the Ideas graph.'); }));
+        drop.addEventListener('click', () => removeHeldRow(li, i, () => toast('Discarded. Nothing was sent.')));
+      }
+      ul.appendChild(li);
+    });
+    updateHeldCounts(); icons();
+  }
+  function updateHeldCounts() {
+    const n = held.filter(h => !(h.chat && !heldInChat)).length;
+    $('#heldCount').textContent = String(n); $('#heldCount').hidden = n === 0;
+    $('#heldTabCount').textContent = String(n);
+    renderChats(); updatePill();
+  }
+
+  /* ---------- Fix 4: sidebar chats grouped by last activity, newest first ---------- */
+  const CHATS0 = [
+    { title: 'Wafer defects × sparsity priors', group: 'Today' },
+    { title: 'Reranker ideas from anchor boxes', group: 'Yesterday' },
+    { title: 'Fork of Reranker ideas from anchor boxes', group: 'Yesterday', fork: true },
+    { title: 'Diffusion policy reading', group: 'Previous 7 days' },
+    { title: 'Tiny-object segmentation survey', group: 'Previous 7 days' },
+    { title: 'Lab meeting deck: GISC', group: 'Previous 30 days' },
+    { title: 'Anchor-free detectors, a reading list', group: 'September 2026' },
+  ];
+  let chats = CHATS0.slice();
+  let activeChat = 'Wafer defects × sparsity priors';
+  const collapsed = new Set();
+  function renderChats() {
+    const box = $('#chatList'); if (!box) return; box.innerHTML = '';
+    const groups = [];
+    chats.forEach(c => { let g = groups.find(x => x.name === c.group); if (!g) groups.push(g = { name: c.group, items: [] }); g.items.push(c); });
+    groups.forEach(g => {
+      const open = !collapsed.has(g.name);
+      const h = document.createElement('button'); h.className = 'chat-group-h'; h.setAttribute('aria-expanded', String(open));
+      h.innerHTML = '<span></span><i data-lucide="chevron-down" class="icon-sm chev"></i>';
+      h.firstChild.textContent = g.name;
+      const body = document.createElement('div'); body.className = 'collapse'; body.dataset.state = open ? 'open' : 'closed';
+      const inner = document.createElement('div'); body.appendChild(inner);
+      g.items.forEach(c => {
+        const b = document.createElement('button');
+        b.className = 'chat-link' + (c.title === activeChat ? ' active' : '') + (c.fork ? ' fork' : '');
+        b.innerHTML = '<span></span>'; b.firstChild.textContent = c.title; b.title = c.title;
+        const waiting = c.title === 'Wafer defects × sparsity priors' && !stopped ? waitingCount() : 0;
+        if (waiting) { const m = document.createElement('span'); m.className = 'held-mark'; m.title = `Paused: ${waiting} item${waiting > 1 ? 's need' : ' needs'} your OK`; m.innerHTML = '<i data-lucide="shield-question" class="icon-sm"></i>' + waiting; b.appendChild(m); }
+        b.addEventListener('click', () => openChat(c.title, false));
+        inner.appendChild(b);
+      });
+      h.addEventListener('click', () => { if (open) collapsed.add(g.name); else collapsed.delete(g.name); h.setAttribute('aria-expanded', String(!open)); body.dataset.state = open ? 'closed' : 'open'; setTimeout(renderChats, reduce() ? 0 : 200); });
+      box.appendChild(h); box.appendChild(body);
+    });
+    icons();
+  }
+  $('.sidebar .nav-item').addEventListener('click', () => {
+    let n = 1; while (chats.some(c => c.title === (n === 1 ? 'New chat' : 'New chat ' + n))) n++;
+    const title = n === 1 ? 'New chat' : 'New chat ' + n;
+    chats.unshift({ title, group: 'Today' }); collapsed.delete('Today'); activeChat = title; renderChats();
+    toast('New chats start at the top of Today.', 'square-pen');
+  });
+
+  /* ---------- Fix 3: jump to a chat (and its waiting card) ---------- */
+  function openChat(title, toCard) {
+    activeChat = title; renderChats(); show('chat');
+    if (title !== 'Wafer defects × sparsity priors') { toast('The prototype only has the Wafer defects chat; the real app opens “' + title + '”.', 'message-square'); return; }
+    if (toCard && waitingCount()) setTimeout(() => focusCard(), reduce() ? 0 : 60);
+  }
+  // Cards still waiting, in thread order: [card, its first button].
+  function waitingCards() {
+    const out = [];
+    if (stopped) return out;
+    if (mode === 'auto') { if (heldInChat) out.push([$('#heldCard'), $('#sendBtn')]); return out; }
+    if (askPending) out.push([$('#askCard'), $('#askAllowBtn')]);
+    if (actionPending) out.push([$('#actionCard'), $('#actConfirmBtn')]);
+    return out;
+  }
+  let pillTarget = null;
+  function focusCard(target) {
+    const [card, btn] = target || pillTarget || waitingCards()[0] || [];
+    if (!card) return;
+    card.scrollIntoView({ behavior: reduce() ? 'auto' : 'smooth', block: 'center' });
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    setTimeout(() => btn.focus({ preventScroll: true }), reduce() ? 0 : 400);
+  }
+  function updatePill() {
+    const pill = $('#needsOkPill'); if (!pill) return;
+    const th = $('#thread').getBoundingClientRect();
+    pillTarget = null;
+    if (!stopped && !$('#view-chat').hidden) {
+      for (const pair of waitingCards()) {
+        const c = pair[0].getBoundingClientRect();
+        if (c.bottom < th.top + 8 || c.top > th.bottom - 8) { pillTarget = pair; break; }
+      }
+    }
+    if (pillTarget) {
+      const n = waitingCards().length;
+      pill.innerHTML = `<i data-lucide="shield-question" class="icon-sm"></i>${n > 1 ? `Paused · ${n} items need your OK` : 'Paused · waiting for your OK'}<i data-lucide="${pillTarget[0].getBoundingClientRect().top < th.top ? 'arrow-up' : 'arrow-down'}" class="icon-sm"></i>`;
+      icons();
+    }
+    pill.dataset.state = pillTarget ? 'open' : 'closed'; pill.tabIndex = pillTarget ? 0 : -1;
+  }
+  $('#needsOkPill').addEventListener('click', () => focusCard());
+  $('#thread').addEventListener('scroll', updatePill, { passive: true });
+  window.addEventListener('resize', updatePill);
+
+  /* ---------- Fix 1: the cloud-model notice opens on demand ---------- */
+  $('#cloudBtn').addEventListener('click', e => {
+    const open = e.currentTarget.getAttribute('aria-expanded') !== 'true';
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+    e.currentTarget.firstChild.textContent = open ? 'Hide' : 'Show which';
+    const l = $('#cloudList'); l.dataset.state = open ? 'open' : 'closed'; l.inert = !open;
+  });
+  function setTab(t) {
+    $$('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+    $('#tab-all').hidden = t !== 'all'; $('#tab-held').hidden = t !== 'held';
+  }
+  $$('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  $('#fDec').addEventListener('change', renderLog); $('#fDest').addEventListener('change', renderLog);
+  $('#exportBtn').addEventListener('click', () => toast('CSV export downloads in the real app', 'download'));
+
+  /* ---------- reset ---------- */
+  function reset() {
+    terms = TERMS0.slice(); log = LOG0.slice(); held = HELD0.slice(); chats = CHATS0.slice(); activeChat = 'Wafer defects × sparsity priors'; collapsed.clear(); heldInChat = true;
+    renderTerms(); renderLog(); renderHeld();
+    const wrap = $('#heldCardWrap'); wrap.dataset.state = 'open'; $('#heldDone').hidden = true;
+    actionPending = true; heldSent = null; actionDone = null; stopped = false;
+    askPending = true; askResult = null; $('#turn').dataset.mode = mode; phase = 'paused'; stoppedWith = null; openNodes.clear();
+    $('#askCardWrap').dataset.state = 'open'; $('#askDone').hidden = true; setDeny(false); $('#askDenyText').value = '';
+    const at = $('#askText'); at.setAttribute('contenteditable', 'false'); at.textContent = ASK_Q;
+    $('#askEditBtn').innerHTML = '<i data-lucide="pencil" class="icon-sm"></i>Edit, then allow'; $('#askAllowBtn').innerHTML = '<i data-lucide="check" class="icon-sm"></i>Allow';
+    $('#modeBtn').title = 'Approval mode (prototype: switches the example turn)';
+
+    $('#actionCardWrap').dataset.state = 'open'; $('#actionDone').hidden = true;
+    $('#pausedWrap').dataset.state = 'open'; $('#answer').hidden = true; $('#answer').innerHTML = ''; $('#stopBtn').dataset.state = 'open';
+    { const n = waitingCount(); $('#pausedText').textContent = `Paused · ${n} item${n > 1 ? 's wait' : ' waits'} for your OK. I'll continue as soon as you decide.`; }
+
+
+    renderChats(); renderTrace();
+    const t = $('#heldText'); t.setAttribute('contenteditable', 'false'); t.textContent = 'dark-field micro-defect segmentation sparsity prior 2025';
+    $('#editBtn').innerHTML = '<i data-lucide="pencil" class="icon-sm"></i>Edit, then send';
+    $('#sendBtn').innerHTML = '<i data-lucide="send" class="icon-sm"></i>Send as shown';
+    pubSwitch.setAttribute('aria-checked', 'false'); $('#publicWarnWrap').dataset.state = 'closed'; $('#publicOnWrap').dataset.state = 'closed'; setDest(false);
+    icons();
+  }
+  $('#resetBtn').addEventListener('click', reset);
+
+  renderTerms(); renderLog(); renderHeld(); renderTrace();
+  show(location.hash.slice(1) || 'chat');
+  icons();
+})();
+</script>

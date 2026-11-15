@@ -224,3 +224,17 @@ async def test_run_backfill_exits_promptly_on_stop(
             run_backfill(migrated_db, stop=stop, initial_delay_s=0.0), timeout=2,
         )
     fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_backfill_skips_private_rows(migrated_db: aiosqlite.Connection) -> None:
+    """A private document with an arxiv_id never reaches the arXiv request."""
+    pcid = await _insert(
+        migrated_db, arxiv_id="2510.21771", title="Private", authors=[], year=None,
+    )
+    await migrated_db.execute(
+        "UPDATE paper_content SET is_private = 1 WHERE id = ?", (pcid,))
+    await migrated_db.commit()
+    with patch("paperhub.pipelines.arxiv_metadata_backfill.fetch_arxiv_by_ids") as f:
+        assert await backfill_once(migrated_db) is True
+    f.assert_not_called()

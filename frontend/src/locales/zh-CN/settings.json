@@ -26,6 +26,7 @@
     "title": "欢迎使用 PaperHub",
     "subtitle": "连接模型提供商即可开始对话。请在“设置”中完成以下步骤：",
     "lockNote": "在三项均有效之前，输入框将保持锁定。",
+    "lockedStep": "由部署者在 backend/.env 中设置，请联系部署者修正。",
     "optionalSS": "可选：可在“设置 → 集成服务”添加 Semantic Scholar API 密钥以加速论文搜索（免费层级有速率限制，但不会阻挡任何功能）。",
     "optionalSSLink": "获取密钥",
     "openSettings": "打开设置",
@@ -50,7 +51,8 @@
     "models_providers": "模型与供应商",
     "agents_memory": "智能体与记忆",
     "integrations": "集成服务",
-    "system": "系统"
+    "system": "系统",
+    "privacy_outbound": "隐私与对外连接"
   },
   "group": {
     "paper_sources": "论文搜索与开放获取",
@@ -197,6 +199,93 @@
     },
     "PAPERHUB_AGENT_KEEP_TURNS": {
       "label": "代理原文保留的对话轮数"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW": {
+      "label": "审查对外搜索",
+      "help": "当查询可能泄露你的私人文档、笔记或实验时，改写或暂停该查询。"
+    },
+    "PAPERHUB_OUTBOUND_UNSURE": {
+      "label": "审查无法判断时",
+      "help": "发送前先询问我，或一律不发送。"
+    },
+    "PAPERHUB_SENSITIVE_TERMS": {
+      "label": "敏感词",
+      "help": "绝不发送到任何地方：产品名称、项目名称、客户。匹配时不区分大小写。"
+    },
+    "PAPERHUB_PRIVATE_UPLOAD_DEFAULT": {
+      "label": "新上传默认私有",
+      "help": "上传表单默认勾选“私人文档”。公开论文仍可取消勾选。"
+    },
+    "PAPERHUB_TRUSTED_SEARCH_URL": {
+      "label": "受信任的搜索服务",
+      "help": "贵组织的搜索服务。查询只会留在你的网络内。"
+    },
+    "PAPERHUB_PUBLIC_WEB_SEARCH": {
+      "label": "公开网络搜索",
+      "help": "Bing、DuckDuckGo 等公开搜索引擎。能找到更多内容，包括最新与热门的研究。"
+    },
+    "PAPERHUB_OUTBOUND_ALLOWLIST": {
+      "label": "允许的目的地",
+      "help": "PaperHub 可连接的主机，其余一律拦截。"
+    },
+    "PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS": {
+      "label": "保留记录天数",
+      "help": "对外连接记录的保留期限（至少 7 天）。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_MODEL": {
+      "label": "审查模型",
+      "help": "判断每个对外请求的模型。留空则使用小型模型。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_TIMEOUT": {
+      "label": "审查超时（秒）",
+      "help": "等待审查结果的时间，超时后按“无法判断”的设置处理。"
+    }
+  },
+  "privacy": {
+    "lockedByDeployer": "由部署者设置",
+    "lockedCount": "{{count}} 项由部署者设置",
+    "removeItem": "移除 {{item}}",
+    "addItemPlaceholder": "输入后按 Enter 添加",
+    "termPlaceholder": "输入词汇后按 Enter",
+    "hostPlaceholder": "输入主机后按 Enter",
+    "publicWarnTitle": "你的搜索文字将离开这台设备。",
+    "publicWarnBody": "查询会发送到组织以外的公开搜索引擎。每一条仍会先经过审查，但查询内容可能透露你的研究，风险由你自行承担。",
+    "publicTurnOn": "开启公开搜索",
+    "publicKeepOff": "保持关闭",
+    "publicOnNote": "已开启。查询经审查后会发送到公开搜索引擎。",
+    "nonLocalOne": "有 1 项设置使用云端模型，部分文字可能离开这台设备。",
+    "nonLocalMany": "有 {{count}} 项设置使用云端模型，部分文字可能离开这台设备。",
+    "groupReview": "对外审查",
+    "groupReviewIntro": "每一次带有你文字的搜索或抓取，在离开这台设备前都会先检查。",
+    "groupSearch": "网络搜索",
+    "groupSearchIntro": "两种搜索网络的方式，两者都会经过对外审查。",
+    "groupDestinations": "允许的目的地",
+    "groupDestinationsIntro": "PaperHub 只会连接这些主机，其余一律拦截。",
+    "groupLog": "对外记录",
+    "groupLogIntro": "所有离开这台设备的内容，保留供查看。",
+    "unsureAsk": "询问我",
+    "unsureBlock": "不要发送",
+    "srcPaperSource": "论文来源",
+    "srcTrustedSearch": "受信任搜索",
+    "srcPublicSearch": "公开搜索",
+    "srcDeployer": "部署者",
+    "anyHost": "任何主机",
+    "allowlistExtra": "额外允许的主机",
+    "days": "天",
+    "advanced": "审查模型与超时",
+    "publicOnNoteBy": "已开启。查询经审查后会发送到公开搜索引擎。由你于 {{when}} 开启。",
+    "trustedReachable": "可连接",
+    "trustedUnreachable": "无法连接",
+    "invalidUrl": "请输入完整的 http:// 或 https:// 地址，或留空。",
+    "invalidNumber": "请输入允许范围内的整数。",
+    "cloudShow": "显示是哪些",
+    "cloudHide": "隐藏",
+    "cloudModelSettings_one": "{{count}} 项设置：{{names}}",
+    "cloudModelSettings_other": "{{count}} 项设置：{{names}}",
+    "serverEnv": "{{name}}（服务器环境）",
+    "envModel": {
+      "PAPERHUB_MARKER_LLM_MODEL": "Marker 精确度处理",
+      "PAPERHUB_AGENT_VISION": "代理视觉"
     }
   }
 }

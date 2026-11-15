@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 
+from paperhub.outbound.policy import locked_keys
+
 # key -> value held by os.environ BEFORE the first override (None = was unset).
 _base: dict[str, str | None] = {}
 
@@ -37,8 +39,11 @@ def clear_override(key: str) -> None:
 
 
 def apply_overlay(rows: dict[str, str]) -> None:
-    """Apply every DB row onto os.environ (records base first)."""
+    """Apply every unlocked DB row onto os.environ (records base first)."""
+    locked = locked_keys()
     for key, value in rows.items():
+        if key in locked:
+            continue  # env-only: a stale DB row never overrides the deployer
         set_override(key, value)
 
 

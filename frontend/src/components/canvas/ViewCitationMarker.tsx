@@ -12,7 +12,7 @@ interface Props {
   ordinal: number;
 }
 
-/** Superscript citation of a page region the agent viewed
+/** Bracketed citation (`[⌕ 3]`) of a page region the agent viewed
  * (`[view:P/N/box]`). Clicking it opens the reader on that page with the
  * region highlighted. */
 export function ViewCitationMarker({ paper, page, box, ordinal }: Props) {
@@ -26,8 +26,8 @@ export function ViewCitationMarker({ paper, page, box, ordinal }: Props) {
         className={EVIDENCE_MARKER_CLASS}
         onClick={() => openView(paper, page, box)}
       >
-        <ScanSearch className="h-[1em] w-[1em]" aria-hidden />
-        {ordinal}
+        [<ScanSearch className="h-[1em] w-[1em]" aria-hidden />
+        {ordinal}]
       </button>
     </sup>
   );

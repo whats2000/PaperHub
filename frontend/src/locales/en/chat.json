@@ -77,7 +77,8 @@
     "stopping": "Stopping…",
     "copy": "Copy message",
     "fork": "Fork from this message",
-    "forkTitle": "Fork from here — branch a new chat and edit this message"
+    "forkTitle": "Fork from here — branch a new chat and edit this message",
+    "sentSearch": "Sent search: {{text}}"
   },
   "routing": {
     "paper_search": "Paper search",
@@ -121,7 +122,111 @@
     "empty": "No steps recorded.",
     "retry": "retry",
     "agentStep": "Step {{n}}",
-    "answer": "answer"
+    "answer": "answer",
+    "paused": "paused · waiting for your OK",
+    "tl": {
+      "technical": "Technical view",
+      "rawSteps": "View raw steps ({{count}})",
+      "backToActivity": "Back to activity view",
+      "head": {
+        "worked": "Worked {{duration}}",
+        "workedParts": "Worked {{duration}}: {{parts}}",
+        "workedNoTime": "Worked",
+        "workedNoTimeParts": "Worked: {{parts}}",
+        "readSections_one": "read {{count}} section",
+        "readSections_other": "read {{count}} sections",
+        "searches_one": "ran {{count}} search",
+        "searches_other": "ran {{count}} searches",
+        "paused_one": "Paused, waiting for your OK on {{count}} item",
+        "paused_other": "Paused, waiting for your OK on {{count}} items",
+        "stopped": "Stopped. Nothing waiting was sent or run.",
+        "working": "Working…"
+      },
+      "answer": "Wrote the answer",
+      "writing": "Writing the answer…",
+      "thinking": "Thinking…",
+      "goToCard": "Go to card",
+      "details": "Details",
+      "queriesDetails": "Queries and details",
+      "d": {
+        "tool": "Tool",
+        "calledIn": "Called in",
+        "calledInValue": "agent step {{n}} · {{model}}",
+        "status": "Status",
+        "internal": "Internal steps"
+      },
+      "unknownPaper": "paper {{id}}",
+      "title": {
+        "list_sections": "Listed the sections of {{paper}}",
+        "read_section": "Read “{{section}}” in {{paper}}",
+        "read_chunks_one": "Read {{count}} passage",
+        "read_chunks_other": "Read {{count}} passages",
+        "search_chunks": "Searched this chat's papers for “{{query}}”",
+        "list_figures_tables": "Listed the figures and tables of {{paper}}",
+        "read_layout_object": "Read {{label}} in {{paper}}",
+        "view_figure": "Looked at {{figure}} in {{paper}}",
+        "view_page": "Looked at page {{page}} of {{paper}}",
+        "zoom": "Zoomed into page {{page}} of {{paper}}",
+        "view_chunk": "Looked at passage {{id}} on its page",
+        "gather_one": "Gathered passages from {{count}} paper",
+        "gather_other": "Gathered passages from {{count}} papers",
+        "query_library": "Asked your library: “{{question}}”",
+        "search_papers": "Searched papers for “{{query}}”",
+        "search_papers_pending": "Search papers for “{{query}}”",
+        "search_papers_running": "Searching papers for “{{query}}”",
+        "add_paper": "Added {{title}} to this chat",
+        "add_paper_failed": "Add {{title}} to this chat",
+        "remember": "Saved to memory: “{{fact}}”",
+        "forget": "Forgot memory {{id}}",
+        "forget_pending": "Forget memory {{id}}",
+        "remove_paper": "Removed “{{paper}}” from this chat",
+        "remove_paper_pending": "Remove “{{paper}}” from this chat",
+        "list_ideas": "Listed ideas",
+        "propose_ideas": "Started idea generation for “{{problem}}”",
+        "create_deck": "Built a slide deck",
+        "edit_slides": "Edited the slides",
+        "write_notes": "Wrote speaker notes"
+      },
+      "sub": {
+        "passages_one": "{{count}} passage",
+        "passages_other": "{{count}} passages",
+        "hits_one": "{{count}} hit",
+        "hits_other": "{{count}} hits",
+        "waitingSearch": "Waiting for your OK before anything is sent.",
+        "waiting": "Waiting for your OK.",
+        "stopped": "Not run: the turn was stopped.",
+        "stoppedSearch": "Not searched: the turn was stopped.",
+        "declined": "Not searched: you didn't allow it.",
+        "declinedNote": "Not searched. You told the agent: “{{note}}”",
+        "dismissed": "Not done: you dismissed it.",
+        "confirmed": "You confirmed it.",
+        "autoApproved": "Auto-approved.",
+        "pending": "Not run: it waited for your OK.",
+        "allowedEdited": "You edited the query before allowing it.",
+        "found_one": "Found {{count}} paper.",
+        "found_other": "Found {{count}} papers.",
+        "sent_one": "{{count}} query sent",
+        "sent_other": "{{count}} queries sent",
+        "rewritten": "({{count}} rewritten first)",
+        "notSent": "{{count}} not sent",
+        "timedOut": "{{count}} timed out",
+        "heldWaiting": "{{count}} waiting for your OK"
+      },
+      "lookups_one": "Also looked up {{count}} found paper by ID ({{ids}}). ID lookups are sent without review.",
+      "lookups_other": "Also looked up {{count}} found papers by ID ({{ids}}). ID lookups are sent without review.",
+      "q": {
+        "sent": "Sent",
+        "rewritten": "Rewritten before sending: {{reason}}",
+        "sentAfterOk": "Sent after your OK",
+        "sentAfterEdit": "Sent after your edit",
+        "blockedTerm": "Not sent: contains the sensitive term {{term}}",
+        "blocked": "Not sent: blocked",
+        "held": "Waiting for your OK: {{reason}}",
+        "declined": "Not sent: you chose not to",
+        "stopped": "Not sent: the turn was stopped",
+        "timeout": "The search service timed out"
+      }
+    }
   },
   "panel": {
     "memory": "Memory",
@@ -133,9 +238,7 @@
     "papers_one": "read {{count}} paper",
     "papers_other": "read {{count}} papers",
     "steps_one": "{{count}} step",
-    "steps_other": "{{count}} steps",
-    "tools": "Tools used: {{tools}}",
-    "noTools": "Answered without tools"
+    "steps_other": "{{count}} steps"
   },
   "agentEvent": {
     "paperAdded": "Added paper",
@@ -173,17 +276,99 @@
     "menuTitle": "Approval mode",
     "ask": {
       "title": "Ask first",
-      "desc": "Asks you before removing a paper or forgetting a memory",
-      "tooltip": "Actions that change your library or memory (remove a paper, forget a memory) wait for your confirmation. Applies to this chat only; this is the default."
+      "desc": "Asks before searching outside PaperHub, removing a paper or forgetting a memory",
+      "tooltip": "The agent's searches outside PaperHub and actions that change your library or memory (remove a paper, forget a memory) wait for your OK. Applies to this chat only; this is the default."
     },
     "auto": {
       "title": "Auto",
-      "desc": "Runs actions that pass a quick check; asks for anything risky",
-      "tooltip": "When on, a quick check decides whether actions that normally need your confirmation (removing a paper, forgetting a memory) can run without asking. Applies to this chat only; off by default."
+      "desc": "Searches run (the privacy guard asks about a flagged query); actions that pass a quick check run",
+      "tooltip": "Searches run without a card; the privacy guard checks every query and asks only about a flagged one. A quick check decides whether actions that normally need your confirmation (removing a paper, forgetting a memory) can run without asking. Applies to this chat only; off by default."
     },
-    "failed": "Couldn't change auto-approve"
+    "failed": "Couldn't change auto-approve",
+    "searchesAllowed": "Searches in this chat run without asking.",
+    "askAgain": "Ask again"
   },
   "proposals": {
     "label": "Suggested follow-ups"
+  },
+  "outbound": {
+    "dest": {
+      "publicSearch": "public web search",
+      "trusted": "trusted search",
+      "semanticScholar": "Semantic Scholar"
+    },
+    "chip": {
+      "title": "Search sent as",
+      "whatChanged": "What changed",
+      "sent": "Sent",
+      "written": "Written",
+      "why": "Why",
+      "to": "To"
+    },
+    "blocked": {
+      "term": "Not sent: <q>{{text}}</q> contains a sensitive term (<b>{{term}}</b>).",
+      "reason": "Not sent: <q>{{text}}</q>. {{reason}}"
+    },
+    "held": {
+      "title": "This search needs your OK",
+      "textLabel": "Search text",
+      "why": "Why you're asked:",
+      "to": "To:",
+      "sendAsShown": "Send as shown",
+      "edit": "Edit, then send",
+      "sendEdited": "Send edited text",
+      "cancelEdit": "Cancel edit",
+      "discard": "Don't send",
+      "sent": "Sent",
+      "sentEdited": "Sent after your edit",
+      "discarded": "Not sent. You chose not to send this search.",
+      "approvedNotRun": "Approved, not run yet",
+      "run": "Run the search",
+      "unavailable": "This search is no longer available.",
+      "sensitive": "It contains a sensitive term ({{term}}), so it can't be sent. Edit it and try again.",
+      "sensitiveNoTerm": "It contains a sensitive term, so it can't be sent. Edit it and try again.",
+      "empty": "There is nothing to send.",
+      "stale": "This search was already handled.",
+      "alreadyRun": "This search was already run.",
+      "failed": "Couldn't send it. Try again.",
+      "runFailed": "Couldn't start the search. Try again.",
+      "discardFailed": "Couldn't discard it. Try again.",
+      "retryUnavailable": "That search can't be retried here. Use Run the search on its card."
+    },
+    "ask": {
+      "title": "Allow this search?",
+      "textLabel": "Search query",
+      "whyText": "Ask first is on for this chat. Nothing has been sent.",
+      "followUps": "The search may also send follow-up queries it writes from this one. Each is still checked for your sensitive terms and private material.",
+      "noDestination": "no search service is allowed",
+      "allow": "Allow",
+      "allowEdited": "Allow edited search",
+      "allowChat": "Allow searches in this chat",
+      "edit": "Edit, then allow",
+      "deny": "Don't allow",
+      "denyLabel": "Tell the agent what to do instead (optional)",
+      "denyPlaceholder": "e.g. Only use papers already in this chat.",
+      "cancel": "Cancel",
+      "allowed": "Allowed",
+      "allowedEdited": "Allowed after your edit",
+      "allowedChat": "later searches in this chat won't ask",
+      "allowedBySetting": "searches are allowed in this chat",
+      "alsoAllows": "also allows {{count}} waiting",
+      "declined": "Not searched. You didn't allow this search.",
+      "declinedNote": "Not searched. You told the agent:",
+      "stopped": "Not searched. The turn was stopped.",
+      "ended": "Not searched. This turn ended before you decided.",
+      "unavailable": "This search is no longer available.",
+      "chatAllowed": "Searches in this chat now run without asking. Actions still ask.",
+      "noteTooLong": "The note is too long (at most 1,000 characters).",
+      "stale": "This search was already decided.",
+      "failed": "Couldn't reach the server. Try again."
+    }
+  },
+  "paused": {
+    "line_one": "Paused · {{count}} item waits for your OK. I'll continue as soon as you decide.",
+    "line_other": "Paused · {{count}} items wait for your OK. I'll continue as soon as you decide.",
+    "pill_one": "Paused · waiting for your OK",
+    "pill_other": "Paused · {{count}} items need your OK"
   }
 }

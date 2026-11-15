@@ -45,7 +45,7 @@ async def backfill_once(conn: aiosqlite.Connection) -> bool:
     was pending (no request made)."""
     async with conn.execute(
         "SELECT id, arxiv_id FROM paper_content "
-        "WHERE kind = 'arxiv' AND arxiv_id IS NOT NULL "
+        "WHERE kind = 'arxiv' AND arxiv_id IS NOT NULL AND is_private = 0 "
         "AND (authors_json = '[]' OR year IS NULL) "
         "ORDER BY id LIMIT ?",
         (_BATCH,),

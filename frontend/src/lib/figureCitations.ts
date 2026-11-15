@@ -80,7 +80,7 @@ export function buildFigureOrdinalMap(content: string): Map<string, number> {
 
 /** Shared look of the evidence superscripts (figure and page region). */
 export const EVIDENCE_MARKER_CLASS = cn(
-  "mx-0.5 inline-flex cursor-pointer items-center gap-0.5 rounded px-1 text-[0.7em] font-medium text-primary",
+  "mx-0.5 inline-flex cursor-pointer items-center gap-px rounded px-0.5 text-[0.75rem] leading-none font-medium text-primary",
   "transition-colors duration-150 motion-reduce:transition-none",
   "hover:bg-primary/10 hover:underline",
 );

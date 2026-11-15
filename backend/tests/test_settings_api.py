@@ -153,3 +153,26 @@ async def test_model_options_reports_configured_providers(
     body = resp.json()
     assert "openai" in body["providers"]
     assert body["options"]["openai"] == ["openai/gpt-x"]
+
+
+async def test_get_settings_reports_profile_default(
+    settings_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PAPERHUB_PROFILE", "deployment")
+    monkeypatch.delenv("PAPERHUB_OUTBOUND_REVIEW", raising=False)
+    resp = await settings_client.get("/settings")
+    fields = {f["key"]: f for c in resp.json()["categories"] for f in c["fields"]}
+    assert fields["PAPERHUB_OUTBOUND_REVIEW"]["value"] == "1"
+    assert fields["PAPERHUB_PUBLIC_WEB_SEARCH"]["value"] == "0"
+
+
+async def test_get_settings_updated_at(settings_client: AsyncClient) -> None:
+    def field(body: dict, key: str) -> dict:
+        return next(f for c in body["categories"] for f in c["fields"] if f["key"] == key)
+
+    key = "PAPERHUB_PUBLIC_WEB_SEARCH"
+    before = field((await settings_client.get("/settings")).json(), key)
+    assert before["updated_at"] is None
+    assert (await settings_client.patch("/settings", json={key: "1"})).status_code == 200
+    after = field((await settings_client.get("/settings")).json(), key)
+    assert after["updated_at"]

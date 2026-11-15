@@ -26,6 +26,7 @@
     "title": "Welcome to PaperHub",
     "subtitle": "Connect a model provider to start chatting. Finish these steps in Settings:",
     "lockNote": "The composer stays locked until all three are valid.",
+    "lockedStep": "Set by the deployer in backend/.env. Ask them to fix it.",
     "optionalSS": "Optional: add a Semantic Scholar API key in Settings → Integrations for faster paper search (the free tier is rate-limited; it won't block anything).",
     "optionalSSLink": "Get a key",
     "openSettings": "Open Settings",
@@ -49,7 +50,8 @@
     "models_providers": "Models & providers",
     "agents_memory": "Agents & memory",
     "integrations": "Integrations",
-    "system": "System"
+    "system": "System",
+    "privacy_outbound": "Privacy & outbound"
   },
   "group": {
     "paper_sources": "Paper search & open access",
@@ -197,6 +199,93 @@
     },
     "PAPERHUB_AGENT_KEEP_TURNS": {
       "label": "Agent conversation turns kept verbatim"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW": {
+      "label": "Review outbound searches",
+      "help": "Rewrites or holds a query that would reveal your private documents, notes or experiments."
+    },
+    "PAPERHUB_OUTBOUND_UNSURE": {
+      "label": "When the review isn't sure",
+      "help": "Ask me before sending, or never send it."
+    },
+    "PAPERHUB_SENSITIVE_TERMS": {
+      "label": "Sensitive terms",
+      "help": "Never sent anywhere: product names, project names, customers. Matched without case."
+    },
+    "PAPERHUB_PRIVATE_UPLOAD_DEFAULT": {
+      "label": "New uploads are private",
+      "help": "Ticks \"private document\" on the upload form by default. You can still untick it for a public paper."
+    },
+    "PAPERHUB_TRUSTED_SEARCH_URL": {
+      "label": "Trusted search service",
+      "help": "Your organisation's search service. Queries stay on your network."
+    },
+    "PAPERHUB_PUBLIC_WEB_SEARCH": {
+      "label": "Public web search",
+      "help": "Bing, DuckDuckGo and other public engines. Finds more, including new and trending work."
+    },
+    "PAPERHUB_OUTBOUND_ALLOWLIST": {
+      "label": "Allowed destinations",
+      "help": "Hosts PaperHub may contact. Anything else is blocked."
+    },
+    "PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS": {
+      "label": "Keep entries for",
+      "help": "How long outbound log entries are kept (at least 7 days)."
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_MODEL": {
+      "label": "Review model",
+      "help": "Model that judges each outbound request. Leave empty to use the small tier."
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_TIMEOUT": {
+      "label": "Review timeout (seconds)",
+      "help": "How long to wait for the review before the unsure policy applies."
+    }
+  },
+  "privacy": {
+    "lockedByDeployer": "Set by the deployer",
+    "lockedCount": "{{count}} set by the deployer",
+    "removeItem": "Remove {{item}}",
+    "addItemPlaceholder": "Add one, then press Enter",
+    "termPlaceholder": "Add a term, then Enter",
+    "hostPlaceholder": "Add a host, then Enter",
+    "publicWarnTitle": "Your search text will leave this device.",
+    "publicWarnBody": "Queries go to public search engines outside your organisation. Each one is still reviewed first, but you take the risk of what a query reveals about your work.",
+    "publicTurnOn": "Turn on public search",
+    "publicKeepOff": "Keep it off",
+    "publicOnNote": "On. Queries reach public engines after review.",
+    "nonLocalOne": "1 setting uses a cloud model, so some text may leave this device.",
+    "nonLocalMany": "{{count}} settings use a cloud model, so some text may leave this device.",
+    "groupReview": "Outbound review",
+    "groupReviewIntro": "Every search or fetch that carries your text is checked before it leaves this device.",
+    "groupSearch": "Web search",
+    "groupSearchIntro": "Two ways to search the web. Both go through the outbound review.",
+    "groupDestinations": "Allowed destinations",
+    "groupDestinationsIntro": "PaperHub only contacts these hosts. Anything else is blocked.",
+    "groupLog": "Outbound log",
+    "groupLogIntro": "Everything that left this device, kept for review.",
+    "unsureAsk": "Ask me",
+    "unsureBlock": "Don't send",
+    "srcPaperSource": "Paper source",
+    "srcTrustedSearch": "Trusted search",
+    "srcPublicSearch": "Public search",
+    "srcDeployer": "Deployer",
+    "anyHost": "Any host",
+    "allowlistExtra": "Extra allowed hosts",
+    "days": "days",
+    "advanced": "Review model and timeout",
+    "publicOnNoteBy": "On. Queries reach public engines after review. Turned on by you, {{when}}.",
+    "trustedReachable": "Reachable",
+    "trustedUnreachable": "Not reachable",
+    "invalidUrl": "Enter a full http:// or https:// address, or leave it empty.",
+    "invalidNumber": "Enter a whole number within the allowed range.",
+    "cloudShow": "Show which",
+    "cloudHide": "Hide",
+    "cloudModelSettings_one": "{{count}} setting: {{names}}",
+    "cloudModelSettings_other": "{{count}} settings: {{names}}",
+    "serverEnv": "{{name}} (server environment)",
+    "envModel": {
+      "PAPERHUB_MARKER_LLM_MODEL": "Marker accuracy pass",
+      "PAPERHUB_AGENT_VISION": "Agent vision"
     }
   }
 }

@@ -1,4 +1,3 @@
-import { CircleHelp } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -10,7 +9,7 @@ interface Props {
   reason: string;
 }
 
-/** Superscript mark where a citation failed validation: the claim beside it
+/** A dashed `[?]` mark (FR-03) where a citation failed validation: the claim beside it
  * has no source the reader can check. Clicking it explains why, so the user
  * always knows which statements are unverified. */
 export function UnsourcedMarker({ reason }: Props) {
@@ -29,7 +28,7 @@ export function UnsourcedMarker({ reason }: Props) {
               type="button"
               aria-label={t("unsourced.aria", { reason: why })}
               className={cn(
-                "mx-0.5 inline-flex cursor-pointer items-center rounded border border-dashed border-muted-foreground/60 px-0.5 text-[0.7em] text-muted-foreground",
+                "mx-0.5 inline-flex cursor-pointer items-center rounded border border-dashed border-muted-foreground/60 px-0.5 text-[0.75rem] leading-none text-muted-foreground",
                 "transition-colors duration-150 motion-reduce:transition-none",
                 "hover:border-foreground hover:text-foreground",
                 open && "border-foreground text-foreground",
@@ -37,7 +36,7 @@ export function UnsourcedMarker({ reason }: Props) {
             />
           }
         >
-          <CircleHelp className="h-[1em] w-[1em]" aria-hidden />
+          [?]
         </PopoverTrigger>
         <PopoverContent
           side="top"

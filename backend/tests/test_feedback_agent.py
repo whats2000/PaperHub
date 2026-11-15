@@ -910,3 +910,54 @@ async def test_trajectory_rebuilds_a_zoomed_region(
     doc.save(tmp_path / "source.pdf")
     changed = await export_agent_trajectory(conn, RUN, include_private=True)
     assert changed["private"] is True
+
+
+async def test_trajectory_rebuilds_a_paused_turns_dismissed_and_confirmed_calls(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """H5a: a live turn pauses on its confirm cards; a dismissed card's
+    tool message and a confirmed one's real result rebuild from the trace."""
+    import asyncio
+
+    from paperhub import approvals
+    from paperhub.approvals import ApprovalDecision
+
+    conn = migrated_db
+    await _seed_session(conn)
+    pid, _ids = await _paper(conn, "2401.0007", {"Intro": ["Hello."]})
+    await _enable(conn, pid)
+    await conn.execute(
+        "INSERT INTO memories (id, scope, session_id, content, status) "
+        "VALUES (9, 'global', NULL, 'Answer briefly.', 'active')")
+    await conn.commit()
+    adapter = FakeAdapter([
+        _calls(("remove_paper", {"paper": pid})),
+        _calls(("forget", {"memory_id": 9})),
+        ToolTurn(content="Kept the paper; forgot the memory."),
+    ])
+
+    async def decide() -> None:
+        for approved in (False, True):
+            while True:
+                await asyncio.sleep(0.01)
+                keys = [k for k in approvals._waiters
+                        if approvals.has_waiter(k)]
+                if keys:
+                    break
+            approvals.deliver(keys[0], ApprovalDecision(approved))
+
+    approvals.open_run(RUN)
+    try:
+        decider = asyncio.create_task(decide())
+        await _drive_and_persist(conn, adapter, build_default_registry(), "Clean up")
+        await decider
+    finally:
+        approvals.close_run(RUN)
+
+    traj = await export_agent_trajectory(conn, RUN, include_private=True)
+    seen = adapter.calls[-1]
+    final = {"role": "assistant", "content": "Kept the paper; forgot the memory."}
+    assert _normalise_ids(traj["messages"]) == _normalise_ids([*seen, final])
+    tool_texts = [m["content"] for m in traj["messages"] if m.get("role") == "tool"]
+    assert tool_texts[0].startswith("The user dismissed remove_paper")
+    assert tool_texts[1].startswith("Forgot memory 9")

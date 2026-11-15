@@ -44,6 +44,23 @@ def _fresh_db_write_lock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _searches_do_not_ask(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live turn's search_papers call pauses on the Ask-first card (H5a)
+    until someone decides it; chat-flow tests that are not about that card
+    would wait forever. Tests marked ``ask_first`` keep the real gate."""
+    if request.node.get_closest_marker("ask_first") is not None:
+        return
+    from paperhub.agents.core import tools
+
+    async def never(_ctx: object, _args: object) -> bool:
+        return False
+
+    monkeypatch.setattr(tools, "_search_needs_ok", never)
+
+
+@pytest.fixture(autouse=True)
 def _no_arxiv_pdf_download(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests never fetch a page PDF from arXiv (a strict compile failing on
     a fixture would otherwise reach the network)."""

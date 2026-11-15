@@ -92,6 +92,40 @@ describe("AutoApproveToggle", () => {
     render(<AutoApproveToggle />);
     await user.click(chip());
     await user.hover(await pick(/^Auto/));
-    expect(await screen.findByText(/a quick check decides/)).toBeInTheDocument();
+    expect(await screen.findByText(/privacy guard checks every query/)).toBeInTheDocument();
+  });
+});
+
+describe("AutoApproveToggle: searches allowed in this chat (H5a)", () => {
+  it("says searches run without asking and Ask again turns it off", async () => {
+    server.use(
+      http.patch(`${API_BASE_URL}/sessions/:id`, async ({ request, params }) => {
+        const body = (await request.json()) as { allow_searches: boolean };
+        patches.push({ id: String(params.id), body });
+        return HttpResponse.json({
+          id: Number(params.id), auto_approve: false, allow_searches: body.allow_searches,
+        });
+      }),
+    );
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 1, title: "c", messages: [], backend_session_id: 42,
+          auto_approve: false, allow_searches: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<AutoApproveToggle />);
+    await user.click(chip());
+    const note = await screen.findByTestId("searches-allowed");
+    expect(note).toHaveAttribute("data-state", "open");
+    expect(note).toHaveTextContent("Searches in this chat run without asking.");
+    await user.click(screen.getByRole("button", { name: "Ask again" }));
+    await waitFor(() =>
+      expect(patches).toEqual([{ id: "42", body: { allow_searches: false } }]),
+    );
+    expect(useChatStore.getState().sessions[0]!.allow_searches).toBe(false);
+    expect(screen.getByTestId("searches-allowed")).toHaveAttribute("data-state", "closed");
   });
 });

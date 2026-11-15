@@ -8,11 +8,15 @@ category guarded by ``is_allowed_credential_key``.
 """
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 
-FieldType = Literal["string", "int", "bool", "email", "enum", "secret"]
+FieldType = Literal[
+    "string", "int", "bool", "email", "enum", "secret", "string_list",
+]
 
 # Domain labels exclude '.' so the dot separators are unambiguous — this avoids
 # the polynomial-backtracking overlap CodeQL flags (py/polynomial-redos) when
@@ -44,6 +48,35 @@ class SettingField:
     # Optional sub-group key within a category — the panel renders a heading per
     # contiguous group (the frontend localizes the title). Empty = ungrouped.
     group: str = ""
+    # Per-profile defaults (``dev`` / ``deployment``) overriding ``default``.
+    profile_defaults: Mapping[str, str] = field(default_factory=dict)
+    # Whether an empty value is a valid setting (e.g. "no terms", "unset").
+    allow_empty: bool = False
+
+
+def current_profile(
+    env: Mapping[str, str] | None = None,
+) -> Literal["dev", "deployment"]:
+    """The deployment profile from ``PAPERHUB_PROFILE`` (default ``dev``)."""
+    raw = (os.environ if env is None else env).get("PAPERHUB_PROFILE", "").strip().lower()
+    return "deployment" if raw == "deployment" else "dev"
+
+
+def effective_default(f: SettingField, profile: str) -> str | None:
+    """``f``'s default under ``profile`` (profile override, else ``default``)."""
+    return f.profile_defaults.get(profile, f.default)
+
+
+def parse_string_list(value: str) -> tuple[str, ...]:
+    """Split on newline/comma; trim, drop empties, de-dup case-insensitively."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in re.split(r"[\n,]", value or ""):
+        item = part.strip()
+        if item and item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return tuple(out)
 
 
 # Curated set of known LiteLLM provider env vars (offered as autocomplete in
@@ -262,6 +295,49 @@ SETTINGS_REGISTRY: list[SettingField] = [
                  help="Let PaperHub ask GitHub whether a newer release exists and "
                       "show an in-app notice. Turn off to disable all outbound "
                       "update checks (no network egress)."),
+    # ── Privacy & outbound (Plan H5a) ───────────────────────────────────
+    SettingField("PAPERHUB_OUTBOUND_REVIEW", "privacy_outbound", "Review outbound searches",
+                 "bool", default="0", profile_defaults={"dev": "0", "deployment": "1"},
+                 help="Check every search or request that leaves this device for "
+                      "sensitive content before it is sent."),
+    SettingField("PAPERHUB_OUTBOUND_UNSURE", "privacy_outbound", "When the review isn't sure",
+                 "enum", default="ask", choices=("ask", "block"),
+                 help="Ask you before sending, or block the request."),
+    SettingField("PAPERHUB_SENSITIVE_TERMS", "privacy_outbound", "Sensitive terms",
+                 "string_list", default="", allow_empty=True,
+                 help="Words or phrases that must never leave this device (one per "
+                      "line or comma-separated, case-insensitive)."),
+    SettingField("PAPERHUB_PRIVATE_UPLOAD_DEFAULT", "privacy_outbound",
+                 "New uploads are private", "bool", default="0",
+                 profile_defaults={"dev": "0", "deployment": "1"},
+                 help="Mark newly uploaded documents private so their content is "
+                      "never sent in outbound requests."),
+    SettingField("PAPERHUB_TRUSTED_SEARCH_URL", "privacy_outbound",
+                 "Trusted search service", "string", default="", allow_empty=True,
+                 help="URL of a search service you trust; searches that may carry "
+                      "private context go only here."),
+    SettingField("PAPERHUB_PUBLIC_WEB_SEARCH", "privacy_outbound", "Public web search",
+                 "bool", default="1", profile_defaults={"dev": "1", "deployment": "0"},
+                 help="Allow searching the public web. Queries leave this device."),
+    SettingField("PAPERHUB_OUTBOUND_ALLOWLIST", "privacy_outbound", "Allowed destinations",
+                 "string_list", default="*",
+                 profile_defaults={
+                     "dev": "*",
+                     "deployment": "export.arxiv.org,arxiv.org,api.semanticscholar.org,api.unpaywall.org",
+                 },
+                 help="Hosts PaperHub may contact (one per line or comma-separated); "
+                      "* allows all."),
+    SettingField("PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS", "privacy_outbound",
+                 "Keep entries for", "int", default="365", min=7,
+                 help="Days to keep outbound log entries."),
+    SettingField("PAPERHUB_OUTBOUND_REVIEW_MODEL", "privacy_outbound", "Review model",
+                 "string", default=None, allow_empty=True, advanced=True,
+                 help="Model that reviews outbound requests (default: the "
+                      "small-tier model)."),
+    SettingField("PAPERHUB_OUTBOUND_REVIEW_TIMEOUT", "privacy_outbound",
+                 "Review timeout (seconds)", "int", default="8", min=1, max=120,
+                 advanced=True,
+                 help="How long to wait for the review before treating it as unsure."),
     # ── Slides ──────────────────────────────────────────────────────────
     SettingField("PAPERHUB_SLIDE_STYLE_PROFILE", "system", "Slide style profile", "enum",
                  default="default", choices=("default", "metropolis_minimal")),
@@ -310,7 +386,9 @@ def coerce_value(field: SettingField, raw: str) -> str:
         if not _EMAIL_RE.match(value):
             raise ValueError(f"{field.key} must be a valid email address.")
         return value
+    if field.type == "string_list":
+        return ",".join(parse_string_list(value))
     # string / secret
-    if not value:
+    if not value and not field.allow_empty:
         raise ValueError(f"{field.key} must not be empty.")
     return value

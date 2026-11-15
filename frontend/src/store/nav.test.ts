@@ -32,3 +32,16 @@ describe("nav store", () => {
     expect(useNavStore.getState().page).toBe("chat");
   });
 });
+
+describe("setPausedList (H5a)", () => {
+  it("counts a paused run's actions and Ask-first search cards per chat", () => {
+    useNavStore.getState().setPausedList([
+      { session_id: 1, kind: "action" },
+      { session_id: 1, kind: "search" },
+      { session_id: 2, kind: "search" },
+      // Held rows are counted from the held list, not here.
+      { session_id: 2, kind: "held" },
+    ]);
+    expect(useNavStore.getState().pausedActionsBySession).toEqual({ 1: 2, 2: 1 });
+  });
+});

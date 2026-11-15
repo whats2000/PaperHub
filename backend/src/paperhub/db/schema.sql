@@ -19,7 +19,11 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     -- Plan H3: 1 = the hidden ideation tracing session (never listed/purged).
     internal INTEGER NOT NULL DEFAULT 0,
     -- Plan H4: 1 = agent-mode confirm-tier tools run without asking.
-    auto_approve INTEGER NOT NULL DEFAULT 0
+    auto_approve INTEGER NOT NULL DEFAULT 0,
+    -- Plan H5a: 1 = in Ask first mode the agent's searches run without the
+    -- "Allow this search?" card (the user chose "Allow searches in this
+    -- chat"); actions still ask. Never copied by a fork.
+    allow_searches INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS paper_content (
@@ -103,7 +107,9 @@ CREATE TABLE IF NOT EXISTS runs (
     mode TEXT NOT NULL DEFAULT 'pipeline',
     -- Plan H4: the agent turn's work record
     -- {"tools": [...], "read": [chunk ids], "cited": [...], "papers": [...], "steps": n}
-    agent_record_json TEXT
+    agent_record_json TEXT,
+    -- Plan H5a: the held search this turn ran (POST /chat approved_held_id).
+    approved_held_id TEXT
 );
 
 -- Plan H4: a confirm-tier tool call awaiting the user's approval.
@@ -135,6 +141,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     token_out INTEGER,
     status TEXT NOT NULL CHECK (status IN ('ok', 'error', 'rejected')),
     error TEXT,
+    tool_call_id TEXT,
     PRIMARY KEY (run_id, branch, step_index)
 );
 
@@ -405,4 +412,54 @@ CREATE TABLE IF NOT EXISTS idea_sessions (
     idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
     session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     PRIMARY KEY (idea_id, session_id)
+);
+
+-- Plan H5a: outbound protection. No foreign keys on purpose: audit rows must
+-- outlive session deletion (purge_deleted_sessions cascades through runs).
+CREATE TABLE IF NOT EXISTS outbound_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL,
+    caller TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    sent_text TEXT,
+    original_text TEXT,
+    decision TEXT NOT NULL CHECK (decision IN
+        ('sent','rewritten','asked_sent','asked_discarded','blocked','held')),
+    stage TEXT NOT NULL,
+    reason TEXT,
+    run_id INTEGER,
+    session_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_log_created ON outbound_log(created_at);
+
+CREATE TABLE IF NOT EXISTS held_requests (
+    id TEXT PRIMARY KEY,
+    created_at TEXT,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    caller TEXT,
+    kind TEXT,
+    destination TEXT,
+    text TEXT NOT NULL,
+    reason TEXT,
+    unattended INTEGER NOT NULL,
+    run_id INTEGER,
+    session_id INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('pending','sending','sent','discarded')),
+    sent_text TEXT,
+    log_id INTEGER,
+    -- set when the approved text was sent: an approval is used once
+    consumed_at TEXT,
+    -- set when a follow-up chat turn took the approval (one turn per card)
+    reserved_at TEXT,
+    -- set while an unattended caller's resender runs (status 'sending')
+    sending_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outbound_review_cache (
+    key TEXT PRIMARY KEY,
+    decision_json TEXT,
+    created_at TEXT
 );

@@ -20,12 +20,21 @@ def action_state(status: str, raw_result: str | None) -> dict[str, Any]:
     except (json.JSONDecodeError, TypeError, ValueError):
         result = None
     if status == "pending":
-        return {"status": "running" if raw_result else "pending"}
+        if not raw_result:
+            return {"status": "pending"}
+        # An allowed search (H5a) keeps its decision in the claim marker.
+        if isinstance(result, dict) and "decision" in result:
+            return {"status": "running",
+                    "result": {k: v for k, v in result.items() if k != "claimed"}}
+        return {"status": "running"}
     if status == "done":
         return {"status": "done", "result": result}
     if status == "failed":
         error = result.get("error") if isinstance(result, dict) else None
         return {"status": "failed", "error": str(error or "failed")}
+    if status == "dismissed" and isinstance(result, dict):
+        # A search card's "Don't allow" note, or why its turn ended (H5a).
+        return {"status": status, "result": result}
     return {"status": status}
 
 

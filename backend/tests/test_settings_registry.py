@@ -86,3 +86,40 @@ def test_every_registry_category_has_a_nav_slot() -> None:
     cats = {f.category for f in SETTINGS_REGISTRY}
     assert cats == set(_CATEGORY_ORDER)
     assert cats == set(_CATEGORY_LABELS)
+
+
+def test_registry_has_privacy_category() -> None:
+    keys = [
+        "PAPERHUB_OUTBOUND_REVIEW", "PAPERHUB_OUTBOUND_UNSURE",
+        "PAPERHUB_SENSITIVE_TERMS", "PAPERHUB_PRIVATE_UPLOAD_DEFAULT",
+        "PAPERHUB_TRUSTED_SEARCH_URL", "PAPERHUB_PUBLIC_WEB_SEARCH",
+        "PAPERHUB_OUTBOUND_ALLOWLIST", "PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS",
+        "PAPERHUB_OUTBOUND_REVIEW_MODEL", "PAPERHUB_OUTBOUND_REVIEW_TIMEOUT",
+    ]
+    for k in keys:
+        f = field_by_key(k)
+        assert f is not None and f.category == "privacy_outbound", k
+    assert _CATEGORY_LABELS["privacy_outbound"] == "Privacy & outbound"
+    assert "privacy_outbound" in _CATEGORY_ORDER
+
+
+def test_string_list_coerces_and_allows_empty() -> None:
+    f = field_by_key("PAPERHUB_SENSITIVE_TERMS")
+    assert f is not None
+    assert coerce_value(f, "a, b\nA") == "a,b"
+    assert coerce_value(f, "") == ""
+
+
+def test_current_profile_and_effective_default() -> None:
+    from paperhub.settings_registry import current_profile, effective_default
+
+    assert current_profile({}) == "dev"
+    assert current_profile({"PAPERHUB_PROFILE": " Deployment "}) == "deployment"
+    assert current_profile({"PAPERHUB_PROFILE": "bogus"}) == "dev"
+    f = field_by_key("PAPERHUB_OUTBOUND_REVIEW")
+    assert f is not None
+    assert effective_default(f, "dev") == "0"
+    assert effective_default(f, "deployment") == "1"
+    g = field_by_key("PAPERHUB_OUTBOUND_UNSURE")
+    assert g is not None
+    assert effective_default(g, "deployment") == "ask"

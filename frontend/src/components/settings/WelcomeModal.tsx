@@ -17,6 +17,8 @@ export function WelcomeModal() {
   const ensureReadiness = useSettingsStore((s) => s.ensureReadiness);
   const dismissWelcome = useSettingsStore((s) => s.dismissWelcome);
   const openSettings = useSettingsStore((s) => s.open);
+  const config = useSettingsStore((s) => s.config);
+  const fetchConfig = useSettingsStore((s) => s.fetchConfig);
 
   // Pull the gate state once on mount (App boot also triggers this, but mounting
   // the modal independently keeps it self-sufficient in tests).
@@ -28,6 +30,18 @@ export function WelcomeModal() {
   // not a transient readiness blip after the site idled.
   const open =
     readiness !== null && hasBlockingConfigIssue(readiness) && !welcomeDismissed;
+
+  // Under a deployer lock (H5a) a model step cannot be done in Settings.
+  useEffect(() => {
+    if (open && config === null) void fetchConfig();
+  }, [open, config, fetchConfig]);
+  const locked = new Set(
+    (config?.categories ?? []).flatMap((c) => c.fields.filter((f) => f.locked).map((f) => f.key)),
+  );
+  const lockedStep: Record<string, boolean> = {
+    small: locked.has("PAPERHUB_MODEL_SMALL"),
+    flagship: locked.has("PAPERHUB_MODEL_FLAGSHIP"),
+  };
 
   const smallOk = readiness?.models.small.key_ok ?? false;
   const flagshipOk = readiness?.models.flagship.key_ok ?? false;
@@ -75,7 +89,12 @@ export function WelcomeModal() {
                       {t(`welcome.step.${step.key}.label`, step.key)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {t(`welcome.step.${step.key}.help`, "")}
+                      {lockedStep[step.key] && !step.done
+                        ? t(
+                            "welcome.lockedStep",
+                            "Set by the deployer in backend/.env. Ask them to fix it.",
+                          )
+                        : t(`welcome.step.${step.key}.help`, "")}
                     </p>
                   </div>
                 </li>

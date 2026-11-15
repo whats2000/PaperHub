@@ -8,6 +8,7 @@ import enChat from "../locales/en/chat.json";
 import enCommon from "../locales/en/common.json";
 import enFeedback from "../locales/en/feedback.json";
 import enIdeas from "../locales/en/ideas.json";
+import enOutbound from "../locales/en/outbound.json";
 import enMemory from "../locales/en/memory.json";
 import enReferences from "../locales/en/references.json";
 import enSettings from "../locales/en/settings.json";
@@ -20,6 +21,7 @@ import jaChat from "../locales/ja/chat.json";
 import jaCommon from "../locales/ja/common.json";
 import jaFeedback from "../locales/ja/feedback.json";
 import jaIdeas from "../locales/ja/ideas.json";
+import jaOutbound from "../locales/ja/outbound.json";
 import jaMemory from "../locales/ja/memory.json";
 import jaReferences from "../locales/ja/references.json";
 import jaSettings from "../locales/ja/settings.json";
@@ -32,6 +34,7 @@ import zhCNChat from "../locales/zh-CN/chat.json";
 import zhCNCommon from "../locales/zh-CN/common.json";
 import zhCNFeedback from "../locales/zh-CN/feedback.json";
 import zhCNIdeas from "../locales/zh-CN/ideas.json";
+import zhCNOutbound from "../locales/zh-CN/outbound.json";
 import zhCNMemory from "../locales/zh-CN/memory.json";
 import zhCNReferences from "../locales/zh-CN/references.json";
 import zhCNSettings from "../locales/zh-CN/settings.json";
@@ -44,6 +47,7 @@ import zhTWChat from "../locales/zh-TW/chat.json";
 import zhTWCommon from "../locales/zh-TW/common.json";
 import zhTWFeedback from "../locales/zh-TW/feedback.json";
 import zhTWIdeas from "../locales/zh-TW/ideas.json";
+import zhTWOutbound from "../locales/zh-TW/outbound.json";
 import zhTWMemory from "../locales/zh-TW/memory.json";
 import zhTWReferences from "../locales/zh-TW/references.json";
 import zhTWSettings from "../locales/zh-TW/settings.json";
@@ -77,6 +81,7 @@ const resources = {
     translation: enTranslation,
     feedback: enFeedback,
     ideas: enIdeas,
+    outbound: enOutbound,
   },
   "zh-TW": {
     about: zhTWAbout,
@@ -91,6 +96,7 @@ const resources = {
     translation: zhTWTranslation,
     feedback: zhTWFeedback,
     ideas: zhTWIdeas,
+    outbound: zhTWOutbound,
   },
   "zh-CN": {
     about: zhCNAbout,
@@ -105,6 +111,7 @@ const resources = {
     translation: zhCNTranslation,
     feedback: zhCNFeedback,
     ideas: zhCNIdeas,
+    outbound: zhCNOutbound,
   },
   ja: {
     about: jaAbout,
@@ -119,6 +126,7 @@ const resources = {
     translation: jaTranslation,
     feedback: jaFeedback,
     ideas: jaIdeas,
+    outbound: jaOutbound,
   },
 } as const;
 
@@ -142,6 +150,7 @@ void i18n
       "translation",
       "feedback",
       "ideas",
+      "outbound",
     ],
     defaultNS: "common",
     interpolation: { escapeValue: false },

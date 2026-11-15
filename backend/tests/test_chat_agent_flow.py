@@ -167,8 +167,11 @@ async def test_turn_streams_agent_events_in_order(
 
     summary = dict(events)["agent_summary"]
     run_id = dict(events)["session"]["run_id"]
+    duration = summary.pop("duration_ms")
+    assert isinstance(duration, int) and duration >= 0
     assert summary == {"run_id": run_id, "papers_read": 0, "steps": 2,
-                       "tools": ["search_papers"]}
+                       "tools": ["search_papers"], "sections_read": 0,
+                       "searches": 1}
     final = dict(events)["final"]
     assert final["content"] == "Here is what I found."
 
@@ -242,7 +245,9 @@ async def test_two_searches_persist_two_batches_and_replay(
     assert [c["paper_id"] for c in assistant["search_results"]] == [
         "arxiv:q1", "arxiv:q2"]
     assert assistant["agent_summary"] == {
-        "papers_read": 0, "steps": 2, "tools": ["search_papers"]}
+        "papers_read": 0, "steps": 2, "tools": ["search_papers"],
+        "sections_read": 0, "searches": 2,
+        "duration_ms": assistant["agent_summary"]["duration_ms"]}
 
 
 async def test_pre_h4_pipeline_run_replays_routing_decision(
@@ -275,7 +280,8 @@ async def test_pre_h4_pipeline_run_replays_routing_decision(
     assert old["agent_summary"] is None
     assert new["routing_decision"] is None
     assert new["agent_summary"] == {
-        "papers_read": 2, "steps": 3, "tools": ["read_section", "gather"]}
+        "papers_read": 2, "steps": 3, "tools": ["read_section", "gather"],
+        "sections_read": 2, "searches": 0, "duration_ms": None}
 
 
 async def test_loop_error_emits_error_and_finalises(
@@ -594,24 +600,78 @@ def _use_ui_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chat_module, "build_default_registry", registry)
 
 
+async def _chat_deciding(
+    app: FastAPI, message: str, decide: Any,
+) -> tuple[list[tuple[str, dict[str, Any]]], list[Any]]:
+    """Run a turn; each time its run reports ``paused`` (read from the run's
+    event buffer: the test transport delivers the SSE body only at the end),
+    ``decide(client, paused_data)`` answers the waiting card as the card's
+    buttons do. Returns the events and every decide() result."""
+    import paperhub.api.chat as chat_module
+
+    decided: list[Any] = []
+
+    finished = asyncio.Event()
+
+    async def decider(client: AsyncClient) -> None:
+        handled = 0
+        while not finished.is_set():
+            await asyncio.sleep(0.02)
+            for handle in list(chat_module.broker._handles.values()):
+                paused = [json.loads(e["data"]) for e in handle.events
+                          if e["event"] == "paused"]
+                for data in paused[handled:]:
+                    handled += 1
+                    decided.append(await decide(client, data))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        task = asyncio.create_task(decider(client))
+        try:
+            events = await _chat(app, message)
+        finally:
+            # A decision in flight (e.g. Stop, which ends the stream) finishes.
+            finished.set()
+            await asyncio.wait_for(task, timeout=30)
+    return events, decided
+
+
 async def test_ui_events_are_recorded_in_order_and_replayed(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ruling R11: paper_added / memory_saved / confirm_request payloads are
     kept in the agent record as ``ui_events`` (in order), and the replay
-    returns them as ``agent_events`` with the pending action's live status."""
+    returns them as ``agent_events`` with the action's live status. H5a: the
+    turn pauses on the confirm card; Dismiss resumes the same run."""
     await _bootstrap(tmp_path, monkeypatch)
     _use_ui_registry(monkeypatch)
-    _script(monkeypatch, [
+    seen = _script(monkeypatch, [
         _calls(("add_and_save", {})),
         _calls(("danger", {})),
-        ToolTurn(content="Waiting for you."),
+        ToolTurn(content="You dismissed it."),
     ])
     app = _app()
-    events = await _chat(app, "do things")
+
+    async def dismiss(client: AsyncClient, paused: dict[str, Any]) -> Any:
+        (card,) = paused["cards"]
+        assert card["kind"] == "action" and card["tool"] == "danger"
+        r = await client.post(f"/chat/actions/{card['id']}/dismiss")
+        assert r.status_code == 200
+        return r.json()
+
+    events, decided = await _chat_deciding(app, "do things", dismiss)
+    assert decided == [{"status": "dismissed", "resumed": True}]
+    types = [t for t, _ in events]
+    assert types.index("confirm_request") < types.index("paused") < types.index(
+        "resumed") < types.index("final")
+    assert types.count("final") == 1
     run_id = dict(events)["session"]["run_id"]
     session_id = dict(events)["session"]["session_id"]
     confirm = dict(events)["confirm_request"]
+    # The model read the decline in the same run.
+    last_tool = [m for m in seen[-1]["messages"] if m.get("role") == "tool"][-1]
+    assert last_tool["content"].startswith("The user dismissed danger")
 
     (raw,) = await _row("SELECT agent_record_json FROM runs WHERE id = ?", run_id)
     ui = json.loads(raw)["ui_events"]
@@ -619,24 +679,63 @@ async def test_ui_events_are_recorded_in_order_and_replayed(
         "paper_added", "memory_saved", "confirm_request"]
     assert ui[0]["data"] == {"papers_id": 7, "paper_content_id": 3, "title": "T"}
     assert ui[2]["data"]["action_id"] == confirm["action_id"]
+    (waits,) = await _row(
+        "SELECT COUNT(*) FROM tool_calls WHERE run_id = ? "
+        "AND tool = 'agent:await_approval'", run_id)
+    assert waits == 1
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test",
     ) as client:
         resp = await client.get(f"/sessions/{session_id}/messages")
-        assistant = [m for m in resp.json() if m["role"] == "assistant"][0]
-        replay = assistant["agent_events"]
-        assert [e["event"] for e in replay] == [
-            "paper_added", "memory_saved", "confirm_request"]
-        assert replay[2]["data"]["status"] == "pending"
-        assert replay[2]["data"]["tool"] == "danger"
-
-        dismissed = await client.post(
-            f"/chat/actions/{confirm['action_id']}/dismiss")
-        assert dismissed.status_code == 200
-        resp = await client.get(f"/sessions/{session_id}/messages")
     assistant = [m for m in resp.json() if m["role"] == "assistant"][0]
-    assert assistant["agent_events"][2]["data"]["status"] == "dismissed"
+    replay = assistant["agent_events"]
+    assert [e["event"] for e in replay] == [
+        "paper_added", "memory_saved", "confirm_request"]
+    assert replay[2]["data"]["status"] == "dismissed"
+    assert replay[2]["data"]["tool"] == "danger"
+
+
+async def test_confirm_resumes_the_paused_run_which_runs_the_action(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _bootstrap(tmp_path, monkeypatch)
+    import paperhub.api.chat as chat_module
+
+    ran: list[int] = []
+
+    async def danger(ctx: Any, _args: dict[str, Any]) -> ToolOutcome:
+        ran.append(ctx.run_id)
+        return ToolOutcome(content="Danger done.", record={"did": True})
+
+    def registry(_settings: Any) -> ToolRegistry:
+        r = ToolRegistry()
+        r.register(ToolSpec("danger", "d", {"type": "object", "properties": {}},
+                            Tier.CONFIRM, danger))
+        return r
+
+    monkeypatch.setattr(chat_module, "build_default_registry", registry)
+    seen = _script(monkeypatch, [_calls(("danger", {})), ToolTurn(content="Done.")])
+
+    async def confirm(client: AsyncClient, paused: dict[str, Any]) -> Any:
+        r = await client.post(f"/chat/actions/{paused['cards'][0]['id']}/confirm")
+        assert r.status_code == 200
+        return r.json()
+
+    events, decided = await _chat_deciding(_app(), "do it", confirm)
+    run_id = dict(events)["session"]["run_id"]
+    assert ran == [run_id], "the run itself ran the action"
+    assert decided[0]["resumed"] is True and decided[0]["status"] == "done"
+    assert decided[0]["result"]["content"] == "Danger done."
+    last_tool = [m for m in seen[-1]["messages"] if m.get("role") == "tool"][-1]
+    assert last_tool["content"] == "Danger done."
+    assert dict(events)["final"]["content"] == "Done."
+    (status,) = await _row("SELECT status FROM pending_actions")
+    assert status == "done"
+    (rec,) = await _row(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = ? "
+        "AND tool = 'tool:danger'", run_id)
+    assert json.loads(rec)["confirm"]["decision"] == "confirmed"
 
 
 async def test_record_shape_is_the_same_without_ui_events(
@@ -685,3 +784,87 @@ async def test_failed_card_save_does_not_mask_the_loop_error(
     errors = [d for t, d in events if t == "error"]
     assert errors and "provider exploded" in errors[0]["message"]
     assert "db locked" not in errors[0]["message"]
+
+
+async def test_stop_while_paused_ends_the_turn_and_runs_nothing(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H5a: Stop on a paused turn ends the wait; the card's action never
+    runs and its row is dismissed."""
+    await _bootstrap(tmp_path, monkeypatch)
+    _use_ui_registry(monkeypatch)
+    _script(monkeypatch, [_calls(("danger", {})),
+                          ToolTurn(content="never reached")])
+
+    async def stop(client: AsyncClient, paused: dict[str, Any]) -> Any:
+        r = await client.post("/chat/cancel", json={"run_id": paused["run_id"]})
+        assert r.status_code == 200
+        return r.json()
+
+    events, decided = await _chat_deciding(_app(), "do it", stop)
+    assert decided[0]["status"] == "cancelled"
+    (run_status,) = await _row("SELECT status FROM runs")
+    assert "final" not in [t for t, _ in events]
+    (status,) = await _row("SELECT status FROM pending_actions")
+    assert status == "dismissed"
+    assert run_status == "cancelled"
+    (rec,) = await _row("SELECT result_summary_json FROM tool_calls "
+                        "WHERE tool = 'agent:await_approval'")
+    assert json.loads(rec)["decision"] == "stopped"
+
+
+@pytest.mark.ask_first
+async def test_ask_first_pauses_the_search_call_until_the_user_allows_it(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H5a wave 3: in Ask first mode the agent's search_papers call pauses
+    on the "Allow this search?" card before anything leaves; Edit, then
+    allow runs the edited query in the same run, and later searches of the
+    chat stop asking once "Allow searches in this chat" was chosen."""
+    await _bootstrap(tmp_path, monkeypatch)
+    _patch_paper_search(monkeypatch)
+    seen = _script(monkeypatch, [
+        _calls(("search_papers", {"query": "q1"})),
+        ToolTurn(content="Found it."),
+    ])
+    app = _app()
+
+    async def allow(client: AsyncClient, paused: dict[str, Any]) -> Any:
+        (card,) = paused["cards"]
+        assert card["kind"] == "search" and card["tool"] == "search_papers"
+        r = await client.post(f"/chat/actions/{card['id']}/confirm",
+                              json={"text": "q2", "allow_chat": True})
+        assert r.status_code == 200
+        return r.json()
+
+    events, decided = await _chat_deciding(app, "find q1", allow)
+    assert decided == [{"status": "allowed", "text": "q2", "edited": True,
+                        "allow_chat": True, "resumed": True, "also_allowed": []}]
+    types = [t for t, _ in events]
+    assert types.index("confirm_request") < types.index("paused") < types.index(
+        "resumed") < types.index("search_results") < types.index("final")
+    card = dict(events)["confirm_request"]
+    assert card["tool"] == "search_papers" and card["target"]["query"] == "q1"
+    # The edited query ran, and the model is told so.
+    assert dict(events)["search_results"]["candidates"][0]["paper_id"] == "arxiv:q2"
+    tool_msg = [m for m in seen[-1]["messages"] if m.get("role") == "tool"][-1]
+    assert '"q2"' in tool_msg["content"] and "edited" in tool_msg["content"]
+    run_id = dict(events)["session"]["run_id"]
+    session_id = dict(events)["session"]["session_id"]
+    (status,) = await _row(
+        "SELECT status FROM pending_actions WHERE id = ?", card["action_id"])
+    assert status == "done"
+    (allow_searches,) = await _row(
+        "SELECT allow_searches FROM chat_sessions WHERE id = ?", session_id)
+    assert allow_searches == 1
+    (wait,) = await _row(
+        "SELECT result_summary_json FROM tool_calls WHERE run_id = ? "
+        "AND tool = 'agent:await_approval'", run_id)
+    assert json.loads(wait)["kind"] == "search"
+
+    # The next search in this chat runs without a card.
+    _script(monkeypatch, [_calls(("search_papers", {"query": "q3"})),
+                          ToolTurn(content="Again.")])
+    events = await _chat(app, "and q3", session_id=session_id)
+    assert "confirm_request" not in [t for t, _ in events]
+    assert dict(events)["search_results"]["candidates"][0]["paper_id"] == "arxiv:q3"

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SettingsReadiness } from "../../lib/api";
+import type { SettingsConfig, SettingsReadiness } from "../../lib/api";
 import { useSettingsStore } from "../../store/settings";
 import { WelcomeModal } from "./WelcomeModal";
 
@@ -19,10 +19,13 @@ function readiness(ready: boolean): SettingsReadiness {
 
 describe("WelcomeModal", () => {
   beforeEach(() =>
-    useSettingsStore.setState({ readiness: null, welcomeDismissed: false, isOpen: false }),
+    useSettingsStore.setState({
+      readiness: null, welcomeDismissed: false, isOpen: false, config: null,
+      fetchConfig: () => Promise.resolve(),
+    }),
   );
   afterEach(() =>
-    useSettingsStore.setState({ readiness: null, welcomeDismissed: false, isOpen: false }),
+    useSettingsStore.setState({ readiness: null, welcomeDismissed: false, isOpen: false, config: null }),
   );
 
   it("shows the tour with a checklist while not ready", () => {
@@ -45,5 +48,28 @@ describe("WelcomeModal", () => {
     await userEvent.click(screen.getByText(/Open Settings/i));
     expect(useSettingsStore.getState().welcomeDismissed).toBe(true);
     expect(useSettingsStore.getState().isOpen).toBe(true);
+  });
+
+  it("says a locked model step is set by the deployer, not in Settings", () => {
+    const field = (key: string, locked: boolean) => ({
+      key, label: key, type: "string", secret: false, restart_required: false,
+      read_only: false, help: "", advanced: false, is_default: true, locked, value: "",
+    });
+    useSettingsStore.setState({
+      readiness: readiness(false),
+      config: {
+        categories: [{
+          key: "models_providers",
+          label: "Models",
+          fields: [field("PAPERHUB_MODEL_SMALL", true), field("PAPERHUB_MODEL_FLAGSHIP", false)],
+        }],
+      } as unknown as SettingsConfig,
+    });
+    render(<WelcomeModal />);
+    expect(
+      screen.getAllByText("Set by the deployer in backend/.env. Ask them to fix it."),
+    ).toHaveLength(1);
+    expect(screen.getByText("Used for user-facing answers.")).toBeInTheDocument();
+    expect(screen.queryByText("Used for classifiers and fast tool calls.")).toBeNull();
   });
 });

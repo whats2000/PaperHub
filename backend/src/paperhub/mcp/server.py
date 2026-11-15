@@ -146,10 +146,12 @@ async def _search_library_handler(query: str, max_results: int = 8) -> list[dict
 
 
 async def _search_semantic_scholar_handler(
-    query: str, max_results: int = 8,
+    query: str, max_results: int = 8, outbound_token: str | None = None,
 ) -> dict[str, Any]:
     ctx = require_request_context()
-    args = {"query": query, "max_results": max_results}
+    # The token is a credential: never recorded, only whether one came along.
+    args = {"query": query, "max_results": max_results,
+            "outbound_token": outbound_token is not None}
     diag: dict[str, Any] = {}
     async with _tool_step(
         ctx, f"paper_search:{SERVER_NAME}.search_semantic_scholar", args,
@@ -159,6 +161,8 @@ async def _search_semantic_scholar_handler(
                 asdict(h)
                 for h in await search_semantic_scholar_dispatch(
                     query=query, max_results=max_results, diag=diag,
+                    outbound_token=outbound_token,
+                    session_id=ctx.session_id, run_id=ctx.run_id,
                 )
             ]
         except Exception:

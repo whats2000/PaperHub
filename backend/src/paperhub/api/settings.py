@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from paperhub import settings_overlay as ov
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
+from paperhub.outbound.policy import locked_keys
 from paperhub.settings_readiness import (
     clear_readiness_cache,
     compute_readiness,
@@ -20,6 +22,8 @@ from paperhub.settings_registry import (
     PROVIDER_CREDENTIAL_SUGGESTIONS,
     SETTINGS_REGISTRY,
     coerce_value,
+    current_profile,
+    effective_default,
     field_by_key,
     is_allowed_credential_key,
 )
@@ -30,12 +34,14 @@ _CATEGORY_LABELS = {
     "models_providers": "Models & providers",
     "agents_memory": "Agents & memory",
     "integrations": "Integrations",
+    "privacy_outbound": "Privacy & outbound",
     "system": "System",
 }
 
 # Order categories deterministically for the modal's left-nav.
 _CATEGORY_ORDER = [
-    "models_providers", "agents_memory", "integrations", "system",
+    "models_providers", "agents_memory", "integrations", "privacy_outbound",
+    "system",
 ]
 
 
@@ -44,6 +50,14 @@ async def _db_rows(db_path: Path) -> dict[str, str]:
         "SELECT key, value FROM settings"
     ) as cur:
         return {r[0]: r[1] for r in await cur.fetchall()}
+
+
+async def _db_updated_at(db_path: Path) -> dict[str, str]:
+    """key -> when its settings row was last written (UTC, as stored)."""
+    async with open_db(db_path) as conn, conn.execute(
+        "SELECT key, updated_at FROM settings"
+    ) as cur:
+        return {r[0]: r[1] for r in await cur.fetchall() if r[1]}
 
 
 def _credential_keys(rows: dict[str, str]) -> list[str]:
@@ -58,7 +72,10 @@ def _credential_keys(rows: dict[str, str]) -> list[str]:
 async def get_settings() -> dict[str, Any]:
     settings = load_settings()
     rows = await _db_rows(settings.db_path)
+    updated = await _db_updated_at(settings.db_path)
 
+    locked = locked_keys()
+    profile = current_profile()
     cats: dict[str, list[dict[str, Any]]] = {k: [] for k in _CATEGORY_ORDER}
 
     # Provider credentials ride on the models_providers category as a dedicated
@@ -68,12 +85,23 @@ async def get_settings() -> dict[str, Any]:
 
     # Structured fields from the registry.
     for f in SETTINGS_REGISTRY:
-        effective = os.environ.get(f.key, f.default)
+        effective = (os.environ.get(f.key, "").strip() or effective_default(f, profile))
         item: dict[str, Any] = {
             "key": f.key, "label": f.label, "type": f.type,
             "secret": f.secret, "restart_required": f.restart_required,
             "read_only": f.read_only, "help": f.help, "advanced": f.advanced,
-            "is_default": f.key not in rows,
+            "is_default": (
+                (not os.environ.get(f.key, "").strip()
+                 or os.environ[f.key].strip() == effective_default(f, profile))
+                if f.key in locked  # DB rows are ignored for locked keys
+                else f.key not in rows
+            ),
+            "locked": f.key in locked,
+            # When the DB row was last written; null if never set from the UI
+            # (and for locked keys, whose DB rows are ignored).
+            "updated_at": (
+                None if f.key in locked else updated.get(f.key)
+            ),
         }
         if f.docs_url:
             item["docs_url"] = f.docs_url
@@ -133,7 +161,13 @@ async def get_model_options() -> dict[str, Any]:
 
 
 @router.patch("")
-async def patch_settings(body: dict[str, str | None]) -> dict[str, Any]:
+async def patch_settings(body: dict[str, str | None]) -> Any:
+    # Deployer locks are env-only: refuse the whole patch before any write.
+    locked = locked_keys()
+    hit = [k for k in body if k in locked]
+    if hit:
+        return JSONResponse({"detail": "locked", "keys": hit}, status_code=403)
+
     updated: list[str] = []
     cleared: list[str] = []
     restart: list[str] = []

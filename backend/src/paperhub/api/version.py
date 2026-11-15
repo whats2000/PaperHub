@@ -14,6 +14,8 @@ from importlib.metadata import version as pkg_version
 import httpx
 from fastapi import APIRouter
 
+from paperhub.outbound.destinations import check_destination
+
 router = APIRouter()
 
 _DEFAULT_REPO = "whats2000/PaperHub"
@@ -54,6 +56,7 @@ async def _fetch_latest_release(repo: str) -> tuple[str | None, str | None]:
     """Return (latest_version_without_v, html_url) from GitHub, or (None, None).
     Monkeypatched in tests; never raises to the caller in practice."""
     url = f"https://api.github.com/repos/{repo}/releases/latest"
+    check_destination(url, caller="version._fetch_latest_release", kind="version_check")
     async with httpx.AsyncClient(timeout=5.0) as client:
         resp = await client.get(url, headers={"Accept": "application/vnd.github+json"})
         resp.raise_for_status()

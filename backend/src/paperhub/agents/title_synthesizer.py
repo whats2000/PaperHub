@@ -42,9 +42,9 @@ async def synthesize_talk_title(
     reg = registry or PromptRegistry()
     prompt = reg.get("slides_title_synthesizer/v1")
     if llm_acompletion is None:
-        import litellm
+        from paperhub.outbound.llm_destinations import acompletion_noted
 
-        llm_acompletion = litellm.acompletion
+        llm_acompletion = acompletion_noted
 
     paper_titles = "; ".join(f"[{b.paper_idx}] {b.title}" for b in bundles)
     narrative_summaries = "\n\n".join(

@@ -5,11 +5,13 @@ patterns copied + edited to fit the Plan-C Paper Pipeline contract.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import random
 import re
 import tarfile
 import time
+from collections.abc import Iterator
 from datetime import UTC
 from pathlib import Path
 
@@ -17,6 +19,7 @@ import arxiv
 import httpx
 from pydantic import BaseModel
 
+from paperhub.outbound.destinations import check_destination
 from paperhub.pipelines.author_names import clean_author_names
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,7 @@ _metadata_client = arxiv.Client(num_retries=0)
 # hundred KB/s. 120 s total read budget covers ~50 MB at 400 KB/s with margin;
 # connect stays tight so a hung DNS / firewall fails fast.
 _DOWNLOAD_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+_API_URL = "https://export.arxiv.org/api/query"  # the ``arxiv`` library's endpoint
 # arXiv asks for a contactable User-Agent per their Terms of Use.
 # https://info.arxiv.org/help/api/tou.html
 _USER_AGENT = "PaperHub/0.1 (https://github.com/whats2000/PaperHub)"
@@ -115,32 +119,10 @@ def _id_from_entry_id(entry_id: str) -> str:
     return m.group(1)
 
 
-def search_arxiv(query: str, max_results: int = 10) -> list[ArxivResult]:
-    """Return metadata-only search results from arXiv. No download."""
-    search = arxiv.Search(
-        query=query,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.Relevance,
-    )
-    results: list[ArxivResult] = []
-    for r in _client.results(search):
-        results.append(
-            ArxivResult(
-                arxiv_id=_id_from_entry_id(r.entry_id),
-                title=r.title.strip(),
-                authors=clean_author_names([a.name for a in r.authors]),
-                year=getattr(r.published, "year", None),
-                abstract=r.summary.strip(),
-                pdf_url=r.pdf_url if isinstance(getattr(r, "pdf_url", None), str) else None,
-            )
-        )
-    return results
-
-
 def fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
     """Exact-ID metadata lookup — returns the paper for ``arxiv_id`` or None.
 
-    Unlike :func:`search_arxiv` (a relevance query that returns the
+    Unlike a relevance query (which returns the
     nearest-matching paper for ANY string), this uses arXiv's ``id_list``
     so a non-existent / hallucinated id returns ``None`` instead of a
     confidently-wrong neighbour. Used to VERIFY an LLM-claimed arxiv_id
@@ -150,6 +132,7 @@ def fetch_arxiv_by_id(arxiv_id: str) -> ArxivResult | None:
     "unverifiable" (``None``) rather than propagated.
     """
     try:
+        check_destination(_API_URL, caller="arxiv_client.fetch_arxiv_by_id", kind="arxiv_lookup")
         search = arxiv.Search(id_list=[arxiv_id])
         for r in _client.results(search):
             return ArxivResult(
@@ -180,6 +163,7 @@ def fetch_arxiv_by_ids(arxiv_ids: list[str]) -> dict[str, ArxivResult] | None:
         return {}
     out: dict[str, ArxivResult] = {}
     try:
+        check_destination(_API_URL, caller="arxiv_client.fetch_arxiv_by_ids", kind="arxiv_lookup")
         search = arxiv.Search(id_list=list(arxiv_ids), max_results=len(arxiv_ids))
         for r in _metadata_client.results(search):
             try:
@@ -201,6 +185,32 @@ def fetch_arxiv_by_ids(arxiv_ids: list[str]) -> dict[str, ArxivResult] | None:
         )
         return None
     return out
+
+
+_REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
+_MAX_REDIRECTS = 10
+
+
+@contextlib.contextmanager
+def _stream_checked(url: str, headers: dict[str, str]) -> Iterator[httpx.Response]:
+    """Stream ``url`` following redirects by hand so every hop's host is
+    checked against the outbound allowlist BEFORE it is contacted."""
+    current = url
+    with contextlib.ExitStack() as stack:
+        for _ in range(_MAX_REDIRECTS + 1):
+            resp = stack.enter_context(httpx.stream(
+                "GET", current, timeout=_DOWNLOAD_TIMEOUT,
+                follow_redirects=False, headers=headers,
+            ))
+            location = resp.headers.get("location") if resp.status_code in _REDIRECT_STATUS else None
+            if not location:
+                yield resp
+                return
+            current = str(httpx.URL(current).join(location))
+            check_destination(
+                current, caller="arxiv_client.download", kind="arxiv_download",
+            )
+        raise httpx.TooManyRedirects(f"too many redirects from {url}")
 
 
 def _download_with_resume(url: str, target_path: Path) -> None:
@@ -234,6 +244,7 @@ def _download_with_resume(url: str, target_path: Path) -> None:
     Partial bytes are kept on disk on every branch so the caller can
     inspect what was received.
     """
+    check_destination(url, caller="arxiv_client.download", kind="arxiv_download")
     last_exc: BaseException | None = None
     for attempt in range(1, _DOWNLOAD_MAX_ATTEMPTS + 1):
         existing_bytes = target_path.stat().st_size if target_path.exists() else 0
@@ -243,12 +254,7 @@ def _download_with_resume(url: str, target_path: Path) -> None:
         bytes_before_attempt = existing_bytes
 
         try:
-            with httpx.stream(
-                "GET", url,
-                timeout=_DOWNLOAD_TIMEOUT,
-                follow_redirects=True,
-                headers=headers,
-            ) as resp:
+            with _stream_checked(url, headers) as resp:
                 if resp.status_code == 416 and existing_bytes > 0:
                     logger.info(
                         "download_with_resume %s: 416 Range Not Satisfiable "

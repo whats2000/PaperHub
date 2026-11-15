@@ -11,7 +11,14 @@
     "noChats": "No chats yet.",
     "deleteChat": "Delete chat: {{title}}",
     "forkedFrom": "{{title}} (forked from {{parent}})",
-    "fromIdea": "Opened from an idea"
+    "fromIdea": "Opened from an idea",
+    "group": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "d7": "Previous 7 days",
+      "d30": "Previous 30 days",
+      "older": "Older"
+    }
   },
   "sessionToast": {
     "deleteFailed": "Failed to delete chat",

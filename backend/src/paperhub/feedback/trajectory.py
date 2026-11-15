@@ -9,6 +9,9 @@ model worked through, from the run's trace alone; no prompt is stored:
   memories and UI language as recorded);
 * the conversation is rebuilt with ``load_conversation`` from the session's
   earlier messages and their runs' work records;
+* a held search the user sent (Plan H5a) ran before the first step, on the
+  user's approval: its ``tool:search_papers`` row gives an assistant call and
+  its tool message, both part of the prompt (the model did not choose it);
 * each ``agent:step`` that called tools gives an assistant message with its
   calls (ids numbered here; provider ids are not training data), and each
   call's ``tool:<name>`` row gives its tool message: library chunks are
@@ -53,6 +56,7 @@ from paperhub.agents.core.agent import (
     DUPLICATE_CALL_CONTENT,
     EMPTY_TURN_NUDGE,
     PENDING_RETRY_CONTENT,
+    approved_search_message,
     prompt_fingerprint,
 )
 from paperhub.agents.core.citations import cited_figures, cited_ids, cited_views
@@ -82,7 +86,7 @@ from paperhub.agents.core.read_tools import (
     format_read_chunks,
     format_section_page,
 )
-from paperhub.agents.core.tools import PENDING_CONTENT
+from paperhub.agents.core.tools import DECLINED_CONTENT, PENDING_CONTENT
 from paperhub.agents.paper_qa_subagent import _list_figures_tables, _read_layout_object
 from paperhub.feedback.citations import strip_unsourced
 from paperhub.llm.prompts.registry import PromptRegistry
@@ -111,7 +115,9 @@ class ConversationMismatch(TrajectoryError):
 class Trajectory:
     messages: list[Message]
     tools: list[dict[str, Any]]
-    prompt_len: int  # messages up to and including this turn's user message
+    # Messages up to and including this turn's user message (and the
+    # approved search that opened the turn, if any).
+    prompt_len: int
     private: bool = False
     chunk_ids: list[int] = field(default_factory=list)
     # The tool whose own answer ended the turn (query_library with
@@ -252,6 +258,11 @@ async def _tool_content(
     """The tool message the model read, from the call's ``tool:<name>`` row."""
     if result.get("pending_action_id"):
         return PENDING_CONTENT.format(summary=_pending_summary(name, args, result))
+    confirm = result.get("confirm")
+    if isinstance(confirm, dict) and confirm.get("decision") == "dismissed":
+        # H5a: the paused run's card was dismissed (a confirmed one renders
+        # as the action's own result below).
+        return DECLINED_CONTENT.format(summary=_pending_summary(name, args, confirm))
     if status == "error" or result.get("error"):
         return f"Error: {result.get('error')}"
     if name in ("read_section", "read_chunks"):
@@ -483,10 +494,20 @@ async def agent_trajectory(
     _check_conversation(run_id, state, conv)
     messages += conv.messages
     messages.append({"role": "user", "content": question})
+    used: set[int] = set()
+    for pre in range(steps[0][0]):
+        _s, tool, status, args, result = rows[pre]
+        if (tool == "tool:search_papers" and isinstance(result, dict)
+                and result.get("approved_held_id")):
+            # User-role context, as the agent gave it (never a tool call).
+            call_args = _strip_call_id(args) if isinstance(args, dict) else {}
+            messages.append(approved_search_message(
+                str(call_args.get("query") or ""),
+                await _tool_content(lib, "search_papers", call_args, result, status)))
+            used.add(pre)
     prompt_len = len(messages)
 
     pending: dict[str, str] = {}  # call key -> confirm summary
-    used: set[int] = set()
     nudge = False
     from_tool: str | None = None
     for n, (pos, record) in enumerate(steps):

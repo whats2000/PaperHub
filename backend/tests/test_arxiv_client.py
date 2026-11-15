@@ -10,11 +10,9 @@ import pytest
 import respx
 
 from paperhub.pipelines.arxiv_client import (
-    ArxivResult,
     TarballCorrupt,
     download_arxiv_pdf,
     download_arxiv_source,
-    search_arxiv,
 )
 
 
@@ -26,7 +24,7 @@ def test_arxiv_module_has_expected_api_shape() -> None:
     assert hasattr(arxiv, "Result")
     client = arxiv.Client()
     assert callable(getattr(client, "results", None)), (
-        "arxiv.Client.results missing — search_arxiv needs rewrite"
+        "arxiv.Client.results missing — fetch_arxiv_by_id needs rewrite"
     )
     # Result.source_url() exists in the installed arxiv library.
     # download_arxiv_source no longer DEPENDS on it (we build the URL
@@ -37,30 +35,14 @@ def test_arxiv_module_has_expected_api_shape() -> None:
     )
 
 
-def test_search_arxiv_returns_typed_results() -> None:
-    fake_result = MagicMock()
-    fake_result.entry_id = "http://arxiv.org/abs/2403.01234v1"
-    fake_result.title = "A Test Paper"
-    fake_result.authors = [MagicMock(name="Author One"), MagicMock(name="Author Two")]
-    fake_result.authors[0].name = "Author One"
-    fake_result.authors[1].name = "Author Two"
-    fake_result.summary = "An abstract."
-    fake_result.published.year = 2024
+def test_no_free_text_arxiv_search() -> None:
+    """Final review: the free-text arXiv search (no outbound checkpoint, on
+    no palette) is gone; arXiv is reached by exact id only."""
+    from paperhub.agents import research_tools
+    from paperhub.pipelines import arxiv_client
 
-    with patch(
-        "paperhub.pipelines.arxiv_client._client"
-    ) as mock_client:
-        mock_client.results.return_value = iter([fake_result])
-        results = search_arxiv("mixture of experts", max_results=1)
-
-    assert len(results) == 1
-    r = results[0]
-    assert isinstance(r, ArxivResult)
-    assert r.arxiv_id == "2403.01234"
-    assert r.title == "A Test Paper"
-    assert r.authors == ["Author One", "Author Two"]
-    assert r.year == 2024
-    assert r.abstract == "An abstract."
+    assert not hasattr(arxiv_client, "search_arxiv")
+    assert not hasattr(research_tools, "search_arxiv_dispatch")
 
 
 @respx.mock

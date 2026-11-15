@@ -26,6 +26,7 @@
     "title": "PaperHub へようこそ",
     "subtitle": "モデルプロバイダーを接続すると会話を開始できます。「設定」で次の手順を完了してください：",
     "lockNote": "3 つすべてが有効になるまで、入力欄はロックされたままです。",
+    "lockedStep": "デプロイ担当者が backend/.env で設定しています。修正を依頼してください。",
     "optionalSS": "任意：「設定 → 連携サービス」で Semantic Scholar API キーを追加すると論文検索が速くなります（無料枠はレート制限がありますが、機能をブロックすることはありません）。",
     "optionalSSLink": "キーを取得",
     "openSettings": "設定を開く",
@@ -50,7 +51,8 @@
     "models_providers": "モデルとプロバイダー",
     "agents_memory": "エージェントとメモリ",
     "integrations": "連携サービス",
-    "system": "システム"
+    "system": "システム",
+    "privacy_outbound": "プライバシーと外部通信"
   },
   "group": {
     "paper_sources": "論文検索とオープンアクセス",
@@ -197,6 +199,93 @@
     },
     "PAPERHUB_AGENT_KEEP_TURNS": {
       "label": "エージェントが原文のまま保持する会話ターン数"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW": {
+      "label": "外部への検索を審査する",
+      "help": "非公開の文書・メモ・実験が分かってしまうクエリを書き換えるか、保留します。"
+    },
+    "PAPERHUB_OUTBOUND_UNSURE": {
+      "label": "審査で判断できないとき",
+      "help": "送信前に確認する、または送信しない。"
+    },
+    "PAPERHUB_SENSITIVE_TERMS": {
+      "label": "機密用語",
+      "help": "どこにも送信しません。製品名、プロジェクト名、顧客名など。大文字小文字は区別しません。"
+    },
+    "PAPERHUB_PRIVATE_UPLOAD_DEFAULT": {
+      "label": "新規アップロードを非公開にする",
+      "help": "アップロードフォームの「非公開文書」を初期でオンにします。公開論文ではオフに戻せます。"
+    },
+    "PAPERHUB_TRUSTED_SEARCH_URL": {
+      "label": "信頼できる検索サービス",
+      "help": "組織の検索サービス。クエリはネットワーク内にとどまります。"
+    },
+    "PAPERHUB_PUBLIC_WEB_SEARCH": {
+      "label": "公開ウェブ検索",
+      "help": "Bing や DuckDuckGo などの公開検索エンジン。新しい論文や話題の研究まで見つかります。"
+    },
+    "PAPERHUB_OUTBOUND_ALLOWLIST": {
+      "label": "許可する接続先",
+      "help": "PaperHub が接続できるホスト。それ以外はブロックされます。"
+    },
+    "PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS": {
+      "label": "記録の保存期間",
+      "help": "外部通信ログの保存期間（最短 7 日）。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_MODEL": {
+      "label": "審査モデル",
+      "help": "各外部リクエストを判断するモデル。空欄なら小型モデルを使います。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_TIMEOUT": {
+      "label": "審査のタイムアウト（秒）",
+      "help": "審査を待つ時間。超えると「判断できないとき」の設定に従います。"
+    }
+  },
+  "privacy": {
+    "lockedByDeployer": "デプロイ担当者が設定",
+    "lockedCount": "{{count}} 件をデプロイ担当者が設定",
+    "removeItem": "{{item}} を削除",
+    "addItemPlaceholder": "入力して Enter で追加",
+    "termPlaceholder": "用語を入力して Enter",
+    "hostPlaceholder": "ホストを入力して Enter",
+    "publicWarnTitle": "検索テキストがこのデバイスの外に出ます。",
+    "publicWarnBody": "クエリは組織外の公開検索エンジンに送られます。各クエリは先に審査されますが、クエリから研究内容が推測されるリスクはご自身の責任となります。",
+    "publicTurnOn": "公開検索をオンにする",
+    "publicKeepOff": "オフのままにする",
+    "publicOnNote": "オン。クエリは審査後に公開検索エンジンへ送られます。",
+    "nonLocalOne": "1 件の設定がクラウドモデルを使うため、一部のテキストがこのデバイスの外に出る可能性があります。",
+    "nonLocalMany": "{{count}} 件の設定がクラウドモデルを使うため、一部のテキストがこのデバイスの外に出る可能性があります。",
+    "groupReview": "外部通信の審査",
+    "groupReviewIntro": "あなたのテキストを含む検索や取得は、デバイスを出る前に確認されます。",
+    "groupSearch": "ウェブ検索",
+    "groupSearchIntro": "ウェブを検索する 2 つの方法。どちらも外部通信の審査を通ります。",
+    "groupDestinations": "許可する接続先",
+    "groupDestinationsIntro": "PaperHub はこれらのホストにのみ接続します。それ以外はブロックされます。",
+    "groupLog": "外部通信ログ",
+    "groupLogIntro": "このデバイスから出たすべての通信を、確認用に保存します。",
+    "unsureAsk": "確認する",
+    "unsureBlock": "送信しない",
+    "srcPaperSource": "論文ソース",
+    "srcTrustedSearch": "信頼できる検索",
+    "srcPublicSearch": "公開検索",
+    "srcDeployer": "デプロイ担当者",
+    "anyHost": "すべてのホスト",
+    "allowlistExtra": "追加で許可するホスト",
+    "days": "日",
+    "advanced": "審査モデルとタイムアウト",
+    "publicOnNoteBy": "オン。クエリは審査後に公開検索エンジンへ送られます。{{when}} にあなたがオンにしました。",
+    "trustedReachable": "接続できます",
+    "trustedUnreachable": "接続できません",
+    "invalidUrl": "http:// または https:// から始まる完全なアドレスを入力するか、空欄にしてください。",
+    "invalidNumber": "許可された範囲の整数を入力してください。",
+    "cloudShow": "どれか表示",
+    "cloudHide": "隠す",
+    "cloudModelSettings_one": "{{count}} 件の設定：{{names}}",
+    "cloudModelSettings_other": "{{count}} 件の設定：{{names}}",
+    "serverEnv": "{{name}}（サーバー環境）",
+    "envModel": {
+      "PAPERHUB_MARKER_LLM_MODEL": "Marker 精度パス",
+      "PAPERHUB_AGENT_VISION": "エージェントの画像読み取り"
     }
   }
 }

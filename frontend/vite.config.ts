@@ -29,5 +29,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     css: false,
+    // Many jsdom workers in parallel (often beside the dev servers) push a few
+    // multi-step tests past the 5 s default; a real hang still fails.
+    testTimeout: 15_000,
   },
 });

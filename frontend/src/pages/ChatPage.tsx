@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ChatThread } from "@/components/chat/ChatThread";
+import { SENT_SEARCH_PREFIX } from "@/components/chat/MessageBubble";
 import { Composer } from "@/components/chat/Composer";
 import { AutoApproveToggle } from "@/components/chat/AutoApproveToggle";
 import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
@@ -224,6 +225,16 @@ export function ChatPage() {
     });
   };
 
+  // H5a: run an approved held search as a follow-up turn. Errors (a 409 when
+  // the approval was already used) are handled by the card.
+  const handleRunHeld = (heldId: string, text: string): Promise<void> => {
+    const sessionId = activeSessionId ?? newSession();
+    return send(sessionId, "", {
+      approvedHeldId: heldId,
+      userBubble: `${SENT_SEARCH_PREFIX}${text}`,
+    });
+  };
+
   const handleToggleMemory = (): void => {
     // Always allowed: with no backend session yet, the panel shows global
     // (user) memories only (project/session memories need a sent message).
@@ -267,7 +278,11 @@ export function ChatPage() {
       style={{ gridTemplateColumns: `1fr ${rightPanelOpen ? canvasWidth : 0}px` }}
     >
       <div className="flex min-h-0 min-w-0 flex-col">
-        <ChatThread session={activeSession} onSend={handleSubmit} />
+        <ChatThread
+          session={activeSession}
+          onSend={handleSubmit}
+          onSendHeld={handleRunHeld}
+        />
         <Composer
           onSubmit={handleSubmit}
           disabled={isStreaming || setupRequired}

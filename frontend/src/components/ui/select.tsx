@@ -20,6 +20,7 @@ export function Select({
   id,
   className,
   "aria-label": ariaLabel,
+  disabled,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -27,14 +28,15 @@ export function Select({
   id?: string;
   className?: string;
   "aria-label"?: string;
+  disabled?: boolean;
 }) {
   return (
-    <SelectPrimitive.Root value={value} onValueChange={(v) => onValueChange(String(v))}>
+    <SelectPrimitive.Root disabled={disabled} value={value} onValueChange={(v) => onValueChange(String(v))}>
       <SelectPrimitive.Trigger
         id={id}
         aria-label={ariaLabel}
         className={cn(
-          "flex h-8 items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50",
+          "flex h-8 items-center justify-between gap-2 rounded-md disabled:cursor-not-allowed disabled:opacity-60 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60 border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50",
           className,
         )}
       >

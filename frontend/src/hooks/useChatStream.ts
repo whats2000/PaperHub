@@ -20,6 +20,11 @@ const AGENT_EVENTS = new Set([
   "paper_added",
   "memory_saved",
   "confirm_request",
+  "outbound_rewritten",
+  "outbound_blocked",
+  "outbound_held",
+  "paused",
+  "resumed",
 ]);
 
 interface SessionData { run_id: number; session_id: number; }
@@ -43,7 +48,14 @@ export function useChatStream() {
   const sessionIdRef = useRef<number | null>(null);
   const store = useChatStore;
 
-  const send = useCallback(async (sessionId: number, userMessage: string, opts?: { skipUserAppend?: boolean }) => {
+  const send = useCallback(async (sessionId: number, userMessage: string, opts?: {
+    skipUserAppend?: boolean;
+    /** H5a: start the turn that runs this approved held search. */
+    approvedHeldId?: string;
+    /** The user bubble to show when `userMessage` is empty (the backend
+     *  stores "Sent search: <text>" as the turn's user message). */
+    userBubble?: string;
+  }) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     userStoppedRef.current = false;
@@ -61,7 +73,8 @@ export function useChatStream() {
 
     if (!opts?.skipUserAppend) {
       store.getState().appendMessage(sessionId, {
-        role: "user", content: userMessage, run_id: null,
+        role: "user", content: opts?.userBubble ?? userMessage, run_id: null,
+        ...(opts?.approvedHeldId ? { approved_held_id: opts.approvedHeldId } : {}),
       });
     }
     store.getState().appendMessage(sessionId, {
@@ -94,6 +107,7 @@ export function useChatStream() {
         {
           session_id: backendSessionId,
           user_message: userMessage,
+          ...(opts?.approvedHeldId ? { approved_held_id: opts.approvedHeldId } : {}),
           history,
           ...(currentViewPage !== undefined ? { current_view_page: currentViewPage } : {}),
           slide_attached: slideAttached,
@@ -203,7 +217,12 @@ export function useChatStream() {
       // case onError didn't run; runId is still null; treat as pre-event.
       if (!handledInline && runId === null) {
         const msg = err instanceof Error ? err.message : String(err);
-        store.getState().failPendingAssistant(sessionId, msg);
+        if (opts?.approvedHeldId && !opts.skipUserAppend) {
+          // The held card offers "Run the search" again; no stray bubbles.
+          store.getState().dropFailedHeldTurn(sessionId);
+        } else {
+          store.getState().failPendingAssistant(sessionId, msg);
+        }
       }
       // Only re-throw for pre-event failures so ChatPage's toast fires.
       // Mid-stream failures stay inline-only.

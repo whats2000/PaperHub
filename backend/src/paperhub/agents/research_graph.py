@@ -76,6 +76,7 @@ from paperhub.agents.state import AgentState, effective_query, response_language
 from paperhub.db.tool_calls import drain_tool_calls_since
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.mcp.registry import MCPRegistry
+from paperhub.outbound.gate import OutboundGate
 from paperhub.pipelines.paper_pipeline import PaperPipeline
 from paperhub.tracing.tracer import Tracer
 
@@ -169,13 +170,25 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
     async def _ps_parse(state: AgentState) -> AgentState:
         run_id: int = state["run_id"]
         last_step = int(state.get("ps_last_step_index", -1))
-        requests = await parse_user_message(
-            effective_query(state),
-            tracer=deps.tracer,
-            model=parser_model,
-            slot=deps.parse_slot,
-            **_kwargs(deps),
-        )
+        pin = state.get("approved_pin")
+        if pin:
+            # Plan H5a (R37): the user's approved text is the request as
+            # written; the Parser would reword it and miss the approval.
+            requests = [ParsedRequest(hint=pin["text"], kind="natural_language")]
+            async with deps.tracer.step(
+                agent="research", tool="paper_search:parse_pinned", model=None,
+            ) as pstep:
+                pstep.record_args({"approved_pin": dict(pin)})
+                pstep.record_result({"requests": [{"hint": pin["text"],
+                                                   "kind": "natural_language"}]})
+        else:
+            requests = await parse_user_message(
+                effective_query(state),
+                tracer=deps.tracer,
+                model=parser_model,
+                slot=deps.parse_slot,
+                **_kwargs(deps),
+            )
         last_step = await _drain_and_stream_tool_steps(last_step, run_id)
         return {
             **state,
@@ -205,6 +218,16 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
         # as _pq_dispatch below.
         emitted_indices: set[int] = set()
         drain_lock = asyncio.Lock()
+        # Plan H5a: every free-text query this search sends passes the
+        # outbound checkpoint; each decision's chat event streams out as it
+        # is made (a later failure must not lose it).
+        gate = OutboundGate(
+            conn=deps.conn, adapter=deps.adapter, tracer=deps.tracer,
+            run_id=run_id, session_id=state.get("session_id"),
+            approved_held_id=state.get("approved_held_id"),
+            on_event=lambda e: writer(
+                {"event": "outbound", "name": e["event"], "data": e["data"]}),
+        )
 
         async def _emit_progress() -> None:
             async with drain_lock:
@@ -213,6 +236,41 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                     if rec["step_index"] not in emitted_indices:
                         writer({"event": "tool_step", "record": rec})
                         emitted_indices.add(rec["step_index"])
+
+        pin = state.get("approved_pin")
+
+        async def _process_pinned(
+            req: ParsedRequest, kinds: list[str],
+        ) -> ResolvedPaper | ParsedRequest:
+            """The user's approved text, sent as written to each approved
+            destination kind (R37): the web search (when approved) runs it
+            first; Semantic Scholar (when approved) gets it as the free-text
+            query. Anything derived from the results takes normal review."""
+            exact = CanonicalIdentity(
+                title=req.hint, author_surname=None, year=None,
+                confidence="low", rationale="the user's approved search, as written",
+            )
+            found: CanonicalIdentity | None = None
+            if "web_search" in kinds:
+                found = await discover_canonical(
+                    req, tracer=deps.tracer, model=parser_model,
+                    mcp_registry=deps.mcp_registry, outbound=gate,
+                    pinned_query=req.hint, **_kwargs(deps),
+                )
+                await _emit_progress()
+            tries = ([exact] if "s2_search" in kinds else []) + (
+                [found] if found is not None else [])
+            if not tries:
+                tries = [exact]
+            for identity in tries:
+                resolved = await resolve_via_ss(
+                    req, identity, tracer=deps.tracer,
+                    mcp_registry=deps.mcp_registry, outbound=gate,
+                )
+                await _emit_progress()
+                if resolved is not None:
+                    return resolved
+            return req
 
         async def _process_one(req: ParsedRequest) -> ResolvedPaper | ParsedRequest:
             """Discover → Resolve, exactly one pass.
@@ -231,6 +289,7 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                     tracer=deps.tracer,
                     model=parser_model,
                     mcp_registry=deps.mcp_registry,
+                    outbound=gate,
                     **_kwargs(deps),
                 )
                 await _emit_progress()
@@ -250,13 +309,16 @@ def build_paper_search_subgraph(deps: ResearchDeps) -> Any:
                     req, identity,
                     tracer=deps.tracer,
                     mcp_registry=deps.mcp_registry,
+                    outbound=gate,
                 )
                 await _emit_progress()
                 if resolved is not None:
                     return resolved
             return req  # NotFound
 
-        if requests:
+        if pin and requests:
+            results = [await _process_pinned(requests[0], list(pin["kinds"]))]
+        elif requests:
             results = await asyncio.gather(
                 *[_process_one(r) for r in requests],
                 return_exceptions=False,

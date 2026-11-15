@@ -32,6 +32,9 @@ export interface ToolCallRecord {
   token_out: number | null;
   status: ToolStatus;
   error: string | null;
+  /** The `tool:*` call this row belongs to (H5a wave 3); absent on rows
+   *  recorded before it, which the timeline groups by position. */
+  tool_call_id?: string | null;
 }
 
 // Stub shape — v2.4-5 will populate from the search_results SSE event.
@@ -182,6 +185,11 @@ export interface AgentSummary {
   papers_read: number;
   steps: number;
   tools: string[];
+  /** H5a wave 3: the activity timeline's header before its trace loads. */
+  sections_read?: number;
+  searches?: number;
+  /** Wall time of the turn; null for runs recorded before it. */
+  duration_ms?: number | null;
 }
 
 /** A chip's Undo state: `undoable` comes from the replay (false when the
@@ -218,6 +226,14 @@ export type ConfirmStatus =
 export type ConfirmTarget =
   | { kind: "paper"; id: number; title: string }
   | { kind: "memory"; id: number; content: string; scope: "session" | "global" }
+  | {
+      /** H5a: Ask first's "Allow this search?" card (tool `search_papers`). */
+      kind: "search";
+      query: string;
+      mode?: string;
+      /** Where the search may send queries (hosts or `public-web-search`). */
+      destinations: string[];
+    }
   | { kind: "other"; summary: string };
 
 export interface ConfirmRequestData {
@@ -230,21 +246,95 @@ export interface ConfirmRequestData {
   reason: string;
   /** Why the user is asked: auto-approve off, the classifier unsure, or the
    *  classifier failed. */
-  reason_kind?: "required" | "classifier" | "classifier_failed";
+  reason_kind?: "required" | "classifier" | "classifier_failed" | "ask_first";
   status?: ConfirmStatus;
-  result?: { content: string; record?: Record<string, unknown> } | null;
+  /** An action's `{content, record}`; a search card's decision
+   *  (`{decision, text, edited, allow_chat}` / `{decision, note}`). */
+  result?: ({ content?: string; record?: Record<string, unknown> } & SearchDecision) | null;
   error?: string;
+}
+
+/** H5a: the user's decision on an Ask-first search card, as the backend
+ *  stores it on the card's `pending_actions` row. */
+export interface SearchDecision {
+  decision?: "allowed" | "declined";
+  text?: string;
+  edited?: boolean;
+  allow_chat?: boolean;
+  /** Allowed by "Allow searches in this chat" chosen on another card. */
+  by_chat_setting?: boolean;
+  note?: string | null;
+  /** `turn_ended`: the turn was gone before the user decided. */
+  error?: string;
+}
+
+/** H5a: a search the checkpoint rewrote before it left the device. */
+export interface OutboundRewrittenData {
+  /** null when the log row's id is not known yet. */
+  log_id: number | null;
+  sent_text: string;
+  original_text: string;
+  reason: string;
+  destination: string;
+}
+
+/** H5a: a search the checkpoint refused (a sensitive term, or a block). */
+export interface OutboundBlockedData {
+  /** null when the log row's id is not known yet. */
+  log_id: number | null;
+  text: string;
+  reason: string;
+  term?: string;
+}
+
+/** `unavailable` is local only: a 409 whose real state is unknown (its turn
+ *  was stopped or its chat deleted). */
+export type HeldStatus = "pending" | "sent" | "discarded" | "unavailable";
+
+/** H5a: a search held for the user's OK. Replay carries the final status. */
+export interface OutboundHeldData {
+  held_id: string;
+  held_ids: string[];
+  text: string;
+  reason: string;
+  destination: string;
+  status: HeldStatus;
+  /** Local: the text actually sent (differs from `text` after an edit). */
+  sent_text?: string;
+  /** Local: the follow-up turn is no longer runnable (409), so the card
+   *  shows plain "Sent". */
+  settled?: boolean;
+  /** The approval was spent (or is held) by the run that sends it: the
+   *  paused turn itself (H5a) or its follow-up turn. */
+  ran?: boolean;
+}
+
+/** H5a: a card a paused run waits on (SSE `paused`): a held search or an
+ *  Ask-first action, and the tool call that waits on it. */
+export interface PausedCard {
+  /** `search`: an Ask-first search card (a `confirm_request`). */
+  kind: "held" | "action" | "search";
+  id: string;
+  tool: string;
+  /** The waiting tool call (its timeline node shows "waiting"). */
+  call_id?: string;
 }
 
 /** A tool UI event of an agent turn, live (SSE) or replayed (agent_events). */
 export type AgentUiEvent =
   | { event: "paper_added"; data: PaperAddedData }
   | { event: "memory_saved"; data: MemorySavedData }
-  | { event: "confirm_request"; data: ConfirmRequestData };
+  | { event: "confirm_request"; data: ConfirmRequestData }
+  | { event: "outbound_rewritten"; data: OutboundRewrittenData }
+  | { event: "outbound_blocked"; data: OutboundBlockedData }
+  | { event: "outbound_held"; data: OutboundHeldData };
 
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** H5a: this user turn runs an approved held search; Retry re-runs it
+   *  through `approved_held_id`, never as plain text. */
+  approved_held_id?: string;
   run_id: number | null;
   routing_decision?: RoutingDecision;
   /** Agent turns (H4): shown instead of the routing badge. */
@@ -258,6 +348,9 @@ export interface ChatMessage {
   /** "stopped": the user pressed Stop after the turn had already acted (a
    *  paper added, a memory saved); the stub keeps those chips and Undo. */
   status?: "streaming" | "processing" | "ok" | "error" | "interrupted" | "stopped";
+  /** H5a: the run is paused on these cards until the user decides (SSE
+   *  `paused`); cleared by `resumed` or the end of the turn. */
+  paused?: PausedCard[] | null;
   /** Set while a retracted (stopped) turn animates out before removal. */
   exiting?: boolean;
   /** Stop pressed; waiting for the backend to say whether the turn had
@@ -281,6 +374,10 @@ export interface ChatSession {
   idea_id?: number | null;
   /** Per-chat agent auto-approve switch (H4); off by default. */
   auto_approve?: boolean;
+  /** H5a: Ask first's "Allow searches in this chat". */
+  allow_searches?: boolean;
+  /** Last activity (ISO, UTC): sorts and groups the sidebar by time. */
+  updated_at?: string;
 }
 
 /** Backend-of-record session row (GET /sessions). The frontend merges these
@@ -297,6 +394,8 @@ export interface SessionSummary {
   idea_id?: number | null;
   /** Per-chat agent auto-approve switch (H4). */
   auto_approve?: boolean;
+  /** H5a: Ask first's "Allow searches in this chat". */
+  allow_searches?: boolean;
 }
 
 /** Result of POST /sessions/{id}/fork — the new session + the forked message
@@ -318,6 +417,8 @@ export interface BackendMessage {
   agent_summary?: AgentSummary | null;
   /** Agent runs: chips + confirm cards, each card with its action's status. */
   agent_events?: AgentUiEvent[] | null;
+  /** A user turn that ran an approved held search (H5a). */
+  approved_held_id?: string | null;
   /** Agent runs: one card list per search. */
   search_result_batches?: SearchResultCandidate[][] | null;
   /** Paper-search result cards emitted on this turn, replayed so they show on

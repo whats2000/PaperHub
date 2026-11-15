@@ -14,7 +14,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { setSessionAutoApprove } from "@/lib/api";
+import { setSessionAllowSearches, setSessionAutoApprove } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
 
@@ -39,7 +39,27 @@ export function AutoApproveToggle() {
     (s) =>
       s.sessions.find((x) => x.id === s.activeSessionId)?.auto_approve ?? false,
   );
+  const allowSearches = useChatStore(
+    (s) =>
+      s.sessions.find((x) => x.id === s.activeSessionId)?.allow_searches ?? false,
+  );
   const current: Mode = auto ? "auto" : "ask";
+
+  // H5a: "Allow searches in this chat" (from a search card) turned off.
+  const askSearchesAgain = async () => {
+    const store = useChatStore.getState();
+    const localId = activeSessionId;
+    if (localId === null) return;
+    store.setAllowSearches(localId, false);
+    try {
+      const backendId = await store.ensureBackendSession(localId);
+      const res = await setSessionAllowSearches(backendId, false);
+      useChatStore.getState().setAllowSearches(localId, res.allow_searches);
+    } catch {
+      useChatStore.getState().setAllowSearches(localId, true);
+      toast.error(t("autoApprove.failed"));
+    }
+  };
 
   const change = async (next: boolean) => {
     const store = useChatStore.getState();
@@ -142,6 +162,27 @@ export function AutoApproveToggle() {
             })}
           </div>
         </TooltipProvider>
+        {/* Ask first with "Allow searches in this chat" on: say so, and let
+            the user turn it off again. */}
+        <div
+          data-testid="searches-allowed"
+          data-state={!auto && allowSearches ? "open" : "closed"}
+          inert={auto || !allowSearches}
+          className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=open]:grid-rows-[1fr] data-[state=open]:opacity-100 motion-reduce:transition-none"
+        >
+          <div className="min-h-0 overflow-hidden">
+            <p className="mx-2 mt-1 flex items-center gap-2 border-t border-border pt-2 pb-1 text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1">{t("autoApprove.searchesAllowed")}</span>
+              <button
+                type="button"
+                onClick={() => void askSearchesAgain()}
+                className="shrink-0 rounded-sm font-medium text-foreground underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t("autoApprove.askAgain")}
+              </button>
+            </p>
+          </div>
+        </div>
       </PopoverContent>
     </Popover>
   );

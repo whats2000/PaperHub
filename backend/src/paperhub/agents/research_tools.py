@@ -19,7 +19,6 @@ imports it.
 """
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import logging
 from dataclasses import asdict, dataclass
@@ -29,7 +28,11 @@ import aiosqlite
 import httpx
 
 from paperhub.db.connection import write_lock
-from paperhub.pipelines.arxiv_client import search_arxiv as _search_arxiv_sync
+from paperhub.outbound import log as outbound_log
+from paperhub.outbound.checkpoint import find_term
+from paperhub.outbound.destinations import OutboundBlocked, check_destination
+from paperhub.outbound.policy import load_policy
+from paperhub.outbound.vouch import vouched
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, IngestRequest, PaperPipeline
 from paperhub.pipelines.semantic_scholar import (
     Mode,
@@ -47,7 +50,6 @@ _LOG = logging.getLogger(__name__)
 
 __all__ = [
     "AddResult",
-    "ArxivHit",
     "LibraryHit",
     "NoIngestibleSourceError",
     "SemanticScholarToolHit",
@@ -56,7 +58,6 @@ __all__ = [
     "add_paper_to_session_dispatch",
     "build_tool_schemas",
     "find_related_papers_dispatch",
-    "search_arxiv_dispatch",
     "search_library_dispatch",
     "search_semantic_scholar_dispatch",
 ]
@@ -69,15 +70,6 @@ class LibraryHit:
     title: str
     abstract: str
     year: int | None
-
-
-@dataclass(frozen=True)
-class ArxivHit:
-    arxiv_id: str
-    title: str
-    abstract: str
-    year: int | None
-    authors: list[str]
 
 
 @dataclass(frozen=True)
@@ -190,6 +182,13 @@ _BASE_PAPER_TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "default": 8,
                         "minimum": 1,
                         "maximum": 25,
+                    },
+                    "outbound_token": {
+                        "type": "string",
+                        "description": (
+                            "Internal: PaperHub's proof that the query passed "
+                            "its outbound privacy check. Omit it."
+                        ),
                     },
                 },
                 "required": ["query"],
@@ -306,39 +305,43 @@ async def search_library_dispatch(
     ]
 
 
-async def search_arxiv_dispatch(
-    *,
-    query: str,
-    max_results: int = 8,
-) -> list[ArxivHit]:
-    """Internal arXiv search — NOT in the LLM-visible palette as of v2.4.
-
-    Kept as a Python helper for Plan F (the slides corpus may want a
-    direct arXiv lookup). The agent uses ``search_semantic_scholar`` instead.
-    """
-    results = await asyncio.to_thread(_search_arxiv_sync, query, max_results)
-    return [
-        ArxivHit(
-            arxiv_id=r.arxiv_id,
-            title=r.title,
-            abstract=r.abstract,
-            year=r.year,
-            authors=list(r.authors),
-        )
-        for r in results
-    ]
-
-
 async def search_semantic_scholar_dispatch(
     *,
     query: str,
     max_results: int = 8,
     diag: dict[str, Any] | None = None,
+    outbound_token: str | None = None,
+    session_id: int | None = None,
+    run_id: int | None = None,
 ) -> list[SemanticScholarToolHit]:
     """Free-text Semantic Scholar search. Returns hits with an LLM-friendly
     ``paper_id`` prefix (``arxiv:<id>`` when available, else ``ss:<paperId>``)
     so the agent can pass it straight back into ``find_related_papers``
-    or into the final ``json:candidates`` shortlist."""
+    or into the final ``json:candidates`` shortlist.
+
+    Defence in depth (Plan H5a): unless ``outbound_token`` proves ``query``
+    already passed the outbound checkpoint in this process
+    (:func:`paperhub.outbound.vouch.vouched`), the sensitive-term list is
+    checked here (no LLM) when review is on. A hit returns no results, logs
+    one ``blocked`` row and says why in ``diag`` (the tool's ``_meta``)."""
+    if not vouched(query, outbound_token):
+        policy = load_policy()
+        term = find_term(query, policy.terms) if policy.review_enabled else None
+        if term is not None:
+            reason = f"contains the sensitive term {term!r}"
+            try:
+                await outbound_log.append(
+                    actor="system", caller="papers.search_semantic_scholar",
+                    kind="s2_search", destination="api.semanticscholar.org",
+                    decision="blocked", stage="terms", original_text=query,
+                    reason=reason, run_id=run_id, session_id=session_id,
+                )
+            except Exception:  # noqa: BLE001 - a log failure never lifts the block
+                _LOG.exception("outbound: could not log a blocked S2 query")
+            if diag is not None:
+                diag["outbound"] = {"decision": "blocked", "stage": "terms",
+                                    "term": term, "reason": reason}
+            return []
     hits = await search_papers(query, max_results, diag=diag)
     out: list[SemanticScholarToolHit] = []
     for h in hits:
@@ -469,6 +472,9 @@ async def _attach_pdf(
     session_id: int,
 ) -> AddResult:
     assert meta.open_access_pdf_url is not None, "_attach_pdf requires open_access_pdf_url"
+    check_destination(
+        meta.open_access_pdf_url, caller="research_tools._attach_pdf", kind="oa_download",
+    )
     result = await pipeline.ingest_pdf_from_url(
         session_id=session_id,
         pdf_url=meta.open_access_pdf_url,
@@ -555,9 +561,17 @@ async def add_paper_to_session_dispatch(
                 ),
             )
         if meta.open_access_pdf_url:
-            return await _attach_pdf(
-                meta, pipeline=pipeline, conn=conn, session_id=session_id,
-            )
+            try:
+                return await _attach_pdf(
+                    meta, pipeline=pipeline, conn=conn, session_id=session_id,
+                )
+            except OutboundBlocked:
+                # The allowlist forbids this host: same manual-download card
+                # as any other source we cannot fetch automatically.
+                raise NoIngestibleSourceError(
+                    paper_id=paper_id, title=meta.title,
+                    tried_urls=[meta.open_access_pdf_url],
+                ) from None
         # F4.3: Unpaywall fallback. When SS has no openAccessPdf URL but
         # we have a DOI AND the operator configured PAPERHUB_UNPAYWALL_EMAIL,
         # query Unpaywall for all OA locations and try each in order.
@@ -575,6 +589,12 @@ async def add_paper_to_session_dispatch(
                         synthesized, pipeline=pipeline, conn=conn,
                         session_id=session_id,
                     )
+                except OutboundBlocked:
+                    _LOG.info(
+                        "unpaywall url blocked by the allowlist doi=%s url=%s — "
+                        "trying next", meta.doi, oa_url,
+                    )
+                    continue
                 except httpx.HTTPError as exc:
                     _LOG.info(
                         "unpaywall url failed doi=%s url=%s err=%s — trying next",

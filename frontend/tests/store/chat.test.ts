@@ -87,7 +87,7 @@ describe("chat store", () => {
     const idB = useChatStore.getState().newSession();
     const idC = useChatStore.getState().newSession();
 
-    // Sessions are [A, B, C], B is at index 1
+    // New chats go first: sessions are [C, B, A], B is at index 1
     const stateBeforeDelete = useChatStore.getState().sessions;
     const idxB = stateBeforeDelete.findIndex((s) => s.id === idB);
     expect(idxB).toBe(1);
@@ -101,8 +101,8 @@ describe("chat store", () => {
     expect(sessions).toHaveLength(3);
     expect(sessions[1]!.id).toBe(idB);
     // Verify the other sessions are still in order
-    expect(sessions[0]!.id).toBe(idA);
-    expect(sessions[2]!.id).toBe(idC);
+    expect(sessions[0]!.id).toBe(idC);
+    expect(sessions[2]!.id).toBe(idA);
   });
 
   it("deleteSession clears activeSessionId when active session is deleted", () => {

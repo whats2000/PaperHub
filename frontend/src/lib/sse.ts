@@ -10,6 +10,8 @@ export interface SseHandlers {
 export interface ChatRequestBody {
   session_id: number | null;
   user_message: string;
+  /** H5a: run this approved held search (user_message may then be empty). */
+  approved_held_id?: string;
   history: { role: "user" | "assistant"; content: string }[];
   /** 1-based page on screen in the Slides panel; sent only when a deck is open. */
   current_view_page?: number;

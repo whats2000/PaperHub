@@ -15,14 +15,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import html
 import json
 import re
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import aiosqlite
 
+from paperhub import approvals
 from paperhub.agents.core.citations import (
     cited_figures,
     cited_ids,
@@ -53,6 +56,7 @@ from paperhub.db.connection import write_transaction
 from paperhub.llm.adapter import ToolCall, ToolTurn
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.models.domain import AgentState
+from paperhub.outbound.gate import OUTBOUND_EVENTS
 from paperhub.tracing.tracer import Tracer
 
 AGENT_MAX_STEPS = 12
@@ -67,6 +71,17 @@ EMPTY_TURN_NUDGE = (
     "Your last turn was empty. Answer my message now from what you have "
     "read, or call a tool if you still need something."
 )
+# Plan H5a: the search the user approved, which PaperHub ran before the
+# model's first step. It is user-role context, never an assistant tool call
+# the model did not make (run 914: Gemini rejects such a call for its
+# missing thought signature). The result is search_papers' own content
+# (external text already escaped inside <search_results>).
+APPROVED_SEARCH_CONTEXT = (
+    "The user approved this search, and PaperHub ran it with search_papers "
+    "before your first step. Treat the result as your own search_papers "
+    "result.\n"
+    '<approved_search_result query="{query}">\n{result}\n</approved_search_result>'
+)
 EMPTY_ANSWER = (
     "I could not finish an answer this turn. Please ask again or narrow the "
     "question."
@@ -78,7 +93,9 @@ DUPLICATE_CALL_CONTENT = (
     "Its result is above.")
 # Tool UI events kept in the agent record so a reloaded chat can replay the
 # chips and confirmation cards (ruling R11), in the order they streamed.
-REPLAYED_UI_EVENTS = frozenset({"paper_added", "memory_saved", "confirm_request"})
+# Plan H5a adds the outbound checkpoint's decisions on paper search.
+REPLAYED_UI_EVENTS = frozenset(
+    {"paper_added", "memory_saved", "confirm_request"} | OUTBOUND_EVENTS)
 _PROPOSAL = re.compile(r"<proposal>(.*?)</proposal>", re.DOTALL)
 _WORK_RECORD = re.compile(r"\s*<work_record>.*?</work_record>", re.DOTALL)
 
@@ -145,6 +162,13 @@ class AgentDeps:
     # Set by the chat layer's Stop branch before it closes the loop: only then
     # is a GeneratorExit a Stop (else it is a caller error or GC finalising).
     stop_requested: bool = False
+
+
+def approved_search_message(query: str, result: str) -> dict[str, Any]:
+    """The approved search's result as the model sees it (the feedback
+    export rebuilds it with this same function)."""
+    return {"role": "user", "content": APPROVED_SEARCH_CONTEXT.format(
+        query=html.escape(query, quote=True), result=result)}
 
 
 def _assistant_message(content: str, calls: list[ToolCall]) -> dict[str, Any]:
@@ -361,14 +385,22 @@ def _check_evidence(
     return answer
 
 
-def _live_beat(run_id: int, tool: str) -> _QueueItem:
+def _live_beat(
+    run_id: int, tool: str, calls: list[ToolCall] | None = None,
+) -> _QueueItem:
     """A live-only trace beat (negative step_index, never persisted): the
     frontend shows the latest one as the in-progress phase at the trace tail,
-    the same channel the Report stage heartbeats use."""
+    the same channel the Report stage heartbeats use. A beat for running
+    tools lists the calls (id, name, args), so the activity timeline shows a
+    running node for each before its row is written (H5a wave 3)."""
+    summary: dict[str, Any] = {"stage": True, "elapsed_s": 0}
+    if calls:
+        summary["calls"] = [{"id": c.id, "name": c.name, "args": c.arguments}
+                            for c in calls]
     return ("event", ("tool_step", {"record": {
         "run_id": run_id, "step_index": -1, "branch": "", "parent_step": None, "agent": "agent",
         "tool": tool, "model": "", "args_redacted_json": None,
-        "result_summary_json": {"stage": True, "elapsed_s": 0},
+        "result_summary_json": summary,
         "latency_ms": 0, "token_in": 0, "token_out": 0, "status": "ok",
         "error": None,
     }}))
@@ -419,7 +451,7 @@ async def _run_calls(
     last_serial: asyncio.Task[ToolOutcome] | None = None
     # A running tool has no tool_calls row until it closes; name it live.
     queue.put_nowait(_live_beat(ctx.run_id, "agent:" + ", ".join(dict.fromkeys(
-        c.name for c in calls))))
+        c.name for c in calls)), calls))
     for c in calls:
         key = _call_key(c)
         if key in pending:
@@ -529,12 +561,55 @@ async def run_core_agent(
         else:
             q.put_nowait(("event", (name, payload)))
 
+    # H5a: paused / resumed go out on the active step's queue, after the
+    # card the run waits on (the card is emitted through the same queue).
+    direct_emit: approvals.Emit | None = None
+
+    def emit_pause_state(name: str, payload: dict[str, Any]) -> None:
+        q = active["queue"]
+        if q is not None:
+            q.put_nowait(("event", (name, payload)))
+        elif direct_emit is not None:
+            direct_emit(name, payload)
+
+    direct_emit = approvals.route_events(run_id, emit_pause_state)
+
     ctx = ToolContext(
         conn=conn, tracer=deps.tracer, session_id=session_id, run_id=run_id,
         settings=settings, adapter=deps.adapter, emit=emit_live,
         enabled_papers=[(p.id, p.title) for p in papers], history=history,
         state=state, mcp_registry=deps.mcp_registry,
     )
+
+    async def drain(
+        queue: asyncio.Queue[_QueueItem | None], task: asyncio.Task[Any],
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """Yield ``queue`` (the active queue)'s tokens and tool events until
+        it closes (each trace row once), then leave ``task`` done (cancelled
+        if the caller stopped early)."""
+        try:
+            while (item := await queue.get()) is not None:
+                kind, value = item
+                if kind == "token":
+                    yield Token(str(value))
+                    continue
+                name, payload = value
+                if name == "tool_step":
+                    idx = (payload.get("record") or {}).get("step_index")
+                    # Negative = Report stage heartbeats, which reuse
+                    # indexes across stages: never de-duplicated.
+                    if isinstance(idx, int) and idx >= 0:
+                        if idx in forwarded_steps:
+                            continue
+                        forwarded_steps.add(idx)
+                yield ToolEvent(name, payload)
+            await task
+        finally:
+            active["queue"] = None
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     read_ids: list[int] = []
     viewed_figures: list[str] = []  # "<paper>/<figure id>" seen this turn
@@ -553,11 +628,18 @@ async def run_core_agent(
     nudge_next = False
     answer_streamed = False
 
+    approved = state.get("approved_search")
+    # Wall time of the turn (the activity timeline's "Worked 10.6 s").
+    started = time.monotonic()
+
     async def save_record(extra: dict[str, Any]) -> dict[str, Any]:
         papers_touched = list(dict.fromkeys(
             touched_papers + await _papers_of_chunks(conn, read_ids)))
         work = {"tools": tools_used, "read": read_ids, "cited": cited_ids(answer),
-                "papers": papers_touched, "steps": step_no, **extra}
+                "papers": papers_touched, "steps": step_no,
+                "duration_ms": int((time.monotonic() - started) * 1000), **extra}
+        if approved:
+            work["approved_search"] = dict(approved)
         if viewed_figures or cited_figures(answer):
             work["figures"] = viewed_figures
             work["cited_figures"] = cited_figures(answer)
@@ -572,6 +654,37 @@ async def run_core_agent(
         return work
 
     try:
+        if approved:
+            # Plan H5a: the user sent a held search. The turn starts with that
+            # search as a real (traced) search_papers call on the approved
+            # text, carrying the approval token to the outbound gate; the
+            # model then gets its result as user-role context.
+            call = ToolCall(id=f"approved_{approved['held_id']}",
+                            name="search_papers",
+                            arguments={"query": approved["text"]})
+            queue0: asyncio.Queue[_QueueItem | None] = asyncio.Queue()
+
+            async def approved_search() -> ToolOutcome:
+                ctx.state["approved_held_id"] = approved["held_id"]
+                try:
+                    outcome = await deps.registry.run(ctx, call)
+                    for event in outcome.events:
+                        queue0.put_nowait(("event", event))
+                    return outcome
+                finally:
+                    ctx.state.pop("approved_held_id", None)
+                    queue0.put_nowait(None)
+
+            queue0.put_nowait(_live_beat(run_id, "agent:search_papers", [call]))
+            active["queue"] = queue0
+            search_task = asyncio.create_task(approved_search())
+            async with contextlib.aclosing(drain(queue0, search_task)) as events:
+                async for ev in events:
+                    yield ev
+            outcome = search_task.result()
+            this_turn.append(approved_search_message(approved["text"], outcome.content))
+            tools_used.append(call.name)
+            tool_tokens += count_tokens(outcome.content)
         while True:
             step_no += 1
             if step_no > 1:
@@ -634,32 +747,15 @@ async def run_core_agent(
                 allowed_views=set(viewed_views) | conv.kept_views,
                 retry_empty=empty_retries == 0, pending=pending,
                 # Only the turn's first tool step: later, the model has read
-                # or done something the tool's answer would not include.
+                # or done something the tool's answer would not include (the
+                # approved search's result also counts as read).
                 allow_tool_answer=len(this_turn) == 1,
             ))
-            try:
-                while (item := await queue.get()) is not None:
-                    kind, value = item
-                    if kind == "token":
-                        yield Token(str(value))
-                        continue
-                    name, payload = value
-                    if name == "tool_step":
-                        idx = (payload.get("record") or {}).get("step_index")
-                        # Negative = Report stage heartbeats, which reuse
-                        # indexes across stages: never de-duplicated.
-                        if isinstance(idx, int) and idx >= 0:
-                            if idx in forwarded_steps:
-                                continue
-                            forwarded_steps.add(idx)
-                    yield ToolEvent(name, payload)
-                res = await step_task
-            finally:
-                active["queue"] = None
-                if not step_task.done():
-                    step_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await step_task
+            # aclosing: a Stop (GeneratorExit here) cancels the step at once.
+            async with contextlib.aclosing(drain(queue, step_task)) as events:
+                async for ev in events:
+                    yield ev
+            res = step_task.result()
             if res.empty:
                 # Seen live on Gemini: a turn with neither text nor tool
                 # calls. The identical request tends to come back empty again,

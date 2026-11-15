@@ -26,6 +26,7 @@
     "title": "歡迎使用 PaperHub",
     "subtitle": "連接模型供應商即可開始對話。請在「設定」中完成以下步驟：",
     "lockNote": "在三項皆有效之前，輸入框將維持鎖定。",
+    "lockedStep": "由部署者在 backend/.env 設定，請聯絡部署者修正。",
     "optionalSS": "選用：可在「設定 → 整合服務」新增 Semantic Scholar API 金鑰以加速論文搜尋（免費層級有速率限制，但不會阻擋任何功能）。",
     "optionalSSLink": "取得金鑰",
     "openSettings": "開啟設定",
@@ -50,7 +51,8 @@
     "models_providers": "模型與供應商",
     "agents_memory": "代理與記憶",
     "integrations": "整合服務",
-    "system": "系統"
+    "system": "系統",
+    "privacy_outbound": "隱私與對外連線"
   },
   "group": {
     "paper_sources": "論文搜尋與開放取用",
@@ -197,6 +199,93 @@
     },
     "PAPERHUB_AGENT_KEEP_TURNS": {
       "label": "代理原文保留的對話回合數"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW": {
+      "label": "審查對外搜尋",
+      "help": "當查詢可能洩漏你的私人文件、筆記或實驗時，改寫或暫停該查詢。"
+    },
+    "PAPERHUB_OUTBOUND_UNSURE": {
+      "label": "審查無法判斷時",
+      "help": "送出前先詢問我，或一律不送出。"
+    },
+    "PAPERHUB_SENSITIVE_TERMS": {
+      "label": "敏感詞",
+      "help": "絕不送往任何地方：產品名稱、專案名稱、客戶。比對時不分大小寫。"
+    },
+    "PAPERHUB_PRIVATE_UPLOAD_DEFAULT": {
+      "label": "新上傳預設為私人",
+      "help": "上傳表單預設勾選「私人文件」。公開論文仍可取消勾選。"
+    },
+    "PAPERHUB_TRUSTED_SEARCH_URL": {
+      "label": "受信任的搜尋服務",
+      "help": "貴組織的搜尋服務。查詢只會留在你的網路內。"
+    },
+    "PAPERHUB_PUBLIC_WEB_SEARCH": {
+      "label": "公開網路搜尋",
+      "help": "Bing、DuckDuckGo 等公開搜尋引擎。能找到更多內容，包括最新與熱門的研究。"
+    },
+    "PAPERHUB_OUTBOUND_ALLOWLIST": {
+      "label": "允許的目的地",
+      "help": "PaperHub 可連線的主機，其餘一律封鎖。"
+    },
+    "PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS": {
+      "label": "保留記錄天數",
+      "help": "對外連線記錄的保留期限（至少 7 天）。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_MODEL": {
+      "label": "審查模型",
+      "help": "判斷每個對外請求的模型。留空則使用小型模型。"
+    },
+    "PAPERHUB_OUTBOUND_REVIEW_TIMEOUT": {
+      "label": "審查逾時（秒）",
+      "help": "等待審查結果的時間，逾時後依「無法判斷」的設定處理。"
+    }
+  },
+  "privacy": {
+    "lockedByDeployer": "由部署者設定",
+    "lockedCount": "{{count}} 項由部署者設定",
+    "removeItem": "移除 {{item}}",
+    "addItemPlaceholder": "輸入後按 Enter 新增",
+    "termPlaceholder": "輸入詞彙後按 Enter",
+    "hostPlaceholder": "輸入主機後按 Enter",
+    "publicWarnTitle": "你的搜尋文字將離開這台裝置。",
+    "publicWarnBody": "查詢會送往組織以外的公開搜尋引擎。每一筆仍會先經過審查，但查詢內容可能透露你的研究，風險由你自行承擔。",
+    "publicTurnOn": "開啟公開搜尋",
+    "publicKeepOff": "維持關閉",
+    "publicOnNote": "已開啟。查詢經審查後會送往公開搜尋引擎。",
+    "nonLocalOne": "有 1 項設定使用雲端模型，部分文字可能離開這台裝置。",
+    "nonLocalMany": "有 {{count}} 項設定使用雲端模型，部分文字可能離開這台裝置。",
+    "groupReview": "對外審查",
+    "groupReviewIntro": "每一次帶有你文字的搜尋或擷取，在離開這台裝置前都會先檢查。",
+    "groupSearch": "網路搜尋",
+    "groupSearchIntro": "兩種搜尋網路的方式，兩者都會經過對外審查。",
+    "groupDestinations": "允許的目的地",
+    "groupDestinationsIntro": "PaperHub 只會連線到這些主機，其餘一律封鎖。",
+    "groupLog": "對外記錄",
+    "groupLogIntro": "所有離開這台裝置的內容，保留供檢視。",
+    "unsureAsk": "詢問我",
+    "unsureBlock": "不要送出",
+    "srcPaperSource": "論文來源",
+    "srcTrustedSearch": "受信任搜尋",
+    "srcPublicSearch": "公開搜尋",
+    "srcDeployer": "部署者",
+    "anyHost": "任何主機",
+    "allowlistExtra": "額外允許的主機",
+    "days": "天",
+    "advanced": "審查模型與逾時",
+    "publicOnNoteBy": "已開啟。查詢經審查後會送往公開搜尋引擎。由你於 {{when}} 開啟。",
+    "trustedReachable": "可連線",
+    "trustedUnreachable": "無法連線",
+    "invalidUrl": "請輸入完整的 http:// 或 https:// 位址，或留空。",
+    "invalidNumber": "請輸入允許範圍內的整數。",
+    "cloudShow": "顯示是哪些",
+    "cloudHide": "隱藏",
+    "cloudModelSettings_one": "{{count}} 項設定：{{names}}",
+    "cloudModelSettings_other": "{{count}} 項設定：{{names}}",
+    "serverEnv": "{{name}}（伺服器環境）",
+    "envModel": {
+      "PAPERHUB_MARKER_LLM_MODEL": "Marker 精確度處理",
+      "PAPERHUB_AGENT_VISION": "代理視覺"
     }
   }
 }

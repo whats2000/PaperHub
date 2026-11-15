@@ -185,3 +185,66 @@ async def test_amain_clears_stale_ports_file_when_already_running(
 
     assert await mcp_up._amain() == 0
     assert not mcp_up._ports_file().exists()
+
+
+async def test_amain_skips_public_web_server_when_search_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_toml(tmp_path, launch=True)
+    monkeypatch.setenv("PAPERHUB_MCP_CONFIG", str(path))
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "0")
+    monkeypatch.setenv("PAPERHUB_MCP_PORTS_FILE", str(tmp_path / "ports"))
+    seen: list[str] = []
+
+    async def _ensure(cfg: Any) -> str:
+        seen.append(cfg.name)
+        return "already-running"
+
+    monkeypatch.setattr(mcp_up, "_ensure_one", _ensure)
+    assert await mcp_up._amain() == 0
+    assert seen == []
+    monkeypatch.setenv("PAPERHUB_PUBLIC_WEB_SEARCH", "1")
+    assert await mcp_up._amain() == 0
+    assert seen == ["web"]
+
+
+def _settings_db(tmp_path: Path, rows: dict[str, str]) -> None:
+    import sqlite3
+
+    with sqlite3.connect(tmp_path / "paperhub.db") as c:
+        c.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
+        c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", list(rows.items()))
+
+
+async def _launched_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    monkeypatch.setenv("PAPERHUB_MCP_CONFIG", str(_write_toml(tmp_path, launch=True)))
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    seen: list[str] = []
+
+    async def _ensure(cfg: Any) -> str:
+        seen.append(cfg.name)
+        return "already-running"
+
+    monkeypatch.setattr(mcp_up, "_ensure_one", _ensure)
+    assert await mcp_up._amain() == 0
+    return seen
+
+
+async def test_amain_honours_public_search_switched_on_in_settings_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERHUB_PROFILE", "deployment")
+    monkeypatch.delenv("PAPERHUB_PUBLIC_WEB_SEARCH", raising=False)
+    monkeypatch.delenv("PAPERHUB_LOCKED_SETTINGS", raising=False)
+    _settings_db(tmp_path, {"PAPERHUB_PUBLIC_WEB_SEARCH": "1"})
+    assert await _launched_names(tmp_path, monkeypatch) == ["web"]
+
+
+async def test_amain_ignores_locked_settings_db_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERHUB_PROFILE", "deployment")
+    monkeypatch.delenv("PAPERHUB_PUBLIC_WEB_SEARCH", raising=False)
+    monkeypatch.setenv("PAPERHUB_LOCKED_SETTINGS", "PAPERHUB_PUBLIC_WEB_SEARCH")
+    _settings_db(tmp_path, {"PAPERHUB_PUBLIC_WEB_SEARCH": "1"})
+    assert await _launched_names(tmp_path, monkeypatch) == []

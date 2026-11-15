@@ -3,8 +3,8 @@ import contextvars
 import json
 import sqlite3
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,6 +66,25 @@ class _StepBuffer:
 _CURRENT_STEP: contextvars.ContextVar[_StepBuffer | None] = contextvars.ContextVar(
     "paperhub_current_step", default=None,
 )
+
+
+# The agent tool call (``tool:<name>`` row) the code now running belongs to
+# (H5a wave 3, FR-02). Set by ``ToolRegistry.run`` around the call; tasks the
+# call starts inherit it. Each step records it as ``tool_call_id`` so the
+# activity timeline groups parallel calls' interleaved rows correctly.
+_CURRENT_TOOL_CALL: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "paperhub_tool_call", default=None,
+)
+
+
+@contextmanager
+def tool_call_scope(call_id: str | None) -> Iterator[None]:
+    """Attribute every trace step opened inside to the tool call ``call_id``."""
+    token = _CURRENT_TOOL_CALL.set(call_id)
+    try:
+        yield
+    finally:
+        _CURRENT_TOOL_CALL.reset(token)
 
 
 def note_model_fallback(from_model: str, to_model: str, reason: str) -> None:
@@ -147,6 +166,7 @@ class Tracer:
         parent_step: int | None = None,
     ) -> AsyncIterator[_StepBuffer]:
         buf = _StepBuffer()
+        call_id = _CURRENT_TOOL_CALL.get()
         index = self._next_index
         self._next_index += 1
         started = time.monotonic()
@@ -160,12 +180,12 @@ class Tracer:
         except asyncio.CancelledError:
             status, error = "error", "cancelled"
             await self._write(buf, index, agent, tool, model, parent_step,
-                              started, status, error)
+                              started, status, error, call_id)
             raise
         except Exception as exc:
             status, error = "error", str(exc)
             await self._write(buf, index, agent, tool, model, parent_step,
-                              started, status, error)
+                              started, status, error, call_id)
             raise
         else:
             if buf.forced_status is not None:
@@ -173,7 +193,7 @@ class Tracer:
             elif buf.forced_error is not None:
                 status, error = "error", buf.forced_error
             await self._write(buf, index, agent, tool, model, parent_step,
-                              started, status, error)
+                              started, status, error, call_id)
         finally:
             _CURRENT_STEP.reset(cv_token)
 
@@ -188,6 +208,7 @@ class Tracer:
         started: float,
         status: str,
         error: str | None,
+        call_id: str | None = None,
     ) -> None:
         latency_ms = int((time.monotonic() - started) * 1000)
         args_json = json.dumps(redact(buf.args)) if buf.args is not None else None
@@ -220,6 +241,7 @@ class Tracer:
             "token_out": token_out,
             "status": status,
             "error": error,
+            "tool_call_id": call_id,
         }
         next_free = (
             "(SELECT COALESCE(MAX(step_index), -1) + 1 FROM tool_calls "
@@ -230,10 +252,10 @@ class Tracer:
             return (
                 "INSERT INTO tool_calls (run_id, branch, step_index, parent_step, "
                 "agent, tool, model, args_redacted_json, result_summary_json, "
-                "latency_ms, token_in, token_out, status, error) "
+                "latency_ms, token_in, token_out, status, error, tool_call_id) "
                 f"VALUES (:run_id, :branch, {step_expr}, :parent_step, "
                 ":agent, :tool, :model, :args_redacted_json, :result_summary_json, "
-                ":latency_ms, :token_in, :token_out, :status, :error)"
+                ":latency_ms, :token_in, :token_out, :status, :error, :tool_call_id)"
             )
 
         # Serialised with every other writer on this connection (ruling R9):

@@ -41,6 +41,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from paperhub.outbound.destinations import (
+    PUBLIC_WEB_SEARCH,
+    OutboundBlocked,
+    check_destination,
+)
+from paperhub.outbound.policy import load_policy
+
 from .client import MCPClient
 from .config import MCPServerConfig, load_mcp_servers
 from .errors import MCPUnavailableError
@@ -57,6 +64,14 @@ from .launcher import (
 _tcp_reachable = tcp_reachable
 
 __all__ = ["MCPRegistry"]
+
+# A server flagged ``public_web`` (open-websearch) reaches the public web: it is
+# off the palette (never connected, never launched, never callable) while public
+# web search is switched off. Callers already degrade when it is unreachable.
+
+
+def _web_enabled() -> bool:
+    return load_policy().public_web_search
 
 _LOG = logging.getLogger(__name__)
 
@@ -77,6 +92,8 @@ class MCPRegistry:
     # long enough that a truly-dead daemon isn't probed on every
     # tool-palette lookup.
     _RETRY_AFTER_SECONDS: float = 30.0
+    # Minimum gap between runtime launch attempts of the same deferred server.
+    _RELAUNCH_AFTER_SECONDS: float = 60.0
 
     def __init__(self) -> None:
         self._clients: dict[str, MCPClient] = {}
@@ -86,6 +103,16 @@ class MCPRegistry:
         # the retry-after-cooldown path.
         self._failed_at: dict[str, float] = {}
         self._aggregated_schemas: list[dict[str, Any]] | None = None
+        # Whether the cached palette was built with the web server enabled.
+        self._aggregated_web_on = True
+        # Names of servers flagged ``public_web`` in the config.
+        self._public_web: set[str] = set()
+        # public_web servers whose launch was skipped at startup (search off);
+        # started when the setting is switched on at runtime.
+        self._deferred_launch: list[MCPServerConfig] = []
+        # Strong refs to the background launches + when each was last tried.
+        self._launch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._launch_attempted: dict[str, float] = {}
         # Server name → live subprocess we spawned at startup. Detach-and-leak:
         # NOT terminated on `shutdown()` (so reloads don't thrash the daemon);
         # populated only for configs with `has_launch`. See module docstring.
@@ -127,6 +154,8 @@ class MCPRegistry:
 
         for cfg in configs:
             self._clients[cfg.name] = MCPClient(cfg)
+            if cfg.public_web:
+                self._public_web.add(cfg.name)
         _LOG.info(
             "mcp.registry loaded %d server config(s): %s",
             len(self._clients),
@@ -138,7 +167,14 @@ class MCPRegistry:
         # boot or the rest of the registry. The unreachable server's
         # `connect()` will fail normally on first use and land in
         # `_connect_failed` via the existing sticky-fail path.
-        launchable = [cfg for cfg in configs if cfg.has_launch]
+        web_on = _web_enabled()
+        launchable = [
+            cfg for cfg in configs
+            if cfg.has_launch and (web_on or not cfg.public_web)
+        ]
+        self._deferred_launch = [
+            cfg for cfg in configs if cfg.has_launch and cfg.public_web and not web_on
+        ]
         if launchable:
             await asyncio.gather(
                 *[self._maybe_launch(cfg) for cfg in launchable],
@@ -156,7 +192,16 @@ class MCPRegistry:
         server. Explicit teardown is the boot script's job (``start.ps1``
         terminates ``paperhub-mcp-up``); leaked daemons otherwise clear at OS
         reboot or manual kill.
+
+        In-flight background launches (``_launch_tasks``) are cancelled and
+        awaited, so none outlives the registry.
         """
+        tasks = [t for t in self._launch_tasks.values() if not t.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._launch_tasks.clear()
         for name, client in self._clients.items():
             try:
                 await client.disconnect()
@@ -166,7 +211,7 @@ class MCPRegistry:
 
     # ------------------------------------------------------------------ autostart
 
-    async def _maybe_launch(self, cfg: MCPServerConfig) -> None:
+    async def _maybe_launch(self, cfg: MCPServerConfig) -> bool:
         """Spawn ``cfg.launch`` if the configured URL isn't already serving.
 
         Operates only on ``streamable_http`` configs (enforced by
@@ -182,14 +227,14 @@ class MCPRegistry:
                 "mcp.registry %s: cannot parse host:port from url=%r; skipping launch",
                 cfg.name, cfg.url,
             )
-            return
+            return False
 
         if await tcp_reachable(host, port):
             _LOG.info(
                 "mcp.registry %s daemon already reachable on %s:%d; skipping launch",
                 cfg.name, host, port,
             )
-            return
+            return True
 
         # Detached subprocess.Popen (loop-independent — works on the
         # SelectorEventLoop uvicorn forces under --reload on Windows). PATH /
@@ -197,7 +242,7 @@ class MCPRegistry:
         # None; the unreachable server then fails cleanly at first call_tool.
         proc = launch_detached(cfg.launch, cfg.launch_env, label=cfg.name)
         if proc is None:
-            return
+            return False
         self._launched[cfg.name] = proc
 
         if not await wait_until_reachable(host, port, cfg.launch_ready_timeout):
@@ -208,12 +253,39 @@ class MCPRegistry:
             )
             terminate(proc)
             self._launched.pop(cfg.name, None)
-            return
+            return False
 
         _LOG.info(
             "mcp.registry %s daemon ready on %s:%d (pid=%s)",
             cfg.name, host, port, proc.pid,
         )
+        return True
+
+    async def _runtime_launch(self, cfg: MCPServerConfig) -> None:
+        """Background launch of a deferred public-web server. On success the
+        deferral clears and the palette cache is dropped so the next rebuild
+        connects; a failure leaves it deferred for a later (backed-off) retry."""
+        try:
+            ok = await self._maybe_launch(cfg)
+        except Exception:  # noqa: BLE001 - never let a background task die silently
+            _LOG.exception("mcp.registry runtime launch of %s failed", cfg.name)
+            return
+        if ok:
+            self._deferred_launch = [c for c in self._deferred_launch if c.name != cfg.name]
+            self._aggregated_schemas = None
+
+    def _start_deferred_launches(self) -> None:
+        """Start (without waiting) each deferred server that has no launch in
+        flight and was not attempted within the backoff window."""
+        now = time.monotonic()
+        for cfg in self._deferred_launch:
+            task = self._launch_tasks.get(cfg.name)
+            if task is not None and not task.done():
+                continue
+            if now - self._launch_attempted.get(cfg.name, -1e9) < self._RELAUNCH_AFTER_SECONDS:
+                continue
+            self._launch_attempted[cfg.name] = now
+            self._launch_tasks[cfg.name] = asyncio.create_task(self._runtime_launch(cfg))
 
     # ------------------------------------------------------------------ public ops
 
@@ -235,6 +307,15 @@ class MCPRegistry:
         the connect happen exactly once and lets concurrent callers
         share the result.
         """
+        web_on = _web_enabled()
+        if self._aggregated_web_on != web_on:
+            self._aggregated_schemas = None  # the setting flipped: rebuild
+        if web_on and self._deferred_launch:
+            # Switched on at runtime: start what boot skipped in the
+            # background (no restart, this turn is not delayed); a later
+            # rebuild picks the server up once it is reachable. Also retries
+            # a failed launch (backed off), even when the palette is cached.
+            self._start_deferred_launches()
         now = time.monotonic()
         # If any previously-failed server has cooled down past the
         # retry window, drop it from the failure set AND invalidate
@@ -267,9 +348,12 @@ class MCPRegistry:
             if self._aggregated_schemas is not None:
                 return self._aggregated_schemas
 
+            pending = {c.name for c in self._deferred_launch}
             aggregated: list[dict[str, Any]] = []
             for name, client in self._clients.items():
                 if name in self._connect_failed:
+                    continue
+                if name in self._public_web and (not web_on or name in pending):
                     continue
                 await self._ensure_connected(name, client)
                 if name in self._connect_failed:
@@ -289,6 +373,7 @@ class MCPRegistry:
                 aggregated.extend(schemas)
 
             self._aggregated_schemas = aggregated
+            self._aggregated_web_on = web_on
             return aggregated
 
     async def has_tool(self, namespaced_name: str) -> bool:
@@ -313,6 +398,13 @@ class MCPRegistry:
         client = self._clients.get(server_name)
         if client is None:
             raise MCPUnavailableError(f"no server named {server_name!r}")
+        if server_name in self._public_web:
+            try:
+                check_destination(
+                    PUBLIC_WEB_SEARCH, caller=f"mcp.{namespaced_name}", kind="web_search",
+                )
+            except OutboundBlocked as exc:
+                raise MCPUnavailableError(str(exc)) from exc
 
         # Serialise the connect via the same lock aggregate_tool_schemas
         # uses — two concurrent ``call`` invocations for the same

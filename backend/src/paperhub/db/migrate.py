@@ -226,6 +226,28 @@ async def _dedupe_implicit_feedback(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
+# The current held_requests shape (schema.sql), for the CHECK rebuild.
+HELD_REQUESTS_DDL = """CREATE TABLE {name} (
+    id TEXT PRIMARY KEY,
+    created_at TEXT,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    caller TEXT,
+    kind TEXT,
+    destination TEXT,
+    text TEXT NOT NULL,
+    reason TEXT,
+    unattended INTEGER NOT NULL,
+    run_id INTEGER,
+    session_id INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('pending','sending','sent','discarded')),
+    sent_text TEXT,
+    log_id INTEGER,
+    consumed_at TEXT,
+    reserved_at TEXT,
+    sending_at TEXT
+)"""
+
+
 async def apply_schema(conn: aiosqlite.Connection) -> None:
     sql = (files("paperhub.db") / "schema.sql").read_text(encoding="utf-8")
     await _dedupe_implicit_feedback(conn)
@@ -708,6 +730,8 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         )
     if "agent_record_json" not in run_cols:
         await conn.execute("ALTER TABLE runs ADD COLUMN agent_record_json TEXT")
+    if "approved_held_id" not in run_cols:
+        await conn.execute("ALTER TABLE runs ADD COLUMN approved_held_id TEXT")
     async with conn.execute("PRAGMA table_info(chat_sessions)") as cur:
         sess_cols = {row[1] for row in await cur.fetchall()}
     if "auto_approve" not in sess_cols:
@@ -715,7 +739,43 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE chat_sessions ADD COLUMN auto_approve "
             "INTEGER NOT NULL DEFAULT 0"
         )
+    # Plan H5a: "Allow searches in this chat". Existing chats keep asking.
+    if "allow_searches" not in sess_cols:
+        await conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN allow_searches "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+    # Plan H5a: a sent held request's approval is single use.
+    async with conn.execute("PRAGMA table_info(held_requests)") as cur:
+        held_cols = {row[1] for row in await cur.fetchall()}
+    if "consumed_at" not in held_cols:
+        await conn.execute("ALTER TABLE held_requests ADD COLUMN consumed_at TEXT")
+    if "reserved_at" not in held_cols:
+        await conn.execute("ALTER TABLE held_requests ADD COLUMN reserved_at TEXT")
+    # H5a wave 3 (FR-02): each trace row names the tool call it belongs to
+    # (parallel calls interleave their internal rows). Old rows stay NULL;
+    # the timeline groups them by position.
+    async with conn.execute("PRAGMA table_info(tool_calls)") as cur:
+        tc_cols = {row[1] for row in await cur.fetchall()}
+    if "tool_call_id" not in tc_cols:
+        await conn.execute("ALTER TABLE tool_calls ADD COLUMN tool_call_id TEXT")
     await conn.commit()
+    # Plan H5a: the 'sending' status (an unattended resend in flight) needs
+    # the CHECK constraint rebuilt; idempotent on the marker.
+    async with conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'held_requests'"
+    ) as cur:
+        held_sql = await cur.fetchone()
+    if held_sql is not None and "'sending'" not in str(held_sql[0]):
+        keep = ("id, created_at, owner_id, caller, kind, destination, text, reason, "
+                "unattended, run_id, session_id, status, sent_text, log_id, "
+                "consumed_at, reserved_at")
+        await _fk_safe_rebuild(
+            conn, old_table="held_requests", new_table="held_requests_new",
+            create_new_sql=HELD_REQUESTS_DDL.format(name="held_requests_new"),
+            copy_sql=f"INSERT INTO held_requests_new ({keep}) "
+                     f"SELECT {keep} FROM held_requests",
+        )
 
     # Backfill chunks_fts when it is empty while chunks is not. An external-
     # content table's own COUNT(*) mirrors the content table, so test the

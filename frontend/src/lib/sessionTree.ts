@@ -89,3 +89,72 @@ export function groupSessionsByFork(sessions: ChatSession[]): SessionRow[] {
 
   return out;
 }
+
+/** Which time section a sidebar group is. */
+export type TimeBucket = "today" | "yesterday" | "d7" | "d30" | "month" | "older";
+
+/** A sidebar section: its rows (roots + their forks), newest first. */
+export interface TimeSection {
+  /** Stable id: the bucket, or `YYYY-MM` for a month. */
+  key: string;
+  bucket: TimeBucket;
+  /** First day of the month, for a `month` section. */
+  month?: Date;
+  rows: SessionRow[];
+}
+
+function bucketOf(ms: number | null, now: Date): { key: string; bucket: TimeBucket; month?: Date } {
+  if (ms === null) return { key: "older", bucket: "older" };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ms >= today) return { key: "today", bucket: "today" };
+  // Day boundaries by calendar date, not 24 h steps (DST-safe).
+  const daysAgo = (n: number) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - n).getTime();
+  if (ms >= daysAgo(1)) return { key: "yesterday", bucket: "yesterday" };
+  if (ms >= daysAgo(7)) return { key: "d7", bucket: "d7" };
+  if (ms >= daysAgo(30)) return { key: "d30", bucket: "d30" };
+  const d = new Date(ms);
+  const month = new Date(d.getFullYear(), d.getMonth(), 1);
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return { key, bucket: "month", month };
+}
+
+/**
+ * The sidebar's chats grouped by last activity relative to `now` (local
+ * time): Today, Yesterday, Previous 7 days, Previous 30 days, then one
+ * section per month; chats without a timestamp go to "older".
+ *
+ * Roots sort newest first by their activity — the latest `updated_at` of
+ * the root and its forks — and forks stay directly under their parent
+ * (`groupSessionsByFork`). Untimestamped roots keep their incoming order,
+ * after every timestamped one.
+ */
+export function groupSessionsByTime(sessions: ChatSession[], now: Date): TimeSection[] {
+  const blocks: { rows: SessionRow[]; ms: number | null; order: number }[] = [];
+  for (const row of groupSessionsByFork(sessions)) {
+    if (!row.isFork || blocks.length === 0) {
+      blocks.push({ rows: [], ms: null, order: blocks.length });
+    }
+    const block = blocks[blocks.length - 1]!;
+    block.rows.push(row);
+    const t = row.session.updated_at ? Date.parse(row.session.updated_at) : NaN;
+    if (!Number.isNaN(t) && (block.ms === null || t > block.ms)) block.ms = t;
+  }
+  blocks.sort((a, b) => {
+    if (a.ms === null || b.ms === null) {
+      return a.ms === b.ms ? a.order - b.order : a.ms === null ? 1 : -1;
+    }
+    return b.ms - a.ms || a.order - b.order;
+  });
+  const out: TimeSection[] = [];
+  for (const block of blocks) {
+    const { key, bucket, month } = bucketOf(block.ms, now);
+    let section = out[out.length - 1];
+    if (!section || section.key !== key) {
+      section = { key, bucket, month, rows: [] };
+      out.push(section);
+    }
+    section.rows.push(...block.rows);
+  }
+  return out;
+}

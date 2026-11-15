@@ -1,5 +1,21 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, ExternalLink, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Bot,
+  Check,
+  Cpu,
+  ExternalLink,
+  Loader2,
+  Pencil,
+  Plug,
+  Plus,
+  ScrollText,
+  Settings,
+  Settings2,
+  Shield,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -10,19 +26,68 @@ import { useSettingsStore } from "../../store/settings";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Collapsible } from "../ui/collapsible";
+import { AdvancedSection } from "./AdvancedSection";
+import { OutboundLogPanel } from "./OutboundLogPanel";
+import {
+  LockedCountPill,
+  NonLocalBanner,
+  PRIVACY_CATEGORY,
+  PrivacyPane,
+  type NonLocalLabel,
+} from "./PrivacyPane";
+import { LockNote } from "./PublicSearchField";
+import { StringListField } from "./StringListField";
+
+export const OUTBOUND_LOG_SECTION = "outbound_log";
+
+/** Left-nav icon per settings category; an unknown category gets `Settings`. */
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  models_providers: Cpu,
+  agents_memory: Bot,
+  integrations: Plug,
+  privacy_outbound: Shield,
+  system: Settings2,
+};
 
 export function SettingsModal() {
-  const { t } = useTranslation(["common", "settings"]);
+  const { t } = useTranslation(["common", "settings", "outbound"]);
   const { isOpen, config, error, restartPending, close, fetchConfig, save } =
     useSettingsStore();
+  // Keep the last keys while the restart banner collapses away.
+  const [restartShown, setRestartShown] = useState(restartPending);
+  if (restartPending.length > 0 && restartPending !== restartShown) setRestartShown(restartPending);
   const modelOptions = useSettingsStore((s) => s.modelOptions);
   const readiness = useSettingsStore((s) => s.readiness);
+  const destinations = useSettingsStore((s) => s.destinations);
+  const fetchDestinations = useSettingsStore((s) => s.fetchDestinations);
+  const trustedStatus = useSettingsStore((s) => s.trustedStatus);
+  const fetchTrustedStatus = useSettingsStore((s) => s.fetchTrustedStatus);
+  const fetchReadiness = useSettingsStore((s) => s.fetchReadiness);
   const readinessChecking = useSettingsStore((s) => s.readinessChecking);
+  const target = useSettingsStore((s) => s.target);
   const [activeCat, setActiveCat] = useState<string | null>(null);
+  // A new open request (Sidebar "Held searches") overrides the remembered section.
+  const [seenNonce, setSeenNonce] = useState(target.nonce);
+  if (target.nonce !== seenNonce) {
+    setSeenNonce(target.nonce);
+    setActiveCat(target.section);
+  }
 
   useEffect(() => {
     if (isOpen && !config) void fetchConfig();
   }, [isOpen, config, fetchConfig]);
+
+  const onPrivacy = (activeCat ?? config?.categories[0]?.key) === PRIVACY_CATEGORY;
+  useEffect(() => {
+    if (isOpen && onPrivacy && !destinations) void fetchDestinations();
+  }, [isOpen, onPrivacy, destinations, fetchDestinations]);
+  useEffect(() => {
+    if (isOpen && onPrivacy && !trustedStatus) void fetchTrustedStatus();
+  }, [isOpen, onPrivacy, trustedStatus, fetchTrustedStatus]);
+  useEffect(() => {
+    if (isOpen && onPrivacy && !readiness) void fetchReadiness();
+  }, [isOpen, onPrivacy, readiness, fetchReadiness]);
 
   // Flatten per-provider model options into one de-duped autocomplete list for
   // the model-name fields. Best-effort: empty list just means no suggestions.
@@ -86,7 +151,24 @@ export function SettingsModal() {
   // Derive the effective category: an explicit selection, else the first one.
   // Deriving (rather than syncing via an effect) avoids cascading renders.
   const effectiveCat = activeCat ?? config?.categories[0]?.key ?? null;
-  const current = config?.categories.find((c) => c.key === effectiveCat);
+  // Nav / Privacy-button entry: always the "all" tab, whatever opened Settings before.
+  const goLog = () =>
+    useSettingsStore.setState((st) => ({
+      target: { section: OUTBOUND_LOG_SECTION, tab: "all", nonce: st.target.nonce + 1 },
+    }));
+  const onLog = effectiveCat === OUTBOUND_LOG_SECTION;
+  const current = onLog ? undefined : config?.categories.find((c) => c.key === effectiveCat);
+  // Display name for a cloud-model setting key (the non-local model notice).
+  // A key that is not a panel setting is set in the server environment.
+  const labelFor = (key: string): NonLocalLabel => {
+    for (const c of config?.categories ?? []) {
+      const f = c.fields.find((x) => x.key === key);
+      if (f) return { label: t(`settings:field.${key}.label`, f.label), env: false };
+    }
+    const readable = key.replace(/^PAPERHUB_/, "").toLowerCase().replace(/_+/g, " ").trim();
+    const fallback = readable ? readable[0]!.toUpperCase() + readable.slice(1) : key;
+    return { label: t(`settings:privacy.envModel.${key}`, fallback), env: true };
+  };
 
   // Base UI Dialog keeps the popup mounted through the close transition, so both
   // open and close animate (fade + scale). The centering wrapper isolates the
@@ -112,21 +194,37 @@ export function SettingsModal() {
           <h2 id="settings-title" className="px-2 py-1 text-sm font-semibold">
             {t("common:settings")}
           </h2>
-          {config?.categories.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => setActiveCat(c.key)}
-              className={`block w-full rounded px-2 py-1.5 text-left text-sm ${
-                c.key === effectiveCat ? "bg-muted font-medium" : "hover:bg-muted/60"
-              }`}
-            >
-              {t(`settings:category.${c.key}`, c.label)}
-            </button>
-          ))}
+          {config?.categories.map((c) => {
+            const Icon = CATEGORY_ICONS[c.key] ?? Settings;
+            return (
+              <button
+                key={c.key}
+                onClick={() => setActiveCat(c.key)}
+                className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm ${
+                  c.key === effectiveCat ? "bg-muted font-medium" : "hover:bg-muted/60"
+                }`}
+              >
+                <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+                {t(`settings:category.${c.key}`, c.label)}
+              </button>
+            );
+          })}
+          <button
+            onClick={goLog}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm ${
+              onLog ? "bg-muted font-medium" : "hover:bg-muted/60"
+            }`}
+          >
+            <ScrollText className="size-3.5 shrink-0" aria-hidden="true" />
+            {t("outbound:nav.title", "Outbound log")}
+          </button>
         </nav>
         {/* Field panel */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-end border-b p-3">
+          <div className="flex items-center justify-between border-b p-3">
+            <div className="min-w-0">
+              {current?.key === PRIVACY_CATEGORY && <LockedCountPill fields={current.fields} />}
+            </div>
             <Button
               variant="ghost"
               size="icon"
@@ -137,29 +235,43 @@ export function SettingsModal() {
               <X />
             </Button>
           </div>
-          {restartPending.length > 0 && (
-            <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <Collapsible open={restartPending.length > 0}>
+            <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
               {t("settings:restartPending", "Restart the backend to apply: {{keys}}", {
-                keys: restartPending.join(", "),
+                keys: restartShown.join(", "),
               })}
             </div>
-          )}
+          </Collapsible>
           <div className="flex-1 overflow-y-auto p-3">
             {current?.credentials && (
               <div className="mb-6">
                 <CredentialEditor credentials={current.credentials} onSave={save} />
               </div>
             )}
-            {current && renderFields(current.fields.filter((f) => !f.advanced))}
-            {current?.fields.some((f) => f.advanced) && (
-              <details className="mt-2 rounded-md border border-border">
-                <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-muted-foreground">
-                  {t("settings:advancedModels", "Per-slot model overrides")}
-                </summary>
-                <div className="border-t border-border p-3 pb-0">
-                  {current.fields.filter((f) => f.advanced).map(renderField)}
-                </div>
-              </details>
+            {onLog ? (
+              <OutboundLogPanel
+                key={`log-${target.nonce}`}
+                initialTab={target.section === OUTBOUND_LOG_SECTION ? target.tab : "all"}
+              />
+            ) : current?.key === PRIVACY_CATEGORY ? (
+              <>
+                <NonLocalBanner readiness={readiness} labelFor={labelFor} />
+                <PrivacyPane
+                  fields={current.fields}
+                  save={save}
+                  destinations={destinations}
+                  trustedStatus={trustedStatus}
+                  renderField={renderField}
+                  onOpenLog={goLog}
+                />
+              </>
+            ) : (
+              current && renderFields(current.fields.filter((f) => !f.advanced))
+            )}
+            {current?.key !== PRIVACY_CATEGORY && current?.fields.some((f) => f.advanced) && (
+              <AdvancedSection title={t("settings:advancedModels", "Per-slot model overrides")}>
+                {current.fields.filter((f) => f.advanced).map(renderField)}
+              </AdvancedSection>
             )}
             {/* Shared autocomplete source for all model-name fields. */}
             <datalist id="model-suggestions">
@@ -291,6 +403,7 @@ function FieldRow({
               size="icon-xs"
               aria-label={t("replace", "Replace")}
               title={t("replace", "Replace")}
+              disabled={field.locked}
               onClick={() => setReplacing(true)}
             >
               <Pencil />
@@ -299,7 +412,28 @@ function FieldRow({
         )}
         {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
         {field.docs_url && <DocsLink url={field.docs_url} />}
+        {field.locked && <LockNote />}
       </div>
+    );
+  }
+
+  if (field.type === "string_list") {
+    return (
+      <StringListField
+        id={field.key}
+        label={label}
+        help={helpText}
+        value={field.value ?? ""}
+        locked={!!field.locked}
+        onChange={(joined) =>
+          onSave({ [field.key]: joined }).catch((e: unknown) => {
+            toast.error(
+              e instanceof Error ? e.message : t("settings:saveFailed", "Couldn't save the setting"),
+            );
+            throw e;
+          })
+        }
+      />
     );
   }
 
@@ -312,10 +446,12 @@ function FieldRow({
             {label} {field.restart_required && <RestartBadge />}
           </label>
           {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
+          {field.locked && <LockNote />}
         </div>
         <Switch
           id={field.key}
           checked={field.value === "1"}
+          disabled={field.locked}
           onCheckedChange={(checked) =>
             void onSave({ [field.key]: checked ? "1" : "0" }).catch((e: unknown) =>
               toast.error(
@@ -341,6 +477,7 @@ function FieldRow({
             value={draft}
             onValueChange={setDraft}
             options={(field.choices ?? []).map((c) => ({ value: c, label: c }))}
+            disabled={field.locked}
             className="w-full"
           />
         ) : (
@@ -349,12 +486,14 @@ function FieldRow({
             type={field.type === "int" ? "number" : "text"}
             list={modelListId}
             value={draft}
+            disabled={field.locked}
             onChange={(e) => setDraft(e.target.value)}
             className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         )}
         <Button
           size="icon"
+          disabled={field.locked}
           aria-label={t("save")}
           title={t("save")}
           onClick={() =>
@@ -369,13 +508,13 @@ function FieldRow({
         </Button>
       </div>
       {modelChecking ? (
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
           <Loader2 className="size-3 animate-spin" />
           {t("settings:modelChecking", "Checking model availability…")}
         </p>
       ) : (
         modelCheck && !modelCheck.key_ok && (
-          <p className="mt-1 text-xs text-destructive">
+          <p className="mt-1 text-xs text-destructive animate-in fade-in-0 duration-200 motion-reduce:animate-none">
             {modelCheck.missing_keys.length > 0
               ? t("settings:modelKeyMissing", "Missing provider key: {{keys}}", {
                   keys: modelCheck.missing_keys.join(", "),
@@ -406,6 +545,7 @@ function FieldRow({
       )}
       {helpText && <p className="mt-1 text-xs text-muted-foreground">{helpText}</p>}
       {field.docs_url && <DocsLink url={field.docs_url} />}
+      {field.locked && <LockNote />}
     </div>
   );
 }

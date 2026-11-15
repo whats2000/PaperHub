@@ -1936,3 +1936,29 @@ async def test_paragraphs_endpoint_statuses(
         assert body["paragraphs"][0]["key"] == "p:/page/0/Text/1"
         assert body["paragraphs"][0]["fragments"] == [{"page": 0, "bbox": [1.0, 2.0, 3.0, 4.0]}]
         assert (await c.get("/papers/content/9999/paragraphs")).status_code == 404
+
+
+async def test_post_papers_blocked_destination_is_403(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An allowlist block is a clear 403, not a 500."""
+    from paperhub.outbound.destinations import OutboundBlocked
+
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        await _seed_session(conn)
+
+    async def _blocked(self: Any, req: Any) -> IngestResult:
+        raise OutboundBlocked("export.arxiv.org")
+
+    import paperhub.pipelines.paper_pipeline as pipeline_module
+
+    with patch.object(pipeline_module.PaperPipeline, "ingest", _blocked):
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            r = await client.post("/papers", json={"session_id": 1, "arxiv_id": "1706.03762"})
+    assert r.status_code == 403
+    assert r.json()["detail"] == {
+        "detail": "destination_blocked", "destination": "export.arxiv.org"}

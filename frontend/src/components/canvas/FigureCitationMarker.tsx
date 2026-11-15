@@ -10,7 +10,7 @@ interface Props {
   ordinal: number;
 }
 
-/** Superscript citation of a figure the agent looked at (`[fig:P/ID]`).
+/** Bracketed citation (`[🖼 2]`) of a figure the agent looked at (`[fig:P/ID]`).
  * Clicking it opens the reader on that figure and highlights it, the same
  * way a `[chunk:N]` citation opens on its passage. */
 export function FigureCitationMarker({ paper, figureId, ordinal }: Props) {
@@ -24,8 +24,8 @@ export function FigureCitationMarker({ paper, figureId, ordinal }: Props) {
         className={EVIDENCE_MARKER_CLASS}
         onClick={() => openFigure(paper, figureId)}
       >
-        <ImageIcon className="h-[1em] w-[1em]" aria-hidden />
-        {ordinal}
+        [<ImageIcon className="h-[1em] w-[1em]" aria-hidden />
+        {ordinal}]
       </button>
     </sup>
   );

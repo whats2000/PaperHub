@@ -882,3 +882,17 @@ async def test_reviewer_is_told_the_ui_language_for_its_doubt(tmp_path: Path) ->
     assert llm.calls[0]["variables"]["doubt_language"] == "Traditional Chinese"
     assert review.doubt_language(None) == "the main language of the user's question"
     assert review.doubt_language("ja") == "Japanese"
+
+
+async def test_a_search_the_user_did_not_allow_reads_as_not_allowed(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """H5a wave 3: an Ask-first search the user declined is no empty search."""
+    import json as _json
+
+    from paperhub.feedback.review import _agent_trace
+
+    steps = [(0, "agent", "tool:search_papers", "ok", None, "{}",
+              _json.dumps({"query": "q", "declined": True, "note": None}))]
+    trace = await _agent_trace(migrated_db, steps, {})
+    assert trace.searches == ['search: "q" -> not allowed by the user']

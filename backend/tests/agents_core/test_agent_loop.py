@@ -309,6 +309,8 @@ async def test_invented_citation_removed_and_traced(
         row = await cur.fetchone()
     assert row is not None
     record = json.loads(row[0])
+    # The turn's wall time (the activity timeline's "Worked 1.2 s").
+    assert isinstance(record.pop("duration_ms"), int)
     assert record == {"tools": ["read_chunks"], "read": [read], "cited": [read],
                       "papers": [pid], "steps": 2}
 
@@ -843,6 +845,12 @@ async def test_running_tools_and_later_steps_send_a_live_beat(
     assert beats_before_release == ["agent:slow"]
     assert all(b["step_index"] < 0 for b in beats)
     assert [b["tool"] for b in beats] == ["agent:slow", "agent:thinking"]
+    # H5a wave 3: the beat lists the calls in flight, so the activity
+    # timeline shows a running node per call before its row exists.
+    assert beats[0]["result_summary_json"]["calls"] == [
+        {"id": "call_0__thought__sig==", "name": "slow", "args": {}},
+        {"id": "call_1__thought__sig==", "name": "slow", "args": {"x": 1}}]
+    assert "calls" not in beats[1]["result_summary_json"]
     # live-only: nothing persisted with a negative index
     async with migrated_db.execute(
         "SELECT COUNT(*) FROM tool_calls WHERE step_index < 0") as cur:

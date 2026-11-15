@@ -29,6 +29,7 @@ from typing import Any
 import litellm
 from litellm.exceptions import BadRequestError, UnsupportedParamsError
 
+from paperhub.outbound.local_models import non_local_settings
 from paperhub.settings_registry import (
     LIVE_DISCOVERY_PROVIDERS,
     field_by_key,
@@ -47,6 +48,8 @@ _OPTIONS_TTL_S = 600.0
 # provider -> (fetched_at_monotonic, models). Live discovery is slow, so cache it.
 _options_cache: dict[str, tuple[float, list[str]]] = {}
 
+# Readiness pings are deliberately NOT written to the outbound log: they send
+# the fixed string "ping" (no user content) and would add a row per recheck.
 _PING_TIMEOUT_S = 12.0
 _PING_RETRIES = 2  # transient-only; litellm won't retry auth / bad-model errors
 _READINESS_TTL_S = 60.0
@@ -207,6 +210,9 @@ async def compute_readiness(credential_keys: list[str]) -> dict[str, Any]:
         "ready": all(m["key_ok"] for m in models.values()),
         "credentials_set": len(credential_keys) > 0,
         "models": models,
+        # Pure config check (no pings): every setting whose effective model
+        # runs off-device. Warns, never blocks.
+        "non_local": [{"key": k, "model": m} for k, m in non_local_settings()],
     }
 
 

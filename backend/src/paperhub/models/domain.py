@@ -80,6 +80,9 @@ class ToolCallRecord(BaseModel):
     token_out: int | None
     status: ToolStatus
     error: str | None
+    #: The ``tool:*`` call this row belongs to (its own id on that row);
+    #: None outside a tool call and on rows recorded before H5a wave 3.
+    tool_call_id: str | None = None
 
 
 class PlannedSection(BaseModel):
@@ -257,6 +260,15 @@ class AgentState(TypedDict, total=False):
     # Plan H3 (QA I4): the <idea_context> block of a chat opened from an idea
     # (agents/idea_context.build_idea_context), None for any other session.
     idea_context: str | None
+    # Plan H5a: the follow-up turn of a held search the user sent
+    # ({"held_id", "text"}); the core agent runs that search first.
+    approved_search: dict[str, str] | None
+    # Plan H5a: set only while that first search runs; its outbound gate
+    # sends the approved text once without review.
+    approved_held_id: str | None
+    # Plan H5a (R37): that search's text and approved destination kinds;
+    # paper_search skips the Parser and sends the text as written.
+    approved_pin: dict[str, Any] | None
     report_deck_id: int          # v2.18: set by sl_emit
     report_papers: list[dict[str, Any]]  # v2.18: enabled papers loaded by sl_resolve
     report_command: DeckCommand  # v2.21 (F4): deck-scoped follow-up action

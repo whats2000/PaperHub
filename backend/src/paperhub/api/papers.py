@@ -24,6 +24,7 @@ from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
 from paperhub.ideation.domains import assign_color_indices
+from paperhub.outbound.destinations import OutboundBlocked
 from paperhub.pipelines.page_pdf import is_compiled_pdf, page_pdf_path
 from paperhub.pipelines.paper_asset import (
     FigureAsset,
@@ -198,6 +199,11 @@ async def ingest_paper(body: IngestBody, request: Request) -> IngestResponse:
                 "paper_id": exc.paper_id,
                 "tried_urls": exc.tried_urls,
             },
+        ) from exc
+    except OutboundBlocked as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"detail": "destination_blocked", "destination": exc.destination},
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

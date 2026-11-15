@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AttachPaperMenu } from "@/components/chat/AttachPaperMenu";
 import { useChatStore } from "@/store/chat";
+import { useSettingsStore } from "@/store/settings";
 
 const { uploadPdfMock } = vi.hoisted(() => ({ uploadPdfMock: vi.fn() }));
 
@@ -21,7 +22,29 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const settingsWith = (value: string) => ({
+  categories: [
+    {
+      key: "privacy_outbound",
+      label: "Privacy & outbound",
+      fields: [
+        {
+          key: "PAPERHUB_PRIVATE_UPLOAD_DEFAULT",
+          label: "New uploads are private",
+          type: "bool" as const,
+          value,
+          secret: false,
+          restart_required: false,
+        },
+      ],
+    },
+  ],
+});
+
+const realFetchConfig = useSettingsStore.getState().fetchConfig;
+
 beforeEach(() => {
+  useSettingsStore.setState({ config: settingsWith("0"), fetchConfig: realFetchConfig });
   uploadPdfMock.mockReset();
   uploadPdfMock.mockResolvedValue({
     papers_id: 42,
@@ -134,5 +157,72 @@ describe("AttachPaperMenu server truth", () => {
     expect(useChatStore.getState().referencesBySession[7]?.[0]?.is_private).toBe(
       true,
     );
+  });
+});
+
+describe("AttachPaperMenu private default from settings", () => {
+  it("starts checked when PAPERHUB_PRIVATE_UPLOAD_DEFAULT is on", async () => {
+    useSettingsStore.setState({
+      config: {
+        categories: [
+          {
+            key: "privacy_outbound",
+            label: "Privacy & outbound",
+            fields: [
+              {
+                key: "PAPERHUB_PRIVATE_UPLOAD_DEFAULT",
+                label: "New uploads are private",
+                type: "bool",
+                value: "1",
+                secret: false,
+                restart_required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    render(<AttachPaperMenu />);
+    await openMenu();
+    expect(screen.getByRole("checkbox", { name: "Private document" })).toBeChecked();
+    useSettingsStore.setState({ config: null });
+  });
+});
+
+describe("AttachPaperMenu private default when settings cannot be read", () => {
+  it("retries once, then fails closed (checked) and lets the user untick", async () => {
+    const getSpy = vi.fn();
+    const fetchConfig = vi.fn(() => {
+      getSpy();
+      return Promise.resolve();
+    });
+    useSettingsStore.setState({ config: null, fetchConfig });
+    render(<AttachPaperMenu />);
+    await openMenu();
+    const box = screen.getByRole("checkbox", { name: "Private document" });
+    await waitFor(() => expect(box).toBeChecked());
+    expect(getSpy).toHaveBeenCalledTimes(2);
+    await userEvent.click(box);
+    expect(box).not.toBeChecked();
+  });
+});
+
+describe("AttachPaperMenu private default while settings are loading", () => {
+  it("shows checked while the fetch is in flight, then follows the loaded default", async () => {
+    let resolve: () => void = () => undefined;
+    const fetchConfig = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        }),
+    );
+    useSettingsStore.setState({ config: null, fetchConfig });
+    render(<AttachPaperMenu />);
+    await openMenu();
+    const box = screen.getByRole("checkbox", { name: "Private document" });
+    expect(box).toBeChecked();
+    useSettingsStore.setState({ config: settingsWith("0") });
+    resolve();
+    await waitFor(() => expect(box).not.toBeChecked());
   });
 });

@@ -9,10 +9,11 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal
 
 import aiosqlite
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from paperhub import approvals
 from paperhub.agents.chitchat import chitchat_stream
 from paperhub.agents.core.action_tools import build_default_registry
 from paperhub.agents.core.agent import (
@@ -25,12 +26,14 @@ from paperhub.agents.core.agent import (
     run_core_agent,
 )
 from paperhub.agents.core.context import in_live_history
+from paperhub.agents.core.private_material import collect_turn_start
 from paperhub.agents.graph import CLARIFY_FALLBACK
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_node import memory_node
 from paperhub.agents.report_graph import ReportDeps, build_report_subgraph
 from paperhub.agents.research import (
     FinalOnlyMessage,
+    OutboundEventYield,
     SearchCandidate,
     SearchResultsYield,
     ToolStepYield,
@@ -80,6 +83,8 @@ from paperhub.models.events import (
     SessionEvent,
     TokenEvent,
 )
+from paperhub.outbound import held
+from paperhub.outbound.context import begin_scope, begin_turn, mark_incomplete
 from paperhub.pipelines.paper_pipeline import ArxivMetadata, PaperPipeline
 from paperhub.tracing.redactor import redact
 from paperhub.tracing.tracer import Tracer
@@ -119,7 +124,8 @@ class HistoryEntry(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: int | None = None
-    user_message: str
+    # May be empty on the follow-up turn of an approved held search.
+    user_message: str = ""
     history: list[HistoryEntry] = Field(default_factory=list)
     # The slide page currently on screen in the frontend's Slides panel
     # (1-based). The Report Agent's deck-command classifier reads this to
@@ -132,6 +138,38 @@ class ChatRequest(BaseModel):
     # The UI language code (en / zh-TW / zh-CN / ja): the feedback reviewer
     # writes its doubt in it.
     ui_language: str | None = None
+    # Plan H5a: the held search the user just sent (POST
+    # /outbound/held/{id}/send). The turn starts by running that search on
+    # the approved text; the approval is spent once.
+    approved_held_id: str | None = None
+
+
+APPROVED_SEARCH_MESSAGE = "Sent search: {text}"
+
+
+async def _approved_search(
+    conn: aiosqlite.Connection, req: ChatRequest, *, strict: bool = True,
+) -> dict[str, str] | None:
+    """The approved search ``{"held_id", "text"}`` this turn runs first, or
+    None without ``approved_held_id``. ``strict`` (the endpoint, before any
+    run exists) reserves the card's single follow-up turn: 409 unless the
+    held row was sent by the user in this chat, is unspent and no turn took
+    it yet. The run itself re-reads the row it reserved."""
+    if req.approved_held_id is None:
+        return None
+    if strict:
+        # Reserves the card's one follow-up turn atomically: a racing second
+        # turn is refused here, before it stores a message or a run.
+        row = await held.reserve_followup(
+            conn, req.approved_held_id, session_id=req.session_id)
+        if row is None:
+            raise HTTPException(
+                status_code=409, detail="no unused approval for this held search")
+    else:
+        row = await held.get(conn, req.approved_held_id)
+    if row is None or not row.sent_text:
+        return None
+    return {"held_id": row.id, "text": row.sent_text}
 
 
 async def _ensure_session(conn: aiosqlite.Connection, session_id: int | None) -> int:
@@ -469,6 +507,11 @@ async def paper_search(
             elif evt == "search_results":
                 yield SearchResultsYield(candidates=list(payload["candidates"]))
                 candidates_yielded = True
+            elif evt == "outbound":
+                # Plan H5a: a checkpoint decision, forwarded as it is made so
+                # a run that fails later still reports it.
+                yield OutboundEventYield(
+                    name=str(payload["name"]), data=dict(payload["data"]))
         elif mode == "values" and isinstance(payload, dict):
             if "final_response" in payload:
                 final_text = payload["final_response"]
@@ -793,6 +836,11 @@ async def run_pipeline_turn(
                             last_emitted_step = max(
                                 last_emitted_step, ps_item.record["step_index"],
                             )
+                        elif isinstance(ps_item, OutboundEventYield):
+                            handle.emit({
+                                "event": ps_item.name,
+                                "data": json.dumps(ps_item.data),
+                            })
                         elif isinstance(ps_item, SearchResultsYield):
                             enriched = await _process_search_results(
                                 ps_item,
@@ -1358,25 +1406,50 @@ async def run_agent(
         _emit_model(handle, sess_evt.type, sess_evt)
         # Before the user message is saved, so it is not counted twice.
         resolved_history = await _resolve_history(conn, session_id, req.history)
-        await _record_user_message(conn, session_id, req.user_message, run_id)
+        approved = await _approved_search(conn, req, strict=False)
+        user_message = req.user_message
+        if approved is not None and not user_message.strip():
+            # The history shows the turn as the search the user sent.
+            user_message = APPROVED_SEARCH_MESSAGE.format(text=approved["text"])
+        await _record_user_message(conn, session_id, user_message, run_id)
         async with write_lock(conn):
             await conn.execute(
-                "UPDATE runs SET mode = 'agent' WHERE id = ?", (run_id,))
+                "UPDATE runs SET mode = 'agent', approved_held_id = ? WHERE id = ?",
+                (approved["held_id"] if approved is not None else None, run_id))
             await conn.commit()
         # Plan H2: a correction-like message flags the previous answer for a
         # detached background review (never raises, never awaits the LLM).
         await maybe_review_keyword(
             conn, settings=settings, session_id=session_id, run_id=run_id,
-            user_message=req.user_message, llm=adapter,
+            user_message=user_message, llm=adapter,
             ui_language=req.ui_language,
         )
         tracer = Tracer(conn, run_id=run_id, branch="")
         trace = _TraceStream(conn, run_id, handle)
+        # H5a: this live turn may pause on its approval cards; the stream
+        # reports paused / resumed (buffered, so a rejoining client sees it).
+        approvals.open_run(run_id, lambda name, data: _emit_json(handle, name, data))
         # MCP calls (incl. the loopback papers/sql/memory servers) forward
         # the session/run headers the loopback middleware requires.
         headers_token = set_client_headers_context(
             ClientHeadersContext(session_id=session_id, run_id=run_id),
         )
+        # H5a: a fresh private-material list for this turn (in this task, before
+        # any tool runs); the user's typed message is never added.
+        begin_turn()
+        begin_scope(run_id, session_id)
+        try:
+            await collect_turn_start(conn, session_id)
+        except Exception as exc:  # noqa: BLE001 - the turn must survive
+            logger.warning("outbound: turn-start collection failed", exc_info=True)
+            mark_incomplete(f"turn-start collection failed ({type(exc).__name__})")
+            with contextlib.suppress(Exception):
+                async with tracer.step(
+                    agent="outbound", tool="outbound:collect", model=None,
+                ) as cstep:
+                    cstep.record_args({"session_id": session_id})
+                    cstep.record_result(
+                        {"private_collect_error": type(exc).__name__})
         try:
             # Plan H3 (QA I4): a chat opened from an idea carries the idea on
             # every turn; slide context only when the composer chip is on.
@@ -1389,7 +1462,7 @@ async def run_agent(
                     idea_step.record_result(idea.record)
             state: AgentState = {
                 "run_id": run_id, "branch": "", "session_id": session_id,
-                "user_message": req.user_message,
+                "user_message": user_message,
                 "history": resolved_history,
                 "current_view_page": req.current_view_page,
                 "slide_attached": req.slide_attached,
@@ -1404,8 +1477,10 @@ async def run_agent(
             }
             if req.ui_language:
                 state["ui_language"] = req.ui_language
+            if approved is not None:
+                state["approved_search"] = approved
 
-            style_action = await _style_intercept(
+            style_action = None if approved is not None else await _style_intercept(
                 conn, session_id, req.user_message)
             if style_action is not None:
                 # Deterministic and instant (no LLM), as before H4.
@@ -1465,7 +1540,13 @@ async def run_agent(
             _emit_model(handle, err_evt.type, err_evt)
             handle.mark_terminal("error", now=time.monotonic())
         finally:
+            approvals.close_run(run_id)
             reset_client_headers_context(headers_token)
+            if approved is not None:
+                # Ended (error, Stop, or nothing sent) without spending the
+                # approval: the user may use it in another turn.
+                with contextlib.suppress(Exception):
+                    await held.release_followup(conn, approved["held_id"])
 
 
 async def _terminal_events_from_db(
@@ -1678,6 +1759,10 @@ async def cancel_run(req: CancelRequest) -> dict[str, Any]:
             "UPDATE runs SET finished_at=datetime('now'), status='cancelled' "
             "WHERE id = ? AND status = 'running'", (req.run_id,))
         await conn.commit()
+    async with open_db(settings.db_path) as conn:
+        # Plan H5a: a stopped turn's held searches can no longer be sent.
+        await held.discard_pending(conn, run_id=req.run_id,
+                                   reason="the chat turn was stopped")
     return {"status": "cancelled", "run_id": str(req.run_id), "kept": kept}
 
 
@@ -1694,8 +1779,17 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> EventSourceRespon
     # as a backend-owned background task. A client disconnect detaches the
     # subscriber but never cancels the task (FR-15 / D4).
     async with open_db(settings.db_path) as conn:
-        session_id = await _ensure_session(conn, req.session_id)
-        run_id = await _new_run(conn, session_id)
+        # Refuse a spent or foreign approval before any run exists.
+        reserved = await _approved_search(conn, req)
+        try:
+            session_id = await _ensure_session(conn, req.session_id)
+            run_id = await _new_run(conn, session_id)
+        except BaseException:
+            if reserved is not None:
+                # No run took the reservation: the approval stays usable.
+                with contextlib.suppress(Exception):
+                    await held.release_followup(conn, reserved["held_id"])
+            raise
 
     handle = broker.register(run_id)
     handle.task = asyncio.create_task(

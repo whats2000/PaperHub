@@ -312,3 +312,33 @@ launch = ["npx", 2]
     )
     with pytest.raises(ValueError, match="'launch'"):
         load_mcp_servers(path)
+
+
+def test_public_web_flag_defaults_by_name_and_can_be_explicit(tmp_path: Path) -> None:
+    p = tmp_path / "s.toml"
+    p.write_text(
+        """
+[[server]]
+name = "web"
+transport = "streamable_http"
+url = "http://h:1/mcp"
+expose = ["search"]
+
+[[server]]
+name = "search2"
+transport = "streamable_http"
+url = "http://h:2/mcp"
+expose = ["search"]
+public_web = true
+
+[[server]]
+name = "web2"
+transport = "streamable_http"
+url = "http://h:3/mcp"
+expose = ["search"]
+public_web = false
+""",
+        encoding="utf-8",
+    )
+    cfgs = {c.name: c.public_web for c in load_mcp_servers(p)}
+    assert cfgs == {"web": True, "search2": True, "web2": False}
