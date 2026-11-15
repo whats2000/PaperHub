@@ -213,7 +213,7 @@ input { font: inherit; color: inherit; }
   transition: opacity 200ms ease-out, transform 200ms ease-out; }
 .back-pill[data-state="closed"] { opacity: 0; transform: translate(-50%, -6px); pointer-events: none; }
 /* "Saved to …" confirmation */
-.toast { position: fixed; z-index: 60; background: var(--foreground); color: var(--background); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; box-shadow: var(--shadow-md);
+.toast { position: fixed; z-index: 60; background: var(--popover); color: var(--foreground); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; box-shadow: var(--shadow-md);
   transition: opacity 200ms ease-out, transform 200ms ease-out; }
 .toast[data-state="closed"] { opacity: 0; transform: translateY(6px); pointer-events: none; }
 .toast button { border: 0; background: transparent; color: inherit; text-decoration: underline; padding: 0; font-size: 12.5px; }
@@ -319,6 +319,32 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 .sug-bar { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--amber-fg); margin-top: 3px; flex-wrap: wrap; }
 .sug-bar .btns { display: inline-flex; gap: 4px; } .sug-bar .btn { padding: 0 8px; font-size: 11.5px; }
 .placeholder { color: var(--muted-fg); font-size: 12.5px; padding: 3px 6px 0 32px; }
+/* New line at the end of a note: typing --- makes a divider */
+.newline { outline: none; font-size: 13.5px; padding: 4px 6px 0 32px; min-height: 24px; }
+.newline:empty::before { content: attr(data-ph); color: var(--muted-fg); font-size: 12.5px; }
+[data-edit] { outline: none; border-radius: 4px; } [data-edit]:focus { box-shadow: 0 0 0 1px var(--border); }
+/* Dividers split a section into parts; the part you're in is marked; Focus fades the rest (note and paper) */
+.divider-line { display: flex; align-items: center; gap: 4px; padding: 7px 0; }
+.divider-line hr { flex: 1; border: 0; border-top: 1px solid color-mix(in srgb, var(--foreground) 28%, transparent); margin: 0; }
+.fold { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 20px; height: 20px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms, transform 200ms ease-out; flex-shrink: 0; }
+.blk-row:hover .fold, .fold:focus-visible, .fold[aria-expanded="false"] { opacity: 1; }
+.fold:hover { background: var(--accent); color: var(--foreground); }
+.fold[aria-expanded="false"] { transform: rotate(-90deg); }
+.part { border-radius: 6px; transition: background 200ms ease-out, box-shadow 200ms ease-out, opacity 200ms ease-out; }
+.part[data-active="true"] { background: color-mix(in srgb, var(--accent) 75%, transparent); box-shadow: inset 2px 0 0 var(--ring); }
+.notes-body.focus-on .part:not([data-active="true"]) { opacity: 0.45; cursor: pointer; }
+.part-sum { border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; padding: 2px 6px 4px 32px; display: inline-flex; gap: 5px; align-items: center; }
+.part-sum:hover { color: var(--foreground); }
+.focus-btn { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); border-radius: 6px; padding: 1px 7px; display: inline-flex; gap: 4px; align-items: center; }
+.focus-btn:hover { background: var(--accent); color: var(--foreground); }
+.focus-btn[aria-pressed="true"] { background: var(--accent); color: var(--foreground); box-shadow: inset 0 -2px 0 var(--foreground); }
+.hl { transition: box-shadow 150ms ease-out, background-color 200ms ease-out; }
+.hl[data-fade="true"] { --hl-alpha: 6%; }
+.qmark[data-fade="true"] { text-decoration-color: color-mix(in srgb, var(--muted-fg) 30%, transparent); }
+.margin-ic[data-fade="true"] { opacity: 0.3; }
+.obj[data-marked][data-fade="true"] { box-shadow: 0 0 0 1px var(--border); }
+.gmark { transition: box-shadow 150ms ease-out, opacity 200ms ease-out; } .gmark[data-fade="true"] { opacity: 0.18; }
+.gcard .nc-hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
 .blk-enter { animation: blkIn 220ms ease-out; } @keyframes blkIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .blk-exit { animation: blkOut 200ms ease-in forwards; } @keyframes blkOut { to { opacity: 0; transform: translateY(-4px); } }
 
@@ -350,7 +376,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     <button aria-pressed="true" data-view="chat">Chat page</button>
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2 sketch)</button>
   </div>
-  <span class="muted">Try: select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
+  <span class="muted">Try: select paper text · Highlighter (drag several bits of one paragraph, click Figure 3) · trash on a note block, then Undo → Delete again · Notes: type --- on the last line, Focus, fold a divider · the PDF-only paper: Box around Eq. (1) or the title, 文A translate · My marks · drag the panel edge wider</span>
 </div>
 
 <div class="app">
@@ -518,7 +544,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
               <span class="spacer"></span>
               <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
-            <div class="n-sub"><i data-lucide="link" class="icon-xs"></i><span id="followLbl">Shows the section you're reading</span><span class="spacer"></span><span id="noteMeta"></span></div>
+            <div class="n-sub"><i data-lucide="link" class="icon-xs"></i><span id="followLbl">Shows the section you're reading</span><span class="spacer"></span><span id="noteMeta"></span><button class="focus-btn" id="focusBtn" aria-pressed="false" title="Fade the other parts of the note and their marks on the paper (Esc to stop)"><i data-lucide="scan-eye" class="icon-xs"></i>Focus</button></div>
             <div class="notes-body" id="notesBody"></div>
           </div>
         </div>
@@ -598,10 +624,12 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       { id: 's2', type: 'sec', key: 'Background and Motivation', text: '§2 Background and Motivation' },
       { id: 'b2', type: 'quote', c: 'blue', mark: 'm1', src: '§2 · p. 2', text: 'it usually takes more than 1.2 seconds for user to observe the feedback visualization of a transform invoked by the user motion in XR.' },
       { id: 'b3', type: 'p', text: 'Rapid tasks (catching, tracing lines) fail at this latency — matches what we saw with our Kinova setup.' },
+      { id: 'd1', type: 'hr' },
       { id: 'b4', type: 'quote', c: 'green', mark: 'm2', src: '§2 · p. 2', text: 'we believe the timely update of agent poses is more critical compared to pose accuracy.' },
       { id: 'b6', type: 'quote', c: 'none', mark: 'm3', src: '§2 · p. 2', text: 'We find out the end-to-end latency is reduced by 89%, 88%, and 83% respectively for all three trajectories.' },
       { id: 'b7', type: 'p', text: 'Latency reduced by up to 83% with local prediction.', sug: { del: 'up to 83%', ins: '89%, 88% and 83% (three trajectories)' } },
       { id: 'b8', type: 'lost', text: 'the round-trip time is measured with NTP-synchronised clocks' },
+      { id: 'd2', type: 'hr' },
       { id: 'b9', type: 'quote', c: 'pink', mark: 'm4', src: '§2 · p. 3', text: 'significant pose drift when merging the ground-truth poses with the predicted poses for each of the calibrations' },
       { id: 'b10', type: 'h', text: 'What we concluded' },
       { id: 'b11', type: 'p', ai: true, fresh: true, text: 'Network transmission dominates: up to 1 s of the 1.2 s end-to-end latency is the two-way network delay.<span class="cite">[1]</span>' },
@@ -622,6 +650,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   };
   const markNote = { m1: ['xr', ['b2', 'b3']], m2: ['xr', ['b4']], m3: ['xr', ['b6', 'b7']], m4: ['xr', ['b9']], g1: ['ghost', ['gq1']], g2: ['ghost', ['gq2', 'gp3']] };
   let doc = 'xr', noteTab = 'paper', undone = false;
+  let activeSeg = 'b2', focusOn = false; const folded = new Set(); // the part of the note you're in; Focus; folded dividers
   let pen = null, lastPen = null; const penMarks = {}; // highlighter colour; marks made with it (to join strokes)
   const curNoteKey = () => noteTab === 'chat' ? 'chat' : doc;
 
@@ -630,7 +659,8 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const tag = b.ai ? '<span class="ai-tag" title="Written by the assistant"><i data-lucide="sparkles" class="icon-xs"></i>AI</span>' : '';
     const chip = (mark, src) => `<button class="src-chip" data-mark="${mark}"><i data-lucide="file-text" class="icon-xs"></i>${esc(DOCS[k] ? DOCS[k].src : '')} · ${esc(src)}</button>`;
     let inner;
-    if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
+    if (b.type === 'hr') inner = `<div class="divider-line"><button class="fold" data-fold="${b.id}" aria-expanded="${!folded.has(b.id)}" aria-label="Fold the part below this divider" title="Fold the part below"><i data-lucide="chevron-down" class="icon-xs"></i></button><hr></div>`;
+    else if (b.type === 'sec') inner = `<h3 data-sec-key="${esc(b.key)}">${esc(b.text)}</h3>`;
     else if (b.type === 'h') inner = `<h4>${esc(b.text)}</h4>`;
     else if (b.type === 'quote') inner = `<div class="quote" data-c="${b.c}">${esc(b.text)}${b.c !== 'none' ? `<span class="cname">· ${esc(cname(b.c))}</span>` : ''}${b.pieces > 1 ? `<span class="pieces">· ${b.pieces} pieces</span>` : ''}<div>${chip(b.mark, b.src)}</div></div>`;
     else if (b.type === 'fig') inner = `<div class="objblk"><div class="head"><i data-lucide="image" class="icon-xs"></i>Figure 3 · ${esc(cname(b.c))}</div><div class="fig-img">${FIG_SVG}</div><div class="cap">Figure 3: Latency profiling and challenges during poses merge.<div>${chip(b.mark, 'Fig. 3 · p. 3')}</div></div></div>`;
@@ -640,14 +670,33 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     else if (b.type === 'lost') inner = `<div class="lost"><div style="display:flex;gap:5px;align-items:center"><i data-lucide="unlink" class="icon-xs"></i>Anchor lost: not found after the paper was re-ingested. Your quote is kept.</div><div class="q">“${esc(b.text)}”</div></div>`;
     else if (b.type === 'check') inner = `<label class="check"><input type="checkbox" id="chk-${b.id}"><span>${b.text}${tag}</span></label>`;
     else if (b.sug) inner = `<div>${b.text.replace(b.sug.del, `<del class="sug">${b.sug.del}</del> <ins class="sug">${b.sug.ins}</ins>`)}<div class="sug-bar"><i data-lucide="sparkles" class="icon-xs"></i>Suggested by the assistant<span class="btns"><button class="btn" data-acc="${b.id}">Accept</button><button class="btn btn-ghost" data-rej="${b.id}">Reject</button></span></div></div>`;
-    else inner = `<div>${b.text}${tag}</div>`;
+    else inner = b.ai ? `<div>${b.text}${tag}</div>` : `<div data-edit="${b.id}" contenteditable="true" spellcheck="false">${b.text}</div>`;
     const del = b.type === 'sec' ? '<span></span>' : `<button class="blk-del" data-del="${b.id}" aria-label="${b.mark ? 'Delete this mark' : 'Delete this block'}" title="${b.mark ? 'Delete this mark (removes it from the paper too)' : 'Delete this block'}"><i data-lucide="trash-2" class="icon-xs"></i></button>`;
     return `<div class="blk-row" data-id="${b.id}"><button class="handle" aria-label="Drag to move"><i data-lucide="grip-vertical" class="icon-sm"></i></button><div class="blk">${inner}</div>${del}</div>`;
   }
   const visible = k => notes[k].blocks.filter(b => !(undone && b.fresh)).map(b => (undone && b.sug) ? { ...b, sug: null } : b);
+  // Parts: runs of blocks between section headings, sub-headings and dividers. A divider can fold the part below it.
+  function segmentsHtml(list, k) {
+    let html = '', seg = null, prevHr = null;
+    const close = () => {
+      if (!seg) return;
+      const ids = seg.blocks.map(b => b.id), key = ids[0], isFold = seg.hr && folded.has(seg.hr.id);
+      const nMarks = seg.blocks.filter(b => b.mark).length;
+      html += `<div class="part" data-key="${key}" data-ids="${ids.join(' ')}" data-active="${key === activeSeg}">` +
+        (seg.hr ? `<div class="collapse" data-state="${isFold ? 'open' : 'closed'}"><div><button class="part-sum" data-unfold="${seg.hr.id}"><i data-lucide="chevron-right" class="icon-xs"></i>${seg.blocks.length} block${seg.blocks.length > 1 ? 's' : ''}${nMarks ? ` · ${nMarks} mark${nMarks > 1 ? 's' : ''}` : ''}</button></div></div>` : '') +
+        `<div class="collapse" data-state="${isFold ? 'closed' : 'open'}"><div>${seg.rows.join('')}</div></div></div>`;
+      seg = null;
+    };
+    list.forEach(b => {
+      if (['sec', 'h', 'hr'].includes(b.type)) { close(); html += blockHtml(b, k); prevHr = b.type === 'hr' ? b : null; }
+      else { if (!seg) seg = { hr: prevHr, rows: [], blocks: [] }; seg.rows.push(blockHtml(b, k)); seg.blocks.push(b); }
+    });
+    close(); return html;
+  }
   function renderNote() {
     const k = curNoteKey();
-    $('#notesBody').innerHTML = `<div class="blocks">${visible(k).map(b => blockHtml(b, k)).join('')}</div><div class="placeholder">Type / for blocks, @ to link a paper or section</div>`;
+    $('#notesBody').innerHTML = `<div class="blocks">${segmentsHtml(visible(k), k)}</div><div class="newline" contenteditable="true" data-ph="Type here · --- makes a divider · / for blocks · @ links a paper or section"></div>`;
+    requestAnimationFrame(applyFocus);
     $('#noteMeta').textContent = notes[k].meta;
     $('#paperNoteLabel').textContent = DOCS[doc].title; icons();
   }
@@ -747,7 +796,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       const blk = $$(doc === 'ghost' ? '#ghostView [data-sec]' : '#paper h2').find(el => el.getBoundingClientRect().bottom > rb.top + 40);
       const key = doc === 'ghost' ? blk && blk.dataset.sec : 'Background and Motivation';
       const h = key && $(`#notesBody h3[data-sec-key="${CSS.escape(key)}"]`);
-      if (h) h.closest('.blk-row').scrollIntoView({ block: 'start', behavior: reduce() ? 'auto' : 'smooth' });
+      if (h) { const row = h.closest('.blk-row'); row.scrollIntoView({ block: 'start', behavior: reduce() ? 'auto' : 'smooth' }); let n = row.nextElementSibling; while (n && !n.classList.contains('part')) n = n.nextElementSibling; if (n && !focusOn) setActive(n.dataset.key); }
     }, 150);
     if (cardAnchor && $('#noteCardG').dataset.state === 'open') placeCards();
   });
@@ -784,6 +833,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     $('#ncTitle').textContent = `${DOCS[k] ? DOCS[k].short : 'Note'} › ${(list[s0] && list[s0].type === 'sec') ? list[s0].text : ''}`;
     $('#ncBody').innerHTML = part.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
       const editable = b.type === 'p' && !b.sug;
+      if (b.type === 'hr') return '<hr class="nc-hr">';
       const body = b.type === 'h' ? `<b>${esc(b.text)}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
@@ -837,6 +887,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     $$('.blk-row[data-link]').forEach(r => delete r.dataset.link);
     if (!on || noteTab !== 'paper') return; const [k, ids] = markNote[mark] || [];
     if (k !== doc) return;
+    if (!focusOn) { const r0 = $(`#notesBody .blk-row[data-id="${ids[0]}"]`); const sg = r0 && r0.closest('.part'); if (sg) setActive(sg.dataset.key); }
     ids.forEach((id, i) => { const row = $(`#notesBody .blk-row[data-id="${id}"]`); if (row) { row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); } });
   }
   function bindMark(el) {
@@ -848,7 +899,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       if (!marksOn() || !markNote[mark] || String(window.getSelection())) return;
       e.stopPropagation();
       if (pen) { erasePiece(el); return; }
-      if (notesVisible()) { flash($(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`)); return; }
+      if (notesVisible()) { const r = $(`#notesBody .blk-row[data-id="${(markNote[mark] || [, []])[1][0]}"]`); const sg = r && r.closest('.part'); if (sg) setActive(sg.dataset.key); flash(r); return; }
       openNoteCard(mark, el.closest('p') || el, null);
     });
   }
@@ -909,7 +960,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       const ic = document.createElement('button'); ic.className = 'gicon'; ic.dataset.gm = m.id; ic.setAttribute('aria-label', 'Open the note on this mark');
       ic.style.left = '89%'; ic.style.top = (rects[0].y * 100) + '%'; ic.innerHTML = '<i data-lucide="message-square-text" style="width:11px;height:11px"></i>'; layer.appendChild(ic);
     });
-    icons(); applyFilter();
+    icons(); applyFilter(); applyFocus();
   }
   const hit = (page, e) => {
     const pb = page.getBoundingClientRect(), x = (e.clientX - pb.left) / pb.width, y = (e.clientY - pb.top) / pb.height;
@@ -1241,6 +1292,66 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     if (onPage) setTimeout(renderPage, 220);
   });
   $('#ncDel').addEventListener('click', () => { const m = cardMark; closeCards(); deleteMark(m); });
+
+  /* ---------- parts of a note: the active part, Focus, folding, --- ---------- */
+  function setActive(key) {
+    if (!key || key === activeSeg) { applyFocus(); return; }
+    activeSeg = key; $$('#notesBody .part').forEach(sg => { sg.dataset.active = String(sg.dataset.key === key); }); applyFocus();
+  }
+  // With Focus on: the note's other parts fade, and on the paper only the marks quoted in this part keep their colour.
+  function applyFocus() {
+    $('#notesBody').classList.toggle('focus-on', focusOn);
+    const sg = $(`#notesBody .part[data-key="${activeSeg}"]`);
+    const ids = new Set(sg ? sg.dataset.ids.split(' ') : []);
+    const keep = new Set(Object.keys(markNote).filter(m => markNote[m][1].some(id => ids.has(id))));
+    const fade = el => { const m = el.dataset.mark || el.dataset.id; if (focusOn && !keep.has(m)) el.dataset.fade = 'true'; else delete el.dataset.fade; };
+    $$('#paper .hl, #paper .qmark, #paper .margin-ic, .obj[data-mark]').forEach(fade);
+    $$('.gmark').forEach(fade);
+  }
+  $('#focusBtn').addEventListener('click', e => {
+    focusOn = !focusOn; e.currentTarget.setAttribute('aria-pressed', String(focusOn)); applyFocus();
+    if (focusOn) { const sg = $(`#notesBody .part[data-key="${activeSeg}"]`); if (sg) sg.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && focusOn) { focusOn = false; $('#focusBtn').setAttribute('aria-pressed', 'false'); applyFocus(); } });
+  $('#notesBody').addEventListener('focusin', e => { const sg = e.target.closest('.part'); if (sg) setActive(sg.dataset.key); });
+  $('#notesBody').addEventListener('click', e => {
+    const f = e.target.closest('[data-fold], [data-unfold]');
+    if (f) {
+      const id = f.dataset.fold || f.dataset.unfold; const fold = !!f.dataset.fold && !folded.has(id);
+      if (fold) folded.add(id); else folded.delete(id);
+      const btn = $(`#notesBody [data-fold="${id}"]`); btn.setAttribute('aria-expanded', String(!fold));
+      let n = btn.closest('.blk-row').nextElementSibling;
+      if (n && n.classList.contains('part')) { const [sum, body] = $$(':scope > .collapse', n); sum.dataset.state = fold ? 'open' : 'closed'; body.dataset.state = fold ? 'closed' : 'open'; }
+      return;
+    }
+    const sg = e.target.closest('.part'); if (sg) setActive(sg.dataset.key);
+  });
+  // Typing --- turns a line into a divider at once; Undo turns it back (and then offers Make a divider again).
+  function toDivider(k, b, el) {
+    b.type = 'hr'; b.text = ''; renderNote();
+    const r = $(`#notesBody .blk-row[data-id="${b.id}"]`); if (r) r.classList.add('blk-enter');
+    const undo = () => { b.type = 'p'; b.text = '---'; renderNote(); return { text: 'Back to ---', onAct: redo, label: 'Make a divider again', icon: 'rotate-ccw' }; };
+    const redo = () => { b.type = 'hr'; b.text = ''; renderNote(); return { text: 'Divider added', onAct: undo, label: 'Undo', icon: 'minus' }; };
+    toast('Divider added', undo, 'Undo', 'minus', 5000);
+  }
+  $('#notesBody').addEventListener('input', e => {
+    const k = curNoteKey();
+    const ed = e.target.closest('[data-edit]');
+    if (ed && ed.textContent.trim() === '---') { const b = notes[k].blocks.find(x => x.id === ed.dataset.edit); if (b) toDivider(k, b, ed); return; }
+    const nl = e.target.closest('.newline');
+    if (nl && nl.textContent.trim() === '---') { const b = { id: 'd' + (++nid), type: 'p', text: '' }; notes[k].blocks.push(b); toDivider(k, b, nl); requestAnimationFrame(() => { const n2 = $('#notesBody .newline'); n2 && n2.focus(); }); }
+  });
+  $('#notesBody').addEventListener('keydown', e => {
+    const nl = e.target.closest('.newline'); if (!nl || e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault(); const text = nl.textContent.trim(); if (!text) return; const k = curNoteKey();
+    const b = { id: 'n' + (++nid), type: 'p', text: esc(text) }; notes[k].blocks.push(b); renderNote();
+    const r = $(`#notesBody .blk-row[data-id="${b.id}"]`); if (r) r.classList.add('blk-enter');
+    requestAnimationFrame(() => { const n2 = $('#notesBody .newline'); n2 && n2.focus(); });
+  });
+  $('#notesBody').addEventListener('focusout', e => {
+    const ed = e.target.closest('[data-edit]'); if (!ed) return; const b = notes[curNoteKey()].blocks.find(x => x.id === ed.dataset.edit);
+    if (b && b.type !== 'hr' && b.text !== ed.innerHTML) b.text = ed.innerHTML;
+  });
 
   applyPanel(); renderNote(); renderMarksMenu(); renderPage(); icons();
 })();
