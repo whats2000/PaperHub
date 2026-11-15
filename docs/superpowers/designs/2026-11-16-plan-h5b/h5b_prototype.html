@@ -271,8 +271,7 @@ input { font: inherit; color: inherit; }
 .gcard-b .blk { padding: 3px 6px; border-radius: 6px; line-height: 1.55; }
 .gcard-b .cite { line-height: 0; }
 .gcard-b .blk[contenteditable="true"]:focus { outline: 1px solid var(--ring); background: var(--background); }
-/* The quoting block: a stronger tint inside the current note's band, no outline (no boxes inside a box) */
-.gcard-b .blk[data-target="true"] { background: color-mix(in srgb, var(--foreground) 9%, transparent); }
+/* Only the clicked reference is highlighted (.nc-ref[data-target]); the user's own blocks never are */
 .gcard-f { border-top: 1px solid var(--border); padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
 .tr-body { padding: 8px 10px 10px; font-size: 13px; line-height: 1.6; }
 
@@ -343,7 +342,15 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 .notes-body.focus-on .part:not([data-active="true"]) .blk-row:not(:has(h3)) { opacity: 0.45; cursor: pointer; }
 .notes-body.focus-on .part .blk-row { transition: opacity 200ms ease-out; }
 /* The note card: the current note stands out; the section's other notes fold to one line each */
-.nc-cur { border-radius: 6px; background: color-mix(in srgb, var(--foreground) 6%, transparent); box-shadow: inset 2px 0 0 var(--ring); padding: 2px 0; margin: 2px 0; }
+.nc-cur { padding: 2px 0; margin: 2px 0; display: flex; flex-direction: column; gap: 3px; } /* other notes are folded: no band needed */
+/* A reference (from the paper) looks unlike the user's own note: paper serif, muted, a bar in the mark's colour, a "From the paper" tag */
+.nc-ref { display: block; width: 100%; text-align: left; border: 0; background: transparent; border-left: 3px solid var(--mc); border-radius: 0 6px 6px 0; padding: 3px 8px 4px; font-family: var(--font-paper); font-size: 13px; line-height: 1.5; color: var(--muted-fg); }
+.nc-ref-tag { display: flex; gap: 4px; align-items: center; font-family: var(--font-sans); font-size: 10.5px; color: var(--muted-fg); margin-bottom: 1px; }
+.nc-ref[data-target="true"] { background: color-mix(in srgb, var(--mc) 16%, transparent); color: var(--foreground); }
+button.nc-ref { cursor: pointer; transition: background 150ms ease-out, color 150ms ease-out; }
+button.nc-ref:hover, button.nc-ref:focus-visible { background: var(--accent); color: var(--foreground); }
+button.nc-ref .go { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; opacity: 0.7; }
+button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 .nc-other { width: 100%; border: 0; background: transparent; color: var(--muted-fg); font-size: 11.5px; text-align: left; padding: 3px 8px; border-radius: 5px; display: flex; gap: 5px; align-items: center; white-space: nowrap; overflow: hidden; }
 .nc-other span { overflow: hidden; text-overflow: ellipsis; }
 .nc-other:hover { background: var(--accent); color: var(--foreground); }
@@ -871,6 +878,15 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const rowsOf = g => g.filter(b => b.type !== 'sec' && b.type !== 'lost').map(b => {
       const editable = b.type === 'p' && !b.sug;
       if (b.type === 'hr') return '<hr class="nc-hr">';
+      if (['quote', 'fig', 'eq', 'box'].includes(b.type)) {
+        // A reference: the clicked one is highlighted; any other is a jumper to its passage on the paper.
+        const src = (b.c && b.c !== 'none' ? cname(b.c) + ' · ' : '') + (b.type === 'fig' ? 'Fig. 3 · p. 3' : b.type === 'eq' ? 'Eq. (1) · p. 2' : (b.src || b.where || ''));
+        const txt = b.type === 'quote' ? `“${esc(b.text.slice(0, 110))}${b.text.length > 110 ? '…' : ''}”` : b.type === 'fig' ? 'Figure 3: Latency profiling and challenges during poses merge.' : b.type === 'eq' ? '⟨ΔI<sub>t</sub>(x<sub>t</sub>) ΔI<sub>r</sub>(x<sub>r</sub>)⟩ = O(x<sub>t</sub>, x<sub>r</sub>)' : esc((b.text || 'Region').slice(0, 110));
+        const mc = b.c && b.c !== 'none' ? `var(--hl-${b.c})` : 'var(--muted-fg)';
+        const icon = b.type === 'fig' ? 'image' : b.type === 'eq' ? 'sigma' : b.type === 'box' ? 'square-dashed' : 'quote';
+        if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}</span>${txt}</div>`;
+        return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage in the paper"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}<span class="go">Show<i data-lucide="arrow-up-right" class="icon-xs"></i></span></span>${txt}</button>`;
+      }
       const body = b.type === 'h' ? `<b>${esc(b.text)}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
@@ -880,6 +896,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
       if (gi === cur) return `<div class="nc-cur">${rowsOf(g)}</div>`;
       return `<button class="nc-other" data-g="${gi}" aria-expanded="false"><i data-lucide="chevron-right" class="icon-xs"></i>Note ${gi + 1} · ${n} block${n > 1 ? 's' : ''}<span>· ${esc(snip(g))}</span></button><div class="collapse" data-state="closed"><div class="nc-other-body">${rowsOf(g)}</div></div>`;
     }).join(''); icons();
+    $$('#ncBody [data-jump]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); jumpToMark(btn.dataset.jump); }));
     $$('#ncBody .nc-other').forEach(btn => btn.addEventListener('click', () => {
       const o = btn.getAttribute('aria-expanded') !== 'true'; btn.setAttribute('aria-expanded', String(o)); btn.nextElementSibling.dataset.state = o ? 'open' : 'closed'; setTimeout(placeCards, 210);
     }));
@@ -891,6 +908,15 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     if (tr && $('#trFab').getAttribute('aria-pressed') === 'true') { $('#trText').textContent = tr; tc.dataset.state = 'open'; } else tc.dataset.state = 'closed';
     placeCards();
     requestAnimationFrame(() => { placeCards(); const t = $('[data-target="true"]', nc); t && t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  }
+  // Jump from the card to another reference: scroll the paper to it, flash it, and re-point the card at it.
+  function jumpToMark(mark) {
+    if (!markNote[mark]) return; const [k] = markNote[mark]; if (k !== doc) { doc = k; showDoc(); }
+    const g = gmarks.find(m => m.id === mark); let el, anchor, blk = null;
+    if (g) { drawGhostMarks(); el = $(`.gmark[data-id="${mark}"]`); blk = g.block ? $(`[data-block="${g.block}"]`) : null; anchor = blk || el; $$(`.gmark[data-id="${mark}"]`).forEach(flash); }
+    else { el = $(`#paper [data-mark="${mark}"]:not(.margin-ic)`); anchor = el && (el.closest('p') || el); flash(el); }
+    if (!el) return; scrollTo(el);
+    setTimeout(() => openNoteCard(mark, anchor, blk), reduce() ? 0 : 380);
   }
   function openTranslation(block) {
     if (nc.dataset.state === 'open') return; // a note card is open: leave it
