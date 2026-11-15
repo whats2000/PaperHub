@@ -133,6 +133,9 @@ input, textarea { font: inherit; color: inherit; }
 .panes[data-orient="side"] { flex-direction: row; }
 .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 50%; transition: flex-basis 200ms ease-out, opacity 200ms ease-out; }
 .pane[data-hidden="true"] { flex-basis: 0 !important; flex-grow: 0; opacity: 0; pointer-events: none; }
+/* Side by side: Notes keeps its own width; the panel's left edge resizes only the Reader. */
+.panes[data-orient="side"] #readerPane { flex: 1 1 auto; }
+.panes[data-orient="side"] #notesPane { flex: 0 0 var(--notes-w, 320px); }
 .divider { flex: 0 0 7px; cursor: row-resize; position: relative; border: 0; padding: 0; background: transparent; }
 .divider::before { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: var(--border); }
 .divider::after { content: ""; position: absolute; left: 50%; top: 1px; width: 28px; height: 5px; margin-left: -14px; border-radius: 3px; background: var(--border); }
@@ -572,6 +575,8 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
   $('#closeNotes').addEventListener('click', () => { state.notes = false; applyPanel(); });
   $('#orientBtn').addEventListener('click', e => {
     const p = $('#panes'); const side = p.dataset.orient !== 'side'; p.dataset.orient = side ? 'side' : 'stacked';
+    // Inline heights from the stacked divider don't apply side by side.
+    [$('#readerPane'), $('#notesPane')].forEach(x => { x.style.flexBasis = ''; });
     e.currentTarget.setAttribute('aria-label', side ? 'Stack' : 'Side by side'); e.currentTarget.title = side ? 'Stack' : 'Side by side';
     e.currentTarget.innerHTML = `<i data-lucide="${side ? 'rows-2' : 'columns-2'}" class="icon-sm"></i>`;
     $('#swapBtn').innerHTML = `<i data-lucide="${side ? 'arrow-left-right' : 'arrow-up-down'}" class="icon-sm"></i>`; icons();
@@ -586,7 +591,14 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     d.addEventListener('pointerup', () => { drag = false; d.dataset.drag = 'false'; });
     d.addEventListener('pointermove', e => {
       if (!drag) return; const p = $('#panes'), box = p.getBoundingClientRect(), side = p.dataset.orient === 'side';
-      const k = Math.min(0.8, Math.max(0.2, side ? (e.clientX - box.left) / box.width : (e.clientY - box.top) / box.height));
+      if (side) {
+        // Trade width between the two: Notes' width is what's on its side of the divider.
+        const notesFirst = p.firstElementChild.id === 'notesPane';
+        const w = notesFirst ? e.clientX - box.left : box.right - e.clientX;
+        p.style.setProperty('--notes-w', Math.min(box.width - 240, Math.max(240, w)) + 'px');
+        return;
+      }
+      const k = Math.min(0.8, Math.max(0.2, (e.clientY - box.top) / box.height));
       p.firstElementChild.style.flexBasis = `${k * 100}%`; p.lastElementChild.style.flexBasis = `${(1 - k) * 100}%`;
     });
     const rz = $('#panelResize'); let rdrag = false;
@@ -594,7 +606,8 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     rz.addEventListener('pointerup', () => { rdrag = false; });
     rz.addEventListener('pointermove', e => {
       if (!rdrag) return; const m = $('.main').getBoundingClientRect();
-      const w = Math.min(0.7, Math.max(0.25, (m.right - e.clientX) / m.width)); $('#panel').style.setProperty('--panel-w', (w * 100) + '%');
+      // Side by side, Notes keeps its px width, so this edge only resizes the Reader.
+      const w = Math.min(0.75, Math.max(0.25, (m.right - e.clientX) / m.width)); $('#panel').style.setProperty('--panel-w', (w * 100) + '%');
     });
   })();
 
