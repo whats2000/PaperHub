@@ -24,7 +24,7 @@ digraph finish {
   "Invoke paperhub-merge-prep" -> "version pick + quality gates + version/lock bumps";
   "version pick + quality gates + version/lock bumps" -> "4 READMEs + SRS row + CLAUDE.md";
   "4 READMEs + SRS row + CLAUDE.md" -> "release commit";
-  "release commit" -> "STOP: surface merge/tag/push for explicit approval";
+  "release commit" -> "STOP: surface squash-merge/tag/push for explicit approval";
 }
 ```
 
@@ -39,7 +39,10 @@ digraph finish {
    approval.
 2. **Only after** merge-prep's release commit exists do the merge/PR/push
    happen — and those are restricted ops needing explicit user approval each
-   time (merge-prep step 6 already enforces this). The generic finish's
+   time (merge-prep step 6 already enforces this). The merge is always a
+   **squash merge** (`git merge --squash` → one commit on `main`), never
+   `--no-ff` or a fast-forward, so `main` doesn't grow by every dev commit;
+   a PR is merged with GitHub's "Squash and merge". The generic finish's
    "merge / PR / keep / discard" menu is redundant with merge-prep here; don't
    run it separately.
 3. **Never** call `superpowers:finishing-a-development-branch` directly for

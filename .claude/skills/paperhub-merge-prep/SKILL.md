@@ -193,10 +193,10 @@ Use a HEREDOC for the commit message so the formatting is preserved.
 This is a hard stop per the global CLAUDE.md restricted-operations
 rule. The following commands are NOT auto-runnable:
 
-- `git checkout main && git merge --no-ff <branch>` (modifies shared
-  branch state — requires explicit per-instance approval)
-- `git tag -a vX.Y.Z <branch-name> -m "Release vX.Y.Z"` (annotated tag
-  on the RELEASE commit — NOT the merge commit; see the warning below)
+- `git checkout main && git merge --squash <branch>` + the squash commit
+  (modifies shared branch state — requires explicit per-instance approval)
+- `git tag -a vX.Y.Z main -m "Release vX.Y.Z"` (annotated tag on the
+  squash commit — see "Merge rule" below)
 - `git push origin main` (publishes — requires explicit approval)
 - `git push origin vX.Y.Z` (publishes that one tag — requires explicit
   approval; push the **specific** tag, never `--tags`, which also
@@ -206,20 +206,45 @@ Describe the **exact** sequence you propose to the user and wait. Do
 not execute. Do not assume previous approval from earlier in the
 session carries forward — restricted ops need per-instance approval.
 
-Recommended proposal to surface:
+### Merge rule: squash merge, always
+
+A branch lands on `main` as **ONE squash commit**: `git merge --squash`,
+never `git merge --no-ff` or a fast-forward. A plan branch carries
+100+ dev commits (TDD steps, review fixes, wave commits); merging them
+would make `main`'s history grow with every plan. The full dev history
+stays on the feature branch; `main` gets one commit per release.
+
+The squash commit message follows the existing squash commits on `main`
+(e.g. `3cef36d3`): subject `feat: Plan <X> — <what shipped> (vX.Y.Z)`
+(`fix: …` for a patch release), a body of 2–4 short paragraphs (what
+changed, how it was verified), the `Versions:` + test-count lines from
+the release commit, and the `Co-Authored-By` trailer when Claude wrote
+code on the branch.
+
+Recommended proposal to surface (run it in the checkout that has `main`
+checked out — with worktrees that is often not the branch's checkout):
 
 ```
 git checkout main
-git pull origin main                  # in case main moved since this branch was cut
-git merge --no-ff <branch-name>       # the actual merge (a merge commit becomes main's tip)
-
-# Tag the RELEASE commit, NOT the merge commit. After --no-ff the
-# <branch-name> ref still points at the chore(release) commit, so tag THAT:
-git tag -a vX.Y.Z <branch-name> -m "Release vX.Y.Z"
+git pull origin main                   # in case main moved since this branch was cut
+git merge --squash <branch-name>       # stages the whole branch; no commit yet
+git commit -F <squash-message-file>    # the ONE commit main gets
+git tag -a vX.Y.Z main -m "Release vX.Y.Z"   # the squash commit (1 parent)
 
 git push origin main
 git push origin vX.Y.Z                 # the specific tag — NEVER --tags
 ```
+
+Before tagging, verify the squash landed as intended:
+`git log -1 --format=%P main` shows **one** parent, and
+`git rev-parse main^{tree}` equals `git rev-parse <branch-name>^{tree}`
+(same content as the `chore(release)` commit). An uncommitted change
+already in the `main` checkout stays out of the commit as long as you
+don't `git add` it — check `git status` after the commit.
+
+The feature branch is NOT merged in git's sense afterwards, so
+`git branch -d` refuses it; keep it (it holds the dev history) unless
+the user asks to delete it.
 
 When you surface this, tell the user what the **tag push** triggers so the
 publish is not a surprise: `release.yml` fires on `v*`, **builds + pushes
@@ -229,27 +254,27 @@ and **cuts a GitHub Release** whose notes are composed from the `vX.Y.Z`
 PR list. `push origin main` separately runs `ci.yml`. (The push to `main`
 is what makes the Release notes' source available at the tagged commit, so
 the tag must point at a commit that already contains the §4b changelog
-entry — the `chore(release)` commit does.)
+entry — the squash commit does, since it carries the `chore(release)`
+changes.)
 
-**⚠️ Never tag the merge commit — tag-triggered CD does not fire on it.**
-A deploy pipeline keyed on `on: push: tags` will NOT run for a tag that
-points at a `--no-ff` merge commit; the release looks shipped but never
-deploys (silent). Always anchor the tag on the `chore(release): vX.Y.Z`
-commit — i.e. the branch tip, which has the **identical tree** to the
-merge but is a normal 1-parent commit. If a tag was mistakenly placed on
-the merge commit, move it (delete-then-recreate gives CD a clean
-tag-create event to fire on):
+**⚠️ The tag goes on a 1-parent commit — tag-triggered CD does not fire
+on a merge commit.** A deploy pipeline keyed on `on: push: tags` will NOT
+run for a tag on a 2-parent merge commit; the release looks shipped but
+never deploys (silent — this bit **v2.31.0**). The squash commit has one
+parent, so tagging `main` after the squash is correct. If `main`'s tip
+turns out to be a merge commit (someone ran `git merge --no-ff`, or a
+pending merge editor finished), do NOT tag it: while it is unpushed,
+run the `safe-amend` check, then `git reset --soft origin/main` (keeps
+the merged tree staged) and make the squash commit. If a bad tag was
+already pushed, move it (delete-then-recreate gives CD a clean
+tag-create event):
 
 ```
 git push origin :refs/tags/vX.Y.Z     # delete the bad remote tag
 git tag -d vX.Y.Z                      # delete it locally
-git tag -a vX.Y.Z <release-commit-sha> -m "Release vX.Y.Z"
+git tag -a vX.Y.Z <squash-commit-sha> -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
-
-This bit the **v2.31.0** release — the tag first landed on the merge
-commit and CD stayed silent until it was moved to the `chore(release)`
-commit.
 
 If a frontend rebuild or backend Docker image rebuild is needed for
 deployment, NOTE that to the user but DO NOT trigger it. The deploy is
@@ -272,11 +297,13 @@ a separate downstream action with its own approval.
 - Auto-executing the merge / push / tag commands → restricted ops
   always need per-instance approval, even when the user has approved
   similar ops earlier in the same session.
-- **Tagging the `--no-ff` merge commit instead of the `chore(release)`
-  commit** → tag-triggered CD (`on: push: tags`) does not fire on a
-  merge commit, so the release silently never deploys. Always tag the
-  release commit (the branch tip). Likewise `git push origin --tags`
-  instead of `git push origin vX.Y.Z` → publishes stray local tags.
+- **Merging with `--no-ff` or a fast-forward instead of `--squash`** →
+  every dev commit of the branch lands on `main` and its history grows
+  by 100+ commits per plan. Always squash: one commit per release.
+- **Tagging a merge commit** → tag-triggered CD (`on: push: tags`) does
+  not fire on a 2-parent commit, so the release silently never deploys.
+  Tag the squash commit. Likewise `git push origin --tags` instead of
+  `git push origin vX.Y.Z` → publishes stray local tags.
 
 ## Conventions reference (from CLAUDE.md)
 
