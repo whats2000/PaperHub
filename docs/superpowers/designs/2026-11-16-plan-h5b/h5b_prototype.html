@@ -183,6 +183,10 @@ input, textarea { font: inherit; color: inherit; }
 .blk-row .handle { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); padding: 3px 0; border-radius: 4px; display: flex; justify-content: center; transition: opacity 120ms; }
 .blk-row:hover .handle, .blk-row:focus-within .handle { opacity: 1; }
 .blk-row[data-flash="true"] { background: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+.blk-row { transition: box-shadow 150ms ease-out, background 150ms ease-out; }
+.blk-row[data-link="true"] { background: var(--accent); box-shadow: 0 0 0 1px var(--ring); }
+.hl:hover, .qmark:hover { box-shadow: 0 0 0 1px var(--ring); }
+.marks-off .hl:hover, .marks-off .qmark:hover { box-shadow: none; }
 .blk { padding: 3px 6px; min-width: 0; }
 .blk h4 { margin: 8px 0 2px; font-size: 14.5px; }
 .blk.ai { position: relative; }
@@ -273,7 +277,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     <button aria-pressed="false" data-view="notes">Notes page (H5b.2)</button>
     <button aria-pressed="false" data-view="pdf">PDF marks</button>
   </div>
-  <span class="muted">Try: select text in the paper · hover a highlight · click a quote's source chip · run the agent card</span>
+  <span class="muted">Try: select text in the paper · hover a highlight (Paper + Notes) or its margin icon (Paper only) · click a quote's source chip · Undo in the agent card</span>
 </div>
 
 <div class="app">
@@ -579,20 +583,53 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const target = markNote[mark] || [];
     const blocks = notes.sec.blocks.filter(b => !(undone && b.fresh));
     $('#hcardBody').innerHTML = blocks.filter(b => b.type !== 'lost').map(b => `<div class="blk" data-target="${target.includes(b.id)}">${b.type === 'h' ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}…”</span>` : b.text}</div>`).join('');
-    const body = $('#readerBody').getBoundingClientRect(), r = el.getBoundingClientRect();
-    hcard.style.left = Math.max(8, Math.min(r.left - body.left, body.width - 352)) + 'px';
-    hcard.style.top = (r.bottom - body.top + $('#readerBody').scrollTop + 6) + 'px';
+    // Beside the margin icon, never over the paragraph: the card's right edge
+    // sits just left of the icon, its top at the icon's line.
+    const body = $('#readerBody').getBoundingClientRect();
+    const icon = el.classList.contains('margin-ic') ? el : (el.closest('p') && $('.margin-ic', el.closest('p'))) || el;
+    const r = icon.getBoundingClientRect();
+    const w = Math.min(340, body.width - 24);
+    const right = r.right - body.left;
+    hcard.style.left = Math.max(8, Math.min(right + 8, body.width - w - 8)) + 'px';
+    if (right + 8 + w > body.width - 8) hcard.style.left = Math.max(8, r.left - body.left - w - 8) + 'px';
+    hcard.style.top = (r.top - body.top + $('#readerBody').scrollTop - 4) + 'px';
+    hcard.style.transformOrigin = 'top right';
     hcard.dataset.state = 'open';
     requestAnimationFrame(() => { const t = $('[data-target="true"]', hcard); t && t.scrollIntoView({ block: 'nearest' }); });
     $('#hcardMeta').textContent = mark === 'm3' ? 'Assistant · just now' : 'You · 2 days ago';
   }
-  const hideCard = () => { hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 180); };
-  $$('[data-mark]', $('#paper')).forEach(el => {
-    el.addEventListener('mouseenter', () => { if (!$('#paper').classList.contains('marks-off')) showCard(el, el.dataset.mark); });
-    el.addEventListener('mouseleave', hideCard);
-    el.addEventListener('focus', () => showCard(el, el.dataset.mark));
-  });
+  const hideCard = () => { clearTimeout(openT); hideT = setTimeout(() => { hcard.dataset.state = 'closed'; }, 180); };
+  let openT = null;
+  const notesOpen = () => $('#notesPane').dataset.hidden !== 'true';
+  const marksOff = () => $('#paper').classList.contains('marks-off');
+  // Notes pane open: no popup — outline the linked block in the pane instead.
+  function syncBlock(mark, on) {
+    $$('.blk-row[data-link]').forEach(r => { delete r.dataset.link; });
+    if (!on) return;
+    if (curNote !== 'sec') return;
+    (markNote[mark] || []).forEach((id, i) => {
+      const row = $(`.blk-row[data-id="${id}"]`); if (!row) return;
+      row.dataset.link = 'true'; if (i === 0) row.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
+    });
+  }
+  function bindMark(el) {
+    const mark = el.dataset.mark, isIcon = el.classList.contains('margin-ic');
+    el.addEventListener('mouseenter', () => {
+      if (marksOff()) return;
+      if (notesOpen()) { syncBlock(mark, true); return; }
+      if (isIcon) { clearTimeout(openT); openT = setTimeout(() => showCard(el, mark), 300); }
+    });
+    el.addEventListener('mouseleave', () => { syncBlock(mark, false); hideCard(); });
+    // A click (or tap) opens the card in Paper-only view, wherever the mark is.
+    el.addEventListener('click', e => {
+      if (marksOff() || window.getSelection().toString()) return;
+      if (notesOpen()) { syncBlock(mark, true); const r = $(`.blk-row[data-id="${(markNote[mark] || [])[0]}"]`); if (r) { r.dataset.flash = 'true'; setTimeout(() => delete r.dataset.flash, 1200); } return; }
+      e.stopPropagation(); showCard(el, mark);
+    });
+  }
+  $$('[data-mark]', $('#paper')).forEach(bindMark);
   hcard.addEventListener('mouseenter', () => clearTimeout(hideT)); hcard.addEventListener('mouseleave', hideCard);
+  document.addEventListener('click', e => { if (!hcard.contains(e.target) && !e.target.closest('[data-mark]')) hcard.dataset.state = 'closed'; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { hcard.dataset.state = 'closed'; $('#selPop').dataset.state = 'closed'; } });
   $('#editInNotes').addEventListener('click', () => {
     hcard.dataset.state = 'closed'; setPanes('both');
@@ -651,14 +688,14 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
     const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
     const span = wrapSel('hl', { c: s.dataset.c, mark }); if (!span) return;
     markNote[mark] = ['q' + (nid + 1)]; addQuote(text, s.dataset.c, mark);
-    span.addEventListener('mouseenter', () => showCard(span, mark)); span.addEventListener('mouseleave', hideCard);
+    bindMark(span);
     $('.marks-count').textContent = String(+$('.marks-count').textContent + 1);
   }));
   $('#quoteAct').addEventListener('click', () => {
     const text = selRange && selRange.toString(); const mark = 'u' + (++nid);
     const span = wrapSel('qmark', { mark }); if (!span) return;
     markNote[mark] = ['q' + (nid + 1)]; addQuote(text, 'none', mark);
-    span.addEventListener('mouseenter', () => showCard(span, mark)); span.addEventListener('mouseleave', hideCard);
+    bindMark(span);
   });
 
   /* ---------- suggestions: accept / reject ---------- */
