@@ -401,6 +401,7 @@ async def _system_messages(
     parts = SessionStateParts(
         papers=papers, idea_context=text("idea_context"),
         slide_context=text("slide_context"), memories=memories,
+        notes=text("notes"), notes_changes=text("notes_changes"),
         ui_language=text("ui_language"),
     )
     return [

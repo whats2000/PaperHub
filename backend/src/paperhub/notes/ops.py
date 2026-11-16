@@ -54,7 +54,7 @@ class Op(BaseModel):
 class ApplyResult(BaseModel):
     note_id: int
     revision: int
-    change_set_id: str
+    change_set_id: str | None  # None when nothing was written (all rejected)
     applied: list[str]
     suggested: list[dict[str, str]]  # {block_id, suggestion_id}
     rejected: list[dict[str, Any]]  # {block_id, reason, current: Block | None}
@@ -459,6 +459,7 @@ async def _apply_in_tx(
         raise ValueError(
             f"base_revision {base_revision} is ahead of note {note_id} "
             f"(revision {note.revision})")
+    await conn.execute("SAVEPOINT apply_ops")
     ctx = await _begin(conn, note_id, actor=actor, run_id=run_id,
                        summary=summary)
     recorded: list[dict[str, Any]] = []
@@ -469,6 +470,15 @@ async def _apply_in_tx(
         if op.op == "insert" and len(ctx.applied) > before_applied:
             stored["block_id"] = ctx.applied[-1]  # the id the block got
         recorded.append(stored)
+    if not ctx.applied and not ctx.suggested:
+        # Every op was rejected: no change, so no revision and no change set.
+        await conn.execute("ROLLBACK TO apply_ops")
+        await conn.execute("RELEASE apply_ops")
+        res = ctx.result()
+        res.revision = ctx.rev - 1
+        res.change_set_id = None
+        return res
+    await conn.execute("RELEASE apply_ops")
     await _record_change_set(ctx, base_revision=base_revision,
                              ops_json=json.dumps(recorded))
     return ctx.result()

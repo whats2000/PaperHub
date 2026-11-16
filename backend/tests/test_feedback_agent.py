@@ -961,3 +961,20 @@ async def test_trajectory_rebuilds_a_paused_turns_dismissed_and_confirmed_calls(
     tool_texts = [m["content"] for m in traj["messages"] if m.get("role") == "tool"]
     assert tool_texts[0].startswith("The user dismissed remove_paper")
     assert tool_texts[1].startswith("Forgot memory 9")
+
+
+async def test_trajectory_exports_the_notes_the_turn_saw(
+    migrated_db: aiosqlite.Connection, fake_sql_agent: None,
+) -> None:
+    conn = migrated_db
+    await _seed_session(conn)
+    adapter = FakeAdapter([ToolTurn(content="Done.")])
+    await _drive_and_persist(
+        conn, adapter, build_default_registry(_settings()), "hi", history=[])
+    seen = adapter.calls[-1][1]["content"]
+    assert "<notes>" in seen
+    # The note changes after the turn: the export uses what was recorded.
+    await conn.execute("UPDATE notes SET title = 'renamed', revision = 9")
+    await conn.commit()
+    traj = await export_agent_trajectory(conn, RUN, include_private=True)
+    assert traj["messages"][1]["content"] == seen

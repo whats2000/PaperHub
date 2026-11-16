@@ -566,3 +566,21 @@ async def test_restore_settles_siblings_in_order(conn):
     res = await restore_blocks(conn, n.id, ["k1", "k2"], actor="user")
     assert res.applied == ["k1", "k2"]
     assert [b.id for b in await list_blocks(conn, n.id)] == ["k1", "k2", "z"]
+
+
+async def test_all_rejected_ops_write_no_revision_or_change_set(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a"))])
+    before = (await get_note(conn, n.id)).revision
+    res = await apply_ops(conn, n.id, base_revision=before, actor="agent", ops=[
+        Op(op="delete", block_id="nope")])
+    assert res.applied == [] and res.suggested == []
+    assert res.rejected[0]["reason"] == "missing"
+    assert res.revision == before and res.change_set_id is None
+    assert (await get_note(conn, n.id)).revision == before
+    for table in ("note_revisions", "note_change_sets"):
+        async with conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE note_id = ? "  # noqa: S608
+                + ("AND revision > ?" if table == "note_revisions" else "AND result_revision > ?"),
+                (n.id, before)) as cur:
+            assert (await cur.fetchone())[0] == 0
