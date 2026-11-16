@@ -49,7 +49,13 @@ from paperhub.agents.core.context import (
     session_state_parts,
 )
 from paperhub.agents.core.figures import IMAGE_TOKENS, images_message
-from paperhub.agents.core.tools import Tier, ToolContext, ToolOutcome, ToolRegistry
+from paperhub.agents.core.tools import (
+    Tier,
+    ToolContext,
+    ToolOutcome,
+    ToolRegistry,
+    TurnEvidence,
+)
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.slide_context import build_slide_context
 from paperhub.config import Settings, flagship_tier_model
@@ -588,6 +594,11 @@ async def run_core_agent(
         settings=settings, adapter=deps.adapter, emit=emit_live,
         enabled_papers=[(p.id, p.title) for p in papers], history=history,
         state=state, mcp_registry=deps.mcp_registry,
+        # What a citation may name (edit_note checks the blocks it writes):
+        # the kept turns' evidence now, this turn's reads as they happen.
+        evidence=TurnEvidence(
+            chunks=set(conv.kept_ids), figures=set(conv.kept_figures),
+            views=set(conv.kept_views)),
     )
 
     async def drain(
@@ -807,6 +818,10 @@ async def run_core_agent(
                         vkey = view_key(paper, page, (box[0], box[1], box[2], box[3]))
                         if vkey not in viewed_views:
                             viewed_views.append(vkey)
+                ctx.evidence.chunks.update(read_ids)
+                ctx.evidence.figures.update(viewed_figures)
+                ctx.evidence.views.update(viewed_views)
+                ctx.evidence.note_blocks.update(read_note_blocks)
                 images = [i for o in res.outcomes for i in o.images]
                 if images:
                     # Tool messages carry text only on most providers: the

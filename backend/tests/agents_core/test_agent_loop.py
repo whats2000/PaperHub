@@ -28,6 +28,7 @@ from paperhub.agents.core.tools import (
     ToolOutcome,
     ToolRegistry,
     ToolSpec,
+    TurnEvidence,
 )
 from paperhub.llm.adapter import ToolCall, ToolTurn
 from paperhub.tracing.tracer import Tracer
@@ -1219,3 +1220,36 @@ async def test_figure_citations_need_a_viewed_figure_and_carry_to_the_next_turn(
     assert final2.text == f"As shown before [fig:{pid}/fig-003]."
     sent = adapter2.calls[0]["messages"]
     assert any(f"figures: {pid}/fig-003" in str(m.get("content")) for m in sent)
+
+
+async def test_tools_see_the_evidence_read_this_turn(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """edit_note checks citations against what the turn read: the loop keeps
+    ctx.evidence current after every step."""
+    _, _, tracer = await _setup(migrated_db)
+    seen: list[TurnEvidence] = []
+
+    async def read(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        return ToolOutcome(content="x", record={
+            "tool": "notes:read", "block_ids": ["b_1"]}, chunk_ids_read=[5])
+
+    async def view_figure(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        return ToolOutcome(content="x", record={
+            "paper": 3, "figure": "fig2", "page": 2, "box": [1, 2, 3, 4]})
+
+    async def probe(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        seen.append(ctx.evidence)
+        return ToolOutcome(content="x", record={})
+
+    reg = ToolRegistry()
+    empty = {"type": "object", "properties": {}}
+    for name, fn in (("read", read), ("view_figure", view_figure),
+                     ("probe", probe)):
+        reg.register(ToolSpec(name, "d", empty, Tier.FREE, fn))
+    adapter = FakeAdapter([_calls(("read", {}), ("view_figure", {})),
+                           _calls(("probe", {})), _answer("ok")])
+    await _drive(migrated_db, tracer, adapter, reg)
+    ev = seen[0]
+    assert ev.chunks == {5} and ev.note_blocks == {"b_1"}
+    assert ev.figures == {"3/fig2"} and ev.views == {"3/2/1,2,3,4"}

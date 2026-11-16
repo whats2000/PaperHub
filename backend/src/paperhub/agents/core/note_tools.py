@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
 from pydantic import ValidationError
 
+from paperhub.agents.core.citations import check_written_citations
 from paperhub.agents.core.private_material import (
     collect_note_blocks,
     collect_note_titles,
@@ -26,6 +28,7 @@ from paperhub.agents.core.tools import (
     ToolOutcome,
     ToolRegistry,
     ToolSpec,
+    TurnEvidence,
     error_outcome,
 )
 from paperhub.agents.research_tools import _to_fts5_query
@@ -377,6 +380,43 @@ def _current(block: object) -> object:
     return block
 
 
+def _check_runs(content: Any, check: Callable[[str], str]) -> Any:
+    """``content`` (a string or inline runs, links nesting their runs) with
+    ``check`` applied to every piece of text."""
+    if isinstance(content, str):
+        return check(content)
+    if not isinstance(content, list):
+        return content
+    out: list[Any] = []
+    for run in content:
+        if isinstance(run, dict):
+            run = dict(run)
+            if isinstance(run.get("text"), str):
+                run["text"] = check(run["text"])
+            if run.get("content") is not None:
+                run["content"] = _check_runs(run["content"], check)
+        out.append(run)
+    return out
+
+
+def _check_citations(
+    block: BlockIn, ev: TurnEvidence, removed: dict[str, list[Any]],
+) -> BlockIn:
+    """The block with citations of anything not read this turn marked
+    ``[unsourced:<reason>]`` (the answer rules); removals merge into
+    ``removed`` by kind."""
+    def check(text: str) -> str:
+        text, gone = check_written_citations(
+            text, chunks=ev.chunks, figures=ev.figures, views=ev.views,
+            note_blocks=ev.note_blocks)
+        for kind, ids in gone.items():
+            bucket = removed.setdefault(kind, [])
+            bucket.extend(i for i in ids if i not in bucket)
+        return text
+
+    return block.model_copy(update={"content": _check_runs(block.content, check)})
+
+
 def _invalid(label: str | None, hint: str) -> dict[str, Any]:
     return {"block_id": label, "reason": "invalid", "current": None,
             "hint": hint}
@@ -406,12 +446,14 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     valid: list[Op] = []
     section: str | None = None
     new_sections: dict[str, str] = {}  # section name -> block id to create
-    for op in ops:
+    placed: list[tuple[int, str, str]] = []  # (op index, section, block id)
+    removed_cites: dict[str, list[Any]] = {}
+    # An empty chat / idea / free note has one place to write; elsewhere
+    # (and always on a paper note, which writes under a section) an insert
+    # names its place.
+    anywhere = not blocks and note.target_kind != "paper"
+    for index, op in enumerate(ops):
         label = op.block_id or op.after or op.before or op.under_heading
-        # An empty chat / idea / free note has one place to write; elsewhere
-        # (and always on a paper note, which writes under a section) an
-        # insert names its place.
-        anywhere = not blocks and note.target_kind != "paper"
         if (op.op == "insert" and not anywhere
                 and not (op.after or op.before or op.under_heading)):
             rejected.append(_invalid(
@@ -430,6 +472,11 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 continue
             op = op.model_copy(update={"under_heading": bid})
             section = section or name
+            if name is not None and bid is not None:
+                placed.append((index, name, bid))
+        if op.block is not None:
+            op = op.model_copy(update={"block": _check_citations(
+                op.block, ctx.evidence, removed_cites)})
         valid.append(op)
     if new_sections:
         order = await _section_order(ctx.conn, int(note.target_id))
@@ -457,8 +504,25 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         if revision == seen + 1:  # nothing but this write since it last looked
             await _record_reads(ctx, {note.id: revision})
     record["rejected"] = rejected
-    result = {"revision": revision, "applied": record["applied"],
-              "suggested": record["suggested"], "rejected": rejected}
+    result: dict[str, Any] = {
+        "revision": revision, "applied": record["applied"],
+        "suggested": record["suggested"], "rejected": rejected}
+    if placed:
+        # Whether this op's section heading was made by this change set (the
+        # first op naming a new section), so the answer can say so.
+        claimed: set[str] = set()
+        made_now = set(record["applied"])
+        result["placed"] = []
+        for index, name, bid in placed:
+            created = (bid in new_sections.values() and bid in made_now
+                       and bid not in claimed)
+            claimed.add(bid)
+            result["placed"].append(
+                {"op": index, "section": name, "created": created})
+        record["placed"] = result["placed"]
+    if removed_cites:
+        record["citations_removed"] = removed_cites
+        result["citations_removed"] = removed_cites
     events: list[tuple[str, dict[str, Any]]] = []
     if record["applied"] or record["suggested"]:
         record["note_title"] = note.title
@@ -523,6 +587,7 @@ def register_note_tools(registry: ToolRegistry) -> None:
             "and a place: after / before a block id, or under_heading; an "
             "empty non-paper note needs no place}; `content` is the block's "
             "text as a string, `type` e.g. paragraph, bulletListItem, heading; "
+            "math is LaTeX as typed, with single backslashes ($\\alpha$); "
             "update {block_id, block}; delete {block_id}; move {block_id, "
             "place}. `under_heading` is a heading or section block id, or on a "
             "paper note the paper's section name ('Method'), created if "

@@ -9,7 +9,12 @@ import aiosqlite
 import pytest
 
 from paperhub.agents.core.note_tools import register_note_tools
-from paperhub.agents.core.tools import ToolContext, ToolOutcome, ToolRegistry
+from paperhub.agents.core.tools import (
+    ToolContext,
+    ToolOutcome,
+    ToolRegistry,
+    TurnEvidence,
+)
 from paperhub.llm.adapter import ToolCall
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import paper_note
@@ -378,3 +383,61 @@ async def test_block_content_is_offered_as_text() -> None:
     assert item["properties"]["block"]["properties"]["content"] == {
         "type": "string"}
     assert "divider_before" in reg.get("edit_note").description
+    # LaTeX was stored with doubled backslashes in 3/5 eval runs.
+    assert "single backslashes" in reg.get("edit_note").description
+
+
+async def test_unread_citations_in_written_blocks_are_marked(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """A summary written into a note follows the answer citation rules: ids
+    not read this turn become [unsourced:<reason>], recorded in the trace."""
+    nid = await _chat_note(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer)
+    ctx.evidence = TurnEvidence(chunks={5}, note_blocks={"b_seen"})
+    out = await _edit(ctx, note="chat", base_revision=0, ops=[
+        {"op": "insert", "block": {"type": "paragraph",
+         "content": "A [chunk:5]. B [chunk:9]. C [note:b_seen]. D [note:b_zz]."}},
+        {"op": "insert", "block": {"type": "paragraph", "content": [
+            {"type": "text", "text": "E [fig:3/fig2] F [view:3/2/1,2,3,4]"}]}},
+    ])
+    assert not out.record.get("error"), out.content
+    texts = [b.text for b in await list_blocks(migrated_db, nid)]
+    assert texts == [
+        "A [chunk:5]. B [unsourced:not_read]. C [note:b_seen]. "
+        "D [unsourced:note_not_read].",
+        "E [unsourced:figure_not_viewed] F [unsourced:region_not_viewed]"]
+    assert out.record["citations_removed"] == {
+        "chunks": [9], "notes": ["b_zz"], "figures": ["3/fig2"],
+        "views": ["3/2/1,2,3,4"]}
+    assert json.loads(out.content)["citations_removed"] == out.record[
+        "citations_removed"]
+
+
+async def test_read_citations_in_written_blocks_are_kept(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer)
+    ctx.evidence = TurnEvidence(chunks={5, 6})
+    out = await _edit(ctx, note="chat", base_revision=0, ops=[
+        _ins("both [chunk:5, 6]")])
+    assert "citations_removed" not in out.record
+    assert [b.text for b in await list_blocks(migrated_db, nid)] == [
+        "both [chunk:5, 6]"]
+
+
+async def test_result_says_whether_a_section_was_created(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[_ins("one", under_heading="Method")])
+    data = json.loads(out.content)
+    assert data["placed"] == [{"op": 0, "section": "Method", "created": True}]
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=data["revision"],
+                      ops=[_ins("two", under_heading="Method")])
+    assert json.loads(out.content)["placed"] == [
+        {"op": 0, "section": "Method", "created": False}]

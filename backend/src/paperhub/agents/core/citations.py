@@ -347,3 +347,27 @@ def validate_note_citations(
         return f"{_lead(m)}[note:{', '.join(keep)}]"
 
     return _NOTE_MARKER.sub(fix, text), removed
+
+
+def check_written_citations(
+    text: str, *, chunks: set[int], figures: set[str], views: set[str],
+    note_blocks: set[str],
+) -> tuple[str, dict[str, list[str] | list[int]]]:
+    """Apply the answer citation rules to text the agent writes elsewhere (a
+    note block): ``[chunk:]`` / ``[fig:]`` / ``[view:]`` / ``[note:]`` ids not
+    read this turn become ``[unsourced:<reason>]``. Returns the text and the
+    removed ids by kind (only kinds with removals)."""
+    removed: dict[str, list[str] | list[int]] = {}
+    text, gone_chunks = validate_citations(text, chunks)
+    if gone_chunks:
+        removed["chunks"] = gone_chunks
+    text, gone_notes = validate_note_citations(text, note_blocks)
+    if gone_notes:
+        removed["notes"] = gone_notes
+    text, gone_figs = validate_figure_citations(text, figures)
+    if gone_figs:
+        removed["figures"] = gone_figs
+    text, gone_views, _snapped = validate_view_citations(text, views)
+    if gone_views:
+        removed["views"] = gone_views
+    return text, removed

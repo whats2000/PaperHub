@@ -35,6 +35,17 @@ class Tier(StrEnum):
 
 
 @dataclass
+class TurnEvidence:
+    """What the turn has read so far (plus the kept turns' work records):
+    the ids a citation may name. The agent loop updates it after each step."""
+
+    chunks: set[int] = field(default_factory=set)
+    figures: set[str] = field(default_factory=set)  # figure_key(paper, id)
+    views: set[str] = field(default_factory=set)    # view_key(paper, page, box)
+    note_blocks: set[str] = field(default_factory=set)
+
+
+@dataclass
 class ToolContext:
     conn: aiosqlite.Connection
     tracer: Tracer
@@ -51,6 +62,7 @@ class ToolContext:
     # UI events of every call that finished this turn, in completion order:
     # a stopped turn still records the side effects that already happened.
     done_events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    evidence: TurnEvidence = field(default_factory=TurnEvidence)
 
 
 @dataclass
