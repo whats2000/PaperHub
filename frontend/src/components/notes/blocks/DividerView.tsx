@@ -1,26 +1,45 @@
+import { useEditorChange } from "@blocknote/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
 
-import { foldSummary, partsOfNote } from "../parts";
+import { foldSummary, partsOfNote, type PartBlock } from "../parts";
 import { useNoteEditorContext } from "./markProps";
+
+type AnyEditor = NonNullable<Parameters<typeof useEditorChange>[1]>;
+
+interface DocBlock extends PartBlock {
+  children: DocBlock[];
+}
+
+/** The editor's blocks in document order (what the parts rule reads). */
+function flatten(list: DocBlock[], out: PartBlock[] = []): PartBlock[] {
+  for (const b of list) {
+    out.push(b);
+    flatten(b.children, out);
+  }
+  return out;
+}
 
 /** A divider's line: its fold chevron at the content edge (centred on a
  * reference's bar), the rule darkened when it frames the part you're in, and
- * the folded part's one-line summary, which unfolds it. */
-export function DividerView({ id }: { id: string }) {
+ * the folded part's one-line summary, which unfolds it. The parts come from
+ * the editor's own document, so a divider just typed is right before its
+ * sync reaches the store. */
+export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
   const { t } = useTranslation();
   const { noteId } = useNoteEditorContext();
-  const blocks = useNotesStore((s) => s.notes[noteId]?.blocks);
+  const [blocks, setBlocks] = useState(() => flatten(editor.document as unknown as DocBlock[]));
+  useEditorChange(() => setBlocks(flatten(editor.document)), editor);
   const folded = useNotesStore((s) => (s.folded[noteId] ?? []).includes(id));
   const active = useNotesStore((s) => s.activePart[noteId] ?? null);
   const toggleFold = useNotesStore((s) => s.toggleFold);
 
   const { summary, edge } = useMemo(() => {
-    const parts = partsOfNote(blocks ?? []);
+    const parts = partsOfNote(blocks);
     const mine = parts.find((p) => p.id === id);
     const at = active === null ? -1 : parts.findIndex((p) => p.id === active);
     // The dividers just above and below the active part frame it.

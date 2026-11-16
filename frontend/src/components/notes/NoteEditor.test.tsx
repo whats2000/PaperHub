@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { BlockNoteEditor } from "@blocknote/core";
 
@@ -626,6 +626,12 @@ describe("comments in the editor", () => {
   });
 });
 
+type PMView = {
+  state: { doc: { content: { size: number } }; selection: { from: number; to: number }; tr: { insertText: (t: string, f: number, to: number) => unknown } };
+  dispatch: (tr: unknown) => void;
+  someProp: (name: string, f: (fn: (...a: unknown[]) => boolean) => boolean) => boolean | undefined;
+};
+
 describe("dividers, Focus and folding", () => {
   const d1 = blk("d1", { type: "divider" });
   const d2 = blk("d2", { type: "divider" });
@@ -790,6 +796,36 @@ describe("dividers, Focus and folding", () => {
     act(() => useNotesStore.getState().setActivePart(7, "s1"));
     expect(rule("d1")).toHaveAttribute("data-edge", "true");
     expect(rule("d2")).not.toHaveAttribute("data-edge");
+  });
+
+  it("a divider just typed frames the part and counts its blocks from the editor, before the store has it", async () => {
+    const pe = blk("pe", { content: [] });
+    seed([section, quote, d1, q2, p3, pe]);
+    // The sync has not landed: the store keeps the line as it was.
+    const applyLocal = useNotesStore.getState().applyLocal;
+    useNotesStore.setState({ activePart: { 7: "d1" }, applyLocal: () => {} });
+    onTestFinished(() => {
+      useNotesStore.setState({ applyLocal });
+    });
+    mount();
+    await screen.findByText("Third");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+    const view = pm.editor.view;
+    act(() => {
+      pm.editor.commands.setTextSelection(view.state.doc.content.size - 3);
+      for (const ch of "---") {
+        const { from, to } = view.state.selection;
+        const handled = view.someProp("handleTextInput", (f) => f(view, from, to, ch, () => view.state.tr));
+        if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
+      }
+    });
+    const rule = (await screen.findByTestId("divider-pe")).querySelector("hr")!;
+    expect(rule).toHaveAttribute("data-edge", "true");
+    // d1's part (q2, p3) as the editor has it.
+    act(() => useNotesStore.getState().toggleFold(7, "d1"));
+    expect(within(screen.getByTestId("divider-d1")).getByRole("button", { name: "2 blocks · 1 mark" })).toBeInTheDocument();
   });
 
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {

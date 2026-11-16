@@ -6,7 +6,7 @@ import { DividerView } from "./DividerView";
 export const dividerBlock = createReactBlockSpec(
   { type: "divider", propSchema: {}, content: "none" },
   {
-    render: ({ block }) => <DividerView id={block.id} />,
+    render: ({ block, editor }) => <DividerView id={block.id} editor={editor as never} />,
     parse: (el) => (el.tagName === "HR" ? {} : undefined),
     toExternalHTML: () => <hr />,
   },
