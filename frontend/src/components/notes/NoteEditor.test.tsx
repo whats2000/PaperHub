@@ -841,6 +841,61 @@ describe("dividers, Focus and folding", () => {
     expect(foldLine(t, { blocks: 1, marks: 3 })).toBe(plural);
   });
 
+  it("the caret never lands in a folded part: moving down skips past it, moving up stops at its divider", async () => {
+    seed([section, quote, d1, q2, p3, d2, p4]);
+    useNotesStore.setState({ folded: { 7: ["d1"] } });
+    mount();
+    await screen.findByText("Fourth");
+    type Node = { attrs: { id?: string }; type: { name: string }; nodeSize: number };
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: {
+        state: {
+          doc: { descendants: (f: (n: Node, pos: number) => boolean | void) => void };
+          selection: { from: number; $from: { depth: number; node: (d: number) => Node } };
+        };
+        commands: { setTextSelection: (pos: number) => boolean };
+      };
+    };
+    const posIn = (id: string) => {
+      let at = -1;
+      pm.editor.state.doc.descendants((n, pos) => {
+        if (n.type.name === "blockContainer" && n.attrs.id === id) at = pos + 2;
+        return at < 0;
+      });
+      return at;
+    };
+    const blockAtCaret = () => {
+      const $f = pm.editor.state.selection.$from;
+      for (let d = $f.depth; d > 0; d--) {
+        const n = $f.node(d);
+        if (n.type.name === "blockContainer") return n.attrs.id;
+      }
+      return null;
+    };
+    // Down from the first part: past the folded q2 / p3.
+    act(() => {
+      pm.editor.commands.setTextSelection(posIn("s1"));
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(posIn("p3"));
+    });
+    expect(["d2", "p4"]).toContain(blockAtCaret());
+    // Up from the last part: onto the folded part's divider.
+    act(() => {
+      pm.editor.commands.setTextSelection(posIn("p4"));
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(posIn("p3"));
+    });
+    expect(["d1", "q1", "s1"]).toContain(blockAtCaret());
+    // Unfolded, the caret goes in.
+    act(() => useNotesStore.getState().toggleFold(7, "d1"));
+    act(() => {
+      pm.editor.commands.setTextSelection(posIn("p3"));
+    });
+    expect(blockAtCaret()).toBe("p3");
+  });
+
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
     seed([section, quote, d1, q2, p3, d2, p4]);
     mount();

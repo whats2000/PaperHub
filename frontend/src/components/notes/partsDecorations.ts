@@ -12,7 +12,7 @@
  */
 import { createExtension } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, Selection, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
 import { partsOfNote, type PartBlock } from "./parts";
@@ -34,10 +34,15 @@ function toPartBlock(container: PMNode): PartBlock {
   };
 }
 
-/** The decorations for `doc` under `view`. */
-export function partDecorations(doc: PMNode, view: PartsView): DecorationSet {
+interface Layout {
+  attrs: Map<string, Record<string, string>>;
+  top: { id: string; from: number; to: number }[];
+}
+
+/** Each top-level block's place and the attributes it takes under `view`. */
+function layout(doc: PMNode, view: PartsView): Layout | null {
   const group = doc.firstChild;
-  if (!group) return DecorationSet.empty;
+  if (!group) return null;
   // Every block in document order (the rule reads nested dividers too), and
   // where each top-level block sits.
   const flat: PartBlock[] = [];
@@ -63,11 +68,44 @@ export function partDecorations(doc: PMNode, view: PartsView): DecorationSet {
       if (Object.keys(a).length) attrs.set(b.id, a);
     }
   }
-  const decos = top.flatMap((t) => {
-    const a = attrs.get(t.id);
+  return { attrs, top };
+}
+
+/** The decorations for `doc` under `view`. */
+export function partDecorations(doc: PMNode, view: PartsView): DecorationSet {
+  const l = layout(doc, view);
+  if (!l) return DecorationSet.empty;
+  const decos = l.top.flatMap((t) => {
+    const a = l.attrs.get(t.id);
     return a ? [Decoration.node(t.from, t.to, a)] : [];
   });
   return DecorationSet.create(doc, decos);
+}
+
+/** The document ranges of folded blocks, runs of them merged. */
+export function foldedRanges(doc: PMNode, view: PartsView): [number, number][] {
+  const l = layout(doc, view);
+  const out: [number, number][] = [];
+  for (const t of l?.top ?? []) {
+    if (l?.attrs.get(t.id)?.["data-folded"] !== "true") continue;
+    const last = out[out.length - 1];
+    if (last && last[1] === t.from) last[1] = t.to;
+    else out.push([t.from, t.to]);
+  }
+  return out;
+}
+
+/** A selection moved out of a folded part: past it when it was moving down,
+ * else back to the block before it (its divider). Null when it is not in one. */
+export function skipFolded(state: EditorState, oldHead: number, view: PartsView): Transaction | null {
+  const head = state.selection.head;
+  const range = foldedRanges(state.doc, view).find(([from, to]) => head > from && head < to);
+  if (!range) return null;
+  const down = head >= oldHead;
+  const target = down
+    ? (Selection.findFrom(state.doc.resolve(range[1]), 1) ?? Selection.findFrom(state.doc.resolve(range[0]), -1))
+    : (Selection.findFrom(state.doc.resolve(range[0]), -1) ?? Selection.findFrom(state.doc.resolve(range[1]), 1));
+  return target ? state.tr.setSelection(target) : null;
 }
 
 /** The extension; `get` returns the current view state. */
@@ -82,6 +120,11 @@ export function noteParts(get: () => PartsView) {
           init: () => 0,
           apply: (tr, version) => (tr.getMeta(key) ? version + 1 : version),
         },
+        // The caret never enters a folded part (its blocks are out of sight).
+        appendTransaction: (trs, old, state) =>
+          trs.some((t) => t.selectionSet || t.docChanged || t.getMeta(key))
+            ? skipFolded(state, old.selection.head, get())
+            : null,
         props: {
           decorations(state) {
             const version = key.getState(state) ?? 0;
