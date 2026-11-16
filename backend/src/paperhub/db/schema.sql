@@ -463,3 +463,81 @@ CREATE TABLE IF NOT EXISTS outbound_review_cache (
     decision_json TEXT,
     created_at TEXT
 );
+
+-- Plan H5b.1: the notes layer. One note per (owner, target); content lives in
+-- note_blocks (a tree ordered by fractional order_key), every change leaves a
+-- note_block_history row, and each committed edit is one note_revisions row.
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('paper', 'session', 'idea')),
+    target_id TEXT NOT NULL,
+    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    UNIQUE (owner_id, target_kind, target_id)
+);
+CREATE TABLE IF NOT EXISTS note_blocks (
+    id TEXT PRIMARY KEY,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    parent_id TEXT,
+    order_key TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    author TEXT NOT NULL CHECK (author IN ('user', 'ai')),
+    section_key TEXT,
+    changed_rev INTEGER NOT NULL,
+    changed_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_note_blocks_order
+    ON note_blocks(note_id, parent_id, order_key);
+CREATE TABLE IF NOT EXISTS note_block_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL,
+    block_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    op TEXT NOT NULL CHECK (op IN ('insert', 'update', 'delete', 'move', 'restore')),
+    before_json TEXT,
+    after_json TEXT,
+    run_id INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS note_revisions (
+    note_id INTEGER NOT NULL,
+    revision INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    change_set_id TEXT,
+    run_id INTEGER,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (note_id, revision)
+);
+
+-- Full-text index over live note_blocks.text (external content on the
+-- implicit rowid; soft-deleted blocks are kept out of the index).
+CREATE VIRTUAL TABLE IF NOT EXISTS note_blocks_fts USING fts5(
+    text, content='note_blocks', content_rowid='rowid'
+);
+CREATE TRIGGER IF NOT EXISTS note_blocks_fts_ai AFTER INSERT ON note_blocks
+WHEN new.deleted_at IS NULL BEGIN
+    INSERT INTO note_blocks_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS note_blocks_fts_ad AFTER DELETE ON note_blocks
+WHEN old.deleted_at IS NULL BEGIN
+    INSERT INTO note_blocks_fts(note_blocks_fts, rowid, text)
+    VALUES ('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS note_blocks_fts_au AFTER UPDATE ON note_blocks BEGIN
+    INSERT INTO note_blocks_fts(note_blocks_fts, rowid, text)
+    SELECT 'delete', old.rowid, old.text WHERE old.deleted_at IS NULL;
+    INSERT INTO note_blocks_fts(rowid, text)
+    SELECT new.rowid, new.text WHERE new.deleted_at IS NULL;
+END;

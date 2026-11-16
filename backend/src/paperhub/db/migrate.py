@@ -788,6 +788,20 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
         await conn.commit()
 
+    # Plan H5b.1: same backfill for note_blocks_fts (live blocks only).
+    async with conn.execute(
+        "SELECT COUNT(*) FROM note_blocks WHERE deleted_at IS NULL"
+    ) as cur:
+        n_blocks = int((await cur.fetchone() or (0,))[0])
+    async with conn.execute("SELECT COUNT(*) FROM note_blocks_fts_docsize") as cur:
+        n_nb_indexed = int((await cur.fetchone() or (0,))[0])
+    if n_blocks > 0 and n_nb_indexed == 0:
+        await conn.execute(
+            "INSERT INTO note_blocks_fts(rowid, text) "
+            "SELECT rowid, text FROM note_blocks WHERE deleted_at IS NULL"
+        )
+        await conn.commit()
+
     # Plan H2: a pending reviewer item whose run was rated explicitly is
     # resolved (idempotent; a no-op once nothing is pending).
     from paperhub.feedback.repo import resolve_superseded
