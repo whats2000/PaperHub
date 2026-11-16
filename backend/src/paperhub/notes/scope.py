@@ -59,7 +59,8 @@ async def notes_in_scope(
     if everything:
         async with conn.execute(
             f"SELECT {_NOTE_COLS} FROM notes "  # noqa: S608
-            "WHERE owner_id = 1 AND deleted_at IS NULL ORDER BY id"
+            "WHERE owner_id = 1 AND deleted_at IS NULL "
+            "ORDER BY updated_at DESC, id DESC"
         ) as cur:
             return [_row(r) for r in await cur.fetchall()]
     notes = [await _chat_note(conn, session_id)]

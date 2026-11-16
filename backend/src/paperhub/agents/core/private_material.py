@@ -82,6 +82,13 @@ def collect_note_blocks(blocks: list[tuple[str, str]], note_title: str) -> None:
             add_private(PrivateItem("note", f"note_block:{block_id}", note_title, text))
 
 
+def collect_note_titles(titles: list[tuple[int, str]]) -> None:
+    """Add note titles (``(note_id, title)``) the agent was shown."""
+    for note_id, title in titles:
+        if title:
+            add_private(PrivateItem("note", f"note_title:{note_id}", title, title))
+
+
 # query_library (SQL over the whole library) can return any column of a
 # private document. Cells shorter than this carry no passage worth guarding.
 _CELL_MIN = 12

@@ -14,7 +14,10 @@ from typing import Any
 
 import aiosqlite
 
-from paperhub.agents.core.private_material import collect_note_blocks
+from paperhub.agents.core.private_material import (
+    collect_note_blocks,
+    collect_note_titles,
+)
 from paperhub.agents.core.read_tools import _CJK_RUN
 from paperhub.agents.core.tools import (
     Tier,
@@ -34,6 +37,8 @@ PAGE_BLOCKS = 40
 PAGE_CHARS = 6_000
 SEARCH_LIMIT = 20
 SNIPPET_CHARS = 240
+ALL_NOTES_MAX = 30
+OUTLINE_MAX = 50
 
 _SCOPE = {"type": "string", "enum": ["chat", "all"],
           "description": "chat = this chat's notes (default); all = every note."}
@@ -63,22 +68,35 @@ def _block_xml(b: Block, text: str | None = None) -> str:
             f'author="{_esc(b.author)}">{body}</note_block>')
 
 
-def _outline(blocks: list[Block]) -> list[dict[str, Any]]:
-    return [{"block_id": b.id, "text": _text(b), "level": lvl}
-            for b in blocks if (lvl := _level(b)) is not None]
+def _heading_xml(block_id: str, text: str) -> str:
+    return (f'<note_heading id="{_esc(block_id)}">'
+            f'{html.escape(text, quote=False)}</note_heading>')
 
 
-def _heading_paths(blocks: list[Block]) -> dict[str, list[str]]:
-    """Each block's chain of headings (sections, then headings by level)."""
-    stack: list[tuple[int, str]] = []
-    paths: dict[str, list[str]] = {}
+def _title_xml(title: str) -> str:
+    return f"<note_title>{html.escape(title, quote=False)}</note_title>"
+
+
+def _outline(blocks: list[Block]) -> tuple[list[tuple[str, str, int]], bool]:
+    """``(block_id, text, level)`` of the first OUTLINE_MAX headings, and
+    whether more were left out."""
+    heads = [(b.id, _text(b), lvl) for b in blocks
+             if (lvl := _level(b)) is not None]
+    return heads[:OUTLINE_MAX], len(heads) > OUTLINE_MAX
+
+
+def _heading_paths(blocks: list[Block]) -> dict[str, list[tuple[str, str]]]:
+    """Each block's chain of ``(heading block id, text)`` (sections, then
+    headings by level)."""
+    stack: list[tuple[int, str, str]] = []
+    paths: dict[str, list[tuple[str, str]]] = {}
     for b in blocks:
         lvl = _level(b)
         if lvl is not None:
             while stack and stack[-1][0] >= lvl:
                 stack.pop()
-            stack.append((lvl, _text(b)))
-        paths[b.id] = [t for _, t in stack]
+            stack.append((lvl, b.id, _text(b)))
+        paths[b.id] = [(i, t) for _, i, t in stack]
     return paths
 
 
@@ -128,20 +146,29 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         return error_outcome("scope must be 'chat' or 'all'.")
     notes = await notes_in_scope(ctx.conn, ctx.session_id, everything=scope == "all",
                                 paper_ids=[p for p, _ in ctx.enabled_papers])
+    truncated = len(notes) > ALL_NOTES_MAX
+    notes = notes[:ALL_NOTES_MAX]
     seen = await _read_revisions(ctx.conn, ctx.session_id)
     rows: list[dict[str, Any]] = []
     for n in notes:
         blocks = await list_blocks(ctx.conn, n.id)
+        heads, outline_cut = _outline(blocks)
+        collect_note_titles([(n.id, n.title)])
+        collect_note_blocks([(i, t) for i, t, _ in heads], n.title)
         rows.append({
-            "ref": ref_of(n, ctx.session_id), "title": n.title,
+            "ref": ref_of(n, ctx.session_id), "title": _title_xml(n.title),
             "target": f"{n.target_kind}:{n.target_id}", "revision": n.revision,
-            "blocks": len(blocks), "outline": _outline(blocks),
+            "blocks": len(blocks),
+            "outline": [{"block_id": i, "text": _heading_xml(i, t), "level": lvl}
+                        for i, t, lvl in heads],
+            "outline_truncated": outline_cut,
             "last_editor": await _last_editor(ctx.conn, n),
             "changed_since_you_read": n.id in seen and seen[n.id] < n.revision,
         })
     return ToolOutcome(
-        content=json.dumps({"notes": rows}, ensure_ascii=False),
-        record={"tool": "notes:list", "scope": scope,
+        content=json.dumps({"notes": rows, "truncated": truncated},
+                           ensure_ascii=False),
+        record={"tool": "notes:list", "scope": scope, "truncated": truncated,
                 "note_ids": [n.id for n in notes],
                 "revisions": {str(n.id): n.revision for n in notes}},
     )
@@ -187,17 +214,19 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             (*ids, *(f"%{t}%" for t in cjk), SEARCH_LIMIT),
         ) as cur:
             rows = list(await cur.fetchall())
-    paths: dict[int, dict[str, list[str]]] = {}
+    paths: dict[int, dict[str, list[tuple[str, str]]]] = {}
     hits: list[dict[str, Any]] = []
     private: dict[int, list[tuple[str, str]]] = {}
     for bid, note_id, text, author in rows:
         if note_id not in paths:
             paths[note_id] = _heading_paths(await list_blocks(ctx.conn, note_id))
         note = by_id[note_id]
+        path = paths[note_id].get(bid, [])
+        collect_note_blocks(path, note.title)
         snippet = html.escape(str(text)[:SNIPPET_CHARS], quote=False)
         hits.append({
             "note": ref_of(note, ctx.session_id), "block_id": bid,
-            "heading_path": paths[note_id].get(bid, []),
+            "heading_path": [_heading_xml(i, t) for i, t in path],
             "snippet": (f'<note_block id="{_esc(bid)}" author="{_esc(author)}">'
                         f"{snippet}</note_block>"),
         })
@@ -274,6 +303,7 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             f'revision="{note.revision}" page="{page}"'
             + (f' next_page="{next_page}"' if next_page else "") + ">")
     content = "\n".join([head, *(_block_xml(b) for b in window), "</note>"])
+    collect_note_titles([(note.id, note.title)])
     collect_note_blocks([(b.id, _text(b)) for b in window], note.title)
     await _record_reads(ctx, {note.id: note.revision})
     return ToolOutcome(
