@@ -2,7 +2,7 @@
 
 Provenance (SRS H5a stage 4): private documents attached to the chat, the
 chunks read from them this turn, private rows returned by ``query_library``,
-and the idea's problem text in an idea chat. The user's own typed message is never added.
+the note blocks the agent read, and the idea's problem text in an idea chat. The user's own typed message is never added.
 """
 from __future__ import annotations
 
@@ -72,6 +72,14 @@ async def collect_chunks(conn: aiosqlite.Connection, chunk_ids: list[int]) -> No
     for cid, title, text in rows:
         add_private(PrivateItem("chunk", f"chunk:{cid}", str(title or ""),
                                 str(text or "")))
+
+
+def collect_note_blocks(blocks: list[tuple[str, str]], note_title: str) -> None:
+    """Add the note text the agent read this turn: ``(block_id, text)`` pairs.
+    Notes are the user's own words, so every block read counts as private."""
+    for block_id, text in blocks:
+        if text:
+            add_private(PrivateItem("note", f"note_block:{block_id}", note_title, text))
 
 
 # query_library (SQL over the whole library) can return any column of a

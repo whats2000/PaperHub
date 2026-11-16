@@ -14,6 +14,7 @@ from xml.sax.saxutils import escape
 from paperhub.agents._mcp_result import normalize_mcp_result
 from paperhub.agents.core.gather import register_gather_tool
 from paperhub.agents.core.language import direct_answer_language
+from paperhub.agents.core.note_tools import register_note_tools
 from paperhub.agents.core.permissions import memory_listing, visible_memories
 from paperhub.agents.core.private_material import collect_library_rows
 from paperhub.agents.core.read_tools import register_read_tools
@@ -857,5 +858,6 @@ def build_default_registry(settings: Settings | None = None) -> ToolRegistry:
     register_read_tools(registry, vision=settings.agent_vision)
     register_gather_tool(registry)
     register_action_tools(registry)
+    register_note_tools(registry)
     return registry
 

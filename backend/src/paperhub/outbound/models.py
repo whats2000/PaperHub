@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-PrivateKind = Literal["document", "chunk", "problem"]
+PrivateKind = Literal["document", "chunk", "problem", "note"]
 OutboundKind = Literal["web_search", "s2_search", "arxiv_search"]
 #: ``discard``: the user chose not to send a held request (a paused turn).
 Action = Literal["send", "ask", "hold", "block", "discard"]

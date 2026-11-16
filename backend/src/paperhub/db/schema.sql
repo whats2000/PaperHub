@@ -551,6 +551,15 @@ CREATE TABLE IF NOT EXISTS note_suggestions (
     status TEXT NOT NULL CHECK (status IN ('open', 'accepted', 'rejected', 'withdrawn')),
     created_at TEXT NOT NULL
 );
+-- The revision of each note the chat's agent last read, so list_notes can say
+-- what changed since (H5b.1).
+CREATE TABLE IF NOT EXISTS note_agent_reads (
+    session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (session_id, note_id)
+);
 CREATE INDEX IF NOT EXISTS idx_note_change_sets_note
     ON note_change_sets(note_id);
 CREATE INDEX IF NOT EXISTS idx_note_suggestions_change_set
