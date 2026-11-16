@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
-from paperhub.notes.store import block_text
 
 pytestmark = pytest.mark.asyncio
 
@@ -95,24 +94,51 @@ async def test_validation(env) -> None:
 
 async def test_comment_text_is_not_note_text(env) -> None:
     c, nid, bid, tmp = env
-    await _new(c, nid, bid, "secretcomment")
-    # the style carries only the thread id, never thread text
-    assert block_text("paragraph", {}, [
-        {"type": "text", "text": "hello", "styles": {"comment": "c_1"}}]) == "hello"
+    t = await _new(c, nid, bid, "secretcomment")
+    # the editor puts the thread id on the words as an inline style
+    r = await c.post(f"/notes/{nid}/ops", json={"base_revision": 1, "ops": [{
+        "op": "update", "block_id": bid, "block": {"type": "paragraph", "content": [
+            {"type": "text", "text": "hello", "styles": {"comment": t["id"]}},
+            {"type": "text", "text": " world", "styles": {}}]}}]})
+    assert r.status_code == 200 and r.json()["applied"] == [bid], r.text
+    got = (await c.get(f"/notes/{nid}")).json()
+    block = next(b for b in got["blocks"] if b["id"] == bid)
+    assert block["text"] == "hello world"
+    assert block["content"][0]["styles"] == {"comment": t["id"]}
     async with aiosqlite.connect(tmp / "paperhub.db") as conn:
         async with conn.execute(
             "SELECT count(*) FROM note_blocks_fts WHERE note_blocks_fts MATCH "
             "'secretcomment'") as cur:
             assert (await cur.fetchone())[0] == 0
         async with conn.execute(
+            "SELECT count(*) FROM note_blocks_fts WHERE note_blocks_fts MATCH "
+            "'hello'") as cur:
+            assert (await cur.fetchone())[0] == 1
+        async with conn.execute(
             "SELECT text FROM note_blocks WHERE note_id = ?", (nid,)) as cur:
-            assert all("secretcomment" not in r[0] for r in await cur.fetchall())
+            texts = [r[0] for r in await cur.fetchall()]
+    assert texts == ["hello world"]
+    assert all(t["id"] not in x for x in texts)
 
 
-async def test_cascade_with_note_tables(env) -> None:
+async def test_deleting_the_note_deletes_its_threads(env) -> None:
     c, nid, bid, tmp = env
     await _new(c, nid, bid)
     async with aiosqlite.connect(tmp / "paperhub.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
         for t in ("note_comments", "note_comment_items"):
             async with conn.execute(f"SELECT owner_id FROM {t}") as cur:
                 assert (await cur.fetchone())[0] == 1
+        await conn.execute("DELETE FROM notes WHERE id = ?", (nid,))
+        await conn.commit()
+        for t in ("note_comments", "note_comment_items"):
+            async with conn.execute(f"SELECT count(*) FROM {t}") as cur:
+                assert (await cur.fetchone())[0] == 0
+
+
+async def test_blank_quote_is_rejected(env) -> None:
+    c, nid, bid, _ = env
+    for q in ("", "   "):
+        r = await c.post(f"/notes/{nid}/comments",
+                         json={"block_id": bid, "quote": q, "text": "x"})
+        assert r.status_code == 422

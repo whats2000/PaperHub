@@ -508,3 +508,42 @@ async def test_summary_counts_only_content_blocks(
     data = json.loads(out.content)
     assert len(data["applied"]) == 4  # section, divider, paragraph, divider
     assert out.events[0][1]["summary"]["added"] == 1
+
+
+async def test_agent_rewrite_of_a_commented_block_is_a_suggestion(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Pins today's behaviour: the user's block (with a comment's style) is not
+    touched by the agent; accepting the suggestion replaces the content, which
+    drops the style and leaves the thread open on a block with no underline."""
+    from paperhub.notes.comments import create_comment, list_comments
+    from paperhub.notes.ops import resolve_suggestion
+
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="user", ops=[
+        Op(op="insert", block=BlockIn(type="paragraph", content=[
+            {"type": "text", "text": "mine", "styles": {}}]))])
+    bid = res.applied[0]
+    thread = await create_comment(
+        migrated_db, nid, block_id=bid, quote="mine", text="why?")
+    res = await apply_ops(migrated_db, nid, base_revision=res.revision,
+                          actor="user", ops=[Op(op="update", block_id=bid,
+        block=BlockIn(type="paragraph", content=[
+            {"type": "text", "text": "mine", "styles": {"comment": thread["id"]}}]))])
+    out = await _edit(_ctx(migrated_db, fake_tracer), note="chat",
+                      base_revision=res.revision, ops=[
+        {"op": "update", "block_id": bid, "block": {
+            "type": "paragraph", "content": "theirs"}}])
+    data = json.loads(out.content)
+    assert data["applied"] == [] and len(data["suggested"]) == 1
+    block = (await list_blocks(migrated_db, nid))[0]
+    assert block.text == "mine"
+    assert block.content[0]["styles"] == {"comment": thread["id"]}  # type: ignore[index]
+    assert [c["status"] for c in await list_comments(migrated_db, nid)] == ["open"]
+
+    await resolve_suggestion(migrated_db, data["suggested"][0]["suggestion_id"], True)
+    block = (await list_blocks(migrated_db, nid))[0]
+    assert block.text == "theirs"
+    assert "comment" not in json.dumps(block.content)  # the underline is gone
+    still = await list_comments(migrated_db, nid)
+    assert [(c["id"], c["status"]) for c in still] == [(thread["id"], "open")]

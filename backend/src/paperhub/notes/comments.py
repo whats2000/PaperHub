@@ -29,10 +29,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _clean(text: str) -> str:
+def _clean(text: str, what: str = "comment text") -> str:
     text = text.strip()
     if not text:
-        raise CommentInputError("comment text is empty")
+        raise CommentInputError(f"{what} is empty")
     return text
 
 
@@ -84,6 +84,7 @@ async def create_comment(conn: aiosqlite.Connection, note_id: int, *,
                          block_id: str, quote: str, text: str,
                          ) -> dict[str, Any]:
     text = _clean(text)
+    quote = _clean(quote, "the quoted text")
     if block_id not in {b.id for b in await list_blocks(conn, note_id)}:
         raise CommentInputError(f"block {block_id} is not in note {note_id}")
     cid = "c_" + "".join(secrets.choice(_ALPHABET) for _ in range(10))
