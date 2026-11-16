@@ -362,6 +362,39 @@ input { font: inherit; color: inherit; }
 .fmt-bar button { border: 0; background: transparent; color: var(--foreground); min-width: 28px; height: 26px; border-radius: 5px; font-size: 13px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
 .fmt-bar button:hover { background: var(--accent); }
 .fmt-bar .sep { width: 1px; background: var(--border); margin: 3px 2px; }
+.fmt-bar button[aria-pressed="true"] { background: var(--accent); }
+.fmt-bar .fmt-cmt { padding: 0 8px; }
+.spoiler { background: var(--foreground); color: transparent; border-radius: 3px; cursor: pointer; transition: background 150ms ease-out, color 150ms ease-out; }
+.spoiler[data-shown] { background: color-mix(in srgb, var(--foreground) 10%, transparent); color: inherit; }
+.cmt { background: color-mix(in srgb, var(--foreground) 7%, transparent); border-bottom: 2px solid color-mix(in srgb, var(--foreground) 45%, transparent); cursor: pointer; transition: background 150ms ease-out; }
+.cmt[data-on] { background: color-mix(in srgb, var(--foreground) 16%, transparent); border-bottom-color: var(--foreground); }
+.cmt-pop { position: fixed; z-index: 81; width: 300px; background: var(--popover); color: var(--foreground); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 8px; transform-origin: top left; transition: opacity 120ms ease-out, transform 120ms ease-out; font-size: 13px; }
+.cmt-pop[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
+.cmt-q { font-size: 11.5px; color: var(--muted-fg); border-left: 2px solid var(--border); padding-left: 6px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmt-item { padding: 4px 2px; } .cmt-item .who { font-size: 11.5px; color: var(--muted-fg); display: flex; gap: 6px; align-items: center; } .cmt-item .who b { color: var(--foreground); font-weight: 600; }
+.cmt-item p { margin: 2px 0 0; white-space: pre-wrap; }
+.cmt-in { display: flex; gap: 6px; align-items: flex-end; border: 1px solid var(--border); border-radius: 8px; padding: 4px 4px 4px 8px; margin-top: 6px; background: var(--background); }
+.cmt-in textarea { flex: 1; border: 0; outline: none; resize: none; background: transparent; color: var(--foreground); font: inherit; font-size: 13px; min-height: 20px; max-height: 120px; padding: 3px 0; }
+.cmt-in button, .cmt-acts button, .code-head button { border: 0; background: transparent; color: var(--muted-fg); width: 26px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.cmt-in button:hover, .cmt-acts button:hover, .code-head button:hover { background: var(--accent); color: var(--foreground); }
+.cmt-in button[disabled] { opacity: 0.4; pointer-events: none; }
+.cmt-acts { display: flex; gap: 2px; align-items: center; margin-bottom: 4px; } .cmt-acts .lbl { margin-right: auto; font-size: 11.5px; color: var(--muted-fg); }
+.codeblk { background: var(--muted); border: 1px solid var(--border); border-radius: 6px; }
+.code-head { display: flex; align-items: center; gap: 6px; padding: 1px 4px 1px 8px; font-size: 11px; color: var(--muted-fg); border-bottom: 1px solid var(--border); }
+.code-lang { outline: none; font-family: var(--font-mono); border-radius: 4px; padding: 0 4px; } .code-lang:hover, .code-lang:focus { background: var(--accent); color: var(--foreground); }
+.code-head .hint { margin-left: auto; opacity: 0; transition: opacity 120ms; } .codeblk:focus-within .code-head .hint { opacity: 1; }
+.code-head button { width: 22px; height: 22px; }
+.code-ed { font-family: var(--font-mono); font-size: 12.5px; padding: 8px 10px; white-space: pre !important; overflow-x: auto; tab-size: 2; line-height: 1.5; margin: 0; }
+.ed-tip { margin: 6px 10px 0; font-size: 12px; color: var(--muted-fg); background: var(--accent); border-radius: 8px; padding: 5px 4px 5px 10px; display: flex; gap: 8px; align-items: center; }
+.ed-tip kbd, .help-pop kbd { font-family: var(--font-mono); font-size: 11px; background: var(--background); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--foreground); white-space: nowrap; }
+.ed-tip .lnk { border: 0; background: transparent; color: var(--foreground); text-decoration: underline; padding: 0; font-size: 12px; white-space: nowrap; }
+.ed-tip .x { border: 0; background: transparent; margin-left: auto; color: var(--muted-fg); width: 22px; height: 22px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; }
+.ed-tip .x:hover { background: var(--background); color: var(--foreground); }
+.help-pop { position: fixed; z-index: 81; width: 340px; max-height: 72vh; overflow-y: auto; background: var(--popover); color: var(--foreground); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px 12px 10px; transform-origin: top right; transition: opacity 120ms ease-out, transform 120ms ease-out; font-size: 12.5px; }
+.help-pop[data-state="closed"] { opacity: 0; transform: scale(0.96); pointer-events: none; }
+.help-pop h4 { margin: 10px 0 3px; font-size: 11.5px; color: var(--muted-fg); font-weight: 600; }
+.help-pop table { width: 100%; border-collapse: collapse; font-size: inherit; } .help-pop td { padding: 3px 0; vertical-align: baseline; } .help-pop td:first-child { width: 48%; }
+.help-pop code { font-family: var(--font-mono); font-size: 0.88em; background: var(--accent); color: #d6457e; border-radius: 4px; padding: 0 4px; }
 .blk-row:hover .handle { opacity: 1; }
 .blk-del { opacity: 0; border: 0; background: transparent; color: var(--muted-fg); width: 22px; height: 22px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms; }
 .blk-row:hover .blk-del, .blk-del:focus-visible { opacity: 1; } .blk-del:hover { background: var(--accent); color: var(--foreground); }
@@ -648,8 +681,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
               <span class="spacer"></span>
               <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
-            <div class="n-sub"><i data-lucide="link" class="icon-xs"></i><span id="followLbl">Shows the section you're reading</span><span class="spacer"></span><span id="noteMeta"></span><button class="focus-btn" id="focusBtn" aria-pressed="false" title="Fade the other parts of the note and their marks on the paper (Esc to stop)"><i data-lucide="scan-eye" class="icon-xs"></i>Focus</button></div>
-            <div class="notes-body" id="notesBody"></div>
+            <div class="n-sub"><i data-lucide="link" class="icon-xs"></i><span id="followLbl">Shows the section you're reading</span><span class="spacer"></span><span id="noteMeta"></span><button class="focus-btn" id="focusBtn" aria-pressed="false" title="Fade the other parts of the note and their marks on the paper (Esc to stop)"><i data-lucide="scan-eye" class="icon-xs"></i>Focus</button><button class="focus-btn" id="mdHelpBtn" aria-expanded="false" title="Every mark and shortcut the editor knows"><i data-lucide="keyboard" class="icon-xs"></i>Shortcuts</button></div>
+            <div class="collapse" id="edTipWrap" data-state="open"><div><div class="ed-tip"><span>New here? Type <kbd>/</kbd> for blocks, <kbd>**bold**</kbd> as you type, or select text for the toolbar.</span><button class="lnk" data-help="1">All shortcuts</button><button class="x" id="edTipX" aria-label="Dismiss the tip"><i data-lucide="x" class="icon-xs"></i></button></div></div></div><div class="notes-body" id="notesBody"></div>
           </div>
         </div>
       </div>
@@ -797,6 +830,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   const PH = { p: "Type '/' for commands", h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', h: 'Heading 3', bullet: 'List', num: 'List', todo: 'To-do', check: 'To-do', uquote: 'Empty quote', callout: 'Type something…' };
   const mathHtml = tex => { try { return window.katex ? katex.renderToString(tex || '\\;', { output: 'mathml', displayMode: true, throwOnError: false }) : esc(tex); } catch (e) { return esc(tex); } };
   function textBlockHtml(b, tag) {
+    if (b.type === 'code') return `<div class="codeblk"><div class="code-head"><span class="code-lang" contenteditable="true" spellcheck="false" data-lang="${b.id}" title="Language">${esc(b.lang || 'plain')}</span><span class="hint">Ctrl+Enter to leave</span><button data-copy="${b.id}" title="Copy"><i data-lucide="copy" class="icon-xs"></i></button></div><pre class="ed code-ed" data-edit="${b.id}" contenteditable="true" spellcheck="false" data-ph="Code">${esc(b.text || '')}</pre></div>`;
     if (b.type === 'math') return `<div class="mathblk" data-mathblk="${b.id}" data-empty="${!b.text}"><div class="math-out">${mathHtml(b.text)}</div><div class="math-src" contenteditable="true" spellcheck="false" data-mathsrc="${b.id}">${esc(b.text || '')}</div></div>`;
     const t = b.type === 'h' ? 'h3' : b.type === 'check' ? 'todo' : b.type;
     const cls = ['h1', 'h2', 'h3'].includes(t) ? 'ed-' + t : 'ed-p';
@@ -1005,7 +1039,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
         if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}</span>${txt}</div>`;
         return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage in the paper"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}<span class="go">Show<i data-lucide="arrow-up-right" class="icon-xs"></i></span></span>${txt}</button>`;
       }
-      const body = b.type === 'math' ? mathHtml(b.text) : ['h', 'h1', 'h2', 'h3'].includes(b.type) ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
+      const body = b.type === 'code' ? `<pre class="code-ed">${esc(b.text || '')}</pre>` : b.type === 'math' ? mathHtml(b.text) : ['h', 'h1', 'h2', 'h3'].includes(b.type) ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
     const snip = g => { const b = g.find(x => x.type !== 'sec' && x.text); return b ? b.text.replace(/<[^>]+>/g, '').slice(0, 60) : ''; };
@@ -1092,11 +1126,11 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   // A toast with one action. If the action returns {text, onAct, label, icon}, the toast turns into that
   // (so Undo becomes "Delete again" / "Apply again": an accidental Undo is one click back).
   function toast(text, onAct, label = 'Show', icon = 'check', ms = 3200) {
-    const t = $('#toast'); t.innerHTML = `<i data-lucide="${icon}" class="icon-xs"></i><span class="tt">${esc(text)}</span> <button type="button">${esc(label)}</button>`; icons();
+    const t = $('#toast'); t.innerHTML = `<i data-lucide="${icon}" class="icon-xs"></i><span class="tt">${esc(text)}</span>${onAct ? ` <button type="button">${esc(label)}</button>` : ''}`; icons();
     const host = readerVisible() ? $('#readerBody') : $('#notesBody'); const rb = host.getBoundingClientRect();
     t.style.left = (rb.left + 16) + 'px'; t.style.top = (Math.min(rb.bottom, window.innerHeight) - 52) + 'px';
     t.dataset.state = 'open';
-    $('button', t).onclick = () => { const next = onAct(); if (next) toast(next.text, next.onAct, next.label, next.icon, ms); else t.dataset.state = 'closed'; };
+    if (onAct) $('button', t).onclick = () => { const next = onAct(); if (next) toast(next.text, next.onAct, next.label, next.icon, ms); else t.dataset.state = 'closed'; };
     clearTimeout(toastT); toastT = setTimeout(() => { t.dataset.state = 'closed'; }, ms);
   }
   function revealBlock(k, id) {
@@ -1619,8 +1653,11 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   $('#notesBody').addEventListener('input', e => {
     const ms = e.target.closest('[data-mathsrc]');
     if (ms) { const b = blockOf(ms); b.text = ms.textContent; const blk = ms.closest('.mathblk'); $('.math-out', blk).innerHTML = mathHtml(b.text); blk.dataset.empty = String(!b.text); return; }
+    const lg = e.target.closest('[data-lang]'); if (lg) { const lb = noteList().find(x => x.id === lg.dataset.lang); if (lb) lb.lang = lg.textContent.trim() || 'plain'; return; }
     const ed = e.target.closest('[data-edit]'); if (!ed) return; const b = blockOf(ed); if (!b || b.type === 'hr') return;
+    if (b.type === 'code') { b.text = ed.textContent; return; }
     const txt = ed.textContent;
+    const fence = /^```([\w+#-]*)[\s ]$/.exec(txt); if (fence && b.type === 'p') { toCode(b, fence[1]); return; }
     if (txt === '$$') { b.type = 'math'; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
     if (b.type === 'p' || b.type === 'bullet' || b.type === 'num' || b.type === 'todo') {
       for (const [re, t] of MD) if (re.test(txt) && !(t === b.type)) {
@@ -1628,6 +1665,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
         b.type = t; b.text = ed.innerHTML.replace(/^(###|##|#|-|\*|1\.|\[\]|")(&nbsp;|\s)/, ''); renderNote(); focusBlock(b.id, 0); return;
       }
     }
+    if (e.data && '*_~|`'.includes(e.data.slice(-1))) inlineMd(ed);
     b.text = ed.innerHTML;
     if (e.data === '/' || e.data === '@') { const off = caretOff(ed); if (off === 1 || /\s/.test(txt[off - 2] || ' ')) openMenu(e.data === '/' ? 'slash' : 'mention', ed, off - 1); }
     else if (mState && mState.ed === ed) updateMenu();
@@ -1644,8 +1682,23 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); return; }
     }
     const off = caretOff(ed), len = ed.textContent.length, sl = getSelection();
+    if (b.type === 'code') {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); const nb = insertAfter(b, { id: newId(), type: 'p', text: '' }); renderNote(); focusBlock(nb.id, 0); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault(); const r = sl.getRangeAt(0); r.deleteContents(); const atEnd = caretOff(ed) === ed.textContent.length;
+        const t = document.createTextNode(e.key === 'Tab' ? '  ' : (atEnd && !ed.textContent.endsWith('\n') ? '\n\n' : '\n'));
+        r.insertNode(t); r.setStart(t, e.key === 'Tab' ? 2 : 1); r.collapse(true); sl.removeAllRanges(); sl.addRange(r); b.text = ed.textContent; return;
+      }
+      if (e.key === 'Backspace' && !len) { e.preventDefault(); b.type = 'p'; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
+      if (e.key === 'Backspace' && off === 0 && sl.isCollapsed) { e.preventDefault(); return; }
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !sl.isCollapsed) {
+      const k2 = e.key.toLowerCase(); const cmd = k2 === 'e' && !e.shiftKey ? 'code' : k2 === 's' && e.shiftKey ? 'strikeThrough' : k2 === 'm' && e.shiftKey ? 'comment' : null;
+      if (cmd) { e.preventDefault(); applyFmt(cmd); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      const f = /^```([\w+#-]*)$/.exec(ed.textContent); if (f && b.type === 'p') { toCode(b, f[1]); return; }
       // An empty list item / to-do / quote turns back into text (as in Notion); otherwise split at the caret.
       if (!len && ['bullet', 'num', 'todo', 'uquote', 'callout'].includes(b.type)) { b.type = 'p'; renderNote(); focusBlock(b.id, 0); return; }
       const r = sl.getRangeAt(0); r.deleteContents(); const tail = document.createRange(); tail.setStart(r.endContainer, r.endOffset); tail.setEnd(ed, ed.childNodes.length);
@@ -1680,6 +1733,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     { k: 'callout', name: 'Callout', desc: 'Make writing stand out.', icon: 'lightbulb', g: 'Basic blocks' },
     { k: 'hr', name: 'Divider', desc: 'Split this section into notes.', icon: 'minus', md: '---', g: 'Basic blocks' },
     { k: 'math', name: 'Equation', desc: 'A LaTeX equation, rendered.', icon: 'sigma', md: '$$', g: 'Basic blocks' },
+    { k: 'code', name: 'Code', desc: 'Capture a code snippet.', icon: 'code-xml', md: '```', g: 'Basic blocks' },
     { k: 'paperq', name: 'Quote from the paper', desc: 'Select text in the reader; it lands here.', icon: 'text-quote', g: 'PaperHub' },
     { k: 'mention', name: 'Link a paper or section', desc: 'Same as typing @.', icon: 'at-sign', md: '@', g: 'PaperHub' },
   ];
@@ -1766,7 +1820,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     menu.style.left = Math.max(8, r.left - 4) + 'px'; menu.style.top = Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8) + 'px';
     menu.onmousedown = e => {
       e.preventDefault(); const t = e.target.closest('.em-i'); if (!t) return; menu.onmousedown = null; closeMenu();
-      if (t.dataset.turn) { b.type = t.dataset.turn; if (b.type === 'math') b.text = ''; renderNote(); focusBlock(b.id); }
+      if (t.dataset.turn) { if (t.dataset.turn === 'code') b.text = plain(b.text); b.type = t.dataset.turn; if (b.type === 'math') b.text = ''; renderNote(); focusBlock(b.id); }
       else if (t.dataset.dup) { const nb = insertAfter(b, { ...b, id: newId(), ai: false, fresh: false }); renderNote(); const r2 = $(`#notesBody .blk-row[data-id="${nb.id}"]`); if (r2) r2.classList.add('blk-enter'); }
       else if (t.dataset.delb) deleteBlock(curNoteKey(), b.id);
     };
@@ -1777,23 +1831,103 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 
   // The formatting bar on a text selection: bold, italic, underline, strikethrough, code, link to a paper.
   const fmt = document.createElement('div'); fmt.className = 'fmt-bar'; fmt.dataset.state = 'closed';
-  fmt.innerHTML = '<button data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button><button data-cmd="italic" title="Italic (Ctrl+I)"><i>i</i></button><button data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button><button data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button><button data-cmd="code" title="Inline code"><i data-lucide="code" class="icon-sm"></i></button><span class="sep"></span><button data-cmd="mention" title="Link a paper or section"><i data-lucide="at-sign" class="icon-sm"></i>Link</button>';
+  fmt.innerHTML = '<button data-cmd="bold" title="Bold · **text** · Ctrl+B"><b>B</b></button><button data-cmd="italic" title="Italic · *text* or _text_ · Ctrl+I"><i>i</i></button><button data-cmd="underline" title="Underline · __text__ · Ctrl+U"><u>U</u></button><button data-cmd="strikeThrough" title="Strikethrough · ~~text~~ · Ctrl+Shift+S"><s>S</s></button><span class="sep"></span><button data-cmd="quote" title="Turn into a quote · &quot; at the line start"><i data-lucide="quote" class="icon-sm"></i></button><button data-cmd="code" title="Inline code · &#96;text&#96; · Ctrl+E"><i data-lucide="code" class="icon-sm"></i></button><button data-cmd="spoiler" title="Hide until clicked · ||text||"><i data-lucide="eye-off" class="icon-sm"></i></button><span class="sep"></span><button data-cmd="mention" title="Link a paper or section · @"><i data-lucide="at-sign" class="icon-sm"></i>Link</button><button data-cmd="comment" class="fmt-cmt" title="Comment · Ctrl+Shift+M"><i data-lucide="message-square" class="icon-sm"></i>Comment</button>';
   document.body.appendChild(fmt);
   document.addEventListener('selectionchange', () => {
     const sl = getSelection(); const ed = sl.rangeCount && !sl.isCollapsed && sl.anchorNode && (sl.anchorNode.nodeType === 1 ? sl.anchorNode : sl.anchorNode.parentElement).closest('#notesBody [data-edit]');
     if (!ed) { fmt.dataset.state = 'closed'; return; }
-    const r = sl.getRangeAt(0).getBoundingClientRect(); fmt.dataset.state = 'open'; icons();
+    const r = sl.getRangeAt(0).getBoundingClientRect(); fmt.dataset.state = 'open'; icons(); ['bold', 'italic', 'underline', 'strikeThrough'].forEach(c => { const bt = $(`[data-cmd="${c}"]`, fmt); if (bt) bt.setAttribute('aria-pressed', String(document.queryCommandState(c))); });
     fmt.style.left = Math.max(8, Math.min(r.left + r.width / 2 - fmt.offsetWidth / 2, innerWidth - fmt.offsetWidth - 8)) + 'px'; fmt.style.top = Math.max(8, r.top - fmt.offsetHeight - 8) + 'px';
   });
-  fmt.addEventListener('mousedown', e => {
-    e.preventDefault(); const bt = e.target.closest('[data-cmd]'); if (!bt) return; const sl = getSelection(); if (!sl.rangeCount) return;
+  fmt.addEventListener('mousedown', e => { e.preventDefault(); const bt = e.target.closest('[data-cmd]'); if (bt) applyFmt(bt.dataset.cmd); });
+  const plain = h => new DOMParser().parseFromString(`<div>${h || ''}</div>`, 'text/html').body.textContent;
+  const unwrapEl = el => el.replaceWith(...el.childNodes);
+  function wrapSel(tag, cls) { const sl = getSelection(); const r = sl.getRangeAt(0); const el = document.createElement(tag); if (cls) el.className = cls; el.appendChild(r.extractContents()); r.insertNode(el); return el; }
+  // One place for every format: the bar, the keyboard and (for marks typed as Markdown) inlineMd below.
+  function applyFmt(cmd) {
+    const sl = getSelection(); if (!sl.rangeCount) return;
     const ed = (sl.anchorNode.nodeType === 1 ? sl.anchorNode : sl.anchorNode.parentElement).closest('[data-edit]'); if (!ed) return;
-    const cmd = bt.dataset.cmd;
-    if (cmd === 'code') document.execCommand('insertHTML', false, `<code>${esc(sl.toString())}</code>`);
-    else if (cmd === 'mention') { const r = sl.getRangeAt(0); r.collapse(false); sl.removeAllRanges(); sl.addRange(r); document.execCommand('insertText', false, ' @'); const b0 = blockOf(ed); b0.text = ed.innerHTML; openMenu('mention', ed, caretOff(ed) - 1); return; }
+    const b = blockOf(ed); const inEl = sel => (sl.anchorNode.nodeType === 1 ? sl.anchorNode : sl.anchorNode.parentElement).closest(sel);
+    if (cmd === 'quote') { b.type = b.type === 'uquote' ? 'p' : 'uquote'; b.text = ed.innerHTML; fmt.dataset.state = 'closed'; renderNote(); focusBlock(b.id); return; }
+    if (cmd === 'mention') { const r = sl.getRangeAt(0); r.collapse(false); sl.removeAllRanges(); sl.addRange(r); document.execCommand('insertText', false, ' @'); b.text = ed.innerHTML; openMenu('mention', ed, caretOff(ed) - 1); return; }
+    if (cmd === 'comment') { newComment(ed); return; }
+    if (cmd === 'code' || cmd === 'spoiler') { const on = inEl(cmd === 'code' ? 'code' : '.spoiler'); if (on && ed.contains(on)) unwrapEl(on); else wrapSel(cmd === 'code' ? 'code' : 'span', cmd === 'spoiler' ? 'spoiler' : ''); }
     else document.execCommand(cmd);
-    const b = blockOf(ed); if (b) b.text = ed.innerHTML;
-  });
+    b.text = ed.innerHTML;
+  }
+  // Markdown marks as you type (as in Notion and Discord): **bold** *italic* _italic_ __underline__ ~~strike~~ `code` ||hidden||.
+  const INL = [[/(?<![*\\])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/, 'b'], [/(?<![_\w])__([^_\s](?:[^_]*[^_\s])?)__$/, 'u'], [/(?<!~)~~([^~\s](?:[^~]*[^~\s])?)~~$/, 's'], [/(?<!\|)\|\|([^|\s](?:[^|]*[^|\s])?)\|\|$/, 'spoiler'], [/(?<![*\w])\*([^*\s](?:[^*]*[^*\s])?)\*$/, 'i'], [/(?<![_\w])_([^_\s](?:[^_]*[^_\s])?)_$/, 'i'], [/(?<!`)`([^`\s][^`]*)`$/, 'code']];
+  function inlineMd(ed) {
+    const sl = getSelection(); if (!sl.rangeCount || !sl.isCollapsed) return; const n = sl.anchorNode; if (!n || n.nodeType !== 3 || n.parentElement.closest('code')) return;
+    const pre = n.data.slice(0, sl.anchorOffset);
+    for (const [re, kind] of INL) {
+      const m = re.exec(pre); if (!m) continue;
+      const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, sl.anchorOffset); r.deleteContents();
+      const el = document.createElement(kind === 'spoiler' ? 'span' : kind); if (kind === 'spoiler') el.className = 'spoiler'; el.textContent = m[1];
+      r.insertNode(el); const after = document.createTextNode('​'); el.after(after);
+      const c = document.createRange(); c.setStart(after, 1); c.collapse(true); sl.removeAllRanges(); sl.addRange(c); return;
+    }
+  }
+  function toCode(b, lang) { b.type = 'code'; b.lang = lang || 'plain'; b.text = ''; renderNote(); focusBlock(b.id, 0); }
+  $('#notesBody').addEventListener('click', e => { const c = e.target.closest('[data-copy]'); if (!c) return; const b = noteList().find(x => x.id === c.dataset.copy); try { navigator.clipboard.writeText(b.text || ''); } catch (err) { /* demo */ } toast('Code copied', null, '', 'copy', 1800); });
+  document.addEventListener('click', e => { const sp = e.target.closest('.spoiler'); if (!sp) return; if (sp.dataset.shown) delete sp.dataset.shown; else sp.dataset.shown = '1'; });
+
+  // Comments on selected text: the user's remarks beside the note, not part of it.
+  const comments = {}; let cid = 0, cOpen = null;
+  const cpop = document.createElement('div'); cpop.className = 'cmt-pop'; cpop.dataset.state = 'closed'; cpop.setAttribute('role', 'dialog'); cpop.setAttribute('aria-label', 'Comment'); document.body.appendChild(cpop);
+  const blockFor = c => notes[c.k].blocks.find(x => x.id === c.block);
+  function stripCmt(c) { const b = blockFor(c); const tmp = document.createElement('div'); tmp.innerHTML = b.text || ''; tmp.querySelectorAll(`.cmt[data-cmt="${c.id}"]`).forEach(unwrapEl); b.text = tmp.innerHTML; }
+  function newComment(ed) {
+    const b = blockOf(ed); const id = 'c' + (++cid); const sp = wrapSel('span', 'cmt'); sp.dataset.cmt = id;
+    comments[id] = { id, k: curNoteKey(), block: b.id, quote: sp.textContent, items: [] }; b.text = ed.innerHTML;
+    getSelection().removeAllRanges(); fmt.dataset.state = 'closed'; openThread(id, sp);
+  }
+  function openThread(id, anchor) {
+    cOpen = id; const c = comments[id]; const n = c.items.length;
+    $$('.cmt[data-on]').forEach(x => delete x.dataset.on); $$(`.cmt[data-cmt="${id}"]`).forEach(x => { x.dataset.on = '1'; });
+    cpop.innerHTML = `<div class="cmt-acts"><span class="lbl">${n ? `${n} comment${n > 1 ? 's' : ''}` : 'New comment'}</span>${n ? '<button data-cres title="Resolve"><i data-lucide="check" class="icon-sm"></i></button><button data-cdel title="Delete the thread"><i data-lucide="trash-2" class="icon-sm"></i></button>' : ''}<button data-cclose title="Close (Esc)"><i data-lucide="x" class="icon-sm"></i></button></div>` +
+      `<div class="cmt-q">“${esc(c.quote)}”</div>` + c.items.map(it => `<div class="cmt-item"><div class="who"><b>You</b>${esc(it.at)}</div><p>${esc(it.text)}</p></div>`).join('') +
+      `<div class="cmt-in"><textarea rows="1" placeholder="${n ? 'Reply…' : 'Add a comment…'}" aria-label="Comment"></textarea><button data-csend disabled title="Comment (Enter)"><i data-lucide="arrow-up" class="icon-sm"></i></button></div>`;
+    icons(); const r = anchor.getBoundingClientRect(); cpop.dataset.state = 'open'; const h = cpop.offsetHeight;
+    cpop.style.left = Math.max(8, Math.min(r.left, innerWidth - 308)) + 'px'; cpop.style.top = (r.bottom + 6 + h > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6) + 'px';
+    cpop.style.transformOrigin = r.bottom + 6 + h > innerHeight ? 'bottom left' : 'top left';
+    const ta = $('textarea', cpop); requestAnimationFrame(() => ta.focus());
+    ta.addEventListener('input', () => { $('[data-csend]', cpop).disabled = !ta.value.trim(); ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
+    ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeThread(); } });
+    const send = () => { if (!ta.value.trim()) return; c.items.push({ text: ta.value.trim(), at: 'just now' }); openThread(id, $(`.cmt[data-cmt="${id}"]`) || anchor); };
+    $('[data-csend]', cpop).onclick = send; $('[data-cclose]', cpop).onclick = () => closeThread();
+    const act = (verb, again) => {
+      const b = blockFor(c), before = b.text; closeThread(true); stripCmt(c); c.resolved = verb === 'resolved'; renderNote();
+      const undo = () => { b.text = before; c.resolved = false; renderNote(); return { text: 'Comment restored', onAct: redo, label: again, icon: 'rotate-ccw' }; };
+      const redo = () => { stripCmt(c); c.resolved = verb === 'resolved'; renderNote(); return { text: `Comment ${verb}`, onAct: undo, label: 'Undo', icon: 'check' }; };
+      toast(`Comment ${verb}`, undo, 'Undo', verb === 'resolved' ? 'check' : 'trash-2', 5000);
+    };
+    if (n) { $('[data-cres]', cpop).onclick = () => act('resolved', 'Resolve again'); $('[data-cdel]', cpop).onclick = () => act('deleted', 'Delete again'); }
+  }
+  function closeThread(keep) {
+    if (!cOpen) return; const c = comments[cOpen]; cOpen = null; cpop.dataset.state = 'closed'; $$('.cmt[data-on]').forEach(x => delete x.dataset.on);
+    if (!keep && !c.items.length) { stripCmt(c); delete comments[c.id]; renderNote(); } // an empty new comment is cancelled
+  }
+  document.addEventListener('click', e => { const sp = e.target.closest('.cmt[data-cmt]'); if (sp && comments[sp.dataset.cmt] && getSelection().isCollapsed) openThread(sp.dataset.cmt, sp); });
+  document.addEventListener('mousedown', e => { if (cOpen && !cpop.contains(e.target) && !e.target.closest('.cmt') && !fmt.contains(e.target)) closeThread(); });
+
+  // What the editor knows: a guide for new users, and a one-time tip.
+  const help = document.createElement('div'); help.className = 'help-pop'; help.dataset.state = 'closed'; help.setAttribute('role', 'dialog'); help.setAttribute('aria-label', 'Shortcuts');
+  const row = (a, b2) => `<tr><td>${a}</td><td>${b2}</td></tr>`, K = t => `<kbd>${t}</kbd>`;
+  help.innerHTML = '<h4>Marks as you type</h4><table>' + row(K('**bold**'), '<b>bold</b>') + row(K('*italic*') + ' ' + K('_italic_'), '<i>italic</i>') + row(K('__underline__'), '<u>underline</u>') + row(K('~~strike~~'), '<s>strike</s>') + row(K('&#96;code&#96;'), '<code>code</code>') + row(K('||hidden||'), '<span class="spoiler">hidden</span> · click to show') + '</table>' +
+    '<h4>At the start of a line</h4><table>' + row(K('#') + ' ' + K('##') + ' ' + K('###') + ' + space', 'Heading 1–3') + row(K('-') + ' + space', '• Bulleted list') + row(K('1.') + ' + space', '1. Numbered list') + row(K('[]') + ' + space', '☐ To-do') + row(K('"') + ' + space', 'Quote') + row(K('---'), 'Divider: starts a new note') + row(K('$$'), 'Equation (LaTeX)') + row(K('&#96;&#96;&#96;python') + ' + Enter', 'Code block') + '</table>' +
+    '<h4>Anywhere</h4><table>' + row(K('/'), 'Every block, incl. Quote from the paper') + row(K('@'), 'Link a paper, section or idea') + row('Select text', 'Toolbar: bold … hide, link, comment') + row('Hover a block', K('+') + ' add · ' + K('⋮⋮') + ' drag or menu') + '</table>' +
+    '<h4>Keys</h4><table>' + row(K('Ctrl+B') + ' ' + K('I') + ' ' + K('U'), 'Bold, italic, underline') + row(K('Ctrl+E'), 'Inline code') + row(K('Ctrl+Shift+S'), 'Strikethrough') + row(K('Ctrl+Shift+M'), 'Comment') + row(K('Shift+Enter'), 'Line break') + row(K('Ctrl+Enter'), 'Leave a code block') + '</table>' +
+    '<h4>On the paper</h4><table>' + row('Select text', 'Quote to note, or a highlight colour') + row('Highlighter', 'Drag over words, or click a figure') + row('Box', 'Drag over a figure or equation') + row('Click a mark', 'Opens its note') + '</table>';
+  document.body.appendChild(help);
+  function openHelp() { const a = $('#mdHelpBtn').getBoundingClientRect(); help.dataset.state = 'open'; help.style.left = Math.max(8, Math.min(a.right - 340, innerWidth - 348)) + 'px'; help.style.top = Math.min(a.bottom + 6, innerHeight - help.offsetHeight - 8) + 'px'; $('#mdHelpBtn').setAttribute('aria-expanded', 'true'); }
+  function closeHelp() { help.dataset.state = 'closed'; $('#mdHelpBtn').setAttribute('aria-expanded', 'false'); }
+  $('#mdHelpBtn').addEventListener('click', e => { e.stopPropagation(); help.dataset.state === 'open' ? closeHelp() : openHelp(); });
+  document.addEventListener('click', e => { if (e.target.closest('[data-help]')) { e.stopPropagation(); openHelp(); } });
+  document.addEventListener('mousedown', e => { if (help.dataset.state === 'open' && !help.contains(e.target) && !e.target.closest('#mdHelpBtn, [data-help]')) closeHelp(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && help.dataset.state === 'open') closeHelp(); });
+  try { if (localStorage.getItem('ph-ed-tip')) $('#edTipWrap').dataset.state = 'closed'; } catch (err) { /* storage blocked: show the tip */ }
+  $('#edTipX').addEventListener('click', () => { $('#edTipWrap').dataset.state = 'closed'; try { localStorage.setItem('ph-ed-tip', '1'); } catch (err) { /* ignore */ } });
 
   /* ---------- parts of a note: the active part, Focus, folding, --- ---------- */
   function setActive(key) {
