@@ -630,3 +630,18 @@ async def test_insert_with_a_deleted_blocks_id_brings_that_block_back(conn):
     # Undo of the revive deletes the block again.
     await undo_change_set(conn, res.change_set_id)
     assert await _texts(conn, n.id) == ["A"]
+
+
+async def test_agent_cannot_revive_a_deleted_user_block(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("A")), ("b", _para("mine"))])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                          ops=[Op(op="delete", block_id="b")])
+    res = await apply_ops(conn, n.id, base_revision=res.revision,
+                          actor="agent", ops=[
+                              Op(op="insert", block_id="b",
+                                 block=_para("agent text"), after="a")])
+    assert res.applied == []
+    assert res.rejected[0]["block_id"] == "b"
+    assert res.rejected[0]["reason"] == "invalid"
+    assert await _texts(conn, n.id) == ["A"]
