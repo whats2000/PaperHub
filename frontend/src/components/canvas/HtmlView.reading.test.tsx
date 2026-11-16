@@ -76,4 +76,40 @@ describe("HtmlView reports the section being read (Follow in the notes)", () => 
     });
     expect(onReadingHeading).toHaveBeenLastCalledWith("Data", ["4 Experiments", "4.1 Setup"]);
   });
+
+  it("reports again when the reader is laid out after it loaded (shown, resized)", async () => {
+    const onReadingHeading = vi.fn();
+    const { container } = render(
+      <HtmlView
+        html="<html><body></body></html>"
+        isDark={false}
+        highlightDomId={null}
+        highlightText={null}
+        sectionTitle={null}
+        nonce={0}
+        onReadingHeading={onReadingHeading}
+      />,
+    );
+    const iframe = container.querySelector("iframe")!;
+    const doc = iframe.contentDocument!;
+    doc.body.innerHTML = PAPER;
+    // Loaded while hidden: no height yet, so no section is in view.
+    Object.defineProperty(iframe.contentWindow!, "innerHeight", { configurable: true, value: 0 });
+    place(doc, { a: 50, b: 400, c: 900 });
+    act(() => {
+      iframe.dispatchEvent(new Event("load"));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(onReadingHeading).toHaveBeenLastCalledWith(null, []);
+    Object.defineProperty(iframe.contentWindow!, "innerHeight", { configurable: true, value: 800 });
+    act(() => {
+      iframe.contentWindow!.dispatchEvent(new Event("resize"));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(onReadingHeading).toHaveBeenLastCalledWith("1 Introduction", []);
+  });
 });

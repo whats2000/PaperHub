@@ -319,7 +319,8 @@ export function HtmlView({
     };
   }, [trEnabled, trLanguage, trPaperId, trFullPaper, loaded, html, t]);
 
-  // The section being read: reported on load and after each scroll settles.
+  // The section being read: reported on load, after each scroll settles and
+  // after a resize (a reader loaded while hidden has no height until shown).
   const onReadingRef = useRef(onReadingHeading);
   useEffect(() => {
     onReadingRef.current = onReadingHeading;
@@ -339,9 +340,11 @@ export function HtmlView({
     };
     report();
     win.addEventListener("scroll", report, { passive: true });
+    win.addEventListener("resize", report);
     return () => {
       clearTimeout(timer);
       win.removeEventListener("scroll", report);
+      win.removeEventListener("resize", report);
     };
   }, [following, loaded, html]);
 
