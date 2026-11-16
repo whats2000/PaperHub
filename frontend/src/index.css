@@ -5,7 +5,7 @@
 @import "@fontsource-variable/geist";
 
 /* The notes editor's shadcn UI ships Tailwind classes; scan them. */
-@source "../node_modules/@blocknote/shadcn";
+@source "../node_modules/@blocknote/shadcn/dist";
 
 @custom-variant dark (&:is(.dark *));
 
