@@ -788,6 +788,17 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         await conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
         await conn.commit()
 
+    # Plan H5b.1: owner_id on note tables created before it was added
+    # (additive only; CHECK/FK changes need a fresh table).
+    for tbl in ("note_blocks", "note_block_history", "note_revisions"):
+        async with conn.execute(f"PRAGMA table_info({tbl})") as cur:
+            tcols = {row[1] for row in await cur.fetchall()}
+        if "owner_id" not in tcols:
+            await conn.execute(
+                f"ALTER TABLE {tbl} ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 1"
+            )
+            await conn.commit()
+
     # Plan H5b.1: same backfill for note_blocks_fts (live blocks only).
     async with conn.execute(
         "SELECT COUNT(*) FROM note_blocks WHERE deleted_at IS NULL"

@@ -52,10 +52,10 @@ def block_text(type: str, props: dict[str, Any], content: Any) -> str:
 
 def _note(row: Any) -> Note:
     return Note(id=row[0], target_kind=row[1], target_id=row[2], title=row[3],
-                revision=row[4], updated_at=row[5])
+                revision=row[4], updated_at=row[5], deleted_at=row[6])
 
 
-_NOTE_COLS = "id, target_kind, target_id, title, revision, updated_at"
+_NOTE_COLS = "id, target_kind, target_id, title, revision, updated_at, deleted_at"
 
 
 async def get_note(conn: aiosqlite.Connection, note_id: int) -> Note | None:
@@ -70,7 +70,11 @@ async def get_or_create_note(
     conn: aiosqlite.Connection, *, target_kind: str, target_id: str,
     title: str, session_id: int | None = None,
 ) -> Note:
-    """The (single-owner) note for a target, created on first use."""
+    """The (single-owner) note for a target, created on first use.
+
+    A soft-deleted note is returned as-is with ``deleted_at`` set; the caller
+    decides (the chat-note lifecycle restores it).
+    """
     now = _now()
     async with write_lock(conn):
         await conn.execute(
@@ -94,7 +98,12 @@ async def get_or_create_note(
 async def list_blocks(
     conn: aiosqlite.Connection, note_id: int, *, include_deleted: bool = False,
 ) -> list[Block]:
-    """Blocks in document order: depth-first, siblings by ``order_key``."""
+    """Blocks in document order: depth-first, siblings by ``order_key``.
+
+    Deleting a block soft-deletes its whole subtree (the op engine relies on
+    it). Should a live block still have a missing / deleted parent, it is
+    surfaced after the tree (in ``order_key`` order) rather than hidden.
+    """
     where = "note_id = ?" + ("" if include_deleted else " AND deleted_at IS NULL")
     async with conn.execute(
         "SELECT id, note_id, parent_id, type, payload_json, text, author, "
@@ -107,8 +116,13 @@ async def list_blocks(
         children.setdefault(r[2], []).append(r)
     for sibs in children.values():
         sibs.sort(key=lambda r: (r[9], r[0]))
+    ids = {r[0] for r in rows}
+    orphans = sorted(
+        (r for r in rows if r[2] is not None and r[2] not in ids),
+        key=lambda r: (r[9], r[0]),
+    )
     out: list[Block] = []
-    stack = list(reversed(children.get(None, [])))
+    stack = list(reversed(orphans)) + list(reversed(children.get(None, [])))
     while stack:
         r = stack.pop()
         payload = json.loads(r[4])

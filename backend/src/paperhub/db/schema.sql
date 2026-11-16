@@ -482,6 +482,7 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE TABLE IF NOT EXISTS note_blocks (
     id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
     note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     parent_id TEXT,
     order_key TEXT NOT NULL,
@@ -491,7 +492,7 @@ CREATE TABLE IF NOT EXISTS note_blocks (
     author TEXT NOT NULL CHECK (author IN ('user', 'ai')),
     section_key TEXT,
     changed_rev INTEGER NOT NULL,
-    changed_by TEXT NOT NULL,
+    changed_by TEXT NOT NULL CHECK (changed_by IN ('user', 'agent', 'import', 'system')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
@@ -500,20 +501,24 @@ CREATE INDEX IF NOT EXISTS idx_note_blocks_order
     ON note_blocks(note_id, parent_id, order_key);
 CREATE TABLE IF NOT EXISTS note_block_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    note_id INTEGER NOT NULL,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     block_id TEXT NOT NULL,
     revision INTEGER NOT NULL,
-    actor TEXT NOT NULL,
+    actor TEXT NOT NULL CHECK (actor IN ('user', 'agent', 'import', 'system')),
     op TEXT NOT NULL CHECK (op IN ('insert', 'update', 'delete', 'move', 'restore')),
     before_json TEXT,
     after_json TEXT,
     run_id INTEGER,
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_note_block_history_block
+    ON note_block_history(note_id, block_id);
 CREATE TABLE IF NOT EXISTS note_revisions (
-    note_id INTEGER NOT NULL,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL,
-    actor TEXT NOT NULL,
+    actor TEXT NOT NULL CHECK (actor IN ('user', 'agent', 'import', 'system')),
     summary TEXT NOT NULL,
     change_set_id TEXT,
     run_id INTEGER,

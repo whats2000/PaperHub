@@ -28,3 +28,14 @@ async def test_schema_applies_twice_and_backfills_fts(tmp_path):
             "SELECT b.id FROM note_blocks_fts f JOIN note_blocks b ON b.rowid=f.rowid "
             "WHERE note_blocks_fts MATCH 'needle'") as cur:
             assert [r[0] for r in await cur.fetchall()] == ["b_1"]
+
+
+async def test_owner_id_guard_adds_missing_column(tmp_path):
+    async with aiosqlite.connect(str(tmp_path / "t.db")) as conn:
+        await apply_schema(conn)
+        await conn.execute("ALTER TABLE note_revisions DROP COLUMN owner_id")
+        await conn.commit()
+        await apply_schema(conn)
+        for tbl in ("note_blocks", "note_block_history", "note_revisions"):
+            async with conn.execute(f"PRAGMA table_info({tbl})") as cur:
+                assert "owner_id" in {r[1] for r in await cur.fetchall()}, tbl

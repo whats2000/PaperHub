@@ -32,3 +32,4 @@ class Note(BaseModel):
     title: str
     revision: int
     updated_at: str
+    deleted_at: str | None = None

@@ -106,3 +106,59 @@ async def test_fts_tracks_insert_update_delete(conn):
     assert await _fts(conn, "gamma") == []
     await _insert(conn, n.id, "b_2", None, "a1", "hidden", deleted=True)
     assert await _fts(conn, "hidden") == []
+
+
+async def test_list_blocks_surfaces_orphans_last(conn):
+    n = await get_or_create_note(conn, target_kind="paper", target_id="1", title="")
+    await _insert(conn, n.id, "b_p", None, "a0", "parent", deleted=True)
+    await _insert(conn, n.id, "b_c", "b_p", "a0", "live child of deleted")
+    await _insert(conn, n.id, "b_r", None, "a1", "root")
+    await _insert(conn, n.id, "b_m", "b_missing", "a0", "child of missing")
+    ids = [b.id for b in await list_blocks(conn, n.id)]
+    assert ids == ["b_r", "b_c", "b_m"]
+
+
+async def test_soft_deleted_note_is_returned_with_deleted_at(conn):
+    a = await get_or_create_note(conn, target_kind="session", target_id="s", title="")
+    assert a.deleted_at is None
+    await conn.execute("UPDATE notes SET deleted_at='t' WHERE id=?", (a.id,))
+    await conn.commit()
+    b = await get_or_create_note(conn, target_kind="session", target_id="s", title="")
+    assert b.id == a.id and b.deleted_at == "t"
+
+
+async def test_invalid_actor_rejected(conn):
+    n = await get_or_create_note(conn, target_kind="paper", target_id="1", title="")
+    with pytest.raises(aiosqlite.IntegrityError):
+        await bump_revision(conn, n.id, actor="robot", summary="x")
+    await conn.rollback()
+    with pytest.raises(aiosqlite.IntegrityError):
+        await conn.execute(
+            "INSERT INTO note_block_history (note_id, block_id, revision, actor, "
+            "op, created_at) VALUES (?, 'b', 1, 'robot', 'insert', 't')", (n.id,))
+    with pytest.raises(aiosqlite.IntegrityError):
+        await conn.execute(
+            "INSERT INTO note_blocks (id, note_id, order_key, type, payload_json, "
+            "author, changed_rev, changed_by, created_at, updated_at) "
+            "VALUES ('b', ?, 'a0', 'paragraph', '{}', 'user', 1, 'robot', 't', 't')",
+            (n.id,))
+
+
+async def test_note_delete_and_session_purge_cascade_history(conn):
+    await conn.execute(
+        "INSERT INTO chat_sessions (id, created_at, title) "
+        "VALUES (1, datetime('now'), 's')")
+    n = await get_or_create_note(
+        conn, target_kind="session", target_id="1", title="", session_id=1)
+    await _insert(conn, n.id, "b_1", None, "a0", "private")
+    await bump_revision(conn, n.id, actor="user", summary="x")
+    await conn.execute(
+        "INSERT INTO note_block_history (note_id, block_id, revision, actor, op, "
+        "after_json, created_at) VALUES (?, 'b_1', 1, 'user', 'insert', 'private', 't')",
+        (n.id,))
+    await conn.commit()
+    await conn.execute("DELETE FROM chat_sessions WHERE id = 1")
+    await conn.commit()
+    for tbl in ("notes", "note_blocks", "note_block_history", "note_revisions"):
+        async with conn.execute(f"SELECT COUNT(*) FROM {tbl}") as cur:
+            assert (await cur.fetchone())[0] == 0, tbl
