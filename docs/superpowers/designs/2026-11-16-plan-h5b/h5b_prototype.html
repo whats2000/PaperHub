@@ -439,9 +439,9 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 .newline:empty::before { content: attr(data-ph); color: var(--muted-fg); font-size: 12.5px; }
 [data-edit] { outline: none; border-radius: 4px; } [data-edit]:focus { box-shadow: 0 0 0 1px var(--border); }
 /* Dividers split a section into parts; the part you're in is marked; Focus fades the rest (note and paper) */
-.divider-line { position: relative; display: flex; align-items: center; height: 26px; }
-/* The line spans the full content width on both sides; the chevron sits over its left end (icon at the content edge). */
-.divider-line .fold { position: absolute; left: -4px; top: 3px; background: var(--background); }
+.divider-line { display: flex; align-items: center; gap: 2px; height: 26px; }
+/* The chevron's icon starts at the content's left edge, in line with the note below; the line follows it. */
+.divider-line .fold { margin-left: -4px; }
 .blk-row:has(.divider-line) { align-items: center; } .blk-row:has(.divider-line) .gutter { padding-top: 0; }
 .divider-line hr { flex: 1; border: 0; border-top: 1px solid color-mix(in srgb, var(--foreground) 28%, transparent); margin: 0; transition: border-color 200ms ease-out, box-shadow 200ms ease-out; }
 /* The dividers around the note you're in (a hovered or clicked reference, the cursor) darken: they frame the note instead of a band */
