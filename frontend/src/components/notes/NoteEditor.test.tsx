@@ -795,6 +795,60 @@ describe("dividers, Focus and folding", () => {
     cleanupEditors();
   });
 
+  it("--- puts the caret on a new line below the divider; Undo takes that line away again", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor(
+      [dividerRule],
+      [
+        { id: "x", type: "paragraph", content: "" },
+        { id: "y", type: "paragraph", content: "after" },
+      ],
+    );
+    editor.setTextCursorPosition("x", "start");
+    type(editor, "---");
+    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    const lines = () =>
+      (editor.document as unknown as { type: string; content?: { text: string }[] }[]).map((b) => [
+        b.type,
+        (b.content ?? []).map((c) => c.text).join(""),
+      ]);
+    type(editor, "z");
+    expect(lines().slice(0, 3)).toEqual([
+      ["divider", ""],
+      ["paragraph", "z"],
+      ["paragraph", "after"],
+    ]);
+    // A new line left empty goes with Undo.
+    editor.updateBlock(editor.document[1]!, { content: [] } as never);
+    const undo = (toastFn.mock.calls[0] as [string, { action: { onClick: () => void } }])[1];
+    act(() => undo.action.onClick());
+    expect(lines().slice(0, 2)).toEqual([
+      ["paragraph", "---"],
+      ["paragraph", "after"],
+    ]);
+    cleanupEditors();
+  });
+
+  it("--- right above an empty line moves the caret onto it", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor(
+      [dividerRule],
+      [
+        { id: "x", type: "paragraph", content: "" },
+        { id: "e", type: "paragraph", content: "" },
+        { id: "y", type: "paragraph", content: "after" },
+      ],
+    );
+    editor.setTextCursorPosition("x", "start");
+    type(editor, "---");
+    await waitFor(() => expect(toastFn).toHaveBeenCalled());
+    expect(editor.document.map((b) => b.id).slice(0, 3)).toEqual(["x", "e", "y"]);
+    expect(editor.getTextCursorPosition().block.id).toBe("e");
+    cleanupEditors();
+  });
+
   it("dividers are always top level: --- in a nested list item lands after the list", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");

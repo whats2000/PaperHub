@@ -177,6 +177,7 @@ interface LineBlock {
 
 type DividerEditor = {
   getBlock: (id: string) => unknown;
+  getNextBlock: (id: string) => unknown;
   getParentBlock: (id: string) => unknown;
   updateBlock: (id: string, update: never) => unknown;
   removeBlocks: (ids: string[]) => unknown;
@@ -208,10 +209,38 @@ export function dashLineOrigin(editor: DividerEditor, block: LineBlock): DashLin
   };
 }
 
+interface LineContent {
+  content?: unknown[];
+  children?: unknown[];
+  type?: string;
+}
+
+const isEmptyLine = (b: LineContent | undefined): boolean =>
+  !!b && b.type === "paragraph" && (b.content?.length ?? 0) === 0 && (b.children?.length ?? 0) === 0;
+
+/** The caret goes to the line below a divider just typed: the empty line
+ * already there, else a new one. Returns the id of a line it added. */
+export function caretBelowDivider(editor: DividerEditor, dividerId: string): string | null {
+  const next = editor.getNextBlock(dividerId) as (LineContent & { id: string }) | undefined;
+  if (isEmptyLine(next)) {
+    editor.setTextCursorPosition(next!.id, "start");
+    return null;
+  }
+  const [fresh] = editor.insertBlocks([{ type: "paragraph" } as never], dividerId, "after") as { id: string }[];
+  editor.setTextCursorPosition(fresh!.id, "start");
+  return fresh!.id;
+}
+
 /** "Divider added" with Undo, which turns the divider back into the three
  * dashes where they were typed (the same as Ctrl+Z) and offers "Make a
- * divider again" (and so on). */
-export function announceDivider(editor: DividerEditor, blockId: string, origin?: DashLineOrigin): void {
+ * divider again" (and so on). Undo also takes away `addedLine`, the line the
+ * caret was put on, while nothing has been written on it. */
+export function announceDivider(
+  editor: DividerEditor,
+  blockId: string,
+  origin?: DashLineOrigin,
+  addedLine?: string | null,
+): void {
   const added = () =>
     toast(i18n.t("notes:divider.added", "Divider added"), {
       duration: UNDO_MS,
@@ -219,6 +248,9 @@ export function announceDivider(editor: DividerEditor, blockId: string, origin?:
     });
   const back = () => {
     if (!editor.getBlock(blockId)) return;
+    if (addedLine && isEmptyLine(editor.getBlock(addedLine) as LineContent | undefined)) {
+      editor.removeBlocks([addedLine]);
+    }
     const line = {
       id: blockId,
       type: origin?.type ?? "paragraph",
@@ -303,9 +335,14 @@ export const dividerRule = createExtension({
         if (!DASH_LINE_TYPES.has(String(block.type)) || !sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) {
           return undefined;
         }
-        // The toast follows the change (the rule applies after this returns).
+        // The caret and the toast follow the change (the rule applies after
+        // this returns); the caret goes on below the divider.
         const origin = dashLineOrigin(editor, block);
-        queueMicrotask(() => announceDivider(editor, block.id, origin));
+        queueMicrotask(() => {
+          if (!editor.getBlock(block.id)) return;
+          const added = caretBelowDivider(editor, block.id);
+          announceDivider(editor, block.id, origin, added);
+        });
         return { type: "divider", props: {} };
       },
     },
