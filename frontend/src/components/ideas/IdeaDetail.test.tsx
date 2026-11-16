@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -20,6 +20,7 @@ import type { NoteOpsBody } from "@/types/notes";
 import { FULL_TEXT_SECTION, type GraphResponse, type Idea, type IdeaPatch } from "@/types/ideation";
 
 import { IdeaDetail } from "./IdeaDetail";
+import { IdeaKanban } from "./IdeaKanban";
 
 const base = (over: Partial<Idea> = {}): Idea => ({
   id: 5,
@@ -68,20 +69,25 @@ const chatCalls: number[] = [];
 const noteTargets: string[] = [];
 const postedOps: NoteOpsBody[] = [];
 let noteFails = false;
+let contentOnly = false;
+const noteWords = "Try it on the eval set";
 
 const server = setupServer(
   http.get(`${API_BASE_URL}/marks/colors`, () => HttpResponse.json([])),
   http.get(`${API_BASE_URL}/notes/target`, ({ request }) => {
     const u = new URL(request.url);
-    noteTargets.push(`${u.searchParams.get("kind")}:${u.searchParams.get("id")}`);
+    const ideaId = Number(u.searchParams.get("id"));
+    noteTargets.push(`${u.searchParams.get("kind")}:${ideaId}`);
     if (noteFails) return HttpResponse.json({ detail: "boom" }, { status: 500 });
+    const noteId = 65 + ideaId; // idea 5 -> note 70, idea 6 -> note 71
     return HttpResponse.json({
-      note: { id: 70, target_kind: "idea", target_id: "5", title: "", revision: 2, updated_at: "2026-11-16T00:00:00Z" },
+      note: { id: noteId, target_kind: "idea", target_id: String(ideaId), title: "", revision: 2, updated_at: "2026-11-16T00:00:00Z" },
       blocks: [
         {
-          id: "n1", note_id: 70, parent_id: null, type: "paragraph", props: {},
-          content: [{ type: "text", text: "Try it on the eval set", styles: {} }],
-          text: "Try it on the eval set", author: "user", section_key: null, changed_rev: 1,
+          id: "n1", note_id: noteId, parent_id: null, type: "paragraph", props: {},
+          // `contentOnly`: the stored text column is empty, the words are only in the content.
+          content: [{ type: "text", text: noteWords, styles: {} }],
+          text: contentOnly ? "" : noteWords, author: "user", section_key: null, changed_rev: 1,
         },
       ],
       suggestions: [],
@@ -89,10 +95,10 @@ const server = setupServer(
       shared_by: 0,
     });
   }),
-  http.post(`${API_BASE_URL}/notes/70/ops`, async ({ request }) => {
+  http.post(`${API_BASE_URL}/notes/:noteId/ops`, async ({ request, params }) => {
     postedOps.push((await request.json()) as NoteOpsBody);
     return HttpResponse.json({
-      note_id: 70, revision: 3, change_set_id: null, applied: [], suggested: [], rejected: [], reparented: [],
+      note_id: Number(params.noteId), revision: 3, change_set_id: null, applied: [], suggested: [], rejected: [], reparented: [],
     });
   }),
   http.patch(`${API_BASE_URL}/ideation/ideas/:id`, async ({ request, params }) => {
@@ -170,6 +176,7 @@ beforeEach(() => {
   noteTargets.length = 0;
   postedOps.length = 0;
   noteFails = false;
+  contentOnly = false;
   useNotesStore.setState({ notes: {}, byTarget: {}, reloads: {}, retrying: {}, drafts: {}, colorNames: {} });
   toast.mockClear();
   scrollIntoView.mockClear();
@@ -206,6 +213,83 @@ describe("IdeaDetail", () => {
     expect(patches).toEqual([]);
     // The kanban / drawer excerpt follows the edit.
     expect(useIdeationStore.getState().graph?.ideas[0]?.note).toBe("Try it on the eval set!");
+  });
+
+  it("posts a pending note edit once when the drawer switches to another idea", async () => {
+    setup();
+    useIdeationStore.setState((s) => ({
+      graph: s.graph && { ...s.graph, ideas: [...s.graph.ideas, base({ id: 6, title: "Other idea" })] },
+    }));
+    await screen.findByText(noteWords);
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { commands: { insertContentAt: (pos: number, text: string) => boolean } };
+    };
+    act(() => {
+      pm.editor.commands.insertContentAt(25, "!");
+    });
+    act(() => useIdeationStore.setState({ selected: { kind: "idea", id: 6 } }));
+    await waitFor(() => expect(postedOps).toHaveLength(1), { timeout: 2500 });
+    expect(postedOps[0]?.ops).toEqual([expect.objectContaining({ op: "update", block_id: "n1" })]);
+    await new Promise((r) => setTimeout(r, 800));
+    expect(postedOps).toHaveLength(1);
+    expect(patches).toEqual([]);
+  });
+
+  it("keeps the list's note when a block's words are only in its content", async () => {
+    contentOnly = true;
+    // The list endpoint already joined `text or block_text(...)`: the same string.
+    setup(base({ note: noteWords }));
+    await screen.findByText(noteWords);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(useIdeationStore.getState().graph?.ideas[0]?.note).toBe(noteWords);
+  });
+
+  it("puts the note's text back when a graph refetch brings a stale one", async () => {
+    setup(base({ note: noteWords }));
+    await screen.findByText(noteWords);
+    act(() =>
+      useIdeationStore.setState((s) => ({
+        graph: s.graph && { ...s.graph, ideas: s.graph.ideas.map((i) => ({ ...i, note: "stale server text" })) },
+      })),
+    );
+    await waitFor(() => expect(useIdeationStore.getState().graph?.ideas[0]?.note).toBe(noteWords));
+  });
+
+  it("shows the edited note on the kanban card", async () => {
+    server_idea = base();
+    useIdeationStore.setState({
+      scope: "explore", filter: "active", graph: graph(server_idea), selected: { kind: "idea", id: 5 }, leavingIdeaIds: [],
+    });
+    function Both() {
+      const g = useIdeationStore((s) => s.graph)!;
+      return (
+        <>
+          <IdeaKanban graph={g} ideas={g.ideas} filter="active" selected={null} onSelect={() => {}} />
+          <IdeaDetail key={5} idea={g.ideas[0]!} />
+        </>
+      );
+    }
+    render(<Both />);
+    await screen.findByTestId("idea-note").then(() => screen.findAllByText(noteWords));
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { commands: { insertContentAt: (pos: number, text: string) => boolean } };
+    };
+    act(() => {
+      pm.editor.commands.insertContentAt(25, "!");
+    });
+    await waitFor(() => expect(screen.getByTestId("idea-card-5")).toHaveTextContent(`${noteWords}!`));
+  });
+
+  it("fades the loading line out over the editor, and the editor in", async () => {
+    setup();
+    const status = await screen.findByTestId("idea-note-status");
+    const editor = await screen.findByTestId("note-editor");
+    expect(editor.className).toContain("fade-in");
+    await waitFor(() => expect(status).toHaveAttribute("data-closed"));
+    fireEvent.transitionEnd(status, { propertyName: "opacity" });
+    expect(screen.queryByTestId("idea-note-status")).not.toBeInTheDocument();
   });
 
   it("says so, with a retry, when the note cannot be loaded", async () => {
