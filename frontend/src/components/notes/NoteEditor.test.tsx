@@ -946,6 +946,45 @@ describe("dividers, Focus and folding", () => {
     await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual([]));
   });
 
+  it("Esc that closes the slash menu leaves Focus on; a bare Esc in the note ends it", async () => {
+    const { NotesToolbar } = await import("./NotesToolbar");
+    seed([section, blk("p0", { content: [] })]);
+    useNotesStore.setState({ focusOn: true, activePart: { 7: "s1" } });
+    // jsdom's rects lack toJSON, which the menu's positioning reads.
+    const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(rect);
+    if (!("getBoundingClientRect" in Range.prototype)) {
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: rect });
+      Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+    }
+    act(() => {
+      render(
+        <>
+          <NotesToolbar noteId={7} followLabel={null} guideOpen={false} onGuideOpenChange={() => {}} />
+          <NoteEditor noteId={7} variant="pane" />
+        </>,
+      );
+    });
+    await screen.findByTestId("note-editor");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean; focus: () => boolean } };
+    };
+    const view = pm.editor.view;
+    act(() => {
+      pm.editor.commands.focus();
+      pm.editor.commands.setTextSelection(view.state.doc.content.size - 3);
+      const { from, to } = view.state.selection;
+      const handled = view.someProp("handleTextInput", (f) => f(view, from, to, "/", () => view.state.tr));
+      if (!handled) view.dispatch(view.state.tr.insertText("/", from, to));
+    });
+    await screen.findByText("Callout");
+    fireEvent.keyDown(pm, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("Callout")).toBeNull());
+    expect(useNotesStore.getState().focusOn).toBe(true);
+    fireEvent.keyDown(pm, { key: "Escape" });
+    expect(useNotesStore.getState().focusOn).toBe(false);
+  });
+
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
     seed([section, quote, d1, q2, p3, d2, p4]);
     mount();

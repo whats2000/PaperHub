@@ -1,4 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -108,6 +109,19 @@ describe("NotesToolbar", () => {
     expect(useNotesStore.getState().activePart[7]).toBe("s1");
     expect(focus).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(document, { key: "Escape" });
+    expect(useNotesStore.getState().focusOn).toBe(false);
+  });
+
+  it("Esc that closes the ⋯ menu leaves Focus on; a bare Esc ends it", async () => {
+    useNotesStore.setState({ focusOn: true, activePart: { 7: "s1" } });
+    const user = userEvent.setup();
+    render(<Toolbar />);
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(useNotesStore.getState().focusOn).toBe(true);
+    await user.keyboard("{Escape}");
     expect(useNotesStore.getState().focusOn).toBe(false);
   });
 

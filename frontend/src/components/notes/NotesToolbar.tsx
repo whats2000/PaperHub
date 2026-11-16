@@ -15,6 +15,11 @@ import { ShortcutsGuide } from "./ShortcutsGuide";
 
 export type ExportFormat = "md" | "docx";
 
+/** Open layers an Esc closes first (then Focus stays on). */
+const OPEN_LAYER = ["[role=\"menu\"]", "[role=\"listbox\"]", "[role=\"dialog\"]", ".bn-suggestion-menu"]
+  .map((s) => `${s}:not([data-closed]):not([hidden])`)
+  .join(", ");
+
 export interface NotesToolbarProps {
   /** The note shown (null while none is loaded). */
   noteId: number | null;
@@ -68,14 +73,18 @@ export function NotesToolbar({
   );
   const moreRef = useRef<HTMLButtonElement>(null);
 
-  // Esc stops Focus (unless something else, e.g. a menu, took the key).
+  // Esc stops Focus, unless it is closing something open over the page (a
+  // menu, the slash / @ menu, a dialog): checked before that closes, in the
+  // capture phase, since the editor itself takes a bare Esc too.
   useEffect(() => {
     if (!focusOn) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) setFocusOn(false);
+      if (e.key !== "Escape") return;
+      if (document.querySelector(OPEN_LAYER)) return;
+      setFocusOn(false);
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [focusOn, setFocusOn]);
 
   const toggleFocus = () => {
