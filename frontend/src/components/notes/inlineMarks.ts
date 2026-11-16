@@ -168,15 +168,50 @@ export const codeFence = createExtension({
 
 const UNDO_MS = 5000;
 
+interface LineBlock {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  children: LineBlock[];
+}
+
 type DividerEditor = {
   getBlock: (id: string) => unknown;
+  getParentBlock: (id: string) => unknown;
   updateBlock: (id: string, update: never) => unknown;
+  removeBlocks: (ids: string[]) => unknown;
+  insertBlocks: (blocks: never[], ref: string, placement: "before" | "after") => unknown;
   setTextCursorPosition: (id: string, placement: "start" | "end") => void;
 };
 
+/** Where a `---` line was, to put it back there: its type and props, and,
+ * for a nested line (whose divider moved to the top level), its parent and
+ * neighbours. */
+export interface DashLineOrigin {
+  type: string;
+  props: Record<string, unknown>;
+  parentId: string | null;
+  prevId: string | null;
+  nextId: string | null;
+}
+
+export function dashLineOrigin(editor: DividerEditor, block: LineBlock): DashLineOrigin {
+  const parent = editor.getParentBlock(block.id) as LineBlock | undefined;
+  const sibs = parent?.children ?? [];
+  const i = sibs.findIndex((b) => b.id === block.id);
+  return {
+    type: block.type,
+    props: block.props,
+    parentId: parent?.id ?? null,
+    prevId: i > 0 ? sibs[i - 1]!.id : null,
+    nextId: i >= 0 && i + 1 < sibs.length ? sibs[i + 1]!.id : null,
+  };
+}
+
 /** "Divider added" with Undo, which turns the divider back into the three
- * dashes and offers "Make a divider again" (and so on). */
-export function announceDivider(editor: DividerEditor, blockId: string): void {
+ * dashes where they were typed (the same as Ctrl+Z) and offers "Make a
+ * divider again" (and so on). */
+export function announceDivider(editor: DividerEditor, blockId: string, origin?: DashLineOrigin): void {
   const added = () =>
     toast(i18n.t("notes:divider.added", "Divider added"), {
       duration: UNDO_MS,
@@ -184,7 +219,22 @@ export function announceDivider(editor: DividerEditor, blockId: string): void {
     });
   const back = () => {
     if (!editor.getBlock(blockId)) return;
-    editor.updateBlock(blockId, { type: "paragraph", content: "---" } as never);
+    const line = {
+      id: blockId,
+      type: origin?.type ?? "paragraph",
+      props: origin?.props ?? {},
+      content: "---",
+    };
+    const at = origin?.parentId ? origin : null;
+    if (at && editor.getBlock(at.parentId!)) {
+      // A nested line: its divider moved to the top level; put the line back.
+      editor.removeBlocks([blockId]);
+      if (at.prevId && editor.getBlock(at.prevId)) editor.insertBlocks([line as never], at.prevId, "after");
+      else if (at.nextId && editor.getBlock(at.nextId)) editor.insertBlocks([line as never], at.nextId, "before");
+      else editor.updateBlock(at.parentId!, { children: [line] } as never);
+    } else {
+      editor.updateBlock(blockId, { type: line.type, props: line.props, content: "---" } as never);
+    }
     editor.setTextCursorPosition(blockId, "end");
     toast(i18n.t("notes:divider.back", "Back to ---"), {
       duration: UNDO_MS,
@@ -193,7 +243,7 @@ export function announceDivider(editor: DividerEditor, blockId: string): void {
   };
   const again = () => {
     if (!editor.getBlock(blockId)) return;
-    editor.updateBlock(blockId, { type: "divider", props: {} } as never);
+    editor.updateBlock(blockId, { type: "divider", props: {}, content: undefined } as never);
     added();
   };
   added();
@@ -254,7 +304,8 @@ export const dividerRule = createExtension({
           return undefined;
         }
         // The toast follows the change (the rule applies after this returns).
-        queueMicrotask(() => announceDivider(editor, block.id));
+        const origin = dashLineOrigin(editor, block);
+        queueMicrotask(() => announceDivider(editor, block.id, origin));
         return { type: "divider", props: {} };
       },
     },

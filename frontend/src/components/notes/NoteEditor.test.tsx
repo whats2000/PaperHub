@@ -697,6 +697,46 @@ describe("dividers, Focus and folding", () => {
     cleanupEditors();
   });
 
+  it("Undo after a lifted --- puts the list item back where it was; Make a divider again lifts it again", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor(
+      [dividerRule],
+      [
+        {
+          id: "li1",
+          type: "bulletListItem",
+          content: "a",
+          children: [
+            { id: "li2", type: "bulletListItem", content: "b" },
+            { id: "li3", type: "checkListItem", props: { checked: true }, content: "" },
+            { id: "li4", type: "bulletListItem", content: "d" },
+          ],
+        },
+      ],
+    );
+    const tree = () => JSON.parse(JSON.stringify(editor.document)) as unknown;
+    editor.setTextCursorPosition("li3", "start");
+    type(editor, "---");
+    expect(editor.document.map((b) => b.type)).toEqual(["bulletListItem", "divider"]);
+    await waitFor(() => expect(toastFn).toHaveBeenCalled());
+    const undo = (toastFn.mock.calls.at(-1) as [string, { action: { onClick: () => void } }])[1];
+    act(() => undo.action.onClick());
+    // The same document as before the last dash: the to-do back in its place, with ---.
+    const restored = tree() as { children: { id: string; type: string; props: { checked: boolean }; content: { text: string }[] }[] }[];
+    expect(restored.map((b) => (b as never as { type: string }).type)).toEqual(["bulletListItem"]);
+    const li3 = restored[0]!.children[1]!;
+    expect([li3.id, li3.type, li3.props.checked, li3.content.map((c) => c.text).join("")]).toEqual([
+      "li3", "checkListItem", true, "---",
+    ]);
+    expect(restored[0]!.children.map((c) => c.id)).toEqual(["li2", "li3", "li4"]);
+    const again = (toastFn.mock.calls.at(-1) as [string, { action: { label: string; onClick: () => void } }])[1];
+    expect(again.action.label).toBe("Make a divider again");
+    act(() => again.action.onClick());
+    expect(editor.document.map((b) => b.type)).toEqual(["bulletListItem", "divider"]);
+    cleanupEditors();
+  });
+
   it("--- before other words on the line stays text", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");
