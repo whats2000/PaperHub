@@ -143,6 +143,24 @@ describe("a suggestion in the editor", () => {
     expect(posted).toEqual([]);
   });
 
+  it("fades the tracked change in when it arrives, not again on later edits", async () => {
+    seed([para("p1", [run("latency drops up to 83%")])], [suggestion("p1", "latency drops 89%, 88% and 83%")]);
+    mount();
+    const del = await waitFor(() => {
+      const el = pm().querySelector(".note-sug-del");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(del).toHaveClass("note-sug-enter");
+    expect(pm().querySelector(".note-sug-ins")).toHaveClass("note-sug-enter");
+    // A later redraw (e.g. typing in the block) does not replay it.
+    await new Promise((r) => setTimeout(r, 450));
+    act(() => {
+      useNotesStore.setState((st) => ({ notes: { ...st.notes, 7: { ...st.notes[7]!, suggestions: [...st.notes[7]!.suggestions] } } }));
+    });
+    await waitFor(() => expect(pm().querySelector(".note-sug-del")).not.toHaveClass("note-sug-enter"));
+  });
+
   it("shows a suggested delete as the whole line struck through", async () => {
     seed([para("p1", [run("Mine")])], [suggestion("p1", null)]);
     mount();

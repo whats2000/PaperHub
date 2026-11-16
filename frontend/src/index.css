@@ -353,11 +353,18 @@
     background-color: color-mix(in oklch, oklch(0.723 0.219 149.579) 16%, transparent);
     border-bottom-color: oklch(0.723 0.219 149.579);
 }
+/* Arrival: the insertion fades in, the strike draws in (once, see
+   noteSuggestions.tsx ENTER_MS). */
+@keyframes note-sug-ins-enter { from { opacity: 0; } }
+@keyframes note-sug-del-enter { from { text-decoration-color: transparent; } }
+.note-sug-ins.note-sug-enter { animation: note-sug-ins-enter 200ms ease-out; }
+.note-sug-del.note-sug-enter { animation: note-sug-del-enter 200ms ease-out; }
 .note-sug-del[data-leaving] { color: inherit; text-decoration-color: transparent; }
 .note-sug-ins[data-leaving] { opacity: 0; }
 .note-sug-host { display: block; user-select: none; }
 @media (prefers-reduced-motion: reduce) {
     .note-sug-del, .note-sug-ins { transition: none; }
+    .note-sug-del.note-sug-enter, .note-sug-ins.note-sug-enter { animation: none; }
 }
 
 /* Notes: parts. Focus fades the other parts (section headings and dividers

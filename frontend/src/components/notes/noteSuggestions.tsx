@@ -62,16 +62,24 @@ function textWithPositions(content: PMNode, start: number): { text: string; at: 
   return { text, at };
 }
 
-function insElement(text: string, id: string): HTMLElement {
+/** A suggestion counts as arriving for this long after it is first drawn:
+ * its marks fade in then, and are not replayed by later redraws. */
+const ENTER_MS = 400;
+
+function insElement(text: string, id: string, entering: boolean): HTMLElement {
   const el = document.createElement("ins");
-  el.className = "note-sug-ins";
+  el.className = entering ? "note-sug-ins note-sug-enter" : "note-sug-ins";
   el.setAttribute("data-suggestion-id", id);
   el.textContent = text;
   return el;
 }
 
 /** The decorations of every open suggestion in `doc`. */
-export function suggestionDecorations(doc: PMNode, view: SuggestionsView): DecorationSet {
+export function suggestionDecorations(
+  doc: PMNode,
+  view: SuggestionsView,
+  entering: (id: string) => boolean = () => false,
+): DecorationSet {
   const byBlock = new Map(view.suggestions.map((s) => [s.block_id, s]));
   if (!byBlock.size) return DecorationSet.empty;
   const decos: Decoration[] = [];
@@ -82,7 +90,8 @@ export function suggestionDecorations(doc: PMNode, view: SuggestionsView): Decor
     if (!s || !content) return true;
     const start = pos + 2; // inside the container, inside the content
     const end = start + content.content.size;
-    const mark = { class: "note-sug-del", "data-suggestion-id": s.id };
+    const enter = entering(s.id);
+    const mark = { class: enter ? "note-sug-del note-sug-enter" : "note-sug-del", "data-suggestion-id": s.id };
     if (content.isTextblock) {
       const { text, at } = textWithPositions(content, start);
       if (s.kind === "delete") {
@@ -95,7 +104,7 @@ export function suggestionDecorations(doc: PMNode, view: SuggestionsView): Decor
         if (d.ins) {
           const where = gone ? at[p + gone - 1]! + 1 : p < at.length ? at[p]! : end;
           decos.push(
-            Decoration.widget(where, () => insElement(d.ins, s.id), {
+            Decoration.widget(where, () => insElement(d.ins, s.id, enter), {
               side: 1,
               key: `ins:${s.id}:${d.ins}`,
               ignoreSelection: true,
@@ -122,6 +131,12 @@ export function suggestionDecorations(doc: PMNode, view: SuggestionsView): Decor
 /** The extension; `get` returns the current suggestions and bar hosts. */
 export function noteSuggestionMarks(get: () => SuggestionsView) {
   let cache: { doc: PMNode; version: number; set: DecorationSet } | null = null;
+  const firstSeen = new Map<string, number>();
+  const entering = (id: string) => {
+    const now = Date.now();
+    if (!firstSeen.has(id)) firstSeen.set(id, now);
+    return now - firstSeen.get(id)! < ENTER_MS;
+  };
   return createExtension({
     key: "paperhubSuggestions",
     prosemirrorPlugins: [
@@ -135,7 +150,7 @@ export function noteSuggestionMarks(get: () => SuggestionsView) {
           decorations(state) {
             const version = key.getState(state) ?? 0;
             if (cache?.doc !== state.doc || cache.version !== version) {
-              cache = { doc: state.doc, version, set: suggestionDecorations(state.doc, get()) };
+              cache = { doc: state.doc, version, set: suggestionDecorations(state.doc, get(), entering) };
             }
             return cache.set;
           },
