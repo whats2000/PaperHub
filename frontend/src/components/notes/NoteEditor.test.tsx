@@ -1167,6 +1167,15 @@ describe("dividers, Focus and folding", () => {
     expect(useNotesStore.getState().focusOn).toBe(false);
   });
 
+  it("the chevron sits above BlockNote's side menu (z-20), whose drag handle it overlaps", async () => {
+    seed([section, quote, d1, q2]);
+    mount();
+    const fold = within(await screen.findByTestId("divider-d1")).getByRole("button", {
+      name: "Fold the part below this divider",
+    });
+    expect(fold.className.split(" ")).toEqual(expect.arrayContaining(["relative", "z-[21]"]));
+  });
+
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
     seed([section, quote, d1, q2, p3, d2, p4]);
     mount();

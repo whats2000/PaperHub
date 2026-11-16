@@ -25,7 +25,8 @@ function flatten(list: DocBlock[], out: PartBlock[] = []): PartBlock[] {
 }
 
 /** A divider's line: its fold chevron at the content edge (centred on a
- * reference's bar), the rule darkened when it frames the part you're in, and
+ * reference's bar, so it reaches into the side menu's column: it sits above
+ * BlockNote's side menu, z-20, or the drag handle would take its clicks), the rule darkened when it frames the part you're in, and
  * the folded part's one-line summary, which unfolds it. The parts come from
  * the editor's own document, so a divider just typed is right before its
  * sync reaches the store. */
@@ -59,7 +60,7 @@ export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
           title={t("notes:fold.foldTitle", "Fold the part below")}
           onClick={() => toggleFold(noteId, id)}
           className={cn(
-            "note-fold -ml-2 inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-[opacity,rotate] duration-200 ease-out hover:bg-accent hover:text-foreground motion-reduce:transition-none",
+            "note-fold relative z-[21] -ml-2 inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-[opacity,rotate] duration-200 ease-out hover:bg-accent hover:text-foreground motion-reduce:transition-none",
             folded && "-rotate-90",
           )}
         >
