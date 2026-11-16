@@ -319,6 +319,8 @@ input { font: inherit; color: inherit; }
 .gutter [data-drag] { cursor: grab; }
 .blk-row:hover .gutter button, .blk-row:focus-within .gutter button { opacity: 1; }
 .blk-row.dragging { opacity: 0.35; }
+.blk[data-selblk] { outline: none; border-radius: 6px; transition: background 120ms ease-out; }
+.blk[data-selblk]:focus { background: color-mix(in srgb, var(--hl-blue) 12%, transparent); }
 .drop-line { position: fixed; height: 3px; border-radius: 2px; background: var(--hl-blue); pointer-events: none; z-index: 70; display: none; }
 /* Editable text blocks */
 .ed { outline: none; min-height: 1.5em; white-space: pre-wrap; word-break: break-word; }
@@ -441,7 +443,7 @@ del.sug { color: var(--muted-fg); text-decoration-color: var(--del); }
 /* Dividers split a section into parts; the part you're in is marked; Focus fades the rest (note and paper) */
 .divider-line { display: flex; align-items: center; gap: 2px; height: 26px; }
 /* The chevron's icon starts at the content's left edge, in line with the note below; the line follows it. */
-.divider-line .fold { margin-left: -4px; }
+.divider-line .fold { margin-left: -8px; }
 .blk-row:has(.divider-line) { align-items: center; } .blk-row:has(.divider-line) .gutter { padding-top: 0; }
 .divider-line hr { flex: 1; border: 0; border-top: 1px solid color-mix(in srgb, var(--foreground) 28%, transparent); margin: 0; transition: border-color 200ms ease-out, box-shadow 200ms ease-out; }
 /* The dividers around the note you're in (a hovered or clicked reference, the cursor) darken: they frame the note instead of a band */
@@ -470,7 +472,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 .nc-other[aria-expanded="true"] svg { transform: rotate(90deg); }
 .nc-other svg { transition: transform 200ms ease-out; flex-shrink: 0; }
 .nc-other-body { opacity: 0.75; }
-.part-sum { border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; padding: 2px 6px 4px 50px; display: inline-flex; gap: 5px; align-items: center; }
+.part-sum { border: 0; background: transparent; color: var(--muted-fg); font-size: 12px; padding: 2px 6px 4px 46px; display: inline-flex; gap: 5px; align-items: center; }
 .part-sum:hover { color: var(--foreground); }
 .focus-btn { border: 0; background: transparent; font-size: 11.5px; color: var(--muted-fg); border-radius: 6px; padding: 1px 7px; display: inline-flex; gap: 4px; align-items: center; }
 .focus-btn:hover { background: var(--accent); color: var(--foreground); }
@@ -826,7 +828,9 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     else inner = textBlockHtml(b, tag);
     const del = b.type === 'sec' ? '<span></span>' : `<button class="blk-del" data-del="${b.id}" aria-label="${b.mark ? 'Delete this mark' : 'Delete this block'}" title="${b.mark ? 'Delete this mark (removes it from the paper too)' : 'Delete this block'}"><i data-lucide="trash-2" class="icon-xs"></i></button>`;
     const gut = b.type === 'sec' ? '<span class="gutter"></span>' : `<span class="gutter"><button data-addafter="${b.id}" aria-label="Add a block below" title="Click to add a block below"><i data-lucide="plus" class="icon-sm"></i></button><button data-drag="${b.id}" aria-label="Drag to move, or click for the block menu" title="Drag to move · click for options"><i data-lucide="grip-vertical" class="icon-sm"></i></button></span>`;
-    return `<div class="blk-row" data-id="${b.id}">${gut}<div class="blk">${inner}</div>${del}</div>`;
+    // Non-text blocks (references, headings, dividers) can be selected as a whole, as in Notion: Enter adds a line below.
+    const selectable = ['quote', 'fig', 'eq', 'box', 'lost', 'sec', 'hr'].includes(b.type);
+    return `<div class="blk-row" data-id="${b.id}">${gut}<div class="blk"${selectable ? ` tabindex="0" data-selblk="${b.id}"` : ''}>${inner}</div>${del}</div>`;
   }
   // Notion-style text blocks: one contenteditable each; lists, to-dos, quotes, callouts, headings, equations.
   const TEXT_TYPES = ['p', 'h', 'h1', 'h2', 'h3', 'bullet', 'num', 'todo', 'check', 'uquote', 'callout'];
@@ -1718,11 +1722,22 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       return;
     }
     if (e.key === 'ArrowUp' && off === 0 || e.key === 'ArrowDown' && off === len) {
-      const eds = $$('#notesBody [data-edit]'); const i = eds.indexOf(ed); const to = eds[i + (e.key === 'ArrowUp' ? -1 : 1)];
-      if (to) { e.preventDefault(); to.focus(); setCaret(to, e.key === 'ArrowUp' ? 'end' : 0); }
+      const to = stepFrom(ed, e.key === 'ArrowUp' ? -1 : 1);
+      if (to) { e.preventDefault(); to.focus(); if (to.dataset.edit) setCaret(to, e.key === 'ArrowUp' ? 'end' : 0); }
     }
   });
 
+  // A selected reference, heading or divider: Enter adds an empty line below it; ↑ / ↓ move to the next block.
+  function stepFrom(el, dir) { const all = $$('#notesBody [data-edit], #notesBody [data-selblk]').filter(x => x.offsetParent); return all[all.indexOf(el) + dir] || null; }
+  $('#notesBody').addEventListener('keydown', e => {
+    const sb = e.target.closest('[data-selblk]'); if (!sb || e.target !== sb) return;
+    if (e.key === 'Enter') {
+      e.preventDefault(); const b = noteList().find(x => x.id === sb.dataset.selblk); if (!b) return;
+      const nb = insertAfter(b, { id: newId(), type: 'p', text: '' }); renderNote(); focusBlock(nb.id, 0);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const to = stepFrom(sb, e.key === 'ArrowUp' ? -1 : 1); if (to) { e.preventDefault(); to.focus(); if (to.dataset.edit) setCaret(to, e.key === 'ArrowUp' ? 'end' : 0); }
+    }
+  });
   // The / menu and the @ menu (one floating menu, anchored at the caret).
   const SLASH = [
     { k: 'p', name: 'Text', desc: 'Just start writing.', icon: 'type', g: 'Basic blocks' },
