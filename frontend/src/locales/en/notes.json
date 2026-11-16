@@ -5,7 +5,8 @@
   "conflict": "Updated from another view",
   "sectionNotEmpty": "This section still has notes under it. Delete them first, then the heading.",
   "insertAppended": "A new line could not go where you put it, so it was saved at the end of the note.",
-  "insertNotSaved": "A new line could not be saved. Copy it before you reload.",
+  "insertNotSaved": "A new line could not be saved. It stays here, marked Not saved; edit it to try again.",
+  "draftsKept": "New lines that could not be saved stay here, marked Not saved.",
   "color": {
     "green": "Key result",
     "blue": "Method",
@@ -53,5 +54,11 @@
   "mention": {
     "sections": "Sections of this paper",
     "papers": "Papers in your library"
+  },
+  "draft": {
+    "notSaved": "Not saved",
+    "hint": "Kept on this screen only. Edit it to try again.",
+    "copy": "Copy",
+    "copied": "Copied"
   }
 }

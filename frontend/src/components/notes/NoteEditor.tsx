@@ -31,6 +31,7 @@ import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { noteSchema, paperhubKeys } from "./schema";
+import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
   diffDocuments,
   pruneUnsavedEmpty,
@@ -307,6 +308,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
             </p>
           </div>
         </div>
+        <UnsavedDrafts noteId={noteId} />
         <BlockNoteView
           editor={editor}
           theme={resolvedTheme === "dark" ? "dark" : "light"}

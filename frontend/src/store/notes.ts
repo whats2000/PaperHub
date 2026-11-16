@@ -64,6 +64,10 @@ interface NotesStore {
   reloads: Record<number, NoteReload>;
   /** Notes whose last burst failed and is waiting to be retried. */
   retrying: Record<number, boolean>;
+  /** New blocks the server would not take, kept here unsaved: per note,
+   * block id -> the insert that would save it. Re-applied over every
+   * reload, never sent until the user edits one (one more try). */
+  drafts: Record<number, Record<string, NoteOp>>;
   loadTarget: (kind: NoteTargetKind, id: number) => Promise<number>;
   loadNote: (noteId: number) => Promise<void>;
   applyLocal: (noteId: number, ops: NoteOp[]) => void;
@@ -247,23 +251,23 @@ const rebuilds = new Map<string, number>();
  * previous sibling the server has (parent_id taken from that sibling), else
  * first under its parent, else at the end of the section above it, else at
  * the note end. A block refused again goes to the note end; a third refusal
- * stops resending it. */
+ * makes it an unsaved draft (`drafted`) instead of resending it. */
 function freshInserts(
   local: NoteBlock[],
   lost: Set<string>,
   server: NoteBlock[],
-): { ops: NoteOp[]; appended: boolean; stopped: boolean } {
+): { ops: NoteOp[]; appended: boolean; drafted: NoteBlock[] } {
   const parentOf = new Map(server.map((b) => [b.id, b.parent_id]));
   const order = docOrder(local);
   const ops: NoteOp[] = [];
   let appended = false;
-  let stopped = false;
+  const drafted: NoteBlock[] = [];
   order.forEach((b, at) => {
     if (!lost.has(b.id)) return;
     const n = (rebuilds.get(b.id) ?? 0) + 1;
     rebuilds.set(b.id, n);
     if (n > 2) {
-      stopped = true;
+      drafted.push(b);
       return;
     }
     const block: NoteBlockIn = { type: b.type, props: b.props, content: b.content };
@@ -297,7 +301,18 @@ function freshInserts(
       placement.under_heading ? (parentOf.get(placement.under_heading) ?? null) : (placement.parent_id ?? null),
     );
   });
-  return { ops, appended, stopped };
+  return { ops, appended, drafted };
+}
+
+/** The insert that would save a draft, placed where it stands locally. */
+function draftInsert(local: NoteBlock[], b: NoteBlock): NoteOp {
+  const block: NoteBlockIn = { type: b.type, props: b.props, content: b.content };
+  if (b.section_key !== null) block.section_key = b.section_key;
+  const sibs = local.filter((x) => x.parent_id === b.parent_id);
+  const prev = sibs[sibs.findIndex((x) => x.id === b.id) - 1];
+  return prev
+    ? { op: "insert", block_id: b.id, block, parent_id: b.parent_id, after: prev.id }
+    : { op: "insert", block_id: b.id, block, parent_id: b.parent_id };
 }
 
 export const useNotesStore = create<NotesStore>()(
@@ -323,6 +338,24 @@ export const useNotesStore = create<NotesStore>()(
         }
       };
 
+      /** Keep new blocks the server would not take as unsaved drafts. */
+      const keepDrafts = (noteId: number, local: NoteBlock[], blocks: NoteBlock[]) => {
+        if (!blocks.length) return;
+        const ids = new Set(blocks.map((b) => b.id));
+        // Their queued edits are part of the draft now.
+        const q = pending.get(noteId);
+        if (q) pending.set(noteId, q.filter((o) => !(o.block_id && ids.has(o.block_id))));
+        set((s) => ({
+          drafts: {
+            ...s.drafts,
+            [noteId]: {
+              ...(s.drafts[noteId] ?? {}),
+              ...Object.fromEntries(blocks.map((b) => [b.id, draftInsert(local, b)])),
+            },
+          },
+        }));
+      };
+
       /** The note as the server sent it with the edits not yet saved put
        * back on top. Queued ops placed by a block the server no longer has
        * (and no queued insert creates) are placed where it stood. */
@@ -345,7 +378,11 @@ export const useNotesStore = create<NotesStore>()(
         const q = reanchor(queued, localBlocks, gone);
         if (queued.length) pending.set(noteId, q);
         return {
-          blocks: applyOpsLocally(noteId, serverBlocks, [...retry, ...q]),
+          blocks: applyOpsLocally(noteId, serverBlocks, [
+            ...retry,
+            ...q,
+            ...Object.values(get().drafts[noteId] ?? {}),
+          ]),
           unsaved: retry.length + q.length > 0,
         };
       };
@@ -403,9 +440,10 @@ export const useNotesStore = create<NotesStore>()(
         );
         const q = (pending.get(noteId) ?? []).filter((op) => !(op.block_id && ids.has(op.block_id)));
         pending.set(noteId, reanchor(q, cur.blocks, gone));
-        let rebuilt = { ops: [] as NoteOp[], appended: false, stopped: false };
+        let rebuilt = { ops: [] as NoteOp[], appended: false, drafted: [] as NoteBlock[] };
         const rebuild = (server: NoteBlock[]) => {
           rebuilt = freshInserts(cur.blocks, lost, server);
+          keepDrafts(noteId, cur.blocks, rebuilt.drafted);
           return rebuilt.ops;
         };
 
@@ -431,9 +469,12 @@ export const useNotesStore = create<NotesStore>()(
               ),
             );
           }
-          if (rebuilt.stopped) {
-            toast.error(
-              i18n.t("notes:insertNotSaved", "A new line could not be saved. Copy it before you reload."),
+          if (rebuilt.drafted.length) {
+            toast(
+              i18n.t(
+                "notes:insertNotSaved",
+                "A new line could not be saved. It stays here, marked Not saved; edit it to try again.",
+              ),
             );
           }
         };
@@ -501,6 +542,17 @@ export const useNotesStore = create<NotesStore>()(
             toast.error(
               i18n.t("notes:saveRefused", "Couldn't save that change. Showing the saved version."),
             );
+            // New blocks in the refused burst are the user's new text: keep
+            // them as unsaved drafts rather than lose them to the reload.
+            const local = get().notes[noteId]?.blocks ?? [];
+            const created = new Set(burst.ops.filter((o) => o.op === "insert").map((o) => o.block_id));
+            const fresh = local.filter((b) => created.has(b.id));
+            keepDrafts(noteId, local, fresh);
+            if (fresh.length) {
+              toast(
+                i18n.t("notes:draftsKept", "New lines that could not be saved stay here, marked Not saved."),
+              );
+            }
             await reload(noteId).catch(() => undefined); // the queue is kept either way
             return;
           }
@@ -544,6 +596,7 @@ export const useNotesStore = create<NotesStore>()(
         byTarget: {},
         reloads: {},
         retrying: {},
+        drafts: {},
 
         loadTarget: async (kind, id) => {
           const known = get().byTarget[`${kind}:${id}`];
@@ -588,7 +641,26 @@ export const useNotesStore = create<NotesStore>()(
               },
             };
           });
-          queue(noteId, ops);
+          // An edit of an unsaved draft is one more try at saving it; a
+          // delete simply drops it (the server never had it).
+          const drafts = get().drafts[noteId] ?? {};
+          const touched = new Set(
+            ops.map((o) => o.block_id).filter((id): id is string => !!id && id in drafts),
+          );
+          if (!touched.size) {
+            queue(noteId, ops);
+          } else {
+            const local = get().notes[noteId]?.blocks ?? [];
+            const rest = Object.fromEntries(Object.entries(drafts).filter(([id]) => !touched.has(id)));
+            set((s) => ({ drafts: { ...s.drafts, [noteId]: rest } }));
+            const retry = new Set([...touched].filter((id) => local.some((b) => b.id === id)));
+            for (const id of retry) rebuilds.set(id, 0);
+            const known = local.filter((b) => !(b.id in rest) && !retry.has(b.id));
+            const fresh = freshInserts(local, retry, known).ops;
+            // Refused again, it becomes a draft again rather than moving.
+            for (const id of retry) rebuilds.set(id, 2);
+            queue(noteId, [...fresh, ...ops.filter((o) => !(o.block_id && touched.has(o.block_id)))]);
+          }
           schedule(noteId);
         },
 

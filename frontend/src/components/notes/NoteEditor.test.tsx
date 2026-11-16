@@ -97,7 +97,7 @@ afterEach(() => {
 beforeEach(() => {
   posted.length = 0;
   toastFn.mockReset();
-  useNotesStore.setState({ colorNames: {}, retrying: {} });
+  useNotesStore.setState({ colorNames: {}, retrying: {}, drafts: {} });
   server.use(
     http.get(`${API_BASE_URL}/marks/colors`, () =>
       HttpResponse.json([
@@ -297,6 +297,25 @@ describe("NoteEditor", () => {
       useNotesStore.setState({ retrying: { 7: false } });
     });
     expect(screen.queryByText("Not saved — retrying")).not.toBeInTheDocument();
+  });
+
+  it("marks an unsaved draft and copies its text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    seed([mine, blk("n1", { content: [{ type: "text", text: "my draft", styles: {} }], text: "my draft" })]);
+    useNotesStore.setState({
+      drafts: { 7: { n1: { op: "insert", block_id: "n1", block: { type: "paragraph", props: {} }, parent_id: null, after: "p1" } } },
+    });
+    mount();
+    // In the editor and in the notice above it.
+    expect(await screen.findAllByText("my draft")).toHaveLength(2);
+    const notice = screen.getByTestId("unsaved-drafts");
+    expect(notice).toHaveAttribute("data-state", "open");
+    expect(notice).toHaveTextContent("Not saved");
+    expect(notice).toHaveTextContent("my draft");
+    expect(document.querySelector("style[data-unsaved]")?.textContent).toContain('[data-id="n1"]');
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith("my draft");
   });
 
   it("shows the loading line again when it switches to a note not loaded yet", async () => {
