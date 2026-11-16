@@ -37,6 +37,7 @@ from paperhub.notes.agent_reads import (
     record_contact,
     unseen_user_changes,
 )
+from paperhub.notes.comments import list_comments
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
@@ -76,6 +77,15 @@ def _block_xml(b: Block, text: str | None = None) -> str:
     body = html.escape(_text(b) if text is None else text, quote=False)
     return (f'<note_block id="{_esc(b.id)}" type="{_esc(b.type)}" '
             f'author="{_esc(b.author)}">{body}</note_block>')
+
+
+def _comment_xml(c: dict[str, Any]) -> str:
+    """An open comment thread as the user's words, tied to its block."""
+    items = "".join(
+        f"<item>{html.escape(i['text'], quote=False)}</item>" for i in c["items"])
+    return (f'<user_comment id="{_esc(c["id"])}" block="{_esc(c["block_id"])}">'
+            f"<quote>{html.escape(c['quote'], quote=False)}</quote>"
+            f"{items}</user_comment>")
 
 
 def _heading_xml(block_id: str, text: str) -> str:
@@ -298,9 +308,17 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     head = (f'<note ref="{_esc(ref)}" title="{_esc(note.title)}" '
             f'revision="{note.revision}" page="{page}"'
             + (f' next_page="{next_page}"' if next_page else "") + ">")
-    content = "\n".join([head, *(_block_xml(b) for b in window), "</note>"])
+    shown = {b.id for b in window}
+    comments = [c for c in await list_comments(ctx.conn, note.id, open_only=True)
+                if c["block_id"] in shown]
+    content = "\n".join([head, *(_block_xml(b) for b in window),
+                         *(_comment_xml(c) for c in comments), "</note>"])
     collect_note_titles([(note.id, note.title)])
     collect_note_blocks([(b.id, _text(b)) for b in window], note.title)
+    # The user's comment text is note material too (private for the checkpoint).
+    collect_note_blocks(
+        [(c["id"], " ".join([c["quote"], *(i["text"] for i in c["items"])]))
+         for c in comments], note.title)
     await record_contact(ctx.conn, ctx.session_id, {note.id: note.revision})
     await record_blocks(ctx.conn, ctx.session_id, note.id,
                         [b.id for b in window], note.revision)
@@ -308,7 +326,8 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         content=content,
         record={"tool": "notes:read", "note": ref, "note_id": note.id,
                 "revision": note.revision, "page": page, "next_page": next_page,
-                "block_ids": [b.id for b in window]},
+                "block_ids": [b.id for b in window],
+                "comment_ids": [c["id"] for c in comments]},
     )
 
 

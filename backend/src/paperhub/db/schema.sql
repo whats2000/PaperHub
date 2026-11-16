@@ -638,3 +638,28 @@ CREATE TABLE IF NOT EXISTS mark_colors (
 INSERT OR IGNORE INTO mark_colors (owner_id, color, name) VALUES
     (1, 'green', 'Key result'), (1, 'blue', 'Method'),
     (1, 'pink', 'Question'), (1, 'purple', 'Disagree');
+
+-- Plan H5b.1: comment threads on note text. The anchor is an inline `comment`
+-- style (carrying the thread id) in the block's content; thread text lives
+-- only here, so it is never note text (not in note_blocks.text / FTS /
+-- exports). `quote` is the commented text as it was when the thread began.
+CREATE TABLE IF NOT EXISTS note_comments (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    block_id TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open', 'resolved', 'deleted')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS note_comment_items (
+    id INTEGER PRIMARY KEY,
+    comment_id TEXT NOT NULL REFERENCES note_comments(id) ON DELETE CASCADE,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_note_comments_note
+    ON note_comments(note_id, status);
+CREATE INDEX IF NOT EXISTS idx_note_comment_items_comment
+    ON note_comment_items(comment_id);

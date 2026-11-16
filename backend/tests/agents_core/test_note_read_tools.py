@@ -387,3 +387,42 @@ async def test_search_hits_a_section_heading(
     ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper A")])
     hits = _load(await _run(ctx, "search_notes", query="limitations"))["hits"]
     assert [h["block_id"] for h in hits] == [sid]
+
+
+async def test_read_note_shows_open_comments_as_user_context(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.comments import create_comment, set_status
+
+    nid = await _chat_note(migrated_db)
+    await _fill(migrated_db, nid, [_p("alpha"), _p("beta")])
+    a, b = [x.id for x in await list_blocks(migrated_db, nid)]
+    open_t = await create_comment(
+        migrated_db, nid, block_id=a, quote="alp", text="is <this> right?")
+    done = await create_comment(
+        migrated_db, nid, block_id=b, quote="bet", text="old")
+    await set_status(migrated_db, done["id"], "resolved")
+    gone = await create_comment(
+        migrated_db, nid, block_id=b, quote="bet", text="removed")
+    await set_status(migrated_db, gone["id"], "deleted")
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _run(ctx, "read_note", note="chat")
+    assert not out.record.get("error"), out.content
+    assert f'<user_comment id="{open_t["id"]}" block="{a}"' in out.content
+    assert "is &lt;this&gt; right?" in out.content
+    assert 'quote="alp"' in out.content or "<quote>alp</quote>" in out.content
+    assert done["id"] not in out.content and gone["id"] not in out.content
+    assert "old" not in out.content and "removed" not in out.content
+    assert out.record["comment_ids"] == [open_t["id"]]
+    # block text parsing is unchanged by the comment context
+    assert [x["text"] for x in _read(out)["blocks"]] == ["alpha", "beta"]
+
+
+async def test_read_note_without_comments_has_none(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    await _fill(migrated_db, nid, [_p("alpha")])
+    out = await _run(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
+    assert "<user_comment" not in out.content
+    assert out.record["comment_ids"] == []

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.notes import comments as note_comments
 from paperhub.notes import ops as note_ops
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
@@ -44,6 +45,20 @@ class RestoreBody(BaseModel):
 
 class SuggestionBody(BaseModel):
     accept: bool
+
+
+class CommentBody(BaseModel):
+    block_id: str
+    quote: str
+    text: str
+
+
+class CommentItemBody(BaseModel):
+    text: str
+
+
+class CommentStatusBody(BaseModel):
+    status: Literal["open", "resolved", "deleted"]
 
 
 async def _title_for(conn: aiosqlite.Connection, kind: str, target: int) -> str:
@@ -93,9 +108,10 @@ async def note_detail(note_id: int) -> NoteDetail:
             {"id": r[0], "block_id": r[1], "change_set_id": r[2], "kind": r[3],
              "proposed": json.loads(r[4]) if r[4] else None, "status": r[5],
              "created_at": r[6]} for r in rows]
-        # Block comments arrive with a later task; the key is part of the contract.
-        return NoteDetail(note=note, blocks=await list_blocks(conn, note_id),
-                          suggestions=suggestions, comments=[])
+        return NoteDetail(
+            note=note, blocks=await list_blocks(conn, note_id),
+            suggestions=suggestions,
+            comments=await note_comments.list_comments(conn, note_id))
 
 
 @router.post("/{note_id}/ops", response_model=ApplyResult)
@@ -169,3 +185,42 @@ async def change_set_status(change_set_id: str) -> dict[str, Any]:
     return {"id": change_set_id, "note_id": cs["note_id"],
             "status": cs["status"],
             "reapplied_by": cs["outcome"].get("reapplied_by")}
+
+
+@router.post("/{note_id}/comments")
+async def create_comment(note_id: int, body: CommentBody) -> dict[str, Any]:
+    async with open_db(load_settings().db_path) as conn:
+        if await get_note(conn, note_id) is None:
+            raise HTTPException(404, f"note {note_id} not found")
+        try:
+            return await note_comments.create_comment(
+                conn, note_id, block_id=body.block_id, quote=body.quote,
+                text=body.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/comments/{comment_id}/items")
+async def reply_to_comment(comment_id: str,
+                           body: CommentItemBody) -> dict[str, Any]:
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            return await note_comments.add_item(conn, comment_id, body.text)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except note_comments.CommentConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
+@router.patch("/comments/{comment_id}")
+async def set_comment_status(comment_id: str,
+                             body: CommentStatusBody) -> dict[str, Any]:
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            return await note_comments.set_status(conn, comment_id, body.status)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except note_comments.CommentConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
