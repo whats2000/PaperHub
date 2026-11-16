@@ -457,7 +457,7 @@ async def test_fingerprint_is_recorded_and_a_changed_prompt_or_tools_drops(
     assert row is not None
     record = json.loads(row[0])
     state = record["session_state"]
-    assert state["prompt_slot"] == "core_agent/v8"
+    assert state["prompt_slot"] == "core_agent/v9"
     assert len(state["tools_sha256"]) == 64 and len(state["system_sha256"]) == 64
     assert (await export_agent_trajectory(conn, RUN))["messages"]
 

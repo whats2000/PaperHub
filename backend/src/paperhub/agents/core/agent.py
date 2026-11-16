@@ -62,7 +62,7 @@ from paperhub.tracing.tracer import Tracer
 
 AGENT_MAX_STEPS = 12
 AGENT_MAX_TURN_TOKENS = 120_000
-CORE_AGENT_SLOT = "core_agent/v8"
+CORE_AGENT_SLOT = "core_agent/v9"
 BUDGET_INSTRUCTION = (
     "The step budget for this turn is used up. Do not call tools. Answer now "
     "with what you have, citing only chunks you read, and say plainly what "

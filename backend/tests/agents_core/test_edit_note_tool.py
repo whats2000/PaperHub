@@ -367,3 +367,14 @@ async def test_divider_before_is_advertised_and_applied(
     types = [(b.type, b.text) for b in await list_blocks(migrated_db, note.id)]
     assert types[-3:] == [("paragraph", "first"), ("divider", ""),
                           ("paragraph", "second")]
+
+
+async def test_block_content_is_offered_as_text() -> None:
+    """The model sends a block's text as a string (it guessed {"text": ...}
+    objects against an untyped schema in the core_agent/v9 eval)."""
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    item = reg.get("edit_note").parameters["properties"]["ops"]["items"]
+    assert item["properties"]["block"]["properties"]["content"] == {
+        "type": "string"}
+    assert "divider_before" in reg.get("edit_note").description
