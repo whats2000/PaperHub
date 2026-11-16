@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyOpsLocally,
   diffDocuments,
   pruneUnsavedEmpty,
   toEditorBlocks,
@@ -100,6 +99,14 @@ describe("diffDocuments", () => {
     ]);
   });
 
+  it("deletes the last block first so a section empties before its heading goes", () => {
+    const ops = diffDocuments([p("s", "S"), p("x", "X"), p("keep", "K")], [p("keep", "K")]);
+    expect(ops).toEqual([
+      { op: "delete", block_id: "x" },
+      { op: "delete", block_id: "s" },
+    ]);
+  });
+
   it("moves a child out before its old parent is deleted", () => {
     const ops = diffDocuments([p("a", "A", [p("c", "C")]), p("b", "B")], [p("b", "B"), p("c", "C")]);
     expect(ops.map((o) => o.op)).toEqual(["move", "delete"]);
@@ -148,20 +155,5 @@ describe("pruneUnsavedEmpty", () => {
     const known = new Set(["a", "b"]);
     const out = pruneUnsavedEmpty([p("a", "A"), p("new", ""), p("b", "")], known);
     expect(out.map((b) => b.id)).toEqual(["a", "b"]);
-  });
-});
-
-describe("applyOpsLocally", () => {
-  it("applies insert, update, move and a subtree delete", () => {
-    const blocks = [nb("a", null), nb("c", "a"), nb("b", null)];
-    const out = applyOpsLocally(1, blocks, [
-      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: [{ type: "text", text: "N" }] }, parent_id: null, after: "b" },
-      { op: "update", block_id: "b", block: { type: "heading", props: { level: 2 }, content: "B2" } },
-      { op: "move", block_id: "n", parent_id: null, before: "b" },
-      { op: "delete", block_id: "a" },
-    ]);
-    expect(out.map((b) => b.id)).toEqual(["n", "b"]);
-    expect(out[0]?.text).toBe("N");
-    expect(out[1]).toMatchObject({ type: "heading", props: { level: 2 }, text: "B2" });
   });
 });

@@ -4,16 +4,22 @@
  * per typing burst (600 ms quiet). Every result's `revision` becomes the base
  * of the next burst: the server rejects an op on a block changed after the
  * caller's base by anyone, so a stale base would reject our own edits.
- * Rejected blocks are replaced by the server's current version and the open
- * editors reload exactly those blocks (`reloads`).
+ *
+ * Nothing the user typed is dropped on the way:
+ * - a burst the server could not take (network, 5xx) goes back to the head
+ *   of the queue and is retried with backoff ("Not saved — retrying");
+ * - a burst the server refused (4xx) is dropped and the saved version shown,
+ *   with every edit queued since re-applied on top;
+ * - a conflicted block is replaced by the server's version; edits queued
+ *   beside it stay (re-anchored when their anchor is gone).
  */
 import { toast } from "sonner";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
-import { applyOpsLocally } from "@/components/notes/sync";
-import { getNote, getNoteForTarget, listMarkColors, postNoteOps } from "@/lib/api";
+import { ApiError, getNote, getNoteForTarget, listMarkColors, postNoteOps } from "@/lib/api";
 import i18n from "@/lib/i18n";
+import { applyOpsLocally } from "@/lib/notes/ops";
 import type {
   Note,
   NoteBlock,
@@ -25,6 +31,8 @@ import type {
 } from "@/types/notes";
 
 export const FLUSH_DELAY_MS = 600;
+/** Waits before each retry of a burst the server could not take. */
+export const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000] as const;
 
 export interface NoteState {
   note: Note;
@@ -52,11 +60,13 @@ interface NotesStore {
   /** `${kind}:${id}` -> note id. */
   byTarget: Record<string, number>;
   reloads: Record<number, NoteReload>;
+  /** Notes whose last burst failed and is waiting to be retried. */
+  retrying: Record<number, boolean>;
   loadTarget: (kind: NoteTargetKind, id: number) => Promise<number>;
   loadNote: (noteId: number) => Promise<void>;
   applyLocal: (noteId: number, ops: NoteOp[]) => void;
   flush: (noteId: number) => Promise<void>;
-  onConflict: (noteId: number, rejected: RejectedOp[]) => void;
+  onConflict: (noteId: number, rejected: RejectedOp[]) => Promise<void>;
 
   activePart: Record<number, string | null>;
   setActivePart: (noteId: number, partId: string | null) => void;
@@ -104,6 +114,8 @@ const safeStorage: StateStorage = {
 const pending = new Map<number, NoteOp[]>();
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 const inflight = new Map<number, Promise<void>>();
+/** Failed attempts of the burst at the head of a note's queue. */
+const attempts = new Map<number, number>();
 let colorsRequest: Promise<void> | null = null;
 
 /** Drop every queued edit and pending flush without sending (test isolation). */
@@ -111,42 +123,197 @@ export function clearPendingNoteOps(): void {
   for (const t of timers.values()) clearTimeout(t);
   timers.clear();
   pending.clear();
+  attempts.clear();
+}
+
+/** The edits of a note not yet sent (a copy). */
+export function pendingNoteOps(noteId: number): NoteOp[] {
+  return [...(pending.get(noteId) ?? [])];
+}
+
+function mentions(op: NoteOp, id: string | null | undefined): boolean {
+  return id != null && [op.block_id, op.after, op.before, op.parent_id].includes(id);
 }
 
 function queue(noteId: number, ops: NoteOp[]) {
   const q = pending.get(noteId) ?? [];
   for (const op of ops) {
-    // Typing in one block is many updates: keep only its latest content.
-    const same =
-      op.op === "update"
-        ? q.findIndex((o) => o.op === "update" && o.block_id === op.block_id)
-        : -1;
+    // Typing in one block is many updates: keep only its latest content,
+    // unless something later in the queue touches that block (a delete and
+    // an undo between two typing runs must keep their order).
+    let same = -1;
+    if (op.op === "update") {
+      for (let i = q.length - 1; i >= 0; i--) {
+        if (q[i]!.op === "update" && q[i]!.block_id === op.block_id) {
+          same = i;
+          break;
+        }
+      }
+      if (same >= 0 && q.slice(same + 1).some((o) => mentions(o, op.block_id))) same = -1;
+    }
     if (same >= 0) q[same] = op;
     else q.push(op);
   }
   pending.set(noteId, q);
 }
 
-function touches(op: NoteOp, ids: Set<string>): boolean {
-  return [op.block_id, op.after, op.before, op.parent_id].some((x) => x != null && ids.has(x));
-}
-
 function bump(reloads: Record<number, NoteReload>, noteId: number, blockIds: string[] | null) {
   return { ...reloads, [noteId]: { seq: (reloads[noteId]?.seq ?? 0) + 1, blockIds } };
+}
+
+type Placement = Pick<NoteOp, "parent_id" | "after" | "before">;
+
+/** Where a block stood, named by blocks that are still there: after its
+ * previous surviving sibling, else before its next one, else under its
+ * parent (or where that parent stood). `exclude` is the block being placed. */
+function placeInsteadOf(
+  blocks: NoteBlock[],
+  id: string,
+  gone: Set<string>,
+  exclude: string | null | undefined,
+): Placement {
+  const b = blocks.find((x) => x.id === id);
+  if (!b) return { parent_id: null };
+  const sibs = blocks.filter((x) => x.parent_id === b.parent_id && x.id !== exclude);
+  const i = sibs.findIndex((x) => x.id === id);
+  const prev = sibs.slice(0, i).reverse().find((x) => !gone.has(x.id));
+  if (prev) return { parent_id: b.parent_id, after: prev.id };
+  const next = sibs.slice(i + 1).find((x) => !gone.has(x.id));
+  if (next) return { parent_id: b.parent_id, before: next.id };
+  if (b.parent_id !== null && gone.has(b.parent_id)) {
+    return placeInsteadOf(blocks, b.parent_id, gone, exclude);
+  }
+  return { parent_id: b.parent_id };
+}
+
+/** Queued ops placed by a block that is gone, placed where it stood. */
+function reanchor(ops: NoteOp[], blocks: NoteBlock[], gone: Set<string>): NoteOp[] {
+  return ops.map((op) => {
+    const anchors = [op.after, op.before, op.parent_id];
+    const lost = anchors.find((a) => a != null && gone.has(a));
+    if (lost == null) return op;
+    const placed: NoteOp = { ...op };
+    delete placed.after;
+    delete placed.before;
+    delete placed.parent_id;
+    return { ...placed, ...placeInsteadOf(blocks, lost, gone, op.block_id) };
+  });
 }
 
 export const useNotesStore = create<NotesStore>()(
   persist(
     (set, get) => {
-      const schedule = (noteId: number) => {
+      const schedule = (noteId: number, delay: number = FLUSH_DELAY_MS) => {
+        // A burst waiting to be retried keeps its backoff: typing does not
+        // hammer a failing server.
+        if (attempts.has(noteId) && timers.has(noteId) && delay === FLUSH_DELAY_MS) return;
         clearTimeout(timers.get(noteId));
         timers.set(
           noteId,
           setTimeout(() => {
             timers.delete(noteId);
             void get().flush(noteId);
-          }, FLUSH_DELAY_MS),
+          }, delay),
         );
+      };
+
+      const setRetrying = (noteId: number, on: boolean) => {
+        if ((get().retrying[noteId] ?? false) !== on) {
+          set((s) => ({ retrying: { ...s.retrying, [noteId]: on } }));
+        }
+      };
+
+      /** Load the saved note and put the edits not yet sent back on top. */
+      const reload = async (noteId: number) => {
+        const d = await getNote(noteId);
+        set((s) => {
+          const queued = pending.get(noteId) ?? [];
+          const cur = s.notes[noteId];
+          return {
+            notes: {
+              ...s.notes,
+              [noteId]: {
+                note: d.note,
+                blocks: applyOpsLocally(noteId, d.blocks, queued),
+                suggestions: d.suggestions,
+                comments: d.comments,
+                // Queued edits were made on the older base: keep it, so a
+                // block changed meanwhile still comes back as a conflict.
+                revision:
+                  queued.length && cur ? Math.min(cur.revision, d.note.revision) : d.note.revision,
+              },
+            },
+            reloads: bump(s.reloads, noteId, null),
+          };
+        });
+      };
+
+      const resolveConflict = async (
+        noteId: number,
+        rejected: RejectedOp[],
+        sent: NoteOp[],
+      ): Promise<void> => {
+        const ids = new Set(rejected.map((r) => r.block_id).filter(Boolean));
+        const cur = get().notes[noteId];
+        if (!ids.size || !cur) return;
+        const local = new Map(cur.blocks.map((b) => [b.id, b]));
+        const gone = new Set(rejected.filter((r) => r.block_id && !r.current).map((r) => r.block_id));
+        // Edits OF a conflicted block were made on the version we lost to;
+        // edits placed BESIDE it are the user's words and stay.
+        const q = (pending.get(noteId) ?? []).filter((op) => !(op.block_id && ids.has(op.block_id)));
+        pending.set(noteId, reanchor(q, cur.blocks, gone));
+
+        const movedInBurst = new Set(sent.filter((o) => o.op === "move").map((o) => o.block_id));
+        const structural = rejected.some(
+          (r) =>
+            !r.current ||
+            !local.has(r.block_id) ||
+            local.get(r.block_id)!.parent_id !== r.current.parent_id ||
+            movedInBurst.has(r.block_id),
+        );
+        const sectionKept = rejected.some((r) => r.reason === "invalid" && r.current?.type === "section");
+        toast(
+          sectionKept
+            ? i18n.t(
+                "notes:sectionNotEmpty",
+                "This section still has notes under it. Delete them first, then the heading.",
+              )
+            : i18n.t("notes:conflict", "Updated from another view"),
+        );
+
+        if (structural) {
+          // Where a block sits is only known to the server: reload the note
+          // (queued edits re-applied on top).
+          try {
+            await reload(noteId);
+            return;
+          } catch {
+            /* offline: fall back to the blocks we were given */
+          }
+        }
+        set((s) => {
+          const now = s.notes[noteId];
+          if (!now) return {};
+          let blocks = now.blocks;
+          for (const r of rejected) {
+            if (!r.block_id) continue;
+            const current = r.current;
+            if (current) {
+              blocks = blocks.some((b) => b.id === r.block_id)
+                ? blocks.map((b) => (b.id === r.block_id ? current : b))
+                : [...blocks, current];
+            } else {
+              const gonePlace = placeInsteadOf(blocks, r.block_id, gone, null);
+              blocks = blocks
+                .filter((b) => b.id !== r.block_id)
+                .map((b) => (b.parent_id === r.block_id ? { ...b, parent_id: gonePlace.parent_id ?? null } : b));
+            }
+          }
+          return {
+            notes: { ...s.notes, [noteId]: { ...now, blocks } },
+            reloads: bump(s.reloads, noteId, structural ? null : [...ids]),
+          };
+        });
       };
 
       const send = async (noteId: number) => {
@@ -154,57 +321,58 @@ export const useNotesStore = create<NotesStore>()(
         const state = get().notes[noteId];
         if (!ops?.length || !state) return;
         pending.delete(noteId);
+        let res;
         try {
-          const res = await postNoteOps(noteId, { base_revision: state.revision, ops });
-          const applied = new Set(res.applied);
-          set((s) => {
-            const cur = s.notes[noteId];
-            if (!cur) return {};
-            return {
-              notes: {
-                ...s.notes,
-                [noteId]: {
-                  ...cur,
-                  revision: res.revision,
-                  note: { ...cur.note, revision: res.revision },
-                  blocks: cur.blocks.map((b) =>
-                    applied.has(b.id) ? { ...b, changed_rev: res.revision } : b,
-                  ),
-                },
-              },
-            };
-          });
-          if (res.rejected.length) get().onConflict(noteId, res.rejected);
-        } catch {
-          // A failed burst leaves the local copy ahead of the server: show
-          // the saved version rather than keep edits that were never stored.
-          toast.error(i18n.t("notes:saveFailed", "Couldn't save your note. Showing the saved version."));
-          pending.delete(noteId);
-          await reload(noteId).catch(() => undefined); // offline: the next load catches up
+          res = await postNoteOps(noteId, { base_revision: state.revision, ops });
+        } catch (err) {
+          if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+            // The server refused this burst: it can never land. Show the
+            // saved version; edits queued since stay and are re-applied.
+            attempts.delete(noteId);
+            setRetrying(noteId, false);
+            toast.error(
+              i18n.t("notes:saveRefused", "Couldn't save that change. Showing the saved version."),
+            );
+            await reload(noteId).catch(() => undefined); // the queue is kept either way
+            return;
+          }
+          // The server could not take it (offline, 5xx): back to the head of
+          // the queue, ahead of anything typed meanwhile, and retry later.
+          pending.set(noteId, [...ops, ...(pending.get(noteId) ?? [])]);
+          const n = (attempts.get(noteId) ?? 0) + 1;
+          attempts.set(noteId, n);
+          setRetrying(noteId, true);
+          schedule(noteId, RETRY_DELAYS_MS[Math.min(n, RETRY_DELAYS_MS.length) - 1]);
+          return;
         }
-      };
-
-      const reload = async (noteId: number) => {
-        const d = await getNote(noteId);
-        set((s) => ({
-          notes: {
-            ...s.notes,
-            [noteId]: {
-              note: d.note,
-              blocks: d.blocks,
-              suggestions: d.suggestions,
-              comments: d.comments,
-              revision: d.note.revision,
+        attempts.delete(noteId);
+        setRetrying(noteId, false);
+        const applied = new Set(res.applied);
+        set((s) => {
+          const cur = s.notes[noteId];
+          if (!cur) return {};
+          return {
+            notes: {
+              ...s.notes,
+              [noteId]: {
+                ...cur,
+                revision: res.revision,
+                note: { ...cur.note, revision: res.revision },
+                blocks: cur.blocks.map((b) =>
+                  applied.has(b.id) ? { ...b, changed_rev: res.revision } : b,
+                ),
+              },
             },
-          },
-          reloads: bump(s.reloads, noteId, null),
-        }));
+          };
+        });
+        if (res.rejected.length) await resolveConflict(noteId, res.rejected, ops);
       };
 
       return {
         notes: {},
         byTarget: {},
         reloads: {},
+        retrying: {},
 
         loadTarget: async (kind, id) => {
           const known = get().byTarget[`${kind}:${id}`];
@@ -212,15 +380,17 @@ export const useNotesStore = create<NotesStore>()(
           const d = await getNoteForTarget(kind, id);
           set((s) => {
             const prev = s.notes[d.note.id];
+            const queued = pending.get(d.note.id) ?? [];
             return {
               notes: {
                 ...s.notes,
                 [d.note.id]: {
                   note: d.note,
-                  blocks: d.blocks,
+                  blocks: applyOpsLocally(d.note.id, d.blocks, queued),
                   suggestions: prev?.suggestions ?? [],
                   comments: prev?.comments ?? [],
-                  revision: d.note.revision,
+                  revision:
+                    queued.length && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
                 },
               },
               byTarget: { ...s.byTarget, [`${kind}:${id}`]: d.note.id },
@@ -264,39 +434,10 @@ export const useNotesStore = create<NotesStore>()(
           } finally {
             inflight.delete(noteId);
           }
-          if (pending.get(noteId)?.length) schedule(noteId);
+          if (pending.get(noteId)?.length && !timers.has(noteId)) schedule(noteId);
         },
 
-        onConflict: (noteId, rejected) => {
-          const ids = new Set(rejected.map((r) => r.block_id).filter(Boolean));
-          if (!ids.size) return;
-          // Queued edits of those blocks were made on the version we lost to.
-          const q = pending.get(noteId);
-          if (q) pending.set(noteId, q.filter((op) => !touches(op, ids)));
-          set((s) => {
-            const cur = s.notes[noteId];
-            if (!cur) return {};
-            let blocks = cur.blocks;
-            for (const r of rejected) {
-              if (!r.block_id) continue;
-              if (r.current) {
-                const at = blocks.findIndex((b) => b.id === r.block_id);
-                const current = r.current;
-                blocks =
-                  at >= 0
-                    ? blocks.map((b) => (b.id === r.block_id ? current : b))
-                    : [...blocks, current];
-              } else {
-                blocks = applyOpsLocally(noteId, blocks, [{ op: "delete", block_id: r.block_id }]);
-              }
-            }
-            return {
-              notes: { ...s.notes, [noteId]: { ...cur, blocks } },
-              reloads: bump(s.reloads, noteId, [...ids]),
-            };
-          });
-          toast(i18n.t("notes:conflict", "Updated from another view"));
-        },
+        onConflict: (noteId, rejected) => resolveConflict(noteId, rejected, []),
 
         activePart: {},
         setActivePart: (noteId, partId) =>

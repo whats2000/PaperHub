@@ -1,7 +1,9 @@
 {
   "loading": "正在載入筆記…",
-  "saveFailed": "無法儲存筆記，已顯示已儲存的版本。",
+  "saveRefused": "無法儲存這項變更，已顯示已儲存的版本。",
+  "retrying": "尚未儲存，正在重試",
   "conflict": "已依另一個視窗的內容更新",
+  "sectionNotEmpty": "這個章節下仍有筆記。請先刪除筆記，再刪除標題。",
   "color": {
     "green": "關鍵結果",
     "blue": "方法",
@@ -20,12 +22,14 @@
     "hideOriginal": "隱藏原文",
     "anchorLost": "錨點遺失：論文重新匯入後找不到這段文字。你的引文仍保留。",
     "piecesLost": "{{total}} 段中有 {{lost}} 段遺失",
-    "showInPaper": "在論文中顯示這段文字",
     "thePaper": "論文",
     "latexByModel": "LaTeX 由模型轉寫 · 請對照頁面確認",
     "ocrText": "OCR 文字 · 請對照截圖確認數字",
     "layerText": "方框下的文字，取自頁面的文字層",
-    "pageCrop": "第 {{page}} 頁截圖"
+    "pageCrop": "第 {{page}} 頁截圖",
+    "page": "第 {{page}} 頁",
+    "openInPaper": "在論文中開啟",
+    "openInPaperNamed": "在論文中開啟：{{where}}"
   },
   "math": {
     "edit": "點擊以編輯 LaTeX",

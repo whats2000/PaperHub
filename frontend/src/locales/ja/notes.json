@@ -1,7 +1,9 @@
 {
   "loading": "ノートを読み込んでいます…",
-  "saveFailed": "ノートを保存できませんでした。保存済みの版を表示しています。",
+  "saveRefused": "この変更を保存できませんでした。保存済みの版を表示しています。",
+  "retrying": "未保存 — 再試行しています",
   "conflict": "別の画面での変更を反映しました",
+  "sectionNotEmpty": "このセクションにはまだノートがあります。ノートを先に削除してから見出しを削除してください。",
   "color": {
     "green": "重要な結果",
     "blue": "手法",
@@ -20,12 +22,14 @@
     "hideOriginal": "原文を隠す",
     "anchorLost": "アンカーが失われました：論文の再取り込み後に見つかりません。引用は残っています。",
     "piecesLost": "{{total}} か所中 {{lost}} か所が見つかりません",
-    "showInPaper": "この箇所を論文で表示",
     "thePaper": "論文",
     "latexByModel": "LaTeX はモデルによる書き起こし · ページと照合してください",
     "ocrText": "OCR テキスト · 数値は切り抜きと照合してください",
     "layerText": "枠内の文字（ページのテキストレイヤーより）",
-    "pageCrop": "{{page}} ページの切り抜き"
+    "pageCrop": "{{page}} ページの切り抜き",
+    "page": "p. {{page}}",
+    "openInPaper": "論文で開く",
+    "openInPaperNamed": "論文で開く：{{where}}"
   },
   "math": {
     "edit": "クリックして LaTeX を編集",

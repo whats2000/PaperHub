@@ -1,7 +1,9 @@
 {
   "loading": "Loading the note…",
-  "saveFailed": "Couldn't save your note. Showing the saved version.",
+  "saveRefused": "Couldn't save that change. Showing the saved version.",
+  "retrying": "Not saved — retrying",
   "conflict": "Updated from another view",
+  "sectionNotEmpty": "This section still has notes under it. Delete them first, then the heading.",
   "color": {
     "green": "Key result",
     "blue": "Method",
@@ -20,12 +22,14 @@
     "hideOriginal": "Hide original",
     "anchorLost": "Anchor lost: not found after the paper was re-ingested. Your quote is kept.",
     "piecesLost": "{{lost}} of {{total}} pieces lost",
-    "showInPaper": "Show this passage in the paper",
     "thePaper": "The paper",
     "latexByModel": "LaTeX transcribed by the model · check it against the page",
     "ocrText": "OCR text · check numbers against the crop",
     "layerText": "Text under the box, from the page's text layer",
-    "pageCrop": "Page {{page}} crop"
+    "pageCrop": "Page {{page}} crop",
+    "page": "p. {{page}}",
+    "openInPaper": "Open in the paper",
+    "openInPaperNamed": "Open in the paper: {{where}}"
   },
   "math": {
     "edit": "Click to edit the LaTeX",

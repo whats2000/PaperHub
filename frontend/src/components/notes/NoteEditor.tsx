@@ -25,13 +25,13 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { listLibrary } from "@/lib/api";
+import { propText } from "@/lib/notes/ops";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { noteSchema, paperhubKeys } from "./schema";
 import {
   diffDocuments,
-  propText,
   pruneUnsavedEmpty,
   toEditorBlocks,
   treeIds,

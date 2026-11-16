@@ -1,7 +1,9 @@
 {
   "loading": "正在加载笔记…",
-  "saveFailed": "无法保存笔记，已显示已保存的版本。",
+  "saveRefused": "无法保存这项更改，已显示已保存的版本。",
+  "retrying": "尚未保存，正在重试",
   "conflict": "已按另一个视图的内容更新",
+  "sectionNotEmpty": "这个章节下仍有笔记。请先删除笔记，再删除标题。",
   "color": {
     "green": "关键结果",
     "blue": "方法",
@@ -20,12 +22,14 @@
     "hideOriginal": "隐藏原文",
     "anchorLost": "锚点丢失：论文重新导入后找不到这段文字。你的引文仍保留。",
     "piecesLost": "{{total}} 段中有 {{lost}} 段丢失",
-    "showInPaper": "在论文中显示这段文字",
     "thePaper": "论文",
     "latexByModel": "LaTeX 由模型转写 · 请对照页面确认",
     "ocrText": "OCR 文字 · 请对照截图确认数字",
     "layerText": "方框下的文字，取自页面的文字层",
-    "pageCrop": "第 {{page}} 页截图"
+    "pageCrop": "第 {{page}} 页截图",
+    "page": "第 {{page}} 页",
+    "openInPaper": "在论文中打开",
+    "openInPaperNamed": "在论文中打开：{{where}}"
   },
   "math": {
     "edit": "点击以编辑 LaTeX",

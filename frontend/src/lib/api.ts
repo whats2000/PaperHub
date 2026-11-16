@@ -78,6 +78,16 @@ import type {
 export const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
 
+/** A non-2xx response; `status` tells a refused request (4xx) from a failing server. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, body: string) {
+    super(`API ${status}: ${body}`);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function apiFetch<T>(
   path: string,
   init?: RequestInit,
@@ -88,7 +98,7 @@ async function apiFetch<T>(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    throw new ApiError(res.status, text);
   }
   // 204 No Content
   if (res.status === 204) return undefined as T;
