@@ -105,43 +105,62 @@ function lastAction() {
 }
 
 describe("Resolve and Delete with Undo", () => {
-  it("Resolve → Undo → Resolve again", () => {
+  it("Resolve → Undo → Resolve again", async () => {
     const strip = vi.fn();
     const restore = vi.fn();
     const setStatus = vi.fn().mockResolvedValue(undefined);
     runThreadAction({ kind: "resolve", strip, restore, setStatus, t });
 
     expect(strip).toHaveBeenCalledTimes(1);
-    expect(setStatus).toHaveBeenLastCalledWith("resolved");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("resolved"));
     expect(lastAction()).toMatchObject({ text: "Comment resolved", label: "Undo" });
 
     act(() => lastAction().onClick());
     expect(restore).toHaveBeenCalledTimes(1);
-    expect(setStatus).toHaveBeenLastCalledWith("open");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("open"));
     expect(lastAction()).toMatchObject({ text: "Comment restored", label: "Resolve again" });
 
     act(() => lastAction().onClick());
     expect(strip).toHaveBeenCalledTimes(2);
-    expect(setStatus).toHaveBeenLastCalledWith("resolved");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("resolved"));
     expect(lastAction()).toMatchObject({ text: "Comment resolved", label: "Undo" });
   });
 
-  it("Delete goes to the server at once; Undo reopens it and puts the words back", () => {
+  it("Delete goes to the server at once; Undo reopens it and puts the words back", async () => {
     const strip = vi.fn();
     const restore = vi.fn();
     const setStatus = vi.fn().mockResolvedValue(undefined);
     runThreadAction({ kind: "delete", strip, restore, setStatus, t });
-    expect(setStatus).toHaveBeenLastCalledWith("deleted");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("deleted"));
     expect(lastAction()).toMatchObject({ text: "Comment deleted", label: "Undo" });
 
     act(() => lastAction().onClick());
-    expect(setStatus).toHaveBeenLastCalledWith("open");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("open"));
     expect(restore).toHaveBeenCalledTimes(1);
     expect(lastAction()).toMatchObject({ text: "Comment restored", label: "Delete again" });
 
     act(() => lastAction().onClick());
     expect(strip).toHaveBeenCalledTimes(2);
-    expect(setStatus).toHaveBeenLastCalledWith("deleted");
+    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("deleted"));
+  });
+
+  it("sends Undo only after the status call before it has finished", async () => {
+    const calls: string[] = [];
+    let release: () => void = () => undefined;
+    const setStatus = vi.fn((status: string) => {
+      calls.push(status);
+      return calls.length === 1
+        ? new Promise<void>((r) => {
+            release = r;
+          })
+        : Promise.resolve();
+    });
+    runThreadAction({ kind: "delete", strip: vi.fn(), restore: vi.fn(), setStatus, t });
+    act(() => lastAction().onClick()); // Undo while "deleted" is still in flight
+    await Promise.resolve();
+    expect(calls).toEqual(["deleted"]);
+    release();
+    await waitFor(() => expect(calls).toEqual(["deleted", "open"]));
   });
 
   it("does not undo twice", () => {

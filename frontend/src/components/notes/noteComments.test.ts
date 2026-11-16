@@ -73,6 +73,27 @@ describe("the comment style", () => {
     expect(runs.filter((r) => r.styles.comment === "c_2").map((r) => r.text).join("")).toBe("bold word");
   });
 
+  it("only looks in the block's own text, not in its child blocks", () => {
+    const editor = makeEditor([], [{
+      id: "p1", type: "paragraph", content: "parent words",
+      children: [{ id: "k1", type: "paragraph", content: "child has the quote" }],
+    }]);
+    expect(applyCommentStyle(editor, "c_1", "p1", "quote")).toBe(false);
+    expect(applyCommentStyle(editor, "c_1", "k1", "quote")).toBe(true);
+    const kid = (editor.document[0] as unknown as { children: { content: { text: string; styles: Record<string, unknown> }[] }[] }).children[0]!;
+    expect(kid.content.filter((r) => r.styles.comment === "c_1").map((r) => r.text)).toEqual(["quote"]);
+    const parent = editor.document[0]!.content as { styles: Record<string, unknown> }[];
+    expect(parent.some((r) => r.styles.comment)).toBe(false);
+  });
+
+  it("marks the occurrence nearest the given position", () => {
+    const editor = makeEditor([], para("the cat and the dog"));
+    // block text starts at position 3; the second "the" is at index 12
+    expect(applyCommentStyle(editor, "c_1", "p1", "the", 15)).toBe(true);
+    const runs = editor.document[0]!.content as { text: string; styles: Record<string, unknown> }[];
+    expect(runs.map((r) => [r.text, !!r.styles.comment])).toEqual([["the cat and ", false], ["the", true], [" dog", false]]);
+  });
+
   it("returns false and leaves the text alone when the quote is gone", () => {
     const editor = makeEditor([], para("something else"));
     expect(applyCommentStyle(editor, "c_1", "p1", "this")).toBe(false);

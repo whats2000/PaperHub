@@ -1305,7 +1305,8 @@ export async function replyToNoteComment(commentId: string, text: string): Promi
   });
 }
 
-/** open <-> resolved, or deleted (a deleted thread cannot come back: 409). */
+/** open <-> resolved, or deleted. A deleted thread only goes back to open (the
+ * Undo of Delete); anything else on it is a 409. */
 export async function setNoteCommentStatus(
   commentId: string,
   status: NoteCommentStatus,

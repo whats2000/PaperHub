@@ -104,7 +104,7 @@ interface NotesStore {
    * must exist on the server). Returns the new thread. */
   addComment: (noteId: number, blockId: string, quote: string, text: string) => Promise<NoteComment>;
   replyComment: (noteId: number, commentId: string, text: string) => Promise<NoteComment>;
-  /** `deleted` drops the thread from the list. */
+  /** `deleted` drops the thread from the list; `open` lists it again. */
   setCommentStatus: (noteId: number, commentId: string, status: NoteCommentStatus) => Promise<void>;
 }
 
@@ -743,11 +743,13 @@ export const useNotesStore = create<NotesStore>()(
         },
         setCommentStatus: async (noteId, commentId, status) => {
           const thread = await setNoteCommentStatus(commentId, status);
-          writeComments(noteId, (list) =>
-            status === "deleted"
-              ? list.filter((c) => c.id !== commentId)
-              : list.map((c) => (c.id === commentId ? thread : c)),
-          );
+          writeComments(noteId, (list) => {
+            if (status === "deleted") return list.filter((c) => c.id !== commentId);
+            // A thread brought back after Delete is not in the list any more.
+            return list.some((c) => c.id === commentId)
+              ? list.map((c) => (c.id === commentId ? thread : c))
+              : [...list, thread].sort((a, b) => a.created_at.localeCompare(b.created_at));
+          });
         },
 
         colorNames: {},

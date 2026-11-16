@@ -677,4 +677,28 @@ describe("useNotesStore", () => {
     useNotesStore.getState().toggleFold(7, "d1");
     expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
+
+  it("lists a deleted thread again when it is reopened (the Undo of Delete)", async () => {
+    const thread = {
+      id: "c_1", note_id: 7, block_id: "a", quote: "A", status: "open" as const,
+      created_at: "2026-11-16T10:00:00Z", items: [{ id: 1, text: "hm", created_at: "2026-11-16T10:00:00Z" }],
+    };
+    server.use(
+      http.patch(`${API_BASE_URL}/notes/comments/c_1`, async ({ request }) => {
+        const { status } = (await request.json()) as { status: string };
+        return HttpResponse.json({ ...thread, status });
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.setState((s) => ({
+      notes: { ...s.notes, 7: { ...s.notes[7]!, comments: [thread] } },
+    }));
+    await useNotesStore.getState().setCommentStatus(7, "c_1", "deleted");
+    expect(useNotesStore.getState().notes[7]?.comments).toEqual([]);
+    await useNotesStore.getState().setCommentStatus(7, "c_1", "open");
+    expect(useNotesStore.getState().notes[7]?.comments.map((c) => [c.id, c.status])).toEqual([["c_1", "open"]]);
+    // again: no duplicate
+    await useNotesStore.getState().setCommentStatus(7, "c_1", "open");
+    expect(useNotesStore.getState().notes[7]?.comments).toHaveLength(1);
+  });
 });

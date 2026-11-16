@@ -31,10 +31,16 @@ export function runThreadAction(deps: ThreadActionDeps): void {
     ? t("notes:comment.resolveAgain", "Resolve again")
     : t("notes:comment.deleteAgain", "Delete again");
   const fail = () => void toast.error(t("notes:comment.failed", "Couldn't save the comment."));
+  // Status calls go one after another, so a quick Undo cannot overtake the
+  // Delete / Resolve before it and leave the server on the wrong side.
+  let sending: Promise<unknown> = Promise.resolve();
+  const send = (status: "open" | "resolved" | "deleted") => {
+    sending = sending.then(() => setStatus(status)).catch(fail);
+  };
 
   const apply = () => {
     strip();
-    void setStatus(resolve ? "resolved" : "deleted").catch(fail);
+    send(resolve ? "resolved" : "deleted");
     let undone = false;
     toast(done, {
       duration: UNDO_MS,
@@ -43,7 +49,7 @@ export function runThreadAction(deps: ThreadActionDeps): void {
         onClick: () => {
           if (undone) return;
           undone = true;
-          void setStatus("open").catch(fail);
+          send("open");
           restore();
           toast(t("notes:comment.restored", "Comment restored"), {
             duration: UNDO_MS,

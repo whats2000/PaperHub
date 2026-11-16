@@ -586,6 +586,33 @@ describe("comments in the editor", () => {
     });
   });
 
+  it("a thread brought back after Delete opens again on a click on its words", async () => {
+    const thread = {
+      id: "c_5", note_id: 7, block_id: "p1", quote: "Mine", status: "open" as const,
+      created_at: "2026-11-16T10:00:00Z", items: [{ id: 1, text: "back again", created_at: "2026-11-16T10:00:00Z" }],
+    };
+    server.use(
+      http.patch(`${API_BASE_URL}/notes/comments/c_5`, async ({ request }) => {
+        const { status } = (await request.json()) as { status: string };
+        return HttpResponse.json({ ...thread, status });
+      }),
+    );
+    seed([blk("p1", { content: [{ type: "text", text: "Mine", styles: { comment: "c_5" } }], text: "Mine" })]);
+    useNotesStore.setState((st) => ({ notes: { ...st.notes, 7: { ...st.notes[7]!, comments: [thread] } } }));
+    mount();
+    const words = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('.note-comment[data-comment-id="c_5"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    await act(() => useNotesStore.getState().setCommentStatus(7, "c_5", "deleted"));
+    fireEvent.click(words);
+    expect(screen.queryByTestId("comment-thread")).toBeNull();
+    await act(() => useNotesStore.getState().setCommentStatus(7, "c_5", "open"));
+    fireEvent.click(words);
+    expect(await screen.findByText("back again")).toBeInTheDocument();
+  });
+
   it("Ctrl+Shift+M with nothing selected does nothing", async () => {
     seed([blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" })]);
     mount();
