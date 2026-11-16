@@ -508,6 +508,14 @@ describe("Ideas page: an explore scope with no ideas yet", () => {
     expect(screen.getByTestId("hull-label-1")).toHaveTextContent("Vision");
     expect(screen.getByTestId("hull-label-2")).toHaveTextContent("Language");
   });
+
+  it("slides the graph and cards views: the transition covers Tailwind v4's `translate`", async () => {
+    render(<IdeasPage />);
+    for (const view of ["graph", "cards"]) {
+      const slot = await screen.findByTestId(`ideas-${view}-view`);
+      expect(slot.className).toMatch(/transition-\[opacity,translate\]/);
+    }
+  });
 });
 
 describe("Ideas page: reading a document", () => {

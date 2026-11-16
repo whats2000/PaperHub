@@ -136,7 +136,7 @@ function ViewSlot({ view, active, children }: { view: IdeationView; active: bool
       inert={!active}
       aria-hidden={active ? undefined : true}
       className={cn(
-        "absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+        "absolute inset-0 flex min-h-0 flex-col transition-[opacity,translate] duration-200 ease-out motion-reduce:transition-none",
         active ? "translate-x-0 opacity-100" : cn(away, "pointer-events-none opacity-0"),
       )}
     >
