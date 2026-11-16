@@ -240,6 +240,42 @@
     border: 1px solid var(--note-code-border);
     border-radius: 8px;
 }
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] {
+    position: relative;
+}
+/* BlockNote paints the language select white: keep it readable on both themes. */
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select {
+    color: var(--note-code-fg);
+}
+.paperhub-notes .note-code-copy {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    padding: 0 6px;
+    height: 22px;
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--muted-foreground);
+    background: transparent;
+    opacity: 0;
+    transition: opacity 120ms ease-out, color 150ms ease-out, background-color 150ms ease-out;
+}
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"]:hover .note-code-copy,
+.paperhub-notes .note-code-copy:focus-visible,
+.paperhub-notes .note-code-copy[data-copied] {
+    opacity: 1;
+}
+.paperhub-notes .note-code-copy:hover {
+    background-color: var(--accent);
+    color: var(--foreground);
+}
+.paperhub-notes .note-code-copy[data-copied] {
+    color: var(--foreground);
+    background-color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+    .paperhub-notes .note-code-copy { transition: none; }
+}
 .paperhub-notes .bn-block-content[data-content-type="codeBlock"] code {
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: 0.85em;
@@ -257,6 +293,7 @@
     color: transparent;
     border-radius: 3px;
     cursor: pointer;
+    caret-color: var(--foreground);
     transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 .note-hidden[data-shown] {

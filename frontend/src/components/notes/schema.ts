@@ -6,15 +6,14 @@
  */
 import {
   BlockNoteSchema,
-  createCodeBlockSpec,
   createExtension,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
   defaultStyleSpecs,
 } from "@blocknote/core";
-import { codeBlockOptions } from "@blocknote/code-block";
 
 import { calloutBlock } from "./blocks/CalloutBlock";
+import { codeBlockWithCopy } from "./blocks/CodeBlock";
 import { hiddenStyle } from "./blocks/HiddenStyle";
 import { mathBlock } from "./blocks/MathBlock";
 import { mentionInline } from "./blocks/MentionChip";
@@ -43,7 +42,7 @@ export const noteSchema = BlockNoteSchema.create({
     checkListItem,
     quote,
     divider,
-    codeBlock: createCodeBlockSpec(codeBlockOptions),
+    codeBlock: codeBlockWithCopy(),
     callout: calloutBlock(),
     math: mathBlock(),
     section: sectionBlock(),
