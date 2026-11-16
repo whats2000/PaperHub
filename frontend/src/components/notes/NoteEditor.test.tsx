@@ -726,6 +726,45 @@ describe("dividers, Focus and folding", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("textbox", { name: "LaTeX" }));
   });
 
+  it("shows the formatting bar for selected words, not for a selected divider or equation", async () => {
+    seed([
+      blk("p0", { content: [{ type: "text", text: "Some words", styles: {} }], text: "Some words" }),
+      blk("d0", { type: "divider" }),
+      blk("m0", { type: "math", props: { latex: "x" } }),
+    ]);
+    // jsdom has no Range geometry; the bar is placed from it.
+    const range = Range.prototype as unknown as Record<"getClientRects" | "getBoundingClientRect", unknown>;
+    const had = { rects: range.getClientRects, box: range.getBoundingClientRect };
+    range.getClientRects = () => [];
+    range.getBoundingClientRect = () => new DOMRect();
+    onTestFinished(() => {
+      range.getClientRects = had.rects;
+      range.getBoundingClientRect = had.box;
+    });
+    mount();
+    const { NodeSelection, TextSelection } = await import("@tiptap/pm/state");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: import("@tiptap/pm/view").EditorView };
+    };
+    const view = pm.editor.view;
+    const posOf = (name: string) => {
+      let at = -1;
+      view.state.doc.descendants((n, pos) => {
+        if (at < 0 && n.type.name === name) at = pos;
+      });
+      return at;
+    };
+    act(() => {
+      pm.focus();
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3, 7)));
+    });
+    await waitFor(() => expect(document.querySelector('[data-test="bold"]')).not.toBeNull());
+    for (const name of ["divider", "math"]) {
+      act(() => view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, posOf(name)))));
+      await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
+    }
+  });
+
   const p4 = blk("p4", { content: [{ type: "text", text: "Fourth", styles: {} }], text: "Fourth" });
   const outer = (id: string) => document.querySelector(`.bn-block-outer[data-id="${id}"]`)!;
 

@@ -14,6 +14,7 @@ import {
 } from "@blocknote/react";
 import { AtSign, Bold, Code, EyeOff, Italic, MessageSquare, Quote, Strikethrough, Underline } from "lucide-react";
 import type { ReactNode } from "react";
+import { NodeSelection } from "@tiptap/pm/state";
 import { useTranslation } from "react-i18next";
 
 import type { noteSchema } from "./schema";
@@ -49,6 +50,9 @@ function Bar({ onComment }: { onComment?: () => void }) {
     editor,
     selector: ({ editor: e }) => {
       if (!e.isEditable) return undefined;
+      // A selected divider, equation or reference has no words to format
+      // (BlockNote shows its bar for any selected block without text).
+      if (e.prosemirrorState.selection instanceof NodeSelection) return undefined;
       const styles = e.getActiveStyles() as Record<string, unknown>;
       return {
         bold: !!styles.bold,
