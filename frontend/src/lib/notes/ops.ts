@@ -67,6 +67,9 @@ export function applyOpsLocally(noteId: number, blocks: NoteBlock[], ops: NoteOp
     const id = op.block_id ?? "";
     if (op.op === "insert" && op.block) {
       const { type, props, content = null, section_key = null } = op.block;
+      // An insert naming a block we already hold (a burst the server saved
+      // but never confirmed, replayed on a reload) replaces it.
+      out = out.filter((b) => b.id !== id);
       out = place(out, {
         id,
         note_id: noteId,

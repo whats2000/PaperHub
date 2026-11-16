@@ -32,4 +32,16 @@ describe("applyOpsLocally", () => {
     expect(out[0]?.text).toBe("N");
     expect(out[1]).toMatchObject({ type: "heading", props: { level: 2 }, text: "B2" });
   });
+
+  it("replaces a block an insert names again instead of adding a second copy", () => {
+    const blocks = [nb("a", null), nb("n", null, "old"), nb("b", null)];
+    const out = applyOpsLocally(1, blocks, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "new" }, parent_id: null, after: "b" },
+    ]);
+    expect(out.map((b) => [b.id, b.text])).toEqual([
+      ["a", "a"],
+      ["b", "b"],
+      ["n", "new"],
+    ]);
+  });
 });
