@@ -27,9 +27,6 @@ export function sectionLabel(section: string): string {
   return section === FULL_TEXT_SECTION ? i18n.t("ideas:section.fullText", "Full text") : section;
 }
 
-/** The note saves this long after the last keystroke. */
-export const NOTE_DEBOUNCE_MS = 500;
-
 const isReason = (r: string): r is DismissReason => (DISMISS_REASONS as readonly string[]).includes(r);
 
 /** The idea's dismissal reasons in the UI language, comma-joined. */

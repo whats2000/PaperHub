@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BookOpen,
   CircleCheck,
@@ -16,12 +16,13 @@ import { toast } from "sonner";
 
 import { DismissForm } from "@/components/ideas/DismissForm";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { NOTE_DEBOUNCE_MS, openIdeaChat, sectionLabel, useReasonText } from "@/lib/ideaActions";
+import { NoteEditor } from "@/components/notes/NoteEditor";
+import { openIdeaChat, sectionLabel, useReasonText } from "@/lib/ideaActions";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useIdeationStore, matchesFilter } from "@/store/ideation";
+import { useNotesStore } from "@/store/notes";
 import type { DismissReason, Idea, IdeaStatus } from "@/types/ideation";
 
 const STATUS_BUTTONS: { status: IdeaStatus; icon: LucideIcon; fallback: string }[] = [
@@ -97,45 +98,41 @@ export function IdeaDetail({
   const reasonText = useReasonText();
   const statusLabel = (s: IdeaStatus) => t(`graph.status.${s}`, STATUS_FALLBACK[s]);
 
-  // ---- Note autosave (debounced; a pending save flushes when the drawer leaves the idea).
-  const [note, setNote] = useState(idea.note);
-  const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; text: string } | null>(null);
-  // Each edit bumps the sequence; only the latest edit's save may say "Saved".
-  const noteSeq = useRef(0);
+  // ---- Note: the idea's note opens in the notes editor, which syncs its own edits.
   const ideaId = idea.id;
-  const saveNote = (text: string, seq: number) => {
-    pending.current = null;
-    patchIdea(ideaId, { note: text }).then(
-      () => {
-        if (seq === noteSeq.current) setNoteState("saved");
+  const loadTarget = useNotesStore((s) => s.loadTarget);
+  const [noteLoad, setNoteLoad] = useState<{ id: number; noteId: number | null; failed: boolean } | null>(null);
+  const [loadTry, setLoadTry] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    loadTarget("idea", ideaId).then(
+      (noteId) => {
+        if (!cancelled) setNoteLoad({ id: ideaId, noteId, failed: false });
       },
       () => {
-        if (seq === noteSeq.current) setNoteState("error");
+        if (!cancelled) setNoteLoad({ id: ideaId, noteId: null, failed: true });
       },
     );
-  };
-  const saveRef = useRef(saveNote);
+    return () => {
+      cancelled = true;
+    };
+  }, [ideaId, loadTarget, loadTry]);
+  const noteId = noteLoad?.id === ideaId ? noteLoad.noteId : null;
+  const noteFailed = noteLoad?.id === ideaId && noteLoad.failed;
+  // The kanban card and the drawer excerpt read `idea.note`: keep it the note's plain text.
+  const blocks = useNotesStore((s) => (noteId === null ? undefined : s.notes[noteId]?.blocks));
   useEffect(() => {
-    saveRef.current = saveNote;
-  });
-  useEffect(
-    () => () => {
-      const p = pending.current;
-      if (p) {
-        clearTimeout(p.timer);
-        saveRef.current(p.text, noteSeq.current);
-      }
-    },
-    [],
-  );
-  const onNote = (text: string) => {
-    setNote(text);
-    setNoteState("saving");
-    if (pending.current) clearTimeout(pending.current.timer);
-    const seq = ++noteSeq.current;
-    pending.current = { text, timer: setTimeout(() => saveRef.current(text, seq), NOTE_DEBOUNCE_MS) };
-  };
+    if (!blocks) return;
+    const text = blocks
+      .map((b) => b.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    useIdeationStore.setState((s) =>
+      s.graph?.ideas.some((i) => i.id === ideaId && i.note !== text)
+        ? { graph: { ...s.graph, ideas: s.graph.ideas.map((i) => (i.id === ideaId ? { ...i, note: text } : i)) } }
+        : {},
+    );
+  }, [blocks, ideaId]);
 
   // ---- Status
   const [busy, setBusy] = useState(false);
@@ -314,28 +311,33 @@ export function IdeaDetail({
         </div>
       )}
 
-      <Label>
-        <span className="flex items-center justify-between">
-          <label htmlFor={`idea-note-${idea.id}`}>{t("detail.note", "Note")}</label>
-          <span role="status" className="text-[11px]" data-testid="note-state">
-            {noteState === "saving"
-              ? t("detail.saving", "Saving…")
-              : noteState === "saved"
-                ? t("detail.saved", "Saved")
-                : noteState === "error"
-                  ? t("detail.saveFailed", "Couldn't save the note")
-                  : ""}
-          </span>
-        </span>
-      </Label>
-      <Textarea
-        id={`idea-note-${idea.id}`}
-        rows={2}
-        value={note}
-        onChange={(e) => onNote(e.target.value)}
-        placeholder={t("detail.notePlaceholder", "e.g. Discussed with my advisor; small experiment next week")}
-        className="min-h-0 text-sm"
-      />
+      <Label>{t("detail.note", "Note")}</Label>
+      <div
+        data-testid="idea-note"
+        className="max-h-80 min-h-16 overflow-auto rounded-md border bg-background"
+      >
+        {noteId !== null ? (
+          <NoteEditor noteId={noteId} variant="pane" />
+        ) : noteFailed ? (
+          <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground animate-in fade-in-0 motion-reduce:animate-none">
+            <span className="min-w-0 flex-1">{t("detail.noteLoadFailed", "Couldn't load the note.")}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setNoteLoad(null);
+                setLoadTry((n) => n + 1);
+              }}
+            >
+              {t("detail.noteRetry", "Try again")}
+            </Button>
+          </div>
+        ) : (
+          <div role="status" className="px-3 py-2 text-sm text-muted-foreground animate-in fade-in-0 motion-reduce:animate-none">
+            {t("detail.noteLoading", "Loading the note…")}
+          </div>
+        )}
+      </div>
 
       <div className="mt-4 flex gap-2">
         <Button className="flex-1" disabled={opening} onClick={() => void openChat(true)}>

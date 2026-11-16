@@ -15,6 +15,8 @@ import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useIdeationStore } from "@/store/ideation";
 import { useNavStore } from "@/store/nav";
+import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
+import type { NoteOpsBody } from "@/types/notes";
 import { FULL_TEXT_SECTION, type GraphResponse, type Idea, type IdeaPatch } from "@/types/ideation";
 
 import { IdeaDetail } from "./IdeaDetail";
@@ -63,8 +65,36 @@ const patchedIds: number[] = [];
 let patchDelayMs = 0;
 const undoCalls: number[] = [];
 const chatCalls: number[] = [];
+const noteTargets: string[] = [];
+const postedOps: NoteOpsBody[] = [];
+let noteFails = false;
 
 const server = setupServer(
+  http.get(`${API_BASE_URL}/marks/colors`, () => HttpResponse.json([])),
+  http.get(`${API_BASE_URL}/notes/target`, ({ request }) => {
+    const u = new URL(request.url);
+    noteTargets.push(`${u.searchParams.get("kind")}:${u.searchParams.get("id")}`);
+    if (noteFails) return HttpResponse.json({ detail: "boom" }, { status: 500 });
+    return HttpResponse.json({
+      note: { id: 70, target_kind: "idea", target_id: "5", title: "", revision: 2, updated_at: "2026-11-16T00:00:00Z" },
+      blocks: [
+        {
+          id: "n1", note_id: 70, parent_id: null, type: "paragraph", props: {},
+          content: [{ type: "text", text: "Try it on the eval set", styles: {} }],
+          text: "Try it on the eval set", author: "user", section_key: null, changed_rev: 1,
+        },
+      ],
+      suggestions: [],
+      comments: [],
+      shared_by: 0,
+    });
+  }),
+  http.post(`${API_BASE_URL}/notes/70/ops`, async ({ request }) => {
+    postedOps.push((await request.json()) as NoteOpsBody);
+    return HttpResponse.json({
+      note_id: 70, revision: 3, change_set_id: null, applied: [], suggested: [], rejected: [], reparented: [],
+    });
+  }),
   http.patch(`${API_BASE_URL}/ideation/ideas/:id`, async ({ request, params }) => {
     const body = (await request.json()) as IdeaPatch;
     patches.push(body);
@@ -105,7 +135,10 @@ beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
 });
 afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  clearPendingNoteOps();
+  server.resetHandlers();
+});
 
 /** IdeaDetail fed from the store, the way the drawer renders it. */
 function Harness({ onReadSection }: { onReadSection?: (docId: number, chunkIds: number[]) => void }) {
@@ -134,6 +167,10 @@ beforeEach(() => {
   patchDelayMs = 0;
   undoCalls.length = 0;
   chatCalls.length = 0;
+  noteTargets.length = 0;
+  postedOps.length = 0;
+  noteFails = false;
+  useNotesStore.setState({ notes: {}, byTarget: {}, reloads: {}, retrying: {}, drafts: {}, colorNames: {} });
   toast.mockClear();
   scrollIntoView.mockClear();
   toast.dismiss.mockClear();
@@ -142,43 +179,42 @@ beforeEach(() => {
 });
 
 describe("IdeaDetail", () => {
-  it("autosaves the note with one PATCH once typing stops", async () => {
-    const user = userEvent.setup();
+  it("opens the idea's note in the notes editor", async () => {
     setup();
-    await user.type(screen.getByRole("textbox", { name: "Note" }), "Run it on the eval set");
-    expect(screen.getByTestId("note-state")).toHaveTextContent("Saving…");
-    await waitFor(() => expect(screen.getByTestId("note-state")).toHaveTextContent("Saved"), { timeout: 2000 });
-    expect(patches).toEqual([{ note: "Run it on the eval set" }]);
+    expect(await screen.findByTestId("note-editor")).toBeInTheDocument();
+    expect(noteTargets).toEqual(["idea:5"]);
+    expect(await screen.findByText("Try it on the eval set")).toBeInTheDocument();
+    // The plain textarea and its own autosave are gone.
+    expect(screen.queryByTestId("note-state")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Discussed with my advisor/)).not.toBeInTheDocument();
   });
 
-  it("flushes a pending note when the drawer switches to another idea", async () => {
-    const user = userEvent.setup();
+  it("posts note ops, never an idea PATCH, when the note is edited", async () => {
     setup();
-    useIdeationStore.setState((s) => ({
-      graph: s.graph && { ...s.graph, ideas: [...s.graph.ideas, base({ id: 6, title: "Other idea" })] },
-    }));
-    await user.type(screen.getByRole("textbox", { name: "Note" }), "half a thought");
-    act(() => useIdeationStore.setState({ selected: { kind: "idea", id: 6 } }));
-    await waitFor(() => expect(patches).toHaveLength(1));
-    expect(patches[0]).toEqual({ note: "half a thought" });
-    expect(patchedIds).toEqual([5]);
-    await new Promise((r) => setTimeout(r, 700));
-    expect(patches).toHaveLength(1);
+    await screen.findByText("Try it on the eval set");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { commands: { insertContentAt: (pos: number, text: string) => boolean } };
+    };
+    act(() => {
+      pm.editor.commands.insertContentAt(25, "!");
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(70);
+    });
+    expect(postedOps).toHaveLength(1);
+    expect(postedOps[0]?.ops).toEqual([expect.objectContaining({ op: "update", block_id: "n1" })]);
+    expect(patches).toEqual([]);
+    // The kanban / drawer excerpt follows the edit.
+    expect(useIdeationStore.getState().graph?.ideas[0]?.note).toBe("Try it on the eval set!");
   });
 
-  it("doesn't say Saved while a newer edit is still pending", async () => {
-    const user = userEvent.setup();
-    patchDelayMs = 400;
+  it("says so, with a retry, when the note cannot be loaded", async () => {
+    noteFails = true;
     setup();
-    const box = screen.getByRole("textbox", { name: "Note" });
-    await user.type(box, "first");
-    // The first save is in flight; type more before it returns.
-    await waitFor(() => expect(patches).toHaveLength(1), { timeout: 1500 });
-    await user.type(box, " second");
-    await new Promise((r) => setTimeout(r, 450));
-    expect(screen.getByTestId("note-state")).toHaveTextContent("Saving…");
-    await waitFor(() => expect(screen.getByTestId("note-state")).toHaveTextContent("Saved"), { timeout: 3000 });
-    expect(patches.at(-1)).toEqual({ note: "first second" });
+    expect(await screen.findByText("Couldn't load the note.")).toBeInTheDocument();
+    noteFails = false;
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Try it on the eval set")).toBeInTheDocument();
   });
 
   it("the toast Undo and the banner Undo undo once", async () => {
