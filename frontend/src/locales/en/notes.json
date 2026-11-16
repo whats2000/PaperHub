@@ -197,5 +197,39 @@
   "code": {
     "copy": "Copy",
     "copied": "Copied"
+  },
+  "fold": {
+    "fold": "Fold the part below this divider",
+    "foldTitle": "Fold the part below",
+    "blocks_one": "{{count}} block",
+    "blocks_other": "{{count}} blocks",
+    "marks_one": "{{count}} mark",
+    "marks_other": "{{count}} marks"
+  },
+  "divider": {
+    "added": "Divider added",
+    "undo": "Undo",
+    "back": "Back to ---",
+    "again": "Make a divider again"
+  },
+  "toolbar": {
+    "label": "Note tools",
+    "following": "Following {{section}}",
+    "followingAny": "Following",
+    "follow": "Follow reading",
+    "followingTitle": "The note scrolls to the section you're reading. Click to stop following.",
+    "followTitle": "Click to scroll the note along with the section you're reading.",
+    "focus": "Focus",
+    "focusTitle": "Focus: fade the other parts of the note and their marks on the paper (Esc to stop)",
+    "more": "More",
+    "sharedBy_one": "Shared by {{count}} chat · revision {{revision}}",
+    "sharedBy_other": "Shared by {{count}} chats · revision {{revision}}",
+    "revision": "Revision {{revision}}",
+    "exportMd": "Export as Markdown",
+    "exportMdHint": ".md, images, references.bib",
+    "exportDocx": "Export as Word",
+    "exportDocxHint": ".docx",
+    "comingSoon": "Coming soon",
+    "shortcuts": "Shortcuts"
   }
 }

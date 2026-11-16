@@ -197,5 +197,39 @@
   "code": {
     "copy": "コピー",
     "copied": "コピーしました"
+  },
+  "fold": {
+    "fold": "この区切り線の下を折りたたむ",
+    "foldTitle": "下の部分を折りたたむ",
+    "blocks_one": "{{count}} ブロック",
+    "blocks_other": "{{count}} ブロック",
+    "marks_one": "{{count}} マーク",
+    "marks_other": "{{count}} マーク"
+  },
+  "divider": {
+    "added": "区切り線を追加しました",
+    "undo": "元に戻す",
+    "back": "--- に戻しました",
+    "again": "もう一度区切り線にする"
+  },
+  "toolbar": {
+    "label": "ノートのツール",
+    "following": "{{section}} に追従中",
+    "followingAny": "追従中",
+    "follow": "読んでいる位置に追従",
+    "followingTitle": "読んでいる章までノートがスクロールします。クリックで追従を止めます。",
+    "followTitle": "クリックすると、読んでいる章に合わせてノートがスクロールします。",
+    "focus": "フォーカス",
+    "focusTitle": "フォーカス：ノートのほかの部分と、その論文上のマークを薄くする（Esc で終了）",
+    "more": "その他",
+    "sharedBy_one": "{{count}} 件のチャットで共有 · リビジョン {{revision}}",
+    "sharedBy_other": "{{count}} 件のチャットで共有 · リビジョン {{revision}}",
+    "revision": "リビジョン {{revision}}",
+    "exportMd": "Markdown で書き出す",
+    "exportMdHint": ".md、画像、references.bib",
+    "exportDocx": "Word で書き出す",
+    "exportDocxHint": ".docx",
+    "comingSoon": "近日対応",
+    "shortcuts": "ショートカット"
   }
 }

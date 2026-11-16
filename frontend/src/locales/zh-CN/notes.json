@@ -197,5 +197,39 @@
   "code": {
     "copy": "复制",
     "copied": "已复制"
+  },
+  "fold": {
+    "fold": "折叠这条分隔线下方的部分",
+    "foldTitle": "折叠下方的部分",
+    "blocks_one": "{{count}} 个区块",
+    "blocks_other": "{{count}} 个区块",
+    "marks_one": "{{count}} 个标记",
+    "marks_other": "{{count}} 个标记"
+  },
+  "divider": {
+    "added": "已添加分隔线",
+    "undo": "撤销",
+    "back": "已改回 ---",
+    "again": "再次设为分隔线"
+  },
+  "toolbar": {
+    "label": "笔记工具",
+    "following": "跟随 {{section}}",
+    "followingAny": "跟随中",
+    "follow": "跟随阅读",
+    "followingTitle": "笔记会滚动到你正在阅读的章节。点击即停止跟随。",
+    "followTitle": "点击后，笔记会随你正在阅读的章节滚动。",
+    "focus": "专注",
+    "focusTitle": "专注：淡化笔记的其他部分，以及它们在论文上的标记（按 Esc 停止）",
+    "more": "更多",
+    "sharedBy_one": "{{count}} 个对话共用 · 版本 {{revision}}",
+    "sharedBy_other": "{{count}} 个对话共用 · 版本 {{revision}}",
+    "revision": "版本 {{revision}}",
+    "exportMd": "导出为 Markdown",
+    "exportMdHint": ".md、图片、references.bib",
+    "exportDocx": "导出为 Word",
+    "exportDocxHint": ".docx",
+    "comingSoon": "即将推出",
+    "shortcuts": "快捷键"
   }
 }

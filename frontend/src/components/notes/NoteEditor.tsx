@@ -17,7 +17,7 @@ import {
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
-import { AtSign, CloudOff, FileText, Hash, Keyboard, Lightbulb, Sigma, TextQuote } from "lucide-react";
+import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -35,9 +35,10 @@ import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
 import { commentKeys, useNoteComments } from "./noteComments";
-import { codeFence, inlineMarks } from "./inlineMarks";
+import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
+import { partOf } from "./parts";
+import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
 import { noteSchema, paperhubKeys } from "./schema";
-import { ShortcutsGuide } from "./ShortcutsGuide";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
   diffDocuments,
@@ -53,9 +54,17 @@ export interface NoteEditorProps {
   variant: "pane" | "card";
   /** The block holding the caret, as it moves. */
   onBlockFocus?: (blockId: string) => void;
+  /** Opens the shortcuts guide (the tip's "All shortcuts"). */
+  onOpenGuide?: () => void;
 }
 
 const DICTIONARIES = { en, ja, "zh-TW": zhTW, "zh-CN": zh } as const;
+
+/** What the part decorations draw for a note (Focus fades, folds). */
+function partsViewOf(noteId: number): PartsView {
+  const s = useNotesStore.getState();
+  return { focusOn: s.focusOn, activePart: s.activePart[noteId] ?? null, folded: new Set(s.folded[noteId] ?? []) };
+}
 
 function dictionaryFor(lang: string) {
   return DICTIONARIES[lang as keyof typeof DICTIONARIES] ?? (lang.startsWith("zh") ? zh : en);
@@ -96,7 +105,7 @@ function NoteEditorFrame(props: NoteEditorProps) {
   );
 }
 
-function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
+function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEditorProps) {
   const { t, i18n } = useTranslation();
   const { resolvedTheme } = useTheme();
   const note = useNotesStore((s) => s.notes[noteId]!.note);
@@ -104,6 +113,10 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
   const setQuoteTarget = useNotesStore((s) => s.setQuoteTarget);
   const reload = useNotesStore((s) => s.reloads[noteId]);
   const retrying = useNotesStore((s) => s.retrying[noteId] ?? false);
+  const focusOn = useNotesStore((s) => s.focusOn);
+  const activePart = useNotesStore((s) => s.activePart[noteId] ?? null);
+  const folded = useNotesStore((s) => s.folded[noteId]);
+  const setActivePart = useNotesStore((s) => s.setActivePart);
 
   const editor = useCreateBlockNote(
     {
@@ -113,7 +126,15 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
         return tree.length ? (tree as never) : undefined;
       })(),
       dictionary: dictionaryFor(i18n.language),
-      extensions: [paperhubKeys, commentKeys, inlineMarks, codeFence, syntaxHighlighter],
+      extensions: [
+        paperhubKeys,
+        commentKeys,
+        inlineMarks,
+        codeFence,
+        dividerRule,
+        syntaxHighlighter,
+        noteParts(() => partsViewOf(noteId)),
+      ],
     },
     [noteId],
   );
@@ -178,14 +199,35 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
     synced.current = pruneUnsavedEmpty(doc(), new Set([...treeIds(synced.current ?? []), ...flat.keys()]));
   }, [reload, editor, noteId, doc]);
 
-  const onSelectionChange = useCallback(() => {
-    if (!onBlockFocus) return;
+  // The part decorations read the store; redraw them when it changes.
+  useEffect(() => {
     try {
-      onBlockFocus(editor.getTextCursorPosition().block.id);
+      refreshPartDecorations(editor._tiptapEditor.view);
     } catch {
-      /* no caret (e.g. the editor lost focus) */
+      /* not mounted yet: the decorations draw on mount */
     }
-  }, [editor, onBlockFocus]);
+  }, [editor, focusOn, activePart, folded]);
+
+  const onSelectionChange = useCallback(() => {
+    let blockId: string;
+    try {
+      blockId = editor.getTextCursorPosition().block.id;
+    } catch {
+      return; // no caret (e.g. the editor lost focus)
+    }
+    onBlockFocus?.(blockId);
+    // The caret's part is the one you're in (a click on a faded part moves
+    // Focus there). Parts are read from the editor, ahead of the sync.
+    const flat: EditorBlock[] = [];
+    const walk = (list: EditorBlock[]) =>
+      list.forEach((b) => {
+        flat.push(b);
+        walk(b.children);
+      });
+    walk(doc());
+    const part = partOf(flat, blockId)?.id ?? null;
+    if (part !== null && part !== useNotesStore.getState().activePart[noteId]) setActivePart(noteId, part);
+  }, [editor, onBlockFocus, doc, noteId, setActivePart]);
 
   const slashItems = useCallback(
     (query: string): Promise<DefaultReactSuggestionItem[]> => {
@@ -282,7 +324,6 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
     [editor, noteId, paperContentId, t],
   );
 
-  const [guideOpen, setGuideOpen] = useState(false);
   const comments = useNoteComments(editor, noteId);
 
   const loadColors = useNotesStore((s) => s.loadColors);
@@ -326,27 +367,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
             </p>
           </div>
         </div>
-        {variant === "pane" && (
-          <div className="flex items-start">
-            <div className="min-w-0 flex-1">
-              <EditorTip onOpenGuide={() => setGuideOpen(true)} />
-            </div>
-            <ShortcutsGuide
-              open={guideOpen}
-              onOpenChange={setGuideOpen}
-              trigger={
-                <button
-                  type="button"
-                  aria-label={t("notes:guide.title", "Shortcuts")}
-                  title={t("notes:guide.title", "Shortcuts")}
-                  className="mx-2 mt-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <Keyboard className="size-3.5" aria-hidden />
-                </button>
-              }
-            />
-          </div>
-        )}
+        {variant === "pane" && onOpenGuide && <EditorTip onOpenGuide={onOpenGuide} />}
         <UnsavedDrafts noteId={noteId} />
         <BlockNoteView
           editor={editor}

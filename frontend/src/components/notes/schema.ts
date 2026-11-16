@@ -14,6 +14,7 @@ import {
 
 import { calloutBlock } from "./blocks/CalloutBlock";
 import { codeBlockWithCopy } from "./blocks/CodeBlock";
+import { dividerBlock } from "./blocks/DividerBlock";
 import { commentStyle } from "./blocks/CommentStyle";
 import { hiddenStyle } from "./blocks/HiddenStyle";
 import { mathBlock } from "./blocks/MathBlock";
@@ -31,7 +32,6 @@ const {
   numberedListItem,
   checkListItem,
   quote,
-  divider,
 } = defaultBlockSpecs;
 
 export const noteSchema = BlockNoteSchema.create({
@@ -42,7 +42,7 @@ export const noteSchema = BlockNoteSchema.create({
     numberedListItem,
     checkListItem,
     quote,
-    divider,
+    divider: dividerBlock(),
     codeBlock: codeBlockWithCopy(),
     callout: calloutBlock(),
     math: mathBlock(),
@@ -57,8 +57,8 @@ export const noteSchema = BlockNoteSchema.create({
 });
 
 /** The Notion line-start shortcut BlockNote lacks: `$$ ` starts an equation.
- * (`" ` quotes, `---` dividers and Enter on a selected reference, section or
- * divider adding a line below are BlockNote's own; tests pin them.) */
+ * (`" ` quotes and Enter on a selected reference, section or divider adding a
+ * line below are BlockNote's own; `---` is `dividerRule`. Tests pin them.) */
 export const paperhubKeys = createExtension({
   key: "paperhubKeys",
   inputRules: [{ find: /^\$\$\s$/, replace: () => ({ type: "math", props: {} }) }],

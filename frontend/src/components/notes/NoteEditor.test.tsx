@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import { setupServer } from "msw/node";
@@ -623,5 +623,117 @@ describe("comments in the editor", () => {
       fireEvent.keyDown(pm, { key: "M", keyCode: 77, ctrlKey: true, shiftKey: true });
     });
     expect(screen.queryByTestId("comment-thread")).toBeNull();
+  });
+});
+
+describe("dividers, Focus and folding", () => {
+  const d1 = blk("d1", { type: "divider" });
+  const d2 = blk("d2", { type: "divider" });
+  const q2 = blk("q2", { ...quote, id: "q2", props: { ...quote.props, markId: "mk_2" } });
+  const p3 = blk("p3", { content: [{ type: "text", text: "Third", styles: {} }], text: "Third" });
+  const p4 = blk("p4", { content: [{ type: "text", text: "Fourth", styles: {} }], text: "Fourth" });
+  const outer = (id: string) => document.querySelector(`.bn-block-outer[data-id="${id}"]`)!;
+
+  beforeEach(() => {
+    useNotesStore.setState({ activePart: {}, focusOn: false, folded: {} });
+  });
+
+  it("typing --- makes a divider at once; Undo turns it back into ---, then offers Make a divider again", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor([dividerRule]);
+    type(editor, "---");
+    expect(editor.document[0]!.type).toBe("divider");
+    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    const [msg, opts] = toastFn.mock.calls[0] as [string, { action: { label: string; onClick: () => void } }];
+    expect(msg).toBe("Divider added");
+    expect(opts.action.label).toBe("Undo");
+    act(() => opts.action.onClick());
+    const back = editor.document[0] as unknown as { type: string; content: { text: string }[] };
+    expect(back.type).toBe("paragraph");
+    expect(back.content.map((c) => c.text).join("")).toBe("---");
+    const [msg2, opts2] = toastFn.mock.calls[1] as [string, { action: { label: string; onClick: () => void } }];
+    expect(msg2).toBe("Back to ---");
+    expect(opts2.action.label).toBe("Make a divider again");
+    act(() => opts2.action.onClick());
+    expect(editor.document[0]!.type).toBe("divider");
+    expect((toastFn.mock.calls[2] as [string])[0]).toBe("Divider added");
+    cleanupEditors();
+  });
+
+  it("--- before other words on the line stays text", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor([dividerRule], [{ type: "paragraph", content: "keep" }]);
+    type(editor, "---");
+    expect(editor.document[0]!.type).toBe("paragraph");
+    cleanupEditors();
+  });
+
+  it("Focus fades the other parts (headings and dividers stay) and the focused part's marks are exposed", async () => {
+    seed([section, quote, d1, q2, p3]);
+    useNotesStore.setState({ activePart: { 7: "d1" }, focusOn: true });
+    mount();
+    await waitFor(() => expect(outer("q1")).toHaveAttribute("data-fade", "true"));
+    expect(outer("s1")).not.toHaveAttribute("data-fade");
+    expect(outer("d1")).not.toHaveAttribute("data-fade");
+    expect(outer("q2")).not.toHaveAttribute("data-fade");
+    expect(outer("p3")).not.toHaveAttribute("data-fade");
+    const { focusedMarkIds } = await import("./parts");
+    expect(focusedMarkIds(useNotesStore.getState(), 7)).toEqual(["mk_2"]);
+    // Moving the focus to the first part swaps the fade.
+    act(() => useNotesStore.getState().setActivePart(7, "s1"));
+    await waitFor(() => expect(outer("q2")).toHaveAttribute("data-fade", "true"));
+    expect(outer("q1")).not.toHaveAttribute("data-fade");
+    expect(focusedMarkIds(useNotesStore.getState(), 7)).toEqual(["mk_1"]);
+    act(() => useNotesStore.getState().setFocusOn(false));
+    await waitFor(() => expect(outer("q2")).not.toHaveAttribute("data-fade"));
+    expect(focusedMarkIds(useNotesStore.getState(), 7)).toBeNull();
+  });
+
+  it("the caret makes its part the active one", async () => {
+    seed([section, quote, d1, q2, p3]);
+    mount();
+    await screen.findByText("Third");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { commands: { setTextSelection: (pos: number) => boolean }; state: { doc: { content: { size: number } } } };
+    };
+    act(() => {
+      pm.editor.commands.setTextSelection(pm.editor.state.doc.content.size - 4);
+    });
+    await waitFor(() => expect(useNotesStore.getState().activePart[7]).toBe("d1"));
+  });
+
+  it("darkens the dividers around the active part", async () => {
+    seed([section, quote, d1, q2, d2, p4]);
+    useNotesStore.setState({ activePart: { 7: "d1" } });
+    mount();
+    const rule = (id: string) => screen.getByTestId(`divider-${id}`).querySelector("hr")!;
+    await waitFor(() => expect(rule("d1")).toHaveAttribute("data-edge", "true"));
+    expect(rule("d2")).toHaveAttribute("data-edge", "true");
+    act(() => useNotesStore.getState().setActivePart(7, "s1"));
+    expect(rule("d1")).toHaveAttribute("data-edge", "true");
+    expect(rule("d2")).not.toHaveAttribute("data-edge");
+  });
+
+  it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
+    seed([section, quote, d1, q2, p3, d2, p4]);
+    mount();
+    const fold = within(await screen.findByTestId("divider-d1")).getByRole("button", {
+      name: "Fold the part below this divider",
+    });
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(fold);
+    expect(useNotesStore.getState().folded[7]).toEqual(["d1"]);
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(outer("q2")).toHaveAttribute("data-folded", "true"));
+    expect(outer("p3")).toHaveAttribute("data-folded", "true");
+    expect(outer("p4")).not.toHaveAttribute("data-folded");
+    const line = within(screen.getByTestId("divider-d1")).getByRole("button", { name: "2 blocks · 1 mark" });
+    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { folded: unknown } };
+    expect(saved.state.folded).toEqual({ 7: ["d1"] });
+    fireEvent.click(line);
+    await waitFor(() => expect(outer("q2")).not.toHaveAttribute("data-folded"));
+    expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
 });

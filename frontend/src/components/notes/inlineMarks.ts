@@ -1,4 +1,5 @@
-/** Markdown marks as you type, and the code fence, for the notes editor.
+/** Markdown marks as you type, the code fence and the `---` divider, for the
+ * notes editor.
  *
  * A mark converts on its CLOSING mark (`**bold**` the moment the last `*` is
  * typed), never inside a word (`my_var_name`, `2*3*4` stay as typed) and never
@@ -9,6 +10,9 @@
 import { codeBlockOptions } from "@blocknote/code-block";
 import { createExtension } from "@blocknote/core";
 import { Extension, InputRule } from "@tiptap/core";
+import { toast } from "sonner";
+
+import i18n from "@/lib/i18n";
 
 export type InlineStyle = "bold" | "italic" | "underline" | "strike" | "code" | "hidden";
 
@@ -156,4 +160,61 @@ export const codeFence = createExtension({
       return true;
     },
   },
+});
+
+// ---- divider --------------------------------------------------------------
+
+const UNDO_MS = 5000;
+
+type DividerEditor = {
+  getBlock: (id: string) => unknown;
+  updateBlock: (id: string, update: never) => unknown;
+  setTextCursorPosition: (id: string, placement: "start" | "end") => void;
+};
+
+/** "Divider added" with Undo, which turns the divider back into the three
+ * dashes and offers "Make a divider again" (and so on). */
+export function announceDivider(editor: DividerEditor, blockId: string): void {
+  const added = () =>
+    toast(i18n.t("notes:divider.added", "Divider added"), {
+      duration: UNDO_MS,
+      action: { label: i18n.t("notes:divider.undo", "Undo"), onClick: back },
+    });
+  const back = () => {
+    if (!editor.getBlock(blockId)) return;
+    editor.updateBlock(blockId, { type: "paragraph", content: "---" } as never);
+    editor.setTextCursorPosition(blockId, "end");
+    toast(i18n.t("notes:divider.back", "Back to ---"), {
+      duration: UNDO_MS,
+      action: { label: i18n.t("notes:divider.again", "Make a divider again"), onClick: again },
+    });
+  };
+  const again = () => {
+    if (!editor.getBlock(blockId)) return;
+    editor.updateBlock(blockId, { type: "divider", props: {} } as never);
+    added();
+  };
+  added();
+}
+
+/** `---` on an empty line turns it into a divider at once (BlockNote's own
+ * rule goes with its divider, replaced by PaperHub's), with an Undo toast. */
+export const dividerRule = createExtension({
+  key: "paperhubDivider",
+  inputRules: [
+    {
+      find: /^---$/,
+      replace: ({ editor }) => {
+        const { block } = editor.getTextCursorPosition();
+        const sel = editor.prosemirrorState.selection;
+        // Only a line that is just the dashes: text after the caret is kept.
+        if (block.type !== "paragraph" || !sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) {
+          return undefined;
+        }
+        // The toast follows the change (the rule applies after this returns).
+        queueMicrotask(() => announceDivider(editor, block.id));
+        return { type: "divider", props: {} };
+      },
+    },
+  ],
 });

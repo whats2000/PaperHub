@@ -197,5 +197,39 @@
   "code": {
     "copy": "複製",
     "copied": "已複製"
+  },
+  "fold": {
+    "fold": "收合這條分隔線下方的部分",
+    "foldTitle": "收合下方的部分",
+    "blocks_one": "{{count}} 個區塊",
+    "blocks_other": "{{count}} 個區塊",
+    "marks_one": "{{count}} 個標記",
+    "marks_other": "{{count}} 個標記"
+  },
+  "divider": {
+    "added": "已加入分隔線",
+    "undo": "復原",
+    "back": "已改回 ---",
+    "again": "再次設為分隔線"
+  },
+  "toolbar": {
+    "label": "筆記工具",
+    "following": "跟隨 {{section}}",
+    "followingAny": "跟隨中",
+    "follow": "跟隨閱讀",
+    "followingTitle": "筆記會捲動到你正在閱讀的章節。點一下即停止跟隨。",
+    "followTitle": "點一下，讓筆記隨你正在閱讀的章節捲動。",
+    "focus": "專注",
+    "focusTitle": "專注：淡化筆記的其他部分，以及它們在論文上的標記（按 Esc 停止）",
+    "more": "更多",
+    "sharedBy_one": "{{count}} 個對話共用 · 版本 {{revision}}",
+    "sharedBy_other": "{{count}} 個對話共用 · 版本 {{revision}}",
+    "revision": "版本 {{revision}}",
+    "exportMd": "匯出為 Markdown",
+    "exportMdHint": ".md、圖片、references.bib",
+    "exportDocx": "匯出為 Word",
+    "exportDocxHint": ".docx",
+    "comingSoon": "即將推出",
+    "shortcuts": "快速鍵"
   }
 }

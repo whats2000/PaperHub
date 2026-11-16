@@ -330,3 +330,41 @@
 @media (prefers-reduced-motion: reduce) {
     .note-comment { transition: none; }
 }
+
+/* Notes: parts. Focus fades the other parts (section headings and dividers
+   stay); a divider's chevron folds the part below it, collapsing its height
+   toward the divider. The attributes are editor decorations (partsDecorations.ts). */
+.paperhub-notes .bn-block-outer {
+    transition: margin 0.2s, opacity 200ms ease-out;
+}
+.paperhub-notes .bn-block-outer[data-fade="true"] {
+    opacity: 0.45;
+    cursor: pointer;
+}
+.paperhub-notes .bn-block-outer[data-part-body] {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: margin 0.2s, opacity 200ms ease-out, grid-template-rows 200ms ease-out, visibility 200ms;
+}
+.paperhub-notes .bn-block-outer[data-part-body] > .bn-block {
+    min-height: 0;
+    overflow: hidden;
+}
+.paperhub-notes .bn-block-outer[data-folded="true"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+}
+/* The fold chevron shows on hover, on focus and while folded. */
+.paperhub-notes .note-fold {
+    opacity: 0;
+}
+.paperhub-notes .bn-block-outer:hover .note-fold,
+.paperhub-notes .note-fold:focus-visible,
+.paperhub-notes .note-fold[aria-expanded="false"] {
+    opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+    .paperhub-notes .bn-block-outer,
+    .paperhub-notes .bn-block-outer[data-part-body] { transition: none; }
+}
