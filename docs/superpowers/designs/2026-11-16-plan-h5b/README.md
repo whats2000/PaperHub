@@ -29,6 +29,49 @@ The interactive design for Plan H5b, the notes layer (#51). It is the **visual b
 - **Notes page:** a rough H5b.2 sketch only; it will be redesigned from the shipped Ideas / Feedback pages before H5b.2 is planned.
 - **Highlight palette:** validated with the dataviz validator in both themes (light `#2f9e63 #3b7dd8 #d6457e #8b5cd6`, dark `#36a067 #4b86dc #d9578a #9670dc`); every colour also has a name, so colour is never the only cue. Yellow stays reserved for citations.
 
+## Editor library — verified
+
+Spike run 2026-11-16 on BlockNote **0.57.0** (React 19.2.6, Vitest + jsdom). The spike code was throwaway and is not committed. "Method" says how each finding was checked: **test** = a Vitest jsdom test against a mounted editor, **source** = reading the installed package.
+
+**Install for Task 13** (all exact `0.57.0`, no XL package):
+
+| Package | Licence | Notes |
+| --- | --- | --- |
+| `@blocknote/core` | MPL-2.0 | Includes the `./comments` entry (threads, `TipTapThreadStore`, comment mark). |
+| `@blocknote/react` | MPL-2.0 | Peer `react ^18 \|\| ^19`; includes `createReactBlockSpec`, `createReactStyleSpec`, `useCreateBlockNote`, comment UI. |
+| `@blocknote/shadcn` | MPL-2.0 | Peer `react ^18 \|\| ^19`, `tailwindcss ^4.1.12` (the app is on Tailwind 4); built on `@base-ui/react` (MIT), which the app already uses. |
+| `@blocknote/code-block` | MPL-2.0 | Shiki highlighting (below). |
+
+- **Licences (source):** each package's `LICENSE` file and `package.json` `license` are MPL-2.0. BlockNote's own README says the majority of BlockNote is MPL-2.0, and the **XL packages (`@blocknote/xl-*`) are GPL-3.0 or commercial**. Installing `@blocknote/xl-multi-column` showed `"GPL-3.0 OR PROPRIETARY"`: **rejected, never install any `@blocknote/xl-*`.** The whole resolved tree (`package-lock.json`, 4 BlockNote packages) contained no other GPL / commercial licence: MIT, ISC, Apache-2.0, BSD, MPL-2.0 (28), BlueOak, OFL-1.1, CC-BY-4.0, CC0, 0BSD. MPL-2.0 is file-level: we may not edit BlockNote's files without publishing those edits; wrapping and extending it from our own files is fine.
+- **React 19 (source + test):** peer ranges accept 19; `BlockNoteView` from `@blocknote/shadcn` mounted and rendered under React 19.2.6 in jsdom. A harmless `act(...)` warning appears in tests (BlockNote updates state outside act).
+- **`@blocknote/code-block` (source + test):** exists, MPL-2.0. It pulls `@shikijs/core`, `@shikijs/engine-javascript`, `@shikijs/langs-precompiled`, `@shikijs/themes` (all MIT, 4.6.0) and `prosemirror-highlight` (MIT). So no custom highlight.js block is needed. Wire it: `createCodeBlockSpec(codeBlockOptions)` under the block type **`codeBlock`** (not `code`) in `BlockNoteSchema`, and add the `syntaxHighlighter` extension. Language ids come from `codeBlockOptions.supportedLanguages` (about 50, including `python`, `latex`, `rust`, `sql`, `mermaid`); an unknown id (e.g. `py` as a block prop) throws "Language py is not supported", while typing ```` ```python ```` then a space creates a `codeBlock` with `language: "python"` (test).
+- **Comments (source):** in the open core. `@blocknote/core/comments` (`CommentsExtension`, `ThreadStore`, `TipTapThreadStore`, comment mark) and `@blocknote/react` (`Comments`, `CommentEditor`, `CommentButton`) are both MPL-2.0. No fallback mark is needed; we implement our own `ThreadStore` backed by the PaperHub note API (the interface is pluggable). Not exercised end to end in this spike.
+- **UI flavour:** `@blocknote/shadcn`. Its CSS is scoped to `.bn-shadcn` / `.bn-*` selectors and theme variables `--bn-colors-*`, so there is no global reset to fight with Tailwind 4 preflight; its only touches are `svg` sizing and link colour reverting inside `.bn-shadcn`. Map `--bn-colors-editor-background/text`, `--bn-colors-menu-*` to our theme tokens in the app CSS. `@blocknote/mantine` is not needed. (Method: source and a mounted render; a full dev-server visual pass is left to Task 13.)
+- **Custom block (test):** works in a mounted editor; props round-trip unchanged.
+
+  ```tsx
+  const paperQuote = createReactBlockSpec(
+    { type: "paperQuote",
+      propSchema: { markId: { default: "" }, color: { default: "yellow" },
+                    quote: { default: "" }, source: { default: "" } },
+      content: "none" },
+    { render: (p) => <blockquote>{p.block.props.quote}</blockquote> },
+  );
+  const schema = BlockNoteSchema.create({
+    blockSpecs: { ...defaultBlockSpecs, paperQuote: paperQuote() }, // note the call
+  });
+  ```
+
+  Inline-content blocks receive `contentRef` in render props. `createReactStyleSpec({ type: "hidden", propSchema: "boolean" }, { render })` defines a custom inline mark (used for `||hidden||`).
+- **Input rules and shortcuts (test + source):**
+  - `---` on an empty paragraph already becomes a `divider` block (built-in rule; test).
+  - Block-level rules: an extension's `inputRules: [{ find: RegExp, replace: ({match, range, editor}) => PartialBlock | undefined }]` replaces the block (this is how ```` ```python ```` works). Rules are fixed at editor creation.
+  - Inline marks need a tiptap extension: `{ key, tiptapExtensions: [Extension.create({ name, priority: 1000, addInputRules() { return [markInputRule({ find, type: this.editor.schema.marks.underline })] } })] }` passed in `extensions`. **Gotcha:** the built-in bold mark also matches `__x__`, so without `priority: 1000` `__under__` becomes bold; with it, `__under__` gives `underline` and `||sec||` gives the custom `hidden` style (both verified by typing through ProseMirror's `handleTextInput`).
+  - Keyboard shortcuts: `keyboardShortcuts: { "Mod-Enter": ({editor, event}) => boolean }` on an extension.
+- **Block ids (test):** `JSON.parse(JSON.stringify(editor.document))` -> `editor.replaceBlocks(editor.document, thatJson)` -> `editor.document` kept every `id`, including a nested child and a custom block (same id list, same order).
+- **Tab / Shift+Tab (test):** with the caret in the second bullet item, a `Tab` keydown nested it under the first (`[a (1 child)]`); `Shift+Tab` brought it back to top level (`[a, b]`). Applies to any block, not only list items (core `Tab` / `Shift-Tab` handlers call nest / unnest). Inside a `codeBlock`, Tab indents the line (`indentLineWithTab`, source).
+- **Not covered:** a real browser dev-server pass (typing feel, drag handle, slash menu rendering) and comments end to end; both belong to Task 13's live check.
+
 ## Files
 
 | File | What it is |
