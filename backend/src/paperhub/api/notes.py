@@ -7,7 +7,7 @@ import json
 from typing import Any, Literal
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel
 
 from paperhub.config import load_settings
@@ -126,7 +126,7 @@ class BlockPlace(BaseModel):
 
 
 @router.get("/blocks/{block_id}", response_model=BlockPlace)
-async def block_place(block_id: str) -> BlockPlace:
+async def block_place(block_id: str = Path(max_length=64)) -> BlockPlace:
     """The note a live block is in, and that note's target (a ``[note:B]``
     chip in the chat opens the notes pane there)."""
     async with open_db(load_settings().db_path) as conn, conn.execute(

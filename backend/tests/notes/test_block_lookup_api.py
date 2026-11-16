@@ -48,3 +48,10 @@ async def test_block_lookup_names_the_note_and_its_target(
         await apply_ops(conn, nid, base_revision=1, actor="user",
                         ops=[Op(op="delete", block_id=EDITOR_ID)])
     assert (await client.get(f"/notes/blocks/{EDITOR_ID}")).status_code == 404
+
+
+async def test_block_lookup_refuses_an_id_longer_than_any_block_id(
+    client: AsyncClient,
+) -> None:
+    assert (await client.get(f"/notes/blocks/{'x' * 65}")).status_code == 422
+    assert (await client.get(f"/notes/blocks/{'x' * 64}")).status_code == 404
