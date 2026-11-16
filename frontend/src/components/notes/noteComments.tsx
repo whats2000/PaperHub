@@ -312,5 +312,8 @@ export function useNoteComments(editor: Ed, noteId: number) {
     </CommentPopover>
   );
 
-  return { start, onEditorClick, popover, reanchor };
+  /** Opens a thread under `el` (a lost thread's badge). */
+  const openThread = useCallback((id: string, el: Element) => show({ kind: "thread", id }, el), [show]);
+
+  return { start, onEditorClick, popover, reanchor, openThread };
 }

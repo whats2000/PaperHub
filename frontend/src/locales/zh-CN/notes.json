@@ -112,7 +112,9 @@
     "resolveAgain": "再次标为已解决",
     "deleteAgain": "再次删除",
     "failed": "无法保存评论。",
-    "textChanged": "被评论的文字已更改。"
+    "textChanged": "被评论的文字已更改。",
+    "lostBadge_one": "{{count}} 条评论的文字已更改",
+    "lostBadge_other": "{{count}} 条评论的文字已更改"
   },
   "tip": {
     "body": "第一次使用？输入 <slash>/</slash> 选区块，输入 <bold>**粗体**</bold> 即可应用格式，或选中文字调出工具栏。",

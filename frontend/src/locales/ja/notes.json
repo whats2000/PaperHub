@@ -112,7 +112,9 @@
     "resolveAgain": "もう一度解決済みにする",
     "deleteAgain": "もう一度削除",
     "failed": "コメントを保存できませんでした。",
-    "textChanged": "コメントした文章が変更されました。"
+    "textChanged": "コメントした文章が変更されました。",
+    "lostBadge_one": "文章が変更されたコメント {{count}} 件",
+    "lostBadge_other": "文章が変更されたコメント {{count}} 件"
   },
   "tip": {
     "body": "はじめてですか？ <slash>/</slash> でブロック、<bold>**太字**</bold> のように入力すると書式が付き、文字を選ぶとツールバーが出ます。",

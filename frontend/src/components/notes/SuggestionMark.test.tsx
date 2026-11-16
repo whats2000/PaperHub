@@ -254,4 +254,39 @@ describe("accepting a suggestion on commented words", () => {
     await waitFor(() => expect(pm()).not.toHaveTextContent("Mine"));
     expect(screen.queryByTestId("comment-thread")).toBeNull();
   });
+
+  it("a badge at the block reaches every thread whose words are gone, after the popover closed", async () => {
+    const a = { ...thread("c_1", "Mine"), items: [{ id: 1, text: "first thread", created_at: "x" }] };
+    const b = { ...thread("c_2", "yours"), items: [{ id: 2, text: "second thread", created_at: "x" }] };
+    seed(
+      [para("p1", [run("Mine", { comment: "c_1" }), run(" and "), run("yours", { comment: "c_2" })])],
+      [suggestion("p1", "Theirs only")],
+      [a, b],
+    );
+    serve(para("p1", [run("Theirs only")], 5), [a, b]);
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(pm()).toHaveTextContent("Theirs only"));
+    // The first one opens at once; both stay open.
+    expect(await screen.findByText("first thread")).toBeInTheDocument();
+    const badge = await screen.findByRole("button", { name: "2 comments on text that changed" });
+    expect(badge).toHaveAttribute("title", "The commented text changed.");
+    fireEvent.click(screen.getByRole("button", { name: "Close (Esc)" }));
+    await waitFor(() => expect(screen.queryByTestId("comment-thread")).toBeNull());
+    fireEvent.click(badge);
+    expect(await screen.findByText("first thread")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close (Esc)" }));
+    await waitFor(() => expect(screen.queryByTestId("comment-thread")).toBeNull());
+    fireEvent.click(badge);
+    expect(await screen.findByText("second thread")).toBeInTheDocument();
+    expect(useNotesStore.getState().notes[7]!.comments.map((x) => x.status)).toEqual(["open", "open"]);
+    // Settled threads take the badge away, which closes before it leaves.
+    act(() => {
+      useNotesStore.setState((st) => ({
+        notes: { ...st.notes, 7: { ...st.notes[7]!, comments: st.notes[7]!.comments.map((x) => ({ ...x, status: "resolved" as const })) } },
+      }));
+    });
+    await waitFor(() => expect(screen.getByTestId("lost-comments-badge")).toHaveAttribute("data-closed"));
+    await waitFor(() => expect(screen.queryByTestId("lost-comments-badge")).toBeNull());
+  });
 });

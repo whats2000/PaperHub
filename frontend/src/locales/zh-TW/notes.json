@@ -112,7 +112,9 @@
     "resolveAgain": "再次標為已解決",
     "deleteAgain": "再次刪除",
     "failed": "無法儲存留言。",
-    "textChanged": "被評論的文字已變更。"
+    "textChanged": "被評論的文字已變更。",
+    "lostBadge_one": "{{count}} 則評論的文字已變更",
+    "lostBadge_other": "{{count}} 則評論的文字已變更"
   },
   "tip": {
     "body": "第一次使用？輸入 <slash>/</slash> 選區塊，輸入 <bold>**粗體**</bold> 即可套用格式，或選取文字叫出工具列。",

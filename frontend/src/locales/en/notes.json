@@ -112,7 +112,9 @@
     "resolveAgain": "Resolve again",
     "deleteAgain": "Delete again",
     "failed": "Couldn't save the comment.",
-    "textChanged": "The commented text changed."
+    "textChanged": "The commented text changed.",
+    "lostBadge_one": "{{count}} comment on text that changed",
+    "lostBadge_other": "{{count}} comments on text that changed"
   },
   "tip": {
     "body": "New here? Type <slash>/</slash> for blocks, <bold>**bold**</bold> as you type, or select text for the toolbar.",

@@ -34,6 +34,8 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
+import { lostCommentBadges, useBadgeRefresh, useLostCommentBadges } from "./commentBadges";
+import { LostCommentBadges } from "./LostCommentBadges";
 import { commentKeys, useNoteComments, type ReanchorHint } from "./noteComments";
 import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./noteSuggestions";
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
@@ -120,6 +122,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
   const setActivePart = useNotesStore((s) => s.setActivePart);
   // The bars of the agent's suggestions are rendered into these hosts.
   const suggestionHost = useSuggestionHosts();
+  // Badges for open comment threads whose words are gone.
+  const lostBadges = useLostCommentBadges(noteId);
 
   const editor = useCreateBlockNote(
     {
@@ -141,6 +145,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
           suggestions: useNotesStore.getState().notes[noteId]?.suggestions ?? [],
           host: suggestionHost,
         })),
+        lostCommentBadges(lostBadges.badgeView),
       ],
     },
     [noteId],
@@ -182,6 +187,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
   const pendingReanchorRef = useRef<ReanchorHint[] | null>(null);
   const suggestionBars = useNoteSuggestions(editor, noteId, suggestionHost, pendingReanchorRef);
   const { reanchor } = comments;
+  const threads = useNotesStore((s) => s.notes[noteId]?.comments);
+  useBadgeRefresh(editor, [threads, lostBadges.badges]);
 
   // Blocks the server replaced (a conflict) or a whole reload: apply them in
   // place without sending them back as edits.
@@ -415,6 +422,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
         </BlockNoteView>
         {comments.popover}
         {suggestionBars}
+        <LostCommentBadges badges={lostBadges.badges} host={lostBadges.host} onOpen={comments.openThread} />
       </div>
     </NoteEditorContext.Provider>
   );
