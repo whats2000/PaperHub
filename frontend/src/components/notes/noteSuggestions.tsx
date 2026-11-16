@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { blockText } from "@/lib/notes/ops";
 import { diffText } from "@/lib/notes/textDiff";
 import { useNotesStore } from "@/store/notes";
-import type { NoteSuggestion } from "@/types/notes";
+import type { ApplyResult, NoteSuggestion } from "@/types/notes";
 
 import { commentAnchor, type ReanchorHint } from "./noteComments";
 import { SuggestionMark } from "./SuggestionMark";
@@ -198,8 +198,9 @@ export function useNoteSuggestions(
       : [];
     // Handed to the editor only once the server took the decision, right
     // before the saved note is shown.
-    const settle = async () => {
-      if (hints.length) pendingReanchorRef.current = hints;
+    const settle = async (res: ApplyResult) => {
+      // A withdrawn accept (the block was gone) rewrote nothing.
+      if (hints.length && res.applied.includes(s.block_id)) pendingReanchorRef.current = hints;
       await exit();
     };
     try {

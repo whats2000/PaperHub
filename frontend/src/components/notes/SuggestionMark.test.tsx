@@ -217,4 +217,23 @@ describe("accepting a suggestion on commented words", () => {
     expect(screen.getByTestId("comment-thread")).toHaveTextContent("why?");
     expect(useNotesStore.getState().notes[7]!.comments.map((x) => x.status)).toEqual(["open"]);
   });
+
+  it("puts nothing back when the server withdrew the accept (the block was gone)", async () => {
+    const c = thread("c_1", "Mine");
+    seed([para("p1", [run("Mine", { comment: "c_1" })]), para("p2", [run("Other")])], [suggestion("p1", "Theirs")], [c]);
+    server.use(
+      http.post(`${API_BASE_URL}/notes/suggestions/sg_1`, () =>
+        HttpResponse.json({ note_id: 7, revision: 4, change_set_id: "cs_1", applied: [], suggested: [], reparented: [],
+          rejected: [{ block_id: "p1", reason: "missing", current: null }] }),
+      ),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({ note, blocks: [para("p2", [run("Other")])], suggestions: [], comments: [c], shared_by: 1 }),
+      ),
+    );
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("That suggestion no longer applies."));
+    await waitFor(() => expect(pm()).not.toHaveTextContent("Mine"));
+    expect(screen.queryByTestId("comment-thread")).toBeNull();
+  });
 });

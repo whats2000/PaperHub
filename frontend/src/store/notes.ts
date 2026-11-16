@@ -116,12 +116,12 @@ interface NotesStore {
 
   /** Accepts or rejects one of the agent's suggestions (edits queued
    * before it are sent first), then shows the saved note — after `exit`
-   * (the change animating out), when given. */
+   * (the change animating out, told the server's result), when given. */
   resolveSuggestion: (
     noteId: number,
     suggestionId: string,
     accept: boolean,
-    exit?: () => Promise<void>,
+    exit?: (res: ApplyResult) => Promise<void>,
   ) => Promise<ApplyResult>;
 }
 
@@ -779,7 +779,7 @@ export const useNotesStore = create<NotesStore>()(
         resolveSuggestion: async (noteId, suggestionId, accept, exit) => {
           await get().flush(noteId);
           const res = await postSuggestionDecision(suggestionId, accept);
-          await exit?.();
+          await exit?.(res);
           await reload(noteId);
           return res;
         },
