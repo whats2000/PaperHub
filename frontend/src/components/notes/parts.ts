@@ -102,6 +102,19 @@ export function foldSummary(part: Part): { blocks: number; marks: number } {
   };
 }
 
+/** A folded part's line, one translated sentence: "4 blocks · 2 marks", or
+ * "4 blocks" when it quotes no mark. */
+export function foldLine(
+  t: (key: string, fallback: string, options: Record<string, unknown>) => string,
+  summary: { blocks: number; marks: number },
+): string {
+  return t("notes:fold.summary", "{{count}} blocks", {
+    count: summary.blocks,
+    marks: summary.marks,
+    context: summary.marks ? "marks" : undefined,
+  });
+}
+
 // ---- Focus ----------------------------------------------------------------
 
 type NotesState = ReturnType<typeof useNotesStore.getState>;

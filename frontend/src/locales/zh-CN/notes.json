@@ -201,8 +201,10 @@
   "fold": {
     "fold": "折叠这条分隔线下方的部分",
     "foldTitle": "折叠下方的部分",
-    "blocks_one": "{{count}} 个区块",
-    "blocks_other": "{{count}} 个区块",
+    "summary_one": "{{count}} 个区块",
+    "summary_other": "{{count}} 个区块",
+    "summary_marks_one": "{{count}} 个区块 · $t(notes:fold.marks, {\"count\": {{marks}} })",
+    "summary_marks_other": "{{count}} 个区块 · $t(notes:fold.marks, {\"count\": {{marks}} })",
     "marks_one": "{{count}} 个标记",
     "marks_other": "{{count}} 个标记"
   },

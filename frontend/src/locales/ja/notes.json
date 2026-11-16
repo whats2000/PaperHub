@@ -201,8 +201,10 @@
   "fold": {
     "fold": "この区切り線の下を折りたたむ",
     "foldTitle": "下の部分を折りたたむ",
-    "blocks_one": "{{count}} ブロック",
-    "blocks_other": "{{count}} ブロック",
+    "summary_one": "{{count}} ブロック",
+    "summary_other": "{{count}} ブロック",
+    "summary_marks_one": "{{count}} ブロック · $t(notes:fold.marks, {\"count\": {{marks}} })",
+    "summary_marks_other": "{{count}} ブロック · $t(notes:fold.marks, {\"count\": {{marks}} })",
     "marks_one": "{{count}} マーク",
     "marks_other": "{{count}} マーク"
   },

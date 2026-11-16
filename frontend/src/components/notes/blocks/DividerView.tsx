@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
 
-import { foldSummary, partsOfNote, type PartBlock } from "../parts";
+import { foldLine, foldSummary, partsOfNote, type PartBlock } from "../parts";
 import { useNoteEditorContext } from "./markProps";
 
 type AnyEditor = NonNullable<Parameters<typeof useEditorChange>[1]>;
@@ -47,10 +47,7 @@ export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
     return { summary: mine ? foldSummary(mine) : { blocks: 0, marks: 0 }, edge: framing };
   }, [blocks, active, id]);
 
-  const blocksText = t("notes:fold.blocks", "{{count}} blocks", { count: summary.blocks });
-  const line = summary.marks
-    ? `${blocksText} · ${t("notes:fold.marks", "{{count}} marks", { count: summary.marks })}`
-    : blocksText;
+  const line = foldLine(t, summary);
 
   return (
     <div className="note-divider w-full" contentEditable={false} data-testid={`divider-${id}`}>

@@ -828,6 +828,19 @@ describe("dividers, Focus and folding", () => {
     expect(within(screen.getByTestId("divider-d1")).getByRole("button", { name: "2 blocks · 1 mark" })).toBeInTheDocument();
   });
 
+  it.each([
+    ["en", "2 blocks · 1 mark", "1 block", "1 block · 3 marks"],
+    ["zh-TW", "2 個區塊 · 1 個標記", "1 個區塊", "1 個區塊 · 3 個標記"],
+    ["zh-CN", "2 个区块 · 1 个标记", "1 个区块", "1 个区块 · 3 个标记"],
+    ["ja", "2 ブロック · 1 マーク", "1 ブロック", "1 ブロック · 3 マーク"],
+  ])("the fold line is one translated sentence (%s)", async (lng, both, blocksOnly, plural) => {
+    const { foldLine } = await import("./parts");
+    const t = i18n.getFixedT(lng);
+    expect(foldLine(t, { blocks: 2, marks: 1 })).toBe(both);
+    expect(foldLine(t, { blocks: 1, marks: 0 })).toBe(blocksOnly);
+    expect(foldLine(t, { blocks: 1, marks: 3 })).toBe(plural);
+  });
+
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
     seed([section, quote, d1, q2, p3, d2, p4]);
     mount();

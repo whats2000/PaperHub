@@ -201,8 +201,10 @@
   "fold": {
     "fold": "Fold the part below this divider",
     "foldTitle": "Fold the part below",
-    "blocks_one": "{{count}} block",
-    "blocks_other": "{{count}} blocks",
+    "summary_one": "{{count}} block",
+    "summary_other": "{{count}} blocks",
+    "summary_marks_one": "{{count}} block · $t(notes:fold.marks, {\"count\": {{marks}} })",
+    "summary_marks_other": "{{count}} blocks · $t(notes:fold.marks, {\"count\": {{marks}} })",
     "marks_one": "{{count}} mark",
     "marks_other": "{{count}} marks"
   },

@@ -201,8 +201,10 @@
   "fold": {
     "fold": "收合這條分隔線下方的部分",
     "foldTitle": "收合下方的部分",
-    "blocks_one": "{{count}} 個區塊",
-    "blocks_other": "{{count}} 個區塊",
+    "summary_one": "{{count}} 個區塊",
+    "summary_other": "{{count}} 個區塊",
+    "summary_marks_one": "{{count}} 個區塊 · $t(notes:fold.marks, {\"count\": {{marks}} })",
+    "summary_marks_other": "{{count}} 個區塊 · $t(notes:fold.marks, {\"count\": {{marks}} })",
     "marks_one": "{{count}} 個標記",
     "marks_other": "{{count}} 個標記"
   },
