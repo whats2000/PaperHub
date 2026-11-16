@@ -401,17 +401,21 @@ def _check_runs(content: Any, check: Callable[[str], str]) -> Any:
 
 def _check_citations(
     block: BlockIn, ev: TurnEvidence, removed: dict[str, list[Any]],
+    snapped: list[list[str]],
 ) -> BlockIn:
-    """The block with citations of anything not read this turn marked
-    ``[unsourced:<reason>]`` (the answer rules); removals merge into
-    ``removed`` by kind."""
+    """The block under the answer citation rules: a citation of anything not
+    in ``ev`` (read this turn or listed in a kept turn's work record) is
+    marked ``[unsourced:<reason>]``, a self-written view box snaps to the
+    viewed region holding it. Removals merge into ``removed`` by kind; snaps
+    are appended to ``snapped`` as [written, snapped-to]."""
     def check(text: str) -> str:
-        text, gone = check_written_citations(
+        text, gone, snaps = check_written_citations(
             text, chunks=ev.chunks, figures=ev.figures, views=ev.views,
             note_blocks=ev.note_blocks)
         for kind, ids in gone.items():
             bucket = removed.setdefault(kind, [])
             bucket.extend(i for i in ids if i not in bucket)
+        snapped.extend([w, t] for w, t in snaps if [w, t] not in snapped)
         return text
 
     return block.model_copy(update={"content": _check_runs(block.content, check)})
@@ -448,6 +452,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     new_sections: dict[str, str] = {}  # section name -> block id to create
     placed: list[tuple[int, str, str]] = []  # (op index, section, block id)
     removed_cites: dict[str, list[Any]] = {}
+    snapped_cites: list[list[str]] = []
     # An empty chat / idea / free note has one place to write; elsewhere
     # (and always on a paper note, which writes under a section) an insert
     # names its place.
@@ -476,7 +481,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 placed.append((index, name, bid))
         if op.block is not None:
             op = op.model_copy(update={"block": _check_citations(
-                op.block, ctx.evidence, removed_cites)})
+                op.block, ctx.evidence, removed_cites, snapped_cites)})
         valid.append(op)
     if new_sections:
         order = await _section_order(ctx.conn, int(note.target_id))
@@ -523,6 +528,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     if removed_cites:
         record["citations_removed"] = removed_cites
         result["citations_removed"] = removed_cites
+    if snapped_cites:
+        record["citations_snapped"] = snapped_cites
+        result["citations_snapped"] = snapped_cites
     events: list[tuple[str, dict[str, Any]]] = []
     if record["applied"] or record["suggested"]:
         record["note_title"] = note.title

@@ -800,7 +800,9 @@ async def run_core_agent(
                     tool_tokens += count_tokens(o.content)
                 for o in res.outcomes:
                     ids = o.record.get("block_ids")
-                    if (o.record.get("tool") in ("notes:read", "notes:search")
+                    # Only read_note blocks are citable: a search hit is a
+                    # truncated snippet, like a chunk snippet.
+                    if (o.record.get("tool") == "notes:read"
                             and _result_status(o) == "ok" and isinstance(ids, list)):
                         read_note_blocks.extend(
                             b for b in ids if isinstance(b, str) and b not in read_note_blocks)

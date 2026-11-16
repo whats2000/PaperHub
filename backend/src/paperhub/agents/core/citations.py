@@ -352,11 +352,14 @@ def validate_note_citations(
 def check_written_citations(
     text: str, *, chunks: set[int], figures: set[str], views: set[str],
     note_blocks: set[str],
-) -> tuple[str, dict[str, list[str] | list[int]]]:
+) -> tuple[str, dict[str, list[str] | list[int]], list[tuple[str, str]]]:
     """Apply the answer citation rules to text the agent writes elsewhere (a
-    note block): ``[chunk:]`` / ``[fig:]`` / ``[view:]`` / ``[note:]`` ids not
-    read this turn become ``[unsourced:<reason>]``. Returns the text and the
-    removed ids by kind (only kinds with removals)."""
+    note block). The allowed sets hold what may be cited: evidence read this
+    turn or listed in a kept turn's work record. ``[chunk:]`` / ``[fig:]`` /
+    ``[view:]`` / ``[note:]`` ids outside them become
+    ``[unsourced:<reason>]``; a self-written ``[view:]`` box inside an allowed
+    region snaps to it. Returns the text, the removed ids by kind (only kinds
+    with removals) and the (written, snapped-to) view pairs."""
     removed: dict[str, list[str] | list[int]] = {}
     text, gone_chunks = validate_citations(text, chunks)
     if gone_chunks:
@@ -367,7 +370,7 @@ def check_written_citations(
     text, gone_figs = validate_figure_citations(text, figures)
     if gone_figs:
         removed["figures"] = gone_figs
-    text, gone_views, _snapped = validate_view_citations(text, views)
+    text, gone_views, snapped = validate_view_citations(text, views)
     if gone_views:
         removed["views"] = gone_views
-    return text, removed
+    return text, removed, snapped

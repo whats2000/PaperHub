@@ -441,3 +441,22 @@ async def test_result_says_whether_a_section_was_created(
                       ops=[_ins("two", under_heading="Method")])
     assert json.loads(out.content)["placed"] == [
         {"op": 0, "section": "Method", "created": False}]
+
+
+async def test_snapped_view_boxes_in_written_blocks_are_traced(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """A self-written [view:] box inside a viewed region becomes that region,
+    as in answers; the snap is recorded like the answer's
+    view_citations_snapped."""
+    nid = await _chat_note(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer)
+    ctx.evidence = TurnEvidence(views={"3/2/100,100,500,500"})
+    out = await _edit(ctx, note="chat", base_revision=0, ops=[
+        _ins("value [view:3/2/200,200,300,300]")])
+    assert [b.text for b in await list_blocks(migrated_db, nid)] == [
+        "value [view:3/2/100,100,500,500]"]
+    snaps = [["3/2/200,200,300,300", "3/2/100,100,500,500"]]
+    assert out.record["citations_snapped"] == snaps
+    assert json.loads(out.content)["citations_snapped"] == snaps
+    assert "citations_removed" not in out.record

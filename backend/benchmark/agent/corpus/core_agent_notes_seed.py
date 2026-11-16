@@ -9,7 +9,8 @@ balancing) and 68 (BERT) must be in its library::
 Prints the ids of the sessions it made (``moe``: 47 + 48 with the notes,
 ``empty``: no papers and an empty chat note, ``bert``: 68, ``chat``: no
 papers). Written as actor ``user``, so the agent's edits to these blocks
-become suggestions, as for a real user's notes.
+become suggestions, as for a real user's notes. Idempotent: a second run on
+the same copy finds the notes and sessions already there and adds nothing.
 """
 from __future__ import annotations
 
@@ -75,9 +76,18 @@ def _para(text: str) -> BlockIn:
     return BlockIn(type="paragraph", content=[{"type": "text", "text": text}])
 
 
+async def _has_blocks(conn: aiosqlite.Connection, note_id: int) -> bool:
+    async with conn.execute(
+        "SELECT 1 FROM note_blocks WHERE note_id = ? AND deleted_at IS NULL "
+        "LIMIT 1", (note_id,)) as cur:
+        return await cur.fetchone() is not None
+
+
 async def _fill(conn: aiosqlite.Connection, paper_id: int,
                 sections: dict[str, list[str]]) -> None:
     note = await paper_note(conn, paper_id)
+    if await _has_blocks(conn, note.id):  # seeded before
+        return
     for section, texts in sections.items():
         sid = await ensure_section(conn, note.id, paper_id, section)
         current = await get_note(conn, note.id)
@@ -88,6 +98,12 @@ async def _fill(conn: aiosqlite.Connection, paper_id: int,
 
 
 async def _session(conn: aiosqlite.Connection, title: str, papers: list[int]) -> int:
+    async with conn.execute(
+        "SELECT id FROM chat_sessions WHERE title = ? AND deleted_at IS NULL "
+        "ORDER BY id LIMIT 1", (title,)) as cur:
+        row = await cur.fetchone()
+    if row is not None:  # seeded before
+        return int(row[0])
     await conn.execute("INSERT INTO chat_sessions (title) VALUES (?)", (title,))
     async with conn.execute("SELECT last_insert_rowid()") as cur:
         row = await cur.fetchone()
@@ -108,9 +124,11 @@ async def seed(workspace: Path) -> dict[str, int]:
         await _fill(conn, 47, PAPER_47)
         moe = await _session(conn, "MoE reading group", [47, 48])
         chat = await note_ref(conn, "chat", moe)
-        await apply_ops(conn, chat.id, base_revision=chat.revision, actor="user", ops=[
-            Op(op="insert", block=_para(
-                "Reading group meets Thursdays; next session covers load balancing."))])
+        if not await _has_blocks(conn, chat.id):
+            await apply_ops(conn, chat.id, base_revision=chat.revision, actor="user", ops=[
+                Op(op="insert", block=_para(
+                    "Reading group meets Thursdays; next session covers load "
+                    "balancing."))])
         return {"moe": moe, "empty": await _session(conn, "Scratch chat", []),
                 "bert": await _session(conn, "BERT questions", [68]),
                 "chat": await _session(conn, "Chit-chat", [])}

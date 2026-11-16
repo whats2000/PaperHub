@@ -1253,3 +1253,37 @@ async def test_tools_see_the_evidence_read_this_turn(
     ev = seen[0]
     assert ev.chunks == {5} and ev.note_blocks == {"b_1"}
     assert ev.figures == {"3/fig2"} and ev.views == {"3/2/1,2,3,4"}
+
+
+async def test_note_search_snippets_are_not_citable(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A search hit is a truncated snippet, like a chunk snippet: only blocks
+    read with read_note may be cited, in answers and in note writes."""
+    _, _, tracer = await _setup(migrated_db)
+    seen: list[TurnEvidence] = []
+
+    async def search(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        return ToolOutcome(content="x", record={
+            "tool": "notes:search", "block_ids": ["b_hit"]})
+
+    async def read(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        return ToolOutcome(content="x", record={
+            "tool": "notes:read", "block_ids": ["b_read"]})
+
+    async def probe(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+        seen.append(ctx.evidence)
+        return ToolOutcome(content="x", record={})
+
+    reg = ToolRegistry()
+    empty = {"type": "object", "properties": {}}
+    for name, fn in (("search", search), ("read", read), ("probe", probe)):
+        reg.register(ToolSpec(name, "d", empty, Tier.FREE, fn))
+    adapter = FakeAdapter([_calls(("search", {}), ("read", {})),
+                           _calls(("probe", {})),
+                           _answer("hit [note:b_hit] read [note:b_read]")])
+    events = await _drive(migrated_db, tracer, adapter, reg)
+    assert seen[0].note_blocks == {"b_read"}
+    final = events[-1]
+    assert isinstance(final, Final)
+    assert final.text == "hit [unsourced:note_not_read] read [note:b_read]"
