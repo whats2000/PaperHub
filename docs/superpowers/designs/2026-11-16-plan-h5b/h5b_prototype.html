@@ -485,7 +485,7 @@ button.nc-ref { cursor: pointer; transition: background 150ms ease-out, color 15
 button.nc-ref:hover, button.nc-ref:focus-visible { background: var(--accent); color: var(--foreground); }
 button.nc-ref .go { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; opacity: 0.7; }
 button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
-.nc-other { width: 100%; border: 0; background: transparent; color: var(--muted-fg); font-size: 11.5px; text-align: left; padding: 3px 8px; border-radius: 5px; display: flex; gap: 5px; align-items: center; white-space: nowrap; overflow: hidden; }
+.nc-other { width: calc(100% + 4.5px); margin-left: -4.5px; border: 0; background: transparent; color: var(--muted-fg); font-size: 11.5px; text-align: left; padding: 3px 8px 3px 0; border-radius: 5px; display: flex; gap: 5px; align-items: center; white-space: nowrap; overflow: hidden; }
 .nc-other span { overflow: hidden; text-overflow: ellipsis; }
 .nc-other:hover { background: var(--accent); color: var(--foreground); }
 .nc-other[aria-expanded="true"] svg { transform: rotate(90deg); }
@@ -971,7 +971,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       return `<div class="tr-row" data-page="${pg.id}" style="--d:${d}" aria-current="${curNP === pg.id}" title="${esc(pg.title || 'Untitled')}"><button class="tr-chev" data-chev="${pg.id}" aria-expanded="${open}" aria-label="Show or hide what is inside" ${f ? '' : 'hidden'}><i data-lucide="chevron-down" class="icon-xs"></i></button><button class="pg-ic" data-picon="${pg.id}" aria-label="Change icon" title="Change icon">${pgIcon(pg)}</button><span class="tr-t">${esc(pg.title || 'Untitled')}</span><button class="tr-act" data-addsub="${pg.id}" aria-label="Add a page inside" title="Add a page inside"><i data-lucide="plus" class="icon-xs"></i></button><button class="tr-act" data-pmenu="${pg.id}" aria-label="More" title="Move, delete…"><i data-lucide="ellipsis" class="icon-xs"></i></button></div>` +
         (f ? `<div class="collapse" data-state="${open ? 'open' : 'closed'}"><div>${treeRows(pg.id, d + 1)}${linksOf(pg.id).map(l => { const t = TARGETS[l.note]; return `<div class="tr-row link" data-open="${l.note}" data-linkof="${pg.id}" style="--d:${d + 1}" title="Link to the ${t.kind.toLowerCase()} filed in “${esc(ptitle(t.filed) || 'Unsorted ' + t.group.toLowerCase())}” (the same note, not a copy)"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span><i data-lucide="link-2" class="icon-xs lk"></i><button class="tr-act" data-unlink="${pg.id}|${l.note}" aria-label="Remove the link" title="Remove this link (the note is kept)"><i data-lucide="x" class="icon-xs"></i></button></div>`; }).join('')}</div></div>` : '');
     }).join('');
-    return pages + filedIn(parent === null ? 'root' : parent).map(k => noteRow(k, d)).join('');
+    const rootLinks = parent === null ? linksOf('root').map(l => { const t = TARGETS[l.note]; return `<div class="tr-row link" data-open="${l.note}" data-linkof="root" style="--d:0" title="Link to the ${t.kind.toLowerCase()} filed in “${esc(ptitle(t.filed) || 'Unsorted ' + t.group.toLowerCase())}” (the same note, not a copy)"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span><i data-lucide="link-2" class="icon-xs lk"></i><button class="tr-act" data-unlink="root|${l.note}" aria-label="Remove the link" title="Remove this link (the note is kept)"><i data-lucide="x" class="icon-xs"></i></button></div>`; }).join('') : '';
+    return pages + filedIn(parent === null ? 'root' : parent).map(k => noteRow(k, d)).join('') + rootLinks;
   }
   function renderTree() {
     const grp = g => {
@@ -1142,13 +1143,17 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     $$('#pageTree [data-drop]').forEach(x => delete x.dataset.drop); npLine.style.display = 'none'; dragNP.drop = null; tagSay(e, '');
     const el = document.elementFromPoint(e.clientX, e.clientY); if (!el) return;
     const tgt = dragNP.tgt && TARGETS[dragNP.id];
-    if (dragNP.link) { const lr = el.closest('#pageTree .tr-row[data-page]'); if (!lr || lr.dataset.page === dragNP.link) { tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Drop on a page to move this link'); return; } lr.dataset.drop = 'in'; dragNP.drop = { parent: lr.dataset.page }; tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Move the link inside'); return; }
+    if (dragNP.link) {
+      const rt = el.closest('#pageTree .tree-h[data-root]'); if (rt && dragNP.link !== 'root') { rt.dataset.drop = 'in'; dragNP.drop = { parent: 'root' }; tagSay(e, '<i data-lucide="corner-left-up" class="icon-xs"></i>Move the link to the top level'); return; }
+      const lr = el.closest('#pageTree .tr-row[data-page]'); if (!lr || lr.dataset.page === dragNP.link) { tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Drop on a page, or on “Your pages”'); return; }
+      lr.dataset.drop = 'in'; dragNP.drop = { parent: lr.dataset.page }; tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Move the link inside'); return;
+    }
     const gh = el.closest('#pageTree .grp-h'); if (gh && tgt && gh.dataset.grp === tgt.group && tgt.filed) { gh.dataset.drop = 'in'; dragNP.drop = { unsort: true }; tagSay(e, `<i data-lucide="inbox" class="icon-xs"></i>Back to Unsorted ${tgt.group.toLowerCase()}`); return; }
     const root = el.closest('#pageTree .tree-h[data-root]'); if (root) { root.dataset.drop = 'in'; dragNP.drop = { parent: null }; tagSay(e, '<i data-lucide="corner-left-up" class="icon-xs"></i>Move to the top level'); return; }
     const row = el.closest('#pageTree .tr-row[data-page]'); if (!row || row === dragNP.row) return;
     const tid = row.dataset.page; if (!dragNP.tgt && (tid === dragNP.id || isUnder(tid, dragNP.id))) return;
     const rr = row.getBoundingClientRect(), y = (e.clientY - rr.top) / rr.height;
-    if (y > 0.28 && y < 0.72) { row.dataset.drop = 'in'; dragNP.drop = { parent: tid }; tagSay(e, '<i data-lucide="corner-down-right" class="icon-xs"></i>Move inside'); return; }
+    if (dragNP.tgt || (y > 0.28 && y < 0.72)) { row.dataset.drop = 'in'; dragNP.drop = { parent: tid }; tagSay(e, '<i data-lucide="corner-down-right" class="icon-xs"></i>Move inside'); return; }
     const where = y <= 0.28 ? 'before' : 'after', d = +getComputedStyle(row).getPropertyValue('--d') || 0;
     Object.assign(npLine.style, { display: 'block', left: rr.left + 8 + d * 14 + 'px', width: rr.width - 12 - d * 14 + 'px', top: (where === 'before' ? rr.top - 1 : rr.bottom - 1) + 'px' });
     dragNP.drop = { parent: pageById(tid).parent, rel: { id: tid, where } }; tagSay(e, '<i data-lucide="move-vertical" class="icon-xs"></i>Move here');
@@ -1160,7 +1165,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     if (d.link) {
       const to = d.drop.parent, t = TARGETS[d.id];
       if (t.filed === to || LINKS.some(l => l.page === to && l.note === d.id)) { toast(`Already in “${ptitle(to)}”`, null, '', 'link-2', 2400); return; }
-      const s0 = snap(); LINKS = LINKS.map(l => l.page === d.link && l.note === d.id ? { page: to, note: d.id } : l); openP.add(to); renderPage();
+      const s0 = snap(); LINKS = LINKS.map(l => l.page === d.link && l.note === d.id ? { page: to, note: d.id } : l); if (to !== 'root') openP.add(to); renderPage();
       toast(`Link moved to “${ptitle(to)}” · the note stays filed in ${ptitle(t.filed) || 'Unsorted'}`, () => { restore(s0); return null; }, 'Undo', 'link-2', 5000); return;
     }
     if (d.tgt) { fileNote(d.id, d.drop.unsort ? null : (d.drop.parent || 'root')); return; }
