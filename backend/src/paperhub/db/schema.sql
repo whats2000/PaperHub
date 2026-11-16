@@ -578,3 +578,36 @@ CREATE TRIGGER IF NOT EXISTS note_blocks_fts_au AFTER UPDATE ON note_blocks BEGI
     INSERT INTO note_blocks_fts(rowid, text)
     SELECT new.rowid, new.text WHERE new.deleted_at IS NULL;
 END;
+
+-- Plan H5b.1: reading marks. A mark is the source of truth for a highlight /
+-- quote / figure / equation / region on a paper; its note block carries a
+-- copy of the display props. Soft-deleted together with that block.
+CREATE TABLE IF NOT EXISTS note_marks (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    paper_content_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    block_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('highlight', 'quote', 'figure', 'equation', 'region')),
+    color TEXT,
+    view TEXT NOT NULL CHECK (view IN ('html', 'pdf')),
+    pieces_json TEXT NOT NULL,
+    lang TEXT,
+    source_ref TEXT,
+    section_key TEXT,
+    status TEXT NOT NULL DEFAULT 'ok'
+        CHECK (status IN ('ok', 'lost', 'partly_lost', 'translation_changed')),
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_note_marks_paper
+    ON note_marks(paper_content_id, deleted_at);
+CREATE TABLE IF NOT EXISTS mark_colors (
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    color TEXT NOT NULL,
+    name TEXT NOT NULL,
+    visible INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (owner_id, color)
+);
+INSERT OR IGNORE INTO mark_colors (owner_id, color, name) VALUES
+    (1, 'green', 'Key result'), (1, 'blue', 'Method'),
+    (1, 'pink', 'Question'), (1, 'purple', 'Disagree');
