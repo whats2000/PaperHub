@@ -18,7 +18,16 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
-import { ApiError, getNote, getNoteForTarget, listMarkColors, postNoteOps } from "@/lib/api";
+import {
+  ApiError,
+  createNoteComment,
+  getNote,
+  getNoteForTarget,
+  listMarkColors,
+  postNoteOps,
+  replyToNoteComment,
+  setNoteCommentStatus,
+} from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { applyOpsLocally } from "@/lib/notes/ops";
 import type {
@@ -26,6 +35,7 @@ import type {
   NoteBlock,
   NoteBlockIn,
   NoteComment,
+  NoteCommentStatus,
   NoteOp,
   NoteSuggestion,
   NoteTargetKind,
@@ -89,6 +99,13 @@ interface NotesStore {
   /** The user's names for the mark colours (empty until loaded). */
   colorNames: Record<string, string>;
   loadColors: () => Promise<void>;
+
+  /** Starts a thread on `blockId` (sends the queued edits first: the block
+   * must exist on the server). Returns the new thread. */
+  addComment: (noteId: number, blockId: string, quote: string, text: string) => Promise<NoteComment>;
+  replyComment: (noteId: number, commentId: string, text: string) => Promise<NoteComment>;
+  /** `deleted` drops the thread from the list. */
+  setCommentStatus: (noteId: number, commentId: string, status: NoteCommentStatus) => Promise<void>;
 }
 
 /** localStorage that never throws (private windows, blocked site data). */
@@ -318,6 +335,12 @@ function draftInsert(local: NoteBlock[], b: NoteBlock): NoteOp {
 export const useNotesStore = create<NotesStore>()(
   persist(
     (set, get) => {
+      const writeComments = (noteId: number, f: (list: NoteComment[]) => NoteComment[]) =>
+        set((s) => {
+          const cur = s.notes[noteId];
+          return cur ? { notes: { ...s.notes, [noteId]: { ...cur, comments: f(cur.comments) } } } : {};
+        });
+
       const schedule = (noteId: number, delay: number = FLUSH_DELAY_MS) => {
         // A burst waiting to be retried keeps its backoff: typing does not
         // hammer a failing server.
@@ -706,6 +729,26 @@ export const useNotesStore = create<NotesStore>()(
           }),
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
+
+        addComment: async (noteId, blockId, quote, text) => {
+          await get().flush(noteId);
+          const thread = await createNoteComment(noteId, { block_id: blockId, quote, text });
+          writeComments(noteId, (list) => [...list, thread]);
+          return thread;
+        },
+        replyComment: async (noteId, commentId, text) => {
+          const thread = await replyToNoteComment(commentId, text);
+          writeComments(noteId, (list) => list.map((c) => (c.id === commentId ? thread : c)));
+          return thread;
+        },
+        setCommentStatus: async (noteId, commentId, status) => {
+          const thread = await setNoteCommentStatus(commentId, status);
+          writeComments(noteId, (list) =>
+            status === "deleted"
+              ? list.filter((c) => c.id !== commentId)
+              : list.map((c) => (c.id === commentId ? thread : c)),
+          );
+        },
 
         colorNames: {},
         loadColors: () => {

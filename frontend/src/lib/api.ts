@@ -68,6 +68,8 @@ import type {
   MarkColorPatch,
   MarkCreated,
   MarkIn,
+  NoteComment,
+  NoteCommentStatus,
   NoteDetail,
   NoteOpsBody,
   NoteTargetKind,
@@ -1282,6 +1284,35 @@ export async function postNoteOps(noteId: number, body: NoteOpsBody): Promise<Ap
   return apiFetch<ApplyResult>(`/notes/${noteId}/ops`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/** Starts a thread on a block's text (the first item is `text`). */
+export async function createNoteComment(
+  noteId: number,
+  body: { block_id: string; quote: string; text: string },
+): Promise<NoteComment> {
+  return apiFetch<NoteComment>(`/notes/${noteId}/comments`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function replyToNoteComment(commentId: string, text: string): Promise<NoteComment> {
+  return apiFetch<NoteComment>(`/notes/comments/${commentId}/items`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+/** open <-> resolved, or deleted (a deleted thread cannot come back: 409). */
+export async function setNoteCommentStatus(
+  commentId: string,
+  status: NoteCommentStatus,
+): Promise<NoteComment> {
+  return apiFetch<NoteComment>(`/notes/comments/${commentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
 }
 

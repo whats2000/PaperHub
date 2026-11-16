@@ -1,8 +1,8 @@
 /** The notes formatting bar: B I U S · quote, code, hide · Link, Comment.
  *
  * Every tooltip names the Markdown and the key, so the bar teaches the
- * shortcuts. The Comment button is present but disabled until the comments
- * feature wires `onComment` (Ctrl+Shift+M belongs to it as well).
+ * shortcuts. The Comment button starts a comment on the selection (`onComment`;
+ * Ctrl+Shift+M does the same, bound in noteComments.tsx).
  */
 import { SuggestionMenu } from "@blocknote/core/extensions";
 import {

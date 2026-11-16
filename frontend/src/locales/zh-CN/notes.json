@@ -93,6 +93,26 @@
     "or": "或",
     "atLineStart": "在行首"
   },
+  "comment": {
+    "label": "评论",
+    "new": "新评论",
+    "countOne": "1 条评论",
+    "countMany": "{{count}} 条评论",
+    "resolve": "标为已解决",
+    "deleteThread": "删除这串评论",
+    "close": "关闭（Esc）",
+    "add": "添加评论…",
+    "reply": "回复…",
+    "send": "发送评论（Enter）",
+    "you": "你",
+    "resolved": "评论已解决",
+    "deleted": "评论已删除",
+    "restored": "评论已恢复",
+    "undo": "撤销",
+    "resolveAgain": "再次标为已解决",
+    "deleteAgain": "再次删除",
+    "failed": "无法保存评论。"
+  },
   "tip": {
     "body": "第一次使用？输入 <slash>/</slash> 选区块，输入 <bold>**粗体**</bold> 即可应用格式，或选中文字调出工具栏。",
     "all": "所有快捷键",

@@ -93,6 +93,26 @@
     "or": "or",
     "atLineStart": "at the line start"
   },
+  "comment": {
+    "label": "Comment",
+    "new": "New comment",
+    "countOne": "1 comment",
+    "countMany": "{{count}} comments",
+    "resolve": "Resolve",
+    "deleteThread": "Delete the thread",
+    "close": "Close (Esc)",
+    "add": "Add a comment…",
+    "reply": "Reply…",
+    "send": "Comment (Enter)",
+    "you": "You",
+    "resolved": "Comment resolved",
+    "deleted": "Comment deleted",
+    "restored": "Comment restored",
+    "undo": "Undo",
+    "resolveAgain": "Resolve again",
+    "deleteAgain": "Delete again",
+    "failed": "Couldn't save the comment."
+  },
   "tip": {
     "body": "New here? Type <slash>/</slash> for blocks, <bold>**bold**</bold> as you type, or select text for the toolbar.",
     "all": "All shortcuts",

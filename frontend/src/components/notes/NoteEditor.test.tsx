@@ -493,3 +493,74 @@ describe("NoteEditor", () => {
     expect(posted).toHaveLength(1);
   });
 });
+
+describe("comments in the editor", () => {
+  type PM = HTMLElement & {
+    editor: {
+      commands: { setTextSelection: (r: { from: number; to: number }) => boolean };
+      view: { dom: HTMLElement };
+    };
+  };
+
+  // jsdom has no layout: give ranges the rectangles ProseMirror asks for.
+  beforeAll(() => {
+    const zero = () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => zero();
+  });
+
+  it("Ctrl+Shift+M opens a comment box on the selected words; posting marks them and a click reopens the thread", async () => {
+    const sent: unknown[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/comments`, async ({ request }) => {
+        const body = (await request.json()) as { block_id: string; quote: string; text: string };
+        sent.push(body);
+        return HttpResponse.json({
+          id: "c_9", note_id: 7, block_id: body.block_id, quote: body.quote, status: "open",
+          created_at: "2026-11-16T10:00:00Z",
+          items: [{ id: 1, text: body.text, created_at: "2026-11-16T10:00:00Z" }],
+        });
+      }),
+    );
+    seed([blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" })]);
+    mount();
+    const pm = document.querySelector(".ProseMirror") as PM;
+    await screen.findByText("Mine words");
+    act(() => {
+      pm.editor.commands.setTextSelection({ from: 3, to: 7 }); // "Mine"
+    });
+    expect(screen.queryByTestId("comment-thread")).toBeNull();
+    act(() => {
+      fireEvent.keyDown(pm, { key: "M", keyCode: 77, ctrlKey: true, shiftKey: true });
+    });
+    const box = await screen.findByRole("textbox", { name: "Comment" });
+    expect(screen.getByText("New comment")).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: "check this" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(sent).toEqual([{ block_id: "p1", quote: "Mine", text: "check this" }]));
+    const words = await waitFor(() => {
+      const el = pm.querySelector<HTMLElement>('.note-comment[data-comment-id="c_9"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(words).toHaveTextContent("Mine");
+    expect(useNotesStore.getState().notes[7]?.comments.map((c) => c.id)).toEqual(["c_9"]);
+    // Esc closes the open thread; a click on the words opens it again.
+    fireEvent.keyDown(await screen.findByRole("textbox", { name: "Comment" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("comment-thread")).toBeNull());
+    fireEvent.click(words);
+    expect(await screen.findByText("check this")).toBeInTheDocument();
+  });
+
+  it("Ctrl+Shift+M with nothing selected does nothing", async () => {
+    seed([blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" })]);
+    mount();
+    const pm = document.querySelector(".ProseMirror") as PM;
+    await screen.findByText("Mine words");
+    act(() => {
+      pm.editor.commands.setTextSelection({ from: 4, to: 4 });
+      fireEvent.keyDown(pm, { key: "M", keyCode: 77, ctrlKey: true, shiftKey: true });
+    });
+    expect(screen.queryByTestId("comment-thread")).toBeNull();
+  });
+});

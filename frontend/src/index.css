@@ -315,3 +315,18 @@
     @apply font-sans;
     }
 }
+
+/* Notes: commented text, a neutral underline + tint (yellow is for citations). */
+.note-comment {
+    background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+    border-bottom: 2px solid color-mix(in srgb, var(--foreground) 45%, transparent);
+    cursor: pointer;
+    transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+.note-comment[data-on] {
+    background-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+    border-bottom-color: var(--foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+    .note-comment { transition: none; }
+}

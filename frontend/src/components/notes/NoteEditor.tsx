@@ -34,6 +34,7 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
+import { commentKeys, useNoteComments } from "./noteComments";
 import { codeFence, inlineMarks } from "./inlineMarks";
 import { noteSchema, paperhubKeys } from "./schema";
 import { ShortcutsGuide } from "./ShortcutsGuide";
@@ -112,7 +113,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
         return tree.length ? (tree as never) : undefined;
       })(),
       dictionary: dictionaryFor(i18n.language),
-      extensions: [paperhubKeys, inlineMarks, codeFence, syntaxHighlighter],
+      extensions: [paperhubKeys, commentKeys, inlineMarks, codeFence, syntaxHighlighter],
     },
     [noteId],
   );
@@ -282,6 +283,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
   );
 
   const [guideOpen, setGuideOpen] = useState(false);
+  const comments = useNoteComments(editor, noteId);
 
   const loadColors = useNotesStore((s) => s.loadColors);
   useEffect(() => {
@@ -297,6 +299,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
     <NoteEditorContext.Provider value={ctx}>
       <div
         data-testid="note-editor"
+        onClick={comments.onEditorClick}
         onClickCapture={(e) => {
           // A paper link made from selected words opens the paper, like its chip.
           const a = (e.target as HTMLElement).closest?.("a[href^='paperhub://']");
@@ -353,10 +356,11 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
           onChange={onChange}
           onSelectionChange={onSelectionChange}
         >
-          <NoteFormattingBar />
+          <NoteFormattingBar onComment={comments.start} />
           <SuggestionMenuController triggerCharacter="/" getItems={slashItems} />
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
         </BlockNoteView>
+        {comments.popover}
       </div>
     </NoteEditorContext.Provider>
   );

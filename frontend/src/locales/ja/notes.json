@@ -93,6 +93,26 @@
     "or": "または",
     "atLineStart": "行の先頭で"
   },
+  "comment": {
+    "label": "コメント",
+    "new": "新しいコメント",
+    "countOne": "コメント 1 件",
+    "countMany": "コメント {{count}} 件",
+    "resolve": "解決済みにする",
+    "deleteThread": "スレッドを削除",
+    "close": "閉じる（Esc）",
+    "add": "コメントを追加…",
+    "reply": "返信…",
+    "send": "コメントする（Enter）",
+    "you": "あなた",
+    "resolved": "コメントを解決済みにしました",
+    "deleted": "コメントを削除しました",
+    "restored": "コメントを元に戻しました",
+    "undo": "元に戻す",
+    "resolveAgain": "もう一度解決済みにする",
+    "deleteAgain": "もう一度削除",
+    "failed": "コメントを保存できませんでした。"
+  },
   "tip": {
     "body": "はじめてですか？ <slash>/</slash> でブロック、<bold>**太字**</bold> のように入力すると書式が付き、文字を選ぶとツールバーが出ます。",
     "all": "すべてのショートカット",

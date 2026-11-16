@@ -14,6 +14,7 @@ import {
 
 import { calloutBlock } from "./blocks/CalloutBlock";
 import { codeBlockWithCopy } from "./blocks/CodeBlock";
+import { commentStyle } from "./blocks/CommentStyle";
 import { hiddenStyle } from "./blocks/HiddenStyle";
 import { mathBlock } from "./blocks/MathBlock";
 import { mentionInline } from "./blocks/MentionChip";
@@ -52,7 +53,7 @@ export const noteSchema = BlockNoteSchema.create({
     paperRegion: paperRegionBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline },
-  styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle },
+  styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle, comment: commentStyle },
 });
 
 /** The Notion line-start shortcut BlockNote lacks: `$$ ` starts an equation.

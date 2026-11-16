@@ -56,8 +56,25 @@ export interface NoteSuggestion {
   created_at: string;
 }
 
-/** Block comments arrive with a later task; the key is part of the contract. */
-export type NoteComment = Record<string, unknown>;
+export type NoteCommentStatus = "open" | "resolved" | "deleted";
+
+export interface NoteCommentItem {
+  id: number;
+  text: string;
+  created_at: string;
+}
+
+/** A comment thread on a text range of a block. The anchor is the inline
+ * `comment` style carrying `id`; the thread text is not note text. */
+export interface NoteComment {
+  id: string;
+  note_id: number;
+  block_id: string;
+  quote: string;
+  status: NoteCommentStatus;
+  created_at: string;
+  items: NoteCommentItem[];
+}
 
 export interface NoteWithBlocks {
   note: Note;

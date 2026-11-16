@@ -93,6 +93,26 @@
     "or": "或",
     "atLineStart": "在行首"
   },
+  "comment": {
+    "label": "留言",
+    "new": "新留言",
+    "countOne": "1 則留言",
+    "countMany": "{{count}} 則留言",
+    "resolve": "標為已解決",
+    "deleteThread": "刪除這串留言",
+    "close": "關閉（Esc）",
+    "add": "新增留言…",
+    "reply": "回覆…",
+    "send": "送出留言（Enter）",
+    "you": "你",
+    "resolved": "留言已解決",
+    "deleted": "留言已刪除",
+    "restored": "留言已還原",
+    "undo": "復原",
+    "resolveAgain": "再次標為已解決",
+    "deleteAgain": "再次刪除",
+    "failed": "無法儲存留言。"
+  },
   "tip": {
     "body": "第一次使用？輸入 <slash>/</slash> 選區塊，輸入 <bold>**粗體**</bold> 即可套用格式，或選取文字叫出工具列。",
     "all": "所有快速鍵",
