@@ -364,6 +364,11 @@ async def test_search_records_hits_shown_whole(
     whole = out.record["whole_block_ids"]
     assert len(hits) == 2 and len(whole) == 1
     assert "short needle" in hits[whole[0]]["snippet"]
+    # the model is told which hits are cut (and need read_note before citing)
+    assert [h.get("cut", False) for h in hits.values()].count(True) == 1
+    assert "cut" not in hits[whole[0]]
+    reg = _reg()
+    assert 'unless marked "cut"' in reg.get("search_notes").description
 
 
 async def test_search_hits_a_section_heading(

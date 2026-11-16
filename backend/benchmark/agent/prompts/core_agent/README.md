@@ -425,3 +425,35 @@ hit's block id before citing it." (prompt unchanged, `core_agent_v9`).
 | n5, n7, n1 | — | unchanged: whole-note read / outline → heading / cited summary, no marks [1 each] |
 
 **D5 shipped.**
+
+### Task 12: whole note hits are citable (D6)
+
+A hit whose block fits the 240-character snippet now counts as read (live
+run 913 had cited one and got `[unsourced:note_not_read]`), so D5's "hits
+cannot be cited" was wrong for short blocks. Variants of the `search_notes`
+description (prompt unchanged, `core_agent_v9`; deploy model
+`gemini/gemini-pro-latest`; in-process on the seeded scratch copy):
+
+- D5 (baseline): "Hits are snippets and cannot be cited: read_note from the
+  hit's block id before citing it."
+- D6: "A hit shows its block whole unless marked \"cut\": cite a whole hit as
+  [note:<block id>]; read_note from a cut hit's block id before citing it."
+  Truncated hits carry `"cut": true`.
+- D7: "A hit shows a block's first 240 characters, so a short block is whole
+  and can be cited [note:<block id>]; read_note from a longer hit's block id
+  before citing it." (no flag)
+
+Cases: n3 (short capacity-factor block), nL (a 465-character user block in
+paper 48's Discussion whose numbers come after the cut: "what did I record
+about my rerun of the bias trick at scale?"), n2 (regression). Every answer
+read by hand.
+
+| case | D5 | D6 | D7 |
+|---|---|---|---|
+| n3 | search → read_note, cited, 3 steps (3/3) | search only, cited, 2 steps (3/3) | search only, cited, 2 steps (3/3) |
+| nL | search → read_note, cited, all numbers right (3/3) | read before citing (3/3: 2× read_note direct, 1× search ×2 → read) | read before citing (3/3) |
+| n2 | search → read, cited (2/2) | search → read, cited (2/2) | search → read, cited (2/2) |
+
+No unsourced marks and no cut hit cited unread in any of the 24 runs. D6
+and D7 measure the same; **D6 shipped** because the flag does not ask the
+model to judge a block's length (a borderline 230 vs 250-character block).

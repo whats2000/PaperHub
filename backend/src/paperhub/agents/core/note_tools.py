@@ -215,6 +215,8 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             "heading_path": [_heading_xml(i, t) for i, t in path],
             "snippet": (f'<note_block id="{_esc(bid)}" author="{_esc(author)}">'
                         f"{snippet}</note_block>"),
+            # A cut hit is a snippet: read_note before citing it.
+            **({"cut": True} if len(str(text)) > SNIPPET_CHARS else {}),
         })
         private.setdefault(note_id, []).append((bid, str(text)))
     for note_id, blocks in private.items():
@@ -570,8 +572,9 @@ def register_note_tools(registry: ToolRegistry) -> None:
             f"Keyword search over the user's notes: up to {SEARCH_LIMIT} "
             "matching blocks, each with its block id and heading path. The way "
             "into a long note or many notes. Use a few key terms in the note's "
-            "language. Hits are snippets and cannot be cited: read_note from the "
-            "hit's block id before citing it.",
+            "language. A hit shows its block whole unless marked \"cut\": "
+            "cite a whole hit as [note:<block id>]; read_note from a cut hit's "
+            "block id before citing it.",
             {"type": "object",
              "properties": {"query": {"type": "string"}, "scope": _SCOPE},
              "required": ["query"]},
