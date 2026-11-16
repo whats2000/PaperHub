@@ -84,13 +84,32 @@ async def test_insert_without_place_invalid(
     migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
 ) -> None:
     nid = await _chat_note(migrated_db)
+    first = await apply_ops(migrated_db, nid, base_revision=0, ops=[
+        Op(op="insert", block=BlockIn(type="paragraph", content="mine"))],
+        actor="user")
     ctx = _ctx(migrated_db, fake_tracer)
-    out = await _edit(ctx, note="chat", base_revision=0, ops=[_ins("loose")])
+    out = await _edit(ctx, note="chat", base_revision=first.revision,
+                      ops=[_ins("loose")])
     data = json.loads(out.content)
     assert data["applied"] == []
     assert data["rejected"][0]["reason"] == "invalid"
-    assert await list_blocks(migrated_db, nid) == []
+    assert [b.text for b in await list_blocks(migrated_db, nid)] == ["mine"]
     assert out.events == []
+
+
+async def test_insert_into_empty_note_needs_no_place(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """An empty note has one place to write, so no anchor is needed (a new
+    chat's note would otherwise be unwritable)."""
+    nid = await _chat_note(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _edit(ctx, note="chat", base_revision=0,
+                      ops=[_ins("first"), _ins("second")])
+    data = json.loads(out.content)
+    assert data["rejected"] == []
+    assert [b.text for b in await list_blocks(migrated_db, nid)] == [
+        "first", "second"]
 
 
 async def test_user_block_update_is_suggestion(
@@ -324,3 +343,27 @@ async def test_bad_arguments_are_clean_errors(
     out = await _edit(ctx, note="chat", base_revision=99, ops=[
         _ins("x", under_heading="h")])
     assert out.record.get("error") and "ahead" in out.content
+
+
+async def test_divider_before_is_advertised_and_applied(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """The schema offers divider_before, so the agent can start an appended
+    block as a new note within the section."""
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    item = reg.get("edit_note").parameters["properties"]["ops"]["items"]
+    assert item["properties"]["divider_before"] == {"type": "boolean"}
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[_ins("first", under_heading="Method")])
+    rev = json.loads(out.content)["revision"]
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=rev,
+                      ops=[_ins("second", under_heading="Method",
+                                divider_before=True)])
+    assert not out.record.get("error"), out.content
+    types = [(b.type, b.text) for b in await list_blocks(migrated_db, note.id)]
+    assert types[-3:] == [("paragraph", "first"), ("divider", ""),
+                          ("paragraph", "second")]

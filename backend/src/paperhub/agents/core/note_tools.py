@@ -408,7 +408,12 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     new_sections: dict[str, str] = {}  # section name -> block id to create
     for op in ops:
         label = op.block_id or op.after or op.before or op.under_heading
-        if op.op == "insert" and not (op.after or op.before or op.under_heading):
+        # An empty chat / idea / free note has one place to write; elsewhere
+        # (and always on a paper note, which writes under a section) an
+        # insert names its place.
+        anywhere = not blocks and note.target_kind != "paper"
+        if (op.op == "insert" and not anywhere
+                and not (op.after or op.before or op.under_heading)):
             rejected.append(_invalid(
                 label, "an insert must name after, before or under_heading"))
             continue
@@ -540,7 +545,8 @@ def register_note_tools(registry: ToolRegistry) -> None:
                              "required": ["type"]},
                          "after": {"type": "string"},
                          "before": {"type": "string"},
-                         "under_heading": {"type": "string"}},
+                         "under_heading": {"type": "string"},
+                         "divider_before": {"type": "boolean"}},
                      "required": ["op"]}}},
              "required": ["note", "base_revision", "ops"]},
             Tier.SHOW_UNDO, _edit_note,
