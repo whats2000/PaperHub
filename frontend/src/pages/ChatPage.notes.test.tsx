@@ -63,7 +63,7 @@ beforeEach(() => {
   useChatStore.getState().reset();
   useNotesStore.setState({ notes: {}, byTarget: {} });
   useNotesPaneStore.setState({ open: false, activeTab: "reader", notesWidth: NOTES_DEFAULT_WIDTH });
-  useCanvasStore.setState({ open: false, width: 600, activePaperId: null });
+  useCanvasStore.setState({ open: false, width: 600, activePaperId: null, readerView: null, readingSection: null });
   const sid = useChatStore.getState().newSession();
   useChatStore.getState().patchSessionBackendId(sid, 42);
   useChatStore.setState((s) => ({
@@ -87,6 +87,19 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(within(bar).getByRole("button", { name: "More" }));
     // The chat's note is linked to this chat only.
     expect(await screen.findByRole("menu")).toHaveTextContent("Shared by 1 chat · revision 1");
+  });
+
+  it("disables Follow while the reader shows the paper as a PDF", async () => {
+    useCanvasStore.setState({ open: true, width: 600, activePaperId: 7, readerView: { paperId: 7, kind: "pdf" } });
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const bar = await screen.findByRole("toolbar", { name: "Note tools" });
+    await screen.findByText("note 11");
+    expect(within(bar).getByRole("button", { name: "Follow reading" })).toHaveAttribute("aria-disabled", "true");
+    act(() => {
+      useCanvasStore.setState({ readerView: { paperId: 7, kind: "html" } });
+    });
+    expect(within(bar).getByRole("button", { name: /^Following/ })).not.toHaveAttribute("aria-disabled");
   });
 
   it("the Notes button opens and closes the pane", async () => {

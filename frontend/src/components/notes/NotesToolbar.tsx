@@ -20,6 +20,9 @@ export interface NotesToolbarProps {
   noteId: number | null;
   /** The section Follow is tracking ("§2"), null when none yet. */
   followLabel: string | null;
+  /** The reader shows the paper as a PDF, which does not report its section
+   * yet: Follow is off with a hint. */
+  followUnavailable?: boolean;
   /** How many chats share the note, when known. */
   sharedBy?: number | null;
   /** Export the note; the items wait as "Coming soon" until it is given. */
@@ -51,6 +54,7 @@ function ExportItem(props: {
 export function NotesToolbar({
   noteId,
   followLabel,
+  followUnavailable = false,
   sharedBy = null,
   onExport,
   guideOpen,
@@ -84,7 +88,7 @@ export function NotesToolbar({
     setFocusOn(!focusOn);
   };
 
-  const followText = followOn
+  const followText = followOn && !followUnavailable
     ? followLabel
       ? t("notes:toolbar.following", "Following {{section}}", { section: followLabel })
       : t("notes:toolbar.followingAny", "Following")
@@ -109,18 +113,24 @@ export function NotesToolbar({
     >
       <button
         type="button"
-        aria-pressed={followOn}
+        aria-pressed={followOn && !followUnavailable}
+        // aria-disabled, not disabled: the hint stays readable on hover / focus.
+        aria-disabled={followUnavailable || undefined}
         disabled={noteId === null}
-        onClick={() => setFollowOn(!followOn)}
+        onClick={() => {
+          if (!followUnavailable) setFollowOn(!followOn);
+        }}
         title={
-          followOn
+          followUnavailable
+            ? t("notes:toolbar.followPdf", "Follow works on HTML papers for now; this paper is showing as a PDF.")
+            : followOn
             ? t(
                 "notes:toolbar.followingTitle",
                 "The note scrolls to the section you're reading. Click to stop following.",
               )
             : t("notes:toolbar.followTitle", "Click to scroll the note along with the section you're reading.")
         }
-        className={cn(BUTTON, "min-w-0")}
+        className={cn(BUTTON, "min-w-0 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground")}
       >
         <LocateFixed className="size-3 shrink-0" aria-hidden />
         <span className="truncate">{followText}</span>

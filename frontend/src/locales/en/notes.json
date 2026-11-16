@@ -219,6 +219,7 @@
     "follow": "Follow reading",
     "followingTitle": "The note scrolls to the section you're reading. Click to stop following.",
     "followTitle": "Click to scroll the note along with the section you're reading.",
+    "followPdf": "Follow works on HTML papers for now; this paper is showing as a PDF.",
     "focus": "Focus",
     "focusTitle": "Focus: fade the other parts of the note and their marks on the paper (Esc to stop)",
     "more": "More",

@@ -110,6 +110,11 @@ export function NotesPane({ onClose }: Props) {
     root: panel,
   });
   const [guideOpen, setGuideOpen] = useState(false);
+  // A PDF in the reader does not report its section yet (Follow on PDFs
+  // comes with the PDF marks).
+  const followUnavailable = useCanvasStore(
+    (s) => tab === "paper" && paperId !== null && s.readerView?.paperId === paperId && s.readerView.kind === "pdf",
+  );
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
 
   return (
@@ -129,6 +134,7 @@ export function NotesPane({ onClose }: Props) {
       <NotesToolbar
         noteId={noteId}
         followLabel={followLabel}
+        followUnavailable={followUnavailable}
         sharedBy={sharedBy}
         guideOpen={guideOpen}
         onGuideOpenChange={setGuideOpen}

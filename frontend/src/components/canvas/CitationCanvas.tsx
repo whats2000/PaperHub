@@ -118,6 +118,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
   const setActivePaperId = useCanvasStore((s) => s.setActivePaperId);
   const setReadingSection = useCanvasStore((s) => s.setReadingSection);
+  const setReaderView = useCanvasStore((s) => s.setReaderView);
 
   // Derive the active session's enabled references (mirror ReferenceSourcesPanel)
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -680,6 +681,22 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // Stay mounted while there are references to prefetch (even when closed) so
   // their content loads + caches for the session; render nothing only when
   // closed AND there's nothing to prefetch.
+  // Publish how the paper is shown: a PDF (a PDF-only paper or the PDF tab)
+  // does not report the section being read yet, so the notes' Follow says so.
+  const readerKind: "html" | "pdf" | null =
+    !open || effectivePaperId == null || !activeDoc
+      ? null
+      : activeDoc.mode === "pdf" ||
+          (activeDoc.status === "ready" &&
+            activeDoc.pagePdf === true &&
+            readerTabByPaper[effectivePaperId] === "pdf")
+        ? "pdf"
+        : "html";
+  useEffect(() => {
+    setReaderView(effectivePaperId != null && readerKind ? { paperId: effectivePaperId, kind: readerKind } : null);
+  }, [effectivePaperId, readerKind, setReaderView]);
+  useEffect(() => () => setReaderView(null), [setReaderView]);
+
   if (!open && refs.length === 0) return null;
 
   const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);

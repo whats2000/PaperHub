@@ -244,6 +244,22 @@ describe("CitationCanvas — figure and region citations", () => {
     expect(screen.queryByRole("tab", { name: "HTML" })).toBeNull();   // hidden from a11y
   });
 
+  it("publishes whether the reader shows the paper as HTML or as a PDF (Follow in the notes)", async () => {
+    const user = userEvent.setup();
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LATEX_PAPER));
+    const html = await screen.findByRole("tab", { name: "HTML" });
+    await waitFor(() =>
+      expect(useCanvasStore.getState().readerView).toEqual({ paperId: LATEX_PAPER, kind: "html" }));
+    html.focus();
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() =>
+      expect(useCanvasStore.getState().readerView).toEqual({ paperId: LATEX_PAPER, kind: "pdf" }));
+    act(() => useCanvasStore.getState().openPaper(PDF_PAPER));
+    await waitFor(() =>
+      expect(useCanvasStore.getState().readerView).toEqual({ paperId: PDF_PAPER, kind: "pdf" }));
+  });
+
   it("the track slides for a tab change, not for a paper switch", async () => {
     const user = userEvent.setup();
     const { container } = render(<CitationCanvas />);

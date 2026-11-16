@@ -58,6 +58,9 @@ interface CanvasState {
   /** The section heading the reader is at, per the reader's scroll (HTML
    *  papers); the notes pane's Follow scrolls the note to it. Ephemeral. */
   readingSection: ReadingSection | null;
+  /** How the reader shows its paper (the HTML or a PDF: a PDF-only paper or
+   *  the PDF tab), published by CitationCanvas; null when it shows none. */
+  readerView: ReaderView | null;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number, endChunkId?: number) => void;
@@ -80,6 +83,7 @@ interface CanvasState {
   setActivePaperId: (paperContentId: number | null) => void;
   /** Published by the reader as it scrolls (null heading: before the first). */
   setReadingSection: (paperContentId: number, heading: string | null) => void;
+  setReaderView: (view: ReaderView | null) => void;
   /** References button: open in browse mode if closed, else close. */
   toggleCanvas: () => void;
   closeCanvas: () => void;
@@ -89,6 +93,11 @@ interface CanvasState {
 export interface ReadingSection {
   paperId: number;
   heading: string;
+}
+
+export interface ReaderView {
+  paperId: number;
+  kind: "html" | "pdf";
 }
 
 export const useCanvasStore = create<CanvasState>()(
@@ -105,6 +114,7 @@ export const useCanvasStore = create<CanvasState>()(
       paperRequestNonce: 0,
       activePaperId: null,
       readingSection: null,
+      readerView: null,
       width: CANVAS_DEFAULT_WIDTH,
       openCitation: (chunkId, endChunkId) =>
         set((s) => ({
@@ -159,6 +169,12 @@ export const useCanvasStore = create<CanvasState>()(
           if (heading === null) return cur?.paperId === paperId ? { readingSection: null } : {};
           return cur?.paperId === paperId && cur.heading === heading ? {} : { readingSection: { paperId, heading } };
         }),
+      setReaderView: (view) =>
+        set((s) =>
+          s.readerView?.paperId === view?.paperId && s.readerView?.kind === view?.kind
+            ? {}
+            : { readerView: view },
+        ),
       toggleCanvas: () => set((s) => ({ open: !s.open })),
       closeCanvas: () => set({ open: false }),
       setWidth: (width) => set({ width }),

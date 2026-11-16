@@ -74,6 +74,18 @@ describe("NotesToolbar", () => {
     expect(screen.getByRole("button", { name: "Follow reading" })).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("Follow is unavailable while the reader shows a PDF, and says why", () => {
+    render(<Toolbar followUnavailable />);
+    const follow = screen.getByRole("button", { name: "Follow reading" });
+    expect(follow).toHaveAttribute("aria-disabled", "true");
+    expect(follow).toHaveAttribute(
+      "title",
+      "Follow works on HTML papers for now; this paper is showing as a PDF.",
+    );
+    fireEvent.click(follow);
+    expect(useNotesStore.getState().followOn).toBe(true);
+  });
+
   it("Focus toggles, starts on the first part when none is chosen, and Esc stops it", () => {
     render(<Toolbar />);
     const focus = screen.getByRole("button", { name: "Focus" });
