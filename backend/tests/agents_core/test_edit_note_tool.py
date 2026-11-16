@@ -69,7 +69,7 @@ async def test_edit_inserts_under_section_name(
                       ops=[_ins("key point", under_heading="method")])
     assert not out.record.get("error"), out.content
     data = json.loads(out.content)
-    assert len(data["applied"]) == 1
+    assert len(data["applied"]) == 2  # the new section and the paragraph
     blocks = await list_blocks(migrated_db, note.id)
     sec = next(b for b in blocks if b.type == "section")
     assert sec.section_key == "Method"
@@ -180,3 +180,147 @@ async def test_trace_records_outcome(
     assert rec["rejected"] == [] and rec["ops"][0]["op"] == "insert"
     note = await get_note(migrated_db, nid)
     assert note is not None and note.revision == rec["revision"]
+
+
+async def _read(ctx: ToolContext, note: str) -> None:
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    await reg.run(ctx, ToolCall(id="r", name="read_note", arguments={"note": note}))
+
+
+async def _history_actor(conn: aiosqlite.Connection, block_id: str) -> str:
+    async with conn.execute(
+        "SELECT actor FROM note_block_history WHERE block_id = ? "
+        "ORDER BY id LIMIT 1", (block_id,)) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    return str(row[0])
+
+
+async def test_new_section_is_part_of_the_change_set(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    await _read(ctx, f"paper:{pid}")
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[_ins("a", under_heading="Method"),
+                           _ins("b", under_heading="method")])
+    ev = out.events[0][1]
+    assert ev["revision"] == note.revision + 1  # one revision, not two
+    assert ev["summary"]["added"] == 2 and ev["summary"]["section"] == "Method"
+    blocks = await list_blocks(migrated_db, note.id)
+    secs = [b for b in blocks if b.type == "section"]
+    assert len(secs) == 1
+    assert await _history_actor(migrated_db, secs[0].id) == "agent"
+    async with migrated_db.execute(
+        "SELECT revision FROM note_agent_reads WHERE note_id = ?", (note.id,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] == ev["revision"]
+    from paperhub.notes.ops import undo_change_set
+    await undo_change_set(migrated_db, ev["change_set_id"])
+    assert await list_blocks(migrated_db, note.id) == []
+
+
+async def test_new_section_comes_in_paper_order(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                ops=[_ins("m", under_heading="Method")])
+    cur = (await get_note(migrated_db, note.id))
+    assert cur is not None
+    await _edit(ctx, note=f"paper:{pid}", base_revision=cur.revision,
+                ops=[_ins("i", under_heading="Introduction")])
+    keys = [b.section_key for b in await list_blocks(migrated_db, note.id)
+            if b.type == "section"]
+    assert keys == ["Introduction", "Method"]
+
+
+async def test_no_section_left_for_invalid_ops(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[_ins("x", under_heading="No such section"),
+                           _ins("loose")])
+    data = json.loads(out.content)
+    assert data["applied"] == [] and len(data["rejected"]) == 2
+    assert await list_blocks(migrated_db, note.id) == []
+    n = await get_note(migrated_db, note.id)
+    assert n is not None and n.revision == note.revision
+
+
+async def test_existing_section_is_reused(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.papers import ensure_section
+
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    sec = await ensure_section(migrated_db, note.id, pid, "Method")
+    n = await get_note(migrated_db, note.id)
+    assert n is not None
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=n.revision,
+                      ops=[_ins("again", under_heading="Method")])
+    assert out.events[0][1]["summary"]["added"] == 1
+    secs = [b for b in await list_blocks(migrated_db, note.id)
+            if b.type == "section"]
+    assert [b.id for b in secs] == [sec]
+
+
+async def test_summary_counts_move_and_before(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="paragraph", content="a")),
+        Op(op="insert", block=BlockIn(type="paragraph", content="b"))])
+    a, b = res.applied
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _edit(ctx, note="chat", base_revision=res.revision, ops=[
+        _ins("front", before=a), {"op": "move", "block_id": b, "before": a}])
+    assert out.events[0][1]["summary"] == {
+        "added": 1, "updated": 1, "deleted": 0, "suggested": 0,
+        "rejected": 0, "section": None}
+
+
+async def test_suggestion_only_card_replayed(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.api.chat import _side_effects_from_trace
+
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="user", ops=[
+        Op(op="insert", block=BlockIn(type="paragraph", content="mine"))])
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _edit(ctx, note="chat", base_revision=res.revision, ops=[
+        {"op": "delete", "block_id": res.applied[0]}])
+    assert json.loads(out.content)["applied"] == []
+    assert out.events[0][1]["change_set_id"]
+    events = await _side_effects_from_trace(migrated_db, 1)
+    assert [e["data"] for e in events] == [out.events[0][1]]
+
+
+async def test_bad_arguments_are_clean_errors(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.agents.core.note_tools import _edit_note
+
+    await _chat_note(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer)
+    for args in ({}, {"note": "chat"}, {"note": "chat", "base_revision": 0},
+                 {"ops": [], "base_revision": 0}):
+        out = await _edit_note(ctx, args)
+        assert out.record.get("error"), args
+    out = await _edit(ctx, note="chat", base_revision=99, ops=[
+        _ins("x", under_heading="h")])
+    assert out.record.get("error") and "ahead" in out.content

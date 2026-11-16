@@ -154,3 +154,16 @@ async def reapply_change_set(change_set_id: str) -> ApplyResult:
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/change-sets/{change_set_id}")
+async def change_set_status(change_set_id: str) -> dict[str, Any]:
+    """Where a change set stands, so a card shows Undo or Apply again."""
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            cs = await note_ops._load_change_set(conn, change_set_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    return {"id": change_set_id, "note_id": cs["note_id"],
+            "status": cs["status"],
+            "reapplied_by": cs["outcome"].get("reapplied_by")}

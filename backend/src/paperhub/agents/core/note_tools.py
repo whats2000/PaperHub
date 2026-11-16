@@ -31,10 +31,10 @@ from paperhub.agents.core.tools import (
 from paperhub.agents.research_tools import _to_fts5_query
 from paperhub.db.connection import write_transaction
 from paperhub.notes.models import Block, Note
-from paperhub.notes.ops import Op, apply_ops
-from paperhub.notes.papers import _section_order, ensure_section
+from paperhub.notes.ops import BlockIn, Op, apply_ops
+from paperhub.notes.papers import _section_order
 from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
-from paperhub.notes.store import list_blocks
+from paperhub.notes.store import list_blocks, new_block_id
 
 PAGE_BLOCKS = 40
 PAGE_CHARS = 6_000
@@ -318,24 +318,41 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
 
 
 async def _resolve_heading(
-    ctx: ToolContext, note: Note, value: str,
-) -> tuple[str | None, str | None]:
-    """``(block id, section name)`` for an ``under_heading`` value: a live
-    heading / section block id, else (paper notes) a section name, created in
-    paper order when the note has no such section yet."""
-    blocks = await list_blocks(ctx.conn, note.id)
+    ctx: ToolContext, note: Note, value: str, blocks: list[Block],
+) -> tuple[str | None, str | None, bool]:
+    """``(block id, section name, is_new)`` for an ``under_heading`` value: a
+    live heading / section block id, else (paper notes) a section name. A
+    section the note lacks is not created here: ``is_new`` is True and the id
+    is None, so the caller inserts it inside the same change set."""
     for b in blocks:
         if b.id == value and b.type in ("heading", "section"):
-            return b.id, (b.section_key if b.type == "section" else None)
+            return b.id, (b.section_key if b.type == "section" else None), False
     if note.target_kind != "paper":
-        return None, None
-    pcid = int(note.target_id)
+        return None, None, False
     wanted = value.strip().casefold()
-    names = await _section_order(ctx.conn, pcid)
+    names = await _section_order(ctx.conn, int(note.target_id))
     name = next((n for n in names if n.casefold() == wanted), None)
     if name is None:
-        return None, None
-    return await ensure_section(ctx.conn, note.id, pcid, name), name
+        return None, None, False
+    have = next((b for b in blocks
+                 if b.type == "section" and b.section_key == name), None)
+    return (have.id if have else None), name, have is None
+
+
+def _section_ops(
+    new: dict[str, str], order: list[str], blocks: list[Block],
+) -> list[Op]:
+    """Insert ops for the missing sections, in the paper's section order."""
+    existing = [b for b in blocks if b.type == "section"]
+    ops: list[Op] = []
+    for name in sorted(new, key=order.index):
+        before = next((b.id for b in existing
+                       if b.section_key in order
+                       and order.index(b.section_key) > order.index(name)), None)
+        ops.append(Op(op="insert", block_id=new[name], before=before,
+                      block=BlockIn(type="section", props={"title": name},
+                                    section_key=name)))
+    return ops
 
 
 def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
@@ -366,6 +383,9 @@ def _invalid(label: str | None, hint: str) -> dict[str, Any]:
 
 
 async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+    for key in ("note", "base_revision", "ops"):
+        if key not in args:
+            return error_outcome(f"{key} is required.")
     base = args["base_revision"]
     if not isinstance(base, int) or isinstance(base, bool) or base < 0:
         return error_outcome("base_revision must be a non-negative integer.")
@@ -381,9 +401,11 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         return error_outcome(
             f"base_revision {base} is ahead of the note (revision "
             f"{note.revision}); read the note again.")
+    blocks = await list_blocks(ctx.conn, note.id)
     rejected: list[dict[str, Any]] = []
     valid: list[Op] = []
     section: str | None = None
+    new_sections: dict[str, str] = {}  # section name -> block id to create
     for op in ops:
         label = op.block_id or op.after or op.before or op.under_heading
         if op.op == "insert" and not (op.after or op.before or op.under_heading):
@@ -391,7 +413,10 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 label, "an insert must name after, before or under_heading"))
             continue
         if op.under_heading is not None:
-            bid, name = await _resolve_heading(ctx, note, op.under_heading)
+            bid, name, is_new = await _resolve_heading(
+                ctx, note, op.under_heading, blocks)
+            if is_new and name is not None:
+                bid = new_sections.setdefault(name, new_block_id())
             if bid is None:
                 rejected.append(_invalid(
                     op.under_heading,
@@ -401,6 +426,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             op = op.model_copy(update={"under_heading": bid})
             section = section or name
         valid.append(op)
+    if new_sections:
+        order = await _section_order(ctx.conn, int(note.target_id))
+        valid = [*_section_ops(new_sections, order, blocks), *valid]
     record: dict[str, Any] = {
         "tool": "notes:edit", "note": ref_of(note, ctx.session_id),
         "note_id": note.id, "base_revision": base, "revision": note.revision,
@@ -408,8 +436,12 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         "applied": [], "suggested": [], "rejected": []}
     revision = note.revision
     if valid:
-        res = await apply_ops(ctx.conn, note.id, base_revision=base, ops=valid,
-                              actor="agent", run_id=ctx.run_id)
+        try:
+            res = await apply_ops(
+                ctx.conn, note.id, base_revision=base, ops=valid,
+                actor="agent", run_id=ctx.run_id)
+        except ValueError as exc:
+            return error_outcome(str(exc))
         revision = res.revision
         record.update(
             revision=revision, change_set_id=res.change_set_id,
@@ -425,9 +457,10 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     events: list[tuple[str, dict[str, Any]]] = []
     if record["applied"] or record["suggested"]:
         record["note_title"] = note.title
+        made = set(new_sections.values())
         record["summary"] = _summary(
-            valid, record["applied"], len(record["suggested"]), len(rejected),
-            section)
+            valid, [a for a in record["applied"] if a not in made],
+            len(record["suggested"]), len(rejected), section)
         events.append(("notes_changed", {
             "change_set_id": record["change_set_id"], "note_id": note.id,
             "note_title": note.title, "summary": record["summary"],

@@ -118,3 +118,18 @@ async def test_suggestion_endpoint(client: AsyncClient, tmp_path: Path) -> None:
                               json={"accept": True})).status_code == 409
     assert (await client.post("/notes/suggestions/zzz",
                               json={"accept": True})).status_code == 404
+
+
+async def test_change_set_status_endpoint(client: AsyncClient) -> None:
+    nid = await _session_note(client)
+    cs = (await client.post(f"/notes/{nid}/ops", json={
+        "base_revision": 0, "ops": [_INSERT]})).json()["change_set_id"]
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    assert got == {"id": cs, "note_id": nid, "status": "applied",
+                   "reapplied_by": None}
+    await client.post(f"/notes/change-sets/{cs}/undo")
+    assert (await client.get(f"/notes/change-sets/{cs}")).json()["status"] == "undone"
+    again = (await client.post(f"/notes/change-sets/{cs}/reapply")).json()
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    assert got["reapplied_by"] == again["change_set_id"]
+    assert (await client.get("/notes/change-sets/nope")).status_code == 404
