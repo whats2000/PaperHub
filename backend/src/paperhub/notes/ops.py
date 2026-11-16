@@ -31,6 +31,9 @@ from paperhub.notes.store import block_text, bump_revision, get_note, new_block_
 
 Actor = Literal["user", "agent", "import", "system"]
 RejectReason = Literal["changed_since_base", "missing", "invalid"]
+# Blocks that own a ``note_marks`` row (the mark follows the block).
+MARK_BLOCK_TYPES = frozenset(
+    {"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
 
 
 class BlockIn(BaseModel):
@@ -215,6 +218,19 @@ class _Ctx:
              state["deleted_at"], self.rev, self.actor, self.now,
              state.get("section_key"), block_id),
         )
+        if state["type"] in MARK_BLOCK_TYPES:
+            # A mark lives and dies with its block, whoever deletes or
+            # brings the block back (editor, agent, undo, restore).
+            if state["deleted_at"] is not None:
+                await self.conn.execute(
+                    "UPDATE note_marks SET deleted_at = ? "
+                    "WHERE block_id = ? AND deleted_at IS NULL",
+                    (state["deleted_at"], block_id))
+            else:
+                await self.conn.execute(
+                    "UPDATE note_marks SET deleted_at = NULL "
+                    "WHERE block_id = ? AND deleted_at IS NOT NULL",
+                    (block_id,))
 
 
 def _section_ends(anchor: _Row, candidate: _Row) -> bool:

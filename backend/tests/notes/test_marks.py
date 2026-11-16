@@ -138,11 +138,17 @@ async def test_delete_rejected_when_block_already_deleted(conn):
     note = await get_note(conn, saved.note_id)
     await apply_ops(conn, note.id, base_revision=note.revision, actor="user",
                     ops=[Op(op="delete", block_id=m["block_id"])])
+    # The block's delete took the mark with it; deleting the mark again is
+    # rejected and changes nothing.
+    async with conn.execute("SELECT deleted_at FROM note_marks WHERE id = ?",
+                            (m["id"],)) as cur:
+        gone_at = (await cur.fetchone())[0]
+    assert gone_at is not None
     with pytest.raises(RuntimeError):
         await delete_mark(conn, m["id"])
     async with conn.execute("SELECT deleted_at FROM note_marks WHERE id = ?",
                             (m["id"],)) as cur:
-        assert (await cur.fetchone())[0] is None
+        assert (await cur.fetchone())[0] == gone_at
 
 
 async def test_failed_mark_insert_leaves_no_orphan_block(conn, monkeypatch):
@@ -220,3 +226,28 @@ async def test_no_section_lands_at_note_end_and_bounds_raise(conn):
         for i in (-1, 5):
             with pytest.raises(ValueError):
                 await fn(conn, a["id"], i)
+
+
+async def test_block_delete_takes_its_mark_and_undo_brings_it_back(conn):
+    """Deleting a mark's block through the op engine (the editor, the
+    agent) deletes the mark with it; undo / restore brings both back."""
+    from paperhub.notes.ops import restore_blocks, undo_change_set
+
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("hello")]))
+    note = await get_note(conn, saved.note_id)
+    res = await apply_ops(conn, note.id, base_revision=note.revision,
+                          actor="user",
+                          ops=[Op(op="delete", block_id=m["block_id"])])
+    assert res.applied == [m["block_id"]]
+    assert await list_marks(conn, 1) == []
+    await undo_change_set(conn, res.change_set_id)
+    [back] = await list_marks(conn, 1)
+    assert back["id"] == m["id"]
+
+    note = await get_note(conn, saved.note_id)
+    await apply_ops(conn, note.id, base_revision=note.revision, actor="user",
+                    ops=[Op(op="delete", block_id=m["block_id"])])
+    assert await list_marks(conn, 1) == []
+    await restore_blocks(conn, note.id, [m["block_id"]], actor="user")
+    assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
