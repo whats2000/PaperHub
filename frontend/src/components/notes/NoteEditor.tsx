@@ -27,10 +27,12 @@ import { listLibrary } from "@/lib/api";
 import { prefersReducedMotion } from "@/lib/motion";
 import { propText } from "@/lib/notes/ops";
 import { cn } from "@/lib/utils";
+import { useCanvasStore } from "@/store/canvas";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { EditorTip } from "./EditorTip";
+import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
 import { codeFence, inlineMarks } from "./inlineMarks";
 import { noteSchema, paperhubKeys } from "./schema";
@@ -240,8 +242,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
 
   const mentionItems = useCallback(
     async (query: string): Promise<DefaultReactSuggestionItem[]> => {
-      const insert = (props: { kind: "paper" | "section"; paperId: number; sectionKey: string; label: string }) => () =>
-        editor.insertInlineContent([{ type: "mention", props } as never, " "]);
+      const insert = (props: MentionTarget) => () => insertMention(editor, props);
       const q = query.trim().toLowerCase();
       const sections: DefaultReactSuggestionItem[] =
         paperContentId === null
@@ -296,6 +297,14 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
     <NoteEditorContext.Provider value={ctx}>
       <div
         data-testid="note-editor"
+        onClickCapture={(e) => {
+          // A paper link made from selected words opens the paper, like its chip.
+          const a = (e.target as HTMLElement).closest?.("a[href^='paperhub://']");
+          const target = a ? parseMentionHref(a.getAttribute("href") ?? "") : null;
+          if (!target) return;
+          e.preventDefault();
+          useCanvasStore.getState().openPaper(target.paperId);
+        }}
         data-lang={i18n.language}
         className={cn(
           "paperhub-notes min-w-0 animate-in fade-in-0 duration-200 motion-reduce:animate-none",

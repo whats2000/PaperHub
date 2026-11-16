@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { noteSchema } from "./schema";
+import { selectionIsQuote, toggleQuote } from "./formatActions";
 import { FORMAT_BUTTONS, formatHint, type FormatId } from "./formatButtons";
 
 const ICONS: Record<FormatId, ReactNode> = {
@@ -49,7 +50,6 @@ function Bar({ onComment }: { onComment?: () => void }) {
     selector: ({ editor: e }) => {
       if (!e.isEditable) return undefined;
       const styles = e.getActiveStyles() as Record<string, unknown>;
-      const blocks = e.getSelection()?.blocks ?? [e.getTextCursorPosition().block];
       return {
         bold: !!styles.bold,
         italic: !!styles.italic,
@@ -57,7 +57,7 @@ function Bar({ onComment }: { onComment?: () => void }) {
         strike: !!styles.strike,
         code: !!styles.code,
         hidden: !!styles.hidden,
-        quote: blocks.length > 0 && blocks.every((b: { type: string }) => b.type === "quote"),
+        quote: selectionIsQuote(e),
       };
     },
   });
@@ -75,7 +75,7 @@ function Bar({ onComment }: { onComment?: () => void }) {
         data-test={id}
         label={name}
         mainTooltip={name}
-        secondaryTooltip={formatHint(id)}
+        secondaryTooltip={formatHint(id, (k, en) => t(k, en))}
         icon={ICONS[id]}
         {...props}
       />
@@ -101,8 +101,7 @@ function Bar({ onComment }: { onComment?: () => void }) {
         isSelected: state.quote,
         onClick: () => {
           editor.focus();
-          const blocks = editor.getSelection()?.blocks ?? [editor.getTextCursorPosition().block];
-          for (const b of blocks) editor.updateBlock(b, { type: state.quote ? "paragraph" : "quote" });
+          toggleQuote(editor);
         },
       })}
       {toggle("code")}
