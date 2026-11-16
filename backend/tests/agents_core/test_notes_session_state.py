@@ -216,3 +216,42 @@ async def test_agent_write_not_reported_but_user_edit_of_it_is(
     assert await _changes(migrated_db) == ""
     await _user_update(migrated_db, nid, mine)
     assert mine in await _changes(migrated_db)
+
+
+async def test_user_deletion_is_reported_until_the_next_contact(
+    migrated_db: aiosqlite.Connection, fake_tracer: Any,
+) -> None:
+    nid = await _note(migrated_db, 1)
+    await _write(migrated_db, nid, "alpha topic", "user")
+    await _write(migrated_db, nid, "beta topic", "user")
+    _, b = await _ids(migrated_db, nid)
+    ctx = _tool_ctx(migrated_db, fake_tracer)
+    await _tool(ctx, "read_note", note="chat")
+    await _user_update(migrated_db, nid, b)  # changed, then deleted
+    await apply_ops(migrated_db, nid, base_revision=await _rev(migrated_db, nid),
+                    actor="user", ops=[Op(op="delete", block_id=b)])
+    assert b in await _changes(migrated_db)
+    await _tool(ctx, "search_notes", query="alpha")  # contact after the delete
+    assert await _changes(migrated_db) == ""
+    listed = json.loads((await _tool(ctx, "list_notes")).content)["notes"]
+    assert listed[0]["changed_since_you_read"] is False
+
+
+async def test_old_changes_do_not_hide_a_new_one(
+    migrated_db: aiosqlite.Connection, fake_tracer: Any,
+) -> None:
+    nid = await _note(migrated_db, 1)
+    await apply_ops(migrated_db, nid, base_revision=0, actor="user",
+                    ops=[_p(f"para {i}") for i in range(30)])
+    ids = await _ids(migrated_db, nid)
+    ctx = _tool_ctx(migrated_db, fake_tracer)
+    await _tool(ctx, "search_notes", query="nothingmatches")  # no contact
+    await _tool(ctx, "edit_note", note="chat",
+                base_revision=await _rev(migrated_db, nid),
+                ops=[{"op": "insert", "after": ids[-1], "block": {
+                    "type": "paragraph", "content": "agent"}}])  # first contact
+    for bid in ids[:25]:  # 25 old user changes, never seen
+        await _user_update(migrated_db, nid, bid)
+    await _user_update(migrated_db, nid, ids[29])  # the newest
+    changes = await _changes(migrated_db)
+    assert ids[29] in changes and changes.count("b_") == 20

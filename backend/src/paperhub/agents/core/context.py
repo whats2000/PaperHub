@@ -120,7 +120,7 @@ async def render_notes(
         if n.id not in seen:
             continue
         rows = await unseen_user_changes(
-            conn, session_id, n.id, seen[n.id][0], NOTES_CHANGES_MAX_BLOCKS)
+            conn, session_id, n.id, seen[n.id], NOTES_CHANGES_MAX_BLOCKS)
         if rows:
             changes.append((max(when for _, when in rows), ref_of(n, session_id),
                             [bid for bid, _ in rows]))

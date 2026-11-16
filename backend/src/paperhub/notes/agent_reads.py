@@ -9,7 +9,8 @@ Two marks per chat session:
 
 A user change to block ``b`` is unseen when its revision is after the
 revision the agent saw ``b`` at, or, for a block the agent never saw, after
-its first contact with the note. ``<notes_changes>`` and ``list_notes``
+its first contact with the note; a deletion counts as seen once the agent
+has touched the note after it. ``<notes_changes>`` and ``list_notes``
 report exactly those, so a search hit or one page never hides an edit
 elsewhere in the note.
 """
@@ -36,6 +37,8 @@ async def record_contact(
                 "INSERT INTO note_agent_reads (session_id, note_id, revision, "
                 "first_revision, at) VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT (session_id, note_id) DO UPDATE SET "
+                "first_revision = COALESCE(note_agent_reads.first_revision, "
+                "note_agent_reads.revision), "
                 "revision = excluded.revision, at = excluded.at",
                 (session_id, note_id, rev, rev, now))
 
@@ -71,17 +74,27 @@ async def contacts(
 
 async def unseen_user_changes(
     conn: aiosqlite.Connection, session_id: int, note_id: int,
-    first_revision: int, limit: int,
+    contact: tuple[int, int], limit: int,
 ) -> list[tuple[str, str]]:
     """``(block id, last change time)`` of the user's changes the agent has
-    not seen, in the order they were first made (at most ``limit``)."""
+    not seen, newest first (at most ``limit``). ``contact`` is the agent's
+    (first, last) contact revision with the note. A block the user deleted
+    can't be read again: its deletion counts as seen once the agent has
+    touched the note at or after it."""
+    first, last = contact
     async with conn.execute(
         "SELECT h.block_id, MAX(h.created_at) FROM note_block_history h "
         "LEFT JOIN note_agent_block_reads r ON r.session_id = ? "
         "AND r.note_id = h.note_id AND r.block_id = h.block_id "
+        "LEFT JOIN note_blocks b ON b.id = h.block_id "
         "WHERE h.note_id = ? AND h.actor = 'user' AND h.revision > ? "
         "AND (r.revision IS NULL OR h.revision > r.revision) "
-        "GROUP BY h.block_id ORDER BY MIN(h.id) LIMIT ?",
-        (session_id, note_id, first_revision, limit),
+        "AND NOT (b.deleted_at IS NOT NULL AND ? >= COALESCE(("
+        "  SELECT MAX(d.revision) FROM note_block_history d "
+        "  WHERE d.note_id = h.note_id AND d.block_id = h.block_id "
+        "  AND d.op = 'delete'), 0)) "
+        "GROUP BY h.block_id ORDER BY MAX(h.revision) DESC, MAX(h.id) DESC "
+        "LIMIT ?",
+        (session_id, note_id, first, last, limit),
     ) as cur:
         return [(str(r[0]), str(r[1])) for r in await cur.fetchall()]

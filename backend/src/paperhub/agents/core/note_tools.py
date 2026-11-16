@@ -149,7 +149,7 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             "last_editor": await _last_editor(ctx.conn, n),
             "changed_since_you_read": n.id in seen and bool(
                 await unseen_user_changes(ctx.conn, ctx.session_id, n.id,
-                                          seen[n.id][0], 1)),
+                                          seen[n.id], 1)),
         })
     return ToolOutcome(
         content=json.dumps({"notes": rows, "truncated": truncated},

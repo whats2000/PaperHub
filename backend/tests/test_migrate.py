@@ -381,3 +381,27 @@ async def test_mechanism_cards_gain_slot_defaulting_to_v1(tmp_path: Path) -> Non
         await apply_schema(conn)
         async with conn.execute("SELECT slot FROM mechanism_cards") as cur:
             assert [r[0] for r in await cur.fetchall()] == ["ideation_card/v1"]
+
+
+@pytest.mark.asyncio
+async def test_note_agent_reads_gains_first_revision(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A note_agent_reads table made before first_revision gets the column,
+    filled from revision (the earliest contact it knows)."""
+    db = migrated_db
+    await db.execute("INSERT INTO chat_sessions (title) VALUES ('c')")
+    await db.execute(
+        "INSERT INTO notes (target_kind, target_id, title, created_at, updated_at) "
+        "VALUES ('session', '1', 'n', 't', 't')")
+    await db.execute("DROP TABLE note_agent_reads")
+    await db.execute(
+        "CREATE TABLE note_agent_reads (session_id INTEGER NOT NULL, "
+        "note_id INTEGER NOT NULL, revision INTEGER NOT NULL, at TEXT NOT NULL, "
+        "PRIMARY KEY (session_id, note_id))")
+    await db.execute("INSERT INTO note_agent_reads VALUES (1, 1, 4, 't')")
+    await db.commit()
+    await apply_schema(db)
+    async with db.execute(
+        "SELECT revision, first_revision FROM note_agent_reads") as cur:
+        assert [tuple(r) for r in await cur.fetchall()] == [(4, 4)]

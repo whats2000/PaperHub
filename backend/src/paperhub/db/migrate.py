@@ -805,6 +805,10 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             await conn.execute(
                 "ALTER TABLE note_agent_reads ADD COLUMN first_revision INTEGER")
             await conn.commit()
+    await conn.execute(  # the earliest contact an older row knows
+        "UPDATE note_agent_reads SET first_revision = revision "
+        "WHERE first_revision IS NULL")
+    await conn.commit()
 
     # Plan H5b.1: same backfill for note_blocks_fts (live blocks only).
     async with conn.execute(
