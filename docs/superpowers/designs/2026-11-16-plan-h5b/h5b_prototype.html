@@ -692,7 +692,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
           <div class="pane" id="notesPane">
             <div class="n-tabs" role="tablist" aria-label="Notes">
               <button class="note-tab" role="tab" aria-selected="true" data-note="paper" id="paperNoteTab"><i data-lucide="file-text" class="icon-xs"></i><span id="paperNoteLabel">Toward a Predictive eXtended Reality…</span></button>
-              <button class="note-tab secondary" role="tab" aria-selected="false" data-note="chat"><i data-lucide="message-square" class="icon-xs"></i>This chat</button>
+              <button class="note-tab secondary" role="tab" aria-selected="false" data-note="chat" title="Notes for this chat only: Where does the XR latency drop of 83–89% come from?"><i data-lucide="message-square" class="icon-xs"></i><span>This chat</span></button>
               <span class="spacer"></span>
               <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
@@ -713,7 +713,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
           <button class="tree-i sub"><span>§2 Background and Motivation</span></button>
           <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>A Review of Ghost Imaging via…</span></button>
           <div class="tree-h">Chats</div>
-          <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Where does the XR latency drop…</span></button>
+          <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Where does the XR latency drop of 83–89% come from?</span></button>
           <div class="tree-h">Ideas</div>
           <button class="tree-i"><i data-lucide="lightbulb" class="icon-sm"></i><span>Smooth pose merging with a Kalman blend</span></button>
           <div class="tree-h">Pages</div>
@@ -990,6 +990,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   }
   $$('.paper-tab').forEach(b => b.addEventListener('click', () => { doc = b.dataset.doc; showDoc(); }));
 
+  // Any title cut off by its width shows the full text on hover.
+  document.addEventListener('mouseover', e => { const el = e.target.closest('.chat-link, .paper-tab, .note-tab > span, .tree-i span'); if (el && !el.title && !el.closest('[title]') && el.scrollWidth > el.clientWidth + 1) el.title = el.textContent.trim(); });
   /* ---------- notes tabs; the note follows the section being read ---------- */
   $$('.note-tab').forEach(t => t.addEventListener('click', () => {
     $$('.note-tab').forEach(x => x.setAttribute('aria-selected', String(x === t))); noteTab = t.dataset.note; renderNote();
