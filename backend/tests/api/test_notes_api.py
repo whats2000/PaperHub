@@ -52,6 +52,25 @@ async def test_target_endpoint_creates_once(client: AsyncClient) -> None:
         "/notes/target", params={"kind": "paper", "id": 99})).status_code == 404
 
 
+async def test_target_endpoint_carries_open_suggestions_and_comments(
+        client: AsyncClient, tmp_path: Path) -> None:
+    """Opening a note shows its open suggestions and comment threads at once."""
+    nid = await _session_note(client)
+    bid = (await client.post(f"/notes/{nid}/ops", json={
+        "base_revision": 0, "ops": [_INSERT]})).json()["applied"][0]
+    await client.post(f"/notes/{nid}/comments",
+                      json={"block_id": bid, "quote": "hello", "text": "why?"})
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        res = await apply_ops(conn, nid, base_revision=1, actor="agent", ops=[
+            Op(op="update", block_id=bid, block=BlockIn(
+                type="paragraph", content=[{"type": "text", "text": "new"}]))])
+    got = (await client.get("/notes/target",
+                            params={"kind": "session", "id": 1})).json()
+    assert [s["id"] for s in got["suggestions"]] == [
+        res.suggested[0]["suggestion_id"]]
+    assert [c["quote"] for c in got["comments"]] == ["hello"]
+
+
 async def test_ops_endpoint_returns_apply_result(client: AsyncClient) -> None:
     nid = await _session_note(client)
     r = await client.post(f"/notes/{nid}/ops",

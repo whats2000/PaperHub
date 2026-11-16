@@ -80,11 +80,31 @@ async def _title_for(conn: aiosqlite.Connection, kind: str, target: int) -> str:
     return str(row[0])
 
 
-@router.get("/target", response_model=NoteWithBlocks)
+async def _detail(conn: aiosqlite.Connection, note: Note) -> NoteDetail:
+    """A note with its blocks, open suggestions and comment threads."""
+    async with conn.execute(
+        "SELECT id, block_id, change_set_id, kind, proposed_json, status, "
+        "created_at FROM note_suggestions WHERE note_id = ? "
+        "AND status = 'open' ORDER BY created_at, rowid", (note.id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    suggestions = [
+        {"id": r[0], "block_id": r[1], "change_set_id": r[2], "kind": r[3],
+         "proposed": json.loads(r[4]) if r[4] else None, "status": r[5],
+         "created_at": r[6]} for r in rows]
+    return NoteDetail(
+        note=note, blocks=await list_blocks(conn, note.id),
+        shared_by=await shared_by(conn, note),
+        suggestions=suggestions,
+        comments=await note_comments.list_comments(conn, note.id))
+
+
+@router.get("/target", response_model=NoteDetail)
 async def note_for_target(
     kind: Literal["paper", "session", "idea"], id: int = Query(),
-) -> NoteWithBlocks:
-    """The note of a paper / chat / idea, created on first use."""
+) -> NoteDetail:
+    """The note of a paper / chat / idea, created on first use, as
+    ``GET /notes/{id}`` shows it (open suggestions and comments too)."""
     async with open_db(load_settings().db_path) as conn:
         if kind == "paper":
             try:
@@ -96,9 +116,7 @@ async def note_for_target(
             note = await get_or_create_note(
                 conn, target_kind=kind, target_id=str(id), title=title,
                 session_id=id if kind == "session" else None)
-        return NoteWithBlocks(
-            note=note, blocks=await list_blocks(conn, note.id),
-            shared_by=await shared_by(conn, note))
+        return await _detail(conn, note)
 
 
 @router.get("/{note_id}", response_model=NoteDetail)
@@ -107,21 +125,7 @@ async def note_detail(note_id: int) -> NoteDetail:
         note = await get_note(conn, note_id)
         if note is None:
             raise HTTPException(404, f"note {note_id} not found")
-        async with conn.execute(
-            "SELECT id, block_id, change_set_id, kind, proposed_json, status, "
-            "created_at FROM note_suggestions WHERE note_id = ? "
-            "AND status = 'open' ORDER BY created_at, rowid", (note_id,),
-        ) as cur:
-            rows = await cur.fetchall()
-        suggestions = [
-            {"id": r[0], "block_id": r[1], "change_set_id": r[2], "kind": r[3],
-             "proposed": json.loads(r[4]) if r[4] else None, "status": r[5],
-             "created_at": r[6]} for r in rows]
-        return NoteDetail(
-            note=note, blocks=await list_blocks(conn, note_id),
-            shared_by=await shared_by(conn, note),
-            suggestions=suggestions,
-            comments=await note_comments.list_comments(conn, note_id))
+        return await _detail(conn, note)
 
 
 @router.post("/{note_id}/ops", response_model=ApplyResult)
