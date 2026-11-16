@@ -1,8 +1,7 @@
 /** Resolve and Delete on a comment thread, each with an Undo.
  *
- * A deleted thread cannot come back on the server, so Delete waits for its
- * toast to run out (or the editor to close) before telling the server; Undo
- * inside that window just restores the words.
+ * Both go to the server at once. Undo reopens the thread there and puts the
+ * underline back over the thread's quote in the note as it is now.
  */
 import { toast } from "sonner";
 
@@ -10,27 +9,20 @@ type Translate = (key: string, fallback: string) => string;
 
 const UNDO_MS = 5000;
 
-/** Deletes whose toast is still open: the server is told when it closes. */
-const pendingDeletes = new Set<() => void>();
-
-/** Tells the server about deletes still waiting on their toast (the editor
- * closing must not lose them). */
-export function flushPendingThreadActions(): void {
-  for (const finish of [...pendingDeletes]) finish();
-}
-
 export interface ThreadActionDeps {
   kind: "resolve" | "delete";
-  /** Takes the comment off the words; returns what puts it back. */
-  strip: () => () => void;
+  /** Takes the comment off the words. */
+  strip: () => void;
+  /** Puts it back (over the quote in the current text). */
+  restore: () => void;
   setStatus: (status: "open" | "resolved" | "deleted") => Promise<unknown>;
   t: Translate;
 }
 
-/** Resolve or delete, with a toast whose Undo restores the words and whose
+/** Resolve or delete, with a toast whose Undo reopens the thread and whose
  * next button reads "Resolve again" / "Delete again". */
 export function runThreadAction(deps: ThreadActionDeps): void {
-  const { kind, strip, setStatus, t } = deps;
+  const { kind, strip, restore, setStatus, t } = deps;
   const resolve = kind === "resolve";
   const done = resolve
     ? t("notes:comment.resolved", "Comment resolved")
@@ -41,33 +33,24 @@ export function runThreadAction(deps: ThreadActionDeps): void {
   const fail = () => void toast.error(t("notes:comment.failed", "Couldn't save the comment."));
 
   const apply = () => {
-    const restore = strip();
-    let applied = true;
-    let sent = false;
-    const finish = () => {
-      pendingDeletes.delete(finish);
-      if (!applied || sent || resolve) return;
-      sent = true;
-      void setStatus("deleted").catch(fail);
-    };
-    if (resolve) void setStatus("resolved").catch(fail);
-    else pendingDeletes.add(finish);
-    const undo = () => {
-      if (!applied || sent) return;
-      applied = false;
-      pendingDeletes.delete(finish);
-      restore();
-      if (resolve) void setStatus("open").catch(fail);
-      toast(t("notes:comment.restored", "Comment restored"), {
-        duration: UNDO_MS,
-        action: { label: again, onClick: apply },
-      });
-    };
+    strip();
+    void setStatus(resolve ? "resolved" : "deleted").catch(fail);
+    let undone = false;
     toast(done, {
       duration: UNDO_MS,
-      action: { label: t("notes:comment.undo", "Undo"), onClick: undo },
-      onAutoClose: finish,
-      onDismiss: finish,
+      action: {
+        label: t("notes:comment.undo", "Undo"),
+        onClick: () => {
+          if (undone) return;
+          undone = true;
+          void setStatus("open").catch(fail);
+          restore();
+          toast(t("notes:comment.restored", "Comment restored"), {
+            duration: UNDO_MS,
+            action: { label: again, onClick: apply },
+          });
+        },
+      },
     });
   };
   apply();

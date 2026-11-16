@@ -552,6 +552,40 @@ describe("comments in the editor", () => {
     expect(await screen.findByText("check this")).toBeInTheDocument();
   });
 
+  it("a selection over two blocks comments the selected part of the first block only", async () => {
+    const sent: { block_id: string; quote: string }[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/comments`, async ({ request }) => {
+        const body = (await request.json()) as { block_id: string; quote: string; text: string };
+        sent.push(body);
+        return HttpResponse.json({
+          id: "c_8", note_id: 7, block_id: body.block_id, quote: body.quote, status: "open",
+          created_at: "2026-11-16T10:00:00Z", items: [{ id: 1, text: body.text, created_at: "2026-11-16T10:00:00Z" }],
+        });
+      }),
+    );
+    seed([
+      blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" }),
+      blk("p2", { content: [{ type: "text", text: "Second one", styles: {} }], text: "Second one" }),
+    ]);
+    mount();
+    const pm = document.querySelector(".ProseMirror") as PM;
+    await screen.findByText("Second one");
+    act(() => {
+      pm.editor.commands.setTextSelection({ from: 8, to: 22 }); // "words" .. into the second block
+      fireEvent.keyDown(pm, { key: "M", keyCode: 77, ctrlKey: true, shiftKey: true });
+    });
+    const box = await screen.findByRole("textbox", { name: "Comment" });
+    fireEvent.change(box, { target: { value: "hm" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(sent).toEqual([expect.objectContaining({ block_id: "p1", quote: "words" })]));
+    await waitFor(() => {
+      const el = pm.querySelector<HTMLElement>('.note-comment[data-comment-id="c_8"]');
+      expect(el).toHaveTextContent("words");
+      expect(el).not.toHaveTextContent("Mine");
+    });
+  });
+
   it("Ctrl+Shift+M with nothing selected does nothing", async () => {
     seed([blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" })]);
     mount();

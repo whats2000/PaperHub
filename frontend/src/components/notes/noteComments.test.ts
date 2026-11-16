@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { commentKeys, START_COMMENT_EVENT, stripCommentStyle } from "@/components/notes/noteComments";
+import { applyCommentStyle, commentKeys, START_COMMENT_EVENT, stripCommentStyle } from "@/components/notes/noteComments";
 import { cleanupEditors, makeEditor, press } from "@/components/notes/testEditor";
 
 afterEach(cleanupEditors);
@@ -43,15 +43,41 @@ describe("the comment style", () => {
     expect(runs).toEqual([["see ", undefined], ["this", "c_1"], [" now", undefined]]);
   });
 
-  it("is taken off by id (other styles kept) and put back by the returned function", () => {
+  it("is taken off by id, other styles kept", () => {
     const editor = makeEditor([], para(commented));
-    const restore = stripCommentStyle(editor, "c_1");
+    stripCommentStyle(editor, "c_1");
     const after = editor.document[0]!.content as { text: string; styles: Record<string, unknown> }[];
     expect(after.some((r) => r.styles.comment)).toBe(false);
     expect(after.find((r) => r.text === "this")!.styles.bold).toBe(true);
-    restore();
-    const back = editor.document[0]!.content as { text: string; styles: Record<string, unknown> }[];
-    expect(back.find((r) => r.text === "this")!.styles.comment).toBe("c_1");
+  });
+
+  it("is put back over the quote in the CURRENT text, so edits made meanwhile stay", () => {
+    const editor = makeEditor([], para(commented));
+    stripCommentStyle(editor, "c_1");
+    // an edit while the Undo toast was up: words before the quote changed
+    editor.updateBlock("p1", { content: "now see this today" });
+    expect(applyCommentStyle(editor, "c_1", "p1", "this")).toBe(true);
+    const runs = editor.document[0]!.content as { text: string; styles: Record<string, unknown> }[];
+    expect(runs.map((r) => r.text).join("")).toBe("now see this today");
+    expect(runs.filter((r) => r.styles.comment === "c_1").map((r) => r.text)).toEqual(["this"]);
+  });
+
+  it("finds a quote that spans several runs", () => {
+    const editor = makeEditor([], para([
+      { type: "text", text: "a ", styles: {} },
+      { type: "text", text: "bold", styles: { bold: true } },
+      { type: "text", text: " word", styles: {} },
+    ]));
+    expect(applyCommentStyle(editor, "c_2", "p1", "bold word")).toBe(true);
+    const runs = editor.document[0]!.content as { text: string; styles: Record<string, unknown> }[];
+    expect(runs.filter((r) => r.styles.comment === "c_2").map((r) => r.text).join("")).toBe("bold word");
+  });
+
+  it("returns false and leaves the text alone when the quote is gone", () => {
+    const editor = makeEditor([], para("something else"));
+    expect(applyCommentStyle(editor, "c_1", "p1", "this")).toBe(false);
+    const runs = editor.document[0]!.content as { styles: Record<string, unknown> }[];
+    expect(runs.some((r) => r.styles.comment)).toBe(false);
   });
 
   it("leaves another thread's words alone", () => {

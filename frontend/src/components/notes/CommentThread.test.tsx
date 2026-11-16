@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { flushPendingThreadActions, runThreadAction } from "@/components/notes/commentActions";
+import { runThreadAction } from "@/components/notes/commentActions";
 import { CommentThread } from "@/components/notes/CommentThread";
 import type { NoteComment } from "@/types/notes";
 
@@ -35,7 +35,6 @@ function card(over: Partial<React.ComponentProps<typeof CommentThread>> = {}) {
 }
 
 beforeEach(() => toastFn.mockReset());
-afterEach(() => flushPendingThreadActions());
 
 describe("the comment box", () => {
   it("posts on Enter and clears the box", async () => {
@@ -96,8 +95,6 @@ const t = (_key: string, en: string) => en;
 
 interface ToastOpts {
   action: { label: string; onClick: () => void };
-  onDismiss: () => void;
-  onAutoClose: () => void;
 }
 const toasts = () => toastFn.mock.calls as [string, ToastOpts][];
 
@@ -109,10 +106,10 @@ function lastAction() {
 
 describe("Resolve and Delete with Undo", () => {
   it("Resolve → Undo → Resolve again", () => {
+    const strip = vi.fn();
     const restore = vi.fn();
-    const strip = vi.fn(() => restore);
     const setStatus = vi.fn().mockResolvedValue(undefined);
-    runThreadAction({ kind: "resolve", strip, setStatus, t });
+    runThreadAction({ kind: "resolve", strip, restore, setStatus, t });
 
     expect(strip).toHaveBeenCalledTimes(1);
     expect(setStatus).toHaveBeenLastCalledWith("resolved");
@@ -129,32 +126,30 @@ describe("Resolve and Delete with Undo", () => {
     expect(lastAction()).toMatchObject({ text: "Comment resolved", label: "Undo" });
   });
 
-  it("Delete waits for its toast: Undo cancels it, and the server hears nothing", () => {
+  it("Delete goes to the server at once; Undo reopens it and puts the words back", () => {
+    const strip = vi.fn();
     const restore = vi.fn();
     const setStatus = vi.fn().mockResolvedValue(undefined);
-    runThreadAction({ kind: "delete", strip: () => restore, setStatus, t });
+    runThreadAction({ kind: "delete", strip, restore, setStatus, t });
+    expect(setStatus).toHaveBeenLastCalledWith("deleted");
     expect(lastAction()).toMatchObject({ text: "Comment deleted", label: "Undo" });
-    expect(setStatus).not.toHaveBeenCalled();
 
     act(() => lastAction().onClick());
-    expect(restore).toHaveBeenCalled();
+    expect(setStatus).toHaveBeenLastCalledWith("open");
+    expect(restore).toHaveBeenCalledTimes(1);
     expect(lastAction()).toMatchObject({ text: "Comment restored", label: "Delete again" });
-    // The undone toast closing must not delete.
-    toasts()[0]![1].onDismiss();
-    expect(setStatus).not.toHaveBeenCalled();
+
+    act(() => lastAction().onClick());
+    expect(strip).toHaveBeenCalledTimes(2);
+    expect(setStatus).toHaveBeenLastCalledWith("deleted");
   });
 
-  it("Delete is sent once its toast runs out, and when the editor goes", () => {
-    const setStatus = vi.fn().mockResolvedValue(undefined);
-    runThreadAction({ kind: "delete", strip: () => vi.fn(), setStatus, t });
-    toasts()[0]![1].onAutoClose();
-    toasts()[0]![1].onDismiss();
-    expect(setStatus).toHaveBeenCalledTimes(1);
-    expect(setStatus).toHaveBeenCalledWith("deleted");
-
-    const second = vi.fn().mockResolvedValue(undefined);
-    runThreadAction({ kind: "delete", strip: () => vi.fn(), setStatus: second, t });
-    flushPendingThreadActions();
-    expect(second).toHaveBeenCalledWith("deleted");
+  it("does not undo twice", () => {
+    const restore = vi.fn();
+    runThreadAction({ kind: "delete", strip: vi.fn(), restore, setStatus: vi.fn().mockResolvedValue(undefined), t });
+    const { onClick } = lastAction();
+    act(() => onClick());
+    act(() => onClick());
+    expect(restore).toHaveBeenCalledTimes(1);
   });
 });
