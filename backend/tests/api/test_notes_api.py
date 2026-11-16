@@ -133,3 +133,15 @@ async def test_change_set_status_endpoint(client: AsyncClient) -> None:
     got = (await client.get(f"/notes/change-sets/{cs}")).json()
     assert got["reapplied_by"] == again["change_set_id"]
     assert (await client.get("/notes/change-sets/nope")).status_code == 404
+
+
+async def test_ops_endpoint_replays_a_repeated_burst_key(client: AsyncClient) -> None:
+    nid = await _session_note(client)
+    body = {"base_revision": 0, "idempotency_key": "burst-1",
+            "ops": [{**_INSERT, "block_id": "b1"}]}
+    first = (await client.post(f"/notes/{nid}/ops", json=body)).json()
+    again = (await client.post(f"/notes/{nid}/ops", json=body)).json()
+    assert again == first and first["applied"] == ["b1"]
+    detail = (await client.get(f"/notes/{nid}")).json()
+    assert [b["id"] for b in detail["blocks"]] == ["b1"]
+    assert detail["note"]["revision"] == 1

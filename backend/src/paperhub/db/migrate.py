@@ -799,6 +799,22 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             )
             await conn.commit()
 
+    # Plan H5b.1: a burst's idempotency key and stored result, so a retry
+    # after a lost response returns the first result instead of applying
+    # the ops twice.
+    async with conn.execute("PRAGMA table_info(note_change_sets)") as cur:
+        cs_cols = {row[1] for row in await cur.fetchall()}
+    if "idempotency_key" not in cs_cols:
+        await conn.execute(
+            "ALTER TABLE note_change_sets ADD COLUMN idempotency_key TEXT")
+    if "result_json" not in cs_cols:
+        await conn.execute("ALTER TABLE note_change_sets ADD COLUMN result_json TEXT")
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_change_sets_key "
+        "ON note_change_sets(note_id, idempotency_key) "
+        "WHERE idempotency_key IS NOT NULL")
+    await conn.commit()
+
     # Plan H5b.1: first-contact revision on note_agent_reads (additive).
     async with conn.execute("PRAGMA table_info(note_agent_reads)") as cur:
         if "first_revision" not in {row[1] for row in await cur.fetchall()}:

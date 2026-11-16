@@ -405,3 +405,35 @@ async def test_note_agent_reads_gains_first_revision(
     async with db.execute(
         "SELECT revision, first_revision FROM note_agent_reads") as cur:
         assert [tuple(r) for r in await cur.fetchall()] == [(4, 4)]
+
+
+@pytest.mark.asyncio
+async def test_note_change_sets_gain_burst_key_and_result(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A note_change_sets table made before burst keys gets both columns and
+    a per-note unique index on the key."""
+    db = migrated_db
+    await db.execute("DROP TABLE note_change_sets")
+    await db.execute(
+        "CREATE TABLE note_change_sets (id TEXT PRIMARY KEY, owner_id INTEGER "
+        "NOT NULL DEFAULT 1, note_id INTEGER NOT NULL, actor TEXT NOT NULL, "
+        "run_id INTEGER, base_revision INTEGER NOT NULL, result_revision "
+        "INTEGER NOT NULL, ops_json TEXT NOT NULL, outcome_json TEXT NOT NULL, "
+        "status TEXT NOT NULL, created_at TEXT NOT NULL)")
+    await db.commit()
+    await apply_schema(db)
+    async with db.execute("PRAGMA table_info(note_change_sets)") as cur:
+        cols = {r[1] for r in await cur.fetchall()}
+    assert {"idempotency_key", "result_json"} <= cols
+    row = ("x", 1, "user", 0, 1, "[]", "{}", "applied", "t", "k")
+    await db.execute(
+        "INSERT INTO note_change_sets (id, note_id, actor, base_revision, "
+        "result_revision, ops_json, outcome_json, status, created_at, "
+        "idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+    with pytest.raises(aiosqlite.IntegrityError):
+        await db.execute(
+            "INSERT INTO note_change_sets (id, note_id, actor, base_revision, "
+            "result_revision, ops_json, outcome_json, status, created_at, "
+            "idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("y", *row[1:]))

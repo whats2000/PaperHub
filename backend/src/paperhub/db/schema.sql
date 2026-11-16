@@ -538,7 +538,11 @@ CREATE TABLE IF NOT EXISTS note_change_sets (
     ops_json TEXT NOT NULL,
     outcome_json TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('applied', 'undone')),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    -- A client burst's key, kept across its retries, and the result it got
+    -- (a repeated key returns it; unique per note, see migrate.py).
+    idempotency_key TEXT,
+    result_json TEXT
 );
 CREATE TABLE IF NOT EXISTS note_suggestions (
     id TEXT PRIMARY KEY,

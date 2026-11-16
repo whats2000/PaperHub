@@ -541,12 +541,33 @@ async def _apply_in_tx(
 async def apply_ops(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None = None, summary: str = "",
+    idempotency_key: str | None = None,
 ) -> ApplyResult:
-    """Apply ``ops`` as one revision; see the module docstring for the rules."""
+    """Apply ``ops`` as one revision; see the module docstring for the rules.
+
+    ``idempotency_key`` names one burst across its retries: a key already
+    stored for this note returns that burst's result and applies nothing (a
+    retry after a lost response must not insert twice or revert later text).
+    """
     async with write_transaction(conn):
-        return await _apply_in_tx(
+        if idempotency_key is not None:
+            async with conn.execute(
+                "SELECT result_json FROM note_change_sets "
+                "WHERE note_id = ? AND idempotency_key = ?",
+                (note_id, idempotency_key),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None and row[0]:
+                return ApplyResult.model_validate_json(row[0])
+        res = await _apply_in_tx(
             conn, note_id, base_revision=base_revision, ops=ops, actor=actor,
             run_id=run_id, summary=summary)
+        if idempotency_key is not None and res.change_set_id is not None:
+            await conn.execute(
+                "UPDATE note_change_sets SET idempotency_key = ?, "
+                "result_json = ? WHERE id = ?",
+                (idempotency_key, res.model_dump_json(), res.change_set_id))
+        return res
 
 
 async def _load_change_set(conn: aiosqlite.Connection,

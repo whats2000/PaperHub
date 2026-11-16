@@ -34,6 +34,8 @@ class NoteDetail(NoteWithBlocks):
 class OpsBody(BaseModel):
     base_revision: int
     ops: list[Op]
+    # One burst across its retries; a repeated key returns the first result.
+    idempotency_key: str | None = None
 
 
 class RestoreBody(BaseModel):
@@ -104,7 +106,7 @@ async def apply_note_ops(note_id: int, body: OpsBody) -> ApplyResult:
         try:
             return await note_ops.apply_ops(
                 conn, note_id, base_revision=body.base_revision, ops=body.ops,
-                actor="user")
+                actor="user", idempotency_key=body.idempotency_key)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 

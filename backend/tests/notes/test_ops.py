@@ -632,6 +632,46 @@ async def test_insert_with_a_deleted_blocks_id_brings_that_block_back(conn):
     assert await _texts(conn, n.id) == ["A"]
 
 
+async def test_repeated_burst_key_returns_the_stored_result(conn):
+    """A burst retried after its response was lost is not applied twice:
+    no duplicate insert, and a later edit is not reverted."""
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("A"))])
+    burst = [Op(op="insert", block_id="x", block=_para("new"), after="a"),
+             Op(op="update", block_id="a", block=_para("A1"))]
+    first = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                            ops=burst, idempotency_key="k1")
+    # The user keeps typing in the next burst before the retry lands.
+    later = await apply_ops(conn, n.id, base_revision=first.revision,
+                            actor="user", idempotency_key="k2",
+                            ops=[Op(op="update", block_id="a",
+                                    block=_para("A2"))])
+    again = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                            ops=burst, idempotency_key="k1")
+    assert again == first
+    assert await _texts(conn, n.id) == ["A2", "new"]
+    note = await get_note(conn, n.id)
+    assert note.revision == later.revision
+    async with conn.execute(
+        "SELECT COUNT(*) FROM note_change_sets WHERE note_id = ?", (n.id,),
+    ) as cur:
+        assert (await cur.fetchone())[0] == 3  # seed, k1, k2
+
+
+async def test_burst_key_is_per_note(conn):
+    n = await _note(conn)
+    other = await get_or_create_note(conn, target_kind="paper",
+                                     target_id="2", title="")
+    await apply_ops(conn, n.id, base_revision=0, actor="user",
+                    idempotency_key="same",
+                    ops=[Op(op="insert", block_id="p", block=_para("one"))])
+    res = await apply_ops(conn, other.id, base_revision=0, actor="user",
+                          idempotency_key="same",
+                          ops=[Op(op="insert", block_id="q",
+                                  block=_para("two"))])
+    assert res.applied == ["q"]
+
+
 async def test_agent_cannot_revive_a_deleted_user_block(conn):
     n = await _note(conn)
     await _seed(conn, n.id, [("a", _para("A")), ("b", _para("mine"))])
