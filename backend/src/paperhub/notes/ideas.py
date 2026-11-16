@@ -6,13 +6,19 @@ client's ``PATCH`` still sends it) but the note's text is read from here.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import aiosqlite
 
 from paperhub.notes.models import Note
 from paperhub.notes.ops import Actor, BlockIn, Op, _apply_in_tx
 from paperhub.notes.papers import tx
-from paperhub.notes.store import block_text, get_or_create_note, list_blocks
+from paperhub.notes.store import (
+    block_text,
+    get_or_create_note,
+    list_blocks,
+    order_block_rows,
+)
 
 _BLANK = re.compile(r"\n\s*\n")
 
@@ -45,6 +51,43 @@ async def idea_note_text_or_none(conn: aiosqlite.Connection, idea_id: int) -> st
     blocks = await list_blocks(conn, note.id)
     texts = [(b.text or block_text(b.type, b.props, b.content)).strip() for b in blocks]
     return "\n\n".join(t for t in texts if t)
+
+
+async def idea_note_texts(
+    conn: aiosqlite.Connection, idea_ids: list[int],
+) -> dict[int, str]:
+    """``idea_note_text_or_none`` for many ideas in ONE query; ideas with no
+    note in the store are absent from the result."""
+    if not idea_ids:
+        return {}
+    marks = ",".join("?" * len(idea_ids))
+    async with conn.execute(
+        "SELECT n.target_id, n.deleted_at, b.id, b.note_id, b.parent_id, b.type, "
+        "b.payload_json, b.text, b.author, b.section_key, b.changed_rev, b.order_key "
+        "FROM notes n LEFT JOIN note_blocks b "
+        "ON b.note_id = n.id AND b.deleted_at IS NULL "
+        f"WHERE n.owner_id = 1 AND n.target_kind = 'idea' AND n.target_id IN ({marks})",
+        [str(i) for i in idea_ids],
+    ) as cur:
+        rows = await cur.fetchall()
+    grouped: dict[int, list[Any]] = {}
+    deleted: set[int] = set()
+    for r in rows:
+        iid = int(r[0])
+        bucket = grouped.setdefault(iid, [])
+        if r[1] is not None:
+            deleted.add(iid)
+        elif r[2] is not None:
+            bucket.append(r[2:])
+    out: dict[int, str] = {}
+    for iid, brows in grouped.items():
+        if iid in deleted:
+            out[iid] = ""
+            continue
+        texts = [(b.text or block_text(b.type, b.props, b.content)).strip()
+                 for b in order_block_rows(brows)]
+        out[iid] = "\n\n".join(t for t in texts if t)
+    return out
 
 
 async def idea_note_text(conn: aiosqlite.Connection, idea_id: int) -> str:

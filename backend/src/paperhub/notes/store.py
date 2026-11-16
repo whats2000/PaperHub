@@ -138,6 +138,13 @@ async def list_blocks(
         (note_id,),
     ) as cur:
         rows = await cur.fetchall()
+    return order_block_rows(rows)
+
+
+def order_block_rows(rows: Any) -> list[Block]:
+    """``note_blocks`` rows (id, note_id, parent_id, type, payload_json, text,
+    author, section_key, changed_rev, order_key) of ONE note, as blocks in
+    document order."""
     children: dict[str | None, list[Any]] = {}
     for r in rows:
         children.setdefault(r[2], []).append(r)

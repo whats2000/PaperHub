@@ -704,3 +704,43 @@ async def test_problem_reports_nothing_relevant(app_with_db: tuple[Any, Any]) ->
         got = (await c.get(f"/ideation/problems/{p}")).json()
     assert got["nothing_relevant"] is True
     assert got["nothing_relevant_reason"] == "No document is about baking."
+
+
+async def test_idea_list_reads_every_note_in_one_query(
+    app_with_db: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from paperhub.notes.ideas import set_idea_note_text
+
+    app, conn = app_with_db
+    doc = await _doc(conn, 1)
+    a = await _idea(conn, source=doc, title="A")
+    b = await _idea(conn, source=doc, title="B")
+    c_ = await _idea(conn, source=doc, title="C")
+    d = await _idea(conn, source=doc, title="D")
+    await conn.execute("UPDATE ideas SET note = 'old column' WHERE id IN (?, ?)", (c_, d))
+    await conn.commit()
+    await set_idea_note_text(conn, a, "First para\n\nSecond para", actor="user")
+    await set_idea_note_text(conn, b, "Only one", actor="user")
+    await set_idea_note_text(conn, c_, "x", actor="user")
+    await conn.execute(  # c: soft-deleted note reads as empty; d: no note, column wins
+        "UPDATE notes SET deleted_at = datetime('now') WHERE target_kind = 'idea' "
+        "AND target_id = ?", (str(c_),))
+    await conn.commit()
+
+    async def _boom(*_a: Any, **_k: Any) -> None:
+        raise AssertionError("per-idea note lookup")
+
+    monkeypatch.setattr("paperhub.notes.ideas.idea_note_text_or_none", _boom)
+    queries: list[str] = []
+    real_execute = aiosqlite.Connection.execute
+
+    def spy(self: Any, sql: str, *a: Any, **k: Any) -> Any:
+        queries.append(sql)
+        return real_execute(self, sql, *a, **k)
+
+    monkeypatch.setattr(aiosqlite.Connection, "execute", spy)
+    async with _client(app) as cl:
+        g = (await cl.get("/ideation/graph", params={"explore": 1})).json()
+    notes = {i["id"]: i["note"] for i in g["ideas"]}
+    assert notes == {a: "First para\n\nSecond para", b: "Only one", c_: "", d: "old column"}
+    assert sum("note_blocks" in q for q in queries) == 1

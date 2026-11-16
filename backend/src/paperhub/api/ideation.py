@@ -82,7 +82,7 @@ from paperhub.ideation.models import (
     ProblemCreate,
 )
 from paperhub.ideation.problems import insert_problem, start_problem_run
-from paperhub.notes.ideas import idea_note_text_or_none, set_idea_note_text
+from paperhub.notes.ideas import idea_note_texts, set_idea_note_text
 
 router = APIRouter(prefix="/ideation", tags=["ideation"])
 
@@ -167,11 +167,7 @@ async def _ideas(
             sessions.setdefault(int(iid), []).append(int(sid))
     # The note text lives in the notes store; the column only for an idea the
     # migration has not reached yet.
-    notes: dict[int, str] = {}
-    for idea_id in ids:
-        stored = await idea_note_text_or_none(conn, idea_id)
-        if stored is not None:
-            notes[idea_id] = stored
+    notes = await idea_note_texts(conn, ids)
     out: list[Idea] = []
     for (iid, prob, sdoc, ssec, schunks, tdoc, tsec, tchunks, title, rationale,
          status, prev, note, reasons, created_at) in rows:
