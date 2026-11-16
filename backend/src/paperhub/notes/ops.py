@@ -351,6 +351,17 @@ async def _suggest(ctx: _Ctx, row: _Row, op: Op) -> None:
     ctx.suggested.append({"block_id": row.id, "suggestion_id": sid})
 
 
+async def _section_has_blocks(ctx: _Ctx, section: _Row) -> bool:
+    """Whether live blocks sit under a ``section`` block: its children, or
+    the siblings after it up to the next section."""
+    if any(d.deleted_at is None for d in await ctx.descendants(section.id)):
+        return True
+    sibs = await ctx.siblings(section.parent_id, live_only=True)
+    idx = next(i for i, s in enumerate(sibs) if s.id == section.id)
+    nxt = sibs[idx + 1] if idx + 1 < len(sibs) else None
+    return nxt is not None and nxt.type != "section"
+
+
 async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     if op.op == "insert":
         if op.block is None:
@@ -382,6 +393,10 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         ctx.reject(row.id, "invalid")
         return
     live_desc: list[_Row] = []
+    if op.op == "delete" and row.type == "section" and ctx.actor == "user"             and await _section_has_blocks(ctx, row):
+        # A paper section's notes hang off its heading: delete them first.
+        ctx.reject(row.id, "invalid", row)
+        return
     if op.op == "delete":
         live_desc = [d for d in await ctx.descendants(row.id)
                      if d.deleted_at is None]

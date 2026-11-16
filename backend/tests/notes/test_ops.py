@@ -584,3 +584,29 @@ async def test_all_rejected_ops_write_no_revision_or_change_set(conn):
                 + ("AND revision > ?" if table == "note_revisions" else "AND result_revision > ?"),
                 (n.id, before)) as cur:
             assert (await cur.fetchone())[0] == 0
+
+
+async def test_user_cannot_delete_a_section_with_blocks_under_it(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [
+        ("s1", BlockIn(type="section", props={"title": "A"}, section_key="A")),
+        ("p1", _para("mine")),
+        ("s2", BlockIn(type="section", props={"title": "B"}, section_key="B")),
+    ])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                          ops=[Op(op="delete", block_id="s1")])
+    assert res.applied == []
+    [rej] = res.rejected
+    assert rej["block_id"] == "s1" and rej["reason"] == "invalid"
+    assert rej["current"] is not None and rej["current"].id == "s1"
+    # Its blocks first, then the empty section: both in one burst.
+    res = await apply_ops(conn, n.id, base_revision=res.revision,
+                          actor="user", ops=[
+                              Op(op="delete", block_id="p1"),
+                              Op(op="delete", block_id="s1")])
+    assert res.applied == ["p1", "s1"]
+    # An empty section at the end may go too.
+    res = await apply_ops(conn, n.id, base_revision=res.revision,
+                          actor="user", ops=[Op(op="delete", block_id="s2")])
+    assert res.applied == ["s2"]
+
