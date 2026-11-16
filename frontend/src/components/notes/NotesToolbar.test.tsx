@@ -191,6 +191,16 @@ describe("useFollowReading", () => {
     root.remove();
   });
 
+  it("follows the reader into a subsection: the note goes to the section it is in", async () => {
+    const { root, scroll } = mountNote();
+    const { result } = renderHook(() => useFollowReading({ noteId: 7, paperId: 3, root }));
+    act(() => useCanvasStore.getState().setReadingSection(3, "2.3 Ablation", ["2 Method"]));
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+    expect(scroll.mock.instances[0]).toBe(root.querySelector('[data-id="s2"]'));
+    expect(result.current).toBe("§2");
+    root.remove();
+  });
+
   it("Follow off stops scrolling with the reader", () => {
     const { root, scroll } = mountNote();
     renderHook(() => useFollowReading({ noteId: 7, paperId: 3, root }));

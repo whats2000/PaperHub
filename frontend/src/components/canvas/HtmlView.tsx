@@ -57,23 +57,28 @@ interface Props {
   translation?: HtmlTranslationProps;
   /** The heading of the section being read, reported after each scroll
    * settles (Follow in the notes). */
-  onReadingHeading?: (heading: string | null) => void;
+  onReadingHeading?: (heading: string | null, within: string[]) => void;
 }
 
 /** How long the reader rests before the section being read is reported. */
 const READING_SETTLE_MS = 150;
 
-/** The heading of the section at the top third of the view: the last heading
- * above that line, else null (still before the first one). */
-function readingHeading(doc: Document): string | null {
+/** The heading of the section at the top third of the view (the last heading
+ * above that line, else null: still before the first one), and the headings
+ * of the sections it is in, outermost first (a subsection's section). */
+function readingHeading(doc: Document): { heading: string | null; within: string[] } {
   const line = (doc.defaultView?.innerHeight ?? 0) / 3;
-  let found: string | null = null;
+  const path: { level: number; text: string }[] = [];
   for (const h of Array.from(doc.querySelectorAll("h1,h2,h3,h4"))) {
     if (h.getBoundingClientRect().top > line) break;
     const text = (h.textContent ?? "").replace(/\s+/g, " ").trim();
-    if (text) found = text;
+    if (!text) continue;
+    const level = Number(h.tagName.slice(1));
+    while (path.length && path[path.length - 1]!.level >= level) path.pop();
+    path.push({ level, text });
   }
-  return found;
+  const last = path.pop();
+  return { heading: last?.text ?? null, within: path.map((p) => p.text) };
 }
 
 export interface HtmlTranslationProps {
@@ -327,7 +332,10 @@ export function HtmlView({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const report = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => onReadingRef.current?.(readingHeading(loaded.doc)), READING_SETTLE_MS);
+      timer = setTimeout(() => {
+        const { heading, within } = readingHeading(loaded.doc);
+        onReadingRef.current?.(heading, within);
+      }, READING_SETTLE_MS);
     };
     report();
     win.addEventListener("scroll", report, { passive: true });

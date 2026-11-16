@@ -82,7 +82,8 @@ interface CanvasState {
    *  when closed/empty), so the References panel can highlight the active row. */
   setActivePaperId: (paperContentId: number | null) => void;
   /** Published by the reader as it scrolls (null heading: before the first). */
-  setReadingSection: (paperContentId: number, heading: string | null) => void;
+  /** `within`: the headings of the sections `heading` is in, outermost first. */
+  setReadingSection: (paperContentId: number, heading: string | null, within?: string[]) => void;
   setReaderView: (view: ReaderView | null) => void;
   /** References button: open in browse mode if closed, else close. */
   toggleCanvas: () => void;
@@ -93,6 +94,8 @@ interface CanvasState {
 export interface ReadingSection {
   paperId: number;
   heading: string;
+  /** The headings of the sections `heading` is in, outermost first. */
+  within: string[];
 }
 
 export interface ReaderView {
@@ -163,11 +166,13 @@ export const useCanvasStore = create<CanvasState>()(
       consumePaperRequest: () => set({ requestedPaperId: null }),
       setActivePaperId: (paperContentId) =>
         set({ activePaperId: paperContentId }),
-      setReadingSection: (paperId, heading) =>
+      setReadingSection: (paperId, heading, within = []) =>
         set((s) => {
           const cur = s.readingSection;
           if (heading === null) return cur?.paperId === paperId ? { readingSection: null } : {};
-          return cur?.paperId === paperId && cur.heading === heading ? {} : { readingSection: { paperId, heading } };
+          const same =
+            cur?.paperId === paperId && cur.heading === heading && JSON.stringify(cur.within) === JSON.stringify(within);
+          return same ? {} : { readingSection: { paperId, heading, within } };
         }),
       setReaderView: (view) =>
         set((s) =>

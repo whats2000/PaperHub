@@ -28,10 +28,13 @@ export function useFollowReading({ noteId, paperId, root }: FollowReadingArgs): 
   const followOn = useNotesStore((s) => s.followOn);
   const blocks = useNotesStore((s) => (noteId === null ? undefined : s.notes[noteId]?.blocks));
   const reading = useCanvasStore((s) =>
-    paperId !== null && s.readingSection?.paperId === paperId ? s.readingSection.heading : null,
+    paperId !== null && s.readingSection?.paperId === paperId ? s.readingSection : null,
   );
 
-  const section = useMemo(() => (blocks ? sectionForHeading(blocks, reading) : null), [blocks, reading]);
+  const section = useMemo(
+    () => (blocks && reading ? sectionForHeading(blocks, reading.heading, reading.within) : null),
+    [blocks, reading],
+  );
   const sectionId = section?.id ?? null;
 
   useEffect(() => {

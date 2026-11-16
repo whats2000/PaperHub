@@ -160,4 +160,10 @@ describe("sectionForHeading (Follow)", () => {
     expect(sectionForHeading(NOTE, "Related work")).toBeNull();
     expect(sectionForHeading(NOTE, null)).toBeNull();
   });
+
+  it("falls back to the headings a subsection is in, innermost first", () => {
+    expect(sectionForHeading(NOTE, "2.1 Details", ["2 Method"])?.id).toBe("s2");
+    expect(sectionForHeading(NOTE, "Data", ["2 Method", "2.1 Details"])?.id).toBe("s2");
+    expect(sectionForHeading(NOTE, "Data", ["9 Appendix"])).toBeNull();
+  });
 });

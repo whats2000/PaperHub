@@ -152,8 +152,20 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 export function sectionForHeading<B extends PartBlock & { section_key?: string | null }>(
   blocks: B[],
   heading: string | null,
+  within: string[] = [],
 ): B | null {
-  const target = heading ? norm(heading) : "";
+  // A subsection the note has no section for: the section it is in.
+  if (heading) {
+    for (const h of [heading, ...within.slice().reverse()]) {
+      const found = sectionForOne(blocks, h);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function sectionForOne<B extends PartBlock & { section_key?: string | null }>(blocks: B[], heading: string): B | null {
+  const target = norm(heading);
   if (!target) return null;
   const sections = blocks
     .filter((b) => b.type === "section")

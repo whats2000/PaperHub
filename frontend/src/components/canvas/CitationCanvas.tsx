@@ -937,7 +937,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 html={doc.html}
                 isDark={isDark}
                 onReadingHeading={
-                  isActive && !standalone ? (h) => setReadingSection(pid, h) : undefined
+                  isActive && !standalone ? (h, within) => setReadingSection(pid, h, within) : undefined
                 }
                 scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
