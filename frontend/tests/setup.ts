@@ -68,3 +68,11 @@ afterEach(() => {
   // deliver to a later test reusing the same session id.
   MemoryBroadcastChannel.channels.clear();
 });
+
+// jsdom's Range has no geometry. ProseMirror reads it to place BlockNote's
+// floating bars (formatting bar, menus) when a test selects text; without it
+// the placement throws "target.getClientRects is not a function" outside the
+// test, an unhandled error that fails the run at random.
+const rangeProto = Range.prototype as unknown as Record<string, unknown>;
+if (!("getClientRects" in Range.prototype)) rangeProto.getClientRects = () => [];
+if (!("getBoundingClientRect" in Range.prototype)) rangeProto.getBoundingClientRect = () => new DOMRect();
