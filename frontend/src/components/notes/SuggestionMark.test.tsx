@@ -143,6 +143,16 @@ describe("a suggestion in the editor", () => {
     expect(posted).toEqual([]);
   });
 
+  it("keeps the Accept / Reject bar valid inside the line's <p> (phrasing content only)", async () => {
+    seed([para("p1", [run("latency drops up to 83%")])], [suggestion("p1", "latency drops 89%, 88% and 83%")]);
+    mount();
+    const bar = await screen.findByText("Suggested by the assistant");
+    const p = bar.closest("p")!;
+    expect(p).not.toBeNull();
+    const BLOCK = "div, p, ul, ol, li, section, table, h1, h2, h3, blockquote, pre";
+    expect(p.querySelectorAll(BLOCK)).toHaveLength(0);
+  });
+
   it("fades the tracked change in when it arrives, not again on later edits", async () => {
     seed([para("p1", [run("latency drops up to 83%")])], [suggestion("p1", "latency drops 89%, 88% and 83%")]);
     mount();

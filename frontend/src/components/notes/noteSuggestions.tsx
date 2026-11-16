@@ -165,13 +165,15 @@ export function refreshSuggestionMarks(view: EditorView): void {
   view.dispatch(view.state.tr.setMeta(key, true).setMeta("addToHistory", false));
 }
 
-/** The bar hosts of one editor (kept across renders; one per suggestion). */
+/** The bar hosts of one editor (kept across renders; one per suggestion).
+ * A span shown as a block (index.css `.note-sug-host`): the host sits inside
+ * the line's <p>, where only phrasing content is valid. */
 export function useSuggestionHosts() {
   const hosts = useRef(new Map<string, HTMLElement>());
   return useCallback((id: string) => {
     let el = hosts.current.get(id);
     if (!el) {
-      el = document.createElement("div");
+      el = document.createElement("span");
       el.className = "note-sug-host";
       el.contentEditable = "false";
       hosts.current.set(id, el);
