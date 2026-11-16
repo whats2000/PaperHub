@@ -247,6 +247,11 @@
 .paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select {
     color: var(--note-code-fg);
 }
+/* Its options are black on whatever the native list is: dark in the dark theme. */
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select > option {
+    color: var(--popover-foreground);
+    background-color: var(--popover);
+}
 .paperhub-notes .note-code-copy {
     position: absolute;
     top: 4px;
