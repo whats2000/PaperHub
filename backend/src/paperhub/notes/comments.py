@@ -22,7 +22,7 @@ class CommentInputError(ValueError):
 
 
 class CommentConflict(RuntimeError):
-    """A deleted thread cannot be changed."""
+    """A deleted thread takes no replies and only reopens."""
 
 
 def _now() -> str:
@@ -127,8 +127,9 @@ async def set_status(conn: aiosqlite.Connection, cid: str, status: str,
     thread = await get_comment(conn, cid)
     if thread is None:
         raise LookupError(f"comment {cid} not found")
-    if thread["status"] == "deleted" and status != "deleted":
-        raise CommentConflict("a deleted comment cannot be reopened")
+    # A deleted thread only comes back as open: that is the Undo of Delete.
+    if thread["status"] == "deleted" and status not in ("deleted", "open"):
+        raise CommentConflict("a deleted comment can only be reopened")
     async with write_lock(conn):
         await conn.execute("UPDATE note_comments SET status = ? WHERE id = ?",
                            (status, cid))

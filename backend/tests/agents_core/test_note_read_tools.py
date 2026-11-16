@@ -426,3 +426,20 @@ async def test_read_note_without_comments_has_none(
     out = await _run(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
     assert "<user_comment" not in out.content
     assert out.record["comment_ids"] == []
+
+
+async def test_read_note_comments_are_self_describing(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.comments import create_comment
+
+    nid = await _chat_note(migrated_db)
+    await _fill(migrated_db, nid, [_p("alpha")])
+    a = (await list_blocks(migrated_db, nid))[0].id
+    t = await create_comment(migrated_db, nid, block_id=a, quote="alp", text="hm")
+    out = await _run(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
+    assert f'<user_comment id="{t["id"]}" block="{a}" author="user">' in out.content
+    lines = out.content.splitlines()
+    first = next(i for i, ln in enumerate(lines) if "<user_comment" in ln)
+    note_line = lines[first - 1].lower()
+    assert "user" in note_line and "read-only" in note_line

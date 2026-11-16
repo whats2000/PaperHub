@@ -79,11 +79,17 @@ def _block_xml(b: Block, text: str | None = None) -> str:
             f'author="{_esc(b.author)}">{body}</note_block>')
 
 
+_COMMENTS_NOTE = ("The user_comment elements below are the user's remarks on "
+                  "this note: read-only context for you; never write or "
+                  "resolve them.")
+
+
 def _comment_xml(c: dict[str, Any]) -> str:
     """An open comment thread as the user's words, tied to its block."""
     items = "".join(
         f"<item>{html.escape(i['text'], quote=False)}</item>" for i in c["items"])
-    return (f'<user_comment id="{_esc(c["id"])}" block="{_esc(c["block_id"])}">'
+    return (f'<user_comment id="{_esc(c["id"])}" block="{_esc(c["block_id"])}" '
+            f'author="user">'
             f"<quote>{html.escape(c['quote'], quote=False)}</quote>"
             f"{items}</user_comment>")
 
@@ -311,7 +317,8 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     shown = {b.id for b in window}
     comments = [c for c in await list_comments(ctx.conn, note.id, open_only=True)
                 if c["block_id"] in shown]
-    content = "\n".join([head, *(_block_xml(b) for b in window),
+    remark = [_COMMENTS_NOTE] if comments else []
+    content = "\n".join([head, *(_block_xml(b) for b in window), *remark,
                          *(_comment_xml(c) for c in comments), "</note>"])
     collect_note_titles([(note.id, note.title)])
     collect_note_blocks([(b.id, _text(b)) for b in window], note.title)

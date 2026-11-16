@@ -54,10 +54,14 @@ async def test_create_reply_resolve_reopen_delete(env) -> None:
     assert r.json()["status"] == "open"
     r = await c.patch(f"/notes/comments/{t['id']}", json={"status": "deleted"})
     assert r.json()["status"] == "deleted"
-    r = await c.patch(f"/notes/comments/{t['id']}", json={"status": "open"})
-    assert r.status_code == 409
     r = await c.post(f"/notes/comments/{t['id']}/items", json={"text": "late"})
     assert r.status_code == 409
+    r = await c.patch(f"/notes/comments/{t['id']}", json={"status": "resolved"})
+    assert r.status_code == 409
+    # reopening is the Undo of Delete
+    r = await c.patch(f"/notes/comments/{t['id']}", json={"status": "open"})
+    assert r.status_code == 200 and r.json()["status"] == "open"
+    assert [i["text"] for i in r.json()["items"]] == ["why?", "because"]
 
 
 async def test_detail_lists_threads_but_not_deleted(env) -> None:
