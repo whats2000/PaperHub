@@ -319,4 +319,25 @@ describe("ChatPage Notes pane", () => {
       spy.mockRestore();
     }
   });
+
+  it("drops an Open in notes request that never shows its note, and an idea's at once", async () => {
+    useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
+    render(<ChatPage />);
+    // The pane shows note 11 for paper 7; a request for note 99 never lands.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      act(() => useNotesPaneStore.getState().openAt({ kind: "paper", id: 7, noteId: 99, blockId: "b99" }));
+      expect(await screen.findByText("note 11")).toBeInTheDocument();
+      expect(useNotesPaneStore.getState().request).not.toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(useNotesPaneStore.getState().request).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+    act(() => useNotesPaneStore.getState().openAt({ kind: "idea", id: 3, noteId: 40, blockId: "b1" }));
+    await waitFor(() => expect(useNotesPaneStore.getState().request).toBeNull());
+    expect(useNotesPaneStore.getState()).toMatchObject({ open: true, activeTab: "notes" });
+  });
 });

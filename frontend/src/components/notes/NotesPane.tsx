@@ -22,6 +22,9 @@ interface Props {
 
 type Target = { kind: "paper" | "session"; id: number };
 
+/** How long "Open in notes" waits for its note and block to show. */
+const REVEAL_GIVE_UP_MS = 5000;
+
 export function NotesPane({ onClose }: Props) {
   const { t } = useTranslation("notes");
   const idBase = useId();
@@ -129,11 +132,15 @@ export function NotesPane({ onClose }: Props) {
   // ... and its changed block is brought into view once the note shows.
   useEffect(() => {
     if (!request || !panel) return;
+    // An idea's note has no tab here: the pane just opens.
     if (request.blockId === null || request.kind === "idea") {
       consumeRequest(request.seq);
       return;
     }
-    if (noteId !== request.noteId) return;
+    // Never left waiting: a note that does not show (or a block that never
+    // appears) drops the request after a while.
+    const giveUp = setTimeout(() => consumeRequest(request.seq), REVEAL_GIVE_UP_MS);
+    if (noteId !== request.noteId) return () => clearTimeout(giveUp);
     const selector = `.bn-block-outer[data-id="${CSS.escape(request.blockId)}"]`;
     const reveal = (): boolean => {
       const el = panel.querySelector<HTMLElement>(selector);
@@ -145,16 +152,15 @@ export function NotesPane({ onClose }: Props) {
       consumeRequest(request.seq);
       return true;
     };
-    if (reveal()) return;
-    // The editor mounts after the note loads: wait for the block (a while).
+    if (reveal()) {
+      clearTimeout(giveUp);
+      return;
+    }
+    // The editor mounts after the note loads: wait for the block.
     const observer = new MutationObserver(() => {
       if (reveal()) observer.disconnect();
     });
     observer.observe(panel, { childList: true, subtree: true });
-    const giveUp = setTimeout(() => {
-      observer.disconnect();
-      consumeRequest(request.seq);
-    }, 5000);
     return () => {
       observer.disconnect();
       clearTimeout(giveUp);
