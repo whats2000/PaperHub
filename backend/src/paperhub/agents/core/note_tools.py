@@ -563,7 +563,8 @@ def register_note_tools(registry: ToolRegistry) -> None:
             f"Keyword search over the user's notes: up to {SEARCH_LIMIT} "
             "matching blocks, each with its block id and heading path. The way "
             "into a long note or many notes. Use a few key terms in the note's "
-            "language.",
+            "language. Hits are snippets and cannot be cited: read_note from the "
+            "hit's block id before citing it.",
             {"type": "object",
              "properties": {"query": {"type": "string"}, "scope": _SCOPE},
              "required": ["query"]},

@@ -408,3 +408,20 @@ search snippets (`read: []`, 4–5 ids marked `[unsourced:not_read]`), one
 attributed an anchor-free setting to the anchor-based model. The same
 failure occurs under v8 on this copy (s4-02 rep 2: 3 unread ids; s2-02),
 so it is not a notes rule, but v9 hit it 3 times out of 3 here: left open.
+
+### Fix round 2: note search hits are not citable (D5)
+
+Review: a `search_notes` hit is a truncated snippet, so — like a chunk
+snippet — it no longer counts as a read block; only `read_note` blocks are
+citable. With the D4 description the agent answered n3 from the search
+hit alone and every answer got `[unsourced:note_not_read]` (3/3). D5 adds to
+`search_notes`: "Hits are snippets and cannot be cited: read_note from the
+hit's block id before citing it." (prompt unchanged, `core_agent_v9`).
+
+| case | D4 | D5 |
+|---|---|---|
+| n3 capacity factor (long note) | search only, marked 3/3 | search → `read_note(from=<hit>)`, cited, no mark 3/3 (+1 step) |
+| n2 bias update | search → read, cited [1] | search → read from the hit, cited [1] |
+| n5, n7, n1 | — | unchanged: whole-note read / outline → heading / cited summary, no marks [1 each] |
+
+**D5 shipped.**
