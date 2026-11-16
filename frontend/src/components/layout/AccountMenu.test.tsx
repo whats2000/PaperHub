@@ -26,4 +26,14 @@ describe("AccountMenu", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Settings" }));
     expect(opened).toBe(true);
   });
+
+  it("grows out of the button and shrinks back into it", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu collapsed={false} onOpenSettings={() => {}} />);
+    await user.click(screen.getByRole("button", { name: /account/i }));
+    const menu = await screen.findByRole("menu");
+    for (const cls of ["origin-(--transform-origin)", "data-open:animate-in", "data-closed:animate-out", "motion-reduce:animate-none"]) {
+      expect(menu.className.split(" ")).toContain(cls);
+    }
+  });
 });
