@@ -45,7 +45,6 @@ async def test_migration_moves_every_note(tmp_path: Path) -> None:
             got = await idea_note_text(conn, iid)
             assert got == "\n\n".join(
                 p.strip() for p in _NOTES[iid].split("\n\n") if p.strip())
-            assert "Third." in got or iid == 2
         assert await idea_note_text(conn, 3) == ""
         async with conn.execute(
             "SELECT type, author FROM note_blocks nb JOIN notes n ON n.id = nb.note_id "
@@ -81,3 +80,18 @@ async def test_dry_run_writes_nothing(tmp_path: Path) -> None:
         for table in ("notes", "note_blocks", "note_revisions"):
             async with conn.execute(f"SELECT COUNT(*) FROM {table}") as cur:
                 assert (await cur.fetchone()) == (0,)
+
+
+async def test_soft_deleted_idea_note_is_skipped_not_duplicated(tmp_path: Path) -> None:
+    db = tmp_path / "p.db"
+    await _seed(db)
+    await migrate(db, dry_run=False)
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("UPDATE notes SET deleted_at = datetime('now')")
+        await conn.commit()
+    again = await migrate(db, dry_run=False)
+    assert {r["idea_id"]: r["status"] for r in again}[1] == "skipped_exists"
+    async with aiosqlite.connect(db) as conn:
+        async with conn.execute("SELECT COUNT(*) FROM notes") as cur:
+            assert (await cur.fetchone()) == (2,)
+        assert await idea_note_text(conn, 1) == ""
