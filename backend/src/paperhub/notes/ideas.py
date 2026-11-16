@@ -6,6 +6,7 @@ client's ``PATCH`` still sends it) but the note's text is read from here.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 import aiosqlite
@@ -70,7 +71,7 @@ async def idea_note_texts(
         [str(i) for i in idea_ids],
     ) as cur:
         rows = await cur.fetchall()
-    grouped: dict[int, list[Any]] = {}
+    grouped: dict[int, list[Sequence[Any]]] = {}
     deleted: set[int] = set()
     for r in rows:
         iid = int(r[0])
