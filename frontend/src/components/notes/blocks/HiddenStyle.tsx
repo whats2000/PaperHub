@@ -20,7 +20,7 @@ export const hiddenStyle = createStyleSpec(
       });
       // The peek is the view's own state: the editor must not re-read it.
       const ignoreMutation = (m: MutationRecord | { type: "selection" }) =>
-        m.type === "attributes" && (m as MutationRecord).attributeName === "data-shown";
+        m.type === "attributes" && m.attributeName === "data-shown";
       return { dom, contentDOM: dom, ignoreMutation } as { dom: HTMLElement; contentDOM: HTMLElement };
     },
   },
