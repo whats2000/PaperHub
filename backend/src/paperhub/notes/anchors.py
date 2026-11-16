@@ -5,25 +5,28 @@ changes a heading's key. The user's marks and note headings must follow, and
 never silently vanish: a quote that cannot be found again stays in the note,
 flagged (``anchorLost`` / ``piecesLost``), so the user can still read it.
 
-Coordinates: an HTML piece's ``chunk_start`` / ``chunk_end`` are offsets into
-the paper's chunk texts joined with a newline in chunk-id order;
-``chunk_ids`` lists the chunks that span touches. All block writes are ops
-with actor ``system`` inside one transaction per paper.
+Coordinates: an HTML piece's ``chunk_start`` / ``chunk_end`` are CHUNK IDS (the
+first and last chunk holding the quote; the reader maps them to ``phchunk-N``
+spans). ``text_start`` / ``text_end`` are the quote's span in the paper's chunk
+texts joined with a newline in chunk-id order, used as the proximity hint when
+the same quote repeats. All block writes are ops with actor ``system`` inside
+one transaction per paper.
 """
 from __future__ import annotations
 
+import bisect
 from typing import Any
 
 import aiosqlite
 
 from paperhub.notes.marks import (
-    _BLOCK_TYPE,
-    _COLS,
-    _block_props,
-    _live,
-    _mark,
-    _save_pieces,
-    _write,
+    BLOCK_TYPE,
+    MARK_COLS,
+    block_props,
+    live_pieces,
+    mark_from_row,
+    save_pieces,
+    write_row,
 )
 from paperhub.notes.ops import BlockIn, Op, _apply_in_tx
 from paperhub.notes.papers import tx
@@ -75,11 +78,12 @@ def _common_prefix(a: str, b: str) -> int:
     return n
 
 
-def _pick(text: str, starts: list[int], length: int, piece: _Piece) -> int:
+def _pick(text: str, starts: list[int], length: int, piece: _Piece,
+          hint: int) -> int:
     """The best of several occurrences: matching context, then nearest."""
     prefix = _normalise(str(piece.get("prefix") or ""))[0]
     suffix = _normalise(str(piece.get("suffix") or ""))[0]
-    old = int(piece.get("chunk_start") or 0)
+    old = hint
 
     def score(s: int) -> tuple[int, int]:
         before = _normalise(text[max(0, s - len(prefix) - 8):s])[0]
@@ -91,7 +95,8 @@ def _pick(text: str, starts: list[int], length: int, piece: _Piece) -> int:
     return min(starts, key=score)
 
 
-def _find(norm: _Norm, piece: _Piece) -> tuple[int, int] | None:
+def _find(norm: _Norm, piece: _Piece, spans: list[_Span],
+          ) -> tuple[int, int] | None:
     """Span of the piece's quote in the chunk text, blind to whitespace runs."""
     quote = str(piece.get("orig") or piece.get("quote") or "")
     if not quote.strip():
@@ -101,7 +106,12 @@ def _find(norm: _Norm, piece: _Piece) -> tuple[int, int] | None:
     starts = _occurrences(ntext, nquote)
     if not starts:
         return None
-    s = _pick(ntext, starts, len(nquote), piece)
+    hint = piece.get("text_start")
+    if hint is None:  # a reader-made piece: where its old chunk sits now
+        hint = next((s0 for cid, s0, _e in spans
+                     if cid == piece.get("chunk_start")), 0)
+    s = _pick(ntext, starts, len(nquote), piece,
+              bisect.bisect_left(idx, int(hint)))
     return idx[s], idx[s + len(nquote) - 1] + 1
 
 
@@ -123,18 +133,20 @@ async def _chunk_spans(conn: aiosqlite.Connection, pcid: int,
     return "\n".join(parts), spans
 
 
-def _chunk_ids(spans: list[_Span], start: int, end: int) -> list[int]:
-    return [cid for cid, s, e in spans if s < end and e > start]
+def _chunk_ids(spans: list[_Span], start: int, end: int) -> tuple[int, int]:
+    """Ids of the first and last chunk the span touches."""
+    hit = [cid for cid, s, e in spans if s < end and e > start]
+    return (hit[0], hit[-1]) if hit else (spans[0][0], spans[-1][0])
 
 
 async def _mark_rows(conn: aiosqlite.Connection, pcid: int, *,
                      html_only: bool) -> list[dict[str, Any]]:
     view = " AND view = 'html'" if html_only else ""
     async with conn.execute(
-        f"SELECT {_COLS} FROM note_marks WHERE paper_content_id = ?{view} "  # noqa: S608
+        f"SELECT {MARK_COLS} FROM note_marks WHERE paper_content_id = ?{view} "  # noqa: S608
         "ORDER BY created_at, rowid", (pcid,),
     ) as cur:
-        return [_mark(r) for r in await cur.fetchall()]
+        return [mark_from_row(r) for r in await cur.fetchall()]
 
 
 async def _system_update(conn: aiosqlite.Connection, note_id: int,
@@ -167,16 +179,18 @@ def _anchor(m: dict[str, Any], text: str, norm: _Norm, spans: list[_Span],
             pieces.append(p)
             continue
         seen += 1
-        span = _find(norm, p)
+        span = _find(norm, p, spans)
         if span is None:
             lost += 1
             pieces.append({**p, "lost": True})
             continue
         s, e = span
-        moved = moved or (s, e) != (p.get("chunk_start"), p.get("chunk_end"))
+        first, last = _chunk_ids(spans, s, e)
+        moved = moved or (first, last) != (p.get("chunk_start"),
+                                           p.get("chunk_end"))
         pieces.append({**{k: v for k, v in p.items() if k != "lost"},
-                       "chunk_start": s, "chunk_end": e,
-                       "chunk_ids": _chunk_ids(spans, s, e)})
+                       "chunk_start": first, "chunk_end": last,
+                       "text_start": s, "text_end": e})
     if not seen:
         return pieces, m["status"], False
     if lost == seen:
@@ -204,7 +218,7 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
     norm = _normalise(text)
     async with tx(conn):
         for m in marks:
-            if not any("chunk_start" in p for p in _live(m["pieces"])):
+            if not any("chunk_start" in p for p in live_pieces(m["pieces"])):
                 continue
             pieces, status, moved = _anchor(m, text, norm, spans)
             key = status if status in ("lost", "partly_lost") else (
@@ -213,14 +227,14 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
             if dry_run or (pieces == m["pieces"] and status == m["status"]):
                 continue
             m["pieces"], m["status"] = pieces, status
-            await _save_pieces(conn, m)
-            await _write(conn, "UPDATE note_marks SET status = ? WHERE id = ?",
+            await save_pieces(conn, m)
+            await write_row(conn, "UPDATE note_marks SET status = ? WHERE id = ?",
                          (status, m["id"]))
             if m["deleted_at"] is None and note_id is not None:
                 await _system_update(
                     conn, note_id, m["block_id"],
-                    BlockIn(type=_BLOCK_TYPE[m["kind"]],
-                            props=_block_props(m)), "Re-anchor mark")
+                    BlockIn(type=BLOCK_TYPE[m["kind"]],
+                            props=block_props(m)), "Re-anchor mark")
         if not dry_run and note_id is not None:
             await flag_lost_sections(conn, paper_content_id, note_id)
     return stats
@@ -280,12 +294,12 @@ async def rename_note_sections(conn: aiosqlite.Connection,
         if m["section_key"] not in mapping:
             continue
         m["section_key"] = mapping[m["section_key"]]
-        await _write(conn, "UPDATE note_marks SET section_key = ? WHERE id = ?",
+        await write_row(conn, "UPDATE note_marks SET section_key = ? WHERE id = ?",
                      (m["section_key"], m["id"]))
         if m["deleted_at"] is None:
             await _system_update(
                 conn, note_id, m["block_id"],
-                BlockIn(type=_BLOCK_TYPE[m["kind"]], props=_block_props(m)),
+                BlockIn(type=BLOCK_TYPE[m["kind"]], props=block_props(m)),
                 "Section renamed")
     await flag_lost_sections(conn, paper_content_id, note_id)
     return renamed

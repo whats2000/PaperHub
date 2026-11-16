@@ -14,30 +14,33 @@ async def _paper(conn, chunks):
         "sections_json, source_path, source_dir_path, html_path) "
         "VALUES (1, 'arxiv:1', 'arxiv', '1', 'A Paper', ?, 's', 'd', 'h')",
         (json.dumps([{"name": "Intro"}, {"name": "Method"}]),))
-    await _set_chunks(conn, chunks)
+    return await _set_chunks(conn, chunks)
 
 
 async def _set_chunks(conn, chunks):
+    """Replace the paper's chunks; return their new ids in order."""
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = 1")
-    pos = 0
+    pos, ids = 0, []
     for section, text in chunks:
-        await conn.execute(
+        cur = await conn.execute(
             "INSERT INTO chunks (paper_content_id, section, char_start, "
             "char_end, text) VALUES (1, ?, ?, ?, ?)",
             (section, pos, pos + len(text), text))
+        ids.append(cur.lastrowid)
         pos += len(text)
     await conn.commit()
+    return ids
 
 
-def _piece(quote, text, prefix="", suffix=""):
-    s = text.index(quote)
-    return {"quote": quote, "chunk_start": s, "chunk_end": s + len(quote),
+def _piece(quote, first, last, prefix="", suffix=""):
+    """A reader-made piece: chunk ids + quote context, no text offsets."""
+    return {"quote": quote, "chunk_start": first, "chunk_end": last,
             "prefix": prefix, "suffix": suffix}
 
 
-async def _mark(conn, pieces, section="Intro"):
+async def _mark(conn, pieces, section="Intro", view="html"):
     m, _ = await create_mark(conn, MarkIn(
-        paper_content_id=1, kind="highlight", color="green", view="html",
+        paper_content_id=1, kind="highlight", color="green", view=view,
         pieces=pieces, section_key=section))
     return m
 
@@ -49,65 +52,88 @@ async def _block(conn, mark):
     return lm, b
 
 
-async def test_reanchor_after_offsets_move(conn):
-    await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
-    m = await _mark(conn, [_piece("gradient descent", TEXT_A + TEXT_B)])
-    # Re-ingest: a new preamble chunk shifts every offset and chunk id.
-    await _set_chunks(conn, [("Intro", "New preamble. "), ("Intro", TEXT_A),
-                             ("Method", TEXT_B)])
+async def test_reanchor_after_chunk_ids_move(conn):
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    m = await _mark(conn, [_piece("gradient descent", b, b)])
+    # Re-ingest: a new preamble chunk and brand-new chunk ids.
+    pre, a2, b2 = await _set_chunks(
+        conn, [("Intro", "New preamble. "), ("Intro", TEXT_A),
+               ("Method", TEXT_B)])
     stats = await reanchor_paper(conn, 1)
     assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0}
-    lm, b = await _block(conn, m)
+    lm, blk = await _block(conn, m)
     p = lm["pieces"][0]
+    assert (p["chunk_start"], p["chunk_end"]) == (b2, b2)  # chunk IDS
     joined = "\n".join(["New preamble. ", TEXT_A, TEXT_B])
-    assert p["chunk_start"] == joined.index("gradient descent")
-    assert p["chunk_end"] == p["chunk_start"] + len("gradient descent")
+    assert p["text_start"] == joined.index("gradient descent")
+    assert p["text_end"] == p["text_start"] + len("gradient descent")
     assert p["quote"] == "gradient descent" and lm["status"] == "ok"
-    assert "anchorLost" not in b.props
+    assert blk.props["pieces"][0]["chunk_start"] == b2
+    assert "anchorLost" not in blk.props
     assert await reanchor_paper(conn, 1) == {
         "ok": 1, "moved": 0, "lost": 0, "partly_lost": 0}  # idempotent
+    assert a != a2 and pre
+
+
+async def test_reanchor_quote_across_chunks_spans_first_to_last(conn):
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    m = await _mark(conn, [_piece("More text follows. Second chunk", a, b)])
+    a2, b2 = await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    await reanchor_paper(conn, 1)
+    lm, _ = await _block(conn, m)
+    p = lm["pieces"][0]
+    assert (p["chunk_start"], p["chunk_end"]) == (a2, b2)
 
 
 async def test_reanchor_lost_keeps_quote(conn):
-    await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
-    m = await _mark(conn, [_piece("gradient descent", TEXT_A + TEXT_B)])
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    m = await _mark(conn, [_piece("gradient descent", b, b)])
     await _set_chunks(conn, [("Intro", TEXT_A), ("Method", "Totally new.")])
     stats = await reanchor_paper(conn, 1)
     assert stats["lost"] == 1 and stats["ok"] == 0
-    lm, b = await _block(conn, m)
+    lm, blk = await _block(conn, m)
     assert lm["status"] == "lost"
-    assert b.props["anchorLost"] is True
-    assert b.props["quote"] == "gradient descent"
+    assert blk.props["anchorLost"] is True
+    assert blk.props["quote"] == "gradient descent"
     # Found again later: the mark recovers.
     await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
     assert (await reanchor_paper(conn, 1))["lost"] == 0
-    lm, b = await _block(conn, m)
-    assert lm["status"] == "ok" and "anchorLost" not in b.props
+    lm, blk = await _block(conn, m)
+    assert lm["status"] == "ok" and "anchorLost" not in blk.props
 
 
 async def test_reanchor_partial_pieces(conn):
-    await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
-    both = TEXT_A + TEXT_B
-    m = await _mark(conn, [_piece("cat sat", both),
-                           _piece("gradient descent", both)])
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    m = await _mark(conn, [_piece("cat sat", a, a),
+                           _piece("gradient descent", b, b)])
     await _set_chunks(conn, [("Intro", TEXT_A), ("Method", "Different.")])
     stats = await reanchor_paper(conn, 1)
     assert stats["partly_lost"] == 1
-    lm, b = await _block(conn, m)
+    lm, blk = await _block(conn, m)
     assert lm["status"] == "partly_lost"
-    assert b.props["piecesLost"] == 1 and "anchorLost" not in b.props
+    assert blk.props["piecesLost"] == 1 and "anchorLost" not in blk.props
     assert [p.get("lost") for p in lm["pieces"]] == [None, True]
 
 
 async def test_reanchor_whitespace_and_repeat_disambiguation(conn):
     text = "alpha beta. first the cat. second the cat. end"
-    await _paper(conn, [("Intro", text)])
-    m = await _mark(conn, [{"quote": "the cat", "chunk_start": 0,
-                            "chunk_end": 7, "prefix": "second ",
-                            "suffix": ". end"}])
+    [c] = await _paper(conn, [("Intro", text)])
+    m = await _mark(conn, [_piece("the cat", c, c, "second ", ". end")])
     await _set_chunks(conn, [("Intro", "alpha  beta.\nfirst the cat. second "
                                        "the\n cat. end")])
     await reanchor_paper(conn, 1)
     lm, _ = await _block(conn, m)
-    p = lm["pieces"][0]
-    assert p["chunk_start"] > 25  # the second occurrence, not the first
+    assert lm["pieces"][0]["text_start"] > 25  # the second occurrence
+
+
+async def test_reanchor_leaves_pdf_marks_untouched(conn):
+    await _paper(conn, [("Intro", TEXT_A)])
+    pdf = {"quote": "cat sat", "page": 0, "block_id": "b1",
+           "rects": [[0.1, 0.1, 0.2, 0.2]]}
+    m = await _mark(conn, [pdf], view="pdf")
+    await _set_chunks(conn, [("Intro", "nothing alike")])
+    assert await reanchor_paper(conn, 1) == {
+        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+    lm, blk = await _block(conn, m)
+    assert lm["pieces"] == [pdf] and lm["status"] == "ok"
+    assert "anchorLost" not in blk.props

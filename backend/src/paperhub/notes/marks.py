@@ -34,12 +34,12 @@ from paperhub.notes.papers import (
 )
 from paperhub.notes.store import get_note, list_blocks, new_block_id
 
-_BLOCK_TYPE: dict[str, Any] = {
+BLOCK_TYPE: dict[str, Any] = {
     "highlight": "paperQuote", "quote": "paperQuote", "figure": "paperFigure",
     "equation": "paperEquation", "region": "paperRegion",
 }
 _VIEWS = ("html", "pdf")
-_COLS = ("id, paper_content_id, block_id, kind, color, view, pieces_json, "
+MARK_COLS = ("id, paper_content_id, block_id, kind, color, view, pieces_json, "
          "lang, source_ref, section_key, status, created_at, deleted_at")
 _INSERT = (
     "INSERT INTO note_marks (id, paper_content_id, block_id, kind, color, "
@@ -82,7 +82,7 @@ def _mark_id() -> str:
         for _ in range(10))
 
 
-def _mark(row: Any) -> dict[str, Any]:
+def mark_from_row(row: Any) -> dict[str, Any]:
     return {
         "id": row[0], "paper_content_id": row[1], "block_id": row[2],
         "kind": row[3], "color": row[4], "view": row[5],
@@ -94,15 +94,15 @@ def _mark(row: Any) -> dict[str, Any]:
 
 async def _get(conn: aiosqlite.Connection, mark_id: str) -> dict[str, Any]:
     async with conn.execute(
-        f"SELECT {_COLS} FROM note_marks WHERE id = ?", (mark_id,)
+        f"SELECT {MARK_COLS} FROM note_marks WHERE id = ?", (mark_id,)
     ) as cur:
         row = await cur.fetchone()
     if row is None:
         raise LookupError(f"mark {mark_id} not found")
-    return _mark(row)
+    return mark_from_row(row)
 
 
-async def _write(conn: aiosqlite.Connection, sql: str,
+async def write_row(conn: aiosqlite.Connection, sql: str,
                  params: tuple[Any, ...]) -> None:
     async with write_lock(conn):
         await conn.execute(sql, params)
@@ -110,7 +110,7 @@ async def _write(conn: aiosqlite.Connection, sql: str,
             await conn.commit()
 
 
-def _live(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def live_pieces(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pieces still shown: neither erased nor moved to another mark."""
     return [p for p in pieces if not p.get("erased") and not p.get("removed")]
 
@@ -123,7 +123,7 @@ def _check_index(m: dict[str, Any], index: int) -> None:
 
 
 def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
-    if kind not in _BLOCK_TYPE:
+    if kind not in BLOCK_TYPE:
         raise MarkInputError(f"unknown mark kind {kind!r}")
     if view not in _VIEWS:
         raise MarkInputError(f"unknown mark view {view!r}")
@@ -131,8 +131,8 @@ def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
         raise MarkInputError("a mark needs at least one piece")
 
 
-def _block_props(m: dict[str, Any]) -> dict[str, Any]:
-    live = _live(m["pieces"])
+def block_props(m: dict[str, Any]) -> dict[str, Any]:
+    live = live_pieces(m["pieces"])
     first = live[0] if live else {}
     source: dict[str, Any] = {}
     if first.get("page") is not None:
@@ -178,13 +178,13 @@ async def _update_block(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
     await _apply(
         conn, await _note_id(conn, m),
         Op(op="update", block_id=m["block_id"],
-           block=BlockIn(type=_BLOCK_TYPE[m["kind"]],
-                         props=_block_props(m))),
+           block=BlockIn(type=BLOCK_TYPE[m["kind"]],
+                         props=block_props(m))),
         "Edit mark", m["block_id"])
 
 
-async def _save_pieces(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
-    await _write(conn, "UPDATE note_marks SET pieces_json = ? WHERE id = ?",
+async def save_pieces(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
+    await write_row(conn, "UPDATE note_marks SET pieces_json = ? WHERE id = ?",
                  (json.dumps(m["pieces"]), m["id"]))
 
 
@@ -194,10 +194,10 @@ async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
     await _apply(
         conn, note_id,
         Op(op="insert", block_id=rec["block_id"], after=after,
-           block=BlockIn(type=_BLOCK_TYPE[rec["kind"]],
-                         props=_block_props(rec))),
+           block=BlockIn(type=BLOCK_TYPE[rec["kind"]],
+                         props=block_props(rec))),
         summary, rec["block_id"])
-    await _write(conn, _INSERT, (
+    await write_row(conn, _INSERT, (
         rec["id"], rec["paper_content_id"], rec["block_id"], rec["kind"],
         rec["color"], rec["view"], json.dumps(rec["pieces"]), rec["lang"],
         rec["source_ref"], rec["section_key"], rec["created_at"]))
@@ -266,7 +266,7 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
         raise MarkInputError("a piece can only join a mark of the same paper, "
                          "colour, kind and view")
     rec["pieces"] = [*rec["pieces"], *m.pieces]
-    await _save_pieces(conn, rec)
+    await save_pieces(conn, rec)
     await _update_block(conn, rec)
     return rec, await _saved_to(conn, rec)
 
@@ -274,7 +274,7 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
 async def list_marks(conn: aiosqlite.Connection,
                      paper_content_id: int) -> list[dict[str, Any]]:
     async with conn.execute(
-        f"SELECT {_COLS} FROM note_marks WHERE paper_content_id = ? "
+        f"SELECT {MARK_COLS} FROM note_marks WHERE paper_content_id = ? "
         "AND deleted_at IS NULL ORDER BY created_at, rowid",
         (paper_content_id,),
     ) as cur:
@@ -286,7 +286,7 @@ async def list_marks(conn: aiosqlite.Connection,
     sections = {b.section_key: b.id for b in blocks if b.type == "section"}
     out: list[dict[str, Any]] = []
     for r in rows:
-        m = _mark(r)
+        m = mark_from_row(r)
         label = m["section_key"] or ""
         sec_id = sections.get(m["section_key"])
         if sec_id is not None:
@@ -306,7 +306,7 @@ async def _delete(conn: aiosqlite.Connection, m: dict[str, Any],
     res = await _apply(conn, await _note_id(conn, m),
                        Op(op="delete", block_id=m["block_id"]),
                        "Delete mark", m["block_id"])
-    await _write(conn, "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
+    await write_row(conn, "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
                  (datetime.now(UTC).isoformat(), m["id"]))
     m["deleted_at"] = "now"
     return res
@@ -320,7 +320,7 @@ async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
         raise MarkConflict(
             f"block {m['block_id']} was not restored: "
             f"{res.rejected or 'rejected'}")
-    await _write(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
+    await write_row(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
                  (m["id"],))
     m["deleted_at"] = None
     await _update_block(conn, m)  # pieces may have changed while deleted
@@ -351,8 +351,8 @@ async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
         if m["deleted_at"] is not None:
             raise MarkInputError("cannot erase from a deleted mark")
         m["pieces"][index] = {**m["pieces"][index], "erased": True}
-        await _save_pieces(conn, m)
-        if _live(m["pieces"]):
+        await save_pieces(conn, m)
+        if live_pieces(m["pieces"]):
             await _update_block(conn, m)
         else:
             await _delete(conn, m)
@@ -366,10 +366,10 @@ async def restore_piece(conn: aiosqlite.Connection, mark_id: str,
     async with tx(conn):
         m = await _get(conn, mark_id)
         _check_index(m, index)
-        auto_deleted = m["deleted_at"] is not None and not _live(m["pieces"])
+        auto_deleted = m["deleted_at"] is not None and not live_pieces(m["pieces"])
         m["pieces"][index] = {k: v for k, v in m["pieces"][index].items()
                               if k != "erased"}
-        await _save_pieces(conn, m)
+        await save_pieces(conn, m)
         if auto_deleted:
             await _restore(conn, m)
         elif m["deleted_at"] is None:
@@ -392,7 +392,7 @@ async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
             raise MarkInputError("only a live mark with two pieces can split")
         piece = m["pieces"][live[-1]]
         m["pieces"][live[-1]] = {**piece, "removed": True}
-        await _save_pieces(conn, m)
+        await save_pieces(conn, m)
         await _update_block(conn, m)
         rec = {**m, "id": _mark_id(), "block_id": new_block_id(),
                "pieces": [piece], "status": "ok",
@@ -422,9 +422,9 @@ async def set_color(conn: aiosqlite.Connection, color: str, *,
         if await cur.fetchone() is None:
             raise LookupError(f"unknown colour {color}")
     if name is not None:
-        await _write(conn, "UPDATE mark_colors SET name = ? "
+        await write_row(conn, "UPDATE mark_colors SET name = ? "
                      "WHERE owner_id = 1 AND color = ?", (name, color))
     if visible is not None:
-        await _write(conn, "UPDATE mark_colors SET visible = ? "
+        await write_row(conn, "UPDATE mark_colors SET visible = ? "
                      "WHERE owner_id = 1 AND color = ?",
                      (1 if visible else 0, color))

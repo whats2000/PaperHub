@@ -351,3 +351,29 @@ async def test_dropped_section_heading_marked_lost(
     [heading] = [b for b in await list_blocks(conn, note.id) if b.type == "section"]
     assert heading.section_key == "\\algo{"  # kept: the user's notes live under it
     assert heading.props["sectionLost"] is True
+
+
+@pytest.mark.asyncio
+async def test_note_failure_rolls_back_the_whole_rename(
+    conn: aiosqlite.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import paperhub.notes.anchors as anchors
+
+    pcid, _ = await _seed_latex_paper(conn, tmp_path)
+    await _note_with_mark(conn, pcid, "\\algo{")
+    async with conn.execute("SELECT id FROM chunks WHERE section = '\\algo{'") as cur:
+        ids = [int(r[0]) for r in await cur.fetchall()]
+
+    async def boom(*_a: object, **_k: object) -> int:
+        raise RuntimeError("notes step failed")
+
+    monkeypatch.setattr(anchors, "rename_note_sections", boom)
+    with pytest.raises(RuntimeError):
+        await apply_section_renames(conn, pcid, {i: "MDLM" for i in ids})
+
+    async with conn.execute(
+        "SELECT DISTINCT section FROM chunks WHERE id = ?", (ids[0],)
+    ) as cur:
+        assert [r[0] for r in await cur.fetchall()] == ["\\algo{"]
+    async with conn.execute("SELECT source_section FROM ideas") as cur:
+        assert (await cur.fetchone())[0] == "\\algo{"  # type: ignore[index]

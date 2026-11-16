@@ -24,6 +24,7 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.db.connection import in_write_transaction, write_transaction
 from paperhub.pipelines.section_names import is_heading_shaped, is_wrapped_continuation
 
 __all__ = [
@@ -201,7 +202,19 @@ async def apply_section_renames(
     chunk_names: Mapping[int, str | None],
 ) -> RenameReport:
     """Set ``chunks.section`` per chunk id and propagate the implied
-    old→new name mapping to every consumer. Commits once at the end."""
+    old→new name mapping to every consumer (incl. the paper's note). One
+    transaction: a failure anywhere rolls the whole rename back."""
+    if in_write_transaction():
+        return await _apply_section_renames(conn, paper_content_id, chunk_names)
+    async with write_transaction(conn):
+        return await _apply_section_renames(conn, paper_content_id, chunk_names)
+
+
+async def _apply_section_renames(
+    conn: aiosqlite.Connection,
+    paper_content_id: int,
+    chunk_names: Mapping[int, str | None],
+) -> RenameReport:
     rep = RenameReport()
     async with conn.execute(
         "SELECT id, section FROM chunks WHERE paper_content_id = ?", (paper_content_id,),
@@ -218,7 +231,6 @@ async def apply_section_renames(
         rep.chunks += 1
     if not mapping:
         await _notes_follow(conn, paper_content_id, mapping, rep)
-        await conn.commit()
         return rep
 
     async with conn.execute(
@@ -267,7 +279,6 @@ async def apply_section_renames(
 
     await _rename_decks(conn, paper_content_id, mapping, rep)
     await _notes_follow(conn, paper_content_id, mapping, rep)
-    await conn.commit()
     return rep
 
 
@@ -276,14 +287,10 @@ async def _notes_follow(
     rep: RenameReport,
 ) -> None:
     """Move the paper note's headings and marks with the rename; flag headings
-    whose section is gone. The chunk/ideas/deck writes above are committed
-    first so the note ops can run in their own write transaction."""
+    whose section is gone, inside the caller's transaction."""
     from paperhub.notes.anchors import rename_note_sections  # local: avoid an import cycle
-    from paperhub.notes.papers import tx
 
-    await conn.commit()
-    async with tx(conn):
-        rep.note_sections = await rename_note_sections(conn, paper_id, dict(mapping))
+    rep.note_sections = await rename_note_sections(conn, paper_id, dict(mapping))
 
 
 def _rename_digest_file(
