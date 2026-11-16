@@ -24,6 +24,7 @@ import { applyOpsLocally } from "@/lib/notes/ops";
 import type {
   Note,
   NoteBlock,
+  NoteBlockIn,
   NoteComment,
   NoteOp,
   NoteSuggestion,
@@ -135,6 +136,7 @@ export function clearPendingNoteOps(): void {
   pending.clear();
   attempts.clear();
   inRetry.clear();
+  rebuilds.clear();
 }
 
 /** The edits of a note not yet saved, in send order (a copy). */
@@ -217,6 +219,87 @@ function reanchor(ops: NoteOp[], blocks: NoteBlock[], gone: Set<string>): NoteOp
   });
 }
 
+/** Blocks in document order (parents before children, siblings in order). */
+function docOrder(blocks: NoteBlock[]): NoteBlock[] {
+  const ids = new Set(blocks.map((b) => b.id));
+  const kids = new Map<string | null, NoteBlock[]>();
+  for (const b of blocks) {
+    const p = b.parent_id !== null && ids.has(b.parent_id) ? b.parent_id : null;
+    kids.set(p, [...(kids.get(p) ?? []), b]);
+  }
+  const out: NoteBlock[] = [];
+  const walk = (p: string | null) => {
+    for (const b of kids.get(p) ?? []) {
+      out.push(b);
+      walk(b.id);
+    }
+  };
+  walk(null);
+  return out;
+}
+
+/** How many times each client-new block's insert has been rebuilt in a row. */
+const rebuilds = new Map<string, number>();
+
+/** Fresh inserts for blocks this view created whose insert the server
+ * refused (an anchor gone or moved elsewhere): each carries the block as it
+ * is now (all its typing), placed in the server's tree after its nearest
+ * previous sibling the server has (parent_id taken from that sibling), else
+ * first under its parent, else at the end of the section above it, else at
+ * the note end. A block refused again goes to the note end; a third refusal
+ * stops resending it. */
+function freshInserts(
+  local: NoteBlock[],
+  lost: Set<string>,
+  server: NoteBlock[],
+): { ops: NoteOp[]; appended: boolean; stopped: boolean } {
+  const parentOf = new Map(server.map((b) => [b.id, b.parent_id]));
+  const order = docOrder(local);
+  const ops: NoteOp[] = [];
+  let appended = false;
+  let stopped = false;
+  order.forEach((b, at) => {
+    if (!lost.has(b.id)) return;
+    const n = (rebuilds.get(b.id) ?? 0) + 1;
+    rebuilds.set(b.id, n);
+    if (n > 2) {
+      stopped = true;
+      return;
+    }
+    const block: NoteBlockIn = { type: b.type, props: b.props, content: b.content };
+    if (b.section_key !== null) block.section_key = b.section_key;
+    let placement: Placement & Pick<NoteOp, "under_heading">;
+    if (n === 2) {
+      placement = { parent_id: null };
+      appended = true;
+    } else {
+      const sibs = local.filter((x) => x.parent_id === b.parent_id);
+      const i = sibs.findIndex((x) => x.id === b.id);
+      const prev = sibs.slice(0, i).reverse().find((x) => parentOf.has(x.id));
+      const heading = order
+        .slice(0, at)
+        .reverse()
+        .find((x) => (x.type === "section" || x.type === "heading") && parentOf.has(x.id));
+      if (prev) {
+        placement = { parent_id: parentOf.get(prev.id) ?? null, after: prev.id };
+      } else if (b.parent_id !== null && parentOf.has(b.parent_id)) {
+        const first = server.find((x) => x.parent_id === b.parent_id);
+        placement = first ? { parent_id: b.parent_id, before: first.id } : { parent_id: b.parent_id };
+      } else if (heading) {
+        placement = { under_heading: heading.id };
+      } else {
+        placement = { parent_id: null };
+      }
+    }
+    ops.push({ op: "insert", block_id: b.id, block, ...placement });
+    parentOf.set(
+      b.id,
+      placement.under_heading ? (parentOf.get(placement.under_heading) ?? null) : (placement.parent_id ?? null),
+    );
+  });
+  return { ops, appended, stopped };
+}
+
 export const useNotesStore = create<NotesStore>()(
   persist(
     (set, get) => {
@@ -243,10 +326,15 @@ export const useNotesStore = create<NotesStore>()(
       /** The note as the server sent it with the edits not yet saved put
        * back on top. Queued ops placed by a block the server no longer has
        * (and no queued insert creates) are placed where it stood. */
-      const rebase = (noteId: number, serverBlocks: NoteBlock[]) => {
+      const rebase = (
+        noteId: number,
+        serverBlocks: NoteBlock[],
+        prepend?: (server: NoteBlock[]) => NoteOp[],
+      ) => {
         const localBlocks = get().notes[noteId]?.blocks ?? [];
         const retry = inRetry.get(noteId)?.ops ?? [];
-        const queued = pending.get(noteId) ?? [];
+        const fresh = prepend ? prepend(serverBlocks) : [];
+        const queued = [...fresh, ...(pending.get(noteId) ?? [])];
         const serverIds = new Set(serverBlocks.map((b) => b.id));
         const created = new Set(
           [...retry, ...queued].filter((o) => o.op === "insert").map((o) => o.block_id),
@@ -263,9 +351,9 @@ export const useNotesStore = create<NotesStore>()(
       };
 
       /** Load the saved note and put the edits not yet sent back on top. */
-      const reload = async (noteId: number) => {
+      const reload = async (noteId: number, prepend?: (server: NoteBlock[]) => NoteOp[]) => {
         const d = await getNote(noteId);
-        const { blocks, unsaved } = rebase(noteId, d.blocks);
+        const { blocks, unsaved } = rebase(noteId, d.blocks, prepend);
         set((s) => {
           const cur = s.notes[noteId];
           return {
@@ -294,25 +382,32 @@ export const useNotesStore = create<NotesStore>()(
         const ids = new Set(rejected.map((r) => r.block_id).filter(Boolean));
         const cur = get().notes[noteId];
         if (!ids.size || !cur) return;
-        // A block this view created whose insert had nowhere to land (its
-        // anchor went in another view) is the user's new text: send it
-        // again, placed anew once the note is reloaded, with its typing.
-        const lostInserts = sent.filter(
-          (o) =>
-            o.op === "insert" &&
-            o.block_id != null &&
-            rejected.some((r) => r.block_id === o.block_id && !r.current),
+        // Blocks this view created whose insert the server refused (an
+        // anchor gone or moved in another view): the user's new text. Their
+        // stale ops are dropped and one fresh insert per block, carrying its
+        // current content, is placed once the note is reloaded.
+        const lost = new Set(
+          sent
+            .filter(
+              (o) =>
+                o.op === "insert" &&
+                o.block_id != null &&
+                rejected.some((r) => r.block_id === o.block_id && !r.current),
+            )
+            .map((o) => o.block_id!),
         );
-        const resent = new Set(lostInserts.map((o) => o.block_id));
         // Edits OF a conflicted block were made on the version we lost to;
         // edits placed BESIDE it are the user's words and stay.
         const gone = new Set(
-          rejected.filter((r) => r.block_id && !r.current && !resent.has(r.block_id)).map((r) => r.block_id),
+          rejected.filter((r) => r.block_id && !r.current && !lost.has(r.block_id)).map((r) => r.block_id),
         );
-        const q = (pending.get(noteId) ?? []).filter(
-          (op) => !(op.block_id && ids.has(op.block_id) && !resent.has(op.block_id)),
-        );
-        pending.set(noteId, [...lostInserts, ...reanchor(q, cur.blocks, gone)]);
+        const q = (pending.get(noteId) ?? []).filter((op) => !(op.block_id && ids.has(op.block_id)));
+        pending.set(noteId, reanchor(q, cur.blocks, gone));
+        let rebuilt = { ops: [] as NoteOp[], appended: false, stopped: false };
+        const rebuild = (server: NoteBlock[]) => {
+          rebuilt = freshInserts(cur.blocks, lost, server);
+          return rebuilt.ops;
+        };
 
         const sectionKept = rejected.some((r) => r.reason === "invalid" && r.current?.type === "section");
         toast(
@@ -327,18 +422,39 @@ export const useNotesStore = create<NotesStore>()(
         // Where blocks sit (an order change by another view, a move, a
         // block gone) is only known to the server: reload the note, the
         // unsaved edits re-applied on top.
+        const notify = () => {
+          if (rebuilt.appended) {
+            toast(
+              i18n.t(
+                "notes:insertAppended",
+                "A new line could not go where you put it, so it was saved at the end of the note.",
+              ),
+            );
+          }
+          if (rebuilt.stopped) {
+            toast.error(
+              i18n.t("notes:insertNotSaved", "A new line could not be saved. Copy it before you reload."),
+            );
+          }
+        };
         try {
-          await reload(noteId);
+          await reload(noteId, lost.size ? rebuild : undefined);
+          notify();
           return;
         } catch {
           /* offline: fall back to the blocks we were given */
+        }
+        if (lost.size) {
+          const known = cur.blocks.filter((b) => !lost.has(b.id) && !gone.has(b.id));
+          pending.set(noteId, [...rebuild(known), ...(pending.get(noteId) ?? [])]);
+          notify();
         }
         set((s) => {
           const now = s.notes[noteId];
           if (!now) return {};
           let blocks = now.blocks;
           for (const r of rejected) {
-            if (!r.block_id || resent.has(r.block_id)) continue;
+            if (!r.block_id || lost.has(r.block_id)) continue;
             const current = r.current;
             if (current) {
               blocks = blocks.some((b) => b.id === r.block_id)
@@ -402,6 +518,7 @@ export const useNotesStore = create<NotesStore>()(
         attempts.delete(noteId);
         setRetrying(noteId, false);
         const applied = new Set(res.applied);
+        for (const id of applied) rebuilds.delete(id);
         set((s) => {
           const cur = s.notes[noteId];
           if (!cur) return {};

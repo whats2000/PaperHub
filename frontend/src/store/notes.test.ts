@@ -204,15 +204,20 @@ describe("useNotesStore", () => {
     expect(s.notes[7]?.blocks.filter((b) => b.id === "n")).toHaveLength(1);
   });
 
-  it("re-queues a new block whose anchor vanished, with its typing", async () => {
+  it("re-sends a new block whose anchor vanished as a fresh insert with all its typing", async () => {
     server.use(
       http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
         const body = (await request.json()) as NoteOpsBody;
         posted.push(body);
         if (posted.length === 1) {
-          useNotesStore.getState().applyLocal(7, [upd("n", "my new line")]);
-          // Another view deleted "b"; the insert after it has no anchor.
-          return HttpResponse.json(result(4, [], [{ block_id: "n", reason: "missing", current: null }]));
+          useNotesStore.getState().applyLocal(7, [upd("n", "hello world")]);
+          // Another view deleted "b": neither op of the burst can land.
+          return HttpResponse.json(
+            result(4, [], [
+              { block_id: "n", reason: "missing", current: null },
+              { block_id: "n", reason: "missing", current: null },
+            ]),
+          );
         }
         return HttpResponse.json(result(5, body.ops.map((o) => o.block_id ?? "")));
       }),
@@ -221,15 +226,95 @@ describe("useNotesStore", () => {
       ),
     );
     await useNotesStore.getState().loadTarget("paper", 3);
+    // Typed in the same burst as the insert.
     useNotesStore.getState().applyLocal(7, [
-      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "" }, parent_id: null, after: "b" },
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "h" }, parent_id: null, after: "b" },
+    ]);
+    useNotesStore.getState().applyLocal(7, [upd("n", "hello")]);
+    await useNotesStore.getState().flush(7);
+    expect(posted[0]?.ops.map((o) => o.op)).toEqual(["insert", "update"]);
+    // One fresh insert carrying everything typed so far, placed after the
+    // nearest previous block the server still has; the stale ops are gone.
+    expect(pendingNoteOps(7)).toEqual([
+      {
+        op: "insert",
+        block_id: "n",
+        block: { type: "paragraph", props: {}, content: [{ type: "text", text: "hello world", styles: {} }] },
+        parent_id: null,
+        after: "a",
+      },
+    ]);
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["A", "hello world"]);
+    const fresh = pendingNoteOps(7);
+    await useNotesStore.getState().flush(7);
+    expect(posted).toHaveLength(2);
+    expect(posted[1]?.ops).toEqual(fresh);
+  });
+
+  it("places a new block after an anchor another view moved, in one retry", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        if (posted.length === 1) {
+          // "b" now sits under "a": an insert after "b" at the top level is invalid.
+          return HttpResponse.json(result(4, [], [{ block_id: "n", reason: "invalid", current: null }]));
+        }
+        return HttpResponse.json(result(5, body.ops.map((o) => o.block_id ?? "")));
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note,
+          blocks: [block("a", "A"), { ...block("b", "B"), parent_id: "a" }],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "mine" }, parent_id: null, after: "b" },
     ]);
     await useNotesStore.getState().flush(7);
-    expect(pendingNoteOps(7)).toEqual([
-      expect.objectContaining({ op: "insert", block_id: "n", parent_id: null, after: "a" }),
-      expect.objectContaining({ op: "update", block_id: "n" }),
+    await useNotesStore.getState().flush(7);
+    expect(posted).toHaveLength(2);
+    expect(posted[1]?.ops).toEqual([
+      expect.objectContaining({ op: "insert", block_id: "n", parent_id: "a", after: "b" }),
     ]);
-    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["A", "my new line"]);
+    expect(pendingNoteOps(7)).toEqual([]);
+  });
+
+  it("saves a new block at the end of the note when its insert is refused twice", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        if (posted.length <= 2) {
+          return HttpResponse.json(result(4, [], [{ block_id: "n", reason: "invalid", current: null }]));
+        }
+        return HttpResponse.json(result(5, body.ops.map((o) => o.block_id ?? "")));
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "mine" }, parent_id: null, after: "b" },
+    ]);
+    await useNotesStore.getState().flush(7);
+    await useNotesStore.getState().flush(7);
+    expect(toastFn).toHaveBeenCalledWith(
+      "A new line could not go where you put it, so it was saved at the end of the note.",
+    );
+    await useNotesStore.getState().flush(7);
+    expect(posted).toHaveLength(3);
+    expect(posted[2]?.ops).toEqual([
+      {
+        op: "insert",
+        block_id: "n",
+        block: { type: "paragraph", props: {}, content: "mine" },
+        parent_id: null,
+      },
+    ]);
+    expect(pendingNoteOps(7)).toEqual([]);
   });
 
   it("shows the saved version when the server refuses a burst (4xx)", async () => {

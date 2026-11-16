@@ -4,6 +4,8 @@
   "retrying": "Not saved — retrying",
   "conflict": "Updated from another view",
   "sectionNotEmpty": "This section still has notes under it. Delete them first, then the heading.",
+  "insertAppended": "A new line could not go where you put it, so it was saved at the end of the note.",
+  "insertNotSaved": "A new line could not be saved. Copy it before you reload.",
   "color": {
     "green": "Key result",
     "blue": "Method",

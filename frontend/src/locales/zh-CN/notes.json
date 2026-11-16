@@ -4,6 +4,8 @@
   "retrying": "尚未保存，正在重试",
   "conflict": "已按另一个视图的内容更新",
   "sectionNotEmpty": "这个章节下仍有笔记。请先删除笔记，再删除标题。",
+  "insertAppended": "有一行新内容无法放在你指定的位置，已保存到笔记末尾。",
+  "insertNotSaved": "有一行新内容无法保存。重新加载前请先复制它。",
   "color": {
     "green": "关键结果",
     "blue": "方法",

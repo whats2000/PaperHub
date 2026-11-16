@@ -4,6 +4,8 @@
   "retrying": "尚未儲存，正在重試",
   "conflict": "已依另一個視窗的內容更新",
   "sectionNotEmpty": "這個章節下仍有筆記。請先刪除筆記，再刪除標題。",
+  "insertAppended": "有一行新內容無法放在你指定的位置，已儲存到筆記結尾。",
+  "insertNotSaved": "有一行新內容無法儲存。重新載入前請先複製它。",
   "color": {
     "green": "關鍵結果",
     "blue": "方法",
