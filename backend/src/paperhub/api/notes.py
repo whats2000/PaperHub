@@ -17,7 +17,12 @@ from paperhub.notes import ops as note_ops
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
-from paperhub.notes.store import get_note, get_or_create_note, list_blocks
+from paperhub.notes.store import (
+    get_note,
+    get_or_create_note,
+    list_blocks,
+    shared_by,
+)
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -25,6 +30,8 @@ router = APIRouter(prefix="/notes", tags=["notes"])
 class NoteWithBlocks(BaseModel):
     note: Note
     blocks: list[Block]
+    # How many live chats the note is linked to ("Shared by N chats").
+    shared_by: int
 
 
 class NoteDetail(NoteWithBlocks):
@@ -89,7 +96,9 @@ async def note_for_target(
             note = await get_or_create_note(
                 conn, target_kind=kind, target_id=str(id), title=title,
                 session_id=id if kind == "session" else None)
-        return NoteWithBlocks(note=note, blocks=await list_blocks(conn, note.id))
+        return NoteWithBlocks(
+            note=note, blocks=await list_blocks(conn, note.id),
+            shared_by=await shared_by(conn, note))
 
 
 @router.get("/{note_id}", response_model=NoteDetail)
@@ -110,6 +119,7 @@ async def note_detail(note_id: int) -> NoteDetail:
              "created_at": r[6]} for r in rows]
         return NoteDetail(
             note=note, blocks=await list_blocks(conn, note_id),
+            shared_by=await shared_by(conn, note),
             suggestions=suggestions,
             comments=await note_comments.list_comments(conn, note_id))
 

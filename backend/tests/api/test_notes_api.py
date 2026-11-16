@@ -145,3 +145,25 @@ async def test_ops_endpoint_replays_a_repeated_burst_key(client: AsyncClient) ->
     detail = (await client.get(f"/notes/{nid}")).json()
     assert [b["id"] for b in detail["blocks"]] == ["b1"]
     assert detail["note"]["revision"] == 1
+
+
+async def test_shared_by_counts_the_live_chats_the_note_is_linked_to(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.executescript(
+            "INSERT INTO chat_sessions (id, title) VALUES (2, 'Two');"
+            "INSERT INTO chat_sessions (id, title, deleted_at) VALUES (3, 'Gone', '2026-11-16');"
+            "INSERT INTO chat_sessions (id, title, internal) VALUES (4, 'Hidden', 1);"
+            "INSERT INTO papers (session_id, paper_content_id) VALUES "
+            "(1, 1), (2, 1), (3, 1), (4, 1);")
+        await conn.commit()
+    # A paper's note: every live, listed chat that attaches the paper.
+    paper = (await client.get("/notes/target", params={"kind": "paper", "id": 1})).json()
+    assert paper["shared_by"] == 2
+    detail = (await client.get(f"/notes/{paper['note']['id']}")).json()
+    assert detail["shared_by"] == 2
+    # A chat's note: that chat only.
+    chat = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
+    assert chat["shared_by"] == 1
+    assert (await client.get(f"/notes/{chat['note']['id']}")).json()["shared_by"] == 1

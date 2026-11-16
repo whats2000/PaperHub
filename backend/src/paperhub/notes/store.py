@@ -60,6 +60,31 @@ def _note(row: Any) -> Note:
 _NOTE_COLS = "id, target_kind, target_id, title, revision, updated_at, deleted_at"
 
 
+_SHARED_BY_SQL = {
+    # A paper's note is shared by every chat that attaches the paper.
+    "paper": "SELECT COUNT(DISTINCT p.session_id) FROM papers p "
+             "JOIN chat_sessions s ON s.id = p.session_id "
+             "WHERE p.paper_content_id = ? AND s.deleted_at IS NULL "
+             "AND s.internal = 0",
+    "session": "SELECT COUNT(*) FROM chat_sessions WHERE id = ? "
+               "AND deleted_at IS NULL AND internal = 0",
+    "idea": "SELECT COUNT(DISTINCT i.session_id) FROM idea_sessions i "
+            "JOIN chat_sessions s ON s.id = i.session_id "
+            "WHERE i.idea_id = ? AND s.deleted_at IS NULL AND s.internal = 0",
+}
+
+
+async def shared_by(conn: aiosqlite.Connection, note: Note) -> int:
+    """How many live chats the note is linked to (a paper note: the chats
+    attaching its paper; a chat note: its chat; an idea note: its chats)."""
+    sql = _SHARED_BY_SQL.get(note.target_kind)
+    if sql is None or not note.target_id.isdigit():
+        return 0
+    async with conn.execute(sql, (int(note.target_id),)) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
 async def get_note(conn: aiosqlite.Connection, note_id: int) -> Note | None:
     async with conn.execute(
         f"SELECT {_NOTE_COLS} FROM notes WHERE id = ?", (note_id,)
