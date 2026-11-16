@@ -14,6 +14,8 @@ export type InlineStyle = "bold" | "italic" | "underline" | "strike" | "code" | 
 
 export interface InlineRule {
   style: InlineStyle;
+  /** Length of the opening (and closing) mark. */
+  delimiter: number;
   /** Matched against the text before the caret plus the character just typed. */
   find: RegExp;
 }
@@ -22,13 +24,13 @@ export interface InlineRule {
 const body = (not: string) => `([^${not}\\s](?:[^${not}]*[^${not}\\s])?)`;
 
 export const INLINE_RULES: InlineRule[] = [
-  { style: "bold", find: new RegExp(`(?<![*\\\\])\\*\\*${body("*")}\\*\\*$`) },
-  { style: "underline", find: new RegExp(`(?<![_\\w])__${body("_")}__$`) },
-  { style: "strike", find: new RegExp(`(?<!~)~~${body("~")}~~$`) },
-  { style: "hidden", find: new RegExp(`(?<!\\|)\\|\\|${body("|")}\\|\\|$`) },
-  { style: "italic", find: new RegExp(`(?<![*\\w])\\*${body("*")}\\*$`) },
-  { style: "italic", find: new RegExp(`(?<![_\\w])_${body("_")}_$`) },
-  { style: "code", find: /(?<!`)`([^`\s][^`]*)`$/ },
+  { style: "bold", delimiter: 2, find: new RegExp(`(?<![*\\\\])\\*\\*${body("*")}\\*\\*$`) },
+  { style: "underline", delimiter: 2, find: new RegExp(`(?<![_\\w])__${body("_")}__$`) },
+  { style: "strike", delimiter: 2, find: new RegExp(`(?<!~)~~${body("~")}~~$`) },
+  { style: "hidden", delimiter: 2, find: new RegExp(`(?<!\\|)\\|\\|${body("|")}\\|\\|$`) },
+  { style: "italic", delimiter: 1, find: new RegExp(`(?<![*\\w])\\*${body("*")}\\*$`) },
+  { style: "italic", delimiter: 1, find: new RegExp(`(?<![_\\w])_${body("_")}_$`) },
+  { style: "code", delimiter: 1, find: /(?<!`)`([^`\s][^`]*)`$/ },
 ];
 
 export interface InlineMatch {
@@ -62,9 +64,20 @@ export const inlineMarks = createExtension({
               find: rule.find,
               handler: ({ state, range, match }) => {
                 const mark = state.schema.marks[rule.style];
-                if (!mark) return null;
-                const text = state.schema.text(match[1]!, [mark.create()]);
-                state.tr.replaceWith(range.from, range.to, text).removeStoredMark(mark);
+                // tiptap writes '%leaf%' for an atom (a mention chip) in the text it
+                // matches, which no longer lines up with document positions: leave it.
+                if (!mark || match[0].includes("%leaf%")) return null;
+                // Like tiptap's markInputRule: drop the marks and mark the words in
+                // place, so chips and marks already on them are kept.
+                const { tr } = state;
+                const start = range.from + rule.delimiter;
+                const end = start + match[1]!.length;
+                // Whatever closing characters are already in the document (the
+                // typed one may or may not be, depending on the input path).
+                if (end < range.to) tr.delete(end, range.to);
+                tr.delete(range.from, start);
+                tr.addMark(range.from, range.from + match[1]!.length, mark.create());
+                tr.removeStoredMark(mark);
               },
             }),
         );
@@ -97,17 +110,26 @@ export const codeFence = createExtension({
   inputRules: [
     {
       find: /^```(\S*)\s$/,
-      replace: ({ match }) => ({
-        type: "codeBlock",
-        props: { language: resolveCodeLanguage(match[1] ?? "") },
-        content: [],
-      }),
+      // tiptap runs input rules on Enter too (as a "\n"), so this also covers
+      // ```lang + Enter; mid-line, Enter splits the line as usual.
+      replace: ({ match, editor }) => {
+        const sel = editor.prosemirrorState.selection;
+        if (!sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) return undefined;
+        return {
+          type: "codeBlock",
+          props: { language: resolveCodeLanguage(match[1] ?? "") },
+          content: [],
+        };
+      },
     },
   ],
   keyboardShortcuts: {
     Enter: ({ editor }) => {
       const { block } = editor.getTextCursorPosition();
       if (block.type !== "paragraph") return false;
+      const sel = editor.prosemirrorState.selection;
+      // Only a caret at the end of the line: Enter elsewhere splits as usual.
+      if (!sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) return false;
       const line = (block.content as { type: string; text?: string }[])
         .map((c) => (c.type === "text" ? (c.text ?? "") : "\u0000"))
         .join("");
@@ -124,7 +146,8 @@ export const codeFence = createExtension({
     "Mod-Enter": ({ editor }) => {
       const { block, nextBlock } = editor.getTextCursorPosition();
       if (block.type !== "codeBlock") return false;
-      if (nextBlock) {
+      const hasText = nextBlock && (editor.schema.blockSchema as Record<string, { content: string } | undefined>)[nextBlock.type as string]?.content === "inline";
+      if (nextBlock && hasText) {
         editor.setTextCursorPosition(nextBlock, "start");
       } else {
         const [fresh] = editor.insertBlocks([{ type: "paragraph" }], block, "after");

@@ -1,54 +1,9 @@
-import { BlockNoteEditor } from "@blocknote/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { codeFence, INLINE_RULES, inlineMarks, matchInlineRule } from "@/components/notes/inlineMarks";
-import { noteSchema } from "@/components/notes/schema";
+import { INLINE_RULES, matchInlineRule } from "@/components/notes/inlineMarks";
+import { cleanupEditors, makeEditor, press, runs, type, type AnyEditor } from "@/components/notes/testEditor";
 
-const mounted: HTMLElement[] = [];
-
-/** An editor with the notes schema and the inline marks, caret in an empty line. */
-function makeEditor() {
-  const editor = BlockNoteEditor.create({ schema: noteSchema, extensions: [inlineMarks, codeFence] });
-  const el = document.createElement("div");
-  document.body.appendChild(el);
-  mounted.push(el);
-  editor.mount(el);
-  editor.setTextCursorPosition(editor.document[0]!, "start");
-  return editor;
-}
-
-type AnyEditor = BlockNoteEditor<
-  typeof noteSchema.blockSchema,
-  typeof noteSchema.inlineContentSchema,
-  typeof noteSchema.styleSchema
->;
-
-/** Type like a person does: one character at a time through ProseMirror's text input. */
-function type(editor: AnyEditor, text: string) {
-  const view = editor._tiptapEditor.view;
-  for (const ch of text) {
-    const { from, to } = view.state.selection;
-    const handled = view.someProp("handleTextInput", (f) =>
-      f(view, from, to, ch, () => view.state.tr.insertText(ch, from, to)),
-    );
-    if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
-  }
-}
-
-function press(editor: AnyEditor, init: KeyboardEventInit) {
-  const view = editor._tiptapEditor.view;
-  view.someProp("handleKeyDown", (f) => f(view, new KeyboardEvent("keydown", init)));
-}
-
-type Run = { text: string; styles: Record<string, unknown> };
-function runs(editor: AnyEditor): Run[] {
-  const first = editor.document[0] as unknown as { content: Run[] };
-  return first.content.map((c) => ({ text: c.text, styles: c.styles }));
-}
-
-afterEach(() => {
-  mounted.splice(0).forEach((el) => el.remove());
-});
+afterEach(cleanupEditors);
 
 describe("INLINE_RULES (pure matching)", () => {
   it.each([

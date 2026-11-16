@@ -173,6 +173,23 @@ describe("NoteEditor", () => {
     expect(screen.getByRole("button", { name: "Hide original" })).toBeInTheDocument();
   });
 
+  it("shows ||hidden|| text as a bar until clicked, and covers it again on a second click", async () => {
+    seed([
+      blk("h1", {
+        content: [{ type: "text", text: "secret", styles: { hidden: true } }],
+        text: "secret",
+      }),
+    ]);
+    mount();
+    const el = (await screen.findByText("secret")).closest<HTMLElement>(".note-hidden")!;
+    expect(el).toHaveClass("note-hidden");
+    expect(el).not.toHaveAttribute("data-shown");
+    fireEvent.click(el);
+    expect(el).toHaveAttribute("data-shown");
+    fireEvent.click(el);
+    expect(el).not.toHaveAttribute("data-shown");
+  });
+
   it("shows the anchor-lost and pieces-lost states", async () => {
     seed([
       blk("q3", {
