@@ -17,15 +17,16 @@ import {
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
-import { AtSign, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
+import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { cn } from "@/lib/utils";
 import { listLibrary } from "@/lib/api";
+import { prefersReducedMotion } from "@/lib/motion";
 import { propText } from "@/lib/notes/ops";
+import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
@@ -53,17 +54,33 @@ function dictionaryFor(lang: string) {
 }
 
 export function NoteEditor(props: NoteEditorProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const loaded = useNotesStore((s) => s.notes[props.noteId] !== undefined);
-  if (!loaded) {
-    return (
-      <div className="px-4 py-3 text-sm text-muted-foreground" role="status">
-        {t("notes:loading", "Loading the note…")}
-      </div>
-    );
-  }
-  // A new note is a new editor (its history and schema state start fresh).
-  return <LoadedNoteEditor key={props.noteId} {...props} />;
+  // The loading line fades out over the editor fading in (never vanishes).
+  const [loaderGone, setLoaderGone] = useState(loaded);
+  const showLoader = !loaderGone && !(loaded && prefersReducedMotion());
+  return (
+    <div className={cn("relative min-w-0", props.variant === "pane" && "h-full")}>
+      {showLoader && (
+        <div
+          role="status"
+          data-closed={loaded ? "" : undefined}
+          className={cn(
+            "px-4 py-3 text-sm text-muted-foreground transition-opacity duration-200 ease-out animate-in fade-in-0 data-closed:opacity-0 motion-reduce:animate-none motion-reduce:transition-none",
+            loaded && "pointer-events-none absolute inset-x-0 top-0",
+          )}
+          onTransitionEnd={() => {
+            if (loaded) setLoaderGone(true);
+          }}
+        >
+          {t("notes:loading", "Loading the note…")}
+        </div>
+      )}
+      {/* A new note, or a new UI language (BlockNote's own strings), is a new
+          editor: its history and dictionary start fresh. */}
+      {loaded && <LoadedNoteEditor key={`${props.noteId}:${i18n.language}`} {...props} />}
+    </div>
+  );
 }
 
 function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
@@ -73,6 +90,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
   const applyLocal = useNotesStore((s) => s.applyLocal);
   const setQuoteTarget = useNotesStore((s) => s.setQuoteTarget);
   const reload = useNotesStore((s) => s.reloads[noteId]);
+  const retrying = useNotesStore((s) => s.retrying[noteId] ?? false);
 
   const editor = useCreateBlockNote(
     {
@@ -265,11 +283,25 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
   return (
     <NoteEditorContext.Provider value={ctx}>
       <div
+        data-testid="note-editor"
+        data-lang={i18n.language}
         className={cn(
-          "paperhub-notes min-w-0",
+          "paperhub-notes min-w-0 animate-in fade-in-0 duration-200 motion-reduce:animate-none",
           variant === "pane" ? "h-full overflow-y-auto py-2" : "max-h-80 overflow-y-auto py-1 text-[13px]",
         )}
       >
+        <div
+          aria-live="polite"
+          data-state={retrying ? "open" : "closed"}
+          className="grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=closed]:opacity-0 motion-reduce:transition-none"
+        >
+          <div className="min-h-0 overflow-hidden">
+            <p className="mx-3 mb-1 flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              <CloudOff className="size-3.5 shrink-0" aria-hidden />
+              {retrying ? t("notes:retrying", "Not saved — retrying") : null}
+            </p>
+          </div>
+        </div>
         <BlockNoteView
           editor={editor}
           theme={resolvedTheme === "dark" ? "dark" : "light"}

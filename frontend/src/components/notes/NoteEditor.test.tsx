@@ -9,6 +9,7 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
 import { noteSchema } from "@/components/notes/schema";
 import { diffDocuments, opBlock, toEditorBlocks, treeIds, type EditorBlock } from "@/components/notes/sync";
 import { API_BASE_URL } from "@/lib/api";
+import i18n from "@/lib/i18n";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
@@ -96,7 +97,7 @@ afterEach(() => {
 beforeEach(() => {
   posted.length = 0;
   toastFn.mockReset();
-  useNotesStore.setState({ colorNames: {} });
+  useNotesStore.setState({ colorNames: {}, retrying: {} });
   server.use(
     http.get(`${API_BASE_URL}/marks/colors`, () =>
       HttpResponse.json([
@@ -216,16 +217,20 @@ describe("NoteEditor", () => {
     );
   });
 
-  it("Enter on a selected section heading adds a line below it", async () => {
-    seed([section, mine]);
+  it.each([
+    ["section heading", section],
+    ["paper quote", quote],
+    ["divider", blk("d1", { type: "divider" })],
+  ])("Enter on a selected %s adds a line below it", async (_name, first) => {
+    seed([first, mine]);
     mount();
-    await screen.findByRole("heading", { name: "2 Method" });
+    await waitFor(() => expect(document.querySelectorAll(".bn-block-outer")).toHaveLength(2));
     const pm = document.querySelector(".ProseMirror") as HTMLElement & {
       editor: { commands: { setNodeSelection: (pos: number) => boolean } };
     };
     const ids = () =>
       [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
-    expect(ids()).toEqual(["s1", "p1"]);
+    expect(ids()).toEqual([first.id, "p1"]);
     act(() => {
       pm.editor.commands.setNodeSelection(2);
     });
@@ -234,13 +239,78 @@ describe("NoteEditor", () => {
     });
     const after = ids();
     expect(after).toHaveLength(3);
-    expect(after[0]).toBe("s1");
+    expect(after[0]).toBe(first.id);
     expect(after[2]).toBe("p1");
     // The empty line is not sent until it holds something.
     await act(async () => {
       await useNotesStore.getState().flush(7);
     });
     expect(posted).toHaveLength(0);
+  });
+
+  it("labels the source chip and shows its full text when cut", async () => {
+    seed([section, quote]);
+    mount();
+    const chip = await screen.findByRole("button", { name: "Open in the paper: Attention · §2 · p. 3" });
+    const label = chip.querySelector("[data-truncate]") as HTMLElement;
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 300 });
+    Object.defineProperty(label, "clientWidth", { configurable: true, value: 120 });
+    fireEvent.pointerEnter(chip);
+    expect(chip).toHaveAttribute("title", "Attention · §2 · p. 3");
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 120 });
+    fireEvent.pointerEnter(chip);
+    expect(chip).toHaveAttribute("title", "Open in the paper");
+  });
+
+  it("names the page in the UI language", async () => {
+    await i18n.changeLanguage("zh-TW");
+    seed([section, quote]);
+    mount();
+    const ref = await screen.findByTestId("paper-ref-q1");
+    expect(ref).toHaveTextContent("§2 · 第 3 頁");
+  });
+
+  it("switches the editor's own strings with the UI language", async () => {
+    seed([mine]);
+    mount();
+    await screen.findByText("Mine");
+    const before = document.querySelector(".ProseMirror");
+    await act(async () => {
+      await i18n.changeLanguage("ja");
+    });
+    // A new editor instance with the Japanese BlockNote dictionary.
+    await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBe(before));
+    expect(screen.getByTestId("note-editor")).toHaveAttribute("data-lang", "ja");
+    expect(screen.getByText("Mine")).toBeInTheDocument();
+  });
+
+  it("says when the note is not saved and being retried", async () => {
+    seed([mine]);
+    mount();
+    await screen.findByText("Mine");
+    expect(screen.queryByText("Not saved — retrying")).not.toBeInTheDocument();
+    act(() => {
+      useNotesStore.setState({ retrying: { 7: true } });
+    });
+    expect(screen.getByText("Not saved — retrying").closest("[data-state]")).toHaveAttribute("data-state", "open");
+    act(() => {
+      useNotesStore.setState({ retrying: { 7: false } });
+    });
+    expect(screen.queryByText("Not saved — retrying")).not.toBeInTheDocument();
+  });
+
+  it("fades the editor in over the loading line", async () => {
+    useNotesStore.setState({ notes: {}, byTarget: {}, reloads: {} });
+    render(<NoteEditor noteId={7} variant="pane" />);
+    const loading = screen.getByRole("status");
+    expect(loading).toHaveTextContent("Loading the note…");
+    act(() => seed([mine]));
+    const editor = await screen.findByTestId("note-editor");
+    expect(editor.className).toContain("fade-in");
+    // The loading line leaves with a fade instead of vanishing.
+    expect(loading).toHaveAttribute("data-closed");
+    fireEvent.transitionEnd(loading, { propertyName: "opacity" });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it.each([

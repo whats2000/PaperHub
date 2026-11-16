@@ -1,5 +1,6 @@
 /** Mark-block props, labels and the editor context the PaperHub blocks read. */
 import { createContext, useContext } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { useNotesStore } from "@/store/notes";
@@ -80,10 +81,10 @@ export function sectionLabel(key: string): string {
 }
 
 /** "§2 · p. 3" (pages are 0-based in the data). */
-export function whereLabel(src: MarkSource): string {
+export function whereLabel(src: MarkSource, t: TFunction): string {
   const parts: string[] = [];
   if (src.section) parts.push(sectionLabel(src.section));
-  if (typeof src.page === "number") parts.push(`p. ${src.page + 1}`);
+  if (typeof src.page === "number") parts.push(t("notes:ref.page", "p. {{page}}", { page: src.page + 1 }));
   return parts.join(" · ");
 }
 

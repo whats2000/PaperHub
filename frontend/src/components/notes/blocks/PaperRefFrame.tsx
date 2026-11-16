@@ -6,6 +6,7 @@ import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Languages, Unlink } from "lucide-react";
 
+import { truncatedTitle } from "@/lib/truncatedTitle";
 import { useCanvasStore } from "@/store/canvas";
 
 import {
@@ -35,7 +36,7 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
   const colorName = useColorName(props.color);
   const src = markSource(props);
   const pieces = markPieces(props);
-  const where = whereLabel(src);
+  const where = whereLabel(src, t);
   const tag = [label, colorName, where].filter(Boolean).join(" · ");
   const bar = props.color ? `var(--hl-${props.color})` : "var(--muted-foreground)";
 
@@ -95,7 +96,9 @@ function RefFooter({ blockId, props, where }: { blockId: string; props: MarkProp
   const { paperContentId, paperTitle } = useNoteEditorContext();
   const [open, setOpen] = useState(false);
   const origId = useId();
-  const chip = [paperTitle, where].filter(Boolean).join(" · ");
+  // It opens the paper; scrolling to the mark itself comes with the reader.
+  const label = [paperTitle, where].filter(Boolean).join(" · ") || t("notes:ref.thePaper", "The paper");
+  const openLabel = t("notes:ref.openInPaper", "Open in the paper");
 
   return (
     <>
@@ -103,12 +106,16 @@ function RefFooter({ blockId, props, where }: { blockId: string; props: MarkProp
         {paperContentId !== null && (
           <button
             type="button"
-            className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-border bg-background px-2 font-sans text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            title={t("notes:ref.showInPaper", "Show this passage in the paper")}
+            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-background px-2 font-sans text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            aria-label={t("notes:ref.openInPaperNamed", "Open in the paper: {{where}}", { where: label })}
+            title={openLabel}
+            {...truncatedTitle(label, openLabel)}
             onClick={() => useCanvasStore.getState().openPaper(paperContentId)}
           >
             <FileText className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">{chip || t("notes:ref.thePaper", "The paper")}</span>
+            <span data-truncate className="min-w-0 truncate">
+              {label}
+            </span>
           </button>
         )}
         {props.lang && props.orig && (
