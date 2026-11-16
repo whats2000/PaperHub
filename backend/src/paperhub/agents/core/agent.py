@@ -33,6 +33,7 @@ from paperhub.agents.core.citations import (
     figure_key,
     validate_citations,
     validate_figure_citations,
+    validate_note_citations,
     validate_view_citations,
     verify_quotes,
     view_key,
@@ -280,6 +281,7 @@ async def _run_step(
     allowed_ids: set[int], retry_empty: bool, pending: dict[str, str],
     allowed_figures: set[str] | None = None,
     allowed_views: set[str] | None = None,
+    allowed_note_blocks: set[str] | None = None,
     allow_tool_answer: bool = False,
 ) -> _StepResult:
     """One ``agent:step``: the model turn (its text deltas go to ``queue`` as
@@ -323,7 +325,8 @@ async def _run_step(
                     answer, removed = validate_citations(direct, allowed_ids)
                     answer = await _verify_quotes(deps.conn, answer, allowed_ids, record)
                     answer = _check_evidence(answer, allowed_figures or set(),
-                                            allowed_views or set(), record)
+                                            allowed_views or set(), record,
+                                            allowed_note_blocks or set())
                     record["answer"] = answer
                     record["citations_removed"] = removed
                     record["answer_from_tool"] = res.calls[0].name
@@ -338,7 +341,8 @@ async def _run_step(
                 answer, removed = validate_citations(raw, allowed_ids)
                 answer = await _verify_quotes(deps.conn, answer, allowed_ids, record)
                 answer = _check_evidence(answer, allowed_figures or set(),
-                                        allowed_views or set(), record)
+                                        allowed_views or set(), record,
+                                        allowed_note_blocks or set())
                 record["answer"] = answer
                 record["citations_removed"] = removed
             st.record_result(record)
@@ -371,9 +375,11 @@ async def _verify_quotes(
 
 def _check_evidence(
     answer: str, figures: set[str], views: set[str], record: dict[str, Any],
+    note_blocks: set[str] | None = None,
 ) -> str:
     """Drop ``[fig:]`` / ``[view:]`` citations of figures and page regions
-    the agent never looked at; a region inside one it viewed snaps to it."""
+    the agent never looked at; a region inside one it viewed snaps to it.
+    ``[note:]`` citations of note blocks not read this turn are marked."""
     answer, removed = validate_figure_citations(answer, figures)
     if removed:
         record["figure_citations_removed"] = removed
@@ -382,6 +388,9 @@ def _check_evidence(
         record["view_citations_removed"] = removed_views
     if snapped:
         record["view_citations_snapped"] = [list(pair) for pair in snapped]
+    answer, removed_notes = validate_note_citations(answer, note_blocks or set())
+    if removed_notes:
+        record["note_citations_removed"] = removed_notes
     return answer
 
 
@@ -614,6 +623,7 @@ async def run_core_agent(
     read_ids: list[int] = []
     viewed_figures: list[str] = []  # "<paper>/<figure id>" seen this turn
     viewed_views: list[str] = []    # "<paper>/<page>/<box>" seen this turn
+    read_note_blocks: list[str] = []  # note block ids read this turn
     tools_used: list[str] = []
     touched_papers: list[int] = []
     pending: dict[str, str] = {}
@@ -729,6 +739,8 @@ async def run_core_agent(
                     "idea_context": state_parts.idea_context,
                     "slide_context": state_parts.slide_context,
                     "memories": state_parts.memories,
+                    "notes": state_parts.notes,
+                    "notes_changes": state_parts.notes_changes,
                     "ui_language": state_parts.ui_language,
                     **prompt_fingerprint(schemas, slot.system),
                 }
@@ -745,6 +757,7 @@ async def run_core_agent(
                 allowed_ids=set(read_ids) | conv.kept_ids,
                 allowed_figures=set(viewed_figures) | conv.kept_figures,
                 allowed_views=set(viewed_views) | conv.kept_views,
+                allowed_note_blocks=set(read_note_blocks),
                 retry_empty=empty_retries == 0, pending=pending,
                 # Only the turn's first tool step: later, the model has read
                 # or done something the tool's answer would not include (the
@@ -774,6 +787,12 @@ async def run_core_agent(
                         if i not in read_ids:
                             read_ids.append(i)
                     tool_tokens += count_tokens(o.content)
+                for o in res.outcomes:
+                    ids = o.record.get("block_ids")
+                    if (o.record.get("tool") in ("notes:read", "notes:search")
+                            and _result_status(o) == "ok" and isinstance(ids, list)):
+                        read_note_blocks.extend(
+                            b for b in ids if isinstance(b, str) and b not in read_note_blocks)
                 for c, o in zip(res.calls, res.outcomes, strict=True):
                     paper, fig = o.record.get("paper"), o.record.get("figure")
                     if (c.name == "view_figure" and _result_status(o) == "ok"

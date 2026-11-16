@@ -13,6 +13,7 @@ export const UNSOURCED_REASONS = [
   "figure_not_viewed",
   "region_not_viewed",
   "quote_not_found",
+  "note_not_read",
 ] as const;
 
 /** Rehype plugin: `[unsourced:<reason>]` → `<unsourced-mark data-reason>`. */

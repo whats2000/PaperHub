@@ -11,7 +11,8 @@ _MARKER = re.compile(
 
 # A citation that fails validation becomes a visible mark instead of
 # vanishing: the reader sees that this claim's source could not be checked.
-# Reasons: not_read, figure_not_viewed, region_not_viewed, quote_not_found.
+# Reasons: not_read, figure_not_viewed, region_not_viewed, quote_not_found,
+# note_not_read.
 UNSOURCED_RE = re.compile(r"\[unsourced:\s*([a-z_]+)\s*\]")
 
 
@@ -302,3 +303,47 @@ def verify_quotes(
     for (start, stop), new in sorted(edits.items(), reverse=True):
         text = text[:start] + new + text[stop:]
     return text, fixes
+
+
+# [note:b_AbC123], [note:b_AbC123, b_Xy9] or [note:b_A, note:b_B]: a block of the
+# user's notes the agent read this turn (read_note / search_notes).
+_NOTE_ID = r"b_[A-Za-z0-9]+"
+_NOTE_MARKER = re.compile(
+    rf"[ \t]?\[note:\s*({_NOTE_ID}(?:\s*,\s*(?:note:\s*)?{_NOTE_ID})*)\s*\]")
+
+
+def _note_ids(group: str) -> list[str]:
+    return re.findall(_NOTE_ID, group)
+
+
+def cited_notes(text: str) -> list[str]:
+    """Every note block id cited in ``text``, first-seen order, unique."""
+    out: list[str] = []
+    for m in _NOTE_MARKER.finditer(text):
+        for i in _note_ids(m.group(1)):
+            if i not in out:
+                out.append(i)
+    return out
+
+
+def validate_note_citations(
+    text: str, allowed_block_ids: set[str],
+) -> tuple[str, list[str]]:
+    """Drop ``[note:B]`` ids the agent did not read this turn; a marker left
+    with none becomes ``[unsourced:note_not_read]``. Returns the text and the
+    removed ids."""
+    removed: list[str] = []
+
+    def fix(m: re.Match[str]) -> str:
+        ids = _note_ids(m.group(1))
+        keep = [i for i in ids if i in allowed_block_ids]
+        for i in ids:
+            if i not in allowed_block_ids and i not in removed:
+                removed.append(i)
+        if not keep:
+            return unsourced("note_not_read", _lead(m))
+        if len(keep) == len(ids) and "note:" not in m.group(1):
+            return m.group(0)
+        return f"{_lead(m)}[note:{', '.join(keep)}]"
+
+    return _NOTE_MARKER.sub(fix, text), removed

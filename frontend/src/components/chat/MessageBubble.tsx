@@ -20,12 +20,14 @@ import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { DeckChip } from "@/components/slides/DeckChip";
 import { rehypeChunkCitations } from "@/lib/rehypeChunkCitations";
 import { rehypeFigureCitations } from "@/lib/rehypeFigureCitations";
+import { rehypeNoteCitations } from "@/lib/rehypeNoteCitations";
 import { rehypeUnsourcedMarks } from "@/lib/unsourcedMarks";
 import { rehypeTableBreaks } from "@/lib/rehypeTableBreaks";
 import { normalizeMath, KATEX_MACROS } from "@/lib/normalizeMath";
 import { liftSqlFence } from "@/lib/liftSqlFence";
 import { CitationMarker } from "@/components/canvas/CitationMarker";
 import { FigureCitationMarker } from "@/components/canvas/FigureCitationMarker";
+import { NoteCitationMarker } from "@/components/canvas/NoteCitationMarker";
 import { ViewCitationMarker } from "@/components/canvas/ViewCitationMarker";
 import { UnsourcedMarker } from "@/components/canvas/UnsourcedMarker";
 import { AgentEventChip, type ChipEvent } from "@/components/chat/AgentEventChip";
@@ -333,6 +335,7 @@ export function MessageBubble({
                 [rehypeKatex, { macros: KATEX_MACROS }],
                 rehypeChunkCitations,
                 rehypeFigureCitations,
+                rehypeNoteCitations,
                 rehypeUnsourcedMarks,
                 rehypeTableBreaks,
               ]}
@@ -369,6 +372,18 @@ export function MessageBubble({
                 "unsourced-mark": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as { dataReason?: string };
                   return <UnsourcedMarker reason={String(props.dataReason ?? "")} />;
+                },
+                "note-cite": ({ node }: ExtraProps) => {
+                  const props = (node?.properties ?? {}) as {
+                    dataBlock?: string;
+                    dataOrdinal?: number | string;
+                  };
+                  return (
+                    <NoteCitationMarker
+                      blockId={String(props.dataBlock ?? "")}
+                      ordinal={Number(props.dataOrdinal)}
+                    />
+                  );
                 },
                 "view-cite": ({ node }: ExtraProps) => {
                   const props = (node?.properties ?? {}) as {

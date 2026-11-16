@@ -30,7 +30,8 @@
   "marker": {
     "citationAria": "引用 {{ordinal}}",
     "figureAria": "図の引用 {{ordinal}}",
-    "viewAria": "{{page}} ページの領域、引用 {{ordinal}}"
+    "viewAria": "{{page}} ページの領域、引用 {{ordinal}}",
+    "noteAria": "ノートの引用 {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "引用された論文を読み込めませんでした",
@@ -71,6 +72,7 @@
       "figure_not_viewed": "引用された図は回答時に見られていません",
       "region_not_viewed": "引用されたページ領域は回答時に見られていません",
       "quote_not_found": "引用された文言は回答時に読んだどの段落にもありません",
+      "note_not_read": "引用されたノートのブロックは回答時に読まれていません",
       "unknown": "出典を確認できませんでした"
     }
   }

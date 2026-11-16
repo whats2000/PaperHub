@@ -30,7 +30,8 @@
   "marker": {
     "citationAria": "citation {{ordinal}}",
     "figureAria": "figure citation {{ordinal}}",
-    "viewAria": "region on page {{page}}, citation {{ordinal}}"
+    "viewAria": "region on page {{page}}, citation {{ordinal}}",
+    "noteAria": "note citation {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "Couldn't load the cited paper",
@@ -71,6 +72,7 @@
       "figure_not_viewed": "the cited figure was not looked at for this answer",
       "region_not_viewed": "the cited page region was not looked at for this answer",
       "quote_not_found": "the quoted words are not in any passage read for this answer",
+      "note_not_read": "the cited note block was not read for this answer",
       "unknown": "the source could not be checked"
     }
   }

@@ -18,11 +18,17 @@ import aiosqlite
 import litellm
 
 from paperhub.agents.core.citations import cited_figures, cited_ids, cited_views
+from paperhub.agents.core.note_tools import _esc, _title_xml
+from paperhub.agents.core.private_material import collect_note_titles
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_recall import active_memories
+from paperhub.notes.scope import notes_in_scope, ref_of
 
 AGENT_KEEP_TURNS = 12
 SUMMARY_QUESTION_CHARS = 160
+NOTES_INDEX_MAX = 12
+NOTES_CHANGES_MAX_NOTES = 10
+NOTES_CHANGES_MAX_BLOCKS = 20
 _COUNT_MODEL = "gpt-4o"  # tokenizer used for budget accounting only
 
 
@@ -79,6 +85,63 @@ def render_memories(rows: list[tuple[int, str, str]]) -> str:
         for mid, scope, content in rows)
 
 
+async def render_notes(
+    conn: aiosqlite.Connection, session_id: int, paper_ids: list[int],
+) -> tuple[str | None, str | None]:
+    """``(<notes> index, <notes_changes>)`` for the chat. The index lists up to
+    NOTES_INDEX_MAX notes in scope (ref, title, revision, block count). The
+    changes list the notes the user edited since this chat's agent last read or
+    wrote them: block ids only, never the user's words. Titles are private
+    material for the outbound checkpoint."""
+    try:
+        notes = await notes_in_scope(conn, session_id, paper_ids=paper_ids)
+    except LookupError:  # no such chat: nothing to show
+        return None, None
+    notes = notes[:NOTES_INDEX_MAX]
+    if not notes:
+        return None, None
+    collect_note_titles([(n.id, n.title) for n in notes])
+    counts: dict[int, int] = {}
+    marks = ",".join("?" for _ in notes)
+    async with conn.execute(
+        f"SELECT note_id, COUNT(*) FROM note_blocks WHERE deleted_at IS NULL "  # noqa: S608
+        f"AND note_id IN ({marks}) GROUP BY note_id", [n.id for n in notes],
+    ) as cur:
+        counts = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    lines = [
+        f'<note ref="{_esc(ref_of(n, session_id))}" revision="{n.revision}" '
+        f'blocks="{counts.get(n.id, 0)}">{_title_xml(n.title)}</note>'
+        for n in notes]
+    index = "<notes>\n" + "\n".join(lines) + "\n</notes>"
+    async with conn.execute(
+        "SELECT note_id, revision FROM note_agent_reads WHERE session_id = ?",
+        (session_id,),
+    ) as cur:
+        seen = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    changes: list[tuple[str, str, list[str]]] = []
+    for n in notes:
+        if n.id not in seen:
+            continue
+        async with conn.execute(
+            "SELECT block_id, MAX(created_at) FROM note_block_history "
+            "WHERE note_id = ? AND actor = 'user' AND revision > ? "
+            "GROUP BY block_id ORDER BY MIN(id) LIMIT ?",
+            (n.id, seen[n.id], NOTES_CHANGES_MAX_BLOCKS),
+        ) as cur:
+            rows = await cur.fetchall()
+        if rows:
+            changes.append((max(str(r[1]) for r in rows), ref_of(n, session_id),
+                            [str(r[0]) for r in rows]))
+    if not changes:
+        return index, None
+    changes.sort(key=lambda c: c[0], reverse=True)
+    out = [
+        f'<note_change note="{_esc(ref)}" when="{_esc(when)}">'
+        + ",".join(_esc(b) for b in ids) + "</note_change>"
+        for when, ref, ids in changes[:NOTES_CHANGES_MAX_NOTES]]
+    return index, "\n".join(out)
+
+
 @dataclass(frozen=True)
 class SessionStateParts:
     """The inputs of the ``<session_state>`` block. ``papers`` is library
@@ -89,6 +152,8 @@ class SessionStateParts:
     slide_context: str | None = None
     memories: str | None = None
     ui_language: str | None = None
+    notes: str | None = None
+    notes_changes: str | None = None
 
 
 def render_session_state(parts: SessionStateParts) -> str:
@@ -99,6 +164,13 @@ def render_session_state(parts: SessionStateParts) -> str:
         out.append(f"<slide_context>\n{parts.slide_context}\n</slide_context>")
     if parts.memories:
         out.append(f"<memories>\n{parts.memories}\n</memories>")
+    if parts.notes:
+        out.append(parts.notes)
+    if parts.notes_changes:
+        out.append(
+            "<notes_changes>\nThe user changed these notes since you last read "
+            "them (block ids; read the note to see the text):\n"
+            f"{parts.notes_changes}\n</notes_changes>")
     if parts.ui_language:
         out.append(f"<ui_language>{escape(parts.ui_language)}</ui_language>")
     return "\n\n".join(out)
@@ -118,12 +190,16 @@ async def session_state_parts(
     slide = state.get("slide_context")
     memories = render_memories(await active_memories(conn, session_id=session_id))
     ui = state.get("ui_language")
+    notes, notes_changes = await render_notes(
+        conn, session_id, [p.id for p in papers])
     return SessionStateParts(
         papers=papers,
         idea_context=str(idea) if idea else None,
         slide_context=str(slide) if slide else None,
         memories=memories or None,
         ui_language=str(ui) if ui else None,
+        notes=notes,
+        notes_changes=notes_changes,
     )
 
 

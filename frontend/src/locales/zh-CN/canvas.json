@@ -30,7 +30,8 @@
   "marker": {
     "citationAria": "引用 {{ordinal}}",
     "figureAria": "图片引用 {{ordinal}}",
-    "viewAria": "第 {{page}} 页区域，引用 {{ordinal}}"
+    "viewAria": "第 {{page}} 页区域，引用 {{ordinal}}",
+    "noteAria": "笔记引用 {{ordinal}}"
   },
   "toast": {
     "loadCitedPaperFailed": "无法加载引用的论文",
@@ -71,6 +72,7 @@
       "figure_not_viewed": "回答时并未看过所引用的图",
       "region_not_viewed": "回答时并未看过所引用的页面区域",
       "quote_not_found": "引述的文字不在回答时读过的任何段落中",
+      "note_not_read": "引用的笔记块在回答时未被读取",
       "unknown": "无法核对来源"
     }
   }
