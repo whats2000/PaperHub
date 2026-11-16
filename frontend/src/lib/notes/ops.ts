@@ -59,8 +59,38 @@ export function subtree(blocks: NoteBlock[], id: string): Set<string> {
   return out;
 }
 
-/** The local copy after `ops` (what the server will hold once they land).
- * Sibling order is what matters; a placed block goes beside its anchor. */
+/** `blocks` in document order (depth-first, siblings in their list order),
+ * as the server lists them; a block whose parent is missing comes after the
+ * tree, like the server's orphans. */
+function depthFirst(blocks: NoteBlock[]): NoteBlock[] {
+  const ids = new Set(blocks.map((b) => b.id));
+  const kids = new Map<string, NoteBlock[]>();
+  const roots: NoteBlock[] = [];
+  const orphans: NoteBlock[] = [];
+  for (const b of blocks) {
+    if (b.parent_id === null) roots.push(b);
+    else if (!ids.has(b.parent_id)) orphans.push(b);
+    else {
+      const list = kids.get(b.parent_id);
+      if (list) list.push(b);
+      else kids.set(b.parent_id, [b]);
+    }
+  }
+  const out: NoteBlock[] = [];
+  const walk = (list: NoteBlock[]) => {
+    for (const b of list) {
+      out.push(b);
+      walk(kids.get(b.id) ?? []);
+    }
+  };
+  walk(roots);
+  walk(orphans);
+  return out;
+}
+
+/** The local copy after `ops` (what the server will hold once they land), in
+ * document order: a placed block goes beside its anchor among its siblings,
+ * and a moved block takes its children with it. */
 export function applyOpsLocally(noteId: number, blocks: NoteBlock[], ops: NoteOp[]): NoteBlock[] {
   let out = blocks;
   for (const op of ops) {
@@ -105,5 +135,5 @@ export function applyOpsLocally(noteId: number, blocks: NoteBlock[], ops: NoteOp
       out = out.filter((b) => !gone.has(b.id));
     }
   }
-  return out;
+  return depthFirst(out);
 }

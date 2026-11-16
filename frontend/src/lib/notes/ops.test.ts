@@ -45,3 +45,24 @@ describe("applyOpsLocally", () => {
     ]);
   });
 });
+
+describe("applyOpsLocally keeps document order (depth-first, like the server's list)", () => {
+  it("a block placed after a parent goes after the parent's children; a moved block takes its children", () => {
+    const blocks = [nb("a", null), nb("a1", "a"), nb("a2", "a"), nb("b", null), nb("b1", "b")];
+    const out = applyOpsLocally(1, blocks, [
+      { op: "move", block_id: "a2", parent_id: null, after: "a" },
+      { op: "insert", block_id: "n", block: { type: "divider", props: {} }, parent_id: null, after: "b" },
+      { op: "insert", block_id: "c", block: { type: "paragraph", props: {}, content: "C" }, parent_id: "a2" },
+      { op: "move", block_id: "b", parent_id: null, before: "a" },
+    ]);
+    expect(out.map((b) => [b.id, b.parent_id])).toEqual([
+      ["b", null],
+      ["b1", "b"],
+      ["a", null],
+      ["a1", "a"],
+      ["a2", null],
+      ["c", "a2"],
+      ["n", null],
+    ]);
+  });
+});
