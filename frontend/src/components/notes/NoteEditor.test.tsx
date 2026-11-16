@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { toast } from "sonner";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -316,6 +317,48 @@ describe("NoteEditor", () => {
     expect(document.querySelector("style[data-unsaved]")?.textContent).toContain('[data-id="n1"]');
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith("my draft");
+  });
+
+  it("says so when the text cannot be copied", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    seed([mine, blk("n1", { content: [{ type: "text", text: "my draft", styles: {} }], text: "my draft" })]);
+    useNotesStore.setState({
+      drafts: { 7: { n1: { op: "insert", block_id: "n1", block: { type: "paragraph", props: {} }, parent_id: null } } },
+    });
+    mount();
+    await screen.findAllByText("my draft");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      await Promise.resolve();
+    });
+    expect(toast.error).toHaveBeenCalledWith("Couldn't copy. Select the text and copy it yourself.");
+
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.mocked(toast.error).mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      await Promise.resolve();
+    });
+    expect(toast.error).toHaveBeenCalledWith("Couldn't copy. Select the text and copy it yourself.");
+  });
+
+  it("keeps the last draft's text while the notice closes", async () => {
+    seed([mine, blk("n1", { content: [{ type: "text", text: "my draft", styles: {} }], text: "my draft" })]);
+    useNotesStore.setState({
+      drafts: { 7: { n1: { op: "insert", block_id: "n1", block: { type: "paragraph", props: {} }, parent_id: null } } },
+    });
+    mount();
+    const notice = await screen.findByTestId("unsaved-drafts");
+    expect(notice).toHaveTextContent("my draft");
+    act(() => {
+      useNotesStore.setState({ drafts: { 7: {} } });
+    });
+    // Closing, with its content still there.
+    expect(notice).toHaveAttribute("data-state", "closed");
+    expect(notice).toHaveTextContent("my draft");
+    fireEvent.transitionEnd(notice, { propertyName: "grid-template-rows" });
+    expect(notice).not.toHaveTextContent("my draft");
   });
 
   it("shows the loading line again when it switches to a note not loaded yet", async () => {

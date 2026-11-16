@@ -59,6 +59,7 @@
     "notSaved": "Not saved",
     "hint": "Kept on this screen only. Edit it to try again.",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy. Select the text and copy it yourself."
   }
 }

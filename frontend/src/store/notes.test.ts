@@ -372,6 +372,55 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["a"]);
   });
 
+  it("makes an edited draft a draft again when its one more try is refused", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        posted.push((await request.json()) as NoteOpsBody);
+        return HttpResponse.json(result(4, [], [{ block_id: "n", reason: "invalid", current: null }]));
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, blocks: [block("a", "A"), block("n", "draft"), block("b", "B")] } },
+      drafts: { 7: { n: { op: "insert", block_id: "n", block: { type: "paragraph", props: {} }, parent_id: null, after: "a" } } },
+    }));
+    useNotesStore.getState().applyLocal(7, [upd("n", "draft, edited")]);
+    await useNotesStore.getState().flush(7);
+    expect(posted).toHaveLength(1);
+    expect(Object.keys(useNotesStore.getState().drafts[7] ?? {})).toEqual(["n"]);
+    expect(pendingNoteOps(7)).toEqual([]);
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["A", "draft, edited", "B"]);
+  });
+
+  it("starts a saved draft's refusal count afresh", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        // The edited draft saves; a later insert of the same block (undo of
+        // a delete) is refused once.
+        if (posted.length === 2) {
+          return HttpResponse.json(result(6, [], [{ block_id: "n", reason: "missing", current: null }]));
+        }
+        return HttpResponse.json(result(body.base_revision + 1, body.ops.map((o) => o.block_id ?? "")));
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, blocks: [block("a", "A"), block("n", "draft"), block("b", "B")] } },
+      drafts: { 7: { n: { op: "insert", block_id: "n", block: { type: "paragraph", props: {} }, parent_id: null, after: "a" } } },
+    }));
+    useNotesStore.getState().applyLocal(7, [upd("n", "saved now")]);
+    await useNotesStore.getState().flush(7);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "again" }, parent_id: null, after: "a" },
+    ]);
+    await useNotesStore.getState().flush(7);
+    // Its first refusal since it was saved: placed and resent, not drafted.
+    expect(useNotesStore.getState().drafts[7]).toEqual({});
+    expect(pendingNoteOps(7)).toEqual([expect.objectContaining({ op: "insert", block_id: "n", after: "a" })]);
+  });
+
   it("saves a new block at the end of the note when its insert is refused twice", async () => {
     server.use(
       http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {

@@ -4,7 +4,9 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, CloudOff, Copy } from "lucide-react";
+import { toast } from "sonner";
 
+import { prefersReducedMotion } from "@/lib/motion";
 import { blockText } from "@/lib/notes/ops";
 import { truncatedTitle } from "@/lib/truncatedTitle";
 import { useNotesStore } from "@/store/notes";
@@ -31,6 +33,23 @@ export function UnsavedDrafts({ noteId }: { noteId: number }) {
         .map((b) => ({ id: b.id, text: blockText(b.type, b.props, b.content) })),
     [blocks, drafts],
   );
+  // The last drafts stay on screen while the notice closes, so it closes
+  // with its content instead of emptying first.
+  const [held, setHeld] = useState(items);
+  if (items.length && items !== held) setHeld(items);
+  const shown = items.length || prefersReducedMotion() ? items : held;
+
+  const copy = async (id: string, text: string) => {
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("no clipboard");
+      }
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+    } catch {
+      toast.error(t("notes:draft.copyFailed", "Couldn't copy. Select the text and copy it yourself."));
+    }
+  };
 
   const style = items
     .map(
@@ -47,11 +66,14 @@ export function UnsavedDrafts({ noteId }: { noteId: number }) {
       <div
         data-testid="unsaved-drafts"
         data-state={items.length ? "open" : "closed"}
+        onTransitionEnd={(e) => {
+          if (e.target === e.currentTarget && !items.length) setHeld([]);
+        }}
         className="grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=closed]:opacity-0 motion-reduce:transition-none"
       >
         <div className="min-h-0 overflow-hidden">
           <ul className="mx-3 mb-1 flex flex-col gap-0.5 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-            {items.map((d) => (
+            {shown.map((d) => (
               <li key={d.id} className="flex min-w-0 items-center gap-1.5">
                 <CloudOff className="size-3.5 shrink-0" aria-hidden />
                 <span className="shrink-0 font-medium">{label}</span>
@@ -66,9 +88,7 @@ export function UnsavedDrafts({ noteId }: { noteId: number }) {
                   aria-label={t("notes:draft.copy", "Copy")}
                   title={t("notes:draft.hint", "Kept on this screen only. Edit it to try again.")}
                   className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-amber-500/20"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(d.text).then(() => setCopied(d.id));
-                  }}
+                  onClick={() => void copy(d.id, d.text)}
                 >
                   {copied === d.id ? (
                     <Check className="size-3" aria-hidden />
