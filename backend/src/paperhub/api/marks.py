@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.notes import marks as marks_store
-from paperhub.notes.marks import MarkIn, SavedTo
+from paperhub.notes.marks import MarkConflict, MarkIn, MarkInputError, SavedTo
 from paperhub.notes.ops import ApplyResult
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import list_blocks
@@ -35,15 +35,15 @@ class ColorPatch(BaseModel):
 @asynccontextmanager
 async def _db() -> AsyncIterator[aiosqlite.Connection]:
     """A connection whose store errors map to HTTP statuses: unknown id 404,
-    invalid input 422, a rejected block op 409."""
+    invalid input 422, a rejected block op 409; anything else is a 500."""
     async with open_db(load_settings().db_path) as conn:
         try:
             yield conn
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
-        except ValueError as exc:
+        except MarkInputError as exc:
             raise HTTPException(422, str(exc)) from exc
-        except RuntimeError as exc:
+        except MarkConflict as exc:
             raise HTTPException(409, str(exc)) from exc
 
 

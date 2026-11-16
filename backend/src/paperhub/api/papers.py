@@ -725,6 +725,8 @@ def _crop_png(pdf: Path, page: int, box: tuple[float, float, float, float]) -> b
         w, h = float(pg.rect.width), float(pg.rect.height)
         clip = pymupdf.Rect(box[0] * w, box[1] * h, box[2] * w, box[3] * h)  # type: ignore[no-untyped-call]
         scale = min(2.0, _CROP_MAX_SIDE / max(clip.width * 1.0, clip.height * 1.0))
+        if clip.width * scale < 1 or clip.height * scale < 1:
+            raise ValueError("box is smaller than one pixel")
         pix = pg.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip)  # type: ignore[no-untyped-call]
         return bytes(pix.tobytes("png"))
 
@@ -738,7 +740,10 @@ async def page_crop(paper_content_id: int, page: int, x0: float, y0: float,
     pdf = page_pdf_path(await _cache_dir(paper_content_id))
     if pdf is None:
         raise HTTPException(404, f"paper_content {paper_content_id} has no page PDF")
-    png = await asyncio.to_thread(_crop_png, pdf, page, (x0, y0, x1, y1))
+    try:
+        png = await asyncio.to_thread(_crop_png, pdf, page, (x0, y0, x1, y1))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if png is None:
         raise HTTPException(404, f"page {page} is not in the page PDF")
     return Response(png, media_type="image/png")

@@ -88,3 +88,9 @@ async def test_blocks_endpoint_fractions(client: AsyncClient) -> None:
     assert (await client.get("/papers/content/2/blocks",
                              params={"page": 0})).json() == []
     assert json.dumps(p2)  # serialisable
+
+
+async def test_page_crop_sub_pixel_box_is_400(client: AsyncClient) -> None:
+    r = await client.get("/papers/content/1/page-crop", params={
+        "page": 0, "x0": 0.5, "y0": 0.5, "x1": 0.5001, "y1": 0.9})
+    assert r.status_code == 400

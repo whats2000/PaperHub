@@ -95,3 +95,19 @@ async def test_colors_patch(client: AsyncClient) -> None:
     assert r.json()[0] == {"color": "green", "name": "Result", "visible": False}
     assert (await client.patch("/marks/colors/red", json={"name": "x"})
             ).status_code == 404
+
+
+async def test_unexpected_store_error_is_a_500(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import paperhub.notes.marks as marks_mod
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("library bug")
+
+    monkeypatch.setattr(marks_mod, "_validate", boom)
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(), raise_app_exceptions=False),
+        base_url="http://test",
+    ) as c:
+        assert (await c.post("/marks", json=_body())).status_code == 500

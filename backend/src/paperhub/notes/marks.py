@@ -47,6 +47,14 @@ _INSERT = (
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?)")
 
 
+class MarkInputError(ValueError):
+    """The request names something invalid (kind, view, piece, ...)."""
+
+
+class MarkConflict(RuntimeError):
+    """The mark's block could not be changed (e.g. the user edited it)."""
+
+
 class MarkIn(BaseModel):
     paper_content_id: int
     kind: str
@@ -109,18 +117,18 @@ def _live(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _check_index(m: dict[str, Any], index: int) -> None:
     if not 0 <= index < len(m["pieces"]):
-        raise ValueError(f"piece {index} out of range")
+        raise MarkInputError(f"piece {index} out of range")
     if m["pieces"][index].get("removed"):
-        raise ValueError(f"piece {index} belongs to another mark now")
+        raise MarkInputError(f"piece {index} belongs to another mark now")
 
 
 def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
     if kind not in _BLOCK_TYPE:
-        raise ValueError(f"unknown mark kind {kind!r}")
+        raise MarkInputError(f"unknown mark kind {kind!r}")
     if view not in _VIEWS:
-        raise ValueError(f"unknown mark view {view!r}")
+        raise MarkInputError(f"unknown mark view {view!r}")
     if not pieces:
-        raise ValueError("a mark needs at least one piece")
+        raise MarkInputError("a mark needs at least one piece")
 
 
 def _block_props(m: dict[str, Any]) -> dict[str, Any]:
@@ -156,7 +164,7 @@ async def _apply(conn: aiosqlite.Connection, note_id: int, op: Op,
         conn, note_id, base_revision=note.revision, ops=[op], actor="user",
         run_id=None, summary=summary)
     if expect not in res.applied:
-        raise RuntimeError(
+        raise MarkConflict(
             f"block {expect} was not changed: {res.rejected or 'rejected'}")
     return res
 
@@ -248,10 +256,10 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
     assert m.join_to is not None
     rec = await _get(conn, m.join_to)
     if rec["deleted_at"] is not None:
-        raise ValueError("cannot join a deleted mark")
+        raise MarkInputError("cannot join a deleted mark")
     if (rec["paper_content_id"], rec["color"], rec["kind"], rec["view"]) != (
             m.paper_content_id, m.color, m.kind, m.view):
-        raise ValueError("a piece can only join a mark of the same paper, "
+        raise MarkInputError("a piece can only join a mark of the same paper, "
                          "colour, kind and view")
     rec["pieces"] = [*rec["pieces"], *m.pieces]
     await _save_pieces(conn, rec)
@@ -305,7 +313,7 @@ async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
     res = await _restore_in_tx(conn, await _note_id(conn, m),
                                [m["block_id"]], actor="user")
     if m["block_id"] not in res.applied:
-        raise RuntimeError(
+        raise MarkConflict(
             f"block {m['block_id']} was not restored: "
             f"{res.rejected or 'rejected'}")
     await _write(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
@@ -337,7 +345,7 @@ async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
         m = await _get(conn, mark_id)
         _check_index(m, index)
         if m["deleted_at"] is not None:
-            raise ValueError("cannot erase from a deleted mark")
+            raise MarkInputError("cannot erase from a deleted mark")
         m["pieces"][index] = {**m["pieces"][index], "erased": True}
         await _save_pieces(conn, m)
         if _live(m["pieces"]):
@@ -377,7 +385,7 @@ async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
         live = [i for i, p in enumerate(m["pieces"])
                 if not p.get("erased") and not p.get("removed")]
         if m["deleted_at"] is not None or len(live) < 2:
-            raise ValueError("only a live mark with two pieces can split")
+            raise MarkInputError("only a live mark with two pieces can split")
         piece = m["pieces"][live[-1]]
         m["pieces"][live[-1]] = {**piece, "removed": True}
         await _save_pieces(conn, m)

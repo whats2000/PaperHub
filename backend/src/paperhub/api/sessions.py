@@ -661,9 +661,10 @@ async def delete_session(session_id: int) -> None:
             )
             # The chat's note goes with it (Undo restores it; purge cascades).
             await conn.execute(
-                "UPDATE notes SET deleted_at = datetime('now') WHERE "
-                "target_kind = 'session' AND target_id = ? "
-                "AND deleted_at IS NULL", (str(session_id),),
+                "UPDATE notes SET deleted_at = (SELECT deleted_at FROM "
+                "chat_sessions WHERE id = ?) WHERE target_kind = 'session' "
+                "AND target_id = ? AND deleted_at IS NULL",
+                (session_id, str(session_id)),
             )
         else:
             await conn.execute(
@@ -683,6 +684,11 @@ async def restore_session(session_id: int) -> None:
     that was hard-deleted, or already purged)."""
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
+        async with conn.execute(
+            "SELECT deleted_at FROM chat_sessions WHERE id = ? AND internal = 0",
+            (session_id,),
+        ) as dcur:
+            drow = await dcur.fetchone()
         cur = await conn.execute(
             "UPDATE chat_sessions SET deleted_at = NULL "
             "WHERE id = ? AND internal = 0",
@@ -690,10 +696,14 @@ async def restore_session(session_id: int) -> None:
         )
         if cur.rowcount == 0:
             raise HTTPException(404, f"chat_sessions row {session_id} not found")
-        await conn.execute(
-            "UPDATE notes SET deleted_at = NULL WHERE "
-            "target_kind = 'session' AND target_id = ?", (str(session_id),),
-        )
+        # Only the note that went down with the session (same tombstone);
+        # one deleted on its own earlier stays deleted.
+        if drow is not None and drow[0] is not None:
+            await conn.execute(
+                "UPDATE notes SET deleted_at = NULL WHERE "
+                "target_kind = 'session' AND target_id = ? AND deleted_at = ?",
+                (str(session_id), drow[0]),
+            )
         await conn.commit()
 
 

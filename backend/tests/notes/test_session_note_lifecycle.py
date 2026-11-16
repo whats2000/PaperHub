@@ -108,3 +108,21 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
             assert await cur.fetchall() == [("system", "forked")]
         # The source note is untouched.
         assert (await get_note(conn, note.id)).revision == 3  # type: ignore[union-attr]
+
+
+async def test_restore_keeps_an_independently_deleted_note(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    nid = (await client.get("/notes/target", params={"kind": "session", "id": 1})
+           ).json()["note"]["id"]
+    db = tmp_path / "paperhub.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "UPDATE notes SET deleted_at = '2020-01-01 00:00:00' WHERE id = ?",
+            (nid,))
+        await conn.commit()
+    assert (await client.delete("/sessions/1")).status_code == 204
+    assert (await client.post("/sessions/1/restore")).status_code == 204
+    async with aiosqlite.connect(db) as conn, conn.execute(
+            "SELECT deleted_at FROM notes WHERE id = ?", (nid,)) as cur:
+        assert (await cur.fetchone())[0] == "2020-01-01 00:00:00"
