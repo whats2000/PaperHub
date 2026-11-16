@@ -364,3 +364,21 @@ async def test_search_records_hits_shown_whole(
     whole = out.record["whole_block_ids"]
     assert len(hits) == 2 and len(whole) == 1
     assert "short needle" in hits[whole[0]]["snippet"]
+
+
+async def test_search_hits_a_section_heading(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Live run 913: "limitations" found nothing although the note has a
+    Limitations section; a section's name is its searchable text."""
+    from paperhub.notes.papers import ensure_section
+
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    sid = await ensure_section(migrated_db, note.id, pid, "Limitations")
+    await _fill(migrated_db, note.id, [Op(
+        op="insert", under_heading=sid, block=BlockIn(
+            type="paragraph", content="not causal over the batch"))])
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper A")])
+    hits = _load(await _run(ctx, "search_notes", query="limitations"))["hits"]
+    assert [h["block_id"] for h in hits] == [sid]

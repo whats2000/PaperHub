@@ -162,3 +162,27 @@ async def test_note_delete_and_session_purge_cascade_history(conn):
     for tbl in ("notes", "note_blocks", "note_block_history", "note_revisions"):
         async with conn.execute(f"SELECT COUNT(*) FROM {tbl}") as cur:
             assert (await cur.fetchone())[0] == 0, tbl
+
+
+def test_section_text_is_its_title():
+    assert block_text("section", {"title": "Limitations"}, None) == "Limitations"
+
+
+async def test_apply_schema_fills_section_text(conn):
+    """Section blocks written before their text held the title get it (and an
+    FTS entry) on the next apply_schema; a second run changes nothing."""
+    from paperhub.db.migrate import apply_schema
+
+    n = await get_or_create_note(conn, target_kind="paper", target_id="1", title="")
+    await conn.execute(
+        "INSERT INTO note_blocks (id, note_id, parent_id, order_key, type, "
+        "payload_json, text, author, section_key, changed_rev, changed_by, "
+        "created_at, updated_at) VALUES ('b_s', ?, NULL, 'a0', 'section', ?, '', "
+        "'user', 'Limitations', 1, 'user', 't', 't')",
+        (n.id, '{"props": {"title": "Limitations"}, "content": null}'))
+    await conn.commit()
+    assert await _fts(conn, "limitations") == []
+    await apply_schema(conn)
+    assert await _fts(conn, "limitations") == ["b_s"]
+    await apply_schema(conn)
+    assert await _fts(conn, "limitations") == ["b_s"]

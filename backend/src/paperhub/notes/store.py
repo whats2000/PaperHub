@@ -41,6 +41,8 @@ def _runs_text(content: Any) -> str:
 
 def block_text(type: str, props: dict[str, Any], content: Any) -> str:
     """Plain text of a block, as indexed for search and read by the agent."""
+    if type == "section":  # the paper section's name
+        return str(props.get("title") or "")
     if type == "paperQuote":
         return str(props.get("quote") or "")
     if type == "math":

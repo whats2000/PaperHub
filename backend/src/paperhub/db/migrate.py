@@ -813,6 +813,15 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         )
         await conn.commit()
 
+    # Plan H5b.1: a section block's text is its title (searchable); fill the
+    # blocks written before that (the FTS update trigger re-indexes them).
+    await conn.execute(
+        "UPDATE note_blocks SET text = json_extract(payload_json, '$.props.title') "
+        "WHERE type = 'section' AND text = '' "
+        "AND COALESCE(json_extract(payload_json, '$.props.title'), '') != ''"
+    )
+    await conn.commit()
+
     # Plan H2: a pending reviewer item whose run was rated explicitly is
     # resolved (idempotent; a no-op once nothing is pending).
     from paperhub.feedback.repo import resolve_superseded
