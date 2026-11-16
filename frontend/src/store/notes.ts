@@ -95,6 +95,9 @@ interface NotesStore {
   /** Folded divider ids per note. */
   folded: Record<number, string[]>;
   toggleFold: (noteId: number, dividerId: string) => void;
+  /** Forgets the folds of dividers no longer in the note (deleted, or turned
+   * back into text). */
+  keepFolds: (noteId: number, dividerIds: ReadonlySet<string>) => void;
   quoteTarget: QuoteTarget | null;
   setQuoteTarget: (target: QuoteTarget | null) => void;
 
@@ -731,6 +734,11 @@ export const useNotesStore = create<NotesStore>()(
               },
             };
           }),
+        keepFolds: (noteId, dividerIds) => {
+          const cur = get().folded[noteId] ?? [];
+          const kept = cur.filter((d) => dividerIds.has(d));
+          if (kept.length !== cur.length) set((s) => ({ folded: { ...s.folded, [noteId]: kept } }));
+        },
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
 

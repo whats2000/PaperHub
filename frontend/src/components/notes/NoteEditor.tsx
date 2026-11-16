@@ -148,13 +148,26 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
     synced.current = pruneUnsavedEmpty(doc(), known);
   }
 
+  // A fold outlives its divider only as a stale id: forget it.
+  const keepFolds = useCallback(() => {
+    const dividers = new Set<string>();
+    const walk = (list: EditorBlock[]) =>
+      list.forEach((b) => {
+        if (b.type === "divider") dividers.add(b.id);
+        walk(b.children);
+      });
+    walk(doc());
+    useNotesStore.getState().keepFolds(noteId, dividers);
+  }, [doc, noteId]);
+
   const onChange = useCallback(() => {
+    keepFolds();
     if (applyingRemote.current || synced.current === null) return;
     const next = pruneUnsavedEmpty(doc(), treeIds(synced.current));
     const ops = diffDocuments(synced.current, next);
     synced.current = next;
     if (ops.length) applyLocal(noteId, ops);
-  }, [applyLocal, doc, noteId]);
+  }, [applyLocal, doc, noteId, keepFolds]);
 
   // Blocks the server replaced (a conflict) or a whole reload: apply them in
   // place without sending them back as edits.

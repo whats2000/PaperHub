@@ -896,6 +896,56 @@ describe("dividers, Focus and folding", () => {
     expect(blockAtCaret()).toBe("p3");
   });
 
+  it("forgets a fold when its divider is deleted or turned back into ---", async () => {
+    const dx = blk("dx", { type: "divider" });
+    seed([section, quote, d1, q2, dx, p3]);
+    useNotesStore.setState({ folded: { 7: ["d1", "dx"] } });
+    mount();
+    await screen.findByTestId("divider-dx");
+    type Node = { attrs: { id?: string }; type: { name: string }; nodeSize: number };
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: {
+        view: {
+          state: {
+            doc: { descendants: (f: (n: Node, pos: number) => boolean | void) => void };
+            tr: { delete: (a: number, b: number) => unknown };
+          };
+          dispatch: (tr: unknown) => void;
+        };
+      };
+    };
+    const view = pm.editor.view;
+    let range: [number, number] | null = null;
+    view.state.doc.descendants((n, pos) => {
+      if (n.type.name === "blockContainer" && n.attrs.id === "dx") range = [pos, pos + n.nodeSize];
+      return range === null;
+    });
+    act(() => view.dispatch(view.state.tr.delete(range![0], range![1])));
+    await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual(["d1"]));
+
+    // d1 turned back into the --- line (what the toast's Undo does): fold gone.
+    type View = {
+      state: {
+        doc: { descendants: (f: (n: Node, pos: number) => boolean | void) => void };
+        schema: { nodes: { paragraph: { create: (a: null, c: unknown) => unknown } }; text: (t: string) => unknown };
+        tr: { replaceWith: (a: number, b: number, n: unknown) => unknown };
+      };
+      dispatch: (tr: unknown) => void;
+    };
+    const v = view as unknown as View;
+    let content: [number, number] | null = null;
+    v.state.doc.descendants((n, pos) => {
+      if (n.type.name === "divider") {
+        content = [pos, pos + n.nodeSize];
+        return false;
+      }
+      return content === null;
+    });
+    const para = v.state.schema.nodes.paragraph.create(null, v.state.schema.text("---"));
+    act(() => v.dispatch(v.state.tr.replaceWith(content![0], content![1], para)));
+    await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual([]));
+  });
+
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
     seed([section, quote, d1, q2, p3, d2, p4]);
     mount();
