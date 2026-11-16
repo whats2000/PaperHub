@@ -86,6 +86,17 @@ describe("NotesToolbar", () => {
     expect(useNotesStore.getState().followOn).toBe(true);
   });
 
+  it("hides Follow on a note with no paper (a chat's note), folding it away", () => {
+    const { rerender } = render(<Toolbar />);
+    expect(screen.getByRole("button", { name: "Following §2" })).toBeInTheDocument();
+    rerender(<Toolbar followAvailable={false} />);
+    expect(screen.queryByRole("button", { name: /Follow/ })).toBeNull();
+    const slot = document.querySelector("[data-follow-slot]")!;
+    expect(slot).toHaveAttribute("data-state", "closed");
+    expect(slot).toHaveAttribute("inert");
+    expect(slot.className).toMatch(/transition-\[grid-template-columns,opacity\]/);
+  });
+
   it("Focus toggles, starts on the first part when none is chosen, and Esc stops it", () => {
     render(<Toolbar />);
     const focus = screen.getByRole("button", { name: "Focus" });

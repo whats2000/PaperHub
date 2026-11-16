@@ -83,7 +83,8 @@ describe("ChatPage Notes pane", () => {
     const bar = within(pane).getByRole("toolbar", { name: "Note tools" });
     await screen.findByText("note 12");
     expect(within(bar).getByRole("button", { name: "Focus" })).toBeEnabled();
-    expect(within(bar).getByRole("button", { name: /^Following/ })).toBeEnabled();
+    // A chat's note has no paper to follow.
+    expect(within(bar).queryByRole("button", { name: /Follow/ })).toBeNull();
     await userEvent.click(within(bar).getByRole("button", { name: "More" }));
     // The chat's note is linked to this chat only.
     expect(await screen.findByRole("menu")).toHaveTextContent("Shared by 1 chat · revision 1");

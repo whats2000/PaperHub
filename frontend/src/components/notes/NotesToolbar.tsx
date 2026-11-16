@@ -20,6 +20,8 @@ export interface NotesToolbarProps {
   noteId: number | null;
   /** The section Follow is tracking ("§2"), null when none yet. */
   followLabel: string | null;
+  /** False on a note with no paper (a chat's note): Follow folds away. */
+  followAvailable?: boolean;
   /** The reader shows the paper as a PDF, which does not report its section
    * yet: Follow is off with a hint. */
   followUnavailable?: boolean;
@@ -36,12 +38,7 @@ const BUTTON =
 const ITEM =
   "flex w-full cursor-default items-center gap-2 rounded-md px-2 py-[5px] text-left text-[12.5px] text-foreground outline-none select-none data-[highlighted]:bg-accent data-[disabled]:opacity-50";
 
-function ExportItem(props: {
-  icon: ReactNode;
-  label: string;
-  hint: string;
-  onClick?: () => void;
-}) {
+function ExportItem(props: { icon: ReactNode; label: string; hint: string; onClick?: () => void }) {
   return (
     <Menu.Item className={ITEM} disabled={!props.onClick} onClick={props.onClick}>
       {props.icon}
@@ -54,6 +51,7 @@ function ExportItem(props: {
 export function NotesToolbar({
   noteId,
   followLabel,
+  followAvailable = true,
   followUnavailable = false,
   sharedBy = null,
   onExport,
@@ -65,7 +63,9 @@ export function NotesToolbar({
   const setFollowOn = useNotesStore((s) => s.setFollowOn);
   const focusOn = useNotesStore((s) => s.focusOn);
   const setFocusOn = useNotesStore((s) => s.setFocusOn);
-  const revision = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.note.revision ?? null)));
+  const revision = useNotesStore((s) =>
+    noteId === null ? null : (s.notes[noteId]?.note.revision ?? null),
+  );
   const moreRef = useRef<HTMLButtonElement>(null);
 
   // Esc stops Focus (unless something else, e.g. a menu, took the key).
@@ -88,11 +88,12 @@ export function NotesToolbar({
     setFocusOn(!focusOn);
   };
 
-  const followText = followOn && !followUnavailable
-    ? followLabel
-      ? t("notes:toolbar.following", "Following {{section}}", { section: followLabel })
-      : t("notes:toolbar.followingAny", "Following")
-    : t("notes:toolbar.follow", "Follow reading");
+  const followText =
+    followOn && !followUnavailable
+      ? followLabel
+        ? t("notes:toolbar.following", "Following {{section}}", { section: followLabel })
+        : t("notes:toolbar.followingAny", "Following")
+      : t("notes:toolbar.follow", "Follow reading");
   const meta =
     revision === null
       ? null
@@ -111,30 +112,51 @@ export function NotesToolbar({
       aria-label={t("notes:toolbar.label", "Note tools")}
       className="relative flex shrink-0 items-center gap-1 border-b border-border px-2 py-[3px] whitespace-nowrap"
     >
-      <button
-        type="button"
-        aria-pressed={followOn && !followUnavailable}
-        // aria-disabled, not disabled: the hint stays readable on hover / focus.
-        aria-disabled={followUnavailable || undefined}
-        disabled={noteId === null}
-        onClick={() => {
-          if (!followUnavailable) setFollowOn(!followOn);
-        }}
-        title={
-          followUnavailable
-            ? t("notes:toolbar.followPdf", "Follow works on HTML papers for now; this paper is showing as a PDF.")
-            : followOn
-            ? t(
-                "notes:toolbar.followingTitle",
-                "The note scrolls to the section you're reading. Click to stop following.",
-              )
-            : t("notes:toolbar.followTitle", "Click to scroll the note along with the section you're reading.")
-        }
-        className={cn(BUTTON, "min-w-0 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground")}
+      {/* Follow folds away sideways (toward the toolbar's start) on a note
+          that has no paper to follow, and unfolds back. */}
+      <div
+        data-follow-slot
+        data-state={followAvailable ? "open" : "closed"}
+        inert={!followAvailable || undefined}
+        aria-hidden={!followAvailable || undefined}
+        className="grid min-w-0 grid-cols-[1fr] transition-[grid-template-columns,opacity] duration-200 ease-out data-[state=closed]:grid-cols-[0fr] data-[state=closed]:opacity-0 motion-reduce:transition-none"
       >
-        <LocateFixed className="size-3 shrink-0" aria-hidden />
-        <span className="truncate">{followText}</span>
-      </button>
+        <div className="flex min-w-0 overflow-hidden">
+          <button
+            type="button"
+            aria-pressed={followOn && !followUnavailable}
+            // aria-disabled, not disabled: the hint stays readable on hover / focus.
+            aria-disabled={followUnavailable || undefined}
+            disabled={noteId === null}
+            onClick={() => {
+              if (!followUnavailable) setFollowOn(!followOn);
+            }}
+            title={
+              followUnavailable
+                ? t(
+                    "notes:toolbar.followPdf",
+                    "Follow works on HTML papers for now; this paper is showing as a PDF.",
+                  )
+                : followOn
+                  ? t(
+                      "notes:toolbar.followingTitle",
+                      "The note scrolls to the section you're reading. Click to stop following.",
+                    )
+                  : t(
+                      "notes:toolbar.followTitle",
+                      "Click to scroll the note along with the section you're reading.",
+                    )
+            }
+            className={cn(
+              BUTTON,
+              "min-w-0 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground",
+            )}
+          >
+            <LocateFixed className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{followText}</span>
+          </button>
+        </div>
+      </div>
       <span className="flex-1" />
       <button
         type="button"
@@ -172,7 +194,9 @@ export function NotesToolbar({
                 <ExportItem
                   icon={<FileDown className="size-3 shrink-0" aria-hidden />}
                   label={t("notes:toolbar.exportMd", "Export as Markdown")}
-                  hint={onExport ? t("notes:toolbar.exportMdHint", ".md, images, references.bib") : soon}
+                  hint={
+                    onExport ? t("notes:toolbar.exportMdHint", ".md, images, references.bib") : soon
+                  }
                   onClick={onExport && (() => onExport("md"))}
                 />
                 <ExportItem

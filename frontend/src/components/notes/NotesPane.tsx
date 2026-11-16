@@ -134,6 +134,7 @@ export function NotesPane({ onClose }: Props) {
       <NotesToolbar
         noteId={noteId}
         followLabel={followLabel}
+        followAvailable={tab === "paper"}
         followUnavailable={followUnavailable}
         sharedBy={sharedBy}
         guideOpen={guideOpen}
