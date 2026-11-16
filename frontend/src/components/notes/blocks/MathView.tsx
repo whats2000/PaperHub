@@ -1,12 +1,27 @@
 import katex from "katex";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "katex/dist/katex.min.css";
 
 /** A display equation: rendered with KaTeX, click to edit its LaTeX. */
-export function MathView({ latex, onChange }: { latex: string; onChange: (latex: string) => void }) {
+export function MathView({
+  latex,
+  onChange,
+  isNew,
+}: {
+  latex: string;
+  onChange: (latex: string) => void;
+  /** Read once on mount: the block was just made here, so the caret goes to its LaTeX. */
+  isNew?: () => boolean;
+}) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(latex === "");
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (isNew?.()) field.current?.focus();
+    // Only the first render: a later empty LaTeX is the user clearing it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const html = useMemo(
     () => (latex ? katex.renderToString(latex, { displayMode: true, throwOnError: false }) : ""),
     [latex],
@@ -31,6 +46,7 @@ export function MathView({ latex, onChange }: { latex: string; onChange: (latex:
       >
         <div className="min-h-0 overflow-hidden">
           <textarea
+            ref={field}
             aria-label={t("notes:math.latex", "LaTeX")}
             value={latex}
             rows={2}

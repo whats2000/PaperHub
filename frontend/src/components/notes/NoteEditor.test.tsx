@@ -695,6 +695,37 @@ describe("dividers, Focus and folding", () => {
   const d2 = blk("d2", { type: "divider" });
   const q2 = blk("q2", { ...quote, id: "q2", props: { ...quote.props, markId: "mk_2" } });
   const p3 = blk("p3", { content: [{ type: "text", text: "Third", styles: {} }], text: "Third" });
+  it("typing $$ at a line start puts the caret in the new equation's LaTeX", () => {
+    seed([blk("p0", { content: [] })]);
+    mount();
+    type View = {
+      state: { selection: { from: number; to: number }; tr: { insertText: (t: string, f: number, to: number) => unknown } };
+      dispatch: (tr: unknown) => void;
+      someProp: (name: string, f: (fn: (...a: unknown[]) => boolean) => boolean) => boolean | undefined;
+    };
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: View; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+    const view = pm.editor.view;
+    act(() => {
+      pm.focus();
+      pm.editor.commands.setTextSelection(3);
+      for (const ch of "$$ ") {
+        const { from, to } = view.state.selection;
+        const handled = view.someProp("handleTextInput", (f) => f(view, from, to, ch, () => view.state.tr));
+        if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
+      }
+    });
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "LaTeX" }));
+  });
+
+  it("an empty equation already in a note does not take the caret", async () => {
+    seed([blk("m0", { type: "math", props: { latex: "" } }), blk("p0", { content: [] })]);
+    mount();
+    await screen.findByRole("textbox", { name: "LaTeX" });
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox", { name: "LaTeX" }));
+  });
+
   const p4 = blk("p4", { content: [{ type: "text", text: "Fourth", styles: {} }], text: "Fourth" });
   const outer = (id: string) => document.querySelector(`.bn-block-outer[data-id="${id}"]`)!;
 
