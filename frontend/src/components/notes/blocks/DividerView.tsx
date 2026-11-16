@@ -26,10 +26,11 @@ function flatten(list: DocBlock[], out: PartBlock[] = []): PartBlock[] {
 
 /** A divider's line: its fold chevron at the content edge (centred on a
  * reference's bar, so it reaches into the side menu's column: it sits above
- * BlockNote's side menu, z-20, or the drag handle would take its clicks), the rule darkened when it frames the part you're in, and
- * the folded part's one-line summary, which unfolds it. The parts come from
- * the editor's own document, so a divider just typed is right before its
- * sync reaches the store. */
+ * BlockNote's side menu, z-20, or the drag handle would take its clicks),
+ * the rule darkened when it frames the part you're in, and the folded
+ * part's one-line summary, which unfolds it. The parts come from the
+ * editor's own document, so a divider just typed is right before its sync
+ * reaches the store. */
 export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
   const { t } = useTranslation();
   const { noteId } = useNoteEditorContext();
