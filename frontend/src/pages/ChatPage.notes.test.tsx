@@ -104,8 +104,27 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(reader);
     expect(reader).toHaveAttribute("aria-selected", "true");
     expect(useNotesPaneStore.getState().activeTab).toBe("reader");
-    // The hidden tab's pane is out of reach.
-    expect(screen.getByTestId("note-editor").closest("[inert]")).not.toBeNull();
+    // The hidden tab's pane is out of reach, slid aside toward its tab.
+    const notesPanel = (await screen.findByTestId("note-editor")).closest("[inert]");
+    expect(notesPanel).not.toBeNull();
+    expect(notesPanel).toHaveClass("translate-x-3", "opacity-0");
+    // Tailwind v4 translate-x-* sets `translate`: the transition must cover it.
+    expect(notesPanel?.className).toMatch(/transition-\[opacity,translate\]/);
+    // Tabs name the panes they control.
+    const readerPanel = screen.getByRole("tabpanel", { name: "Reader" });
+    expect(reader).toHaveAttribute("aria-controls", readerPanel.id);
+    expect(readerPanel).toContainElement(screen.getByTestId("reader"));
+    expect(notes).toHaveAttribute("aria-controls", notesPanel?.id);
+    expect(notesPanel).toHaveAttribute("role", "tabpanel");
+    expect(notesPanel).toHaveAttribute("aria-labelledby", notes.id);
+    // Arrow keys move to the next / previous tab.
+    reader.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(notes).toHaveAttribute("aria-selected", "true");
+    expect(notes).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(reader).toHaveAttribute("aria-selected", "true");
+    expect(reader).toHaveFocus();
     // The Notes button brings the hidden Notes tab forward instead of closing it.
     await userEvent.click(notesButton());
     expect(notes).toHaveAttribute("aria-selected", "true");
@@ -118,9 +137,9 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(notesButton());
     expect(screen.queryByRole("tablist", { name: "Right panel" })).toBeNull();
     expect(screen.getByRole("separator", { name: "Resize Reader and Notes" })).toBeInTheDocument();
-    expect(notesPane()?.parentElement).toHaveStyle({ width: "420px" });
+    expect((await screen.findByRole("region", { name: "Notes" })).parentElement).toHaveStyle({ width: "420px" });
     expect(screen.getByTestId("reader").closest("[inert]")).toBeNull();
-    expect(screen.getByTestId("note-editor").closest("[inert]")).toBeNull();
+    expect((await screen.findByTestId("note-editor")).closest("[inert]")).toBeNull();
     // The paper's note while the reader shows a paper.
     expect(await screen.findByText("note 11")).toBeInTheDocument();
   });
@@ -153,6 +172,35 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(notesButton());
     expect(useNotesPaneStore.getState().notesWidth).toBe(480);
     expect(useCanvasStore.getState().width).toBe(850);
+  });
+
+  it("the divider leaves the reader its 320 px beside the 6 px divider", async () => {
+    useCanvasStore.setState({ open: true, width: 900, activePaperId: 7 });
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const divider = screen.getByRole("separator", { name: "Resize Reader and Notes" });
+    fireEvent.pointerDown(divider, { clientX: 500 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 0 }));
+      window.dispatchEvent(new MouseEvent("pointerup"));
+    });
+    expect(useNotesPaneStore.getState().notesWidth).toBe(900 - 320 - 6);
+  });
+
+  it("narrowing a side-by-side panel to tabs shows the Reader being dragged", async () => {
+    useCanvasStore.setState({ open: true, width: 800, activePaperId: 7 });
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    expect(useNotesPaneStore.getState().activeTab).toBe("notes");
+    const edge = screen.getByRole("separator", { name: "Resize reference panel" });
+    fireEvent.pointerDown(edge, { clientX: 300 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 400 }));
+      window.dispatchEvent(new MouseEvent("pointerup"));
+    });
+    expect(useCanvasStore.getState().width).toBe(700);
+    const tabs = screen.getByRole("tablist", { name: "Right panel" });
+    expect(within(tabs).getByRole("tab", { name: "Reader" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("Memory and Notes close each other", async () => {
@@ -189,11 +237,22 @@ describe("ChatPage Notes pane", () => {
     useCanvasStore.setState({ open: true, width: 900, activePaperId: 7 });
     render(<ChatPage />);
     await userEvent.click(notesButton());
-    const tabs = within(notesPane() as HTMLElement).getByRole("tablist", { name: "Notes" });
+    const tabs = within(await screen.findByRole("region", { name: "Notes" })).getByRole("tablist", { name: "Notes" });
     const paperTab = await within(tabs).findByRole("tab", { name: PAPER_TITLE });
     expect(paperTab).toHaveAttribute("title", `Notes on: ${PAPER_TITLE}`);
     const chatTab = within(tabs).getByRole("tab", { name: "This chat" });
     expect(chatTab).toHaveAttribute("title", `Notes for this chat only: ${CHAT_TITLE}`);
+    const notePanel = within(notesPane() as HTMLElement).getByRole("tabpanel");
+    expect(paperTab).toHaveAttribute("aria-controls", notePanel.id);
+    expect(chatTab).toHaveAttribute("aria-controls", notePanel.id);
+    expect(notePanel).toHaveAttribute("aria-labelledby", paperTab.id);
+    paperTab.focus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(chatTab).toHaveAttribute("aria-selected", "true");
+    expect(chatTab).toHaveFocus();
+    expect(notePanel).toHaveAttribute("aria-labelledby", chatTab.id);
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(paperTab).toHaveAttribute("aria-selected", "true");
     await userEvent.click(chatTab);
     expect(chatTab).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("note 12")).toBeInTheDocument();

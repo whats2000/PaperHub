@@ -6,10 +6,14 @@ import type { KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { notePanelId, noteTabId } from "./noteTabIds";
+
 export type NoteTab = "paper" | "chat";
 
 interface Props {
   active: NoteTab;
+  /** Prefix of the tab and panel ids (the pane's `useId`). */
+  idBase: string;
   /** The paper's title, or null when no paper is open (no paper tab). */
   paperTitle: string | null;
   chatTitle: string;
@@ -22,7 +26,15 @@ interface Props {
 const TAB =
   "inline-flex min-w-0 max-w-60 items-center gap-1 rounded px-2 py-1 text-xs transition-colors duration-150 motion-reduce:transition-none";
 
-export function NotesTabs({ active, paperTitle, chatTitle, chatAvailable, onSelect, onClose }: Props) {
+export function NotesTabs({
+  active,
+  idBase,
+  paperTitle,
+  chatTitle,
+  chatAvailable,
+  onSelect,
+  onClose,
+}: Props) {
   const { t } = useTranslation("notes");
   const tabs: NoteTab[] = [
     ...(paperTitle !== null ? (["paper"] as const) : []),
@@ -30,9 +42,9 @@ export function NotesTabs({ active, paperTitle, chatTitle, chatAvailable, onSele
   ];
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const next = tabs[(tabs.indexOf(active) + 1) % tabs.length];
-    if (tabs.length < 2 || next === undefined) return;
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const next = tabs[(tabs.indexOf(active) + step + tabs.length) % tabs.length];
+    if (!step || tabs.length < 2 || next === undefined) return;
     e.preventDefault();
     onSelect(next);
     e.currentTarget.querySelector<HTMLButtonElement>(`[data-note-tab="${next}"]`)?.focus();
@@ -59,6 +71,8 @@ export function NotesTabs({ active, paperTitle, chatTitle, chatAvailable, onSele
             type="button"
             role="tab"
             data-note-tab="paper"
+            id={noteTabId(idBase, "paper")}
+            aria-controls={notePanelId(idBase)}
             aria-selected={active === "paper"}
             tabIndex={active === "paper" ? 0 : -1}
             onClick={() => onSelect("paper")}
@@ -74,6 +88,8 @@ export function NotesTabs({ active, paperTitle, chatTitle, chatAvailable, onSele
             type="button"
             role="tab"
             data-note-tab="chat"
+            id={noteTabId(idBase, "chat")}
+            aria-controls={notePanelId(idBase)}
             aria-selected={active === "chat"}
             tabIndex={active === "chat" ? 0 : -1}
             onClick={() => onSelect("chat")}

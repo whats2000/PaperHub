@@ -1,6 +1,6 @@
 /** The Notes pane of the chat's right panel: the note of the paper in the
  * reader, or of this chat, in the full editor. */
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { useChatStore } from "@/store/chat";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditor } from "./NoteEditor";
+import { notePanelId, noteTabId } from "./noteTabIds";
 import { NotesTabs, type NoteTab } from "./NotesTabs";
 
 interface Props {
@@ -19,6 +20,7 @@ type Target = { kind: "paper" | "session"; id: number };
 
 export function NotesPane({ onClose }: Props) {
   const { t } = useTranslation("notes");
+  const idBase = useId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const session = useChatStore((s) =>
     s.activeSessionId === null ? null : (s.sessions.find((x) => x.id === s.activeSessionId) ?? null),
@@ -103,6 +105,7 @@ export function NotesPane({ onClose }: Props) {
     >
       <NotesTabs
         active={tab}
+        idBase={idBase}
         paperTitle={paperTitle}
         chatTitle={session?.title ?? ""}
         chatAvailable={session !== null}
@@ -111,7 +114,12 @@ export function NotesPane({ onClose }: Props) {
       />
       {/* Task 17 fills this row with the note's toolbar. */}
       <div data-notes-toolbar />
-      <div className="relative min-h-0 flex-1 overflow-y-auto">
+      <div
+        id={notePanelId(idBase)}
+        role="tabpanel"
+        aria-labelledby={noteTabId(idBase, tab)}
+        className="relative min-h-0 flex-1 overflow-y-auto"
+      >
         {current?.noteId != null ? (
           <div
             key={current.noteId}

@@ -6,6 +6,7 @@ import { ChatThread } from "@/components/chat/ChatThread";
 import { SENT_SEARCH_PREFIX } from "@/components/chat/MessageBubble";
 import { Composer } from "@/components/chat/Composer";
 import { AutoApproveToggle } from "@/components/chat/AutoApproveToggle";
+import { RightPanel } from "@/components/chat/RightPanel";
 import { PanelLoadBoundary } from "@/components/states/PanelLoadBoundary";
 import { retryableLazy } from "@/lib/retryableLazy";
 import { slideStageLabel } from "@/lib/slideStage";
@@ -13,7 +14,7 @@ import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore } from "@/store/chat";
 import { useCanvasStore } from "@/store/canvas";
 import { useSlidesStore } from "@/store/slides";
-import { rightPanelLayout, useNotesPaneStore, type PanelLayout } from "@/store/notesPane";
+import { useNotesPaneStore } from "@/store/notesPane";
 import { useSettingsStore } from "@/store/settings";
 import { hasBlockingConfigIssue } from "@/lib/readiness";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -21,8 +22,7 @@ import { useReferencesSync } from "@/hooks/useReferencesSync";
 import { useSessionsSync } from "@/hooks/useSessionsSync";
 import { useDeckSync } from "@/hooks/useDeckSync";
 import { useCloseCanvasOnSessionChange } from "@/hooks/useCloseCanvasOnSessionChange";
-import { useCanvasResize, useNotesDividerResize } from "@/hooks/useCanvasResize";
-import { usePresence } from "@/hooks/usePresence";
+import { useRightPanel } from "@/hooks/useRightPanel";
 import { useRunReattach } from "@/hooks/useRunReattach";
 import { getDeck, updateDeckNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -39,15 +39,6 @@ const MemoryManager = retryableLazy(() =>
   })),
 );
 
-const NotesPane = retryableLazy(() =>
-  import("@/components/notes/NotesPane").then((m) => ({
-    default: m.NotesPane,
-  })),
-);
-
-/** Exit time of a pane leaving the right panel (ms). */
-const PANE_EXIT_MS = 200;
-
 const SlidesPanel = retryableLazy(() =>
   import("@/components/slides/SlidesPanel").then((m) => ({
     default: m.SlidesPanel,
@@ -55,7 +46,7 @@ const SlidesPanel = retryableLazy(() =>
 );
 
 export function ChatPage() {
-  const { t } = useTranslation(["chat", "notes"]);
+  const { t } = useTranslation("chat");
   useGlobalShortcuts();
   useSessionsSync();
   useReferencesSync();
@@ -64,7 +55,6 @@ export function ChatPage() {
   const canvasOpen = useCanvasStore((s) => s.open);
   const toggleCanvas = useCanvasStore((s) => s.toggleCanvas);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
-  const { width: canvasWidth, resizing, onPointerDown } = useCanvasResize();
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const newSession = useChatStore((s) => s.newSession);
@@ -76,9 +66,6 @@ export function ChatPage() {
   const closeSlides = useSlidesStore((s) => s.closePanel);
 
   const notesOpen = useNotesPaneStore((s) => s.open);
-  const activeTab = useNotesPaneStore((s) => s.activeTab);
-  const storedNotesWidth = useNotesPaneStore((s) => s.notesWidth);
-  const setActiveTab = useNotesPaneStore((s) => s.setActiveTab);
   const toggleNotes = useNotesPaneStore((s) => s.toggle);
   const closeNotes = useNotesPaneStore((s) => s.close);
 
@@ -203,37 +190,10 @@ export function ChatPage() {
       : (s.deckRevisionBySession[backendSessionId] ?? 0),
   );
 
-  // The right column is shared between the Citation Canvas, Memory Manager,
-  // and Slides panel. Opening one closes the others; the column width + slide
-  // animation is the same for all.
-  const rightPanelOpen = canvasOpen || memoryOpen || slidesOpen || notesOpen;
-
-  // Reader or Slides share the panel with Notes: tabs while narrow, side by
-  // side from SIDE_BY_SIDE_MIN. Memory never shares it.
-  const primaryOpen = canvasOpen || slidesOpen;
-  const { layout, notesWidth } = rightPanelLayout({
-    primaryOpen,
-    notesOpen,
-    panelWidth: canvasWidth,
-    notesWidth: storedNotesWidth,
-  });
-  const divider = useNotesDividerResize(canvasWidth);
-  const dragging = resizing || divider.resizing;
-
-  // Panes leave by sliding out (never by animating width): each stays shown
-  // for its exit. The panel column collapses around them when all close.
-  const notesPresence = usePresence(notesOpen, PANE_EXIT_MS);
-  const canvasPresence = usePresence(canvasOpen, PANE_EXIT_MS);
-  const slidesPresence = usePresence(slidesOpen, PANE_EXIT_MS);
-  const primaryPresence = usePresence(primaryOpen, PANE_EXIT_MS);
-  // A swap shows the incoming pane at once; only a pane closing alone lingers.
-  const canvasShown = canvasOpen || (canvasPresence.mounted && !slidesOpen && !memoryOpen);
-  const slidesShown = slidesOpen || (slidesPresence.mounted && !canvasOpen && !memoryOpen);
-  // The layout the two had together, so a closing pane leaves from where it sat.
-  const [sharedLayout, setSharedLayout] = useState<PanelLayout>(layout);
-  if (notesOpen && primaryOpen && layout !== sharedLayout) setSharedLayout(layout);
-  const notesLeaving = !notesOpen && notesPresence.mounted;
-  const primaryLeaving = !primaryOpen && primaryPresence.mounted && notesOpen;
+  // The right column is shared between the reader (Citation Canvas), Slides,
+  // Memory and Notes; Reader or Slides pair with Notes, Memory stays alone.
+  const panel = useRightPanel(memoryOpen);
+  const { behindTab, setActiveTab } = panel;
 
   // Keep the Slides panel MOUNTED once it has been opened (store `everOpened`
   // latch), so swapping to the Citation Canvas and back doesn't unmount it — an
@@ -312,8 +272,6 @@ export function ChatPage() {
   };
 
   // A pane hidden behind the other tab comes forward instead of closing.
-  const behindTab = (tab: "reader" | "notes") => layout === "tabs" && activeTab !== tab;
-
   const handleToggleCanvas = (): void => {
     if (canvasOpen && behindTab("reader")) {
       setActiveTab("reader");
@@ -350,57 +308,14 @@ export function ChatPage() {
     toggleNotes();
   };
 
-  // Tabs stack both panes and slide the hidden one aside, toward its tab;
-  // side by side, Notes keeps its width beside the reader.
-  const hideProps = (hide: boolean) =>
-    hide ? { inert: true, "aria-hidden": true as const } : {};
-  const PANE_MOTION =
-    "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none";
-  const LEAVE = "animate-out fade-out-0 duration-200 fill-mode-forwards motion-reduce:animate-none";
-
-  const primaryClass = cn(
-    "h-full min-w-0",
-    primaryLeaving
-      ? cn("absolute inset-y-0 left-0 z-[1] slide-out-to-left-8", LEAVE)
-      : layout === "tabs"
-        ? cn("absolute inset-0", PANE_MOTION, behindTab("reader") && "pointer-events-none -translate-x-3 opacity-0")
-        : "relative flex-1",
-    // Kept through its exit while the panel collapses around it.
-    !primaryPresence.mounted && !memoryOpen && "hidden",
-  );
-  const notesClass = cn(
-    "h-full min-w-0 bg-card",
-    notesLeaving
-      ? cn("absolute inset-y-0 right-0 z-[1] slide-out-to-right-8", LEAVE)
-      : cn(
-          "animate-in fade-in-0 slide-in-from-right-8 duration-200 ease-out motion-reduce:animate-none",
-          layout === "tabs"
-            ? cn("absolute inset-0", PANE_MOTION, behindTab("notes") && "pointer-events-none translate-x-3 opacity-0")
-            : layout === "side"
-              ? "relative shrink-0"
-              : "relative flex-1",
-        ),
-  );
-  const notesStyle = notesLeaving
-    ? { width: sharedLayout === "side" && primaryOpen ? notesWidth : "100%" }
-    : layout === "side"
-      ? { width: notesWidth }
-      : undefined;
-  const primaryStyle = primaryLeaving
-    ? { width: sharedLayout === "side" ? canvasWidth - notesWidth : "100%" }
-    : undefined;
-  const primaryLabel = slidesOpen
-    ? t("notes:pane.slides", "Slides")
-    : t("notes:pane.reader", "Reader");
-
   return (
     <div
       className={cn(
         "grid flex-1 min-h-0",
         // No width transition while dragging the divider, so it tracks the cursor.
-        !dragging && "transition-[grid-template-columns] duration-200",
+        !panel.dragging && "transition-[grid-template-columns] duration-200",
       )}
-      style={{ gridTemplateColumns: `1fr ${rightPanelOpen ? canvasWidth : 0}px` }}
+      style={{ gridTemplateColumns: `1fr ${panel.open ? panel.width : 0}px` }}
     >
       <div className="flex min-h-0 min-w-0 flex-col">
         <ChatThread
@@ -427,174 +342,44 @@ export function ChatPage() {
           actions={<AutoApproveToggle />}
         />
       </div>
-      {/* Right panel — shared slot for the Citation Canvas, Slides, Memory
-          and Notes. Stays mounted (collapsed to 0 width when closed) so
-          kept-alive paper iframes survive open/close cycles without
-          re-rendering. */}
-      <div className="relative min-h-0 overflow-hidden">
-        {rightPanelOpen && (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t("panel.resize")}
-            onPointerDown={onPointerDown}
-            className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40"
-          />
-        )}
-        {/* Disable pointer events while dragging so the cursor can't enter
-            cross-document iframes and swallow window pointermove events. */}
-        <div className={cn("flex h-full flex-col", dragging && "pointer-events-none")}>
-          {/* Reader | Notes tabs while the two share a narrow panel: always
-              mounted, the bar's height opens and closes. */}
-          <div
-            aria-hidden={layout !== "tabs" || undefined}
-            inert={layout !== "tabs" ? true : undefined}
-            className={cn(
-              "grid shrink-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-              layout === "tabs" ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-            )}
-          >
-            <div className="overflow-hidden">
-              <div
-                role="tablist"
-                aria-label={t("notes:pane.tabsLabel", "Right panel")}
-                className="flex gap-1 border-b border-l border-border bg-card px-2 py-1"
-                onKeyDown={(e) => {
-                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-                  e.preventDefault();
-                  const next = activeTab === "reader" ? "notes" : "reader";
-                  setActiveTab(next);
-                  e.currentTarget
-                    .querySelector<HTMLButtonElement>(`[data-pane-tab="${next}"]`)
-                    ?.focus();
-                }}
-              >
-                {(["reader", "notes"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    role="tab"
-                    data-pane-tab={tab}
-                    aria-selected={activeTab === tab}
-                    tabIndex={activeTab === tab ? 0 : -1}
-                    onClick={() => setActiveTab(tab)}
-                    className={cn(
-                      "rounded px-2 py-0.5 text-xs font-medium transition-colors duration-150 motion-reduce:transition-none",
-                      activeTab === tab
-                        ? "bg-foreground/10 text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    {tab === "reader" ? primaryLabel : t("notes:pane.label", "Notes")}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="relative flex min-h-0 flex-1 overflow-hidden">
-            <div
-              className={primaryClass}
-              style={primaryStyle}
-              {...hideProps(primaryLeaving || behindTab("reader"))}
-            >
-              {/* Fix 2: CitationCanvas is ALWAYS mounted (never conditionally
-                  removed) so its fetched-document cache (iframes/PDF state)
-                  stays alive across open/close cycles. Hidden once closed —
-                  after its exit when it leaves alone — so closing Memory with
-                  the canvas closed does NOT reveal it. */}
-              <div
-                className="h-full w-full"
-                hidden={!canvasShown}
-                aria-hidden={!canvasOpen || undefined}
-                {...(!canvasOpen ? { inert: true } : {})}
-              >
-                <PanelLoadBoundary onRetry={CitationCanvas.reset}>
-                  <Suspense fallback={null}>
-                    <CitationCanvas />
-                  </Suspense>
-                </PanelLoadBoundary>
-              </div>
-
-              {/* Memory Manager: absolutely overlays the Citation Canvas inside
-                  the right-panel column when memoryOpen is true. With no backend
-                  session yet (empty chat) it shows global (user) memories only;
-                  project (session) memory needs at least one sent message. */}
-              {memoryOpen && (
-                <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
-                  <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
-                    {t("panel.memory")}
-                  </div>
-                  <div className="flex-1 overflow-y-auto">
-                    <PanelLoadBoundary onRetry={MemoryManager.reset}>
-                      <Suspense fallback={null}>
-                        <MemoryManager sessionId={backendSessionId} />
-                      </Suspense>
-                    </PanelLoadBoundary>
-                  </div>
-                </div>
-              )}
-
-              {/* Slides panel: absolutely overlays the right-panel column. Kept
-                  MOUNTED once opened (hidden when closed) so its parsed +
-                  rasterized PDF survives a swap to the Canvas and back — no
-                  refetch, no re-render, no "loading" flash. Only mounts when a
-                  backend session exists (a deck is session-scoped). */}
-              {slidesMounted && backendSessionId !== null && (
-                <div
-                  className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden"
-                  hidden={!slidesShown}
-                  aria-hidden={!slidesOpen || undefined}
-                  {...(!slidesOpen ? { inert: true } : {})}
-                >
-                  <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
-                    {t("panel.slides")}
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <PanelLoadBoundary onRetry={SlidesPanel.reset}>
-                      <Suspense fallback={null}>
-                        <SlidesPanel
-                          sessionId={backendSessionId}
-                          speakerNotes={speakerNotes}
-                          busy={deckBusy}
-                          stage={deckStage}
-                          onSaveNote={handleSaveNote}
-                        />
-                      </Suspense>
-                    </PanelLoadBoundary>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Side by side: the divider trades width between the reader and
-                Notes; the panel's left edge sizes only the reader. */}
-            {layout === "side" && !notesLeaving && (
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={t("notes:pane.resize", "Resize Reader and Notes")}
-                onPointerDown={divider.onPointerDown}
-                className="relative z-10 w-1.5 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40"
-              />
-            )}
-
-            {notesPresence.mounted && (
-              <div
-                className={cn(notesClass, layout !== "side" && "border-l border-border")}
-                style={notesStyle}
-                {...hideProps(notesLeaving || behindTab("notes"))}
-              >
-                <PanelLoadBoundary onRetry={NotesPane.reset}>
-                  <Suspense fallback={null}>
-                    <NotesPane onClose={closeNotes} />
-                  </Suspense>
-                </PanelLoadBoundary>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* Right panel — shared slot for the reader, Slides, Memory and Notes.
+          Stays mounted (collapsed to 0 width when closed) so kept-alive paper
+          iframes survive open/close cycles without re-rendering. */}
+      <RightPanel
+        panel={panel}
+        resizeLabel={t("panel.resize")}
+        memoryLabel={t("panel.memory")}
+        slidesLabel={t("panel.slides")}
+        reader={
+          <PanelLoadBoundary onRetry={CitationCanvas.reset}>
+            <Suspense fallback={null}>
+              <CitationCanvas />
+            </Suspense>
+          </PanelLoadBoundary>
+        }
+        memory={
+          <PanelLoadBoundary onRetry={MemoryManager.reset}>
+            <Suspense fallback={null}>
+              <MemoryManager sessionId={backendSessionId} />
+            </Suspense>
+          </PanelLoadBoundary>
+        }
+        slides={
+          slidesMounted && backendSessionId !== null ? (
+            <PanelLoadBoundary onRetry={SlidesPanel.reset}>
+              <Suspense fallback={null}>
+                <SlidesPanel
+                  sessionId={backendSessionId}
+                  speakerNotes={speakerNotes}
+                  busy={deckBusy}
+                  stage={deckStage}
+                  onSaveNote={handleSaveNote}
+                />
+              </Suspense>
+            </PanelLoadBoundary>
+          ) : null
+        }
+      />
     </div>
   );
 }
