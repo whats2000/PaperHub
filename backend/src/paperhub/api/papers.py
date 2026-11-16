@@ -3,8 +3,10 @@ gestures; the Research Agent uses research_tools dispatchers instead."""
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import logging
 import mimetypes
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -13,7 +15,7 @@ from pathlib import Path
 import aiosqlite
 import pymupdf
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, model_validator
 
 from paperhub.agents.research_tools import (
@@ -709,6 +711,76 @@ def _page_rect(pdf: Path, page: int) -> tuple[float, float] | None:
             return None
         r = doc[page - 1].rect
         return float(r.width), float(r.height)
+
+
+_CROP_MAX_SIDE = 1600  # px, the longest side of a page-crop PNG
+
+
+def _crop_png(pdf: Path, page: int, box: tuple[float, float, float, float]) -> bytes | None:
+    """PNG of ``box`` (page fractions) at 2x, scaled down to <= 1600 px."""
+    with pymupdf.open(pdf) as doc:  # type: ignore[no-untyped-call]
+        if not 0 <= page < doc.page_count:
+            return None
+        pg = doc[page]
+        w, h = float(pg.rect.width), float(pg.rect.height)
+        clip = pymupdf.Rect(box[0] * w, box[1] * h, box[2] * w, box[3] * h)  # type: ignore[no-untyped-call]
+        scale = min(2.0, _CROP_MAX_SIDE / max(clip.width * 1.0, clip.height * 1.0))
+        pix = pg.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip)  # type: ignore[no-untyped-call]
+        return bytes(pix.tobytes("png"))
+
+
+@router.get("/content/{paper_content_id}/page-crop")
+async def page_crop(paper_content_id: int, page: int, x0: float, y0: float,
+                    x1: float, y1: float) -> Response:
+    """A region of a page (fractions, 0-based page) as a PNG, for a region mark."""
+    if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+        raise HTTPException(400, "box must be fractions with x0<x1, y0<y1 in 0-1")
+    pdf = page_pdf_path(await _cache_dir(paper_content_id))
+    if pdf is None:
+        raise HTTPException(404, f"paper_content {paper_content_id} has no page PDF")
+    png = await asyncio.to_thread(_crop_png, pdf, page, (x0, y0, x1, y1))
+    if png is None:
+        raise HTTPException(404, f"page {page} is not in the page PDF")
+    return Response(png, media_type="image/png")
+
+
+class PageBlock(BaseModel):
+    block_id: str
+    type: str
+    page: int                  # 0-based
+    box: list[float]           # page fractions x0,y0,x1,y1
+    text: str
+
+
+@router.get("/content/{paper_content_id}/blocks")
+async def page_blocks(paper_content_id: int, page: int) -> list[PageBlock]:
+    """The reading blocks of one page (from ``blocks.json``), boxes as page
+    fractions, for picking a region mark. Empty when the paper has none."""
+    cache = await _cache_dir(paper_content_id)
+    got = read_block_assets(cache)
+    if got is None:
+        return []
+    on_page = [b for b in got[0] if b.page == page]
+    pdf = page_pdf_path(cache)
+    size = await asyncio.to_thread(_page_rect, pdf, page + 1) if pdf else None
+    if not on_page or size is None:
+        return []
+    w, h = size
+    out: list[PageBlock] = []
+    for b in on_page:
+        x0, y0, x1, y1 = b.bbox
+        if x1 <= x0 or y1 <= y0:
+            continue  # no geometry
+        out.append(PageBlock(
+            block_id=b.block_id, type=b.block_type, page=b.page,
+            box=[max(0.0, x0 / w), max(0.0, y0 / h),
+                 min(1.0, x1 / w), min(1.0, y1 / h)],
+            text=_plain_text(b.html)))
+    return out
+
+
+def _plain_text(html: str) -> str:
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", "", html)).split())
 
 
 @router.get("/content/{paper_content_id}/figures/{figure_id}/image")

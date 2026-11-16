@@ -1,0 +1,156 @@
+"""Notes REST surface (Plan H5b.1): a note per paper / chat / idea, edited by
+block ops. Conflicts of an edit are reported in ``rejected`` (never a 409);
+only a second Apply again of one change set is a 409."""
+from __future__ import annotations
+
+import json
+from typing import Any, Literal
+
+import aiosqlite
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
+from paperhub.config import load_settings
+from paperhub.db.connection import open_db
+from paperhub.notes import ops as note_ops
+from paperhub.notes.models import Block, Note
+from paperhub.notes.ops import ApplyResult, Op
+from paperhub.notes.papers import paper_note
+from paperhub.notes.store import get_note, get_or_create_note, list_blocks
+
+router = APIRouter(prefix="/notes", tags=["notes"])
+
+
+class NoteWithBlocks(BaseModel):
+    note: Note
+    blocks: list[Block]
+
+
+class NoteDetail(NoteWithBlocks):
+    suggestions: list[dict[str, Any]]
+    comments: list[dict[str, Any]]
+
+
+class OpsBody(BaseModel):
+    base_revision: int
+    ops: list[Op]
+
+
+class RestoreBody(BaseModel):
+    block_ids: list[str]
+
+
+class SuggestionBody(BaseModel):
+    accept: bool
+
+
+async def _title_for(conn: aiosqlite.Connection, kind: str, target: int) -> str:
+    sql = {
+        "session": "SELECT title FROM chat_sessions WHERE id = ? AND internal = 0",
+        "idea": "SELECT title FROM ideas WHERE id = ?",
+    }[kind]
+    async with conn.execute(sql, (target,)) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(404, f"{kind} {target} not found")
+    return str(row[0])
+
+
+@router.get("/target", response_model=NoteWithBlocks)
+async def note_for_target(
+    kind: Literal["paper", "session", "idea"], id: int = Query(),
+) -> NoteWithBlocks:
+    """The note of a paper / chat / idea, created on first use."""
+    async with open_db(load_settings().db_path) as conn:
+        if kind == "paper":
+            try:
+                note = await paper_note(conn, id)
+            except LookupError as exc:
+                raise HTTPException(404, str(exc)) from exc
+        else:
+            title = await _title_for(conn, kind, id)
+            note = await get_or_create_note(
+                conn, target_kind=kind, target_id=str(id), title=title,
+                session_id=id if kind == "session" else None)
+        return NoteWithBlocks(note=note, blocks=await list_blocks(conn, note.id))
+
+
+@router.get("/{note_id}", response_model=NoteDetail)
+async def note_detail(note_id: int) -> NoteDetail:
+    async with open_db(load_settings().db_path) as conn:
+        note = await get_note(conn, note_id)
+        if note is None:
+            raise HTTPException(404, f"note {note_id} not found")
+        async with conn.execute(
+            "SELECT id, block_id, change_set_id, kind, proposed_json, status, "
+            "created_at FROM note_suggestions WHERE note_id = ? "
+            "AND status = 'open' ORDER BY created_at, rowid", (note_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        suggestions = [
+            {"id": r[0], "block_id": r[1], "change_set_id": r[2], "kind": r[3],
+             "proposed": json.loads(r[4]) if r[4] else None, "status": r[5],
+             "created_at": r[6]} for r in rows]
+        # Block comments arrive with a later task; the key is part of the contract.
+        return NoteDetail(note=note, blocks=await list_blocks(conn, note_id),
+                          suggestions=suggestions, comments=[])
+
+
+@router.post("/{note_id}/ops", response_model=ApplyResult)
+async def apply_note_ops(note_id: int, body: OpsBody) -> ApplyResult:
+    async with open_db(load_settings().db_path) as conn:
+        if await get_note(conn, note_id) is None:
+            raise HTTPException(404, f"note {note_id} not found")
+        try:
+            return await note_ops.apply_ops(
+                conn, note_id, base_revision=body.base_revision, ops=body.ops,
+                actor="user")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/{note_id}/restore", response_model=ApplyResult)
+async def restore_note_blocks(note_id: int, body: RestoreBody) -> ApplyResult:
+    async with open_db(load_settings().db_path) as conn:
+        if await get_note(conn, note_id) is None:
+            raise HTTPException(404, f"note {note_id} not found")
+        try:
+            return await note_ops.restore_blocks(
+                conn, note_id, body.block_ids, actor="user")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/suggestions/{suggestion_id}", response_model=ApplyResult)
+async def decide_suggestion(suggestion_id: str,
+                            body: SuggestionBody) -> ApplyResult:
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            return await note_ops.resolve_suggestion(
+                conn, suggestion_id, body.accept)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/change-sets/{change_set_id}/undo", response_model=ApplyResult)
+async def undo_change_set(change_set_id: str) -> ApplyResult:
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            return await note_ops.undo_change_set(conn, change_set_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/change-sets/{change_set_id}/reapply", response_model=ApplyResult)
+async def reapply_change_set(change_set_id: str) -> ApplyResult:
+    async with open_db(load_settings().db_path) as conn:
+        try:
+            return await note_ops.reapply_change_set(conn, change_set_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc

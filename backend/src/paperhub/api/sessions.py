@@ -659,6 +659,12 @@ async def delete_session(session_id: int) -> None:
                 "WHERE id = ? AND deleted_at IS NULL",
                 (session_id,),
             )
+            # The chat's note goes with it (Undo restores it; purge cascades).
+            await conn.execute(
+                "UPDATE notes SET deleted_at = datetime('now') WHERE "
+                "target_kind = 'session' AND target_id = ? "
+                "AND deleted_at IS NULL", (str(session_id),),
+            )
         else:
             await conn.execute(
                 "DELETE FROM chat_sessions WHERE id = ?", (session_id,),
@@ -684,6 +690,10 @@ async def restore_session(session_id: int) -> None:
         )
         if cur.rowcount == 0:
             raise HTTPException(404, f"chat_sessions row {session_id} not found")
+        await conn.execute(
+            "UPDATE notes SET deleted_at = NULL WHERE "
+            "target_kind = 'session' AND target_id = ?", (str(session_id),),
+        )
         await conn.commit()
 
 

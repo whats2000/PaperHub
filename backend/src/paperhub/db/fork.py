@@ -4,7 +4,9 @@
 user message: it copies every message STRICTLY BEFORE that message (remapping
 each turn's ``run_id`` to a fresh ``runs`` row carrying the per-turn replay
 data), the session's ``papers`` membership rows (same shared ``paper_content``),
-the active session-scoped ``memories``, and the ``slide_style_overrides`` row.
+the active session-scoped ``memories``, the ``slide_style_overrides`` row, and
+the chat's note (live blocks copied with new ids, authors kept, one
+``forked`` revision; paper notes are shared, not copied).
 The forked message itself + everything after it are NOT copied — the message
 text is returned for the composer prefill. The dev-only ``tool_calls`` trace is
 NOT copied (observability, not user history).
@@ -19,11 +21,13 @@ import asyncio
 import logging
 import shutil
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
 
 from paperhub.db.connection import write_transaction
+from paperhub.notes.store import new_block_id
 
 _LOG = logging.getLogger(__name__)
 
@@ -55,6 +59,46 @@ async def _forked_message(
             f"no user message for run_id={fork_run_id} in session {source_session_id}"
         )
     return int(row[0]), str(row[1])
+
+
+async def _copy_session_note(
+    conn: aiosqlite.Connection, source_sid: int, new_sid: int, title: str,
+) -> None:
+    """Give the fork its own copy of the source chat's live note, if any."""
+    async with conn.execute(
+        "SELECT id FROM notes WHERE owner_id = 1 AND target_kind = 'session' "
+        "AND target_id = ? AND deleted_at IS NULL", (str(source_sid),),
+    ) as cur:
+        src = await cur.fetchone()
+    if src is None:
+        return
+    now = datetime.now(UTC).isoformat()
+    cur = await conn.execute(
+        "INSERT INTO notes (target_kind, target_id, session_id, title, "
+        "revision, created_at, updated_at) VALUES ('session', ?, ?, ?, 1, ?, ?)",
+        (str(new_sid), new_sid, title, now, now),
+    )
+    note_id = cur.lastrowid
+    async with conn.execute(
+        "SELECT id, parent_id, order_key, type, payload_json, text, author, "
+        "section_key FROM note_blocks WHERE note_id = ? AND deleted_at IS NULL",
+        (int(src[0]),),
+    ) as bcur:
+        rows = await bcur.fetchall()
+    new_ids = {r[0]: new_block_id() for r in rows}
+    for r in rows:
+        await conn.execute(
+            "INSERT INTO note_blocks (id, note_id, parent_id, order_key, type, "
+            "payload_json, text, author, section_key, changed_rev, changed_by, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'system', ?, ?)",
+            (new_ids[r[0]], note_id, new_ids.get(r[1]), r[2], r[3], r[4], r[5],
+             r[6], r[7], now, now),
+        )
+    await conn.execute(
+        "INSERT INTO note_revisions (note_id, revision, actor, summary, "
+        "created_at) VALUES (?, 1, 'system', 'forked', ?)", (note_id, now),
+    )
 
 
 async def fork_session(
@@ -156,6 +200,8 @@ async def fork_session(
             "SELECT idea_id, ? FROM idea_sessions WHERE session_id = ?",
             (new_sid, source_session_id),
         )
+
+        await _copy_session_note(conn, source_session_id, new_sid, new_title)
 
         # slide_style_overrides (per-session deck style) — at most one row.
         await conn.execute(
