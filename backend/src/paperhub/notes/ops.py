@@ -868,3 +868,80 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
             "UPDATE note_suggestions SET status = ? WHERE id = ?",
             (new_status, suggestion_id))
         return result
+
+
+_STRUCTURAL = frozenset({"section", "divider"})
+
+
+def _state_text(state: dict[str, Any] | None) -> str:
+    if not state:
+        return ""
+    return block_text(str(state.get("type") or ""), state.get("props") or {},
+                      state.get("content"))
+
+
+async def change_set_detail(conn: aiosqlite.Connection,
+                            change_set_id: str) -> dict[str, Any]:
+    """A change set as the chat card shows it.
+
+    ``head`` is the set live now: Apply again makes a new set, so the chain
+    of ``reapplied_by`` is followed to its end. ``changes`` lists what the
+    set did (blocks added, updated, deleted; sections and dividers left
+    out) and its suggestions with the block's text now and the proposal,
+    one per block, from whichever set of the chain holds it now.
+    """
+    cs = await _load_change_set(conn, change_set_id)
+    chain = [change_set_id]
+    head = cs
+    while head["outcome"].get("reapplied_by"):
+        nxt = str(head["outcome"]["reapplied_by"])
+        if nxt in chain:  # never loop on a bad row
+            break
+        chain.append(nxt)
+        head = await _load_change_set(conn, nxt)
+    note = await get_note(conn, cs["note_id"])
+    assert note is not None
+    changes: list[dict[str, Any]] = []
+    async with conn.execute(
+        "SELECT block_id, op, before_json, after_json FROM note_block_history "
+        "WHERE note_id = ? AND revision = ? ORDER BY id",
+        (cs["note_id"], cs["result_revision"]),
+    ) as cur:
+        rows = await cur.fetchall()
+    kinds = {"insert": "added", "update": "updated", "delete": "deleted"}
+    for block_id, op, before_json, after_json in rows:
+        if op not in kinds:
+            continue
+        before = json.loads(before_json) if before_json else None
+        after = json.loads(after_json) if after_json else None
+        shown = after if op != "delete" else before
+        if shown is None or shown.get("type") in _STRUCTURAL:
+            continue
+        item: dict[str, Any] = {"kind": kinds[op], "block_id": block_id,
+                                "text": _state_text(shown)}
+        if op == "update":
+            item["before"] = _state_text(before)
+        changes.append(item)
+    marks = ",".join("?" for _ in chain)
+    async with conn.execute(
+        "SELECT s.block_id, s.kind, s.proposed_json, s.status, b.text "  # noqa: S608
+        "FROM note_suggestions s LEFT JOIN note_blocks b ON b.id = s.block_id "
+        f"WHERE s.change_set_id IN ({marks}) ORDER BY s.created_at, s.rowid",
+        chain,
+    ) as cur:
+        sug_rows = await cur.fetchall()
+    latest: dict[str, dict[str, Any]] = {}
+    for block_id, kind, proposed, status, now_text in sug_rows:
+        latest[block_id] = {
+            "kind": "suggested", "block_id": block_id, "op": kind,
+            "before": now_text or "",
+            "text": _state_text(json.loads(proposed)) if proposed else "",
+            "status": status}
+    changes.extend(latest.values())
+    return {"id": change_set_id, "note_id": cs["note_id"],
+            "status": cs["status"],
+            "reapplied_by": cs["outcome"].get("reapplied_by"),
+            "head": {"id": chain[-1], "status": head["status"]},
+            "note": {"target_kind": note.target_kind,
+                     "target_id": note.target_id, "title": note.title},
+            "changes": changes}

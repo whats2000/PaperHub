@@ -125,14 +125,54 @@ async def test_change_set_status_endpoint(client: AsyncClient) -> None:
     cs = (await client.post(f"/notes/{nid}/ops", json={
         "base_revision": 0, "ops": [_INSERT]})).json()["change_set_id"]
     got = (await client.get(f"/notes/change-sets/{cs}")).json()
-    assert got == {"id": cs, "note_id": nid, "status": "applied",
-                   "reapplied_by": None}
+    assert {k: got[k] for k in ("id", "note_id", "status", "reapplied_by")} == {
+        "id": cs, "note_id": nid, "status": "applied", "reapplied_by": None}
+    assert got["head"] == {"id": cs, "status": "applied"}
     await client.post(f"/notes/change-sets/{cs}/undo")
-    assert (await client.get(f"/notes/change-sets/{cs}")).json()["status"] == "undone"
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    assert got["status"] == "undone" and got["head"] == {"id": cs, "status": "undone"}
     again = (await client.post(f"/notes/change-sets/{cs}/reapply")).json()
     got = (await client.get(f"/notes/change-sets/{cs}")).json()
     assert got["reapplied_by"] == again["change_set_id"]
+    # The card follows Apply again to the set that is live now.
+    assert got["head"] == {"id": again["change_set_id"], "status": "applied"}
+    await client.post(f"/notes/change-sets/{again['change_set_id']}/undo")
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    assert got["head"] == {"id": again["change_set_id"], "status": "undone"}
     assert (await client.get("/notes/change-sets/nope")).status_code == 404
+
+
+async def test_change_set_detail_lists_the_changes(
+        client: AsyncClient, tmp_path: Path) -> None:
+    """What the chat card's Details shows: blocks added (no sections or
+    dividers), and each suggestion with the user's text and the proposal."""
+    nid = await _session_note(client)
+    mine = (await client.post(f"/notes/{nid}/ops", json={
+        "base_revision": 0, "ops": [_INSERT]})).json()["applied"][0]
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        res = await apply_ops(conn, nid, base_revision=1, actor="agent", ops=[
+            Op(op="insert", block=BlockIn(type="divider", props={})),
+            Op(op="insert", block=BlockIn(
+                type="paragraph", content=[{"type": "text", "text": "added"}])),
+            Op(op="update", block_id=mine, block=BlockIn(
+                type="paragraph", content=[{"type": "text", "text": "hello there"}]))])
+    cs = res.change_set_id
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    assert got["note"] == {"target_kind": "session", "target_id": "1",
+                           "title": "Chat"}
+    added = [c for c in got["changes"] if c["kind"] == "added"]
+    assert [c["text"] for c in added] == ["added"]
+    sug = [c for c in got["changes"] if c["kind"] == "suggested"]
+    assert sug == [{"kind": "suggested", "block_id": mine, "op": "update",
+                    "before": "hello", "text": "hello there",
+                    "status": "open"}]
+    # After Undo and Apply again the suggestion lives under the new set and
+    # is still listed once.
+    await client.post(f"/notes/change-sets/{cs}/undo")
+    await client.post(f"/notes/change-sets/{cs}/reapply")
+    got = (await client.get(f"/notes/change-sets/{cs}")).json()
+    sug = [c for c in got["changes"] if c["kind"] == "suggested"]
+    assert [(c["block_id"], c["status"]) for c in sug] == [(mine, "open")]
 
 
 async def test_ops_endpoint_replays_a_repeated_burst_key(client: AsyncClient) -> None:
