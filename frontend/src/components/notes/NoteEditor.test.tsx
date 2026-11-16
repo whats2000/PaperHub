@@ -613,6 +613,46 @@ describe("comments in the editor", () => {
     expect(await screen.findByText("back again")).toBeInTheDocument();
   });
 
+  it("Undo after Resolve puts the underline back on the same occurrence of a repeated quote", async () => {
+    const thread = {
+      id: "c_2", note_id: 7, block_id: "p1", quote: "foo", status: "open" as const,
+      created_at: "2026-11-16T10:00:00Z", items: [{ id: 1, text: "this one", created_at: "2026-11-16T10:00:00Z" }],
+    };
+    server.use(
+      http.patch(`${API_BASE_URL}/notes/comments/c_2`, async ({ request }) => {
+        const { status } = (await request.json()) as { status: string };
+        return HttpResponse.json({ ...thread, status });
+      }),
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json({ note_id: 7, revision: 5, change_set_id: "cs_5", applied: ["p1"], suggested: [], rejected: [], reparented: [] }),
+      ),
+    );
+    const content = [
+      { type: "text", text: "foo and ", styles: {} },
+      { type: "text", text: "foo", styles: { comment: "c_2" } },
+    ];
+    seed([blk("p1", { content, text: "foo and foo" })]);
+    useNotesStore.setState((st) => ({ notes: { ...st.notes, 7: { ...st.notes[7]!, comments: [thread] } } }));
+    mount();
+    const words = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('.note-comment[data-comment-id="c_2"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(words);
+    fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
+    await waitFor(() => expect(document.querySelector('.note-comment[data-comment-id="c_2"]')).toBeNull());
+    const [, opts] = toastFn.mock.calls.at(-1) as [string, { action: { onClick: () => void } }];
+    act(() => opts.action.onClick());
+    await waitFor(() => {
+      const runs = useNotesStore.getState().notes[7]!.blocks[0]!.content as { text: string; styles: Record<string, unknown> }[];
+      expect(runs.map((r) => [r.text, r.styles.comment ?? null])).toEqual([
+        ["foo and ", null],
+        ["foo", "c_2"],
+      ]);
+    });
+  });
+
   it("Ctrl+Shift+M with nothing selected does nothing", async () => {
     seed([blk("p1", { content: [{ type: "text", text: "Mine words", styles: {} }], text: "Mine words" })]);
     mount();

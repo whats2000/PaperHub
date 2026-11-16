@@ -128,6 +128,22 @@ export function applyCommentStyle(
   return found;
 }
 
+/** Where comment `id`'s words start in the document now (undefined when no
+ * text carries it): the hint that puts it back on the same occurrence of a
+ * repeated quote. */
+export function commentAnchor(editor: Ed, id: string): number | undefined {
+  let at: number | undefined;
+  editor._tiptapEditor.view.state.doc.descendants((node, pos) => {
+    if (at !== undefined) return false;
+    if (node.isText && node.marks.some((m) => m.type.name === "comment" && m.attrs.stringValue === id)) {
+      at = pos;
+      return false;
+    }
+    return true;
+  });
+  return at;
+}
+
 // ---- the controller --------------------------------------------------------------
 
 interface Draft {
@@ -237,11 +253,17 @@ export function useNoteComments(editor: Ed, noteId: number) {
     const id = shown.id;
     const blockId = thread?.block_id ?? "";
     const quote = thread?.quote ?? "";
+    // Where its words were, so Undo marks the same occurrence of a quote
+    // that appears more than once.
+    let near: number | undefined;
     close();
     runThreadAction({
       kind,
-      strip: () => stripCommentStyle(editor, id),
-      restore: () => void applyCommentStyle(editor, id, blockId, quote),
+      strip: () => {
+        near = commentAnchor(editor, id) ?? near;
+        stripCommentStyle(editor, id);
+      },
+      restore: () => void applyCommentStyle(editor, id, blockId, quote, near),
       setStatus: (status) => setCommentStatus(noteId, id, status),
       t: (k, en) => t(k, en),
     });
