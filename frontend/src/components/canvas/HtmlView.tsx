@@ -55,6 +55,25 @@ interface Props {
   /** Plan H1 bilingual reading: show a translation under each paragraph.
    *  Omitted or `enabled: false` keeps the overlay fully inert. */
   translation?: HtmlTranslationProps;
+  /** The heading of the section being read, reported after each scroll
+   * settles (Follow in the notes). */
+  onReadingHeading?: (heading: string | null) => void;
+}
+
+/** How long the reader rests before the section being read is reported. */
+const READING_SETTLE_MS = 150;
+
+/** The heading of the section at the top third of the view: the last heading
+ * above that line, else null (still before the first one). */
+function readingHeading(doc: Document): string | null {
+  const line = (doc.defaultView?.innerHeight ?? 0) / 3;
+  let found: string | null = null;
+  for (const h of Array.from(doc.querySelectorAll("h1,h2,h3,h4"))) {
+    if (h.getBoundingClientRect().top > line) break;
+    const text = (h.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text) found = text;
+  }
+  return found;
 }
 
 export interface HtmlTranslationProps {
@@ -97,6 +116,7 @@ export function HtmlView({
   scrollBehavior = "smooth",
   onImageActivate,
   translation,
+  onReadingHeading,
 }: Props) {
   const { t } = useTranslation("canvas");
   const ref = useRef<HTMLIFrameElement>(null);
@@ -293,6 +313,29 @@ export function HtmlView({
       onStatusRef.current?.({ failed: 0, paused: false });
     };
   }, [trEnabled, trLanguage, trPaperId, trFullPaper, loaded, html, t]);
+
+  // The section being read: reported on load and after each scroll settles.
+  const onReadingRef = useRef(onReadingHeading);
+  useEffect(() => {
+    onReadingRef.current = onReadingHeading;
+  }, [onReadingHeading]);
+  const following = onReadingHeading !== undefined;
+  useEffect(() => {
+    if (!following || !loaded || loaded.html !== html) return;
+    const win = loaded.doc.defaultView;
+    if (!win) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const report = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => onReadingRef.current?.(readingHeading(loaded.doc)), READING_SETTLE_MS);
+    };
+    report();
+    win.addEventListener("scroll", report, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      win.removeEventListener("scroll", report);
+    };
+  }, [following, loaded, html]);
 
   // A bump (never the initial value) re-translates the stale visible blocks.
   const seenRetranslate = useRef(trRetranslate);

@@ -55,6 +55,9 @@ interface CanvasState {
    *  displayed-paper state) so other UI — the References panel — can mark which
    *  paper is live. Ephemeral (not persisted). */
   activePaperId: number | null;
+  /** The section heading the reader is at, per the reader's scroll (HTML
+   *  papers); the notes pane's Follow scrolls the note to it. Ephemeral. */
+  readingSection: ReadingSection | null;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number, endChunkId?: number) => void;
@@ -75,10 +78,17 @@ interface CanvasState {
   /** Set by CitationCanvas to publish the paper it is currently showing (null
    *  when closed/empty), so the References panel can highlight the active row. */
   setActivePaperId: (paperContentId: number | null) => void;
+  /** Published by the reader as it scrolls (null heading: before the first). */
+  setReadingSection: (paperContentId: number, heading: string | null) => void;
   /** References button: open in browse mode if closed, else close. */
   toggleCanvas: () => void;
   closeCanvas: () => void;
   setWidth: (width: number) => void;
+}
+
+export interface ReadingSection {
+  paperId: number;
+  heading: string;
 }
 
 export const useCanvasStore = create<CanvasState>()(
@@ -94,6 +104,7 @@ export const useCanvasStore = create<CanvasState>()(
       requestedPaperId: null,
       paperRequestNonce: 0,
       activePaperId: null,
+      readingSection: null,
       width: CANVAS_DEFAULT_WIDTH,
       openCitation: (chunkId, endChunkId) =>
         set((s) => ({
@@ -142,6 +153,12 @@ export const useCanvasStore = create<CanvasState>()(
       consumePaperRequest: () => set({ requestedPaperId: null }),
       setActivePaperId: (paperContentId) =>
         set({ activePaperId: paperContentId }),
+      setReadingSection: (paperId, heading) =>
+        set((s) => {
+          const cur = s.readingSection;
+          if (heading === null) return cur?.paperId === paperId ? { readingSection: null } : {};
+          return cur?.paperId === paperId && cur.heading === heading ? {} : { readingSection: { paperId, heading } };
+        }),
       toggleCanvas: () => set((s) => ({ open: !s.open })),
       closeCanvas: () => set({ open: false }),
       setWidth: (width) => set({ width }),

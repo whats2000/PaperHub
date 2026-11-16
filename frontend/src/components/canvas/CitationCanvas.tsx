@@ -117,6 +117,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const consumeCitation = useCanvasStore((s) => s.consumeCitation);
   const closeCanvas = useCanvasStore((s) => s.closeCanvas);
   const setActivePaperId = useCanvasStore((s) => s.setActivePaperId);
+  const setReadingSection = useCanvasStore((s) => s.setReadingSection);
 
   // Derive the active session's enabled references (mirror ReferenceSourcesPanel)
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -914,6 +915,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
+                onReadingHeading={isActive ? (h) => setReadingSection(pid, h) : undefined}
                 scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
                   isActive &&
