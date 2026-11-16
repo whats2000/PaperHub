@@ -348,3 +348,63 @@ sometimes says a section heading is "new" when it existed (the result
 does not say which). Every `apply_ops` call bumps the note revision, even
 when all its ops were rejected (seen as revisions 1–4 with nothing applied
 in v16's failed n4 run).
+
+### Fix round 1: v19 / v20 (deploy `core_agent_v9`, replacing v18)
+
+Review findings: examples 9 and 10 did not use `edit_note`'s real call
+shape; the Find step repeated `PAGE_BLOCKS` ("≤ 40 blocks") and promised one
+read; LaTeX was stored with doubled backslashes. Tool descriptions for
+every arm below: D4 = D3 + "math is LaTeX as typed, with single
+backslashes ($\alpha$)" (shipped), with `edit_note` now also marking
+unread citations in the blocks it writes and reporting `created` per
+section placement. The notes seed is now in the repo:
+`benchmark/agent/corpus/core_agent_notes_seed.py --workspace <copy>`
+(re-run on a fresh copy of the live DB: identical block counts and sizes).
+
+| ver | change |
+|---|---|
+| v19 | v18 with examples 9 and 10 as real calls (`ops` list, `under_heading` inside the insert, `base_revision`), example 9 without the `list_notes` call, and the Find step worded by `read_note` pages |
+| v20 | v19 with the Find step led by search: "`search_notes` (or the outline), then `read_note` from the block or heading found. Read a note from its start only when the whole note is asked for; a next page only if the result offers one" |
+
+| case (D4) | v18 | v19 | v20 |
+|---|---|---|---|
+| n1, every summary claim cited | 5/5 | 5/5 | 5/5 |
+| n1, one block per bullet | 3/5 (two runs wrote a Markdown list into one block) | 5/5 | 5/5 |
+| n1, `\alpha` stored doubled (runs that wrote α) | 1/2 | 0/3 | 1/3 |
+| n3, long note: read page 1 blindly | 0/3 | **2/4** | 0/4 |
+| n2, n4–n7, r1, r3, r4 | (round 1) | pass [1 each] | pass [1 each] |
+
+LaTeX doubling: 3/3 of the α-writing n1 runs under D2/D3, 2/8 under D4 —
+reduced, not gone (no server-side unescaping by ruling: `\` is valid
+LaTeX). v19's page-worded Find step made the agent read the long note's
+first page in parallel with the search; v20 removed that. **v20 replaces
+v18 as `core_agent_v9`** (the slot had not been released).
+
+#### Regression: the 10 non-mutating `cases.h4-scenarios.toml` cases
+
+The branch backend booted on the seeded workspace copy at :8110 with the
+in-process MCP servers (`papers`, `sql`, `memory` — so `query_library`
+really runs; `web` left out), `benchmark.runner --judge` (judge
+`gemini/gemini-2.5-pro`), agent `gemini/gemini-pro-latest`; v8 run on the
+same copy and code by switching the slot locally (not committed). Same
+D4 tool descriptions for both. First rep per case, judge / hand:
+
+| case | v16 = v8 (H4 run, 2026-11-09) | v8 (this setup) | v9 = v20 |
+|---|---|---|---|
+| gd-chat-01-thanks | 1 | 1 | 1 |
+| gd-chat-02-capabilities | 1 | 1 | judge 0 / **hand 1**: it named "read and update your notes", a real tool now; the rubric predates H3 / H5b |
+| gd-lib-01-total | 0 (no tool call) | judge 0 / **hand 1**: identical answer to v9's, the judge wanted citations for a count | 1 |
+| s1-01-run892 | 1 | 1 | 1 |
+| s1-02-remoe-sparsity | 1 | 1 | 1 |
+| s2-02-jepa-table | 1 | 0 (cells `[unsourced:not_read]`) | 1 |
+| s3-01-genomics-evidence | 1 | 1 | 1 |
+| s4-02-ddpm-livecell-plan | 1 | 1 (reps: 2/3) | **0 (reps: 0/3)** |
+| s6-02-yoloseg-checklist | 1 | 0 (training hardware not flagged) | 1 |
+| s7-02-livecell-claim | 1 | 0 (pre-training not found) | 0 (reps: 1/2) |
+| total (hand) | 9/10 | 7/10 | 8/10 |
+
+s4-02 is v9's one weak case: two runs cited chunks they had only seen as
+search snippets (`read: []`, 4–5 ids marked `[unsourced:not_read]`), one
+attributed an anchor-free setting to the anchor-based model. The same
+failure occurs under v8 on this copy (s4-02 rep 2: 3 unread ids; s2-02),
+so it is not a notes rule, but v9 hit it 3 times out of 3 here: left open.
