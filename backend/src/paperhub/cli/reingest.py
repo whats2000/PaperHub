@@ -27,6 +27,7 @@ import tiktoken
 
 from paperhub.config import load_settings
 from paperhub.db.section_rename import apply_section_renames
+from paperhub.notes.anchors import reanchor_paper
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
 from paperhub.pipelines.extract import extract_latex, extract_pdf_with_headings
 from paperhub.pipelines.mathjax_macros import extract_macros_from_dir
@@ -285,6 +286,11 @@ async def _reingest_one(
         (sections_json, pcid),
     )
     await conn.commit()
+
+    # New chunk ids / offsets: the user's marks follow (lost ones stay flagged).
+    marks = await reanchor_paper(conn, pcid)
+    if any(marks.values()):
+        _LOG.info("pcid=%d: re-anchored note marks: %s", pcid, marks)
 
     return (before, len(chunks))
 

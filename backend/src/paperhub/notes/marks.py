@@ -144,6 +144,10 @@ def _block_props(m: dict[str, Any]) -> dict[str, Any]:
         "quote": " ".join(str(p.get("quote") or "") for p in live).strip(),
         "pieces": live, "source": source,
     }
+    if m["status"] == "lost":
+        props["anchorLost"] = True
+    elif m["status"] == "partly_lost":
+        props["piecesLost"] = sum(1 for p in live if p.get("lost"))
     if m["lang"]:
         props["lang"] = m["lang"]
     if first.get("orig"):

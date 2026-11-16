@@ -295,3 +295,59 @@ def test_rename_cite_lines_merges_sources_renamed_to_one_name() -> None:
     tex = "% cite: 89:frag one; 89:frag two; 12:Intro\n"
     out = rename_cite_lines(tex, 89, {"frag one": "Abstract", "frag two": "Abstract"})
     assert out == "% cite: 89:Abstract; 12:Intro\n"
+
+
+async def _note_with_mark(conn: aiosqlite.Connection, pcid: int, section: str) -> str:
+    from paperhub.notes.marks import MarkIn, create_mark
+
+    m, _ = await create_mark(conn, MarkIn(
+        paper_content_id=pcid, kind="highlight", color="green", view="html",
+        pieces=[{"quote": "x", "chunk_start": 0, "chunk_end": 1,
+                 "prefix": "", "suffix": ""}], section_key=section))
+    return str(m["id"])
+
+
+@pytest.mark.asyncio
+async def test_section_rename_moves_note_heading(
+    conn: aiosqlite.Connection, tmp_path: Path,
+) -> None:
+    from paperhub.notes.papers import paper_note
+    from paperhub.notes.store import list_blocks
+
+    pcid, _ = await _seed_latex_paper(conn, tmp_path)
+    mark_id = await _note_with_mark(conn, pcid, "\\algo{")
+    await _reingest_one(pcid, conn=conn, dry_run=False)
+
+    note = await paper_note(conn, pcid)
+    blocks = await list_blocks(conn, note.id)
+    [heading] = [b for b in blocks if b.type == "section"]
+    assert heading.section_key == "MDLM" and heading.props["title"] == "MDLM"
+    [quote] = [b for b in blocks if b.type == "paperQuote"]
+    assert quote.props["source"]["section"] == "MDLM"
+    async with conn.execute(
+        "SELECT section_key FROM note_marks WHERE id = ?", (mark_id,)
+    ) as cur:
+        assert (await cur.fetchone())[0] == "MDLM"  # type: ignore[index]
+    async with conn.execute(
+        "SELECT changed_by FROM note_blocks WHERE id = ?", (heading.id,)
+    ) as cur:
+        assert (await cur.fetchone())[0] == "system"  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_dropped_section_heading_marked_lost(
+    conn: aiosqlite.Connection, tmp_path: Path,
+) -> None:
+    from paperhub.notes.papers import paper_note
+    from paperhub.notes.store import list_blocks
+
+    pcid, _ = await _seed_latex_paper(conn, tmp_path)
+    await _note_with_mark(conn, pcid, "\\algo{")
+    async with conn.execute("SELECT id FROM chunks WHERE section = '\\algo{'") as cur:
+        ids = [int(r[0]) for r in await cur.fetchall()]
+    await apply_section_renames(conn, pcid, {i: None for i in ids})
+
+    note = await paper_note(conn, pcid)
+    [heading] = [b for b in await list_blocks(conn, note.id) if b.type == "section"]
+    assert heading.section_key == "\\algo{"  # kept: the user's notes live under it
+    assert heading.props["sectionLost"] is True

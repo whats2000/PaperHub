@@ -191,6 +191,7 @@ class RenameReport:
     ideas: int = 0
     deck_slides: int = 0
     deck_tex_files: int = 0
+    note_sections: int = 0
     notes: list[str] = field(default_factory=list)
 
 
@@ -216,6 +217,7 @@ async def apply_section_renames(
         await conn.execute("UPDATE chunks SET section = ? WHERE id = ?", (new, cid))
         rep.chunks += 1
     if not mapping:
+        await _notes_follow(conn, paper_content_id, mapping, rep)
         await conn.commit()
         return rep
 
@@ -264,8 +266,24 @@ async def apply_section_renames(
             rep.ideas += cur2.rowcount
 
     await _rename_decks(conn, paper_content_id, mapping, rep)
+    await _notes_follow(conn, paper_content_id, mapping, rep)
     await conn.commit()
     return rep
+
+
+async def _notes_follow(
+    conn: aiosqlite.Connection, paper_id: int, mapping: Mapping[str, str],
+    rep: RenameReport,
+) -> None:
+    """Move the paper note's headings and marks with the rename; flag headings
+    whose section is gone. The chunk/ideas/deck writes above are committed
+    first so the note ops can run in their own write transaction."""
+    from paperhub.notes.anchors import rename_note_sections  # local: avoid an import cycle
+    from paperhub.notes.papers import tx
+
+    await conn.commit()
+    async with tx(conn):
+        rep.note_sections = await rename_note_sections(conn, paper_id, dict(mapping))
 
 
 def _rename_digest_file(
