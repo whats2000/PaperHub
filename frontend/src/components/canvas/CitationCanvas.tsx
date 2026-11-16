@@ -32,6 +32,7 @@ import {
 } from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
 import { cn } from "@/lib/utils";
+import { truncatedTitle } from "@/lib/truncatedTitle";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -731,7 +732,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                   ? "bg-foreground/10 text-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground")
               }
-              title={r.title}
+              {...truncatedTitle(r.title)}
             >
               {r.title}
             </button>
@@ -762,7 +763,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                           ? "bg-foreground/10 text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground")
                       }
-                      title={r.title}
+                      {...truncatedTitle(r.title)}
                     >
                       {r.title}
                     </button>

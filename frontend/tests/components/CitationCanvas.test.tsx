@@ -157,6 +157,19 @@ describe("CitationCanvas reading panel", () => {
     );
   });
 
+  it("shows a cut-off paper tab title in full on hover, and none when it fits", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().toggleCanvas());
+    const tab = await screen.findByRole("button", { name: "Paper A" });
+    await userEvent.hover(tab);
+    expect(tab).not.toHaveAttribute("title");
+    Object.defineProperty(tab, "scrollWidth", { configurable: true, value: 400 });
+    Object.defineProperty(tab, "clientWidth", { configurable: true, value: 120 });
+    await userEvent.unhover(tab);
+    await userEvent.hover(tab);
+    expect(tab).toHaveAttribute("title", "Paper A");
+  });
+
   it("openPaper switches the active paper (References 'Open in canvas')", async () => {
     const { container } = render(<CitationCanvas />);
     act(() => useCanvasStore.getState().toggleCanvas()); // browse → Paper A default

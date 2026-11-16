@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -320,5 +320,38 @@ describe("Sidebar chats grouped by time", () => {
     });
     render(<Sidebar />);
     expect(screen.getByRole("button", { name: "March 2024" })).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar chat titles", () => {
+  afterEach(() => useChatStore.getState().reset());
+
+  function chatRow(title: string): { button: HTMLElement; label: HTMLElement } {
+    useChatStore.setState({
+      sidebarTab: "chats",
+      sessions: [
+        { id: 1, title, messages: [], backend_session_id: 1, updated_at: new Date().toISOString() },
+      ],
+    });
+    render(<Sidebar />);
+    const label = screen.getByText(title);
+    const button = label.closest("button");
+    if (!button) throw new Error("chat row not found");
+    return { button, label };
+  }
+
+  it("shows a cut-off title in full on hover", () => {
+    const title = "Where does the XR latency drop of 83-89% come from in the predictive teleoperation system?";
+    const { button, label } = chatRow(title);
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 400 });
+    Object.defineProperty(label, "clientWidth", { configurable: true, value: 180 });
+    fireEvent.pointerEnter(button);
+    expect(button).toHaveAttribute("title", title);
+  });
+
+  it("adds no title when the title fits", () => {
+    const { button } = chatRow("Short");
+    fireEvent.pointerEnter(button);
+    expect(button).not.toHaveAttribute("title");
   });
 });

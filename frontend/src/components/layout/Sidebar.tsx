@@ -31,6 +31,7 @@ import { deleteBackendSession, getSessionFeedbackCount, restoreBackendSession } 
 import { prefersReducedMotion, revealInScroll } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { groupSessionsByTime, type TimeSection } from "@/lib/sessionTree";
+import { truncatedTitle } from "@/lib/truncatedTitle";
 import { useChatStore } from "@/store/chat";
 import { useNavStore } from "@/store/nav";
 import { useSettingsStore } from "@/store/settings";
@@ -564,6 +565,7 @@ export function Sidebar() {
                                 >
                                   <button
                                     onClick={() => selectSession(s.id)}
+                                    {...truncatedTitle(s.title)}
                                     aria-current={isActive ? "page" : undefined}
                                     aria-label={
                                       parentTitle
@@ -602,7 +604,7 @@ export function Sidebar() {
                                           aria-hidden
                                         />
                                       )}
-                                      <span className="truncate">{s.title}</span>
+                                      <span data-truncate className="truncate">{s.title}</span>
                                       {s.idea_id != null && (
                                         <span className="sr-only">
                                           {t("sidebar.fromIdea")}

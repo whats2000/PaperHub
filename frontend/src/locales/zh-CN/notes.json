@@ -61,5 +61,21 @@
     "copy": "复制",
     "copied": "已复制",
     "copyFailed": "无法复制。请自行选择文字并复制。"
+  },
+  "pane": {
+    "button": "笔记",
+    "buttonTooltip": "论文与此对话的笔记",
+    "label": "笔记",
+    "tabsLabel": "右侧面板",
+    "reader": "阅读器",
+    "slides": "幻灯片",
+    "resize": "调整阅读器与笔记的宽度",
+    "close": "关闭笔记",
+    "paper": "论文",
+    "paperTitle": "笔记：{{title}}",
+    "chat": "此对话",
+    "chatTitle": "仅限此对话的笔记：{{title}}",
+    "empty": "打开论文或开始对话以做笔记。",
+    "loadFailed": "无法加载此笔记。"
   }
 }

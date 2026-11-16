@@ -61,5 +61,21 @@
     "copy": "Copy",
     "copied": "Copied",
     "copyFailed": "Couldn't copy. Select the text and copy it yourself."
+  },
+  "pane": {
+    "button": "Notes",
+    "buttonTooltip": "Notes on the paper and this chat",
+    "label": "Notes",
+    "tabsLabel": "Right panel",
+    "reader": "Reader",
+    "slides": "Slides",
+    "resize": "Resize Reader and Notes",
+    "close": "Close notes",
+    "paper": "Paper",
+    "paperTitle": "Notes on: {{title}}",
+    "chat": "This chat",
+    "chatTitle": "Notes for this chat only: {{title}}",
+    "empty": "Open a paper or start a chat to take notes.",
+    "loadFailed": "Couldn't load this note."
   }
 }

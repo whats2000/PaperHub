@@ -61,5 +61,21 @@
     "copy": "複製",
     "copied": "已複製",
     "copyFailed": "無法複製。請自行選取文字並複製。"
+  },
+  "pane": {
+    "button": "筆記",
+    "buttonTooltip": "論文與此對話的筆記",
+    "label": "筆記",
+    "tabsLabel": "右側面板",
+    "reader": "閱讀器",
+    "slides": "投影片",
+    "resize": "調整閱讀器與筆記的寬度",
+    "close": "關閉筆記",
+    "paper": "論文",
+    "paperTitle": "筆記：{{title}}",
+    "chat": "此對話",
+    "chatTitle": "僅限此對話的筆記：{{title}}",
+    "empty": "開啟論文或開始對話以做筆記。",
+    "loadFailed": "無法載入此筆記。"
   }
 }

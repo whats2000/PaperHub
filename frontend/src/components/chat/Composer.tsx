@@ -4,6 +4,7 @@ import {
   BookOpen,
   BrainCircuit,
   Mic,
+  NotebookPen,
   Presentation,
   Send,
   Square,
@@ -47,6 +48,10 @@ interface Props {
   slidesOpen?: boolean;
   /** Called when the user clicks the Slides button to toggle the panel. */
   onToggleSlides?: () => void;
+  /** Whether the Notes pane is currently open. */
+  notesOpen?: boolean;
+  /** Called when the user clicks the Notes button to toggle the pane. */
+  onToggleNotes?: () => void;
   /** When the session has a deck in view, the active-slide chip state; null
    *  hides the chip. Content (page) tracks the active slide; attached is the
    *  sticky toggle. */
@@ -72,6 +77,8 @@ export function Composer({
   canvasOpen: canvasOpenProp,
   slidesOpen = false,
   onToggleSlides,
+  notesOpen = false,
+  onToggleNotes,
   slideChip = null,
   isStreaming = false,
   onStop,
@@ -245,6 +252,32 @@ export function Composer({
                     <p>{t("composer.referencesTooltip")}</p>
                   </TooltipContent>
                 </Tooltip>
+                {onToggleNotes && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span tabIndex={0} className="inline-flex" />}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={onToggleNotes}
+                        aria-pressed={notesOpen}
+                        className={
+                          notesOpen
+                            ? "h-8 w-8 bg-accent text-foreground"
+                            : "h-8 w-8 text-muted-foreground hover:text-foreground"
+                        }
+                        aria-label={t("notes:pane.button", "Notes")}
+                      >
+                        <NotebookPen className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>{t("notes:pane.buttonTooltip", "Notes on the paper and this chat")}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={<span tabIndex={0} className="inline-flex" />}

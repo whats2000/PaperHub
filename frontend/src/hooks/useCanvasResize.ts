@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { useCanvasStore, CANVAS_MIN_WIDTH } from "@/store/canvas";
+import { NOTES_MIN_WIDTH, useNotesPaneStore } from "@/store/notesPane";
 
 /** Max canvas width as a fraction of the viewport. */
 const MAX_VW = 0.8;
@@ -14,28 +15,25 @@ interface CanvasResize {
   onPointerDown: (e: ReactPointerEvent) => void;
 }
 
-/**
- * Drag-to-resize for the Citation Canvas. The handle sits on the panel's left
- * edge; dragging left widens it. Width is clamped to
- * [CANVAS_MIN_WIDTH, 80vw] and persisted in the canvas store.
- */
-export function useCanvasResize(): CanvasResize {
-  const width = useCanvasStore((s) => s.width);
-  const setWidth = useCanvasStore((s) => s.setWidth);
+/** A drag on an edge to the LEFT of the pane it sizes: dragging left widens
+ *  it. `clamp` bounds each new width. */
+function useLeftEdgeDrag(
+  readWidth: () => number,
+  setWidth: (width: number) => void,
+  clamp: (width: number) => number,
+): Omit<CanvasResize, "width"> {
   const [resizing, setResizing] = useState(false);
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startW = useCanvasStore.getState().width;
+      const startW = readWidth();
       setResizing(true);
 
       const onMove = (ev: PointerEvent | MouseEvent) => {
         const dx = startX - ev.clientX; // drag left → wider
-        const max = Math.round(window.innerWidth * MAX_VW);
-        const next = Math.min(Math.max(startW + dx, CANVAS_MIN_WIDTH), max);
-        setWidth(next);
+        setWidth(clamp(startW + dx));
       };
       const onUp = () => {
         setResizing(false);
@@ -45,8 +43,43 @@ export function useCanvasResize(): CanvasResize {
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [setWidth],
+    [readWidth, setWidth, clamp],
   );
 
-  return { width, resizing, onPointerDown };
+  return { resizing, onPointerDown };
+}
+
+const readCanvasWidth = () => useCanvasStore.getState().width;
+const clampCanvasWidth = (w: number) =>
+  Math.min(Math.max(w, CANVAS_MIN_WIDTH), Math.round(window.innerWidth * MAX_VW));
+
+/**
+ * Drag-to-resize for the right panel (the Citation Canvas and the panes
+ * sharing it). The handle sits on the panel's left edge; dragging left widens
+ * it. Width is clamped to [CANVAS_MIN_WIDTH, 80vw] and persisted in the
+ * canvas store. Side by side with Notes, only the reader grows.
+ */
+export function useCanvasResize(): CanvasResize {
+  const width = useCanvasStore((s) => s.width);
+  const setWidth = useCanvasStore((s) => s.setWidth);
+  return { width, ...useLeftEdgeDrag(readCanvasWidth, setWidth, clampCanvasWidth) };
+}
+
+/**
+ * Drag-to-resize for the divider between the reader and Notes side by side:
+ * it trades width between them, the panel keeping its width. Notes stays
+ * within [NOTES_MIN_WIDTH, panel - CANVAS_MIN_WIDTH].
+ */
+export function useNotesDividerResize(panelWidth: number): Omit<CanvasResize, "width"> {
+  const setNotesWidth = useNotesPaneStore((s) => s.setNotesWidth);
+  const clamp = useCallback(
+    (w: number) => Math.min(Math.max(w, NOTES_MIN_WIDTH), panelWidth - CANVAS_MIN_WIDTH),
+    [panelWidth],
+  );
+  // Start from the width shown (the stored one may not fit this panel).
+  const readWidth = useCallback(
+    () => clamp(useNotesPaneStore.getState().notesWidth),
+    [clamp],
+  );
+  return useLeftEdgeDrag(readWidth, setNotesWidth, clamp);
 }

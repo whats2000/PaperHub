@@ -61,5 +61,21 @@
     "copy": "コピー",
     "copied": "コピーしました",
     "copyFailed": "コピーできませんでした。テキストを選択して手動でコピーしてください。"
+  },
+  "pane": {
+    "button": "ノート",
+    "buttonTooltip": "論文とこのチャットのノート",
+    "label": "ノート",
+    "tabsLabel": "右パネル",
+    "reader": "リーダー",
+    "slides": "スライド",
+    "resize": "リーダーとノートの幅を変更",
+    "close": "ノートを閉じる",
+    "paper": "論文",
+    "paperTitle": "ノート：{{title}}",
+    "chat": "このチャット",
+    "chatTitle": "このチャット専用のノート：{{title}}",
+    "empty": "論文を開くかチャットを始めてノートを取りましょう。",
+    "loadFailed": "このノートを読み込めませんでした。"
   }
 }
