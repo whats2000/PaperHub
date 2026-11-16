@@ -126,3 +126,27 @@ describe("code block behaviour", () => {
     expect(btn.getAttribute("aria-label")).toBe("Copied");
   });
 });
+
+describe("lists", () => {
+  it("Enter on an empty nested item steps out a level; again at the top, back to text", async () => {
+    const { paperhubKeys } = await import("./schema");
+    const editor = makeEditor(
+      [paperhubKeys],
+      [{ id: "a", type: "bulletListItem", content: "a", children: [{ id: "b", type: "bulletListItem", content: "" }] }],
+    );
+    const shape = () =>
+      (editor.document as unknown as { type: string; children: { type: string }[] }[]).map((b) => [
+        b.type,
+        b.children.map((c) => c.type),
+      ]);
+    editor.setTextCursorPosition("b", "start");
+    press(editor, { key: "Enter" });
+    expect(shape().slice(0, 2)).toEqual([
+      ["bulletListItem", []],
+      ["bulletListItem", []],
+    ]);
+    press(editor, { key: "Enter" });
+    expect(shape()[1]).toEqual(["paragraph", []]);
+    expect(editor.getTextCursorPosition().block.type).toBe("paragraph");
+  });
+});
