@@ -2,7 +2,12 @@ import { useCallback, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { useCanvasStore, CANVAS_MIN_WIDTH } from "@/store/canvas";
-import { NOTES_MIN_WIDTH, useNotesPaneStore } from "@/store/notesPane";
+import {
+  maxNotesWidth,
+  NOTES_MIN_WIDTH,
+  SIDE_BY_SIDE_MIN,
+  useNotesPaneStore,
+} from "@/store/notesPane";
 
 /** Max canvas width as a fraction of the viewport. */
 const MAX_VW = 0.8;
@@ -62,18 +67,29 @@ const clampCanvasWidth = (w: number) =>
 export function useCanvasResize(): CanvasResize {
   const width = useCanvasStore((s) => s.width);
   const setWidth = useCanvasStore((s) => s.setWidth);
-  return { width, ...useLeftEdgeDrag(readCanvasWidth, setWidth, clampCanvasWidth) };
+  // Narrowed from side by side to tabs: the reader being dragged stays shown.
+  const setPanelWidth = useCallback(
+    (next: number) => {
+      const prev = useCanvasStore.getState().width;
+      setWidth(next);
+      if (prev >= SIDE_BY_SIDE_MIN && next < SIDE_BY_SIDE_MIN) {
+        useNotesPaneStore.getState().setActiveTab("reader");
+      }
+    },
+    [setWidth],
+  );
+  return { width, ...useLeftEdgeDrag(readCanvasWidth, setPanelWidth, clampCanvasWidth) };
 }
 
 /**
  * Drag-to-resize for the divider between the reader and Notes side by side:
  * it trades width between them, the panel keeping its width. Notes stays
- * within [NOTES_MIN_WIDTH, panel - CANVAS_MIN_WIDTH].
+ * within [NOTES_MIN_WIDTH, maxNotesWidth(panel)].
  */
 export function useNotesDividerResize(panelWidth: number): Omit<CanvasResize, "width"> {
   const setNotesWidth = useNotesPaneStore((s) => s.setNotesWidth);
   const clamp = useCallback(
-    (w: number) => Math.min(Math.max(w, NOTES_MIN_WIDTH), panelWidth - CANVAS_MIN_WIDTH),
+    (w: number) => Math.min(Math.max(w, NOTES_MIN_WIDTH), maxNotesWidth(panelWidth)),
     [panelWidth],
   );
   // Start from the width shown (the stored one may not fit this panel).

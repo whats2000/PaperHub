@@ -9,6 +9,8 @@ export const NOTES_MIN_WIDTH = 320;
 export const NOTES_DEFAULT_WIDTH = 420;
 /** From this panel width, Reader and Notes sit side by side instead of tabs. */
 export const SIDE_BY_SIDE_MIN = 760;
+/** The divider between the reader and Notes side by side (px). */
+export const DIVIDER_WIDTH = 6;
 
 export type PaneTab = "reader" | "notes";
 
@@ -65,14 +67,20 @@ export const useNotesPaneStore = create<NotesPaneState>()(
     {
       name: "paperhub-notes-pane-v1",
       storage: createJSONStorage(() => safeStorage),
-      // Like the reader, the pane does not reopen on reload; its width and
-      // last tab are remembered.
-      partialize: (s) => ({ notesWidth: s.notesWidth, activeTab: s.activeTab }),
+      // The layout is remembered: the pane reopens on reload with its tab
+      // and width.
+      partialize: (s) => ({ open: s.open, notesWidth: s.notesWidth, activeTab: s.activeTab }),
     },
   ),
 );
 
 export type PanelLayout = "single" | "tabs" | "side";
+
+/** The widest Notes can be side by side in a panel this wide: the reader
+ * keeps its minimum beside the divider. */
+export function maxNotesWidth(panelWidth: number): number {
+  return panelWidth - CANVAS_MIN_WIDTH - DIVIDER_WIDTH;
+}
 
 /** How the right panel lays out its panes. `panelWidth` is the dragged panel
  * width; side by side, Notes keeps its width and the reader takes the rest,
@@ -87,7 +95,7 @@ export function rightPanelLayout(p: {
   const layout: PanelLayout = !both ? "single" : p.panelWidth >= SIDE_BY_SIDE_MIN ? "side" : "tabs";
   const notesWidth = Math.max(
     NOTES_MIN_WIDTH,
-    Math.min(p.notesWidth, p.panelWidth - CANVAS_MIN_WIDTH),
+    Math.min(p.notesWidth, maxNotesWidth(p.panelWidth)),
   );
   return { layout, notesWidth };
 }

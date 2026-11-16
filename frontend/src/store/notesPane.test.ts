@@ -45,13 +45,26 @@ describe("useNotesPaneStore", () => {
     expect(useNotesPaneStore.getState().notesWidth).toBe(512);
   });
 
-  it("remembers the width, not the open state, across reloads", () => {
+  it("remembers the layout across reloads: open, tab and width", () => {
     useNotesPaneStore.getState().toggle();
     useNotesPaneStore.getState().setNotesWidth(500);
     const saved = JSON.parse(localStorage.getItem("paperhub-notes-pane-v1") ?? "{}") as {
       state?: unknown;
     };
-    expect(saved.state).toEqual({ notesWidth: 500, activeTab: "notes" });
+    expect(saved.state).toEqual({ open: true, notesWidth: 500, activeTab: "notes" });
+  });
+
+  it("reopens on reload in its last layout", async () => {
+    localStorage.setItem(
+      "paperhub-notes-pane-v1",
+      JSON.stringify({ state: { open: true, activeTab: "reader", notesWidth: 480 }, version: 0 }),
+    );
+    await useNotesPaneStore.persist.rehydrate();
+    expect(useNotesPaneStore.getState()).toMatchObject({
+      open: true,
+      activeTab: "reader",
+      notesWidth: 480,
+    });
   });
 
   it("opening the pane never resets the dragged width", () => {
@@ -78,7 +91,9 @@ describe("rightPanelLayout", () => {
     expect(rightPanelLayout({ ...base, panelWidth: 1000 }).notesWidth).toBe(420);
   });
 
-  it("leaves the reader its minimum when Notes is wider than fits", () => {
-    expect(rightPanelLayout({ ...base, notesWidth: 600, panelWidth: 800 }).notesWidth).toBe(480);
+  it("leaves the reader its minimum beside the divider when Notes is wider than fits", () => {
+    expect(rightPanelLayout({ ...base, notesWidth: 600, panelWidth: 800 }).notesWidth).toBe(
+      800 - 320 - 6,
+    );
   });
 });
