@@ -446,11 +446,15 @@ async def test_accept_suggestion_on_deleted_block_withdraws(conn):
     await _seed(conn, n.id, [("a", _para("a"))])
     res = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
         Op(op="update", block_id="a", block=_para("agent a"))])
-    await apply_ops(conn, n.id, base_revision=2, actor="user",
-                    ops=[Op(op="delete", block_id="a")])
+    deleted = await apply_ops(conn, n.id, base_revision=2, actor="user",
+                              ops=[Op(op="delete", block_id="a")])
     acc = await resolve_suggestion(conn, res.suggested[0]["suggestion_id"],
                                    accept=True)
     assert acc.applied == [] and acc.rejected[0]["reason"] == "missing"
+    assert acc.revision == deleted.revision
+    assert (await get_note(conn, n.id)).revision == deleted.revision
+    async with conn.execute("SELECT COUNT(*) FROM note_change_sets") as cur:
+        assert (await cur.fetchone())[0] == 3
     async with conn.execute("SELECT status FROM note_suggestions") as cur:
         assert (await cur.fetchone())[0] == "withdrawn"
 
@@ -513,3 +517,52 @@ async def test_change_set_schema_checks_and_indexes(conn):
         names = {r[0] for r in await cur.fetchall()}
     assert {"idx_note_change_sets_note",
             "idx_note_suggestions_note_status"} <= names
+
+
+# --- fix round 2 -----------------------------------------------------------
+
+async def _sug_rows(conn):
+    async with conn.execute(
+        "SELECT block_id, status, change_set_id FROM note_suggestions "
+        "ORDER BY block_id") as cur:
+        return await cur.fetchall()
+
+
+async def test_reapply_reopens_withdrawn_suggestions(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("u", _para("mine")), ("v", _para("also mine"))])
+    cs = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
+        Op(op="insert", block_id="x", block=_para("x"), after="v"),
+        Op(op="update", block_id="u", block=_para("agent u")),
+        Op(op="delete", block_id="v"),
+    ])
+    assert len(cs.suggested) == 2
+    undo = await undo_change_set(conn, cs.change_set_id)
+    assert [r[1] for r in await _sug_rows(conn)] == ["withdrawn", "withdrawn"]
+    # The user edits v after the Undo: its suggestion stays withdrawn.
+    await apply_ops(conn, n.id, base_revision=undo.revision, actor="user",
+                    ops=[Op(op="update", block_id="v", block=_para("v2"))])
+    again = await reapply_change_set(conn, cs.change_set_id)
+    assert again.applied == ["x"]
+    assert [s["block_id"] for s in again.suggested] == ["u"]
+    assert [(r["block_id"], r["reason"]) for r in again.rejected] == [
+        ("v", "changed_since_base")]
+    assert await _sug_rows(conn) == [
+        ("u", "open", again.change_set_id),
+        ("v", "withdrawn", cs.change_set_id),
+    ]
+    assert await _texts(conn, n.id) == ["mine", "v2", "x"]
+
+
+async def test_restore_settles_siblings_in_order(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a")), ("z", _para("z"))])
+    await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="k1", block=_para("k1"), parent_id="a"),
+        Op(op="insert", block_id="k2", block=_para("k2"), after="k1"),
+    ])
+    await apply_ops(conn, n.id, base_revision=2, actor="user",
+                    ops=[Op(op="delete", block_id="a")])
+    res = await restore_blocks(conn, n.id, ["k1", "k2"], actor="user")
+    assert res.applied == ["k1", "k2"]
+    assert [b.id for b in await list_blocks(conn, n.id)] == ["k1", "k2", "z"]

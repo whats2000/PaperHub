@@ -512,7 +512,9 @@ def _op_between(before: dict[str, Any], after: dict[str, Any]) -> str:
 async def _settle_parents(ctx: _Ctx, block_ids: list[str]) -> None:
     """Move live blocks whose parent is deleted under the nearest live
     ancestor (or the top level), where the deleted branch stood, so a
-    brought-back block is never an invisible orphan."""
+    brought-back block is never an invisible orphan. Blocks settled behind
+    the same deleted ancestor keep their relative order."""
+    last_behind: dict[str, str] = {}  # deleted top id -> last settled key
     for bid in block_ids:
         row = await ctx.get(bid)
         if row is None or row.deleted_at is not None or row.parent_id is None:
@@ -528,8 +530,10 @@ async def _settle_parents(ctx: _Ctx, block_ids: list[str]) -> None:
         keys = [s.order_key for s in await ctx.siblings(new_parent)
                 if s.id != bid]
         if top is not None and top.parent_id == new_parent:
-            nxt = [k for k in keys if k > top.order_key]
-            key = key_between(top.order_key, nxt[0] if nxt else None)
+            prev = last_behind.get(top.id, top.order_key)
+            nxt = [k for k in keys if k > prev]
+            key = key_between(prev, nxt[0] if nxt else None)
+            last_behind[top.id] = key
         else:
             key = key_between(keys[-1] if keys else None, None)
         before = row.state()
@@ -595,11 +599,15 @@ async def undo_change_set(conn: aiosqlite.Connection,
                 reverted.append(block_id)
         await _settle_parents(ctx, reverted)
         ctx.applied = reverted
-        await conn.execute(
+        async with conn.execute(
             "UPDATE note_suggestions SET status = 'withdrawn' "
-            "WHERE change_set_id = ? AND status = 'open'", (change_set_id,))
+            "WHERE change_set_id = ? AND status = 'open' RETURNING id",
+            (change_set_id,),
+        ) as cur:
+            withdrawn = sorted(r[0] for r in await cur.fetchall())
         outcome = {**cs["outcome"], "undo": {
-            "revision": ctx.rev, "reverted": reverted, "kept": kept}}
+            "revision": ctx.rev, "reverted": reverted, "kept": kept,
+            "withdrawn": withdrawn}}
         await _set_outcome(conn, change_set_id, outcome, "undone")
         return ctx.result()
 
@@ -642,6 +650,7 @@ async def reapply_change_set(conn: aiosqlite.Connection,
             await ctx.history(bid, _op_between(before, target), before, target)
             ctx.applied.append(bid)
         await _settle_parents(ctx, ctx.applied)
+        await _reopen_suggestions(ctx, undo)
         await _record_change_set(
             ctx, base_revision=ctx.rev - 1,
             ops_json=json.dumps([{"op": "reapply",
@@ -649,6 +658,31 @@ async def reapply_change_set(conn: aiosqlite.Connection,
         outcome = {**cs["outcome"], "reapplied_by": ctx.change_set_id}
         await _set_outcome(conn, change_set_id, outcome, "undone")
         return ctx.result()
+
+
+async def _reopen_suggestions(ctx: _Ctx, undo: dict[str, Any]) -> None:
+    """Reopen the suggestions an Undo withdrew, under the new change set,
+    unless their block changed after the Undo."""
+    for sid in undo.get("withdrawn", []):
+        async with ctx.conn.execute(
+            "SELECT block_id FROM note_suggestions WHERE id = ? "
+            "AND status = 'withdrawn'", (sid,),
+        ) as cur:
+            r = await cur.fetchone()
+        if r is None:
+            continue
+        row = await ctx.live(r[0])
+        if row is None:
+            ctx.reject(r[0], "missing")
+            continue
+        if row.changed_rev > undo["revision"]:
+            if all(x["block_id"] != row.id for x in ctx.rejected):
+                ctx.reject(row.id, "changed_since_base", row)
+            continue
+        await ctx.conn.execute(
+            "UPDATE note_suggestions SET status = 'open', change_set_id = ? "
+            "WHERE id = ?", (ctx.change_set_id, sid))
+        ctx.suggested.append({"block_id": row.id, "suggestion_id": sid})
 
 
 async def _restore_in_tx(conn: aiosqlite.Connection, note_id: int,
@@ -707,6 +741,21 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
             raise ValueError(f"suggestion {suggestion_id} is {status}")
         note = await get_note(conn, note_id)
         assert note is not None
+        async with conn.execute(
+            "SELECT 1 FROM note_blocks WHERE id = ? AND note_id = ? "
+            "AND deleted_at IS NULL", (block_id, note_id),
+        ) as cur:
+            live = await cur.fetchone() is not None
+        if accept and not live:
+            # Nothing to apply: withdraw without a revision or change set.
+            await conn.execute(
+                "UPDATE note_suggestions SET status = 'withdrawn' WHERE id = ?",
+                (suggestion_id,))
+            return ApplyResult(
+                note_id=note_id, revision=note.revision, change_set_id=cs_id,
+                applied=[], suggested=[],
+                rejected=[{"block_id": block_id, "reason": "missing",
+                           "current": None}])
         if accept:
             op = Op(op="update" if kind == "update" else "delete",
                     block_id=block_id,
