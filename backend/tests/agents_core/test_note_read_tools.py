@@ -443,3 +443,18 @@ async def test_read_note_comments_are_self_describing(
     first = next(i for i, ln in enumerate(lines) if "<user_comment" in ln)
     note_line = lines[first - 1].lower()
     assert "user" in note_line and "read-only" in note_line
+
+
+async def test_search_matches_word_prefixes(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    await _fill(migrated_db, nid, [
+        _p("Expert choice drops tokens when the capacity is full"), _p("other")])
+    ctx = _ctx(migrated_db, fake_tracer)
+    hits = _load(await _run(ctx, "search_notes", query="drop"))["hits"]
+    assert len(hits) == 1 and "drops tokens" in hits[0]["snippet"]
+    # FTS syntax in the words stays literal.
+    for q in ['drop"*', "drop OR NOT", "drop) AND (x", "NEAR(drop"]:
+        out = await _run(ctx, "search_notes", query=q)
+        assert not out.record.get("error"), q

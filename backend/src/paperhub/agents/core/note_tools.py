@@ -176,6 +176,14 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     )
 
 
+def _prefix_query(query: str) -> str:
+    """The query as quoted prefix terms (``"drop"*`` finds "drops"), joined
+    with AND. ``_to_fts5_query`` keeps only letters, digits and ``_`` in each
+    quoted term, so the user's words can carry no FTS syntax."""
+    quoted = _to_fts5_query(query)
+    return " AND ".join(f"{t}*" for t in quoted.split(" AND ")) if quoted else ""
+
+
 async def _fts_rows(
     ctx: ToolContext, expr: str, note_ids: list[int],
 ) -> list[Any]:
@@ -195,7 +203,7 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     scope = _scope_arg(args)
     if scope is None:
         return error_outcome("scope must be 'chat' or 'all'.")
-    fts = _to_fts5_query(query)
+    fts = _prefix_query(query)
     if not fts:
         return error_outcome("The query has no searchable words.")
     notes = await notes_in_scope(ctx.conn, ctx.session_id, everything=scope == "all",
