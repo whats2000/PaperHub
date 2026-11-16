@@ -317,6 +317,7 @@ input { font: inherit; color: inherit; }
 .more-meta { font-size: 11.5px; color: var(--muted-fg); padding: 5px 8px 6px; border-bottom: 1px solid var(--border); margin-bottom: 3px; }
 .more-menu button { width: 100%; border: 0; background: transparent; color: var(--foreground); display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px; font-size: 12.5px; text-align: left; }
 .more-menu button:hover { background: var(--accent); }
+.more-menu button small { margin-left: auto; color: var(--muted-fg); font-size: 11px; padding-left: 10px; } .more-sep { display: block; height: 1px; background: var(--border); margin: 3px 4px; }
 .notes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 30px 4px; }
 .blocks { display: flex; flex-direction: column; gap: 1px; }
 .blk-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 24px; gap: 2px; align-items: start; border-radius: 6px; transition: box-shadow 150ms ease-out, background 150ms ease-out; }
@@ -741,7 +742,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
               <span class="spacer"></span>
               <button class="icon-btn" id="closeNotes" aria-label="Close notes"><i data-lucide="x" class="icon-sm"></i></button>
             </div>
-            <div class="n-sub"><button class="focus-btn follow-btn" id="followBtn" aria-pressed="true" title="The note scrolls to the section you're reading. Click to stop following."><i data-lucide="locate-fixed" class="icon-xs"></i><span id="followLbl">Following §2</span></button><span class="spacer"></span><button class="focus-btn" id="focusBtn" aria-pressed="false" title="Focus: fade the other parts of the note and their marks on the paper (Esc to stop)"><i data-lucide="scan-eye" class="icon-xs"></i><span class="lbl">Focus</span></button><button class="focus-btn" id="moreBtn" aria-haspopup="menu" aria-expanded="false" aria-label="More" title="More"><i data-lucide="ellipsis" class="icon-xs"></i></button><div class="more-menu" id="moreMenu" role="menu" data-state="closed"><div class="more-meta" id="noteMeta"></div><button role="menuitem" id="mdHelpBtn" aria-expanded="false"><i data-lucide="keyboard" class="icon-xs"></i>Shortcuts</button></div></div>
+            <div class="n-sub"><button class="focus-btn follow-btn" id="followBtn" aria-pressed="true" title="The note scrolls to the section you're reading. Click to stop following."><i data-lucide="locate-fixed" class="icon-xs"></i><span id="followLbl">Following §2</span></button><span class="spacer"></span><button class="focus-btn" id="focusBtn" aria-pressed="false" title="Focus: fade the other parts of the note and their marks on the paper (Esc to stop)"><i data-lucide="scan-eye" class="icon-xs"></i><span class="lbl">Focus</span></button><button class="focus-btn" id="moreBtn" aria-haspopup="menu" aria-expanded="false" aria-label="More" title="More"><i data-lucide="ellipsis" class="icon-xs"></i></button><div class="more-menu" id="moreMenu" role="menu" data-state="closed"><div class="more-meta" id="noteMeta"></div><button role="menuitem" data-export="md"><i data-lucide="file-down" class="icon-xs"></i>Export as Markdown<small>.md, images, references.bib</small></button><button role="menuitem" data-export="docx"><i data-lucide="file-text" class="icon-xs"></i>Export as Word<small>.docx</small></button><span class="more-sep"></span><button role="menuitem" id="mdHelpBtn" aria-expanded="false"><i data-lucide="keyboard" class="icon-xs"></i>Shortcuts</button></div></div>
             <div class="collapse" id="edTipWrap" data-state="open"><div><div class="ed-tip"><span>New here? Type <kbd>/</kbd> for blocks, <kbd>**bold**</kbd> as you type, or select text for the toolbar.</span><button class="lnk" data-help="1">All shortcuts</button><button class="x" id="edTipX" aria-label="Dismiss the tip"><i data-lucide="x" class="icon-xs"></i></button></div></div></div><div class="notes-body" id="notesBody"></div>
           </div>
         </div>
@@ -968,7 +969,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     const pages = kids(parent).map(pg => {
       const f = inside(pg.id) > 0, open = openP.has(pg.id);
       return `<div class="tr-row" data-page="${pg.id}" style="--d:${d}" aria-current="${curNP === pg.id}" title="${esc(pg.title || 'Untitled')}"><button class="tr-chev" data-chev="${pg.id}" aria-expanded="${open}" aria-label="Show or hide what is inside" ${f ? '' : 'hidden'}><i data-lucide="chevron-down" class="icon-xs"></i></button><button class="pg-ic" data-picon="${pg.id}" aria-label="Change icon" title="Change icon">${pgIcon(pg)}</button><span class="tr-t">${esc(pg.title || 'Untitled')}</span><button class="tr-act" data-addsub="${pg.id}" aria-label="Add a page inside" title="Add a page inside"><i data-lucide="plus" class="icon-xs"></i></button><button class="tr-act" data-pmenu="${pg.id}" aria-label="More" title="Move, delete…"><i data-lucide="ellipsis" class="icon-xs"></i></button></div>` +
-        (f ? `<div class="collapse" data-state="${open ? 'open' : 'closed'}"><div>${treeRows(pg.id, d + 1)}${linksOf(pg.id).map(l => { const t = TARGETS[l.note]; return `<div class="tr-row link" data-open="${l.note}" style="--d:${d + 1}" title="Link to the ${t.kind.toLowerCase()} filed in “${esc(ptitle(t.filed) || 'Unsorted ' + t.group.toLowerCase())}” (the same note, not a copy)"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span><i data-lucide="link-2" class="icon-xs lk"></i><button class="tr-act" data-unlink="${pg.id}|${l.note}" aria-label="Remove the link" title="Remove this link (the note is kept)"><i data-lucide="x" class="icon-xs"></i></button></div>`; }).join('')}</div></div>` : '');
+        (f ? `<div class="collapse" data-state="${open ? 'open' : 'closed'}"><div>${treeRows(pg.id, d + 1)}${linksOf(pg.id).map(l => { const t = TARGETS[l.note]; return `<div class="tr-row link" data-open="${l.note}" data-linkof="${pg.id}" style="--d:${d + 1}" title="Link to the ${t.kind.toLowerCase()} filed in “${esc(ptitle(t.filed) || 'Unsorted ' + t.group.toLowerCase())}” (the same note, not a copy)"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span><i data-lucide="link-2" class="icon-xs lk"></i><button class="tr-act" data-unlink="${pg.id}|${l.note}" aria-label="Remove the link" title="Remove this link (the note is kept)"><i data-lucide="x" class="icon-xs"></i></button></div>`; }).join('')}</div></div>` : '');
     }).join('');
     return pages + filedIn(parent === null ? 'root' : parent).map(k => noteRow(k, d)).join('');
   }
@@ -1132,8 +1133,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   let dragNP = null; const npTag = document.createElement('div'); npTag.className = 'np-drag-tag'; document.body.appendChild(npTag);
   const tagSay = (e, html) => { npTag.innerHTML = html; npTag.style.display = html ? 'flex' : 'none'; npTag.style.left = e.clientX + 14 + 'px'; npTag.style.top = e.clientY + 12 + 'px'; if (html) icons(); };
   $('#vNotes').addEventListener('pointerdown', e => {
-    const row = e.target.closest('#pageTree .tr-row'); if (!row || e.target.closest('button') || row.classList.contains('link')) return;
-    dragNP = { id: row.dataset.page || row.dataset.tgt, tgt: !!row.dataset.tgt, row, y0: e.clientY, on: false, drop: null };
+    const row = e.target.closest('#pageTree .tr-row'); if (!row || e.target.closest('button')) return;
+    dragNP = { id: row.dataset.page || row.dataset.tgt || row.dataset.open, tgt: !!row.dataset.tgt, link: row.dataset.linkof || null, row, y0: e.clientY, on: false, drop: null };
   });
   document.addEventListener('pointermove', e => {
     if (!dragNP) return; if (!dragNP.on && Math.abs(e.clientY - dragNP.y0) > 4) { dragNP.on = true; dragNP.row.classList.add('dragging'); }
@@ -1141,6 +1142,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     $$('#pageTree [data-drop]').forEach(x => delete x.dataset.drop); npLine.style.display = 'none'; dragNP.drop = null; tagSay(e, '');
     const el = document.elementFromPoint(e.clientX, e.clientY); if (!el) return;
     const tgt = dragNP.tgt && TARGETS[dragNP.id];
+    if (dragNP.link) { const lr = el.closest('#pageTree .tr-row[data-page]'); if (!lr || lr.dataset.page === dragNP.link) { tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Drop on a page to move this link'); return; } lr.dataset.drop = 'in'; dragNP.drop = { parent: lr.dataset.page }; tagSay(e, '<i data-lucide="link-2" class="icon-xs"></i>Move the link inside'); return; }
     const gh = el.closest('#pageTree .grp-h'); if (gh && tgt && gh.dataset.grp === tgt.group && tgt.filed) { gh.dataset.drop = 'in'; dragNP.drop = { unsort: true }; tagSay(e, `<i data-lucide="inbox" class="icon-xs"></i>Back to Unsorted ${tgt.group.toLowerCase()}`); return; }
     const root = el.closest('#pageTree .tree-h[data-root]'); if (root) { root.dataset.drop = 'in'; dragNP.drop = { parent: null }; tagSay(e, '<i data-lucide="corner-left-up" class="icon-xs"></i>Move to the top level'); return; }
     const row = el.closest('#pageTree .tr-row[data-page]'); if (!row || row === dragNP.row) return;
@@ -1155,6 +1157,12 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     if (!dragNP) return; const d = dragNP; setTimeout(() => { dragNP = null; }, 0);
     d.row.classList.remove('dragging'); $$('#pageTree [data-drop]').forEach(x => delete x.dataset.drop); npLine.style.display = 'none'; npTag.style.display = 'none';
     if (!d.on || !d.drop) return;
+    if (d.link) {
+      const to = d.drop.parent, t = TARGETS[d.id];
+      if (t.filed === to || LINKS.some(l => l.page === to && l.note === d.id)) { toast(`Already in “${ptitle(to)}”`, null, '', 'link-2', 2400); return; }
+      const s0 = snap(); LINKS = LINKS.map(l => l.page === d.link && l.note === d.id ? { page: to, note: d.id } : l); openP.add(to); renderPage();
+      toast(`Link moved to “${ptitle(to)}” · the note stays filed in ${ptitle(t.filed) || 'Unsorted'}`, () => { restore(s0); return null; }, 'Undo', 'link-2', 5000); return;
+    }
     if (d.tgt) { fileNote(d.id, d.drop.unsort ? null : (d.drop.parent || 'root')); return; }
     if (d.drop.unsort) return;
     movePage(d.id, d.drop.parent, d.drop.rel || null);
@@ -1274,6 +1282,12 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   const moreMenu = $('#moreMenu');
   const setMore = open => { moreMenu.dataset.state = open ? 'open' : 'closed'; $('#moreBtn').setAttribute('aria-expanded', String(open)); };
   $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); setMore(moreMenu.dataset.state !== 'open'); });
+  moreMenu.addEventListener('click', e => {
+    const x = e.target.closest('[data-export]'); if (!x) return; setMore(false);
+    const k = curNoteKey(), name = k === 'chat' ? 'this-chat' : (DOCS[k] ? DOCS[k].short.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'note');
+    const file = x.dataset.export === 'md' ? `${name}-notes.zip (note.md, images/, references.bib)` : `${name}-notes.docx`;
+    toast(`Exported ${file}`, null, '', 'file-down', 4500);
+  });
   document.addEventListener('mousedown', e => { if (moreMenu.dataset.state === 'open' && !moreMenu.contains(e.target) && !e.target.closest('#moreBtn')) setMore(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && moreMenu.dataset.state === 'open') setMore(false); });
   $('#readerBody').addEventListener('scroll', () => {
