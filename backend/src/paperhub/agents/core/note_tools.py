@@ -244,6 +244,9 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         content=json.dumps({"hits": hits}, ensure_ascii=False),
         record={"tool": "notes:search", "query": query, "scope": scope,
                 "note_ids": list(private), "block_ids": [h["block_id"] for h in hits],
+                # Hits whose snippet is the whole block: seen in full, citable.
+                "whole_block_ids": [str(r[0]) for r in rows
+                                    if len(str(r[2])) <= SNIPPET_CHARS],
                 "revisions": {str(nid): by_id[nid].revision for nid in private}},
     )
 

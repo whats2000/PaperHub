@@ -799,11 +799,13 @@ async def run_core_agent(
                             read_ids.append(i)
                     tool_tokens += count_tokens(o.content)
                 for o in res.outcomes:
-                    ids = o.record.get("block_ids")
-                    # Only read_note blocks are citable: a search hit is a
-                    # truncated snippet, like a chunk snippet.
-                    if (o.record.get("tool") == "notes:read"
-                            and _result_status(o) == "ok" and isinstance(ids, list)):
+                    # Citable: read_note blocks and search hits shown whole.
+                    # A truncated hit is a snippet, like a chunk snippet.
+                    tool = o.record.get("tool")
+                    ids = (o.record.get("block_ids") if tool == "notes:read"
+                           else o.record.get("whole_block_ids")
+                           if tool == "notes:search" else None)
+                    if _result_status(o) == "ok" and isinstance(ids, list):
                         read_note_blocks.extend(
                             b for b in ids if isinstance(b, str) and b not in read_note_blocks)
                 for c, o in zip(res.calls, res.outcomes, strict=True):

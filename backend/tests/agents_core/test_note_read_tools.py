@@ -350,3 +350,17 @@ async def test_invalid_scope_and_page_are_errors(
     assert (await _run(ctx, "search_notes", query="a", scope="x")).record.get("error")
     assert (await _run(ctx, "read_note", note="chat", page=0)).record.get("error")
     assert (await _run(ctx, "read_note", note="chat", page=9)).record.get("error")
+
+
+async def test_search_records_hits_shown_whole(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """A hit whose block fits the snippet is the whole block, not a cut."""
+    nid = await _chat_note(migrated_db)
+    long_text = "needle " + "x" * 400
+    await _fill(migrated_db, nid, [_p("short needle"), _p(long_text)])
+    out = await _run(_ctx(migrated_db, fake_tracer), "search_notes", query="needle")
+    hits = {h["block_id"]: h for h in _load(out)["hits"]}
+    whole = out.record["whole_block_ids"]
+    assert len(hits) == 2 and len(whole) == 1
+    assert "short needle" in hits[whole[0]]["snippet"]
