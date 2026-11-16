@@ -53,6 +53,8 @@ export interface NoteState {
   comments: NoteComment[];
   /** The base revision of the next burst (the last result's revision). */
   revision: number;
+  /** How many live chats the note is linked to (unknown until loaded). */
+  sharedBy?: number;
 }
 
 /** A bump tells open editors to reload `blockIds` (null = the whole note). */
@@ -424,6 +426,7 @@ export const useNotesStore = create<NotesStore>()(
                 blocks,
                 suggestions: d.suggestions,
                 comments: d.comments,
+                sharedBy: d.shared_by,
                 // Unsaved edits were made on the older base: keep it, so a
                 // block changed meanwhile still comes back as a conflict.
                 revision: unsaved && cur ? Math.min(cur.revision, d.note.revision) : d.note.revision,
@@ -636,6 +639,7 @@ export const useNotesStore = create<NotesStore>()(
                   blocks,
                   suggestions: prev?.suggestions ?? [],
                   comments: prev?.comments ?? [],
+                  sharedBy: d.shared_by,
                   revision:
                     unsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
                 },

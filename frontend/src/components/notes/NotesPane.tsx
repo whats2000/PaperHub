@@ -110,6 +110,7 @@ export function NotesPane({ onClose }: Props) {
     root: panel,
   });
   const [guideOpen, setGuideOpen] = useState(false);
+  const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
 
   return (
     <section
@@ -128,6 +129,7 @@ export function NotesPane({ onClose }: Props) {
       <NotesToolbar
         noteId={noteId}
         followLabel={followLabel}
+        sharedBy={sharedBy}
         guideOpen={guideOpen}
         onGuideOpenChange={setGuideOpen}
       />

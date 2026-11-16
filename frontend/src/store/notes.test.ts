@@ -79,6 +79,19 @@ function upd(id: string, text: string) {
 }
 
 describe("useNotesStore", () => {
+  it("keeps how many chats share the note, from the target and from a reload", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, () => HttpResponse.json({ note, blocks: [], shared_by: 2 })),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({ note, blocks: [], suggestions: [], comments: [], shared_by: 3 }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    expect(useNotesStore.getState().notes[7]?.sharedBy).toBe(2);
+    await useNotesStore.getState().loadNote(7);
+    expect(useNotesStore.getState().notes[7]?.sharedBy).toBe(3);
+  });
+
   it("loads a target's note and remembers it by target", async () => {
     const id = await useNotesStore.getState().loadTarget("paper", 3);
     expect(id).toBe(7);

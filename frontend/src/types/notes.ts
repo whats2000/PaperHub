@@ -79,6 +79,8 @@ export interface NoteComment {
 export interface NoteWithBlocks {
   note: Note;
   blocks: NoteBlock[];
+  /** How many live chats the note is linked to ("Shared by N chats"). */
+  shared_by: number;
 }
 
 export interface NoteDetail extends NoteWithBlocks {

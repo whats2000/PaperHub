@@ -32,6 +32,7 @@ function note(id: number, kind: string, target: string, title: string) {
   return {
     note: { id, target_kind: kind, target_id: target, title, revision: 1, updated_at: "2026-11-16T00:00:00Z" },
     blocks: [],
+    shared_by: kind === "paper" ? 2 : 1,
   };
 }
 
@@ -84,7 +85,8 @@ describe("ChatPage Notes pane", () => {
     expect(within(bar).getByRole("button", { name: "Focus" })).toBeEnabled();
     expect(within(bar).getByRole("button", { name: /^Following/ })).toBeEnabled();
     await userEvent.click(within(bar).getByRole("button", { name: "More" }));
-    expect(await screen.findByRole("menu")).toHaveTextContent("Revision 1");
+    // The chat's note is linked to this chat only.
+    expect(await screen.findByRole("menu")).toHaveTextContent("Shared by 1 chat · revision 1");
   });
 
   it("the Notes button opens and closes the pane", async () => {
