@@ -190,6 +190,24 @@ describe("NoteEditor", () => {
     expect(el).not.toHaveAttribute("data-shown");
   });
 
+  it("draws ||hidden|| and comment text in the editor's own DOM (a React mark view rendered late and moved the caret)", async () => {
+    seed([
+      blk("h1", {
+        content: [
+          { type: "text", text: "secret", styles: { hidden: true } },
+          { type: "text", text: " and ", styles: {} },
+          { type: "text", text: "noted", styles: { comment: "c_1" } },
+        ],
+        text: "secret and noted",
+      }),
+    ]);
+    mount();
+    const hidden = (await screen.findByText("secret")).closest<HTMLElement>(".note-hidden")!;
+    const comment = screen.getByText("noted").closest<HTMLElement>(".note-comment")!;
+    expect(comment).toHaveAttribute("data-comment-id", "c_1");
+    for (const el of [hidden, comment]) expect(el.closest(".react-renderer")).toBeNull();
+  });
+
   it("shows the anchor-lost and pieces-lost states", async () => {
     seed([
       blk("q3", {
