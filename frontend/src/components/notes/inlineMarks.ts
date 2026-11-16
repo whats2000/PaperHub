@@ -10,6 +10,8 @@
 import { codeBlockOptions } from "@blocknote/code-block";
 import { createExtension } from "@blocknote/core";
 import { Extension, InputRule } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { toast } from "sonner";
 
 import i18n from "@/lib/i18n";
@@ -197,10 +199,50 @@ export function announceDivider(editor: DividerEditor, blockId: string): void {
   added();
 }
 
+/** Block types a `---` line can be typed in. */
+const DASH_LINE_TYPES = new Set(["paragraph", "bulletListItem", "numberedListItem", "checkListItem"]);
+
+/** Moves the first nested divider to the top level, right after the
+ * top-level block it was inside (a nest left empty goes with it). Null when
+ * every divider is already top level. */
+export function liftNestedDivider(doc: PMNode, tr: Transaction): Transaction | null {
+  const group = doc.firstChild;
+  if (!group) return null;
+  let found: { from: number; to: number; node: PMNode; onlyChild: boolean; topEnd: number } | null = null;
+  group.forEach((top, offset) => {
+    if (found) return;
+    const topFrom = 1 + offset;
+    top.descendants((node, pos, parent) => {
+      if (found) return false;
+      if (node.type.name === "blockContainer" && node.firstChild?.type.name === "divider") {
+        const from = topFrom + 1 + pos;
+        found = { from, to: from + node.nodeSize, node, onlyChild: parent?.childCount === 1, topEnd: topFrom + top.nodeSize };
+        return false;
+      }
+      return true;
+    });
+  });
+  if (!found) return null;
+  const f = found as { from: number; to: number; node: PMNode; onlyChild: boolean; topEnd: number };
+  // An only child takes its blockGroup with it (an empty group is invalid).
+  const [from, to] = f.onlyChild ? [f.from - 1, f.to + 1] : [f.from, f.to];
+  tr.delete(from, to);
+  tr.insert(tr.mapping.map(f.topEnd), f.node);
+  return tr;
+}
+
 /** `---` on an empty line turns it into a divider at once (BlockNote's own
- * rule goes with its divider, replaced by PaperHub's), with an Undo toast. */
+ * rule goes with its divider, replaced by PaperHub's), with an Undo toast.
+ * Dividers are always top level, as the parts of a section are: one typed,
+ * made or moved inside a nested block lands right after its top-level block. */
 export const dividerRule = createExtension({
   key: "paperhubDivider",
+  prosemirrorPlugins: [
+    new Plugin({
+      appendTransaction: (trs, _old, state) =>
+        trs.some((t) => t.docChanged) ? liftNestedDivider(state.doc, state.tr) : null,
+    }),
+  ],
   inputRules: [
     {
       find: /^---$/,
@@ -208,7 +250,7 @@ export const dividerRule = createExtension({
         const { block } = editor.getTextCursorPosition();
         const sel = editor.prosemirrorState.selection;
         // Only a line that is just the dashes: text after the caret is kept.
-        if (block.type !== "paragraph" || !sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) {
+        if (!DASH_LINE_TYPES.has(String(block.type)) || !sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) {
           return undefined;
         }
         // The toast follows the change (the rule applies after this returns).

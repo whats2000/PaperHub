@@ -661,6 +661,42 @@ describe("dividers, Focus and folding", () => {
     cleanupEditors();
   });
 
+  it("dividers are always top level: --- in a nested list item lands after the list", async () => {
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const editor = makeEditor(
+      [dividerRule],
+      [
+        {
+          id: "li1",
+          type: "bulletListItem",
+          content: "a",
+          children: [{ id: "li2", type: "bulletListItem", content: "b" }, { id: "li3", type: "bulletListItem", content: "" }],
+        },
+        { id: "after", type: "paragraph", content: "after" },
+      ],
+    );
+    editor.setTextCursorPosition("li3", "start");
+    type(editor, "---");
+    const shape = (list: { id: string; type: string; children: unknown[] }[]): unknown[] =>
+      list.map((b) => [b.type, shape(b.children as never)]);
+    expect(shape(editor.document as never)).toEqual([
+      ["bulletListItem", [["bulletListItem", []]]],
+      ["divider", []],
+      ["paragraph", []],
+    ]);
+    // The only child moved out too: no empty nest is left behind.
+    editor.setTextCursorPosition("li2", "start");
+    editor.updateBlock("li2", { type: "divider" } as never);
+    expect(shape(editor.document as never)).toEqual([
+      ["bulletListItem", []],
+      ["divider", []],
+      ["divider", []],
+      ["paragraph", []],
+    ]);
+    cleanupEditors();
+  });
+
   it("--- before other words on the line stays text", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");
