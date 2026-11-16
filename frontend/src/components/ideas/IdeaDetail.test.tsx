@@ -208,7 +208,9 @@ describe("IdeaDetail", () => {
     await act(async () => {
       await useNotesStore.getState().flush(70);
     });
-    expect(postedOps).toHaveLength(1);
+    // Under load the editor may queue the edit after that flush: it then
+    // goes out on the next save.
+    await waitFor(() => expect(postedOps).toHaveLength(1), { timeout: 2500 });
     expect(postedOps[0]?.ops).toEqual([expect.objectContaining({ op: "update", block_id: "n1" })]);
     expect(patches).toEqual([]);
     // The kanban / drawer excerpt follows the edit.
