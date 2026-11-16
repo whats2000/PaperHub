@@ -7,7 +7,8 @@ import { openNoteBlock } from "@/lib/noteCitations";
 import { useNotesPaneStore } from "@/store/notesPane";
 
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
-vi.mock("sonner", () => ({ toast: Object.assign(toastFn, { error: vi.fn() }) }));
+const { errorFn } = vi.hoisted(() => ({ errorFn: vi.fn() }));
+vi.mock("sonner", () => ({ toast: Object.assign(toastFn, { error: errorFn }) }));
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -15,6 +16,7 @@ afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
   toastFn.mockReset();
+  errorFn.mockReset();
   useNotesPaneStore.setState({ open: false, activeTab: "reader", request: null });
 });
 
@@ -37,5 +39,16 @@ describe("openNoteBlock (a [note:B] chip in the chat)", () => {
     await openNoteBlock("b_gone");
     expect(useNotesPaneStore.getState().request).toBeNull();
     expect(toastFn).toHaveBeenCalledWith("That line is no longer in your notes.");
+  });
+
+  it.each([
+    ["a server error", () => new HttpResponse(null, { status: 500 })],
+    ["a network error", () => HttpResponse.error()],
+  ])("on %s says it couldn't open the note, not that the line is gone", async (_, reply) => {
+    server.use(http.get(`${API_BASE_URL}/notes/blocks/b_x`, reply));
+    await openNoteBlock("b_x");
+    expect(useNotesPaneStore.getState().request).toBeNull();
+    expect(toastFn).not.toHaveBeenCalled();
+    expect(errorFn).toHaveBeenCalledWith("Couldn't open that note. Try again.");
   });
 });

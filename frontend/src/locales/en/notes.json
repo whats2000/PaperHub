@@ -278,6 +278,7 @@
     "gone": "That suggestion no longer applies."
   },
   "cite": {
-    "gone": "That line is no longer in your notes."
+    "gone": "That line is no longer in your notes.",
+    "failed": "Couldn't open that note. Try again."
   }
 }
