@@ -90,6 +90,8 @@ export interface NoteOp {
 export interface NoteOpsBody {
   base_revision: number;
   ops: NoteOp[];
+  /** Names one burst across its retries; the server applies it once. */
+  idempotency_key?: string;
 }
 
 export interface RejectedOp {

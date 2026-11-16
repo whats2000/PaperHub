@@ -6,8 +6,9 @@
  * caller's base by anyone, so a stale base would reject our own edits.
  *
  * Nothing the user typed is dropped on the way:
- * - a burst the server could not take (network, 5xx) goes back to the head
- *   of the queue and is retried with backoff ("Not saved — retrying");
+ * - a burst whose request failed (network, 5xx, a lost response) is resent
+ *   as-is under the same idempotency key, ahead of anything typed since,
+ *   with backoff ("Not saved — retrying"); the server applies a key once;
  * - a burst the server refused (4xx) is dropped and the saved version shown,
  *   with every edit queued since re-applied on top;
  * - a conflicted block is replaced by the server's version; edits queued
@@ -116,6 +117,15 @@ const timers = new Map<number, ReturnType<typeof setTimeout>>();
 const inflight = new Map<number, Promise<void>>();
 /** Failed attempts of the burst at the head of a note's queue. */
 const attempts = new Map<number, number>();
+/** A burst whose request failed in transit, resent as-is (same ops, base
+ * and key) until it lands: if the first try was saved and only its response
+ * lost, the server answers the key with that first result. */
+interface Burst {
+  ops: NoteOp[];
+  base: number;
+  key: string;
+}
+const inRetry = new Map<number, Burst>();
 let colorsRequest: Promise<void> | null = null;
 
 /** Drop every queued edit and pending flush without sending (test isolation). */
@@ -124,11 +134,18 @@ export function clearPendingNoteOps(): void {
   timers.clear();
   pending.clear();
   attempts.clear();
+  inRetry.clear();
 }
 
-/** The edits of a note not yet sent (a copy). */
+/** The edits of a note not yet saved, in send order (a copy). */
 export function pendingNoteOps(noteId: number): NoteOp[] {
-  return [...(pending.get(noteId) ?? [])];
+  return [...(inRetry.get(noteId)?.ops ?? []), ...(pending.get(noteId) ?? [])];
+}
+
+function newBurstKey(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function mentions(op: NoteOp, id: string | null | undefined): boolean {
@@ -223,24 +240,45 @@ export const useNotesStore = create<NotesStore>()(
         }
       };
 
+      /** The note as the server sent it with the edits not yet saved put
+       * back on top. Queued ops placed by a block the server no longer has
+       * (and no queued insert creates) are placed where it stood. */
+      const rebase = (noteId: number, serverBlocks: NoteBlock[]) => {
+        const localBlocks = get().notes[noteId]?.blocks ?? [];
+        const retry = inRetry.get(noteId)?.ops ?? [];
+        const queued = pending.get(noteId) ?? [];
+        const serverIds = new Set(serverBlocks.map((b) => b.id));
+        const created = new Set(
+          [...retry, ...queued].filter((o) => o.op === "insert").map((o) => o.block_id),
+        );
+        const gone = new Set(
+          localBlocks.map((b) => b.id).filter((id) => !serverIds.has(id) && !created.has(id)),
+        );
+        const q = reanchor(queued, localBlocks, gone);
+        if (queued.length) pending.set(noteId, q);
+        return {
+          blocks: applyOpsLocally(noteId, serverBlocks, [...retry, ...q]),
+          unsaved: retry.length + q.length > 0,
+        };
+      };
+
       /** Load the saved note and put the edits not yet sent back on top. */
       const reload = async (noteId: number) => {
         const d = await getNote(noteId);
+        const { blocks, unsaved } = rebase(noteId, d.blocks);
         set((s) => {
-          const queued = pending.get(noteId) ?? [];
           const cur = s.notes[noteId];
           return {
             notes: {
               ...s.notes,
               [noteId]: {
                 note: d.note,
-                blocks: applyOpsLocally(noteId, d.blocks, queued),
+                blocks,
                 suggestions: d.suggestions,
                 comments: d.comments,
-                // Queued edits were made on the older base: keep it, so a
+                // Unsaved edits were made on the older base: keep it, so a
                 // block changed meanwhile still comes back as a conflict.
-                revision:
-                  queued.length && cur ? Math.min(cur.revision, d.note.revision) : d.note.revision,
+                revision: unsaved && cur ? Math.min(cur.revision, d.note.revision) : d.note.revision,
               },
             },
             reloads: bump(s.reloads, noteId, null),
@@ -256,21 +294,26 @@ export const useNotesStore = create<NotesStore>()(
         const ids = new Set(rejected.map((r) => r.block_id).filter(Boolean));
         const cur = get().notes[noteId];
         if (!ids.size || !cur) return;
-        const local = new Map(cur.blocks.map((b) => [b.id, b]));
-        const gone = new Set(rejected.filter((r) => r.block_id && !r.current).map((r) => r.block_id));
+        // A block this view created whose insert had nowhere to land (its
+        // anchor went in another view) is the user's new text: send it
+        // again, placed anew once the note is reloaded, with its typing.
+        const lostInserts = sent.filter(
+          (o) =>
+            o.op === "insert" &&
+            o.block_id != null &&
+            rejected.some((r) => r.block_id === o.block_id && !r.current),
+        );
+        const resent = new Set(lostInserts.map((o) => o.block_id));
         // Edits OF a conflicted block were made on the version we lost to;
         // edits placed BESIDE it are the user's words and stay.
-        const q = (pending.get(noteId) ?? []).filter((op) => !(op.block_id && ids.has(op.block_id)));
-        pending.set(noteId, reanchor(q, cur.blocks, gone));
-
-        const movedInBurst = new Set(sent.filter((o) => o.op === "move").map((o) => o.block_id));
-        const structural = rejected.some(
-          (r) =>
-            !r.current ||
-            !local.has(r.block_id) ||
-            local.get(r.block_id)!.parent_id !== r.current.parent_id ||
-            movedInBurst.has(r.block_id),
+        const gone = new Set(
+          rejected.filter((r) => r.block_id && !r.current && !resent.has(r.block_id)).map((r) => r.block_id),
         );
+        const q = (pending.get(noteId) ?? []).filter(
+          (op) => !(op.block_id && ids.has(op.block_id) && !resent.has(op.block_id)),
+        );
+        pending.set(noteId, [...lostInserts, ...reanchor(q, cur.blocks, gone)]);
+
         const sectionKept = rejected.some((r) => r.reason === "invalid" && r.current?.type === "section");
         toast(
           sectionKept
@@ -281,22 +324,21 @@ export const useNotesStore = create<NotesStore>()(
             : i18n.t("notes:conflict", "Updated from another view"),
         );
 
-        if (structural) {
-          // Where a block sits is only known to the server: reload the note
-          // (queued edits re-applied on top).
-          try {
-            await reload(noteId);
-            return;
-          } catch {
-            /* offline: fall back to the blocks we were given */
-          }
+        // Where blocks sit (an order change by another view, a move, a
+        // block gone) is only known to the server: reload the note, the
+        // unsaved edits re-applied on top.
+        try {
+          await reload(noteId);
+          return;
+        } catch {
+          /* offline: fall back to the blocks we were given */
         }
         set((s) => {
           const now = s.notes[noteId];
           if (!now) return {};
           let blocks = now.blocks;
           for (const r of rejected) {
-            if (!r.block_id) continue;
+            if (!r.block_id || resent.has(r.block_id)) continue;
             const current = r.current;
             if (current) {
               blocks = blocks.some((b) => b.id === r.block_id)
@@ -311,23 +353,33 @@ export const useNotesStore = create<NotesStore>()(
           }
           return {
             notes: { ...s.notes, [noteId]: { ...now, blocks } },
-            reloads: bump(s.reloads, noteId, structural ? null : [...ids]),
+            reloads: bump(s.reloads, noteId, null),
           };
         });
       };
 
       const send = async (noteId: number) => {
-        const ops = pending.get(noteId);
         const state = get().notes[noteId];
-        if (!ops?.length || !state) return;
-        pending.delete(noteId);
+        if (!state) return;
+        let burst = inRetry.get(noteId);
+        if (!burst) {
+          const ops = pending.get(noteId);
+          if (!ops?.length) return;
+          pending.delete(noteId);
+          burst = { ops, base: state.revision, key: newBurstKey() };
+        }
         let res;
         try {
-          res = await postNoteOps(noteId, { base_revision: state.revision, ops });
+          res = await postNoteOps(noteId, {
+            base_revision: burst.base,
+            ops: burst.ops,
+            idempotency_key: burst.key,
+          });
         } catch (err) {
           if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
             // The server refused this burst: it can never land. Show the
             // saved version; edits queued since stay and are re-applied.
+            inRetry.delete(noteId);
             attempts.delete(noteId);
             setRetrying(noteId, false);
             toast.error(
@@ -336,15 +388,17 @@ export const useNotesStore = create<NotesStore>()(
             await reload(noteId).catch(() => undefined); // the queue is kept either way
             return;
           }
-          // The server could not take it (offline, 5xx): back to the head of
-          // the queue, ahead of anything typed meanwhile, and retry later.
-          pending.set(noteId, [...ops, ...(pending.get(noteId) ?? [])]);
+          // The server could not take it, or took it and the answer was
+          // lost (offline, 5xx): resend this very burst later, ahead of
+          // anything typed meanwhile.
+          inRetry.set(noteId, burst);
           const n = (attempts.get(noteId) ?? 0) + 1;
           attempts.set(noteId, n);
           setRetrying(noteId, true);
           schedule(noteId, RETRY_DELAYS_MS[Math.min(n, RETRY_DELAYS_MS.length) - 1]);
           return;
         }
+        inRetry.delete(noteId);
         attempts.delete(noteId);
         setRetrying(noteId, false);
         const applied = new Set(res.applied);
@@ -365,7 +419,7 @@ export const useNotesStore = create<NotesStore>()(
             },
           };
         });
-        if (res.rejected.length) await resolveConflict(noteId, res.rejected, ops);
+        if (res.rejected.length) await resolveConflict(noteId, res.rejected, burst.ops);
       };
 
       return {
@@ -378,19 +432,19 @@ export const useNotesStore = create<NotesStore>()(
           const known = get().byTarget[`${kind}:${id}`];
           if (known !== undefined) await get().flush(known);
           const d = await getNoteForTarget(kind, id);
+          const { blocks, unsaved } = rebase(d.note.id, d.blocks);
           set((s) => {
             const prev = s.notes[d.note.id];
-            const queued = pending.get(d.note.id) ?? [];
             return {
               notes: {
                 ...s.notes,
                 [d.note.id]: {
                   note: d.note,
-                  blocks: applyOpsLocally(d.note.id, d.blocks, queued),
+                  blocks,
                   suggestions: prev?.suggestions ?? [],
                   comments: prev?.comments ?? [],
                   revision:
-                    queued.length && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
+                    unsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
                 },
               },
               byTarget: { ...s.byTarget, [`${kind}:${id}`]: d.note.id },
@@ -426,7 +480,7 @@ export const useNotesStore = create<NotesStore>()(
           timers.delete(noteId);
           // One burst at a time: the next one needs this one's revision.
           while (inflight.has(noteId)) await inflight.get(noteId);
-          if (!pending.get(noteId)?.length) return;
+          if (!inRetry.has(noteId) && !pending.get(noteId)?.length) return;
           const p = send(noteId);
           inflight.set(noteId, p);
           try {
@@ -434,7 +488,9 @@ export const useNotesStore = create<NotesStore>()(
           } finally {
             inflight.delete(noteId);
           }
-          if (pending.get(noteId)?.length && !timers.has(noteId)) schedule(noteId);
+          if ((inRetry.has(noteId) || pending.get(noteId)?.length) && !timers.has(noteId)) {
+            schedule(noteId);
+          }
         },
 
         onConflict: (noteId, rejected) => resolveConflict(noteId, rejected, []),

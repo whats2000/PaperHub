@@ -361,6 +361,21 @@ describe("NoteEditor", () => {
         };
         return HttpResponse.json(res);
       }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: {
+            id: 7,
+            target_kind: "paper",
+            target_id: "3",
+            title: "Attention",
+            revision: 5,
+            updated_at: "2026-11-16T00:00:00Z",
+          },
+          blocks: [{ ...mine, content: [{ type: "text", text: "Theirs", styles: {} }], text: "Theirs", changed_rev: 5 }],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
     );
     seed([mine]);
     mount();

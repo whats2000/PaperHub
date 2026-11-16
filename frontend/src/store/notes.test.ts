@@ -123,6 +123,14 @@ describe("useNotesStore", () => {
           result(5, [], [{ block_id: "a", reason: "changed_since_base", current: block("a", "Theirs", 5) }]),
         ),
       ),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { ...note, revision: 5 },
+          blocks: [block("a", "Theirs", 5), block("b", "B")],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
     );
     await useNotesStore.getState().loadTarget("paper", 3);
     const seq = useNotesStore.getState().reloads[7]?.seq ?? 0;
@@ -131,8 +139,97 @@ describe("useNotesStore", () => {
     const s = useNotesStore.getState();
     expect(s.notes[7]?.blocks[0]?.text).toBe("Theirs");
     expect(s.notes[7]?.revision).toBe(5);
-    expect(s.reloads[7]).toEqual({ seq: seq + 1, blockIds: ["a"] });
+    // Any changed-since-base conflict reloads the whole note.
+    expect(s.reloads[7]).toEqual({ seq: seq + 1, blockIds: null });
     expect(toastFn).toHaveBeenCalledWith("Updated from another view");
+  });
+
+  it("picks up a reorder by another view when a conflict comes back", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json(
+          result(5, [], [{ block_id: "a", reason: "changed_since_base", current: block("a", "A", 5) }]),
+        ),
+      ),
+      // The other view moved "a" below "b" under the same parent.
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { ...note, revision: 5 },
+          blocks: [block("b", "B"), block("a", "A", 5)],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [upd("a", "Mine")]);
+    await useNotesStore.getState().flush(7);
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["b", "a"]);
+  });
+
+  it("retries a burst whose response was lost under the same key, then sends later typing", async () => {
+    // A server that saves the first try but whose response never arrives.
+    const seen = new Map<string, ApplyResult>();
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        const key = body.idempotency_key ?? "";
+        const stored = seen.get(key);
+        if (stored) return HttpResponse.json(stored);
+        const res = result(body.base_revision + 1, body.ops.map((o) => o.block_id ?? ""));
+        seen.set(key, res);
+        if (posted.length === 1) {
+          useNotesStore.getState().applyLocal(7, [upd("a", "A typed later")]);
+          return new HttpResponse(null, { status: 502 });
+        }
+        return HttpResponse.json(res);
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "new" }, parent_id: null, after: "a" },
+    ]);
+    await useNotesStore.getState().flush(7);
+    await waitFor(() => expect(posted).toHaveLength(3), { timeout: 3000 });
+    // The retry is the same burst under the same key and base.
+    expect(posted[1]).toEqual(posted[0]);
+    expect(posted[0]?.idempotency_key).toEqual(expect.any(String));
+    // The later typing goes in its own burst, on the first burst's revision.
+    expect(posted[2]?.ops).toEqual([upd("a", "A typed later")]);
+    expect(posted[2]?.base_revision).toBe(5);
+    expect(posted[2]?.idempotency_key).not.toBe(posted[0]?.idempotency_key);
+    const s = useNotesStore.getState();
+    expect(s.notes[7]?.blocks.map((b) => b.text)).toEqual(["A typed later", "new", "B"]);
+    expect(s.notes[7]?.blocks.filter((b) => b.id === "n")).toHaveLength(1);
+  });
+
+  it("re-queues a new block whose anchor vanished, with its typing", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        if (posted.length === 1) {
+          useNotesStore.getState().applyLocal(7, [upd("n", "my new line")]);
+          // Another view deleted "b"; the insert after it has no anchor.
+          return HttpResponse.json(result(4, [], [{ block_id: "n", reason: "missing", current: null }]));
+        }
+        return HttpResponse.json(result(5, body.ops.map((o) => o.block_id ?? "")));
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({ note, blocks: [block("a", "A")], suggestions: [], comments: [] }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", block: { type: "paragraph", props: {}, content: "" }, parent_id: null, after: "b" },
+    ]);
+    await useNotesStore.getState().flush(7);
+    expect(pendingNoteOps(7)).toEqual([
+      expect.objectContaining({ op: "insert", block_id: "n", parent_id: null, after: "a" }),
+      expect.objectContaining({ op: "update", block_id: "n" }),
+    ]);
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["A", "my new line"]);
   });
 
   it("shows the saved version when the server refuses a burst (4xx)", async () => {
@@ -170,9 +267,12 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().retrying[7]).toBe(true);
     expect(pendingNoteOps(7).map((o) => o.block_id)).toEqual(["a", "b"]);
     expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["A typed", "B typed meanwhile"]);
-    await waitFor(() => expect(posted).toHaveLength(2), { timeout: 3000 });
-    expect(posted[1]?.base_revision).toBe(4);
-    expect(posted[1]?.ops.map((o) => o.block_id)).toEqual(["a", "b"]);
+    await waitFor(() => expect(posted).toHaveLength(3), { timeout: 3000 });
+    // The failed burst is retried as it was; what was typed meanwhile
+    // follows in its own burst.
+    expect(posted[1]).toEqual(posted[0]);
+    expect(posted[2]?.base_revision).toBe(5);
+    expect(posted[2]?.ops.map((o) => o.block_id)).toEqual(["b"]);
     await waitFor(() => expect(useNotesStore.getState().retrying[7]).toBe(false));
     expect(pendingNoteOps(7)).toEqual([]);
   });
@@ -239,6 +339,14 @@ describe("useNotesStore", () => {
         }
         return HttpResponse.json(result(6, body.ops.map((o) => o.block_id ?? "")));
       }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { ...note, revision: 5 },
+          blocks: [block("a", "Theirs", 5), block("b", "B")],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
     );
     await useNotesStore.getState().loadTarget("paper", 3);
     useNotesStore.getState().applyLocal(7, [upd("a", "Mine")]);
