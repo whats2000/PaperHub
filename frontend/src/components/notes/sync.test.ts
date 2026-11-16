@@ -157,3 +157,35 @@ describe("pruneUnsavedEmpty", () => {
     expect(out.map((b) => b.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("a divider lifted to the top level", () => {
+  it("is one update and one move, and the store's copy round-trips to the editor's tree", async () => {
+    const { applyOpsLocally } = await import("@/lib/notes/ops");
+    const { cleanupEditors, makeEditor, type } = await import("./testEditor");
+    const { dividerRule } = await import("./inlineMarks");
+    const stored = [nb("l1", null, "a"), nb("l2", "l1", "b"), nb("l3", "l1", ""), nb("after", null, "after")];
+    const editor = makeEditor([dividerRule], toEditorBlocks(stored));
+    const before = JSON.parse(JSON.stringify(editor.document)) as EditorBlock[];
+    editor.setTextCursorPosition("l3", "start");
+    type(editor, "---");
+    const after = JSON.parse(JSON.stringify(editor.document)) as EditorBlock[];
+    const ops = diffDocuments(before, after);
+    expect(ops.map((o) => [o.op, o.block_id])).toEqual([
+      ["move", "l3"],
+      ["update", "l3"],
+    ]);
+    const move = ops.find((o) => o.op === "move")!;
+    expect([move.parent_id ?? null, move.after]).toEqual([null, "l1"]);
+    // The store applies them as the server would: the same tree comes back.
+    const local = applyOpsLocally(1, stored, ops);
+    expect(local.map((b) => [b.id, b.parent_id, b.type])).toEqual([
+      ["l1", null, "paragraph"],
+      ["l2", "l1", "paragraph"],
+      ["l3", null, "divider"],
+      ["after", null, "paragraph"],
+    ]);
+    const shape = (t: EditorBlock[]): unknown => t.map((b) => [b.id, b.type, shape(b.children)]);
+    expect(shape(toEditorBlocks(local))).toEqual(shape(after));
+    cleanupEditors();
+  });
+});
