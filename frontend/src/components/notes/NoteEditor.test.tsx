@@ -299,6 +299,15 @@ describe("NoteEditor", () => {
     expect(screen.queryByText("Not saved — retrying")).not.toBeInTheDocument();
   });
 
+  it("shows the loading line again when it switches to a note not loaded yet", async () => {
+    seed([mine]);
+    const { rerender } = render(<NoteEditor noteId={7} variant="pane" />);
+    await screen.findByText("Mine");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    rerender(<NoteEditor noteId={8} variant="pane" />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading the note…");
+  });
+
   it("fades the editor in over the loading line", async () => {
     useNotesStore.setState({ notes: {}, byTarget: {}, reloads: {} });
     render(<NoteEditor noteId={7} variant="pane" />);

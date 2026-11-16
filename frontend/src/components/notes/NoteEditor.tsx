@@ -54,6 +54,11 @@ function dictionaryFor(lang: string) {
 }
 
 export function NoteEditor(props: NoteEditorProps) {
+  // Each note gets its own loading line and editor state.
+  return <NoteEditorFrame key={props.noteId} {...props} />;
+}
+
+function NoteEditorFrame(props: NoteEditorProps) {
   const { t, i18n } = useTranslation();
   const loaded = useNotesStore((s) => s.notes[props.noteId] !== undefined);
   // The loading line fades out over the editor fading in (never vanishes).
