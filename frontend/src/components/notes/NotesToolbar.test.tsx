@@ -123,6 +123,14 @@ describe("NotesToolbar", () => {
     expect(md).toHaveTextContent("Coming soon");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Shortcuts" }));
     expect(await screen.findByRole("dialog", { name: "Shortcuts" })).toBeInTheDocument();
+    // The guide is anchored to ⋯ itself: no hidden stand-in control.
+    const bar = screen.getByRole("toolbar", { name: "Note tools" });
+    expect(bar.querySelectorAll("button[aria-hidden], button[tabindex='-1']")).toHaveLength(0);
+    expect(within(bar).getAllByRole("button", { hidden: true }).map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([
+      "Following §2",
+      "Focus",
+      "More",
+    ]);
   });
 
   it("calls onExport with the format once it is wired", async () => {

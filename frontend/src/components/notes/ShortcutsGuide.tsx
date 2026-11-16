@@ -1,5 +1,6 @@
 /** The shortcuts guide: everything the notes editor understands, in the
- * sections of the approved prototype. A popover anchored to `trigger` that
+ * sections of the approved prototype. A popover anchored to `trigger` (or to
+ * `anchor`, a control that opens it some other way, e.g. from a menu) that
  * grows from it and shrinks back into it. */
 import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,23 +37,25 @@ function Rendered({ sample, children }: { sample: Sample; children: ReactNode })
 export interface ShortcutsGuideProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The element the guide grows from and shrinks back into. */
-  trigger: React.ReactElement;
-  /** Where focus goes when the guide closes (default: the trigger). */
-  finalFocus?: React.RefObject<HTMLElement | null>;
+  /** The element that opens the guide, which it grows from and shrinks back into. */
+  trigger?: React.ReactElement;
+  /** Or: the element it grows from when opened some other way; focus goes
+   * back to it on close. */
+  anchor?: React.RefObject<HTMLElement | null>;
 }
 
-export function ShortcutsGuide({ open, onOpenChange, trigger, finalFocus }: ShortcutsGuideProps) {
+export function ShortcutsGuide({ open, onOpenChange, trigger, anchor }: ShortcutsGuideProps) {
   const { t } = useTranslation();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger render={trigger} />
+      {trigger && <PopoverTrigger render={trigger} />}
       <PopoverContent
         side="bottom"
         align="end"
         sideOffset={6}
         role="dialog"
-        finalFocus={finalFocus}
+        anchor={anchor}
+        finalFocus={anchor}
         aria-label={t("notes:guide.title", "Shortcuts")}
         className="max-h-[72vh] w-[340px] max-w-[calc(100vw-16px)] origin-top-right overflow-y-auto px-3 pt-1 pb-2.5 text-[12.5px] motion-reduce:animate-none motion-reduce:transition-none"
       >

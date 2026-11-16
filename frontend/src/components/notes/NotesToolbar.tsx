@@ -173,7 +173,7 @@ export function NotesToolbar({
         <ScanEye className="size-3 shrink-0" aria-hidden />
         <span className="@max-[380px]:hidden">{focusLabel}</span>
       </button>
-      <span className="relative inline-flex">
+      <span className="inline-flex">
         <Menu.Root>
           <Menu.Trigger
             ref={moreRef}
@@ -214,21 +214,8 @@ export function NotesToolbar({
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
-        {/* The guide grows from the ⋯ button: its anchor sits under it and
-            takes no clicks; closing returns focus to ⋯. */}
-        <ShortcutsGuide
-          open={guideOpen}
-          onOpenChange={onGuideOpenChange}
-          finalFocus={moreRef}
-          trigger={
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-hidden
-              className="pointer-events-none absolute inset-0 opacity-0"
-            />
-          }
-        />
+        {/* The guide grows from the ⋯ button and returns focus to it. */}
+        <ShortcutsGuide open={guideOpen} onOpenChange={onGuideOpenChange} anchor={moreRef} />
       </span>
     </div>
   );
