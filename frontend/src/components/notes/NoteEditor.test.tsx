@@ -1128,6 +1128,37 @@ describe("dividers, Focus and folding", () => {
     await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual([]));
   });
 
+  it("the slash menu shows Callout and Equation in BlockNote's one Basic blocks group", async () => {
+    seed([section, blk("p0", { content: [] })]);
+    const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(rect);
+    if (!("getBoundingClientRect" in Range.prototype)) {
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: rect });
+      Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+    }
+    mount();
+    await screen.findByTestId("note-editor");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean; focus: () => boolean } };
+    };
+    const view = pm.editor.view;
+    act(() => {
+      pm.editor.commands.focus();
+      pm.editor.commands.setTextSelection(view.state.doc.content.size - 3);
+      const { from, to } = view.state.selection;
+      const handled = view.someProp("handleTextInput", (f) => f(view, from, to, "/", () => view.state.tr));
+      if (!handled) view.dispatch(view.state.tr.insertText("/", from, to));
+    });
+    await screen.findByText("Callout");
+    expect(screen.getAllByText("Basic blocks")).toHaveLength(1);
+    const titles = [...document.querySelectorAll(".bn-suggestion-menu-item")]
+      .filter((e) => !e.parentElement?.closest(".bn-suggestion-menu-item"))
+      .map((e) => e.textContent ?? "");
+    const at = (title: string) => titles.findIndex((x) => x.startsWith(title));
+    expect(at("Callout")).toBe(at("Divider") + 1);
+    expect(at("Equation")).toBe(at("Callout") + 1);
+  });
+
   it("Esc that closes the slash menu leaves Focus on; a bare Esc in the note ends it", async () => {
     const { NotesToolbar } = await import("./NotesToolbar");
     seed([section, blk("p0", { content: [] })]);

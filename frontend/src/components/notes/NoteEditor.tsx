@@ -272,15 +272,20 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
 
   const slashItems = useCallback(
     (query: string): Promise<DefaultReactSuggestionItem[]> => {
-      const basic = t("notes:slash.groupBasic", "Basic blocks");
+      const defaults = getDefaultReactSlashMenuItems(editor);
+      // Callout and Equation join BlockNote's own basic group, right after
+      // its last item: a group shown twice is two headings (and one React key).
+      const basicGroup =
+        defaults.find((i) => (i as { key?: string }).key === "paragraph")?.group ??
+        t("notes:slash.groupBasic", "Basic blocks");
+      const basicEnd = defaults.map((i) => i.group).lastIndexOf(basicGroup) + 1;
       const paperhub = t("notes:slash.groupPaperHub", "PaperHub");
-      const items: DefaultReactSuggestionItem[] = [
-        ...getDefaultReactSlashMenuItems(editor),
+      const basicItems: DefaultReactSuggestionItem[] = [
         {
           title: t("notes:slash.callout", "Callout"),
           subtext: t("notes:slash.calloutHint", "A tinted box that stands out"),
           aliases: ["callout", "tip", "note"],
-          group: basic,
+          group: basicGroup,
           icon: <Lightbulb className="size-[18px]" />,
           onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "callout" } as never),
         },
@@ -288,10 +293,15 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
           title: t("notes:slash.equation", "Equation"),
           subtext: t("notes:slash.equationHint", "LaTeX, rendered as you type · $$"),
           aliases: ["equation", "math", "latex", "$$"],
-          group: basic,
+          group: basicGroup,
           icon: <Sigma className="size-[18px]" />,
           onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "math" } as never),
         },
+      ];
+      const items: DefaultReactSuggestionItem[] = [
+        ...defaults.slice(0, basicEnd),
+        ...basicItems,
+        ...defaults.slice(basicEnd),
         {
           title: t("notes:slash.quotePaper", "Quote from the paper"),
           subtext: t("notes:slash.quotePaperHint", "Select text in the reader; it lands here."),
