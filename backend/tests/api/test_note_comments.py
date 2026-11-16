@@ -142,3 +142,19 @@ async def test_blank_quote_is_rejected(env) -> None:
         r = await c.post(f"/notes/{nid}/comments",
                          json={"block_id": bid, "quote": q, "text": "x"})
         assert r.status_code == 422
+
+
+async def test_threads_of_a_deleted_block_come_back_with_it(env) -> None:
+    c, nid, bid, _ = env
+    t = await _new(c, nid, bid)
+    rev = (await c.get(f"/notes/{nid}")).json()["note"]["revision"]
+    r = await c.post(f"/notes/{nid}/ops", json={
+        "base_revision": rev, "ops": [{"op": "delete", "block_id": bid}]})
+    assert r.status_code == 200 and r.json()["applied"] == [bid]
+    assert (await c.get(f"/notes/{nid}")).json()["comments"] == []
+    # nothing was changed on the thread itself
+    cs = r.json()["change_set_id"]
+    r = await c.post(f"/notes/change-sets/{cs}/undo")
+    assert r.status_code == 200
+    back = (await c.get(f"/notes/{nid}")).json()["comments"]
+    assert [(x["id"], x["status"]) for x in back] == [(t["id"], "open")]

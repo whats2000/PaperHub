@@ -75,9 +75,14 @@ async def get_comment(conn: aiosqlite.Connection, cid: str,
 
 async def list_comments(conn: aiosqlite.Connection, note_id: int,
                         *, open_only: bool = False) -> list[dict[str, Any]]:
-    """The note's threads (never deleted ones), oldest first."""
+    """The note's threads on live blocks (never deleted ones), oldest first."""
     status = "status = 'open'" if open_only else "status IN ('open', 'resolved')"
-    return await _threads(conn, f"note_id = ? AND {status}", (note_id,))
+    # A thread follows its block: while the block is soft-deleted the thread is
+    # left out (its status is untouched), and an undo brings both back.
+    live = ("block_id IN (SELECT id FROM note_blocks "
+            "WHERE note_id = ? AND deleted_at IS NULL)")
+    return await _threads(conn, f"note_id = ? AND {status} AND {live}",
+                          (note_id, note_id))
 
 
 async def create_comment(conn: aiosqlite.Connection, note_id: int, *,
