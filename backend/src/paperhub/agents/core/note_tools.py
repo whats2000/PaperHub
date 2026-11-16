@@ -505,8 +505,10 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             applied=res.applied, suggested=res.suggested)
         rejected += [{**r, "current": _current(r.get("current"))}
                      for r in res.rejected]
-        seen = (await _read_revisions(ctx.conn, ctx.session_id)).get(note.id, 0)
-        if revision == seen + 1:  # nothing but this write since it last looked
+        seen = (await _read_revisions(ctx.conn, ctx.session_id)).get(note.id)
+        # Nothing but this write since the agent last looked, or it never
+        # looked: either way the user's later edits are changes to show it.
+        if seen is None or revision == seen + 1:
             await _record_reads(ctx, {note.id: revision})
     record["rejected"] = rejected
     result: dict[str, Any] = {

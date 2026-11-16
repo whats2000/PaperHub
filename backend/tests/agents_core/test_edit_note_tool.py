@@ -460,3 +460,33 @@ async def test_snapped_view_boxes_in_written_blocks_are_traced(
     assert out.record["citations_snapped"] == snaps
     assert json.loads(out.content)["citations_snapped"] == snaps
     assert "citations_removed" not in out.record
+
+
+async def test_write_without_read_marks_the_note_seen(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Live run 911/912: the agent wrote into a user's paper note it had not
+    read; the user then edited that block, and the next turn's
+    <notes_changes> was empty because the write left no read mark."""
+    from paperhub.agents.core.context import build_session_state
+
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    await apply_ops(migrated_db, note.id, base_revision=note.revision,
+                    actor="user", ops=[Op(op="insert", block=BlockIn(
+                        type="paragraph", content="user's own words"))])
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    await migrated_db.execute(
+        "INSERT INTO papers (session_id, paper_content_id, enabled) VALUES (1, ?, 1)",
+        (pid,))
+    await migrated_db.commit()
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[_ins("summary", under_heading="Method")])
+    written = json.loads(out.content)["applied"][-1]
+    rev = json.loads(out.content)["revision"]
+    await apply_ops(migrated_db, note.id, base_revision=rev, actor="user", ops=[
+        Op(op="update", block_id=written, block=BlockIn(
+            type="paragraph", content="my rewrite"))])
+    state = await build_session_state(migrated_db, 1, {})
+    assert "<notes_changes>" in state and written in state
