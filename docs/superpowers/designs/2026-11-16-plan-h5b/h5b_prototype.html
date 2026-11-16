@@ -506,6 +506,26 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 .blk-exit { animation: blkOut 200ms ease-in forwards; } @keyframes blkOut { to { opacity: 0; transform: translateY(-4px); } }
 
 /* Notes page (H5b.2 sketch) */
+.tr-row { position: relative; display: flex; align-items: center; gap: 4px; padding: 3px 4px 3px calc(4px + var(--d, 0) * 14px); border-radius: 6px; font-size: 13px; cursor: pointer; user-select: none; color: var(--foreground); transition: background 120ms ease-out, opacity 120ms; }
+.tr-row:hover, .tr-row[aria-current="true"] { background: var(--accent); } .tr-row[aria-current="true"] { font-weight: 500; }
+.tr-row .tr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-chev, .tr-act { border: 0; background: transparent; color: var(--muted-fg); width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; padding: 0; flex-shrink: 0; }
+.tr-chev svg { transition: transform 150ms ease-out; } .tr-chev[aria-expanded="false"] svg { transform: rotate(-90deg); } .tr-chev[hidden] { display: inline-flex; visibility: hidden; }
+.tr-act { opacity: 0; transition: opacity 120ms; } .tr-row:hover .tr-act, .tr-act:focus-visible { opacity: 1; }
+.tr-chev:hover, .tr-act:hover { background: color-mix(in srgb, var(--foreground) 10%, transparent); color: var(--foreground); }
+.tr-row.link { color: var(--muted-fg); } .tr-row .lk { color: var(--muted-fg); flex-shrink: 0; }
+.tr-row.dragging { opacity: 0.4; } .tr-row[data-drop="in"] { background: color-mix(in srgb, var(--hl-blue) 20%, transparent); }
+.tree-h[data-drop="in"] { color: var(--foreground); background: color-mix(in srgb, var(--hl-blue) 20%, transparent); border-radius: 6px; }
+.np-new { border: 0; background: transparent; color: var(--muted-fg); font-size: 13px; padding: 4px 6px; border-radius: 6px; display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; margin-bottom: 4px; }
+.np-new:hover { background: var(--accent); color: var(--foreground); }
+.np-drop-line { position: fixed; height: 2px; background: var(--hl-blue); border-radius: 2px; pointer-events: none; z-index: 70; display: none; }
+.np-index { border: 1px solid var(--border); border-radius: 8px; padding: 4px; margin: 4px 0 16px; }
+.np-index-h { font-size: 11.5px; color: var(--muted-fg); padding: 4px 6px 3px; display: flex; gap: 6px; align-items: center; }
+.np-ix { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: transparent; text-align: left; padding: 5px 6px; border-radius: 6px; font-size: 13.5px; color: var(--foreground); }
+.np-ix:hover { background: var(--accent); } .np-ix small { margin-left: auto; color: var(--muted-fg); font-size: 11.5px; white-space: nowrap; } .np-ix span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-title { font-size: 24px; font-weight: 700; outline: none; margin: 0 0 6px; line-height: 1.25; } .np-title:empty::before { content: 'Untitled'; color: var(--muted-fg); }
+.np-p { outline: none; min-height: 1.6em; padding: 2px 0; font-size: 14px; line-height: 1.6; } .np-p:empty:focus::before { content: "Write, or type '/' for commands"; color: var(--muted-fg); }
+.np-menu { position: fixed; z-index: 85; }
 .notes-page { flex: 1; min-width: 0; display: flex; }
 .tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
 .tree .search { border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; font-size: 12.5px; color: var(--muted-fg); margin-bottom: 8px; display: flex; gap: 6px; align-items: center; }
@@ -713,28 +733,12 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 
     <section class="view" id="vNotes" hidden style="flex:1;min-width:0;display:flex">
       <div class="notes-page">
-        <nav class="tree" aria-label="Notes">
-          <div class="search"><i data-lucide="search" class="icon-sm"></i>Search all notes</div>
-          <div class="tree-h">Papers</div>
-          <button class="tree-i" aria-current="true"><i data-lucide="file-text" class="icon-sm"></i><span>Toward a Predictive eXtended Reality…</span></button>
-          <button class="tree-i sub"><span>§1 Introduction</span></button>
-          <button class="tree-i sub"><span>§2 Background and Motivation</span></button>
-          <button class="tree-i"><i data-lucide="file-text" class="icon-sm"></i><span>A Review of Ghost Imaging via…</span></button>
-          <div class="tree-h">Chats</div>
-          <button class="tree-i"><i data-lucide="message-square" class="icon-sm"></i><span>Where does the XR latency drop of 83–89% come from?</span></button>
-          <div class="tree-h">Ideas</div>
-          <button class="tree-i"><i data-lucide="lightbulb" class="icon-sm"></i><span>Smooth pose merging with a Kalman blend</span></button>
-          <div class="tree-h">Pages</div>
-          <button class="tree-i"><i data-lucide="file" class="icon-sm"></i><span>Related work: XR teleoperation</span></button>
-          <div class="tree-h">Trash</div>
-        </nav>
-        <div class="page-editor"><div class="inner">
+        <nav class="tree" aria-label="Notes"><div id="pageTree"></div></nav>
+        <div class="page-editor" id="pageEditor"><div class="inner">
           <div class="page-actions"><button class="btn"><i data-lucide="history" class="icon-xs"></i>History</button><button class="btn"><i data-lucide="download" class="icon-xs"></i>Export (.md / .docx)</button></div>
-          <div class="crumb"><i data-lucide="file-text" class="icon-xs"></i>Papers <i data-lucide="chevron-right" class="icon-xs"></i> Toward a Predictive eXtended Reality…</div>
-          <h1 style="font-size:24px;margin:0 0 4px">Toward a Predictive eXtended Reality Teleoperation System with Duo-Virtual Spaces</h1>
-          <div class="muted" style="font-size:12px;margin-bottom:14px">One note for the paper, organised by its sections · shared by every chat that attaches it</div>
+          <div id="pageHead"></div>
           <div class="blocks" id="pageBlocks"></div>
-          <p class="sketch-note">H5b.2 sketch, to be redesigned from the shipped Ideas / Feedback pages before H5b.2 is planned.</p>
+          <p class="sketch-note">H5b.2 sketch: the page body uses the notes pane's editor in the app; simplified here. Drag pages in the tree to nest them.</p>
         </div></div>
       </div>
     </section>
@@ -903,7 +907,158 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     $('#noteMeta').textContent = notes[k].meta;
     $('#paperNoteLabel').textContent = DOCS[doc].title; $('#paperNoteTab').title = `Notes on: ${DOCS[doc].title}`; icons();
   }
-  function renderPage() { $('#pageBlocks').innerHTML = visible('xr').map(b => blockHtml(b, 'xr')).join(''); icons(); }
+  /* ---------- Notes page: a tree of your pages (nest by dragging) plus the notes of papers, chats and ideas ---------- */
+  const PAGES = [
+    { id: 'p1', title: 'XR teleoperation project', parent: null, body: ['Goal: cut perceived latency below 100 ms for the lab rig by March.', 'Open: does local prediction hold up when the network jitters?'] },
+    { id: 'p2', title: 'Related work: XR teleoperation', parent: 'p1', body: ['Draft of the related-work section.'] },
+    { id: 'p3', title: 'Meeting notes · 11-12', parent: 'p1', body: ['Bob can lend the rig on Monday.'] },
+    { id: 'p4', title: 'Reading log', parent: null, body: [''] },
+  ];
+  // Notes that belong to a paper, chat or idea are shared, so a page links to them instead of owning them.
+  const TARGETS = {
+    'paper:xr': { title: 'Toward a Predictive eXtended Reality Teleoperation System with Duo-Virtual Spaces', icon: 'file-text', kind: 'Paper note', group: 'Papers' },
+    'paper:ghost': { title: 'A Review of Ghost Imaging via Sparsity Constraints', icon: 'file-text', kind: 'Paper note', group: 'Papers' },
+    'chat:1': { title: 'Where does the XR latency drop of 83–89% come from?', icon: 'message-square', kind: 'Chat note', group: 'Chats' },
+    'idea:1': { title: 'Smooth pose merging with a Kalman blend', icon: 'lightbulb', kind: 'Idea note', group: 'Ideas' },
+  };
+  let LINKS = [{ page: 'p1', note: 'paper:xr' }, { page: 'p1', note: 'idea:1' }];
+  let curNP = 'p1', npSeq = 4; const openP = new Set(['p1']);
+  const pageById = id => PAGES.find(x => x.id === id);
+  const kids = id => PAGES.filter(x => x.parent === id);
+  const linksOf = id => LINKS.filter(l => l.page === id);
+  const isFolder = id => kids(id).length + linksOf(id).length > 0;
+  const isUnder = (id, anc) => { for (let x = pageById(id); x; x = x.parent && pageById(x.parent)) if (x.parent === anc) return true; return false; };
+  function treeRows(parent, d) {
+    return kids(parent).map(pg => {
+      const f = isFolder(pg.id), open = openP.has(pg.id);
+      return `<div class="tr-row" data-page="${pg.id}" style="--d:${d}" aria-current="${curNP === pg.id}" title="${esc(pg.title || 'Untitled')}"><button class="tr-chev" data-chev="${pg.id}" aria-expanded="${open}" aria-label="Show or hide the pages inside" ${f ? '' : 'hidden'}><i data-lucide="chevron-down" class="icon-xs"></i></button><i data-lucide="${f ? (open ? 'folder-open' : 'folder') : 'file'}" class="icon-sm"></i><span class="tr-t">${esc(pg.title || 'Untitled')}</span><button class="tr-act" data-addsub="${pg.id}" aria-label="Add a page inside" title="Add a page inside"><i data-lucide="plus" class="icon-xs"></i></button><button class="tr-act" data-pmenu="${pg.id}" aria-label="More" title="Move, delete…"><i data-lucide="ellipsis" class="icon-xs"></i></button></div>` +
+        (f ? `<div class="collapse" data-state="${open ? 'open' : 'closed'}"><div>${treeRows(pg.id, d + 1)}${linksOf(pg.id).map(l => { const t = TARGETS[l.note]; return `<div class="tr-row link" data-open="${l.note}" data-linkof="${pg.id}" style="--d:${d + 1}" title="${esc(t.title)} · linked here; the note lives under ${t.group}"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span><i data-lucide="arrow-up-right" class="icon-xs lk"></i><button class="tr-act" data-unlink="${pg.id}|${l.note}" aria-label="Remove the link" title="Remove from this page (the note is kept)"><i data-lucide="x" class="icon-xs"></i></button></div>`; }).join('')}</div></div>` : '');
+    }).join('');
+  }
+  function renderTree() {
+    const tg = g => Object.entries(TARGETS).filter(([, t]) => t.group === g).map(([k, t]) => `<div class="tr-row tgt" data-tgt="${k}" style="--d:0" aria-current="${curNP === k}" title="${esc(t.title)} · drag onto a page to link it there"><button class="tr-chev" hidden></button><i data-lucide="${t.icon}" class="icon-sm"></i><span class="tr-t">${esc(t.title)}</span></div>`).join('');
+    $('#pageTree').innerHTML = `<div class="search"><i data-lucide="search" class="icon-sm"></i>Search all notes</div><button class="np-new" id="npNew"><i data-lucide="plus" class="icon-sm"></i>New page</button>` +
+      `<div class="tree-h" data-root="1">Your pages</div>${treeRows(null, 0)}<div class="tree-h">Papers</div>${tg('Papers')}<div class="tree-h">Chats</div>${tg('Chats')}<div class="tree-h">Ideas</div>${tg('Ideas')}<div class="tree-h">Trash</div>`;
+    icons();
+  }
+  function renderPage() {
+    if (!$('#pageTree')) return;
+    renderTree();
+    const pg = pageById(curNP);
+    if (!pg) {
+      const t = TARGETS[curNP]; const inPages = LINKS.filter(l => l.note === curNP).map(l => pageById(l.page).title);
+      $('#pageHead').innerHTML = `<div class="crumb"><i data-lucide="${t.icon}" class="icon-xs"></i>${t.group} <i data-lucide="chevron-right" class="icon-xs"></i> ${esc(t.title)}</div><h1 class="np-title" style="font-size:22px">${esc(t.title)}</h1><div class="muted" style="font-size:12px;margin-bottom:14px">${t.kind}${curNP.startsWith('paper') ? ' · organised by its sections · shared by every chat that attaches it' : ''}${inPages.length ? ` · linked in ${inPages.map(esc).join(', ')}` : ''}</div>`;
+      $('#pageBlocks').innerHTML = curNP === 'paper:xr' ? visible('xr').map(b => blockHtml(b, 'xr')).join('') : '<p class="np-p muted">This note opens here with the same editor.</p>';
+      icons(); return;
+    }
+    const chain = []; for (let x = pg; x; x = x.parent && pageById(x.parent)) chain.unshift(x);
+    const ch = kids(pg.id), ln = linksOf(pg.id);
+    $('#pageHead').innerHTML = `<div class="crumb"><i data-lucide="file" class="icon-xs"></i>${chain.map((x, i) => i < chain.length - 1 ? `<a href="#" data-goto="${x.id}" style="color:inherit">${esc(x.title || 'Untitled')}</a> <i data-lucide="chevron-right" class="icon-xs"></i>` : esc(x.title || 'Untitled')).join(' ')}</div>` +
+      `<h1 class="np-title" contenteditable="true" spellcheck="false" id="npTitle">${esc(pg.title)}</h1>` +
+      `<div class="collapse" data-state="${ch.length + ln.length ? 'open' : 'closed'}"><div><div class="np-index"><div class="np-index-h"><i data-lucide="list-tree" class="icon-xs"></i>In this page · ${ch.length + ln.length}</div>` +
+      ch.map(c => `<button class="np-ix" data-goto="${c.id}"><i data-lucide="${isFolder(c.id) ? 'folder' : 'file'}" class="icon-sm"></i><span>${esc(c.title || 'Untitled')}</span><small>${isFolder(c.id) ? `${kids(c.id).length + linksOf(c.id).length} inside` : 'Page'}</small></button>`).join('') +
+      ln.map(l => { const t = TARGETS[l.note]; return `<button class="np-ix" data-goto="${l.note}"><i data-lucide="${t.icon}" class="icon-sm"></i><span>${esc(t.title)}</span><small>${t.kind} ↗</small></button>`; }).join('') +
+      `</div></div></div>`;
+    $('#pageBlocks').innerHTML = (pg.body.length ? pg.body : ['']).map((t, i) => `<div class="np-p" contenteditable="true" data-np="${i}">${esc(t)}</div>`).join('');
+    icons();
+  }
+  function npSelect(id) { curNP = id; renderPage(); }
+  function npCreate(parent) {
+    const pg = { id: 'p' + (++npSeq), title: '', parent, body: [''] }; PAGES.push(pg); if (parent) openP.add(parent); curNP = pg.id; renderPage();
+    const r = $(`#pageTree [data-page="${pg.id}"]`); if (r) r.classList.add('blk-enter');
+    requestAnimationFrame(() => { const t = $('#npTitle'); if (t) t.focus(); });
+  }
+  const npDel = id => { const all = [id, ...PAGES.filter(x => isUnder(x.id, id)).map(x => x.id)]; return all; };
+  $('#vNotes').addEventListener('input', e => {
+    if (e.target.id === 'npTitle') { const pg = pageById(curNP); pg.title = e.target.textContent; const r = $(`#pageTree [data-page="${pg.id}"] .tr-t`); if (r) r.textContent = pg.title || 'Untitled'; }
+    const np = e.target.closest('[data-np]'); if (np) pageById(curNP).body[+np.dataset.np] = np.textContent;
+  });
+  $('#vNotes').addEventListener('keydown', e => {
+    if (e.target.id === 'npTitle' && e.key === 'Enter') { e.preventDefault(); const f = $('#pageBlocks [data-np]'); if (f) f.focus(); }
+    const np = e.target.closest('[data-np]');
+    if (np && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const pg = pageById(curNP), k = +np.dataset.np; pg.body.splice(k + 1, 0, ''); renderPage(); requestAnimationFrame(() => { const n = $(`#pageBlocks [data-np="${k + 1}"]`); if (n) n.focus(); }); }
+  });
+  $('#vNotes').addEventListener('click', e => {
+    if (dragNP && dragNP.on) return;
+    const t = e.target;
+    const chev = t.closest('[data-chev]'); if (chev) { e.stopPropagation(); const id = chev.dataset.chev, open = !openP.has(id); if (open) openP.add(id); else openP.delete(id); chev.setAttribute('aria-expanded', String(open)); const c = chev.closest('.tr-row').nextElementSibling; if (c && c.classList.contains('collapse')) c.dataset.state = open ? 'open' : 'closed'; const ic = chev.nextElementSibling; ic.setAttribute('data-lucide', open ? 'folder-open' : 'folder'); icons(); return; }
+    if (t.closest('#npNew')) { npCreate(null); return; }
+    const add = t.closest('[data-addsub]'); if (add) { e.stopPropagation(); npCreate(add.dataset.addsub); return; }
+    const un = t.closest('[data-unlink]'); if (un) { e.stopPropagation(); const [pg, note] = un.dataset.unlink.split('|'); const before = LINKS.slice(); LINKS = LINKS.filter(l => !(l.page === pg && l.note === note)); renderPage();
+      const undo = () => { LINKS = before; renderPage(); return { text: 'Link restored', onAct: () => { LINKS = LINKS.filter(l => !(l.page === pg && l.note === note)); renderPage(); return null; }, label: 'Remove again', icon: 'rotate-ccw' }; };
+      toast(`Removed from “${pageById(pg).title}” (the note is kept)`, undo, 'Undo', 'unlink', 5000); return; }
+    const pm = t.closest('[data-pmenu]'); if (pm) { e.stopPropagation(); openPageMenu(pm.dataset.pmenu, pm); return; }
+    const go = t.closest('[data-goto]'); if (go) { e.preventDefault(); npSelect(go.dataset.goto); return; }
+    const row = t.closest('.tr-row'); if (row) npSelect(row.dataset.page || row.dataset.open || row.dataset.tgt);
+  });
+  // ⋯ on a page: add a page inside, move to…, delete (with Undo).
+  const npMenu = document.createElement('div'); npMenu.className = 'ed-menu np-menu'; npMenu.dataset.state = 'closed'; npMenu.setAttribute('role', 'menu'); document.body.appendChild(npMenu);
+  function openPageMenu(id, anchor, moving) {
+    const pg = pageById(id);
+    const dests = [...(pg.parent !== null ? [{ id: null, title: 'Top level (Your pages)' }] : []), ...PAGES.filter(x => x.id !== id && !isUnder(x.id, id) && x.id !== pg.parent)];
+    npMenu.innerHTML = moving
+      ? '<div class="em-h">Move “' + esc(pg.title || 'Untitled') + '” into</div>' + dests.map(x => `<button class="em-i" data-mv="${x.id || ''}"><span class="ico"><i data-lucide="${x.id ? (isFolder(x.id) ? 'folder' : 'file') : 'list-tree'}" class="icon-sm"></i></span><span class="tx">${esc(x.title || 'Untitled')}</span></button>`).join('')
+      : `<button class="em-i" data-m="add"><span class="ico"><i data-lucide="plus" class="icon-sm"></i></span><span class="tx">Add a page inside</span></button><button class="em-i" data-m="move"><span class="ico"><i data-lucide="corner-down-right" class="icon-sm"></i></span><span class="tx">Move to…</span></button><button class="em-i" data-m="del"><span class="ico"><i data-lucide="trash-2" class="icon-sm"></i></span><span class="tx">Delete${isFolder(id) ? ' (and what is inside)' : ''}</span></button>`;
+    icons(); const r = anchor.getBoundingClientRect(); npMenu.dataset.state = 'open';
+    npMenu.style.left = Math.min(r.left, innerWidth - 310) + 'px'; npMenu.style.top = Math.min(r.bottom + 4, innerHeight - npMenu.offsetHeight - 8) + 'px';
+    npMenu.onmousedown = e => {
+      e.preventDefault(); e.stopPropagation(); const b = e.target.closest('.em-i'); if (!b) return;
+      if (b.dataset.m === 'add') { closeNpMenu(); npCreate(id); }
+      else if (b.dataset.m === 'move') openPageMenu(id, anchor, true);
+      else if (b.dataset.m === 'del') { closeNpMenu(); const ids = npDel(id), removed = PAGES.filter(x => ids.includes(x.id)), at = removed.map(x => PAGES.indexOf(x)), lk = LINKS.slice();
+        PAGES.splice(0, PAGES.length, ...PAGES.filter(x => !ids.includes(x.id))); LINKS = LINKS.filter(l => !ids.includes(l.page)); if (ids.includes(curNP)) curNP = pg.parent || 'paper:xr'; renderPage();
+        const undo = () => { removed.forEach((x, i) => PAGES.splice(at[i], 0, x)); LINKS = lk; renderPage(); return null; };
+        toast(`Moved “${pg.title || 'Untitled'}”${ids.length > 1 ? ` and ${ids.length - 1} page${ids.length > 2 ? 's' : ''} inside` : ''} to the trash`, undo, 'Undo', 'trash-2', 5000); }
+      else if (b.dataset.mv !== undefined) { closeNpMenu(); movePage(id, b.dataset.mv || null, null); }
+    };
+  }
+  function closeNpMenu() { npMenu.dataset.state = 'closed'; npMenu.onmousedown = null; }
+  document.addEventListener('mousedown', e => { if (npMenu.dataset.state === 'open' && !npMenu.contains(e.target)) closeNpMenu(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && npMenu.dataset.state === 'open') closeNpMenu(); });
+  // Move a page: into a parent (at the end), or before / after a sibling. Undo puts it back.
+  function movePage(id, parent, rel) {
+    const pg = pageById(id), from = { parent: pg.parent, at: PAGES.indexOf(pg) };
+    PAGES.splice(from.at, 1); pg.parent = parent;
+    if (rel) { const k = PAGES.indexOf(pageById(rel.id)); PAGES.splice(rel.where === 'before' ? k : k + 1, 0, pg); } else PAGES.push(pg);
+    if (parent) openP.add(parent); renderPage();
+    const r = $(`#pageTree [data-page="${id}"]`); if (r) { r.classList.add('blk-enter'); flash(r); }
+    const undo = () => { PAGES.splice(PAGES.indexOf(pg), 1); pg.parent = from.parent; PAGES.splice(from.at, 0, pg); renderPage(); return null; };
+    toast(parent ? `Moved into “${pageById(parent).title || 'Untitled'}”` : 'Moved to the top level', undo, 'Undo', 'corner-down-right', 4000);
+  }
+  // Drag in the tree: onto a page's middle nests it inside; near its top or bottom edge places it before / after.
+  // A paper, chat or idea note dragged onto a page is linked there (it stays in its own group).
+  const npLine = document.createElement('div'); npLine.className = 'np-drop-line'; document.body.appendChild(npLine);
+  let dragNP = null;
+  $('#vNotes').addEventListener('pointerdown', e => {
+    const row = e.target.closest('#pageTree .tr-row'); if (!row || e.target.closest('button') || row.classList.contains('link')) return;
+    dragNP = { id: row.dataset.page || row.dataset.tgt, tgt: !!row.dataset.tgt, row, y0: e.clientY, on: false, drop: null };
+  });
+  document.addEventListener('pointermove', e => {
+    if (!dragNP) return; if (!dragNP.on && Math.abs(e.clientY - dragNP.y0) > 4) { dragNP.on = true; dragNP.row.classList.add('dragging'); }
+    if (!dragNP.on) return;
+    $$('#pageTree [data-drop]').forEach(x => delete x.dataset.drop); npLine.style.display = 'none'; dragNP.drop = null;
+    const el = document.elementFromPoint(e.clientX, e.clientY); if (!el) return;
+    const root = el.closest('#pageTree .tree-h[data-root]'); if (root && !dragNP.tgt) { root.dataset.drop = 'in'; dragNP.drop = { parent: null }; return; }
+    const row = el.closest('#pageTree .tr-row[data-page]'); if (!row || row === dragNP.row) return;
+    const tid = row.dataset.page; if (!dragNP.tgt && (tid === dragNP.id || isUnder(tid, dragNP.id))) return;
+    const rr = row.getBoundingClientRect(), y = (e.clientY - rr.top) / rr.height;
+    if (dragNP.tgt || (y > 0.28 && y < 0.72)) { row.dataset.drop = 'in'; dragNP.drop = { parent: tid }; return; }
+    const where = y <= 0.28 ? 'before' : 'after', d = +getComputedStyle(row).getPropertyValue('--d') || 0;
+    Object.assign(npLine.style, { display: 'block', left: rr.left + 8 + d * 14 + 'px', width: rr.width - 12 - d * 14 + 'px', top: (where === 'before' ? rr.top - 1 : rr.bottom - 1) + 'px' });
+    dragNP.drop = { parent: pageById(tid).parent, rel: { id: tid, where } };
+  });
+  document.addEventListener('pointerup', () => {
+    if (!dragNP) return; const d = dragNP; setTimeout(() => { dragNP = null; }, 0);
+    d.row.classList.remove('dragging'); $$('#pageTree [data-drop]').forEach(x => delete x.dataset.drop); npLine.style.display = 'none';
+    if (!d.on || !d.drop) return;
+    if (d.tgt) {
+      const pg = d.drop.parent; if (LINKS.some(l => l.page === pg && l.note === d.id)) { toast('Already linked in this page', null, '', 'link', 2200); return; }
+      LINKS.push({ page: pg, note: d.id }); openP.add(pg); renderPage();
+      toast(`Linked in “${pageById(pg).title}” · the note stays under ${TARGETS[d.id].group}`, () => { LINKS = LINKS.filter(l => !(l.page === pg && l.note === d.id)); renderPage(); return null; }, 'Undo', 'link', 5000);
+      return;
+    }
+    movePage(d.id, d.drop.parent, d.drop.rel || null);
+  });
 
   // Insert a block under a section heading of a paper's note, creating the heading if missing.
   // A section's notes: the runs of blocks between its heading, its dividers and the next section heading.
