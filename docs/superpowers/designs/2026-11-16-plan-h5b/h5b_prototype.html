@@ -407,6 +407,7 @@ input { font: inherit; color: inherit; }
 .blk-row[data-link="true"]:has(+ .blk-row[data-link="true"]) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .blk-row[data-flash="true"] { background: color-mix(in srgb, var(--foreground) 14%, transparent); }
 .blk { padding: 2px 6px; min-width: 0; font-size: 13.5px; }
+.blk[data-ind] { padding-left: calc(6px + var(--ind) * 24px); transition: padding-left 150ms ease-out; }
 .blk h3 { margin: 12px 0 2px; font-size: 15px; display: flex; gap: 6px; align-items: baseline; }
 .blk h3 .sec-tag { font-size: 10.5px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .blk h4 { margin: 6px 0 1px; font-size: 13.5px; }
@@ -830,7 +831,8 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     const gut = b.type === 'sec' ? '<span class="gutter"></span>' : `<span class="gutter"><button data-addafter="${b.id}" aria-label="Add a block below" title="Click to add a block below"><i data-lucide="plus" class="icon-sm"></i></button><button data-drag="${b.id}" aria-label="Drag to move, or click for the block menu" title="Drag to move · click for options"><i data-lucide="grip-vertical" class="icon-sm"></i></button></span>`;
     // Non-text blocks (references, headings, dividers) can be selected as a whole, as in Notion: Enter adds a line below.
     const selectable = ['quote', 'fig', 'eq', 'box', 'lost', 'sec', 'hr'].includes(b.type);
-    return `<div class="blk-row" data-id="${b.id}">${gut}<div class="blk"${selectable ? ` tabindex="0" data-selblk="${b.id}"` : ''}>${inner}</div>${del}</div>`;
+    const ind = b.ind ? ` data-ind="${b.ind}" style="--ind:${b.ind}"` : '';
+    return `<div class="blk-row" data-id="${b.id}">${gut}<div class="blk"${selectable ? ` tabindex="0" data-selblk="${b.id}"` : ''}${ind}>${inner}</div>${del}</div>`;
   }
   // Notion-style text blocks: one contenteditable each; lists, to-dos, quotes, callouts, headings, equations.
   const TEXT_TYPES = ['p', 'h', 'h1', 'h2', 'h3', 'bullet', 'num', 'todo', 'check', 'uquote', 'callout'];
@@ -843,8 +845,10 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
     const cls = ['h1', 'h2', 'h3'].includes(t) ? 'ed-' + t : 'ed-p';
     const ed = `<div class="ed ${cls}${t === 'todo' && b.done ? ' done' : ''}" data-edit="${b.id}" contenteditable="true" spellcheck="false" data-ph="${esc(PH[t] || '')}">${b.text || ''}</div>`;
     let body = ed;
-    if (t === 'bullet') body = `<div class="li"><span class="bul">•</span>${ed}</div>`;
-    else if (t === 'num') body = `<div class="li"><span class="bul">${b._n || 1}.</span>${ed}</div>`;
+    // Each nesting level has its own marker, as in Notion: • ◦ ▪ and 1. a. i.
+    const lv = (b.ind || 0) % 3, n = b._n || 1;
+    if (t === 'bullet') body = `<div class="li"><span class="bul">${['•', '◦', '▪'][lv]}</span>${ed}</div>`;
+    else if (t === 'num') body = `<div class="li"><span class="bul">${lv === 1 ? String.fromCharCode(96 + ((n - 1) % 26) + 1) : lv === 2 ? ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][(n - 1) % 10] : n}.</span>${ed}</div>`;
     else if (t === 'todo') body = `<div class="li"><input type="checkbox" data-chk="${b.id}" ${b.done ? 'checked' : ''} aria-label="Done">${ed}</div>`;
     else if (t === 'uquote') body = `<div class="uq">${ed}</div>`;
     else if (t === 'callout') body = `<div class="callout"><span class="ic">💡</span>${ed}</div>`;
@@ -872,7 +876,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   }
   function renderNote() {
     const k = curNoteKey();
-    { let n = 0; notes[k].blocks.forEach(b => { if (b.type === 'num') b._n = ++n; else n = 0; }); }
+    { const cnt = []; notes[k].blocks.forEach(b => { const L = b.ind || 0; cnt.length = L + 1; if (b.type === 'num') b._n = cnt[L] = (cnt[L] || 0) + 1; else cnt[L] = 0; }); }
     $('#notesBody').innerHTML = `<div class="blocks">${segmentsHtml(visible(k), k)}</div><div class="newline" contenteditable="true" data-ph="Write, or type '/' for commands · @ links a paper or section · --- makes a divider"></div>`;
     requestAnimationFrame(applyFocus);
     $('#noteMeta').textContent = notes[k].meta;
@@ -1703,19 +1707,29 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       const k2 = e.key.toLowerCase(); const cmd = k2 === 'e' && !e.shiftKey ? 'code' : k2 === 's' && e.shiftKey ? 'strikeThrough' : k2 === 'm' && e.shiftKey ? 'comment' : null;
       if (cmd) { e.preventDefault(); applyFmt(cmd); return; }
     }
+    // Tab nests the block one level under the block above (at most one deeper than it); Shift+Tab steps it out.
+    if (e.key === 'Tab' && !['h1', 'h2', 'h3', 'h'].includes(b.type)) {
+      e.preventDefault(); const cur = b.ind || 0;
+      if (e.shiftKey) { if (cur) b.ind = cur - 1; }
+      else { const pv = prevText(b); const max = pv && TEXT_TYPES.includes(pv.type) && !['h1', 'h2', 'h3', 'h'].includes(pv.type) ? (pv.ind || 0) + 1 : 0; if (cur < Math.min(max, 4)) b.ind = cur + 1; }
+      if ((b.ind || 0) !== cur) { b.text = ed.innerHTML; renderNote(); focusBlock(b.id, off); }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const f = /^```([\w+#-]*)$/.exec(ed.textContent); if (f && b.type === 'p') { toCode(b, f[1]); return; }
-      // An empty list item / to-do / quote turns back into text (as in Notion); otherwise split at the caret.
+      // An empty nested item steps out a level first; an empty top-level list item / to-do / quote turns back into text (as in Notion).
+      if (!len && b.ind && ['bullet', 'num', 'todo'].includes(b.type)) { b.ind--; renderNote(); focusBlock(b.id, 0); return; }
       if (!len && ['bullet', 'num', 'todo', 'uquote', 'callout'].includes(b.type)) { b.type = 'p'; renderNote(); focusBlock(b.id, 0); return; }
       const r = sl.getRangeAt(0); r.deleteContents(); const tail = document.createRange(); tail.setStart(r.endContainer, r.endOffset); tail.setEnd(ed, ed.childNodes.length);
       const holder = document.createElement('div'); holder.appendChild(tail.extractContents());
       b.text = ed.innerHTML; const keep = ['bullet', 'num', 'todo'].includes(b.type);
-      const nb = insertAfter(b, { id: newId(), type: keep ? b.type : 'p', text: holder.innerHTML });
+      const nb = insertAfter(b, { id: newId(), type: keep ? b.type : 'p', text: holder.innerHTML, ind: b.ind || 0 });
       renderNote(); focusBlock(nb.id, 0); return;
     }
     if (e.key === 'Backspace' && sl.isCollapsed && off === 0) {
       if (b.type !== 'p') { e.preventDefault(); b.type = 'p'; b.text = ed.innerHTML; renderNote(); focusBlock(b.id, 0); return; }
+      if (b.ind) { e.preventDefault(); b.ind--; b.text = ed.innerHTML; renderNote(); focusBlock(b.id, 0); return; }
       const pv = prevText(b); if (!pv) return; e.preventDefault();
       if (isText(pv)) { const at = new DOMParser().parseFromString(`<div>${pv.text || ''}</div>`, 'text/html').body.textContent.length; pv.text = (pv.text || '') + ed.innerHTML; noteList().splice(noteList().indexOf(b), 1); renderNote(); focusBlock(pv.id, at); }
       else if (!len) { noteList().splice(noteList().indexOf(b), 1); renderNote(); }
