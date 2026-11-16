@@ -820,7 +820,7 @@ describe("dividers, Focus and folding", () => {
       ["paragraph", "after"],
     ]);
     // A new line left empty goes with Undo.
-    editor.updateBlock(editor.document[1]!, { content: [] } as never);
+    editor.updateBlock(editor.document[1]!, { content: [] });
     const undo = (toastFn.mock.calls[0] as [string, { action: { onClick: () => void } }])[1];
     act(() => undo.action.onClick());
     expect(lines().slice(0, 2)).toEqual([
