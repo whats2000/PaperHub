@@ -693,9 +693,13 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         ? "pdf"
         : "html";
   useEffect(() => {
+    if (standalone) return; // not the chat's reader
     setReaderView(effectivePaperId != null && readerKind ? { paperId: effectivePaperId, kind: readerKind } : null);
-  }, [effectivePaperId, readerKind, setReaderView]);
-  useEffect(() => () => setReaderView(null), [setReaderView]);
+  }, [standalone, effectivePaperId, readerKind, setReaderView]);
+  useEffect(() => {
+    if (standalone) return;
+    return () => setReaderView(null);
+  }, [standalone, setReaderView]);
 
   if (!open && refs.length === 0) return null;
 
@@ -932,7 +936,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
               <HtmlView
                 html={doc.html}
                 isDark={isDark}
-                onReadingHeading={isActive ? (h) => setReadingSection(pid, h) : undefined}
+                onReadingHeading={
+                  isActive && !standalone ? (h) => setReadingSection(pid, h) : undefined
+                }
                 scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
                   isActive &&

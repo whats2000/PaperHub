@@ -260,6 +260,23 @@ describe("CitationCanvas — figure and region citations", () => {
       expect(useCanvasStore.getState().readerView).toEqual({ paperId: PDF_PAPER, kind: "pdf" }));
   });
 
+  it("a standalone reader (the Ideas page) leaves the chat reader's view and section alone", async () => {
+    useCanvasStore.setState({ readerView: null, readingSection: null });
+    const { container } = render(
+      <CitationCanvas standalone={{ papers: [{ paper_content_id: LATEX_PAPER, title: "LaTeX paper" }], onClose: () => {} }} />,
+    );
+    const doc = await loadHtmlPaper(container);
+    doc.body.insertAdjacentHTML("afterbegin", "<h2>1 Intro</h2>");
+    act(() => {
+      doc.defaultView?.dispatchEvent(new Event("scroll"));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(useCanvasStore.getState().readerView).toBeNull();
+    expect(useCanvasStore.getState().readingSection).toBeNull();
+  });
+
   it("the track slides for a tab change, not for a paper switch", async () => {
     const user = userEvent.setup();
     const { container } = render(<CitationCanvas />);
