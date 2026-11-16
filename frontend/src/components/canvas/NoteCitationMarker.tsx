@@ -19,7 +19,7 @@ export function NoteCitationMarker({ blockId, ordinal }: Props) {
         type="button"
         aria-label={t("marker.noteAria", { ordinal })}
         className={EVIDENCE_MARKER_CLASS}
-        onClick={() => openNoteBlock(blockId)}
+        onClick={() => void openNoteBlock(blockId)}
       >
         [<NotebookText className="h-[1em] w-[1em]" aria-hidden />
         {ordinal}]

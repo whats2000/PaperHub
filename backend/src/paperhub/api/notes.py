@@ -119,6 +119,29 @@ async def note_for_target(
         return await _detail(conn, note)
 
 
+class BlockPlace(BaseModel):
+    note_id: int
+    target_kind: str
+    target_id: str
+
+
+@router.get("/blocks/{block_id}", response_model=BlockPlace)
+async def block_place(block_id: str) -> BlockPlace:
+    """The note a live block is in, and that note's target (a ``[note:B]``
+    chip in the chat opens the notes pane there)."""
+    async with open_db(load_settings().db_path) as conn:
+        async with conn.execute(
+            "SELECT n.id, n.target_kind, n.target_id FROM note_blocks b "
+            "JOIN notes n ON n.id = b.note_id "
+            "WHERE b.id = ? AND b.deleted_at IS NULL AND n.deleted_at IS NULL",
+            (block_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(404, f"block {block_id} not found")
+    return BlockPlace(note_id=row[0], target_kind=row[1], target_id=str(row[2]))
+
+
 @router.get("/{note_id}", response_model=NoteDetail)
 async def note_detail(note_id: int) -> NoteDetail:
     async with open_db(load_settings().db_path) as conn:

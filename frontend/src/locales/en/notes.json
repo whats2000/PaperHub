@@ -276,5 +276,8 @@
     "deleteLine": "Suggested removing this line",
     "failed": "Couldn't apply that. Try again.",
     "gone": "That suggestion no longer applies."
+  },
+  "cite": {
+    "gone": "That line is no longer in your notes."
   }
 }

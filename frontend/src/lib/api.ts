@@ -1279,6 +1279,13 @@ export async function getNote(noteId: number): Promise<NoteDetail> {
   return apiFetch<NoteDetail>(`/notes/${noteId}`);
 }
 
+/** The note a block is in, and that note's target (404 once the block is gone). */
+export async function getNoteBlockPlace(
+  blockId: string,
+): Promise<{ note_id: number; target_kind: "paper" | "session" | "idea"; target_id: string }> {
+  return apiFetch(`/notes/blocks/${encodeURIComponent(blockId)}`);
+}
+
 /** One burst of block ops. Conflicts come back in `rejected`, never a 409. */
 export async function postNoteOps(noteId: number, body: NoteOpsBody): Promise<ApplyResult> {
   return apiFetch<ApplyResult>(`/notes/${noteId}/ops`, {
