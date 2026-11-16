@@ -91,10 +91,10 @@ async def test_delete_and_restore_mark_keeps_user_text(conn):
     await delete_mark(conn, m["id"])
     assert await list_marks(conn, 1) == []
     texts = [b.text for b in await list_blocks(conn, note.id)]
-    assert texts == ["", "my thought"]
+    assert texts == ["Method", "my thought"]  # the section heading, then the block
     await restore_mark(conn, m["id"])
     texts = [b.text for b in await list_blocks(conn, note.id)]
-    assert texts == ["", "quoted", "my thought"]
+    assert texts == ["Method", "quoted", "my thought"]
     assert len(await list_marks(conn, 1)) == 1
 
 
