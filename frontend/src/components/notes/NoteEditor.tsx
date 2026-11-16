@@ -34,7 +34,8 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
-import { commentKeys, useNoteComments } from "./noteComments";
+import { commentKeys, useNoteComments, type ReanchorHint } from "./noteComments";
+import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./noteSuggestions";
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { partOf } from "./parts";
 import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
@@ -117,6 +118,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
   const activePart = useNotesStore((s) => s.activePart[noteId] ?? null);
   const folded = useNotesStore((s) => s.folded[noteId]);
   const setActivePart = useNotesStore((s) => s.setActivePart);
+  // The bars of the agent's suggestions are rendered into these hosts.
+  const suggestionHost = useSuggestionHosts();
 
   const editor = useCreateBlockNote(
     {
@@ -134,6 +137,10 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
         dividerRule,
         syntaxHighlighter,
         noteParts(() => partsViewOf(noteId)),
+        noteSuggestionMarks(() => ({
+          suggestions: useNotesStore.getState().notes[noteId]?.suggestions ?? [],
+          host: suggestionHost,
+        })),
       ],
     },
     [noteId],
@@ -168,6 +175,13 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
     synced.current = next;
     if (ops.length) applyLocal(noteId, ops);
   }, [applyLocal, doc, noteId, keepFolds]);
+
+  const comments = useNoteComments(editor, noteId);
+  // Comment threads to put back over their quotes once an accepted
+  // suggestion's text shows (see useNoteSuggestions).
+  const pendingReanchorRef = useRef<ReanchorHint[] | null>(null);
+  const suggestionBars = useNoteSuggestions(editor, noteId, suggestionHost, pendingReanchorRef);
+  const { reanchor } = comments;
 
   // Blocks the server replaced (a conflict) or a whole reload: apply them in
   // place without sending them back as edits.
@@ -210,7 +224,14 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
       applyingRemote.current = false;
     }
     synced.current = pruneUnsavedEmpty(doc(), new Set([...treeIds(synced.current ?? []), ...flat.keys()]));
-  }, [reload, editor, noteId, doc]);
+    // After an accepted suggestion: the threads' styles go back on as the
+    // user's edit of the block (synced like typing).
+    const hints = pendingReanchorRef.current;
+    if (hints) {
+      pendingReanchorRef.current = null;
+      if (hints.length) reanchor(hints);
+    }
+  }, [reload, editor, noteId, doc, reanchor]);
 
   // The part decorations read the store; redraw them when it changes.
   useEffect(() => {
@@ -337,8 +358,6 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
     [editor, noteId, paperContentId, t],
   );
 
-  const comments = useNoteComments(editor, noteId);
-
   const loadColors = useNotesStore((s) => s.loadColors);
   useEffect(() => {
     void loadColors();
@@ -395,6 +414,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
         </BlockNoteView>
         {comments.popover}
+        {suggestionBars}
       </div>
     </NoteEditorContext.Provider>
   );

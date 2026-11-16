@@ -144,6 +144,14 @@ export function commentAnchor(editor: Ed, id: string): number | undefined {
   return at;
 }
 
+/** A thread to put back over its quote after its block was rewritten. */
+export interface ReanchorHint {
+  id: string;
+  blockId: string;
+  quote: string;
+  near: number | undefined;
+}
+
 // ---- the controller --------------------------------------------------------------
 
 interface Draft {
@@ -234,6 +242,23 @@ export function useNoteComments(editor: Ed, noteId: number) {
 
   const close = () => setOpen(false);
 
+  /** Puts threads back over their quotes in rewritten text (an accepted
+   * suggestion). A thread whose quote is gone stays open and is shown, so
+   * the user sees that its text changed. */
+  const reanchor = useCallback(
+    (hints: ReanchorHint[]) => {
+      let lost: ReanchorHint | null = null;
+      for (const h of hints) {
+        if (!applyCommentStyle(editor, h.id, h.blockId, h.quote, h.near)) lost ??= h;
+      }
+      if (!lost) return;
+      const sel = `.bn-block-outer[data-id="${CSS.escape(lost.blockId)}"]`;
+      const el = editor.domElement?.querySelector(sel) ?? editor.domElement;
+      if (el) show({ kind: "thread", id: lost.id }, el);
+    },
+    [editor, show],
+  );
+
   const post = async (text: string) => {
     if (!shown) return;
     if (shown.kind === "draft") {
@@ -281,10 +306,11 @@ export function useNoteComments(editor: Ed, noteId: number) {
           onDelete={() => act("delete")}
           onClose={close}
           onDiscard={close}
+          textChanged={thread?.status === "open" && commentAnchor(editor, thread.id) === undefined}
         />
       )}
     </CommentPopover>
   );
 
-  return { start, onEditorClick, popover };
+  return { start, onEditorClick, popover, reanchor };
 }

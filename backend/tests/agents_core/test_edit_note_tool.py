@@ -513,9 +513,11 @@ async def test_summary_counts_only_content_blocks(
 async def test_agent_rewrite_of_a_commented_block_is_a_suggestion(
     migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
 ) -> None:
-    """Pins today's behaviour: the user's block (with a comment's style) is not
-    touched by the agent; accepting the suggestion replaces the content, which
-    drops the style and leaves the thread open on a block with no underline."""
+    """The user's block (with a comment's style) is not touched by the agent.
+    Accepting writes the proposal as given, so the server's block has no
+    style; the notes editor then puts the open thread's style back over its
+    quote as the user's edit (noteSuggestions.tsx + noteComments.reanchor,
+    tested in SuggestionMark.test.tsx). The thread stays open either way."""
     from paperhub.notes.comments import create_comment, list_comments
     from paperhub.notes.ops import resolve_suggestion
 
@@ -544,6 +546,6 @@ async def test_agent_rewrite_of_a_commented_block_is_a_suggestion(
     await resolve_suggestion(migrated_db, data["suggested"][0]["suggestion_id"], True)
     block = (await list_blocks(migrated_db, nid))[0]
     assert block.text == "theirs"
-    assert "comment" not in json.dumps(block.content)  # the underline is gone
+    assert "comment" not in json.dumps(block.content)  # the editor re-applies it
     still = await list_comments(migrated_db, nid)
     assert [(c["id"], c["status"]) for c in still] == [(thread["id"], "open")]

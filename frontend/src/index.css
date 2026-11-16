@@ -331,6 +331,35 @@
     .note-comment { transition: none; }
 }
 
+/* Notes: the agent's suggestions as tracked changes (noteSuggestions.tsx).
+   The user's words it would replace are struck through, its proposal is
+   inserted after them; neither is yellow (citations). On Accept / Reject
+   the strike and the insertion fade out before the saved text shows. */
+.note-sug-del {
+    color: var(--muted-foreground);
+    text-decoration: line-through;
+    text-decoration-color: oklch(0.577 0.245 27.325);
+    transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
+}
+.note-sug-ins {
+    margin-left: 0.25em;
+    text-decoration: none;
+    background-color: color-mix(in oklch, oklch(0.527 0.154 150.069) 16%, transparent);
+    border-bottom: 1px solid oklch(0.527 0.154 150.069);
+    transition: opacity 200ms ease-out;
+}
+.dark .note-sug-del { text-decoration-color: oklch(0.704 0.191 22.216); }
+.dark .note-sug-ins {
+    background-color: color-mix(in oklch, oklch(0.723 0.219 149.579) 16%, transparent);
+    border-bottom-color: oklch(0.723 0.219 149.579);
+}
+.note-sug-del[data-leaving] { color: inherit; text-decoration-color: transparent; }
+.note-sug-ins[data-leaving] { opacity: 0; }
+.note-sug-host { display: block; user-select: none; }
+@media (prefers-reduced-motion: reduce) {
+    .note-sug-del, .note-sug-ins { transition: none; }
+}
+
 /* Notes: parts. Focus fades the other parts (section headings and dividers
    stay); a divider's chevron folds the part below it, collapsing its height
    toward the divider. The attributes are editor decorations (partsDecorations.ts). */

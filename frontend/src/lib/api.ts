@@ -73,7 +73,6 @@ import type {
   NoteDetail,
   NoteOpsBody,
   NoteTargetKind,
-  NoteWithBlocks,
   PaperPageBlock,
 } from "@/types/notes";
 

@@ -24,6 +24,9 @@ export interface CommentThreadProps {
   onClose: () => void;
   /** Esc on a new comment with nothing written. */
   onDiscard: () => void;
+  /** The commented words are no longer in the note (e.g. an accepted
+   * suggestion rewrote them): the thread stays open, without an underline. */
+  textChanged?: boolean;
 }
 
 function when(iso: string, lang: string): string {
@@ -36,7 +39,7 @@ const iconBtn =
   "inline-flex size-[26px] items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
 export function CommentThread(props: CommentThreadProps) {
-  const { thread, quote, onPost, onResolve, onDelete, onClose, onDiscard } = props;
+  const { thread, quote, onPost, onResolve, onDelete, onClose, onDiscard, textChanged } = props;
   const { t, i18n } = useTranslation();
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -101,6 +104,11 @@ export function CommentThread(props: CommentThreadProps) {
       <div className="mb-1 truncate border-l-2 border-border pl-1.5 text-[11.5px] text-muted-foreground" title={quote}>
         “{quote}”
       </div>
+      {textChanged && (
+        <p className="mb-1 text-[11.5px] text-amber-700 dark:text-amber-300">
+          {t("notes:comment.textChanged", "The commented text changed.")}
+        </p>
+      )}
       {items.map((it) => (
         <div key={it.id} className="px-0.5 py-1">
           <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
