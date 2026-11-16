@@ -3,19 +3,35 @@
  * The block's own render (language select, `<pre><code>`) is kept; the button
  * is added beside it. It copies the code as it is now and says "Copied" for a
  * moment (the colour change is a CSS transition, see `.note-code-copy`).
+ *
+ * BlockNote's own fence rule is left out: it also fired on Enter in the middle
+ * of a "```lang" line and mangled the rest of it. `codeFence` (inlineMarks.ts)
+ * makes code blocks instead, only at the end of the line.
  */
 import { codeBlockOptions } from "@blocknote/code-block";
-import { createCodeBlockSpec } from "@blocknote/core";
+import { createCodeBlockSpec, createExtension } from "@blocknote/core";
 
 import i18n from "@/lib/i18n";
 
 const COPIED_MS = 1500;
+
+type SpecExtension = NonNullable<ReturnType<typeof createCodeBlockSpec>["extensions"]>[number];
+
+/** The extension without its input rules. An extension made from a plain
+ * definition returns that definition when called; others are kept as they are. */
+function withoutInputRules(ext: SpecExtension): SpecExtension {
+  if (typeof ext !== "function") return ext;
+  const def = (ext as unknown as () => unknown)();
+  if (!def || typeof def !== "object" || !("inputRules" in def)) return ext;
+  return createExtension({ ...(def as Record<string, unknown>), inputRules: undefined } as never) as SpecExtension;
+}
 
 export function codeBlockWithCopy() {
   const base = createCodeBlockSpec(codeBlockOptions);
   const baseRender = base.implementation.render!;
   return {
     ...base,
+    extensions: base.extensions?.map(withoutInputRules),
     implementation: {
       ...base.implementation,
       render(this: ThisParameterType<typeof baseRender>, ...args: Parameters<NonNullable<typeof baseRender>>) {

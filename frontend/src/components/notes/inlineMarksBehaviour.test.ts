@@ -150,3 +150,24 @@ describe("lists", () => {
     expect(editor.getTextCursorPosition().block.type).toBe("paragraph");
   });
 });
+
+describe("Enter inside a fence line", () => {
+  it.each([
+    ["```py", "thon"],
+    ["``", "`python"],
+  ])("splits %s|%s into two lines and makes no code block", (before, after) => {
+    const editor = makeEditor([], [{ id: "f", type: "paragraph", content: before + after }]);
+    editor.setTextCursorPosition("f", "start");
+    const at = editor._tiptapEditor.view.state.selection.from + before.length;
+    editor._tiptapEditor.commands.setTextSelection(at);
+    press(editor, { key: "Enter" });
+    const lines = (editor.document as unknown as { type: string; content: { text: string }[] }[]).map((b) => [
+      b.type,
+      b.content.map((c) => c.text).join(""),
+    ]);
+    expect(lines.slice(0, 2)).toEqual([
+      ["paragraph", before],
+      ["paragraph", after],
+    ]);
+  });
+});
