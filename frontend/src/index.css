@@ -156,6 +156,9 @@
     --domain-8: #e34948;
     --hull-alpha: .12;
     /* Mark colours (H5b). Yellow stays reserved for citations. */
+    --note-code-bg: oklch(0.965 0 0);
+    --note-code-fg: oklch(0.27 0 0);
+    --note-code-border: oklch(0.9 0 0);
     --hl-green: #2f9e63;
     --hl-blue: #3b7dd8;
     --hl-pink: #d6457e;
@@ -206,6 +209,9 @@
     --domain-7: #9085e9;
     --domain-8: #e66767;
     --hull-alpha: .2;
+    --note-code-bg: oklch(0.24 0 0);
+    --note-code-fg: oklch(0.9 0 0);
+    --note-code-border: oklch(1 0 0 / 12%);
     --hl-green: #36a067;
     --hl-blue: #4b86dc;
     --hl-pink: #d9578a;
@@ -224,6 +230,41 @@
 .paperhub-notes .bn-shadcn {
     --bn-colors-editor-background: transparent;
     --bn-font-family: var(--font-sans);
+}
+
+/* Notes: code blocks. Plain and unknown languages take --note-code-fg; a
+   language's token colours come from its theme pair (--shiki-light / -dark). */
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] {
+    background-color: var(--note-code-bg);
+    color: var(--note-code-fg);
+    border: 1px solid var(--note-code-border);
+    border-radius: 8px;
+}
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.85em;
+}
+.paperhub-notes .bn-block-content[data-content-type="codeBlock"] .shiki {
+    color: var(--shiki-light, var(--note-code-fg));
+}
+.dark .paperhub-notes .bn-block-content[data-content-type="codeBlock"] .shiki {
+    color: var(--shiki-dark, var(--note-code-fg));
+}
+
+/* Notes: ||hidden|| text is a bar until clicked. */
+.note-hidden {
+    background-color: var(--foreground);
+    color: transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+.note-hidden[data-shown] {
+    background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+    color: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+    .note-hidden { transition: none; }
 }
 
 @layer base {
