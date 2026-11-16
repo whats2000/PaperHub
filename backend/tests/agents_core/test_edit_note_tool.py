@@ -490,3 +490,21 @@ async def test_write_without_read_marks_the_note_seen(
             type="paragraph", content="my rewrite"))])
     state = await build_session_state(migrated_db, 1, {})
     assert "<notes_changes>" in state and written in state
+
+
+async def test_summary_counts_only_content_blocks(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Live run 911: one paragraph after a divider showed "added 2". The
+    divider and an auto-created section are not counted."""
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=note.revision,
+                      ops=[{**_ins("summary", under_heading="Method"),
+                            "divider_before": True},
+                           {"op": "insert", "under_heading": "Method",
+                            "block": {"type": "divider"}}])
+    data = json.loads(out.content)
+    assert len(data["applied"]) == 4  # section, divider, paragraph, divider
+    assert out.events[0][1]["summary"]["added"] == 1

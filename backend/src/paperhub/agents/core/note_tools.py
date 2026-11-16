@@ -362,15 +362,31 @@ def _section_ops(
 
 
 def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
-             section: str | None) -> dict[str, Any]:
+             section: str | None, structural: set[str]) -> dict[str, Any]:
+    """Counts for the notes_changed card. ``added`` counts content blocks
+    only: dividers and sections (``structural``) are left out."""
     done = set(applied)
     touched = [o for o in ops if o.op != "insert" and o.block_id in done]
+    touched_ids = {o.block_id for o in touched}
     return {
-        "added": len(applied) - len(touched),
+        "added": sum(a not in touched_ids and a not in structural
+                     for a in applied),
         "updated": sum(o.op in ("update", "move") for o in touched),
         "deleted": sum(o.op == "delete" for o in touched),
         "suggested": suggested, "rejected": rejected, "section": section,
     }
+
+
+async def _structural_ids(conn: aiosqlite.Connection, ids: list[str]) -> set[str]:
+    """The dividers and sections among ``ids``."""
+    if not ids:
+        return set()
+    marks = ",".join("?" for _ in ids)
+    async with conn.execute(
+        f"SELECT id FROM note_blocks WHERE id IN ({marks}) "  # noqa: S608
+        "AND type IN ('divider', 'section')", ids,
+    ) as cur:
+        return {str(r[0]) for r in await cur.fetchall()}
 
 
 def _current(block: object) -> object:
@@ -539,10 +555,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     events: list[tuple[str, dict[str, Any]]] = []
     if record["applied"] or record["suggested"]:
         record["note_title"] = note.title
-        made = set(new_sections.values())
         record["summary"] = _summary(
-            valid, [a for a in record["applied"] if a not in made],
-            len(record["suggested"]), len(rejected), section)
+            valid, record["applied"], len(record["suggested"]), len(rejected),
+            section, await _structural_ids(ctx.conn, record["applied"]))
         events.append(("notes_changed", {
             "change_set_id": record["change_set_id"], "note_id": note.id,
             "note_title": note.title, "summary": record["summary"],
