@@ -1,12 +1,15 @@
 """Paper notes: the per-paper note, its section headings and parts."""
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
+
 import aiosqlite
 
 from paperhub.agents.sl_seed import section_names_from_json
-from paperhub.db.connection import in_write_transaction, write_lock
+from paperhub.db.connection import in_write_transaction, write_transaction
 from paperhub.notes.models import Block, Note
-from paperhub.notes.ops import BlockIn, Op, apply_ops
+from paperhub.notes.ops import BlockIn, Op, _apply_in_tx
 from paperhub.notes.store import get_note, get_or_create_note, list_blocks
 
 
@@ -32,43 +35,52 @@ async def _section_order(conn: aiosqlite.Connection,
     return section_names_from_json(row[0] if row else None)
 
 
+@contextlib.asynccontextmanager
+async def tx(conn: aiosqlite.Connection) -> AsyncIterator[None]:
+    """One write transaction; joins the caller's when already inside one."""
+    if in_write_transaction():
+        yield
+    else:
+        async with write_transaction(conn):
+            yield
+
+
 async def ensure_section(
     conn: aiosqlite.Connection, note_id: int, paper_content_id: int,
     section_key: str,
 ) -> str:
-    """The ``section`` block for ``section_key``, inserted in paper order."""
-    blocks = await list_blocks(conn, note_id)
-    sections = [b for b in blocks if b.type == "section"]
-    for b in sections:
-        if b.section_key == section_key:
-            return b.id
-    order = await _section_order(conn, paper_content_id)
-    rank = order.index(section_key) if section_key in order else None
-    before: str | None = None
-    if rank is not None:
+    """The ``section`` block for ``section_key``, inserted in paper order.
+
+    The existence check and the insert share one transaction, so concurrent
+    callers cannot create a duplicate heading.
+    """
+    async with tx(conn):
+        blocks = await list_blocks(conn, note_id)
+        sections = [b for b in blocks if b.type == "section"]
         for b in sections:
-            r = order.index(b.section_key) if b.section_key in order else None
-            if r is not None and r > rank:
-                before = b.id
-                break
-    note = await get_note(conn, note_id)
-    assert note is not None
-    op = Op(op="insert", block=BlockIn(type="section",
-                                       props={"title": section_key}),
-            before=before)
-    res = await apply_ops(conn, note_id, base_revision=note.revision,
-                          ops=[op], actor="user",
-                          summary=f"Section {section_key}")
-    if not res.applied:
-        raise RuntimeError(f"could not create section {section_key!r}")
-    block_id = res.applied[0]
-    async with write_lock(conn):
-        await conn.execute(
-            "UPDATE note_blocks SET section_key = ? WHERE id = ?",
-            (section_key, block_id))
-        if not in_write_transaction():
-            await conn.commit()
-    return block_id
+            if b.section_key == section_key:
+                return b.id
+        order = await _section_order(conn, paper_content_id)
+        rank = order.index(section_key) if section_key in order else None
+        before: str | None = None
+        if rank is not None:
+            for b in sections:
+                r = (order.index(b.section_key)
+                     if b.section_key in order else None)
+                if r is not None and r > rank:
+                    before = b.id
+                    break
+        note = await get_note(conn, note_id)
+        assert note is not None
+        op = Op(op="insert", before=before, block=BlockIn(
+            type="section", props={"title": section_key},
+            section_key=section_key))
+        res = await _apply_in_tx(
+            conn, note_id, base_revision=note.revision, ops=[op],
+            actor="user", run_id=None, summary=f"Section {section_key}")
+        if not res.applied:
+            raise RuntimeError(f"could not create section {section_key!r}")
+        return res.applied[0]
 
 
 def _section_slice(blocks: list[Block], section_block_id: str) -> list[Block]:

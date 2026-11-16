@@ -37,6 +37,7 @@ class BlockIn(BaseModel):
     type: BlockType
     props: dict[str, Any] = {}
     content: list[dict[str, Any]] | str | None = None
+    section_key: str | None = None
 
 
 class Op(BaseModel):
@@ -105,6 +106,7 @@ class _Row(BaseModel):
             "type": self.type, "props": self.props, "content": self.content,
             "author": self.author, "parent_id": self.parent_id,
             "order_key": self.order_key, "deleted_at": self.deleted_at,
+            "section_key": self.section_key,
         }
 
 
@@ -204,12 +206,14 @@ class _Ctx:
         await self.conn.execute(
             "UPDATE note_blocks SET type = ?, payload_json = ?, text = ?, "
             "author = ?, parent_id = ?, order_key = ?, deleted_at = ?, "
-            "changed_rev = ?, changed_by = ?, updated_at = ? WHERE id = ?",
+            "changed_rev = ?, changed_by = ?, updated_at = ?, "
+            "section_key = ? WHERE id = ?",
             (state["type"], json.dumps({"props": state["props"],
                                         "content": state["content"]}),
              block_text(state["type"], state["props"], state["content"]),
              state["author"], state["parent_id"], state["order_key"],
-             state["deleted_at"], self.rev, self.actor, self.now, block_id),
+             state["deleted_at"], self.rev, self.actor, self.now,
+             state.get("section_key"), block_id),
         )
 
 
@@ -284,11 +288,13 @@ async def _insert_row(ctx: _Ctx, block_id: str, blk: BlockIn,
     author = "ai" if ctx.actor == "agent" else "user"
     await ctx.conn.execute(
         "INSERT INTO note_blocks (id, note_id, parent_id, order_key, type, "
-        "payload_json, text, author, changed_rev, changed_by, created_at, "
-        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "payload_json, text, author, section_key, changed_rev, changed_by, "
+        "created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (block_id, ctx.note_id, parent, key, blk.type,
          json.dumps({"props": blk.props, "content": blk.content}),
-         block_text(blk.type, blk.props, blk.content), author, ctx.rev,
+         block_text(blk.type, blk.props, blk.content), author,
+         blk.section_key, ctx.rev,
          ctx.actor, ctx.now, ctx.now),
     )
     row = await ctx.get(block_id)
@@ -381,6 +387,8 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         assert op.block is not None
         after = {**before, "type": op.block.type, "props": op.block.props,
                  "content": op.block.content}
+        if op.block.section_key is not None:
+            after["section_key"] = op.block.section_key
         if ctx.actor == "user":
             after["author"] = "user"
         await ctx.write_state(row.id, after)

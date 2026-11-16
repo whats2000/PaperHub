@@ -1,5 +1,9 @@
 import json
 
+import aiosqlite
+import pytest
+
+import paperhub.notes.marks as marks_mod
 from paperhub.notes.marks import (
     MarkIn,
     colors,
@@ -122,3 +126,97 @@ async def test_colors_seeded_and_renamed(conn):
     await set_color(conn, "blue", name="Approach", visible=False)
     blue = [c for c in await colors(conn) if c["color"] == "blue"][0]
     assert blue == {"color": "blue", "name": "Approach", "visible": False}
+
+
+async def _note_rev(conn, note_id):
+    return (await get_note(conn, note_id)).revision
+
+
+async def test_delete_rejected_when_block_already_deleted(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("x")]))
+    note = await get_note(conn, saved.note_id)
+    await apply_ops(conn, note.id, base_revision=note.revision, actor="user",
+                    ops=[Op(op="delete", block_id=m["block_id"])])
+    with pytest.raises(RuntimeError):
+        await delete_mark(conn, m["id"])
+    async with conn.execute("SELECT deleted_at FROM note_marks WHERE id = ?",
+                            (m["id"],)) as cur:
+        assert (await cur.fetchone())[0] is None
+
+
+async def test_failed_mark_insert_leaves_no_orphan_block(conn, monkeypatch):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    before = await _note_rev(conn, note.id)
+    monkeypatch.setattr(marks_mod, "_INSERT", "INSERT INTO nope VALUES (?)")
+    with pytest.raises(aiosqlite.OperationalError):
+        await create_mark(conn, _in([_piece("x")]))
+    assert await list_blocks(conn, note.id) == []
+    assert await _note_rev(conn, note.id) == before
+
+
+async def test_invalid_kind_or_view_writes_nothing(conn):
+    await _paper(conn)
+    for kw in ({"kind": "bogus"}, {"view": "epub"}):
+        with pytest.raises(ValueError):
+            await create_mark(conn, _in([_piece("x")], **kw))
+    note = await paper_note(conn, 1)
+    assert await list_blocks(conn, note.id) == []
+
+
+async def test_join_must_match_paper_colour_kind_and_be_live(conn):
+    await _paper(conn)
+    m, _ = await create_mark(conn, _in([_piece("one")]))
+    with pytest.raises(ValueError):
+        await create_mark(conn, _in([_piece("t")], join_to=m["id"],
+                                    color="blue"))
+    with pytest.raises(ValueError):
+        await create_mark(conn, _in([_piece("t")], join_to=m["id"],
+                                    kind="quote"))
+    with pytest.raises(ValueError):
+        await create_mark(conn, _in([_piece("t")], join_to=m["id"],
+                                    paper_content_id=2))
+    await delete_mark(conn, m["id"])
+    with pytest.raises(ValueError):
+        await create_mark(conn, _in([_piece("t")], join_to=m["id"]))
+
+
+async def test_restore_piece_does_not_revive_user_deleted_mark(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("one"), _piece("two", 9)]))
+    await erase_piece(conn, m["id"], 0)
+    await delete_mark(conn, m["id"])  # the user deleted it on purpose
+    await restore_piece(conn, m["id"], 0)
+    assert await list_marks(conn, 1) == []
+    await restore_mark(conn, m["id"])  # block props are synced on restore
+    blocks = await list_blocks(conn, saved.note_id)
+    assert blocks[1].text == "one two"
+
+
+async def test_split_keeps_piece_indexes_stable(conn):
+    await _paper(conn)
+    m, _ = await create_mark(conn, _in(
+        [_piece("a"), _piece("b", 5), _piece("c", 9)]))
+    await erase_piece(conn, m["id"], 0)
+    new = await split_last_piece(conn, m["id"])
+    assert [p["quote"] for p in new["pieces"]] == ["c"]
+    [orig] = [x for x in await list_marks(conn, 1) if x["id"] == m["id"]]
+    assert [p["quote"] for p in orig["pieces"]] == ["a", "b", "c"]
+    assert orig["pieces"][0].get("erased") and orig["pieces"][2].get("removed")
+    back = await restore_piece(conn, m["id"], 0)
+    assert "erased" not in back["pieces"][0]
+    with pytest.raises(ValueError):
+        await restore_piece(conn, m["id"], 2)  # moved to another mark
+
+
+async def test_no_section_lands_at_note_end_and_bounds_raise(conn):
+    await _paper(conn)
+    a, saved = await create_mark(conn, _in([_piece("a")]))
+    b, _ = await create_mark(conn, _in([_piece("b")], section_key=None))
+    blocks = await list_blocks(conn, saved.note_id)
+    assert [x.id for x in blocks][-1] == b["block_id"]
+    for fn in (erase_piece, restore_piece):
+        for i in (-1, 5):
+            with pytest.raises(ValueError):
+                await fn(conn, a["id"], i)

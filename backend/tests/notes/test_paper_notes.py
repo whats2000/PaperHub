@@ -86,3 +86,33 @@ async def test_destination_falls_back_to_section_end(conn):
     # a hint from another section does not count
     assert await destination(conn, note.id, sec, results) == ("b", 1, 2)
     assert await destination(conn, note.id, results, None) == (results, 0, 1)
+
+
+async def test_concurrent_ensure_section_makes_one_heading(conn):
+    import asyncio
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    ids = await asyncio.gather(*[
+        ensure_section(conn, note.id, 1, "Method") for _ in range(3)])
+    assert len(set(ids)) == 1
+    assert len([b for b in await list_blocks(conn, note.id)
+                if b.type == "section"]) == 1
+
+
+async def test_section_key_persisted_by_ops_and_history(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    sec = await ensure_section(conn, note.id, 1, "Method")
+    async with conn.execute(
+            "SELECT after_json FROM note_block_history WHERE block_id = ?",
+            (sec,)) as cur:
+        rows = await cur.fetchall()
+    assert json.loads(rows[0][0])["section_key"] == "Method"
+    n = await get_note(conn, note.id)
+    res = await apply_ops(conn, note.id, base_revision=n.revision, actor="user",
+                          ops=[Op(op="insert", block_id="x", block=BlockIn(
+                              type="section", section_key="Intro",
+                              props={"title": "Intro"}))])
+    assert "x" in res.applied
+    b = {b.id: b for b in await list_blocks(conn, note.id)}
+    assert b["x"].section_key == "Intro"

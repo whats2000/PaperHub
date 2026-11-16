@@ -2,7 +2,9 @@
 
 ``note_marks`` is the source of truth; each mark owns one note block whose
 props carry what the editor needs to render it. Every block write goes
-through ``apply_ops`` (actor ``user``) so history, revisions and Undo work.
+through the op engine (actor ``user``) so history, revisions and Undo work,
+and each public operation is ONE write transaction covering its block ops
+and its ``note_marks`` writes: either all of it lands or none does.
 """
 from __future__ import annotations
 
@@ -16,12 +18,19 @@ import aiosqlite
 from pydantic import BaseModel
 
 from paperhub.db.connection import in_write_transaction, write_lock
-from paperhub.notes.ops import ApplyResult, BlockIn, Op, apply_ops, restore_blocks
+from paperhub.notes.ops import (
+    ApplyResult,
+    BlockIn,
+    Op,
+    _apply_in_tx,
+    _restore_in_tx,
+)
 from paperhub.notes.papers import (
     destination,
     ensure_section,
     paper_note,
     parts_of_section,
+    tx,
 )
 from paperhub.notes.store import get_note, list_blocks, new_block_id
 
@@ -29,6 +38,7 @@ _BLOCK_TYPE: dict[str, Any] = {
     "highlight": "paperQuote", "quote": "paperQuote", "figure": "paperFigure",
     "equation": "paperEquation", "region": "paperRegion",
 }
+_VIEWS = ("html", "pdf")
 _COLS = ("id, paper_content_id, block_id, kind, color, view, pieces_json, "
          "lang, source_ref, section_key, status, created_at, deleted_at")
 _INSERT = (
@@ -93,7 +103,24 @@ async def _write(conn: aiosqlite.Connection, sql: str,
 
 
 def _live(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [p for p in pieces if not p.get("erased")]
+    """Pieces still shown: neither erased nor moved to another mark."""
+    return [p for p in pieces if not p.get("erased") and not p.get("removed")]
+
+
+def _check_index(m: dict[str, Any], index: int) -> None:
+    if not 0 <= index < len(m["pieces"]):
+        raise ValueError(f"piece {index} out of range")
+    if m["pieces"][index].get("removed"):
+        raise ValueError(f"piece {index} belongs to another mark now")
+
+
+def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
+    if kind not in _BLOCK_TYPE:
+        raise ValueError(f"unknown mark kind {kind!r}")
+    if view not in _VIEWS:
+        raise ValueError(f"unknown mark view {view!r}")
+    if not pieces:
+        raise ValueError("a mark needs at least one piece")
 
 
 def _block_props(m: dict[str, Any]) -> dict[str, Any]:
@@ -121,11 +148,17 @@ async def _note_id(conn: aiosqlite.Connection, m: dict[str, Any]) -> int:
 
 
 async def _apply(conn: aiosqlite.Connection, note_id: int, op: Op,
-                 summary: str) -> ApplyResult:
+                 summary: str, expect: str) -> ApplyResult:
+    """Run one block op inside the caller's transaction; it must land."""
     note = await get_note(conn, note_id)
     assert note is not None
-    return await apply_ops(conn, note_id, base_revision=note.revision,
-                           actor="user", ops=[op], summary=summary)
+    res = await _apply_in_tx(
+        conn, note_id, base_revision=note.revision, ops=[op], actor="user",
+        run_id=None, summary=summary)
+    if expect not in res.applied:
+        raise RuntimeError(
+            f"block {expect} was not changed: {res.rejected or 'rejected'}")
+    return res
 
 
 async def _update_block(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
@@ -135,7 +168,7 @@ async def _update_block(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
         Op(op="update", block_id=m["block_id"],
            block=BlockIn(type=_BLOCK_TYPE[m["kind"]],
                          props=_block_props(m))),
-        "Edit mark")
+        "Edit mark", m["block_id"])
 
 
 async def _save_pieces(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
@@ -146,14 +179,12 @@ async def _save_pieces(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
 async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
                        rec: dict[str, Any], after: str | None,
                        summary: str) -> None:
-    res = await _apply(
+    await _apply(
         conn, note_id,
         Op(op="insert", block_id=rec["block_id"], after=after,
            block=BlockIn(type=_BLOCK_TYPE[rec["kind"]],
                          props=_block_props(rec))),
-        summary)
-    if rec["block_id"] not in res.applied:
-        raise RuntimeError("could not insert the mark block")
+        summary, rec["block_id"])
     await _write(conn, _INSERT, (
         rec["id"], rec["paper_content_id"], rec["block_id"], rec["kind"],
         rec["color"], rec["view"], json.dumps(rec["pieces"]), rec["lang"],
@@ -162,28 +193,30 @@ async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
 
 async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                       ) -> tuple[dict[str, Any], SavedTo]:
-    if m.join_to is not None:
-        return await _join(conn, m)
-    note = await paper_note(conn, m.paper_content_id)
-    after: str | None = None
-    part_index, part_count = 0, 1
-    if m.section_key:
-        sec = await ensure_section(conn, note.id, m.paper_content_id,
-                                   m.section_key)
-        after, part_index, part_count = await destination(
-            conn, note.id, sec, m.hint_block_id)
-    rec: dict[str, Any] = {
-        "id": _mark_id(), "paper_content_id": m.paper_content_id,
-        "block_id": new_block_id(), "kind": m.kind, "color": m.color,
-        "view": m.view, "pieces": m.pieces, "lang": m.lang,
-        "source_ref": m.source_ref, "section_key": m.section_key,
-        "status": "ok", "created_at": datetime.now(UTC).isoformat(),
-        "deleted_at": None,
-    }
-    await _insert_mark(conn, note.id, rec, after, "Add mark")
-    return rec, SavedTo(note_id=note.id, paper_title=note.title,
-                        section=m.section_key, part_index=part_index,
-                        part_count=part_count)
+    _validate(m.kind, m.view, m.pieces)
+    async with tx(conn):
+        if m.join_to is not None:
+            return await _join(conn, m)
+        note = await paper_note(conn, m.paper_content_id)
+        after: str | None = None
+        part_index, part_count = 0, 1
+        if m.section_key:
+            sec = await ensure_section(conn, note.id, m.paper_content_id,
+                                       m.section_key)
+            after, part_index, part_count = await destination(
+                conn, note.id, sec, m.hint_block_id)
+        rec: dict[str, Any] = {
+            "id": _mark_id(), "paper_content_id": m.paper_content_id,
+            "block_id": new_block_id(), "kind": m.kind, "color": m.color,
+            "view": m.view, "pieces": m.pieces, "lang": m.lang,
+            "source_ref": m.source_ref, "section_key": m.section_key,
+            "status": "ok", "created_at": datetime.now(UTC).isoformat(),
+            "deleted_at": None,
+        }
+        await _insert_mark(conn, note.id, rec, after, "Add mark")
+        return rec, SavedTo(note_id=note.id, paper_title=note.title,
+                            section=m.section_key, part_index=part_index,
+                            part_count=part_count)
 
 
 async def _section_block(conn: aiosqlite.Connection, note_id: int,
@@ -214,6 +247,12 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
                 ) -> tuple[dict[str, Any], SavedTo]:
     assert m.join_to is not None
     rec = await _get(conn, m.join_to)
+    if rec["deleted_at"] is not None:
+        raise ValueError("cannot join a deleted mark")
+    if (rec["paper_content_id"], rec["color"], rec["kind"], rec["view"]) != (
+            m.paper_content_id, m.color, m.kind, m.view):
+        raise ValueError("a piece can only join a mark of the same paper, "
+                         "colour, kind and view")
     rec["pieces"] = [*rec["pieces"], *m.pieces]
     await _save_pieces(conn, rec)
     await _update_block(conn, rec)
@@ -250,24 +289,42 @@ async def list_marks(conn: aiosqlite.Connection,
     return out
 
 
+async def _delete(conn: aiosqlite.Connection, m: dict[str, Any],
+                  ) -> ApplyResult:
+    res = await _apply(conn, await _note_id(conn, m),
+                       Op(op="delete", block_id=m["block_id"]),
+                       "Delete mark", m["block_id"])
+    await _write(conn, "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
+                 (datetime.now(UTC).isoformat(), m["id"]))
+    m["deleted_at"] = "now"
+    return res
+
+
+async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
+                   ) -> ApplyResult:
+    res = await _restore_in_tx(conn, await _note_id(conn, m),
+                               [m["block_id"]], actor="user")
+    if m["block_id"] not in res.applied:
+        raise RuntimeError(
+            f"block {m['block_id']} was not restored: "
+            f"{res.rejected or 'rejected'}")
+    await _write(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
+                 (m["id"],))
+    m["deleted_at"] = None
+    await _update_block(conn, m)  # pieces may have changed while deleted
+    return res
+
+
 async def delete_mark(conn: aiosqlite.Connection, mark_id: str) -> ApplyResult:
     """Soft-delete the mark and its block; the user's other blocks stay."""
-    m = await _get(conn, mark_id)
-    res = await _apply(conn, await _note_id(conn, m),
-                       Op(op="delete", block_id=m["block_id"]), "Delete mark")
-    await _write(conn, "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
-                 (datetime.now(UTC).isoformat(), mark_id))
-    return res
+    async with tx(conn):
+        return await _delete(conn, await _get(conn, mark_id))
 
 
 async def restore_mark(conn: aiosqlite.Connection, mark_id: str,
                        ) -> ApplyResult:
-    m = await _get(conn, mark_id)
-    res = await restore_blocks(conn, await _note_id(conn, m),
-                               [m["block_id"]], actor="user")
-    await _write(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
-                 (mark_id,))
-    return res
+    async with tx(conn):
+        return await _restore(conn, await _get(conn, mark_id))
 
 
 async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
@@ -276,48 +333,62 @@ async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
 
     Erasing the last live piece deletes the mark too.
     """
-    m = await _get(conn, mark_id)
-    if not 0 <= index < len(m["pieces"]):
-        raise IndexError(f"piece {index} out of range")
-    m["pieces"][index] = {**m["pieces"][index], "erased": True}
-    await _save_pieces(conn, m)
-    if _live(m["pieces"]):
-        await _update_block(conn, m)
-    else:
-        await delete_mark(conn, mark_id)
-    return await _get(conn, mark_id)
+    async with tx(conn):
+        m = await _get(conn, mark_id)
+        _check_index(m, index)
+        if m["deleted_at"] is not None:
+            raise ValueError("cannot erase from a deleted mark")
+        m["pieces"][index] = {**m["pieces"][index], "erased": True}
+        await _save_pieces(conn, m)
+        if _live(m["pieces"]):
+            await _update_block(conn, m)
+        else:
+            await _delete(conn, m)
+        return await _get(conn, mark_id)
 
 
 async def restore_piece(conn: aiosqlite.Connection, mark_id: str,
                         index: int) -> dict[str, Any]:
-    m = await _get(conn, mark_id)
-    if not 0 <= index < len(m["pieces"]):
-        raise IndexError(f"piece {index} out of range")
-    m["pieces"][index] = {k: v for k, v in m["pieces"][index].items()
-                          if k != "erased"}
-    await _save_pieces(conn, m)
-    if m["deleted_at"] is not None:
-        await restore_mark(conn, mark_id)
-    await _update_block(conn, m)
-    return await _get(conn, mark_id)
+    """Undo an erase. A mark comes back only if erasing its last live piece
+    is what removed it; one the user deleted stays deleted."""
+    async with tx(conn):
+        m = await _get(conn, mark_id)
+        _check_index(m, index)
+        auto_deleted = m["deleted_at"] is not None and not _live(m["pieces"])
+        m["pieces"][index] = {k: v for k, v in m["pieces"][index].items()
+                              if k != "erased"}
+        await _save_pieces(conn, m)
+        if auto_deleted:
+            await _restore(conn, m)
+        elif m["deleted_at"] is None:
+            await _update_block(conn, m)
+        return await _get(conn, mark_id)
 
 
 async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
                            ) -> dict[str, Any]:
-    """The newest piece becomes its own mark, right after the original."""
-    m = await _get(conn, mark_id)
-    live = [i for i, p in enumerate(m["pieces"]) if not p.get("erased")]
-    if len(live) < 2:
-        raise ValueError("a mark needs at least two pieces to split")
-    piece = m["pieces"].pop(live[-1])
-    await _save_pieces(conn, m)
-    await _update_block(conn, m)
-    rec = {**m, "id": _mark_id(), "block_id": new_block_id(),
-           "pieces": [piece], "status": "ok",
-           "created_at": datetime.now(UTC).isoformat(), "deleted_at": None}
-    await _insert_mark(conn, await _note_id(conn, m), rec, m["block_id"],
-                       "Split mark")
-    return await _get(conn, rec["id"])
+    """The newest piece becomes its own mark, right after the original.
+
+    The moved piece stays in the original flagged ``removed`` so the other
+    pieces' indexes do not shift.
+    """
+    async with tx(conn):
+        m = await _get(conn, mark_id)
+        live = [i for i, p in enumerate(m["pieces"])
+                if not p.get("erased") and not p.get("removed")]
+        if m["deleted_at"] is not None or len(live) < 2:
+            raise ValueError("only a live mark with two pieces can split")
+        piece = m["pieces"][live[-1]]
+        m["pieces"][live[-1]] = {**piece, "removed": True}
+        await _save_pieces(conn, m)
+        await _update_block(conn, m)
+        rec = {**m, "id": _mark_id(), "block_id": new_block_id(),
+               "pieces": [piece], "status": "ok",
+               "created_at": datetime.now(UTC).isoformat(),
+               "deleted_at": None}
+        await _insert_mark(conn, await _note_id(conn, m), rec, m["block_id"],
+                           "Split mark")
+        return await _get(conn, rec["id"])
 
 
 async def colors(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
