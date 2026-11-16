@@ -77,6 +77,7 @@ from paperhub.ideation.models import (
 )
 from paperhub.ideation.narrow import narrow, tokens
 from paperhub.llm.adapter import LlmAdapter
+from paperhub.notes.ideas import idea_note_text_or_none
 from paperhub.tracing.tracer import Tracer
 
 _LOG = logging.getLogger(__name__)
@@ -330,19 +331,23 @@ async def _rejected(
     scope = "problem_id = ?" if problem_id is not None else "problem_id IS NULL"
     params: tuple[Any, ...] = (problem_id,) if problem_id is not None else ()
     async with conn.execute(
-        "SELECT status, source_doc, source_section, target_doc, target_section, "
+        "SELECT id, status, source_doc, source_section, target_doc, target_section, "
         "title, dismiss_reasons_json, dismiss_note, note FROM ideas "
         f"WHERE {scope} AND status IN ('dismissed', 'failed') ORDER BY id",
         params,
     ) as cur:
         rows = await cur.fetchall()
     out: list[RejectedIdea] = []
-    for (status, sdoc, ssec, tdoc, tsec, title, reasons_raw, dnote, note) in rows:
+    for (iid, status, sdoc, ssec, tdoc, tsec, title, reasons_raw, dnote, note) in rows:
         try:
             reasons = [str(x) for x in json.loads(reasons_raw or "[]")]
         except ValueError:
             reasons = []
         text = str(dnote or "") if status == "dismissed" else ""
+        # The note lives in the notes store; the column only for an idea the
+        # migration has not reached yet.
+        stored = await idea_note_text_or_none(conn, int(iid))
+        note = stored if stored is not None else note
         if note:
             text = f"{text} {note}".strip()
         out.append(RejectedIdea(

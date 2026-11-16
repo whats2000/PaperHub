@@ -55,6 +55,8 @@
 #                                             that echo the source or whose PDF
 #                                             paragraph changed; merge language-
 #                                             label aliases into one cache key
+# 17. paperhub-migrate-idea-notes            Plan H5b.1: each idea's ideas.note
+#                                             becomes an idea note (column kept)
 # Steps 6-7 need the Marker service (`docker compose up -d marker`) for PDF
 # papers; they are sequential and skip papers that already have the output.
 #
@@ -109,23 +111,24 @@ function Invoke-Step([string]$label, [string[]]$cmd) {
 }
 
 if (-not $SkipRechunk) {
-    Invoke-Step "1/16 re-chunk" (@("paperhub-reingest") + $dry)
+    Invoke-Step "1/17 re-chunk" (@("paperhub-reingest") + $dry)
 }
-Invoke-Step "2/16 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
-Invoke-Step "3/16 figure/table index" (@("paperhub-repair-layout") + $dry)
-Invoke-Step "4/16 section names" (@("paperhub-repair-section-names") + $dry)
-Invoke-Step "5/16 PDF titles" (@("paperhub-repair-titles") + $dry)
-Invoke-Step "6/16 missing assets" (@("paperhub-backfill-assets") + $dry)
-Invoke-Step "7/16 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
-Invoke-Step "8/16 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
-Invoke-Step "9/16 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
-if (-not $DryRun) { Invoke-Step "10/16 Citation Canvas HTML" @("paperhub-rerender-html") }
-if (-not $DryRun) { Invoke-Step "11/16 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
-if (-not $DryRun) { Invoke-Step "12/16 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
-Invoke-Step "13/16 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
-Invoke-Step "14/16 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
-Invoke-Step "15/16 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
-Invoke-Step "16/16 translation cache repair" (@("paperhub-repair-translations") + $dry)
+Invoke-Step "2/17 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
+Invoke-Step "3/17 figure/table index" (@("paperhub-repair-layout") + $dry)
+Invoke-Step "4/17 section names" (@("paperhub-repair-section-names") + $dry)
+Invoke-Step "5/17 PDF titles" (@("paperhub-repair-titles") + $dry)
+Invoke-Step "6/17 missing assets" (@("paperhub-backfill-assets") + $dry)
+Invoke-Step "7/17 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
+Invoke-Step "8/17 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
+Invoke-Step "9/17 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
+if (-not $DryRun) { Invoke-Step "10/17 Citation Canvas HTML" @("paperhub-rerender-html") }
+if (-not $DryRun) { Invoke-Step "11/17 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
+if (-not $DryRun) { Invoke-Step "12/17 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
+Invoke-Step "13/17 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
+Invoke-Step "14/17 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
+Invoke-Step "15/17 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
+Invoke-Step "16/17 translation cache repair" (@("paperhub-repair-translations") + $dry)
+Invoke-Step "17/17 idea notes into the notes store" (@("paperhub-migrate-idea-notes") + $dry)
 
 if ($DryRun) { Write-Host "Done (dry run, nothing changed)." }
 else { Write-Host "Done. DB backup at $dbBak (remove it when you've verified the result)." }

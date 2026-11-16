@@ -82,6 +82,7 @@ from paperhub.ideation.models import (
     ProblemCreate,
 )
 from paperhub.ideation.problems import insert_problem, start_problem_run
+from paperhub.notes.ideas import idea_note_text_or_none, set_idea_note_text
 
 router = APIRouter(prefix="/ideation", tags=["ideation"])
 
@@ -164,6 +165,13 @@ async def _ideas(
     ) as cur:
         for iid, sid in await cur.fetchall():
             sessions.setdefault(int(iid), []).append(int(sid))
+    # The note text lives in the notes store; the column only for an idea the
+    # migration has not reached yet.
+    notes: dict[int, str] = {}
+    for idea_id in ids:
+        stored = await idea_note_text_or_none(conn, idea_id)
+        if stored is not None:
+            notes[idea_id] = stored
     out: list[Idea] = []
     for (iid, prob, sdoc, ssec, schunks, tdoc, tsec, tchunks, title, rationale,
          status, prev, note, reasons, created_at) in rows:
@@ -175,7 +183,8 @@ async def _ideas(
             target_section=str(tsec) if tsec is not None else None,
             target_chunk_ids=_int_list(tchunks), title=str(title),
             rationale=str(rationale or ""), status=status, prev_status=prev,
-            note=str(note or ""), dismiss_reasons=_str_list(reasons),
+            note=notes[int(iid)] if int(iid) in notes else str(note or ""),
+            dismiss_reasons=_str_list(reasons),
             session_ids=sessions.get(int(iid), []), created_at=str(created_at),
         ))
     return out
@@ -410,8 +419,10 @@ async def patch_idea(idea_id: int, body: IdeaPatch) -> Idea:
                     sets.append("dismiss_note = ?")
                     params.append(body.dismiss_note.strip())
             if body.note is not None:
-                sets.append("note = ?")
-                params.append(body.note)
+                # Compatibility for one release: an old client's note edit
+                # lands in the idea note (the column is left untouched).
+                await set_idea_note_text(conn, idea_id, body.note, actor="user",
+                                         summary="edited via the ideas API")
             if sets:
                 sets.append("updated_at = datetime('now')")
                 await conn.execute(
