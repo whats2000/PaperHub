@@ -7,7 +7,9 @@ Rules:
   including another view of the same user) is rejected ``changed_since_base``
   with the current block; a client advances its base from each result;
 * the agent never overwrites or deletes the user's words: its ``update`` /
-  ``delete`` on a user-authored block becomes a ``note_suggestions`` row;
+  ``delete`` on a user-authored block (or a delete of a block with any live
+  user-authored descendant) becomes one ``note_suggestions`` row;
+* a subtree delete is rejected if any live descendant changed since base;
 * a user edit to an AI block makes it the user's;
 * deletes are soft and take the block's subtree with them;
 * every applied change writes a ``note_block_history`` row.
@@ -55,6 +57,9 @@ class ApplyResult(BaseModel):
     applied: list[str]
     suggested: list[dict[str, str]]  # {block_id, suggestion_id}
     rejected: list[dict[str, Any]]  # {block_id, reason, current: Block | None}
+    # Blocks an undo / restore brought back under their nearest live ancestor
+    # because their own parent is deleted: {block_id, parent_id}.
+    reparented: list[dict[str, str | None]] = []
 
 
 def _now() -> str:
@@ -130,6 +135,7 @@ class _Ctx:
         self.applied: list[str] = []
         self.suggested: list[dict[str, str]] = []
         self.rejected: list[dict[str, Any]] = []
+        self.reparented: list[dict[str, str | None]] = []
 
     def reject(self, block_id: str | None, reason: RejectReason,
                current: _Row | None = None) -> None:
@@ -143,6 +149,7 @@ class _Ctx:
             note_id=self.note_id, revision=self.rev,
             change_set_id=self.change_set_id, applied=self.applied,
             suggested=self.suggested, rejected=self.rejected,
+            reparented=self.reparented,
         )
 
     async def get(self, block_id: str) -> _Row | None:
@@ -234,6 +241,11 @@ async def _placement(
         if anchor is None:
             return "missing"
         if anchor_id == moving:
+            return "invalid"
+        if op.under_heading is not None and anchor.type not in (
+                "heading", "section"):
+            return "invalid"
+        if op.parent_id is not None and op.parent_id != anchor.parent_id:
             return "invalid"
         parent = anchor.parent_id
     elif op.parent_id is not None:
@@ -347,8 +359,20 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     if op.op == "update" and op.block is None:
         ctx.reject(row.id, "invalid")
         return
-    if (ctx.actor == "agent" and row.author == "user"
-            and op.op in ("update", "delete")):
+    live_desc: list[_Row] = []
+    if op.op == "delete":
+        live_desc = [d for d in await ctx.descendants(row.id)
+                     if d.deleted_at is None]
+        changed = next((d for d in live_desc if d.changed_rev > base_revision
+                        and d.changed_rev != ctx.rev), None)
+        if changed is not None:
+            ctx.reject(row.id, "changed_since_base", changed)
+            return
+    if ctx.actor == "agent" and op.op in ("update", "delete") and (
+            row.author == "user"
+            or any(d.author == "user" for d in live_desc)):
+        # Never overwrite or remove the user's words: one suggestion on the
+        # target block, nothing changes until the user accepts.
         await _suggest(ctx, row, op)
         return
 
@@ -362,9 +386,7 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         await ctx.write_state(row.id, after)
         await ctx.history(row.id, "update", before, after)
     elif op.op == "delete":
-        subtree = [row] + [d for d in await ctx.descendants(row.id)
-                           if d.deleted_at is None]
-        for d in subtree:
+        for d in [row, *live_desc]:
             d_before = d.state()
             d_after = {**d_before, "deleted_at": ctx.now}
             await ctx.write_state(d.id, d_after)
@@ -424,6 +446,11 @@ async def _apply_in_tx(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None, summary: str,
 ) -> ApplyResult:
+    note = await get_note(conn, note_id)
+    if note is not None and base_revision > note.revision:
+        raise ValueError(
+            f"base_revision {base_revision} is ahead of note {note_id} "
+            f"(revision {note.revision})")
     ctx = await _begin(conn, note_id, actor=actor, run_id=run_id,
                        summary=summary)
     recorded: list[dict[str, Any]] = []
@@ -453,14 +480,63 @@ async def apply_ops(
 async def _load_change_set(conn: aiosqlite.Connection,
                            change_set_id: str) -> dict[str, Any]:
     async with conn.execute(
-        "SELECT note_id, actor, run_id, result_revision, ops_json, status "
+        "SELECT note_id, actor, run_id, result_revision, outcome_json, status "
         "FROM note_change_sets WHERE id = ?", (change_set_id,),
     ) as cur:
         r = await cur.fetchone()
     if r is None:
         raise LookupError(f"change set {change_set_id} not found")
     return {"note_id": r[0], "actor": r[1], "run_id": r[2],
-            "result_revision": r[3], "ops": json.loads(r[4]), "status": r[5]}
+            "result_revision": r[3], "outcome": json.loads(r[4]),
+            "status": r[5]}
+
+
+async def _set_outcome(conn: aiosqlite.Connection, change_set_id: str,
+                       outcome: dict[str, Any], status: str) -> None:
+    await conn.execute(
+        "UPDATE note_change_sets SET outcome_json = ?, status = ? WHERE id = ?",
+        (json.dumps(outcome), status, change_set_id))
+
+
+def _op_between(before: dict[str, Any], after: dict[str, Any]) -> str:
+    """The history op that takes a block from ``before`` to ``after``."""
+    if before["deleted_at"] is not None and after["deleted_at"] is None:
+        return "restore"
+    if before["deleted_at"] is None and after["deleted_at"] is not None:
+        return "delete"
+    same_content = all(before[k] == after[k]
+                       for k in ("type", "props", "content", "author"))
+    return "move" if same_content else "update"
+
+
+async def _settle_parents(ctx: _Ctx, block_ids: list[str]) -> None:
+    """Move live blocks whose parent is deleted under the nearest live
+    ancestor (or the top level), where the deleted branch stood, so a
+    brought-back block is never an invisible orphan."""
+    for bid in block_ids:
+        row = await ctx.get(bid)
+        if row is None or row.deleted_at is not None or row.parent_id is None:
+            continue
+        top = await ctx.get(row.parent_id)
+        if top is not None and top.deleted_at is None:
+            continue
+        anc = await ctx.get(top.parent_id) if top and top.parent_id else None
+        while anc is not None and anc.deleted_at is not None:
+            top = anc
+            anc = await ctx.get(anc.parent_id) if anc.parent_id else None
+        new_parent = anc.id if anc is not None else None
+        keys = [s.order_key for s in await ctx.siblings(new_parent)
+                if s.id != bid]
+        if top is not None and top.parent_id == new_parent:
+            nxt = [k for k in keys if k > top.order_key]
+            key = key_between(top.order_key, nxt[0] if nxt else None)
+        else:
+            key = key_between(keys[-1] if keys else None, None)
+        before = row.state()
+        after = {**before, "parent_id": new_parent, "order_key": key}
+        await ctx.write_state(bid, after)
+        await ctx.history(bid, "move", before, after)
+        ctx.reparented.append({"block_id": bid, "parent_id": new_parent})
 
 
 _UNDO_OP = {"insert": "delete", "delete": "restore", "restore": "delete",
@@ -473,7 +549,8 @@ async def undo_change_set(conn: aiosqlite.Connection,
 
     Blocks changed later (or, for an insert, with a later-changed live
     descendant) are left as they are and reported ``changed_since_base``.
-    Open suggestions of the set are withdrawn.
+    Open suggestions of the set are withdrawn. The set's outcome records
+    what was reverted, which is exactly what Apply again puts back.
     """
     async with write_transaction(conn):
         cs = await _load_change_set(conn, change_set_id)
@@ -488,7 +565,7 @@ async def undo_change_set(conn: aiosqlite.Connection,
             rows = await cur.fetchall()
         ctx = await _begin(conn, cs["note_id"], actor="user", run_id=None,
                            summary="Undo", change_set_id=change_set_id)
-        kept: set[str] = set()
+        kept: list[str] = []
         for block_id, op, _ in rows:
             if block_id in kept:
                 continue
@@ -499,7 +576,7 @@ async def undo_change_set(conn: aiosqlite.Connection,
                 later = any(d.changed_rev > rev and d.deleted_at is None
                             for d in await ctx.descendants(block_id))
             if later:
-                kept.add(block_id)
+                kept.append(block_id)
                 ctx.reject(block_id, "changed_since_base", cur_row)
         reverted: list[str] = []
         for block_id, op, before_json in rows:
@@ -516,43 +593,62 @@ async def undo_change_set(conn: aiosqlite.Connection,
             await ctx.history(block_id, _UNDO_OP[op], now_state, target)
             if block_id not in reverted:
                 reverted.append(block_id)
+        await _settle_parents(ctx, reverted)
         ctx.applied = reverted
         await conn.execute(
             "UPDATE note_suggestions SET status = 'withdrawn' "
             "WHERE change_set_id = ? AND status = 'open'", (change_set_id,))
-        await conn.execute(
-            "UPDATE note_change_sets SET status = 'undone' WHERE id = ?",
-            (change_set_id,))
+        outcome = {**cs["outcome"], "undo": {
+            "revision": ctx.rev, "reverted": reverted, "kept": kept}}
+        await _set_outcome(conn, change_set_id, outcome, "undone")
         return ctx.result()
 
 
 async def reapply_change_set(conn: aiosqlite.Connection,
                              change_set_id: str) -> ApplyResult:
-    """Apply an undone change set's ops again, as a new change set."""
+    """Apply again: put back exactly what the Undo reverted.
+
+    Each reverted block gets its after-state from the set's history again
+    (same ids, no re-run of the ops). Blocks the Undo kept, or changed
+    after the Undo, are left alone and reported ``changed_since_base``.
+    The result is a new, undoable change set; the original records it in
+    ``reapplied_by`` and cannot be applied again a second time.
+    """
     async with write_transaction(conn):
         cs = await _load_change_set(conn, change_set_id)
-        if cs["status"] != "undone":
+        undo = cs["outcome"].get("undo")
+        if cs["status"] != "undone" or undo is None:
             raise ValueError(f"change set {change_set_id} is not undone")
-        note = await get_note(conn, cs["note_id"])
-        assert note is not None
-        if cs["ops"] and cs["ops"][0].get("op") == "restore":
-            ids = [o["block_id"] for o in cs["ops"]]
-            return await _restore_in_tx(conn, cs["note_id"], ids,
-                                        actor=cs["actor"])
-        ops = [Op.model_validate(o) for o in cs["ops"]]
-        # The original inserts' ids still exist (soft-deleted by the undo):
-        # give them fresh ids and follow the references in later ops.
-        remap: dict[str, str] = {}
-        for op in ops:
-            if op.op == "insert" and op.block_id is not None:
-                remap[op.block_id] = new_block_id()
-        fields = ("block_id", "parent_id", "after", "before", "under_heading")
-        ops = [op.model_copy(update={
-            f: remap.get(getattr(op, f), getattr(op, f)) for f in fields})
-            for op in ops]
-        return await _apply_in_tx(
-            conn, cs["note_id"], base_revision=note.revision, ops=ops,
-            actor=cs["actor"], run_id=cs["run_id"], summary="Apply again")
+        if cs["outcome"].get("reapplied_by"):
+            raise ValueError(f"change set {change_set_id} was already applied "
+                             "again")
+        async with conn.execute(
+            "SELECT block_id, after_json FROM note_block_history "
+            "WHERE note_id = ? AND revision = ? ORDER BY id",
+            (cs["note_id"], cs["result_revision"]),
+        ) as cur:
+            final: dict[str, dict[str, Any]] = {
+                bid: json.loads(after) for bid, after in await cur.fetchall()}
+        ctx = await _begin(conn, cs["note_id"], actor=cs["actor"],
+                           run_id=cs["run_id"], summary="Apply again")
+        for bid, target in final.items():
+            cur_row = await ctx.get(bid)
+            assert cur_row is not None
+            if bid not in undo["reverted"] or cur_row.changed_rev > undo["revision"]:
+                ctx.reject(bid, "changed_since_base", cur_row)
+                continue
+            before = cur_row.state()
+            await ctx.write_state(bid, target)
+            await ctx.history(bid, _op_between(before, target), before, target)
+            ctx.applied.append(bid)
+        await _settle_parents(ctx, ctx.applied)
+        await _record_change_set(
+            ctx, base_revision=ctx.rev - 1,
+            ops_json=json.dumps([{"op": "reapply",
+                                  "change_set_id": change_set_id}]))
+        outcome = {**cs["outcome"], "reapplied_by": ctx.change_set_id}
+        await _set_outcome(conn, change_set_id, outcome, "undone")
+        return ctx.result()
 
 
 async def _restore_in_tx(conn: aiosqlite.Connection, note_id: int,
@@ -576,6 +672,7 @@ async def _restore_in_tx(conn: aiosqlite.Connection, note_id: int,
             await ctx.write_state(d.id, d_after)
             await ctx.history(d.id, "restore", d_before, d_after)
             ctx.applied.append(d.id)
+    await _settle_parents(ctx, ctx.applied)
     await _record_change_set(
         ctx, base_revision=ctx.rev - 1,
         ops_json=json.dumps([{"op": "restore", "block_id": b}
@@ -592,7 +689,11 @@ async def restore_blocks(conn: aiosqlite.Connection, note_id: int,
 
 async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
                              accept: bool) -> ApplyResult:
-    """Accept (apply as the user) or reject one open suggestion."""
+    """Accept (apply as the user) or reject one open suggestion.
+
+    An accepted suggestion that can no longer apply (its block was deleted
+    meanwhile, …) is ``withdrawn`` and the result carries the rejection.
+    """
     async with write_transaction(conn):
         async with conn.execute(
             "SELECT note_id, block_id, change_set_id, kind, proposed_json, "
@@ -614,11 +715,14 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
             result = await _apply_in_tx(
                 conn, note_id, base_revision=note.revision, ops=[op],
                 actor="user", run_id=None, summary="Accept suggestion")
+            new_status = ("accepted" if block_id in result.applied
+                          else "withdrawn")
         else:
             result = ApplyResult(note_id=note_id, revision=note.revision,
                                  change_set_id=cs_id, applied=[],
                                  suggested=[], rejected=[])
+            new_status = "rejected"
         await conn.execute(
             "UPDATE note_suggestions SET status = ? WHERE id = ?",
-            ("accepted" if accept else "rejected", suggestion_id))
+            (new_status, suggestion_id))
         return result

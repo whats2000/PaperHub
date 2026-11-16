@@ -531,7 +531,7 @@ CREATE TABLE IF NOT EXISTS note_change_sets (
     id TEXT PRIMARY KEY,
     owner_id INTEGER NOT NULL DEFAULT 1,
     note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    actor TEXT NOT NULL,
+    actor TEXT NOT NULL CHECK (actor IN ('user', 'agent', 'import', 'system')),
     run_id INTEGER,
     base_revision INTEGER NOT NULL,
     result_revision INTEGER NOT NULL,
@@ -551,8 +551,12 @@ CREATE TABLE IF NOT EXISTS note_suggestions (
     status TEXT NOT NULL CHECK (status IN ('open', 'accepted', 'rejected', 'withdrawn')),
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_note_change_sets_note
+    ON note_change_sets(note_id);
 CREATE INDEX IF NOT EXISTS idx_note_suggestions_change_set
     ON note_suggestions(change_set_id);
+CREATE INDEX IF NOT EXISTS idx_note_suggestions_note_status
+    ON note_suggestions(note_id, status);
 
 -- Full-text index over live note_blocks.text (external content on the
 -- implicit rowid; soft-deleted blocks are kept out of the index).

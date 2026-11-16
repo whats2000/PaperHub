@@ -1,3 +1,8 @@
+import json
+
+import aiosqlite
+import pytest
+
 from paperhub.notes.ops import (
     BlockIn,
     Op,
@@ -340,3 +345,171 @@ async def test_undo_and_reapply_restore(conn):
     again = await reapply_change_set(conn, res.change_set_id)
     assert again.applied == ["a"]
     assert await _texts(conn, n.id) == ["a", "b"]
+
+
+# --- fix round 1 -----------------------------------------------------------
+
+async def _cs_row(conn, cs_id):
+    async with conn.execute(
+        "SELECT status, outcome_json FROM note_change_sets WHERE id = ?",
+        (cs_id,)) as cur:
+        status, outcome = await cur.fetchone()
+    return status, json.loads(outcome)
+
+
+async def test_agent_delete_with_user_descendant_becomes_suggestion(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("p", _para("ai parent"))], actor="agent")
+    await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="k", block=_para("my kid"), parent_id="p")])
+    res = await apply_ops(conn, n.id, base_revision=2, actor="agent",
+                          ops=[Op(op="delete", block_id="p")])
+    assert res.applied == []
+    assert [s["block_id"] for s in res.suggested] == ["p"]
+    assert await _texts(conn, n.id) == ["ai parent", "my kid"]
+    await resolve_suggestion(conn, res.suggested[0]["suggestion_id"],
+                             accept=True)
+    assert await _texts(conn, n.id) == []
+
+
+async def test_delete_rejected_when_descendant_changed_since_base(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("p", _para("p"))])
+    await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="k", block=_para("kid"), parent_id="p")])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                          ops=[Op(op="delete", block_id="p")])
+    assert res.applied == []
+    [rej] = res.rejected
+    assert rej["block_id"] == "p" and rej["reason"] == "changed_since_base"
+    assert rej["current"].id == "k"
+    assert await _texts(conn, n.id) == ["p", "kid"]
+
+
+async def test_reapply_after_partial_undo(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("u", _para("u"))])
+    cs = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
+        Op(op="insert", block_id="x", block=_para("x"), after="u"),
+        Op(op="insert", block_id="y", block=_para("y"), after="x"),
+    ])
+    edit = await apply_ops(conn, n.id, base_revision=cs.revision,
+                           actor="user",
+                           ops=[Op(op="update", block_id="y",
+                                   block=_para("my y"))])
+    await undo_change_set(conn, cs.change_set_id)
+    assert await _texts(conn, n.id) == ["u", "my y"]
+    again = await reapply_change_set(conn, cs.change_set_id)
+    assert again.applied == ["x"]
+    assert [(r["block_id"], r["reason"]) for r in again.rejected] == [
+        ("y", "changed_since_base")]
+    assert again.change_set_id != cs.change_set_id
+    blocks = await list_blocks(conn, n.id)
+    assert [b.id for b in blocks] == ["u", "x", "y"]
+    assert [b.text for b in blocks] == ["u", "x", "my y"]
+    assert blocks[2].changed_rev == edit.revision
+    status, outcome = await _cs_row(conn, cs.change_set_id)
+    assert status == "undone" and outcome["reapplied_by"] == again.change_set_id
+    # The reapply is itself an undoable change set.
+    await undo_change_set(conn, again.change_set_id)
+    assert await _texts(conn, n.id) == ["u", "my y"]
+
+
+async def test_reapply_rejects_block_edited_after_undo(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a"))])
+    cs = await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="update", block_id="a", block=_para("a2"))])
+    undo = await undo_change_set(conn, cs.change_set_id)
+    await apply_ops(conn, n.id, base_revision=undo.revision, actor="user",
+                    ops=[Op(op="update", block_id="a", block=_para("a3"))])
+    again = await reapply_change_set(conn, cs.change_set_id)
+    assert again.applied == []
+    assert [(r["block_id"], r["reason"]) for r in again.rejected] == [
+        ("a", "changed_since_base")]
+    assert again.rejected[0]["current"].text == "a3"
+    assert await _texts(conn, n.id) == ["a3"]
+
+
+async def test_reapply_twice_raises(conn):
+    n = await _note(conn)
+    cs = await _seed(conn, n.id, [("a", _para("a"))])
+    await undo_change_set(conn, cs.change_set_id)
+    await reapply_change_set(conn, cs.change_set_id)
+    with pytest.raises(ValueError):
+        await reapply_change_set(conn, cs.change_set_id)
+    assert await _texts(conn, n.id) == ["a"]
+
+
+async def test_accept_suggestion_on_deleted_block_withdraws(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a"))])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
+        Op(op="update", block_id="a", block=_para("agent a"))])
+    await apply_ops(conn, n.id, base_revision=2, actor="user",
+                    ops=[Op(op="delete", block_id="a")])
+    acc = await resolve_suggestion(conn, res.suggested[0]["suggestion_id"],
+                                   accept=True)
+    assert acc.applied == [] and acc.rejected[0]["reason"] == "missing"
+    async with conn.execute("SELECT status FROM note_suggestions") as cur:
+        assert (await cur.fetchone())[0] == "withdrawn"
+
+
+async def test_under_heading_anchor_must_be_heading_or_section(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("p", _para("p"))])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="x", block=_para("x"), under_heading="p")])
+    assert res.applied == [] and res.rejected[0]["reason"] == "invalid"
+
+
+async def test_parent_id_conflicting_with_anchor_is_invalid(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a")), ("b", _para("b"))])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="x", block=_para("x"), parent_id="a",
+           after="b"),
+        Op(op="insert", block_id="y", block=_para("y"), after="b"),
+    ])
+    assert res.applied == ["y"]
+    assert [r["reason"] for r in res.rejected] == ["invalid"]
+
+
+async def test_undo_reparents_when_old_parent_deleted(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("a")), ("z", _para("z"))])
+    await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
+        Op(op="insert", block_id="k", block=_para("kid"), parent_id="a")])
+    mv = await apply_ops(conn, n.id, base_revision=2, actor="user", ops=[
+        Op(op="move", block_id="k", after="z")])
+    await apply_ops(conn, n.id, base_revision=mv.revision, actor="user",
+                    ops=[Op(op="delete", block_id="a")])
+    res = await undo_change_set(conn, mv.change_set_id)
+    assert res.applied == ["k"]
+    assert res.reparented == [{"block_id": "k", "parent_id": None}]
+    blocks = await list_blocks(conn, n.id)
+    assert [b.id for b in blocks] == ["k", "z"]
+    assert blocks[0].parent_id is None
+
+
+async def test_future_base_revision_raises(conn):
+    n = await _note(conn)
+    with pytest.raises(ValueError):
+        await apply_ops(conn, n.id, base_revision=5, actor="user", ops=[
+            Op(op="insert", block=_para("x"))])
+    assert (await get_note(conn, n.id)).revision == 0
+
+
+async def test_change_set_schema_checks_and_indexes(conn):
+    n = await _note(conn)
+    with pytest.raises(aiosqlite.IntegrityError):
+        await conn.execute(
+            "INSERT INTO note_change_sets (id, note_id, actor, base_revision, "
+            "result_revision, ops_json, outcome_json, status, created_at) "
+            "VALUES ('c', ?, 'robot', 0, 1, '[]', '{}', 'applied', 't')",
+            (n.id,))
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index'") as cur:
+        names = {r[0] for r in await cur.fetchall()}
+    assert {"idx_note_change_sets_note",
+            "idx_note_suggestions_note_status"} <= names
