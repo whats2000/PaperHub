@@ -11,6 +11,8 @@ import { useNotesStore } from "@/store/notes";
 import { NoteEditor } from "./NoteEditor";
 import { notePanelId, noteTabId } from "./noteTabIds";
 import { NotesTabs, type NoteTab } from "./NotesTabs";
+import { NotesToolbar } from "./NotesToolbar";
+import { useFollowReading } from "./useFollowReading";
 
 interface Props {
   onClose: () => void;
@@ -97,11 +99,22 @@ export function NotesPane({ onClose }: Props) {
   }, [needsSession, activeSessionId, ensureBackendSession]);
 
   const current = loaded.key === targetKey ? loaded : null;
+  const noteId = current?.noteId ?? null;
+
+  // The note scrolls with the reader (Follow); the guide opens from the
+  // toolbar's ⋯ menu and from the editor tip.
+  const [panel, setPanel] = useState<HTMLElement | null>(null);
+  const followLabel = useFollowReading({
+    noteId,
+    paperId: tab === "paper" ? paperId : null,
+    root: panel,
+  });
+  const [guideOpen, setGuideOpen] = useState(false);
 
   return (
     <section
       aria-label={t("pane.label", "Notes")}
-      className="flex h-full min-w-0 flex-col bg-card"
+      className="@container flex h-full min-w-0 flex-col bg-card"
     >
       <NotesTabs
         active={tab}
@@ -112,9 +125,14 @@ export function NotesPane({ onClose }: Props) {
         onSelect={setChosen}
         onClose={onClose}
       />
-      {/* Task 17 fills this row with the note's toolbar. */}
-      <div data-notes-toolbar />
+      <NotesToolbar
+        noteId={noteId}
+        followLabel={followLabel}
+        guideOpen={guideOpen}
+        onGuideOpenChange={setGuideOpen}
+      />
       <div
+        ref={setPanel}
         id={notePanelId(idBase)}
         role="tabpanel"
         aria-labelledby={noteTabId(idBase, tab)}
@@ -128,7 +146,7 @@ export function NotesPane({ onClose }: Props) {
               tab === "chat" ? "slide-in-from-right-3" : "slide-in-from-left-3",
             )}
           >
-            <NoteEditor noteId={current.noteId} variant="pane" />
+            <NoteEditor noteId={current.noteId} variant="pane" onOpenGuide={() => setGuideOpen(true)} />
           </div>
         ) : current?.failed ? (
           <p role="alert" className="px-4 py-3 text-sm text-muted-foreground">

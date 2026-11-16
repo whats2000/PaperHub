@@ -38,9 +38,11 @@ export interface ShortcutsGuideProps {
   onOpenChange: (open: boolean) => void;
   /** The element the guide grows from and shrinks back into. */
   trigger: React.ReactElement;
+  /** Where focus goes when the guide closes (default: the trigger). */
+  finalFocus?: React.RefObject<HTMLElement | null>;
 }
 
-export function ShortcutsGuide({ open, onOpenChange, trigger }: ShortcutsGuideProps) {
+export function ShortcutsGuide({ open, onOpenChange, trigger, finalFocus }: ShortcutsGuideProps) {
   const { t } = useTranslation();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -50,6 +52,7 @@ export function ShortcutsGuide({ open, onOpenChange, trigger }: ShortcutsGuidePr
         align="end"
         sideOffset={6}
         role="dialog"
+        finalFocus={finalFocus}
         aria-label={t("notes:guide.title", "Shortcuts")}
         className="max-h-[72vh] w-[340px] max-w-[calc(100vw-16px)] origin-top-right overflow-y-auto px-3 pt-1 pb-2.5 text-[12.5px] motion-reduce:animate-none motion-reduce:transition-none"
       >

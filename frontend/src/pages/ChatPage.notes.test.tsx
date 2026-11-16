@@ -74,6 +74,19 @@ const notesButton = () => screen.getByRole("button", { name: "Notes" });
 const notesPane = () => screen.queryByRole("region", { name: "Notes" });
 
 describe("ChatPage Notes pane", () => {
+  it("puts the notes toolbar under the tabs, sized by the pane (a container query)", async () => {
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const pane = await screen.findByRole("region", { name: "Notes" });
+    expect(pane).toHaveClass("@container");
+    const bar = within(pane).getByRole("toolbar", { name: "Note tools" });
+    await screen.findByText("note 12");
+    expect(within(bar).getByRole("button", { name: "Focus" })).toBeEnabled();
+    expect(within(bar).getByRole("button", { name: /^Following/ })).toBeEnabled();
+    await userEvent.click(within(bar).getByRole("button", { name: "More" }));
+    expect(await screen.findByRole("menu")).toHaveTextContent("Revision 1");
+  });
+
   it("the Notes button opens and closes the pane", async () => {
     render(<ChatPage />);
     expect(notesButton()).toHaveAttribute("aria-pressed", "false");
