@@ -167,3 +167,26 @@ async def test_shared_by_counts_the_live_chats_the_note_is_linked_to(
     chat = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
     assert chat["shared_by"] == 1
     assert (await client.get(f"/notes/{chat['note']['id']}")).json()["shared_by"] == 1
+
+
+async def test_shared_by_for_an_idea_note_and_a_paper_in_no_chat(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.executescript(
+            "INSERT INTO chat_sessions (id, title) VALUES (2, 'Two');"
+            "INSERT INTO chat_sessions (id, title, deleted_at) VALUES (3, 'Gone', '2026-11-16');"
+            "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, "
+            "source_path, source_dir_path, html_path) "
+            "VALUES (2, 'arxiv:2', 'arxiv', '2', 'Unread', 's', 'd', 'h');"
+            "INSERT INTO ideas (id, source_doc, source_section, title) "
+            "VALUES (5, 1, '1 Intro', 'An idea');"
+            "INSERT INTO idea_sessions (idea_id, session_id) VALUES (5, 1), (5, 2), (5, 3);")
+        await conn.commit()
+    # An idea's note: its live idea chats.
+    idea = (await client.get("/notes/target", params={"kind": "idea", "id": 5})).json()
+    assert idea["shared_by"] == 2
+    assert (await client.get(f"/notes/{idea['note']['id']}")).json()["shared_by"] == 2
+    # A paper in the library but in no chat.
+    lone = (await client.get("/notes/target", params={"kind": "paper", "id": 2})).json()
+    assert lone["shared_by"] == 0
