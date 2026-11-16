@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from paperhub.notes.models import BLOCK_ID_PATTERN
+
 # [chunk:12], [chunk:12, 13], or the [chunk:12, chunk:13] form models also write
 _MARKER = re.compile(
     r"[ \t]?\[chunk:\s*(\d+(?:\s*,\s*(?:chunk:\s*)?\d+)*)\s*\]")
@@ -306,15 +308,17 @@ def verify_quotes(
 
 
 # [note:b_AbC123], [note:b_AbC123, b_Xy9] or [note:b_A, note:b_B]: a block of the
-# user's notes the agent read this turn (read_note / search_notes). Blocks the
-# server makes have `b_` ids; blocks made in the editor keep the editor's UUID.
-_NOTE_ID = r"(?:b_[A-Za-z0-9]+|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})"
+# user's notes the agent read this turn (read_note / search_notes). Any id the
+# op engine takes (the server's `b_…`, the editor's UUIDs) is matched.
+_NOTE_ID = BLOCK_ID_PATTERN
 _NOTE_MARKER = re.compile(
     rf"[ \t]?\[note:\s*({_NOTE_ID}(?:\s*,\s*(?:note:\s*)?{_NOTE_ID})*)\s*\]")
 
 
 def _note_ids(group: str) -> list[str]:
-    return re.findall(_NOTE_ID, group)
+    # "b_A, note:b_B": the ids, without the optional repeated "note:".
+    parts = (p.strip() for p in group.split(","))
+    return [p.removeprefix("note:").strip() for p in parts if p]
 
 
 def cited_notes(text: str) -> list[str]:

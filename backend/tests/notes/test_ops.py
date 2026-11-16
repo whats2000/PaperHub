@@ -708,3 +708,15 @@ async def test_a_new_suggestion_withdraws_the_older_one_on_its_block(conn):
         "AND status = 'open'") as cur:
         assert len(await cur.fetchall()) <= 1
     assert again.change_set_id
+
+
+@pytest.mark.parametrize("bad", ["has space", "a:b", "x" * 65, "", "[note]"])
+def test_block_ids_take_one_shape(bad: str) -> None:
+    """Ids are what `[note:<id>]` citations can name: letters, digits, _ and -,
+    at most 64 (the server's b_… and the editor's UUIDs both fit)."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Op(op="delete", block_id=bad)
+    for good in ["b_AbC123xYz9", "5a070443-97b8-40ae-bbcc-ff555ee02d52", "x" * 64]:
+        assert Op(op="delete", block_id=good).block_id == good

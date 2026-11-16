@@ -22,10 +22,10 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import aiosqlite
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from paperhub.db.connection import write_transaction
-from paperhub.notes.models import Block, BlockType
+from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType
 from paperhub.notes.order import key_between
 from paperhub.notes.store import block_text, bump_revision, get_note, new_block_id
 
@@ -45,7 +45,7 @@ class BlockIn(BaseModel):
 
 class Op(BaseModel):
     op: Literal["insert", "update", "delete", "move"]
-    block_id: str | None = None
+    block_id: str | None = Field(default=None, pattern=f"^{BLOCK_ID_PATTERN}$")
     block: BlockIn | None = None
     parent_id: str | None = None
     after: str | None = None

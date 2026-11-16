@@ -85,8 +85,9 @@ export const EVIDENCE_MARKER_CLASS = cn(
   "hover:bg-primary/10 hover:underline",
 );
 
-/** A note block id: `b_…` (made by the server) or a UUID (made in the editor). */
-const NOTE_ID = String.raw`(?:b_[A-Za-z0-9]+|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})`;
+/** A note block id, in the one shape the server stores (`BLOCK_ID_PATTERN` in
+ * notes/models.py): its own `b_…` ids and the editor's UUIDs both fit. */
+const NOTE_ID = String.raw`[A-Za-z0-9_-]{1,64}`;
 
 /** Matches `[note:<id>]` markers — a block of the user's notes the agent read —
  * including lists like `[note:b_A, b_B]` or `[note:b_A, note:b_B]`. Capture
@@ -98,5 +99,8 @@ export const NOTE_MARKER_RE = new RegExp(
 
 /** Parse a `[note:]` capture into block ids, in order. */
 export function parseNoteIds(list: string): string[] {
-  return list.match(new RegExp(NOTE_ID, "g")) ?? [];
+  return list
+    .split(",")
+    .map((part) => part.trim().replace(/^note:\s*/, ""))
+    .filter(Boolean);
 }

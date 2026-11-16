@@ -42,3 +42,15 @@ def test_editor_made_block_ids_are_note_citations() -> None:
     assert out == text and removed == []
     out, removed = validate_note_citations(f"You doubted it [note:{U1}].", {B1})
     assert out == "You doubted it [unsourced:note_not_read]." and removed == [U1]
+
+
+def test_any_stored_block_id_shape_is_a_note_citation() -> None:
+    """Every id the op engine takes (letters, digits, _ and -) is checked."""
+    odd = "blk-7_x"
+    out, removed = validate_note_citations(f"So [note:{odd}].", {B1})
+    assert out == "So [unsourced:note_not_read]." and removed == [odd]
+    assert cited_notes(f"So [note:{odd}].") == [odd]
+
+
+def test_repeated_note_prefix_is_not_an_id() -> None:
+    assert cited_notes(f"x [note:{B1}, note:{B2}]") == [B1, B2]

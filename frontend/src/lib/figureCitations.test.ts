@@ -24,6 +24,11 @@ describe("NOTE_MARKER_RE", () => {
     expect(found.flatMap(parseNoteIds)).toEqual([u, "b_A1"]);
   });
 
+  it("parses any id shape the server stores (letters, digits, _ and -)", () => {
+    expect(markers("So [note:blk-7_x].").flatMap(parseNoteIds)).toEqual(["blk-7_x"]);
+    expect(markers(`[note:${"x".repeat(65)}]`)).toEqual([]);
+  });
+
   it("ignores chunk, figure and unsourced markers", () => {
     expect(markers("[chunk:3] [fig:1/f] [unsourced:note_not_read]")).toEqual([]);
   });
