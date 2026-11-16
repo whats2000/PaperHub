@@ -30,3 +30,15 @@ def test_check_evidence_validates_notes() -> None:
     out = _check_evidence(f"a [note:{B2}]", set(), set(), record, {B1})
     assert "[unsourced:note_not_read]" in out
     assert record["note_citations_removed"] == [B2]
+
+
+U1 = "5a070443-97b8-40ae-bbcc-ff555ee02d52"  # a block the user made in the editor
+
+
+def test_editor_made_block_ids_are_note_citations() -> None:
+    text = f"You doubted it [note:{U1}, {B1}]."
+    assert cited_notes(text) == [U1, B1]
+    out, removed = validate_note_citations(text, {U1, B1})
+    assert out == text and removed == []
+    out, removed = validate_note_citations(f"You doubted it [note:{U1}].", {B1})
+    assert out == "You doubted it [unsourced:note_not_read]." and removed == [U1]
