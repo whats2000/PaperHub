@@ -337,6 +337,18 @@
 .paperhub-notes .bn-block-outer {
     transition: margin 0.2s, opacity 200ms ease-out;
 }
+/* "Open in notes" lands on a block: a short neutral ring (yellow is for citations). */
+.paperhub-notes .bn-block-outer[data-flash] > .bn-block > .bn-block-content {
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 35%, transparent);
+    transition: box-shadow 0s;
+}
+.paperhub-notes .bn-block-outer > .bn-block > .bn-block-content {
+    transition: box-shadow 1s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .paperhub-notes .bn-block-outer > .bn-block > .bn-block-content { transition: none; }
+}
 .paperhub-notes .bn-block-outer[data-fade="true"] {
     opacity: 0.45;
     cursor: pointer;

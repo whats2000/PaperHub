@@ -320,6 +320,27 @@ export interface PausedCard {
   call_id?: string;
 }
 
+/** Counts of one agent change set on a note (`edit_note`). `added` counts
+ *  content blocks only (sections and dividers are left out). */
+export interface NotesChangeSummary {
+  added: number;
+  updated: number;
+  deleted: number;
+  suggested: number;
+  rejected: number;
+  /** The paper section the change landed under, if one. */
+  section: string | null;
+}
+
+/** H5b: the agent changed a note (SSE `notes_changed`, replayed). */
+export interface NotesChangedData {
+  change_set_id: string;
+  note_id: number;
+  note_title: string;
+  summary: NotesChangeSummary;
+  revision: number;
+}
+
 /** A tool UI event of an agent turn, live (SSE) or replayed (agent_events). */
 export type AgentUiEvent =
   | { event: "paper_added"; data: PaperAddedData }
@@ -327,7 +348,8 @@ export type AgentUiEvent =
   | { event: "confirm_request"; data: ConfirmRequestData }
   | { event: "outbound_rewritten"; data: OutboundRewrittenData }
   | { event: "outbound_blocked"; data: OutboundBlockedData }
-  | { event: "outbound_held"; data: OutboundHeldData };
+  | { event: "outbound_held"; data: OutboundHeldData }
+  | { event: "notes_changed"; data: NotesChangedData };
 
 export interface ChatMessage {
   role: "user" | "assistant";

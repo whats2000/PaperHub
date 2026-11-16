@@ -3,9 +3,11 @@
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
+import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditor } from "./NoteEditor";
@@ -41,6 +43,15 @@ export function NotesPane({ onClose }: Props) {
   const paperId = paper.id;
 
   const [chosen, setChosen] = useState<NoteTab>("paper");
+  // "Open in notes" (the agent's change card): the note's tab comes forward.
+  const request = useNotesPaneStore((s) => s.request);
+  const consumeRequest = useNotesPaneStore((s) => s.consumeRequest);
+  const [seenRequest, setSeenRequest] = useState(0);
+  if (request && request.seq !== seenRequest) {
+    setSeenRequest(request.seq);
+    if (request.kind === "session") setChosen("chat");
+    else if (request.kind === "paper") setChosen("paper");
+  }
   const tab: NoteTab = paperId === null ? "chat" : session === null ? "paper" : chosen;
   const target: Target | null =
     tab === "paper" && paperId !== null
@@ -115,6 +126,41 @@ export function NotesPane({ onClose }: Props) {
   const followUnavailable = useCanvasStore(
     (s) => tab === "paper" && paperId !== null && s.readerView?.paperId === paperId && s.readerView.kind === "pdf",
   );
+  // ... and its changed block is brought into view once the note shows.
+  useEffect(() => {
+    if (!request || !panel) return;
+    if (request.blockId === null || request.kind === "idea") {
+      consumeRequest(request.seq);
+      return;
+    }
+    if (noteId !== request.noteId) return;
+    const selector = `.bn-block-outer[data-id="${CSS.escape(request.blockId)}"]`;
+    const reveal = (): boolean => {
+      const el = panel.querySelector<HTMLElement>(selector);
+      if (!el) return false;
+      el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      el.setAttribute("data-flash", "");
+      // Outlives this effect (consuming the request re-runs it).
+      setTimeout(() => el.removeAttribute("data-flash"), 1600);
+      consumeRequest(request.seq);
+      return true;
+    };
+    if (reveal()) return;
+    // The editor mounts after the note loads: wait for the block (a while).
+    const observer = new MutationObserver(() => {
+      if (reveal()) observer.disconnect();
+    });
+    observer.observe(panel, { childList: true, subtree: true });
+    const giveUp = setTimeout(() => {
+      observer.disconnect();
+      consumeRequest(request.seq);
+    }, 5000);
+    return () => {
+      observer.disconnect();
+      clearTimeout(giveUp);
+    };
+  }, [request, panel, noteId, consumeRequest]);
+
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
 
   return (

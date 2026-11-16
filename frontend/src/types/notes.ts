@@ -130,11 +130,29 @@ export interface ApplyResult {
   reparented: { block_id: string; parent_id: string | null }[];
 }
 
+/** One line of a change set's Details. */
+export interface ChangeSetChange {
+  kind: "added" | "updated" | "deleted" | "suggested";
+  block_id: string;
+  /** The block's text after the change (a suggestion: the proposal). */
+  text: string;
+  /** An update: the text before; a suggestion: the block's text now. */
+  before?: string;
+  /** A suggestion's op. */
+  op?: "update" | "delete";
+  /** A suggestion's status. */
+  status?: "open" | "accepted" | "rejected" | "withdrawn";
+}
+
 export interface ChangeSetStatus {
   id: string;
   note_id: number;
-  status: string;
+  status: "applied" | "undone";
   reapplied_by: string | null;
+  /** The set live now: Apply again makes a new one. */
+  head: { id: string; status: "applied" | "undone" };
+  note: { target_kind: NoteTargetKind; target_id: string; title: string };
+  changes: ChangeSetChange[];
 }
 
 // ---- Reading marks ------------------------------------------------------

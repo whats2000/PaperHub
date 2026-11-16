@@ -111,7 +111,8 @@
     "undo": "復原",
     "resolveAgain": "再次標為已解決",
     "deleteAgain": "再次刪除",
-    "failed": "無法儲存留言。"
+    "failed": "無法儲存留言。",
+    "textChanged": "被評論的文字已變更。"
   },
   "tip": {
     "body": "第一次使用？輸入 <slash>/</slash> 選區塊，輸入 <bold>**粗體**</bold> 即可套用格式，或選取文字叫出工具列。",
@@ -234,5 +235,44 @@
     "exportDocxHint": ".docx",
     "comingSoon": "即將推出",
     "shortcuts": "快速鍵"
+  },
+  "card": {
+    "added_one": "新增了 {{count}} 則筆記",
+    "added_other": "新增了 {{count}} 則筆記",
+    "addedUnder_one": "在 {{section}} 下新增了 {{count}} 則筆記",
+    "addedUnder_other": "在 {{section}} 下新增了 {{count}} 則筆記",
+    "updated_one": "更新了 {{count}} 則筆記",
+    "updated_other": "更新了 {{count}} 則筆記",
+    "deleted_one": "移除了 {{count}} 則筆記",
+    "deleted_other": "移除了 {{count}} 則筆記",
+    "suggested_one": "對你的文字有 {{count}} 項建議",
+    "suggested_other": "對你的文字有 {{count}} 項建議",
+    "kept_one": "你之後編輯過的 {{count}} 則筆記已保留。",
+    "kept_other": "你之後編輯過的 {{count}} 則筆記已保留。",
+    "changed": "修改了你的筆記",
+    "open": "在筆記中開啟",
+    "undo": "復原",
+    "applyAgain": "重新套用",
+    "applyAgainHint": "把助理的修改放回去",
+    "details": "詳細內容",
+    "undone": "已復原：助理的修改已移除，你自己的文字沒有被動到。",
+    "failed": "無法修改筆記，請再試一次。",
+    "nothing": "沒有可顯示的內容。",
+    "removedLine": "已移除：",
+    "suggestedLine": "對你這行的建議：",
+    "updatedLine": "已更新：",
+    "status": {
+      "accepted": "已接受",
+      "rejected": "已拒絕",
+      "withdrawn": "已撤回"
+    }
+  },
+  "suggestion": {
+    "by": "助理的建議",
+    "accept": "接受",
+    "reject": "拒絕",
+    "deleteLine": "建議刪除這一行",
+    "failed": "無法套用，請再試一次。",
+    "gone": "這項建議已不適用。"
   }
 }

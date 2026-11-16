@@ -18,6 +18,7 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
+import { useNotesStore } from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -203,6 +204,7 @@ const AGENT_UI_EVENTS = new Set([
   "outbound_rewritten",
   "outbound_blocked",
   "outbound_held",
+  "notes_changed",
 ]);
 
 /** The identity of an agent UI event: replays (the reattach poller restarts
@@ -227,6 +229,8 @@ export function agentEventKey(ev: AgentUiEvent): string {
         : `blocked:text:${JSON.stringify(ev.data.text)}`;
     case "outbound_held":
       return `held:${ev.data.held_id}`;
+    case "notes_changed":
+      return `notes:${ev.data.change_set_id}`;
   }
 }
 
@@ -574,7 +578,10 @@ export const useChatStore = create<ChatState>()(
             const last = msgs[lastIdx];
             if (last === undefined || last.role !== "assistant") return sess;
             const acted = (last.agent_events ?? []).some(
-              (e) => e.event === "paper_added" || e.event === "memory_saved",
+              (e) =>
+                e.event === "paper_added" ||
+                e.event === "memory_saved" ||
+                e.event === "notes_changed",
             );
             if (acted) {
               msgs[lastIdx] = {
@@ -792,6 +799,13 @@ export const useChatStore = create<ChatState>()(
             .getState()
             .fetchMemories(backendId)
             .catch(() => undefined);
+        } else if (name === "notes_changed") {
+          // The agent changed a note: an open editor shows it at once.
+          const noteId = (data as { note_id?: number }).note_id;
+          const notes = useNotesStore.getState();
+          if (typeof noteId === "number" && notes.notes[noteId]) {
+            void notes.loadNote(noteId).catch(() => undefined);
+          }
         }
       },
 
@@ -1109,6 +1123,7 @@ export const useChatStore = create<ChatState>()(
             case "outbound_rewritten":
             case "outbound_blocked":
             case "outbound_held":
+            case "notes_changed":
               store.applyAgentEvent(sessionId, run_id, event.event, data);
               break;
             // "session" + unknown events: no-op (placeholder carries run_id)

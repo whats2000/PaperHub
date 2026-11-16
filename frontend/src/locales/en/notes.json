@@ -111,7 +111,8 @@
     "undo": "Undo",
     "resolveAgain": "Resolve again",
     "deleteAgain": "Delete again",
-    "failed": "Couldn't save the comment."
+    "failed": "Couldn't save the comment.",
+    "textChanged": "The commented text changed."
   },
   "tip": {
     "body": "New here? Type <slash>/</slash> for blocks, <bold>**bold**</bold> as you type, or select text for the toolbar.",
@@ -234,5 +235,44 @@
     "exportDocxHint": ".docx",
     "comingSoon": "Coming soon",
     "shortcuts": "Shortcuts"
+  },
+  "card": {
+    "added_one": "Added {{count}} note",
+    "added_other": "Added {{count}} notes",
+    "addedUnder_one": "Added {{count}} note under {{section}}",
+    "addedUnder_other": "Added {{count}} notes under {{section}}",
+    "updated_one": "Updated {{count}} note",
+    "updated_other": "Updated {{count}} notes",
+    "deleted_one": "Removed {{count}} note",
+    "deleted_other": "Removed {{count}} notes",
+    "suggested_one": "{{count}} suggestion on your text",
+    "suggested_other": "{{count}} suggestions on your text",
+    "kept_one": "{{count}} note you edited since was kept.",
+    "kept_other": "{{count}} notes you edited since were kept.",
+    "changed": "Changed your notes",
+    "open": "Open in notes",
+    "undo": "Undo",
+    "applyAgain": "Apply again",
+    "applyAgainHint": "Put the agent's changes back",
+    "details": "Details",
+    "undone": "Undone: the agent's changes were removed. Your own text was not touched.",
+    "failed": "Couldn't change the note. Try again.",
+    "nothing": "Nothing left to show.",
+    "removedLine": "Removed:",
+    "suggestedLine": "Suggested on your line:",
+    "updatedLine": "Updated:",
+    "status": {
+      "accepted": "accepted",
+      "rejected": "rejected",
+      "withdrawn": "withdrawn"
+    }
+  },
+  "suggestion": {
+    "by": "Suggested by the assistant",
+    "accept": "Accept",
+    "reject": "Reject",
+    "deleteLine": "Suggested removing this line",
+    "failed": "Couldn't apply that. Try again.",
+    "gone": "That suggestion no longer applies."
   }
 }

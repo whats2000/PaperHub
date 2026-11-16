@@ -111,7 +111,8 @@
     "undo": "元に戻す",
     "resolveAgain": "もう一度解決済みにする",
     "deleteAgain": "もう一度削除",
-    "failed": "コメントを保存できませんでした。"
+    "failed": "コメントを保存できませんでした。",
+    "textChanged": "コメントした文章が変更されました。"
   },
   "tip": {
     "body": "はじめてですか？ <slash>/</slash> でブロック、<bold>**太字**</bold> のように入力すると書式が付き、文字を選ぶとツールバーが出ます。",
@@ -234,5 +235,44 @@
     "exportDocxHint": ".docx",
     "comingSoon": "近日対応",
     "shortcuts": "ショートカット"
+  },
+  "card": {
+    "added_one": "ノートを {{count}} 件追加しました",
+    "added_other": "ノートを {{count}} 件追加しました",
+    "addedUnder_one": "{{section}} にノートを {{count}} 件追加しました",
+    "addedUnder_other": "{{section}} にノートを {{count}} 件追加しました",
+    "updated_one": "ノートを {{count}} 件更新しました",
+    "updated_other": "ノートを {{count}} 件更新しました",
+    "deleted_one": "ノートを {{count}} 件削除しました",
+    "deleted_other": "ノートを {{count}} 件削除しました",
+    "suggested_one": "あなたの文章への提案 {{count}} 件",
+    "suggested_other": "あなたの文章への提案 {{count}} 件",
+    "kept_one": "その後あなたが編集したノート {{count}} 件はそのままです。",
+    "kept_other": "その後あなたが編集したノート {{count}} 件はそのままです。",
+    "changed": "ノートを変更しました",
+    "open": "ノートで開く",
+    "undo": "元に戻す",
+    "applyAgain": "もう一度適用",
+    "applyAgainHint": "アシスタントの変更を戻す",
+    "details": "詳細",
+    "undone": "元に戻しました：アシスタントの変更を取り消しました。あなたの文章には触れていません。",
+    "failed": "ノートを変更できませんでした。もう一度お試しください。",
+    "nothing": "表示する内容はありません。",
+    "removedLine": "削除：",
+    "suggestedLine": "あなたの行への提案：",
+    "updatedLine": "更新：",
+    "status": {
+      "accepted": "承認済み",
+      "rejected": "却下",
+      "withdrawn": "取り下げ"
+    }
+  },
+  "suggestion": {
+    "by": "アシスタントの提案",
+    "accept": "承認",
+    "reject": "却下",
+    "deleteLine": "この行の削除を提案",
+    "failed": "適用できませんでした。もう一度お試しください。",
+    "gone": "この提案はもう適用できません。"
   }
 }

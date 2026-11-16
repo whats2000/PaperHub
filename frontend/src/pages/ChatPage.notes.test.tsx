@@ -20,7 +20,12 @@ vi.mock("@/components/slides/SlidesPanel", () => ({
   SlidesPanel: () => <div data-testid="slides">slides</div>,
 }));
 vi.mock("@/components/notes/NoteEditor", () => ({
-  NoteEditor: ({ noteId }: { noteId: number }) => <div data-testid="note-editor">note {noteId}</div>,
+  NoteEditor: ({ noteId }: { noteId: number }) => (
+    <div data-testid="note-editor">
+      note {noteId}
+      <div className="bn-block-outer" data-id={`b${noteId}`} />
+    </div>
+  ),
 }));
 
 import { ChatPage } from "./ChatPage";
@@ -285,5 +290,33 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(chatTab);
     expect(chatTab).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("note 12")).toBeInTheDocument();
+  });
+
+  it("Open in notes shows the note's tab and brings the changed block into view", async () => {
+    useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
+    const scrolled: Element[] = [];
+    // jsdom has no scrollIntoView: give it one to watch.
+    if (!("scrollIntoView" in Element.prototype)) Object.assign(Element.prototype, { scrollIntoView: () => undefined });
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+    try {
+      render(<ChatPage />);
+      // A paper is in the reader, so the pane would open on the paper's note.
+      act(() => useNotesPaneStore.getState().openAt({ kind: "session", id: 42, noteId: 12, blockId: "b12" }));
+      expect(useNotesPaneStore.getState()).toMatchObject({ open: true, activeTab: "notes" });
+      expect(await screen.findByText("note 12")).toBeInTheDocument();
+      await waitFor(() => expect(useNotesPaneStore.getState().request).toBeNull());
+      const block = document.querySelector('.bn-block-outer[data-id="b12"]');
+      expect(scrolled).toContain(block);
+      expect(block).toHaveAttribute("data-flash");
+
+      act(() => useNotesPaneStore.getState().openAt({ kind: "paper", id: 7, noteId: 11, blockId: "b11" }));
+      expect(await screen.findByText("note 11")).toBeInTheDocument();
+      await waitFor(() => expect(useNotesPaneStore.getState().request).toBeNull());
+      expect(scrolled).toContain(document.querySelector('.bn-block-outer[data-id="b11"]'));
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

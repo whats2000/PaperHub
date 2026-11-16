@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
-import { CANVAS_MIN_WIDTH } from "@/store/canvas";
+import { CANVAS_MIN_WIDTH, useCanvasStore } from "@/store/canvas";
 
 export const NOTES_MIN_WIDTH = 320;
 export const NOTES_DEFAULT_WIDTH = 420;
@@ -13,6 +13,17 @@ export const SIDE_BY_SIDE_MIN = 760;
 export const DIVIDER_WIDTH = 6;
 
 export type PaneTab = "reader" | "notes";
+
+/** "Open in notes": the note to show and the block to bring into view. A
+ * paper's note opens with its paper in the reader; a chat's on the chat tab. */
+export interface NotesRequest {
+  kind: "paper" | "session" | "idea";
+  /** The target's id (a paper: its paper_content_id). */
+  id: number;
+  noteId: number;
+  blockId: string | null;
+  seq: number;
+}
 
 interface NotesPaneState {
   open: boolean;
@@ -25,6 +36,11 @@ interface NotesPaneState {
   close: () => void;
   setActiveTab: (tab: PaneTab) => void;
   setNotesWidth: (width: number) => void;
+  /** Set by `openAt`, cleared by the pane once it has shown the block. */
+  request: NotesRequest | null;
+  /** Opens the pane on the Notes tab at a note (and one of its blocks). */
+  openAt: (target: Omit<NotesRequest, "seq">) => void;
+  consumeRequest: (seq: number) => void;
 }
 
 /** localStorage that never throws (private windows, blocked site data). */
@@ -52,6 +68,9 @@ const safeStorage: StateStorage = {
   },
 };
 
+/** Request numbers only grow (a consumed request is null, never reused). */
+let requestSeq = 0;
+
 export const useNotesPaneStore = create<NotesPaneState>()(
   persist(
     (set) => ({
@@ -63,6 +82,13 @@ export const useNotesPaneStore = create<NotesPaneState>()(
       close: () => set({ open: false }),
       setActiveTab: (activeTab) => set({ activeTab }),
       setNotesWidth: (width) => set({ notesWidth: Math.max(NOTES_MIN_WIDTH, Math.round(width)) }),
+      request: null,
+      openAt: (target) => {
+        // The paper tab shows the paper in the reader: open it there first.
+        if (target.kind === "paper") useCanvasStore.getState().openPaper(target.id);
+        set({ open: true, activeTab: "notes", request: { ...target, seq: ++requestSeq } });
+      },
+      consumeRequest: (seq) => set((s) => (s.request?.seq === seq ? { request: null } : {})),
     }),
     {
       name: "paperhub-notes-pane-v1",

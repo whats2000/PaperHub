@@ -33,6 +33,7 @@ import { UnsourcedMarker } from "@/components/canvas/UnsourcedMarker";
 import { AgentEventChip, type ChipEvent } from "@/components/chat/AgentEventChip";
 import { ConfirmActionCard } from "@/components/chat/ConfirmActionCard";
 import { HeldSearchCard } from "@/components/chat/HeldSearchCard";
+import { NotesChangeCard } from "@/components/chat/NotesChangeCard";
 import { OutboundBlockedLine } from "@/components/chat/OutboundBlockedLine";
 import { OutboundChip } from "@/components/chat/OutboundChip";
 import { PausedLine } from "@/components/chat/PausedLine";
@@ -163,6 +164,8 @@ export function MessageBubble({
   const confirmEvents = agentEvents
     .map((ev, index) => ({ ev, index }))
     .filter((x) => x.ev.event === "confirm_request");
+  // H5b: the agent's note changes, one card per change set.
+  const notesEvents = agentEvents.flatMap((ev) => (ev.event === "notes_changed" ? [ev.data] : []));
   // Ask-first search cards still waiting (pending) in this turn.
   const waitingSearchIds = confirmEvents.flatMap(({ ev }) =>
     ev.event === "confirm_request" &&
@@ -261,6 +264,9 @@ export function MessageBubble({
             )}
           </div>
         )}
+        {notesEvents.map((d) => (
+          <NotesChangeCard key={d.change_set_id} data={d} />
+        ))}
         {isAssistant && <PausedLine count={pausedCount} />}
         <div
           className={

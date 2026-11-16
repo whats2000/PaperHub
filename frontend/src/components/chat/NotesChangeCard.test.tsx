@@ -1,0 +1,203 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { MessageBubble } from "@/components/chat/MessageBubble";
+import { NotesChangeCard } from "@/components/chat/NotesChangeCard";
+import { API_BASE_URL } from "@/lib/api";
+import { useCanvasStore } from "@/store/canvas";
+import { useNotesPaneStore } from "@/store/notesPane";
+import { useNotesStore } from "@/store/notes";
+import type { NotesChangedData } from "@/types/domain";
+import type { ChangeSetStatus } from "@/types/notes";
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
+
+const server = setupServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterAll(() => server.close());
+afterEach(() => server.resetHandlers());
+
+const data: NotesChangedData = {
+  change_set_id: "cs_1",
+  note_id: 7,
+  note_title: "Attention",
+  summary: { added: 3, updated: 0, deleted: 0, suggested: 1, rejected: 0, section: "2 Background" },
+  revision: 5,
+};
+
+function detail(over: Partial<ChangeSetStatus> = {}): ChangeSetStatus {
+  return {
+    id: "cs_1",
+    note_id: 7,
+    status: "applied",
+    reapplied_by: null,
+    head: { id: "cs_1", status: "applied" },
+    note: { target_kind: "paper", target_id: "3", title: "Attention" },
+    changes: [
+      { kind: "added", block_id: "b1", text: "Network transmission dominates." },
+      {
+        kind: "suggested",
+        block_id: "u1",
+        op: "update",
+        before: "latency drops up to 83%",
+        text: "latency drops 89%, 88% and 83%",
+        status: "open",
+      },
+    ],
+    ...over,
+  };
+}
+
+let calls: string[] = [];
+beforeEach(() => {
+  calls = [];
+  useNotesPaneStore.setState({ open: false, activeTab: "reader", request: null });
+  useNotesStore.setState({ notes: {}, byTarget: {}, reloads: {} });
+});
+
+describe("NotesChangeCard", () => {
+  it("sums the change set up in one line, with plural counts", async () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(<NotesChangeCard data={data} />);
+    expect(screen.getByText(/Added 3 notes under §2/)).toBeInTheDocument();
+    expect(screen.getByText("1 suggestion on your text")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Undo/ });
+  });
+
+  it("uses the singular for one note and names no section when there is none", () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(
+      <NotesChangeCard
+        data={{ ...data, summary: { ...data.summary, added: 1, suggested: 2, section: null } }}
+      />,
+    );
+    expect(screen.getByText(/^Added 1 note$/)).toBeInTheDocument();
+    expect(screen.getByText("2 suggestions on your text")).toBeInTheDocument();
+  });
+
+  it("Undo turns into Apply again and back, each call on the set live at the time", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/undo`, ({ params }) => {
+        calls.push(`undo:${String(params.id)}`);
+        return HttpResponse.json({ note_id: 7, revision: 6, change_set_id: params.id, applied: ["b1"], suggested: [], rejected: [], reparented: [] });
+      }),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/reapply`, ({ params }) => {
+        calls.push(`reapply:${String(params.id)}`);
+        return HttpResponse.json({ note_id: 7, revision: 7, change_set_id: "cs_2", applied: ["b1"], suggested: [], rejected: [], reparented: [] });
+      }),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    // In flight: the control is off, so a second click cannot race the first.
+    expect(screen.getByTestId("notes-card-toggle")).toBeDisabled();
+    fireEvent.click(await screen.findByRole("button", { name: /Apply again/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    await screen.findByRole("button", { name: /Apply again/ });
+    expect(calls).toEqual(["undo:cs_1", "reapply:cs_1", "undo:cs_2"]);
+    expect(screen.getByText(/Undone/)).toBeInTheDocument();
+  });
+
+  it("after a reload shows where the set stands now (Apply again when undone)", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
+        HttpResponse.json(detail({ status: "undone", head: { id: "cs_1", status: "undone" } })),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    expect(await screen.findByRole("button", { name: /Apply again/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Open in notes/ })).toBeDisabled();
+  });
+
+  it("follows Apply again to the set live now, so Undo undoes that one", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
+        HttpResponse.json(detail({ status: "undone", reapplied_by: "cs_2", head: { id: "cs_2", status: "applied" } })),
+      ),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/undo`, ({ params }) => {
+        calls.push(`undo:${String(params.id)}`);
+        return HttpResponse.json({ note_id: 7, revision: 8, change_set_id: params.id, applied: [], suggested: [], rejected: [], reparented: [] });
+      }),
+    );
+    render(<NotesChangeCard data={data} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Undo/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    await screen.findByRole("button", { name: /Apply again/ });
+    expect(calls).toEqual(["undo:cs_2"]);
+  });
+
+  it("says when Undo kept blocks the user edited since", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),
+      http.post(`${API_BASE_URL}/notes/change-sets/cs_1/undo`, () =>
+        HttpResponse.json({
+          note_id: 7, revision: 6, change_set_id: "cs_1", applied: [], suggested: [], reparented: [],
+          rejected: [{ block_id: "b1", reason: "changed_since_base", current: null }],
+        }),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    expect(await screen.findByText(/1 note you edited since was kept/)).toBeInTheDocument();
+  });
+
+  it("Open in notes opens the pane at the note's first changed block", async () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    const openPaper = vi.spyOn(useCanvasStore.getState(), "openPaper");
+    render(<NotesChangeCard data={data} />);
+    const open = await screen.findByRole("button", { name: /Open in notes/ });
+    await waitFor(() => expect(open).toBeEnabled());
+    act(() => {
+      fireEvent.click(open);
+    });
+    const pane = useNotesPaneStore.getState();
+    expect(pane.open).toBe(true);
+    expect(pane.activeTab).toBe("notes");
+    expect(pane.request).toMatchObject({ kind: "paper", id: 3, noteId: 7, blockId: "b1" });
+    expect(openPaper).toHaveBeenCalledWith(3);
+  });
+
+  it("Details folds the diff out and back", async () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(<NotesChangeCard data={data} />);
+    const details = screen.getByRole("button", { name: /Details/ });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
+    const region = screen.getByTestId("notes-card-details");
+    expect(region).toHaveAttribute("data-state", "open");
+    expect(await screen.findByText("Network transmission dominates.")).toBeInTheDocument();
+    expect(screen.getByText("up to")).toBeInTheDocument();
+    expect(screen.getByText("89%, 88% and")).toBeInTheDocument();
+    fireEvent.click(details);
+    expect(region).toHaveAttribute("data-state", "closed");
+  });
+});
+
+describe("MessageBubble", () => {
+  it("shows a replayed notes_changed event as the card, above the answer", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
+        HttpResponse.json(detail({ status: "undone", head: { id: "cs_1", status: "undone" } })),
+      ),
+    );
+    render(
+      <MessageBubble
+        message={{
+          role: "assistant",
+          content: "I put three notes under §2.",
+          run_id: 5,
+          status: "ok",
+          agent_events: [{ event: "notes_changed", data }],
+        }}
+      />,
+    );
+    const card = screen.getByTestId("notes-change-card");
+    const answer = screen.getByText("I put three notes under §2.");
+    expect(card.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Its state is the server's, not the event's.
+    expect(await screen.findByRole("button", { name: /Apply again/ })).toBeInTheDocument();
+  });
+});

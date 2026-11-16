@@ -23,6 +23,7 @@ const AGENT_EVENTS = new Set([
   "outbound_rewritten",
   "outbound_blocked",
   "outbound_held",
+  "notes_changed",
   "paused",
   "resumed",
 ]);

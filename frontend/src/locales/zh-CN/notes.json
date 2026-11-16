@@ -111,7 +111,8 @@
     "undo": "撤销",
     "resolveAgain": "再次标为已解决",
     "deleteAgain": "再次删除",
-    "failed": "无法保存评论。"
+    "failed": "无法保存评论。",
+    "textChanged": "被评论的文字已更改。"
   },
   "tip": {
     "body": "第一次使用？输入 <slash>/</slash> 选区块，输入 <bold>**粗体**</bold> 即可应用格式，或选中文字调出工具栏。",
@@ -234,5 +235,44 @@
     "exportDocxHint": ".docx",
     "comingSoon": "即将推出",
     "shortcuts": "快捷键"
+  },
+  "card": {
+    "added_one": "新增了 {{count}} 条笔记",
+    "added_other": "新增了 {{count}} 条笔记",
+    "addedUnder_one": "在 {{section}} 下新增了 {{count}} 条笔记",
+    "addedUnder_other": "在 {{section}} 下新增了 {{count}} 条笔记",
+    "updated_one": "更新了 {{count}} 条笔记",
+    "updated_other": "更新了 {{count}} 条笔记",
+    "deleted_one": "移除了 {{count}} 条笔记",
+    "deleted_other": "移除了 {{count}} 条笔记",
+    "suggested_one": "对你的文字有 {{count}} 条建议",
+    "suggested_other": "对你的文字有 {{count}} 条建议",
+    "kept_one": "你之后编辑过的 {{count}} 条笔记已保留。",
+    "kept_other": "你之后编辑过的 {{count}} 条笔记已保留。",
+    "changed": "修改了你的笔记",
+    "open": "在笔记中打开",
+    "undo": "撤销",
+    "applyAgain": "重新应用",
+    "applyAgainHint": "把助手的修改放回去",
+    "details": "详细信息",
+    "undone": "已撤销：助手的修改已移除，你自己的文字没有被改动。",
+    "failed": "无法修改笔记，请再试一次。",
+    "nothing": "没有可显示的内容。",
+    "removedLine": "已移除：",
+    "suggestedLine": "对你这行的建议：",
+    "updatedLine": "已更新：",
+    "status": {
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "withdrawn": "已撤回"
+    }
+  },
+  "suggestion": {
+    "by": "助手的建议",
+    "accept": "接受",
+    "reject": "拒绝",
+    "deleteLine": "建议删除这一行",
+    "failed": "无法应用，请再试一次。",
+    "gone": "这条建议已不适用。"
   }
 }
