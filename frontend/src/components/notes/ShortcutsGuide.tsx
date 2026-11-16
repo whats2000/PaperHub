@@ -27,7 +27,7 @@ function Rendered({ sample, children }: { sample: Sample; children: ReactNode })
     case "strike":
       return <s>{children}</s>;
     case "code":
-      return <code className="rounded bg-accent px-1 font-mono text-[0.88em] text-[#d6457e]">{children}</code>;
+      return <code className="rounded bg-accent px-1 font-mono text-[0.88em] text-[var(--note-code-fg)]">{children}</code>;
     case "hidden":
       return <span className="note-hidden">{children}</span>;
   }
@@ -84,7 +84,15 @@ export function ShortcutsGuide({ open, onOpenChange, trigger }: ShortcutsGuidePr
                           {row.sample === "hidden" && ` · ${t("notes:guide.clickToShow", "click to show")}`}
                         </>
                       ) : (
-                        t(`notes:guide.rows.${row.id}`, row.right)
+                        <>
+                          {t(`notes:guide.rows.${row.id}`, row.right)}
+                          {row.rightKey && (
+                            <>
+                              {" · "}
+                              <Kbd>{row.rightKey}</Kbd> {t(`notes:guide.rows.${row.id}Stops`, row.rightAfter ?? "")}
+                            </>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>

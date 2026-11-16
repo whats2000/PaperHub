@@ -89,7 +89,9 @@
     "link": "連結論文或章節",
     "comment": "留言",
     "linkLabel": "連結",
-    "commentLabel": "留言"
+    "commentLabel": "留言",
+    "or": "或",
+    "atLineStart": "在行首"
   },
   "tip": {
     "body": "第一次使用？輸入 <slash>/</slash> 選區塊，輸入 <bold>**粗體**</bold> 即可套用格式，或選取文字叫出工具列。",
@@ -162,13 +164,18 @@
       "shiftEnter": "換行",
       "ctrlEnter": "離開程式碼區塊",
       "following": "點一下，停止筆記隨論文捲動",
-      "focus": "淡化其他筆記與其標記 · 按 Esc 結束",
+      "focus": "淡化其他筆記與其標記",
       "fold": "收合其下的筆記",
       "trash": "刪除，可復原",
       "selectPaper": "引用到筆記，或選一個螢光色",
       "highlighter": "拖過文字，或點一張圖",
       "box": "拖過圖或公式",
-      "clickMark": "開啟它的筆記"
+      "clickMark": "開啟它的筆記",
+      "focusStops": "結束"
     }
+  },
+  "code": {
+    "copy": "複製",
+    "copied": "已複製"
   }
 }

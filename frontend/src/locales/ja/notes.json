@@ -89,7 +89,9 @@
     "link": "論文やセクションをリンク",
     "comment": "コメント",
     "linkLabel": "リンク",
-    "commentLabel": "コメント"
+    "commentLabel": "コメント",
+    "or": "または",
+    "atLineStart": "行の先頭で"
   },
   "tip": {
     "body": "はじめてですか？ <slash>/</slash> でブロック、<bold>**太字**</bold> のように入力すると書式が付き、文字を選ぶとツールバーが出ます。",
@@ -162,13 +164,18 @@
       "shiftEnter": "改行",
       "ctrlEnter": "コードブロックを抜ける",
       "following": "クリックで、ノートが論文に合わせて動くのを止める",
-      "focus": "ほかのノートとそのマークを薄くする · Esc で解除",
+      "focus": "ほかのノートとそのマークを薄くする",
       "fold": "その下のノートを折りたたむ",
       "trash": "削除（元に戻せる）",
       "selectPaper": "ノートに引用、またはハイライト色を選ぶ",
       "highlighter": "単語をなぞる、または図をクリック",
       "box": "図や数式をドラッグで囲む",
-      "clickMark": "そのノートを開く"
+      "clickMark": "そのノートを開く",
+      "focusStops": "で解除"
     }
+  },
+  "code": {
+    "copy": "コピー",
+    "copied": "コピーしました"
   }
 }

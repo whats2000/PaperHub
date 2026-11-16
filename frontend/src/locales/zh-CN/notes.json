@@ -89,7 +89,9 @@
     "link": "链接论文或章节",
     "comment": "评论",
     "linkLabel": "链接",
-    "commentLabel": "评论"
+    "commentLabel": "评论",
+    "or": "或",
+    "atLineStart": "在行首"
   },
   "tip": {
     "body": "第一次使用？输入 <slash>/</slash> 选区块，输入 <bold>**粗体**</bold> 即可应用格式，或选中文字调出工具栏。",
@@ -162,13 +164,18 @@
       "shiftEnter": "换行",
       "ctrlEnter": "离开代码块",
       "following": "点击，停止笔记随论文滚动",
-      "focus": "淡化其他笔记及其标记 · 按 Esc 结束",
+      "focus": "淡化其他笔记及其标记",
       "fold": "折叠其下的笔记",
       "trash": "删除，可撤销",
       "selectPaper": "引用到笔记，或选一种高亮色",
       "highlighter": "拖过文字，或点一张图",
       "box": "拖过图或公式",
-      "clickMark": "打开它的笔记"
+      "clickMark": "打开它的笔记",
+      "focusStops": "结束"
     }
+  },
+  "code": {
+    "copy": "复制",
+    "copied": "已复制"
   }
 }

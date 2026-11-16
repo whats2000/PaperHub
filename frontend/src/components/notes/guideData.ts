@@ -13,6 +13,9 @@ export interface Row {
   /** The left cell is a phrase, not key caps. */
   plainLeft?: string;
   right: string;
+  /** A key cap closing the right cell (`notes:guide.rows.<id>Stops` follows it). */
+  rightKey?: string;
+  rightAfter?: string;
   /** The right cell shows the mark itself, rendered. */
   sample?: Sample;
 }
@@ -91,7 +94,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     title: "The notes pane",
     rows: [
       { id: "following", plainLeft: "Following §2", right: "Click to stop the note scrolling with the paper" },
-      { id: "focus", plainLeft: "Focus", right: "Fade the other notes and their marks · Esc stops" },
+      { id: "focus", plainLeft: "Focus", right: "Fade the other notes and their marks", rightKey: "Esc", rightAfter: "stops" },
       { id: "fold", plainLeft: "⌄ on a divider", right: "Fold the note below it" },
       { id: "trash", plainLeft: "Trash on a block", right: "Delete, with Undo" },
     ],

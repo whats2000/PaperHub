@@ -89,7 +89,9 @@
     "link": "Link a paper or section",
     "comment": "Comment",
     "linkLabel": "Link",
-    "commentLabel": "Comment"
+    "commentLabel": "Comment",
+    "or": "or",
+    "atLineStart": "at the line start"
   },
   "tip": {
     "body": "New here? Type <slash>/</slash> for blocks, <bold>**bold**</bold> as you type, or select text for the toolbar.",
@@ -162,13 +164,18 @@
       "shiftEnter": "Line break",
       "ctrlEnter": "Leave a code block",
       "following": "Click to stop the note scrolling with the paper",
-      "focus": "Fade the other notes and their marks · Esc stops",
+      "focus": "Fade the other notes and their marks",
       "fold": "Fold the note below it",
       "trash": "Delete, with Undo",
       "selectPaper": "Quote to note, or a highlight colour",
       "highlighter": "Drag over words, or click a figure",
       "box": "Drag over a figure or equation",
-      "clickMark": "Opens its note"
+      "clickMark": "Opens its note",
+      "focusStops": "stops"
     }
+  },
+  "code": {
+    "copy": "Copy",
+    "copied": "Copied"
   }
 }
