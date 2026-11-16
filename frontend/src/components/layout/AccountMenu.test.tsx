@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -32,8 +32,14 @@ describe("AccountMenu", () => {
     render(<AccountMenu collapsed={false} onOpenSettings={() => {}} />);
     await user.click(screen.getByRole("button", { name: /account/i }));
     const menu = await screen.findByRole("menu");
+    // Open: the enter animation's state is on; the motion is the classes.
+    expect(menu).toHaveAttribute("data-open");
     for (const cls of ["origin-(--transform-origin)", "data-open:animate-in", "data-closed:animate-out", "motion-reduce:animate-none"]) {
       expect(menu.className.split(" ")).toContain(cls);
     }
+    // Escape closes it through the closed (exit) state, then it is gone.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(menu).toHaveAttribute("data-closed");
   });
 });

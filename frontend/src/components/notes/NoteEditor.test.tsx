@@ -1204,7 +1204,12 @@ describe("dividers, Focus and folding", () => {
     const fold = within(await screen.findByTestId("divider-d1")).getByRole("button", {
       name: "Fold the part below this divider",
     });
+    // jsdom cannot hit-test: the stacking is the classes (verified live).
     expect(fold.className.split(" ")).toEqual(expect.arrayContaining(["relative", "z-[21]"]));
+    // A click on the chevron reaches it and folds the part.
+    fireEvent.click(fold);
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(useNotesStore.getState().folded[7]).toEqual(["d1"]);
   });
 
   it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
