@@ -14,7 +14,7 @@
   --accent: oklch(0.97 0 0); --border: oklch(0.922 0 0); --ring: oklch(0.708 0 0); --sidebar: oklch(0.985 0 0);
   --amber-bg: oklch(0.987 0.022 95.277); --amber-fg: oklch(0.473 0.137 46.201); --amber-border: oklch(0.924 0.12 95.746);
   --cite-bg: oklch(0.945 0.09 98); --cite-line: oklch(0.80 0.15 90);
-  --hl-green: #2f9e63; --hl-blue: #3b7dd8; --hl-pink: #d6457e; --hl-purple: #8b5cd6; --hl-alpha: 22%;
+  --hl-green: #2f9e63; --hl-blue: #3b7dd8; --hl-pink: #d6457e; --hl-purple: #8b5cd6; --hl-alpha: 22%; --code-kw: #a626a4; --code-str: #50a14f; --code-num: #986801; --code-cmt: #8a8b92; --code-fn: #4078f2; --code-bi: #b76b01;
   --ins: oklch(0.527 0.154 150.069); --del: oklch(0.577 0.245 27.325);
   --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif; --font-mono: 'Geist Mono', ui-monospace, monospace;
   --font-paper: 'Times New Roman', Times, 'Noto Serif', serif; --font-math: 'Cambria Math', 'STIX Two Math', 'Times New Roman', serif;
@@ -26,7 +26,7 @@
   --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
   --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
-  --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
+  --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%; --code-kw: #c678dd; --code-str: #98c379; --code-num: #d19a66; --code-cmt: #7f848e; --code-fn: #61afef; --code-bi: #e5c07b;
   --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); color-scheme: dark; } }
 :root[data-theme="dark"] {
   --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0); --popover: oklch(0.205 0 0);
@@ -34,7 +34,7 @@
   --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0); --sidebar: oklch(0.205 0 0);
   --amber-bg: oklch(0.279 0.077 45.635); --amber-fg: oklch(0.924 0.12 95.746); --amber-border: oklch(0.414 0.112 45.904);
   --cite-bg: oklch(0.33 0.07 85); --cite-line: oklch(0.62 0.12 88);
-  --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%;
+  --hl-green: #36a067; --hl-blue: #4b86dc; --hl-pink: #d9578a; --hl-purple: #9670dc; --hl-alpha: 32%; --code-kw: #c678dd; --code-str: #98c379; --code-num: #d19a66; --code-cmt: #7f848e; --code-fn: #61afef; --code-bi: #e5c07b;
   --ins: oklch(0.723 0.219 149.579); --del: oklch(0.704 0.191 22.216); color-scheme: dark; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -395,7 +395,15 @@ input { font: inherit; color: inherit; }
 .code-lang { outline: none; font-family: var(--font-mono); border-radius: 4px; padding: 0 4px; } .code-lang:hover, .code-lang:focus { background: var(--accent); color: var(--foreground); }
 .code-head .hint { margin-left: auto; opacity: 0; transition: opacity 120ms; } .codeblk:focus-within .code-head .hint { opacity: 1; }
 .code-head button { width: 22px; height: 22px; }
-.code-ed { font-family: var(--font-mono); font-size: 12.5px; padding: 8px 10px; white-space: pre !important; overflow-x: auto; tab-size: 2; line-height: 1.5; margin: 0; }
+.code-body { display: grid; } .code-body > pre { grid-area: 1 / 1; margin: 0; min-width: 0; }
+.code-ed, .code-hl { font-family: var(--font-mono); font-size: 12.5px; padding: 8px 10px; white-space: pre-wrap !important; word-break: break-word; tab-size: 2; line-height: 1.5; }
+/* The text you edit is transparent over a highlighted copy, so the colours update as you type. */
+.code-body .code-ed { color: transparent; caret-color: var(--foreground); position: relative; }
+.code-body .code-ed::selection { background: color-mix(in srgb, var(--hl-blue) 30%, transparent); }
+.code-hl { pointer-events: none; color: var(--foreground); }
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag { color: var(--code-kw); } .hljs-string, .hljs-regexp, .hljs-addition { color: var(--code-str); }
+.hljs-number, .hljs-literal, .hljs-symbol { color: var(--code-num); } .hljs-comment, .hljs-quote { color: var(--code-cmt); font-style: italic; }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: var(--code-fn); } .hljs-built_in, .hljs-type, .hljs-attr, .hljs-meta, .hljs-params { color: var(--code-bi); }
 .ed-tip { margin: 6px 10px 0; font-size: 12px; color: var(--muted-fg); background: var(--accent); border-radius: 8px; padding: 5px 4px 5px 10px; display: flex; gap: 8px; align-items: center; }
 .ed-tip kbd, .help-pop kbd { font-family: var(--font-mono); font-size: 11px; background: var(--background); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--foreground); white-space: nowrap; }
 .ed-tip .lnk { border: 0; background: transparent; color: var(--foreground); text-decoration: underline; padding: 0; font-size: 12px; white-space: nowrap; }
@@ -746,6 +754,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
 <div class="toast" id="toast" data-state="closed" role="status"></div>
 
 <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script>
 (() => {
@@ -847,8 +856,11 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   const TEXT_TYPES = ['p', 'h', 'h1', 'h2', 'h3', 'bullet', 'num', 'todo', 'check', 'uquote', 'callout'];
   const PH = { p: "Type '/' for commands", h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', h: 'Heading 3', bullet: 'List', num: 'List', todo: 'To-do', check: 'To-do', uquote: 'Empty quote', callout: 'Type something…' };
   const mathHtml = tex => { try { return window.katex ? katex.renderToString(tex || '\\;', { output: 'mathml', displayMode: true, throwOnError: false }) : esc(tex); } catch (e) { return esc(tex); } };
+  // Code highlighting (highlight.js); an unknown language or 'plain' stays uncoloured. The trailing newline keeps an empty last line visible.
+  function hlCode(t, lang) { let h = esc(t || ''); try { if (window.hljs && lang && lang !== 'plain' && hljs.getLanguage(lang)) h = hljs.highlight(t || '', { language: lang, ignoreIllegals: true }).value; } catch (e) { /* keep plain */ } return h + '\n'; }
+  function syncHl(ed, b) { const h = ed.parentElement.querySelector('.code-hl'); if (h) h.innerHTML = hlCode(b.text, b.lang); }
   function textBlockHtml(b, tag) {
-    if (b.type === 'code') return `<div class="codeblk"><div class="code-head"><span class="code-lang" contenteditable="true" spellcheck="false" data-lang="${b.id}" title="Language">${esc(b.lang || 'plain')}</span><span class="hint">Ctrl+Enter to leave</span><button data-copy="${b.id}" title="Copy"><i data-lucide="copy" class="icon-xs"></i></button></div><pre class="ed code-ed" data-edit="${b.id}" contenteditable="true" spellcheck="false" data-ph="Code">${esc(b.text || '')}</pre></div>`;
+    if (b.type === 'code') return `<div class="codeblk"><div class="code-head"><span class="code-lang" contenteditable="true" spellcheck="false" data-lang="${b.id}" title="Language">${esc(b.lang || 'plain')}</span><span class="hint">Ctrl+Enter to leave</span><button data-copy="${b.id}" title="Copy"><i data-lucide="copy" class="icon-xs"></i></button></div><div class="code-body"><pre class="code-hl" aria-hidden="true">${hlCode(b.text, b.lang)}</pre><pre class="ed code-ed" data-edit="${b.id}" contenteditable="true" spellcheck="false" data-ph="Code">${esc(b.text || '')}</pre></div></div>`;
     if (b.type === 'math') return `<div class="mathblk" data-mathblk="${b.id}" data-empty="${!b.text}"><div class="math-out">${mathHtml(b.text)}</div><div class="math-src" contenteditable="true" spellcheck="false" data-mathsrc="${b.id}">${esc(b.text || '')}</div></div>`;
     const t = b.type === 'h' ? 'h3' : b.type === 'check' ? 'todo' : b.type;
     const cls = ['h1', 'h2', 'h3'].includes(t) ? 'ed-' + t : 'ed-p';
@@ -1073,7 +1085,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
         if (ids.includes(b.id)) return `<div class="nc-ref" data-target="true" style="--mc:${mc}"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}</span>${txt}</div>`;
         return `<button class="nc-ref" data-jump="${b.mark}" style="--mc:${mc}" title="Show this passage in the paper"><span class="nc-ref-tag"><i data-lucide="${icon}" class="icon-xs"></i>From the paper · ${esc(src)}<span class="go">Show<i data-lucide="arrow-up-right" class="icon-xs"></i></span></span>${txt}</button>`;
       }
-      const body = b.type === 'code' ? `<pre class="code-ed">${esc(b.text || '')}</pre>` : b.type === 'math' ? mathHtml(b.text) : ['h', 'h1', 'h2', 'h3'].includes(b.type) ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
+      const body = b.type === 'code' ? `<pre class="code-hl">${hlCode(b.text, b.lang)}</pre>` : b.type === 'math' ? mathHtml(b.text) : ['h', 'h1', 'h2', 'h3'].includes(b.type) ? `<b>${b.text}</b>` : b.type === 'quote' ? `<span style="font-family:var(--font-paper)">“${esc(b.text.slice(0, 90))}${b.text.length > 90 ? '…' : ''}”</span>` : b.type === 'fig' ? '[Figure 3]' : b.type === 'eq' ? '[Eq. (1)]' : b.type === 'box' ? '[Region · p. 3]' : b.text;
       return `<div class="blk" data-bid="${b.id}" data-target="${ids.includes(b.id)}" ${editable ? 'contenteditable="true"' : ''}>${body}</div>`;
     }).join('');
     const snip = g => { const b = g.find(x => x.type !== 'sec' && x.text); return b ? b.text.replace(/<[^>]+>/g, '').slice(0, 60) : ''; };
@@ -1687,9 +1699,9 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
   $('#notesBody').addEventListener('input', e => {
     const ms = e.target.closest('[data-mathsrc]');
     if (ms) { const b = blockOf(ms); b.text = ms.textContent; const blk = ms.closest('.mathblk'); $('.math-out', blk).innerHTML = mathHtml(b.text); blk.dataset.empty = String(!b.text); return; }
-    const lg = e.target.closest('[data-lang]'); if (lg) { const lb = noteList().find(x => x.id === lg.dataset.lang); if (lb) lb.lang = lg.textContent.trim() || 'plain'; return; }
+    const lg = e.target.closest('[data-lang]'); if (lg) { const lb = noteList().find(x => x.id === lg.dataset.lang); if (lb) { lb.lang = lg.textContent.trim().toLowerCase() || 'plain'; const ce = $(`#notesBody [data-edit="${lb.id}"]`); if (ce) syncHl(ce, lb); } return; }
     const ed = e.target.closest('[data-edit]'); if (!ed) return; const b = blockOf(ed); if (!b || b.type === 'hr') return;
-    if (b.type === 'code') { b.text = ed.textContent; return; }
+    if (b.type === 'code') { b.text = ed.textContent; syncHl(ed, b); return; }
     const txt = ed.textContent;
     const fence = /^```([\w+#-]*)[\s ]$/.exec(txt); if (fence && b.type === 'p') { toCode(b, fence[1]); return; }
     if (txt === '$$') { b.type = 'math'; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
@@ -1721,7 +1733,7 @@ button.nc-ref:hover .go { opacity: 1; color: var(--foreground); }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault(); const r = sl.getRangeAt(0); r.deleteContents(); const atEnd = caretOff(ed) === ed.textContent.length;
         const t = document.createTextNode(e.key === 'Tab' ? '  ' : (atEnd && !ed.textContent.endsWith('\n') ? '\n\n' : '\n'));
-        r.insertNode(t); r.setStart(t, e.key === 'Tab' ? 2 : 1); r.collapse(true); sl.removeAllRanges(); sl.addRange(r); b.text = ed.textContent; return;
+        r.insertNode(t); r.setStart(t, e.key === 'Tab' ? 2 : 1); r.collapse(true); sl.removeAllRanges(); sl.addRange(r); b.text = ed.textContent; syncHl(ed, b); return;
       }
       if (e.key === 'Backspace' && !len) { e.preventDefault(); b.type = 'p'; b.text = ''; renderNote(); focusBlock(b.id, 0); return; }
       if (e.key === 'Backspace' && off === 0 && sl.isCollapsed) { e.preventDefault(); return; }
