@@ -59,6 +59,21 @@ import type {
   Problem,
   ProblemCreate,
 } from "@/types/ideation";
+import type {
+  ApplyResult,
+  ChangeSetStatus,
+  Mark,
+  MarkColor,
+  MarkColorInfo,
+  MarkColorPatch,
+  MarkCreated,
+  MarkIn,
+  NoteDetail,
+  NoteOpsBody,
+  NoteTargetKind,
+  NoteWithBlocks,
+  PaperPageBlock,
+} from "@/types/notes";
 
 export const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
@@ -1236,4 +1251,132 @@ export async function discardHeld(
   id: string,
 ): Promise<{ status: string; held_ids: string[]; resumed?: boolean }> {
   return apiFetch(`/outbound/held/${encodeURIComponent(id)}/discard`, { method: "POST" });
+}
+
+// ---- Notes (Plan H5b.1) ----------------------------------------------------
+
+/** The note of a paper / chat / idea, created on first use. */
+export async function getNoteForTarget(
+  kind: NoteTargetKind,
+  id: number,
+): Promise<NoteWithBlocks> {
+  return apiFetch<NoteWithBlocks>(`/notes/target?kind=${kind}&id=${id}`);
+}
+
+export async function getNote(noteId: number): Promise<NoteDetail> {
+  return apiFetch<NoteDetail>(`/notes/${noteId}`);
+}
+
+/** One burst of block ops. Conflicts come back in `rejected`, never a 409. */
+export async function postNoteOps(noteId: number, body: NoteOpsBody): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/notes/${noteId}/ops`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function restoreNoteBlocks(noteId: number, blockIds: string[]): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/notes/${noteId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ block_ids: blockIds }),
+  });
+}
+
+export async function resolveSuggestion(suggestionId: string, accept: boolean): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/notes/suggestions/${encodeURIComponent(suggestionId)}`, {
+    method: "POST",
+    body: JSON.stringify({ accept }),
+  });
+}
+
+/** Undo a change set; the result carries the undone set's id. */
+export async function undoChangeSet(changeSetId: string): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/notes/change-sets/${encodeURIComponent(changeSetId)}/undo`, {
+    method: "POST",
+  });
+}
+
+/** Apply an undone change set again; the result carries a NEW change_set_id. */
+export async function reapplyChangeSet(changeSetId: string): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/notes/change-sets/${encodeURIComponent(changeSetId)}/reapply`, {
+    method: "POST",
+  });
+}
+
+export async function getChangeSet(changeSetId: string): Promise<ChangeSetStatus> {
+  return apiFetch<ChangeSetStatus>(`/notes/change-sets/${encodeURIComponent(changeSetId)}`);
+}
+
+// ---- Reading marks ----------------------------------------------------------
+
+export async function createMark(body: MarkIn): Promise<MarkCreated> {
+  return apiFetch<MarkCreated>("/marks", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function listMarks(paperContentId: number): Promise<Mark[]> {
+  return apiFetch<Mark[]>(`/marks?paper_content_id=${paperContentId}`);
+}
+
+export async function deleteMark(markId: string): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}`, { method: "DELETE" });
+}
+
+export async function restoreMark(markId: string): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}/restore`, { method: "POST" });
+}
+
+export async function erasePiece(markId: string, index: number): Promise<Mark> {
+  return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/pieces/${index}`, {
+    method: "DELETE",
+  });
+}
+
+export async function restorePiece(markId: string, index: number): Promise<Mark> {
+  return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/pieces/${index}/restore`, {
+    method: "POST",
+  });
+}
+
+/** The newest piece becomes its own mark; returns the new mark. */
+export async function splitMark(markId: string): Promise<Mark> {
+  return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST" });
+}
+
+export async function listMarkColors(): Promise<MarkColorInfo[]> {
+  return apiFetch<MarkColorInfo[]>("/marks/colors");
+}
+
+export async function patchMarkColor(
+  color: MarkColor,
+  body: MarkColorPatch,
+): Promise<MarkColorInfo[]> {
+  return apiFetch<MarkColorInfo[]>(`/marks/colors/${color}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** PNG of a page region (fractions, 0-based page) for a region / figure mark. */
+export function pageCropUrl(
+  paperContentId: number,
+  page: number,
+  box: readonly [number, number, number, number],
+): string {
+  const [x0, y0, x1, y1] = box;
+  const q = new URLSearchParams({
+    page: String(page),
+    x0: String(x0),
+    y0: String(y0),
+    x1: String(x1),
+    y1: String(y1),
+  });
+  return `${API_BASE_URL}/papers/content/${paperContentId}/page-crop?${q.toString()}`;
+}
+
+/** The reading blocks of one page (0-based), boxes as page fractions. */
+export async function listPaperBlocks(
+  paperContentId: number,
+  page: number,
+): Promise<PaperPageBlock[]> {
+  return apiFetch<PaperPageBlock[]>(`/papers/content/${paperContentId}/blocks?page=${page}`);
 }

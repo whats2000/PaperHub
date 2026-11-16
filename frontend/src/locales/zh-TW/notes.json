@@ -1,0 +1,51 @@
+{
+  "loading": "正在載入筆記…",
+  "saveFailed": "無法儲存筆記，已顯示已儲存的版本。",
+  "conflict": "已依另一個視窗的內容更新",
+  "color": {
+    "green": "關鍵結果",
+    "blue": "方法",
+    "pink": "疑問",
+    "purple": "不同意"
+  },
+  "ref": {
+    "fromPaper": "出自論文",
+    "figure": "論文中的圖",
+    "equation": "論文中的公式",
+    "region": "論文中的區域",
+    "pieces": "{{count}} 段",
+    "translated": "譯文 · {{lang}}",
+    "translatedTitle": "標記在 {{lang}} 譯文上",
+    "showOriginal": "顯示原文",
+    "hideOriginal": "隱藏原文",
+    "anchorLost": "錨點遺失：論文重新匯入後找不到這段文字。你的引文仍保留。",
+    "piecesLost": "{{total}} 段中有 {{lost}} 段遺失",
+    "showInPaper": "在論文中顯示這段文字",
+    "thePaper": "論文",
+    "latexByModel": "LaTeX 由模型轉寫 · 請對照頁面確認",
+    "ocrText": "OCR 文字 · 請對照截圖確認數字",
+    "layerText": "方框下的文字，取自頁面的文字層",
+    "pageCrop": "第 {{page}} 頁截圖"
+  },
+  "math": {
+    "edit": "點擊以編輯 LaTeX",
+    "empty": "空白公式",
+    "latex": "LaTeX"
+  },
+  "slash": {
+    "groupBasic": "基本區塊",
+    "groupPaperHub": "PaperHub",
+    "callout": "提示框",
+    "calloutHint": "醒目的底色方框",
+    "equation": "公式",
+    "equationHint": "LaTeX，輸入時即時呈現 · $$",
+    "quotePaper": "引用論文",
+    "quotePaperHint": "在閱讀器中選取文字，它會放到這裡。",
+    "link": "連結論文或章節",
+    "linkHint": "等同輸入 @。"
+  },
+  "mention": {
+    "sections": "這篇論文的章節",
+    "papers": "文獻庫中的論文"
+  }
+}

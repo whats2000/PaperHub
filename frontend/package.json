@@ -19,6 +19,10 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
+    "@blocknote/code-block": "0.57.0",
+    "@blocknote/core": "0.57.0",
+    "@blocknote/react": "0.57.0",
+    "@blocknote/shadcn": "0.57.0",
     "@codemirror/language": "^6.12.3",
     "@codemirror/legacy-modes": "^6.5.3",
     "@fontsource-variable/geist": "^5.2.9",

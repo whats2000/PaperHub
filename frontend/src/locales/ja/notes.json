@@ -1,0 +1,51 @@
+{
+  "loading": "ノートを読み込んでいます…",
+  "saveFailed": "ノートを保存できませんでした。保存済みの版を表示しています。",
+  "conflict": "別の画面での変更を反映しました",
+  "color": {
+    "green": "重要な結果",
+    "blue": "手法",
+    "pink": "疑問",
+    "purple": "異論"
+  },
+  "ref": {
+    "fromPaper": "論文より",
+    "figure": "論文の図",
+    "equation": "論文の数式",
+    "region": "論文の領域",
+    "pieces": "{{count}} か所",
+    "translated": "訳文 · {{lang}}",
+    "translatedTitle": "{{lang}} の訳文にマーク",
+    "showOriginal": "原文を表示",
+    "hideOriginal": "原文を隠す",
+    "anchorLost": "アンカーが失われました：論文の再取り込み後に見つかりません。引用は残っています。",
+    "piecesLost": "{{total}} か所中 {{lost}} か所が見つかりません",
+    "showInPaper": "この箇所を論文で表示",
+    "thePaper": "論文",
+    "latexByModel": "LaTeX はモデルによる書き起こし · ページと照合してください",
+    "ocrText": "OCR テキスト · 数値は切り抜きと照合してください",
+    "layerText": "枠内の文字（ページのテキストレイヤーより）",
+    "pageCrop": "{{page}} ページの切り抜き"
+  },
+  "math": {
+    "edit": "クリックして LaTeX を編集",
+    "empty": "空の数式",
+    "latex": "LaTeX"
+  },
+  "slash": {
+    "groupBasic": "基本ブロック",
+    "groupPaperHub": "PaperHub",
+    "callout": "コールアウト",
+    "calloutHint": "目立つ色付きの枠",
+    "equation": "数式",
+    "equationHint": "LaTeX、入力しながら表示 · $$",
+    "quotePaper": "論文から引用",
+    "quotePaperHint": "リーダーで文字を選択すると、ここに入ります。",
+    "link": "論文やセクションへのリンク",
+    "linkHint": "@ を入力するのと同じです。"
+  },
+  "mention": {
+    "sections": "この論文のセクション",
+    "papers": "ライブラリの論文"
+  }
+}

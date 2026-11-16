@@ -1,0 +1,51 @@
+{
+  "loading": "Loading the note…",
+  "saveFailed": "Couldn't save your note. Showing the saved version.",
+  "conflict": "Updated from another view",
+  "color": {
+    "green": "Key result",
+    "blue": "Method",
+    "pink": "Question",
+    "purple": "Disagree"
+  },
+  "ref": {
+    "fromPaper": "From the paper",
+    "figure": "Figure from the paper",
+    "equation": "Equation from the paper",
+    "region": "Region of the paper",
+    "pieces": "{{count}} pieces",
+    "translated": "Translated · {{lang}}",
+    "translatedTitle": "Marked on the {{lang}} translation",
+    "showOriginal": "Show original",
+    "hideOriginal": "Hide original",
+    "anchorLost": "Anchor lost: not found after the paper was re-ingested. Your quote is kept.",
+    "piecesLost": "{{lost}} of {{total}} pieces lost",
+    "showInPaper": "Show this passage in the paper",
+    "thePaper": "The paper",
+    "latexByModel": "LaTeX transcribed by the model · check it against the page",
+    "ocrText": "OCR text · check numbers against the crop",
+    "layerText": "Text under the box, from the page's text layer",
+    "pageCrop": "Page {{page}} crop"
+  },
+  "math": {
+    "edit": "Click to edit the LaTeX",
+    "empty": "Empty equation",
+    "latex": "LaTeX"
+  },
+  "slash": {
+    "groupBasic": "Basic blocks",
+    "groupPaperHub": "PaperHub",
+    "callout": "Callout",
+    "calloutHint": "A tinted box that stands out",
+    "equation": "Equation",
+    "equationHint": "LaTeX, rendered as you type · $$",
+    "quotePaper": "Quote from the paper",
+    "quotePaperHint": "Select text in the reader; it lands here.",
+    "link": "Link a paper or section",
+    "linkHint": "Same as typing @."
+  },
+  "mention": {
+    "sections": "Sections of this paper",
+    "papers": "Papers in your library"
+  }
+}
