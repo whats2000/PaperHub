@@ -373,6 +373,24 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
                        or op.parent_id, place)
             return
         bid = op.block_id
+        old = await ctx.get(bid) if bid is not None else None
+        if old is not None and old.deleted_at is not None:
+            # The editor's undo re-inserts a deleted block under its own id:
+            # bring that block back rather than mint an id the client
+            # never learns about.
+            key = await _place_with_divider(ctx, op, *place)
+            before = old.state()
+            after = {**before, "type": op.block.type,
+                     "props": op.block.props, "content": op.block.content,
+                     "parent_id": place[0], "order_key": key,
+                     "deleted_at": None,
+                     "author": "ai" if ctx.actor == "agent" else "user"}
+            if op.block.section_key is not None:
+                after["section_key"] = op.block.section_key
+            await ctx.write_state(old.id, after)
+            await ctx.history(old.id, "restore", before, after)
+            ctx.applied.append(old.id)
+            return
         if bid is None or await _id_in_use(ctx, bid):
             bid = new_block_id()
         key = await _place_with_divider(ctx, op, *place)

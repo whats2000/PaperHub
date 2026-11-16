@@ -610,3 +610,23 @@ async def test_user_cannot_delete_a_section_with_blocks_under_it(conn):
                           actor="user", ops=[Op(op="delete", block_id="s2")])
     assert res.applied == ["s2"]
 
+
+async def test_insert_with_a_deleted_blocks_id_brings_that_block_back(conn):
+    """Editor undo re-inserts a deleted block under its own id; the server
+    revives that block instead of minting a new id the client never sees."""
+    n = await _note(conn)
+    await _seed(conn, n.id, [("a", _para("A")), ("b", _para("B"))])
+    res = await apply_ops(conn, n.id, base_revision=1, actor="user",
+                          ops=[Op(op="delete", block_id="b")])
+    res = await apply_ops(conn, n.id, base_revision=res.revision,
+                          actor="user", ops=[
+                              Op(op="insert", block_id="b",
+                                 block=_para("B again"), after="a"),
+                              Op(op="update", block_id="b",
+                                 block=_para("B typed"))])
+    assert res.applied == ["b", "b"] and res.rejected == []
+    blocks = await list_blocks(conn, n.id)
+    assert [(b.id, b.text) for b in blocks] == [("a", "A"), ("b", "B typed")]
+    # Undo of the revive deletes the block again.
+    await undo_change_set(conn, res.change_set_id)
+    assert await _texts(conn, n.id) == ["A"]
