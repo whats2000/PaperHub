@@ -1267,12 +1267,13 @@ export async function discardHeld(
 
 // ---- Notes (Plan H5b.1) ----------------------------------------------------
 
-/** The note of a paper / chat / idea, created on first use. */
+/** The note of a paper / chat / idea, created on first use, with its open
+ *  suggestions and comment threads. */
 export async function getNoteForTarget(
   kind: NoteTargetKind,
   id: number,
-): Promise<NoteWithBlocks> {
-  return apiFetch<NoteWithBlocks>(`/notes/target?kind=${kind}&id=${id}`);
+): Promise<NoteDetail> {
+  return apiFetch<NoteDetail>(`/notes/target?kind=${kind}&id=${id}`);
 }
 
 export async function getNote(noteId: number): Promise<NoteDetail> {

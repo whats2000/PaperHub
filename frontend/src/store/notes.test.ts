@@ -92,6 +92,47 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().notes[7]?.sharedBy).toBe(3);
   });
 
+  it("opens a note with its open suggestions and comment threads", async () => {
+    const sug = { id: "sg_1", block_id: "a", change_set_id: "cs_1", kind: "update", proposed: null, status: "open", created_at: "x" };
+    const thread = { id: "c_1", note_id: 7, block_id: "a", quote: "A", status: "open", created_at: "x", items: [] };
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, () =>
+        HttpResponse.json({ note, blocks: [block("a", "A")], shared_by: 1, suggestions: [sug], comments: [thread] }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    expect(useNotesStore.getState().notes[7]?.suggestions).toEqual([sug]);
+    expect(useNotesStore.getState().notes[7]?.comments).toEqual([thread]);
+  });
+
+  it("decides a suggestion after sending queued edits, then shows the saved note", async () => {
+    const order: string[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        posted.push((await request.json()) as NoteOpsBody);
+        order.push("ops");
+        return HttpResponse.json(result(5, ["b"]));
+      }),
+      http.post(`${API_BASE_URL}/notes/suggestions/sg_1`, async ({ request }) => {
+        order.push(`decide:${JSON.stringify(await request.json())}`);
+        return HttpResponse.json(result(6, ["a"]));
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () => {
+        order.push("reload");
+        return HttpResponse.json({ note: { ...note, revision: 6 }, blocks: [block("a", "A2", 6), block("b", "B")], suggestions: [], comments: [] });
+      }),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [upd("b", "B!")]);
+    const res = await useNotesStore.getState().resolveSuggestion(7, "sg_1", true);
+    expect(res.applied).toEqual(["a"]);
+    expect(order).toEqual(["ops", 'decide:{"accept":true}', "reload"]);
+    const st = useNotesStore.getState().notes[7]!;
+    expect(st.blocks.find((b) => b.id === "a")?.text).toBe("A2");
+    expect(st.suggestions).toEqual([]);
+    expect(st.revision).toBe(6);
+  });
+
   it("loads a target's note and remembers it by target", async () => {
     const id = await useNotesStore.getState().loadTarget("paper", 3);
     expect(id).toBe(7);

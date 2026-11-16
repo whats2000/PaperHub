@@ -26,11 +26,13 @@ import {
   listMarkColors,
   postNoteOps,
   replyToNoteComment,
+  resolveSuggestion as postSuggestionDecision,
   setNoteCommentStatus,
 } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { applyOpsLocally } from "@/lib/notes/ops";
 import type {
+  ApplyResult,
   Note,
   NoteBlock,
   NoteBlockIn,
@@ -111,6 +113,10 @@ interface NotesStore {
   replyComment: (noteId: number, commentId: string, text: string) => Promise<NoteComment>;
   /** `deleted` drops the thread from the list; `open` lists it again. */
   setCommentStatus: (noteId: number, commentId: string, status: NoteCommentStatus) => Promise<void>;
+
+  /** Accepts or rejects one of the agent's suggestions (edits queued
+   * before it are sent first), then shows the saved note. */
+  resolveSuggestion: (noteId: number, suggestionId: string, accept: boolean) => Promise<ApplyResult>;
 }
 
 /** localStorage that never throws (private windows, blocked site data). */
@@ -640,8 +646,8 @@ export const useNotesStore = create<NotesStore>()(
                 [d.note.id]: {
                   note: d.note,
                   blocks,
-                  suggestions: prev?.suggestions ?? [],
-                  comments: prev?.comments ?? [],
+                  suggestions: d.suggestions ?? prev?.suggestions ?? [],
+                  comments: d.comments ?? prev?.comments ?? [],
                   sharedBy: d.shared_by,
                   revision:
                     unsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
@@ -762,6 +768,13 @@ export const useNotesStore = create<NotesStore>()(
               ? list.map((c) => (c.id === commentId ? thread : c))
               : [...list, thread].sort((a, b) => a.created_at.localeCompare(b.created_at));
           });
+        },
+
+        resolveSuggestion: async (noteId, suggestionId, accept) => {
+          await get().flush(noteId);
+          const res = await postSuggestionDecision(suggestionId, accept);
+          await reload(noteId);
+          return res;
         },
 
         colorNames: {},
