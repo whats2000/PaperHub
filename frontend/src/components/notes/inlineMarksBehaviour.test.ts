@@ -122,8 +122,12 @@ describe("code block behaviour", () => {
     expect(btn.getAttribute("aria-label")).toBe("Copy");
     btn.click();
     expect(writeText).toHaveBeenCalledWith("x = 1");
-    await waitFor(() => expect(btn.hasAttribute("data-copied")).toBe(true));
-    expect(btn.getAttribute("aria-label")).toBe("Copied");
+    // The button on the page (the editor must not redraw the block over it).
+    const shown = () => document.querySelector<HTMLButtonElement>('[data-content-type="codeBlock"] button.note-code-copy')!;
+    await waitFor(() => expect(shown().hasAttribute("data-copied")).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(shown()).toBe(btn);
+    expect(shown().getAttribute("aria-label")).toBe("Copied");
   });
 });
 

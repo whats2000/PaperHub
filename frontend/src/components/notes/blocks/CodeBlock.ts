@@ -15,6 +15,8 @@ import i18n from "@/lib/i18n";
 
 const COPIED_MS = 1500;
 
+type ViewMutation = MutationRecord | { type: "selection"; target: Node };
+
 type SpecExtension = NonNullable<ReturnType<typeof createCodeBlockSpec>["extensions"]>[number];
 
 /** The extension without its input rules. An extension made from a plain
@@ -70,8 +72,13 @@ export function codeBlockWithCopy() {
         });
         rendered.dom.appendChild(button);
         const destroy = rendered.destroy;
+        const ignore = (rendered as { ignoreMutation?: (m: ViewMutation) => boolean }).ignoreMutation;
         return {
           ...rendered,
+          // The button's label is the view's own state: a change to it must
+          // not make the editor redraw the block (and lose "Copied").
+          ignoreMutation: (m: ViewMutation) =>
+            (m.type !== "selection" && button.contains(m.target)) || (ignore?.(m) ?? false),
           destroy: () => {
             clearTimeout(timer);
             destroy?.();
