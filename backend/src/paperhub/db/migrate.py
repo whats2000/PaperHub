@@ -799,6 +799,13 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
             )
             await conn.commit()
 
+    # Plan H5b.1: first-contact revision on note_agent_reads (additive).
+    async with conn.execute("PRAGMA table_info(note_agent_reads)") as cur:
+        if "first_revision" not in {row[1] for row in await cur.fetchall()}:
+            await conn.execute(
+                "ALTER TABLE note_agent_reads ADD COLUMN first_revision INTEGER")
+            await conn.commit()
+
     # Plan H5b.1: same backfill for note_blocks_fts (live blocks only).
     async with conn.execute(
         "SELECT COUNT(*) FROM note_blocks WHERE deleted_at IS NULL"

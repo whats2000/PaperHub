@@ -22,6 +22,7 @@ from paperhub.agents.core.note_tools import _esc, _title_xml
 from paperhub.agents.core.private_material import collect_note_titles
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_recall import active_memories
+from paperhub.notes.agent_reads import contacts, unseen_user_changes
 from paperhub.notes.scope import notes_in_scope, ref_of
 
 AGENT_KEEP_TURNS = 12
@@ -90,9 +91,9 @@ async def render_notes(
 ) -> tuple[str | None, str | None]:
     """``(<notes> index, <notes_changes>)`` for the chat. The index lists up to
     NOTES_INDEX_MAX notes in scope (ref, title, revision, block count). The
-    changes list the notes the user edited since this chat's agent last read or
-    wrote them: block ids only, never the user's words. Titles are private
-    material for the outbound checkpoint."""
+    changes list the user's edits this chat's agent has not seen (per block,
+    see ``notes.agent_reads``): block ids only, never the user's words.
+    Titles are private material for the outbound checkpoint."""
     try:
         notes = await notes_in_scope(conn, session_id, paper_ids=paper_ids)
     except LookupError:  # no such chat: nothing to show
@@ -113,25 +114,16 @@ async def render_notes(
         f'blocks="{counts.get(n.id, 0)}">{_title_xml(n.title)}</note>'
         for n in notes]
     index = "<notes>\n" + "\n".join(lines) + "\n</notes>"
-    async with conn.execute(
-        "SELECT note_id, revision FROM note_agent_reads WHERE session_id = ?",
-        (session_id,),
-    ) as cur:
-        seen = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    seen = await contacts(conn, session_id)
     changes: list[tuple[str, str, list[str]]] = []
     for n in notes:
         if n.id not in seen:
             continue
-        async with conn.execute(
-            "SELECT block_id, MAX(created_at) FROM note_block_history "
-            "WHERE note_id = ? AND actor = 'user' AND revision > ? "
-            "GROUP BY block_id ORDER BY MIN(id) LIMIT ?",
-            (n.id, seen[n.id], NOTES_CHANGES_MAX_BLOCKS),
-        ) as cur:
-            rows = await cur.fetchall()
+        rows = await unseen_user_changes(
+            conn, session_id, n.id, seen[n.id][0], NOTES_CHANGES_MAX_BLOCKS)
         if rows:
-            changes.append((max(str(r[1]) for r in rows), ref_of(n, session_id),
-                            [str(r[0]) for r in rows]))
+            changes.append((max(when for _, when in rows), ref_of(n, session_id),
+                            [bid for bid, _ in rows]))
     if not changes:
         return index, None
     changes.sort(key=lambda c: c[0], reverse=True)

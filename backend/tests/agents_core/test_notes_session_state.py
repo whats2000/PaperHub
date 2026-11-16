@@ -1,7 +1,9 @@
 """``<notes>`` and ``<notes_changes>`` in the core agent's session state (H5b.1 Task 10)."""
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
 import aiosqlite
 import pytest
@@ -38,12 +40,15 @@ async def _write(conn: aiosqlite.Connection, note_id: int, text: str, actor: str
 
 
 async def _mark_read(conn: aiosqlite.Connection, sid: int, note_id: int) -> None:
-    await conn.execute(
-        "INSERT INTO note_agent_reads (session_id, note_id, revision, at) "
-        "VALUES (?, ?, ?, 'now') ON CONFLICT (session_id, note_id) "
-        "DO UPDATE SET revision = excluded.revision",
-        (sid, note_id, await _rev(conn, note_id)))
-    await conn.commit()
+    """The agent read the whole note at its current revision."""
+    from paperhub.notes.agent_reads import record_blocks, record_contact
+
+    rev = await _rev(conn, note_id)
+    await record_contact(conn, sid, {note_id: rev})
+    async with conn.execute(
+        "SELECT id FROM note_blocks WHERE note_id = ?", (note_id,)) as cur:
+        ids = [str(r[0]) for r in await cur.fetchall()]
+    await record_blocks(conn, sid, note_id, ids, rev)
 
 
 async def test_notes_index_bounded(migrated_db: aiosqlite.Connection) -> None:
@@ -115,3 +120,99 @@ async def test_note_titles_are_private_material(
     await _write(migrated_db, nid, "x", "user")
     await build_session_state(migrated_db, 1, {})
     assert any(i.kind == "note" and "Secret plan" in i.text for i in current_private())
+
+
+# --- per-block read marks (Task 12 controller ruling) ----------------------
+
+def _tool_ctx(conn: aiosqlite.Connection, tracer: Any) -> Any:
+    from unittest.mock import MagicMock
+
+    from paperhub.agents.core.tools import ToolContext
+
+    async def emit(_n: str, _p: dict[str, Any]) -> None:
+        return None
+    return ToolContext(
+        conn=conn, tracer=tracer, session_id=1, run_id=1, settings=MagicMock(),
+        adapter=MagicMock(), emit=emit, enabled_papers=[], history=[], state={})
+
+
+async def _tool(ctx: Any, name: str, **args: Any) -> Any:
+    from paperhub.agents.core.note_tools import register_note_tools
+    from paperhub.agents.core.tools import ToolRegistry
+    from paperhub.llm.adapter import ToolCall
+
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    out = await reg.run(ctx, ToolCall(id="c", name=name, arguments=args))
+    assert not out.record.get("error"), out.content
+    return out
+
+
+async def _ids(conn: aiosqlite.Connection, note_id: int) -> list[str]:
+    async with conn.execute(
+        "SELECT id FROM note_blocks WHERE note_id = ? ORDER BY order_key", (note_id,),
+    ) as cur:
+        return [str(r[0]) for r in await cur.fetchall()]
+
+
+async def _user_update(conn: aiosqlite.Connection, note_id: int, bid: str) -> None:
+    await apply_ops(conn, note_id, base_revision=await _rev(conn, note_id),
+                    actor="user", ops=[Op(op="update", block_id=bid, block=BlockIn(
+                        type="paragraph", content="edited by the user"))])
+
+
+async def _changes(conn: aiosqlite.Connection) -> str:
+    state = await build_session_state(conn, 1, {})
+    block = re.search(r"<notes_changes>.*?</notes_changes>", state, re.S)
+    return block.group(0) if block else ""
+
+
+async def test_search_hit_does_not_hide_an_unseen_block_change(
+    migrated_db: aiosqlite.Connection, fake_tracer: Any,
+) -> None:
+    nid = await _note(migrated_db, 1)
+    await _write(migrated_db, nid, "alpha topic", "user")
+    await _write(migrated_db, nid, "beta topic", "user")
+    a, b = await _ids(migrated_db, nid)
+    ctx = _tool_ctx(migrated_db, fake_tracer)
+    await _tool(ctx, "search_notes", query="alpha")  # first contact: sees A only
+    await _user_update(migrated_db, nid, b)
+    assert b in await _changes(migrated_db)
+    await _tool(ctx, "search_notes", query="alpha")  # sees A again, never B
+    changes = await _changes(migrated_db)
+    assert b in changes and a not in changes
+
+
+async def test_unread_page_change_is_reported(
+    migrated_db: aiosqlite.Connection, fake_tracer: Any,
+) -> None:
+    nid = await _note(migrated_db, 1)
+    await apply_ops(migrated_db, nid, base_revision=0, actor="user",
+                    ops=[_p(f"para {i}") for i in range(45)])
+    ids = await _ids(migrated_db, nid)
+    ctx = _tool_ctx(migrated_db, fake_tracer)
+    await _tool(ctx, "read_note", note="chat")  # page 1: blocks 0-39
+    await _user_update(migrated_db, nid, ids[42])  # on page 2
+    assert ids[42] in await _changes(migrated_db)
+    await _user_update(migrated_db, nid, ids[3])  # seen on page 1, changed since
+    assert ids[3] in await _changes(migrated_db)
+    await _tool(ctx, "read_note", note="chat", page=2)
+    changes = await _changes(migrated_db)
+    assert ids[42] not in changes and ids[3] in changes
+
+
+async def test_agent_write_not_reported_but_user_edit_of_it_is(
+    migrated_db: aiosqlite.Connection, fake_tracer: Any,
+) -> None:
+    nid = await _note(migrated_db, 1)
+    await _write(migrated_db, nid, "user's line", "user")
+    (first,) = await _ids(migrated_db, nid)
+    ctx = _tool_ctx(migrated_db, fake_tracer)
+    out = await _tool(ctx, "edit_note", note="chat",
+                      base_revision=await _rev(migrated_db, nid),
+                      ops=[{"op": "insert", "after": first, "block": {
+                          "type": "paragraph", "content": "agent's line"}}])
+    (mine,) = json.loads(out.content)["applied"]
+    assert await _changes(migrated_db) == ""
+    await _user_update(migrated_db, nid, mine)
+    assert mine in await _changes(migrated_db)

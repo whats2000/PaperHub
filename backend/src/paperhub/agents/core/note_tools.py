@@ -10,7 +10,6 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
@@ -32,7 +31,12 @@ from paperhub.agents.core.tools import (
     error_outcome,
 )
 from paperhub.agents.research_tools import _to_fts5_query
-from paperhub.db.connection import write_transaction
+from paperhub.notes.agent_reads import (
+    contacts,
+    record_blocks,
+    record_contact,
+    unseen_user_changes,
+)
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
@@ -106,32 +110,6 @@ def _heading_paths(blocks: list[Block]) -> dict[str, list[tuple[str, str]]]:
     return paths
 
 
-async def _record_reads(
-    ctx: ToolContext, revisions: dict[int, int],
-) -> None:
-    """Remember the revision of each note the agent just read."""
-    if not revisions:
-        return
-    now = datetime.now(UTC).isoformat()
-    async with write_transaction(ctx.conn):
-        for note_id, rev in revisions.items():
-            await ctx.conn.execute(
-                "INSERT INTO note_agent_reads (session_id, note_id, revision, at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT (session_id, note_id) "
-                "DO UPDATE SET revision = excluded.revision, at = excluded.at",
-                (ctx.session_id, note_id, rev, now))
-
-
-async def _read_revisions(
-    conn: aiosqlite.Connection, session_id: int,
-) -> dict[int, int]:
-    async with conn.execute(
-        "SELECT note_id, revision FROM note_agent_reads WHERE session_id = ?",
-        (session_id,),
-    ) as cur:
-        return {int(r[0]): int(r[1]) for r in await cur.fetchall()}
-
-
 async def _last_editor(conn: aiosqlite.Connection, note: Note) -> str | None:
     async with conn.execute(
         "SELECT actor FROM note_revisions WHERE note_id = ? AND revision = ?",
@@ -154,7 +132,7 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                                 paper_ids=[p for p, _ in ctx.enabled_papers])
     truncated = len(notes) > ALL_NOTES_MAX
     notes = notes[:ALL_NOTES_MAX]
-    seen = await _read_revisions(ctx.conn, ctx.session_id)
+    seen = await contacts(ctx.conn, ctx.session_id)
     rows: list[dict[str, Any]] = []
     for n in notes:
         blocks = await list_blocks(ctx.conn, n.id)
@@ -169,7 +147,9 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                         for i, t, lvl in heads],
             "outline_truncated": outline_cut,
             "last_editor": await _last_editor(ctx.conn, n),
-            "changed_since_you_read": n.id in seen and seen[n.id] < n.revision,
+            "changed_since_you_read": n.id in seen and bool(
+                await unseen_user_changes(ctx.conn, ctx.session_id, n.id,
+                                          seen[n.id][0], 1)),
         })
     return ToolOutcome(
         content=json.dumps({"notes": rows, "truncated": truncated},
@@ -239,14 +219,19 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         private.setdefault(note_id, []).append((bid, str(text)))
     for note_id, blocks in private.items():
         collect_note_blocks(blocks, by_id[note_id].title)
-    await _record_reads(ctx, {nid: by_id[nid].revision for nid in private})
+    # Hits whose snippet is the whole block: seen in full, citable.
+    whole = [str(r[0]) for r in rows if len(str(r[2])) <= SNIPPET_CHARS]
+    await record_contact(ctx.conn, ctx.session_id,
+                         {nid: by_id[nid].revision for nid in private})
+    for row in rows:
+        if str(row[0]) in whole:
+            await record_blocks(ctx.conn, ctx.session_id, row[1], [str(row[0])],
+                                by_id[row[1]].revision)
     return ToolOutcome(
         content=json.dumps({"hits": hits}, ensure_ascii=False),
         record={"tool": "notes:search", "query": query, "scope": scope,
                 "note_ids": list(private), "block_ids": [h["block_id"] for h in hits],
-                # Hits whose snippet is the whole block: seen in full, citable.
-                "whole_block_ids": [str(r[0]) for r in rows
-                                    if len(str(r[2])) <= SNIPPET_CHARS],
+                "whole_block_ids": whole,
                 "revisions": {str(nid): by_id[nid].revision for nid in private}},
     )
 
@@ -314,7 +299,9 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     content = "\n".join([head, *(_block_xml(b) for b in window), "</note>"])
     collect_note_titles([(note.id, note.title)])
     collect_note_blocks([(b.id, _text(b)) for b in window], note.title)
-    await _record_reads(ctx, {note.id: note.revision})
+    await record_contact(ctx.conn, ctx.session_id, {note.id: note.revision})
+    await record_blocks(ctx.conn, ctx.session_id, note.id,
+                        [b.id for b in window], note.revision)
     return ToolOutcome(
         content=content,
         record={"tool": "notes:read", "note": ref, "note_id": note.id,
@@ -524,11 +511,11 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             applied=res.applied, suggested=res.suggested)
         rejected += [{**r, "current": _current(r.get("current"))}
                      for r in res.rejected]
-        seen = (await _read_revisions(ctx.conn, ctx.session_id)).get(note.id)
-        # Nothing but this write since the agent last looked, or it never
-        # looked: either way the user's later edits are changes to show it.
-        if seen is None or revision == seen + 1:
-            await _record_reads(ctx, {note.id: revision})
+        # The blocks it wrote are seen as written; the user's later edits
+        # to them (or to blocks it never saw) are changes to show it.
+        await record_contact(ctx.conn, ctx.session_id, {note.id: revision})
+        await record_blocks(ctx.conn, ctx.session_id, note.id, res.applied,
+                            revision)
     record["rejected"] = rejected
     result: dict[str, Any] = {
         "revision": revision, "applied": record["applied"],
