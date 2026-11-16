@@ -337,7 +337,16 @@ async def _place_with_divider(
     return key
 
 
+async def _withdraw_open(ctx: _Ctx, block_id: str) -> None:
+    """One open suggestion per block: a newer one replaces the older."""
+    await ctx.conn.execute(
+        "UPDATE note_suggestions SET status = 'withdrawn' "
+        "WHERE note_id = ? AND block_id = ? AND status = 'open'",
+        (ctx.note_id, block_id))
+
+
 async def _suggest(ctx: _Ctx, row: _Row, op: Op) -> None:
+    await _withdraw_open(ctx, row.id)
     sid = _new_id("sg_")
     kind = "update" if op.op == "update" else "delete"
     proposed = op.block.model_dump() if op.block is not None else None
@@ -772,6 +781,7 @@ async def _reopen_suggestions(ctx: _Ctx, undo: dict[str, Any]) -> None:
             if all(x["block_id"] != row.id for x in ctx.rejected):
                 ctx.reject(row.id, "changed_since_base", row)
             continue
+        await _withdraw_open(ctx, row.id)
         await ctx.conn.execute(
             "UPDATE note_suggestions SET status = 'open', change_set_id = ? "
             "WHERE id = ?", (ctx.change_set_id, sid))

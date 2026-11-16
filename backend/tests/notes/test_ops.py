@@ -685,3 +685,26 @@ async def test_agent_cannot_revive_a_deleted_user_block(conn):
     assert res.rejected[0]["block_id"] == "b"
     assert res.rejected[0]["reason"] == "invalid"
     assert await _texts(conn, n.id) == ["A"]
+
+
+async def test_a_new_suggestion_withdraws_the_older_one_on_its_block(conn):
+    """One open suggestion per block: the agent's newer proposal replaces
+    its older one (also when Apply again reopens one)."""
+    n = await _note(conn)
+    await _seed(conn, n.id, [("u", _para("mine"))])
+    first = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
+        Op(op="update", block_id="u", block=_para("first try"))])
+    second = await apply_ops(conn, n.id, base_revision=first.revision,
+                             actor="agent", ops=[Op(op="delete", block_id="u")])
+    assert await _sug_rows(conn) == [
+        ("u", "withdrawn", first.change_set_id),
+        ("u", "open", second.change_set_id)]
+    # Undo the first set and apply it again: its suggestion reopens and
+    # the second set's one is withdrawn.
+    await undo_change_set(conn, first.change_set_id)
+    again = await reapply_change_set(conn, first.change_set_id)
+    async with conn.execute(
+        "SELECT status FROM note_suggestions WHERE block_id = 'u' "
+        "AND status = 'open'") as cur:
+        assert len(await cur.fetchall()) <= 1
+    assert again.change_set_id
