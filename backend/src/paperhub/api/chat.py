@@ -1253,7 +1253,7 @@ async def _save_agent_record(
 
 _REPLAYED_UI_EVENTS = REPLAYED_UI_EVENTS
 # A stopped turn that already did one of these keeps a stub (cancel_run).
-_SIDE_EFFECT_EVENTS = frozenset({"paper_added", "memory_saved"})
+_SIDE_EFFECT_EVENTS = frozenset({"paper_added", "memory_saved", "notes_changed"})
 _CANCEL_WAIT_S = 10.0
 
 
@@ -1667,7 +1667,7 @@ async def _side_effects_from_trace(
     async with conn.execute(
         "SELECT tool, result_summary_json FROM tool_calls WHERE run_id = ? "
         "AND status = 'ok' AND tool IN ('tool:add_paper', 'tool:remember', "
-        "'tool:remove_paper', 'tool:forget') ORDER BY step_index", (run_id,),
+        "'tool:remove_paper', 'tool:forget', 'tool:edit_note') ORDER BY step_index", (run_id,),
     ) as cur:
         rows = await cur.fetchall()
     events: list[dict[str, Any]] = []
@@ -1687,6 +1687,13 @@ async def _side_effects_from_trace(
             events.append({"event": "memory_saved", "data": {
                 "memory_id": rec.get("memory_id"), "content": rec.get("content"),
                 "scope": rec.get("scope")}})
+        elif tool == "tool:edit_note" and rec.get("change_set_id") and (
+                rec.get("applied") or rec.get("suggested")):
+            events.append({"event": "notes_changed", "data": {
+                "change_set_id": rec["change_set_id"],
+                "note_id": rec.get("note_id"),
+                "note_title": rec.get("note_title"),
+                "summary": rec.get("summary"), "revision": rec.get("revision")}})
         elif tool == "tool:remove_paper" and rec.get("removed"):
             # Undone later in the same run: no chip (its Undo would re-act).
             events = [e for e in events if not (

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
+from pydantic import ValidationError
 
 from paperhub.agents.core.private_material import (
     collect_note_blocks,
@@ -30,6 +31,8 @@ from paperhub.agents.core.tools import (
 from paperhub.agents.research_tools import _to_fts5_query
 from paperhub.db.connection import write_transaction
 from paperhub.notes.models import Block, Note
+from paperhub.notes.ops import Op, apply_ops
+from paperhub.notes.papers import _section_order, ensure_section
 from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
 from paperhub.notes.store import list_blocks
 
@@ -314,6 +317,126 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     )
 
 
+async def _resolve_heading(
+    ctx: ToolContext, note: Note, value: str,
+) -> tuple[str | None, str | None]:
+    """``(block id, section name)`` for an ``under_heading`` value: a live
+    heading / section block id, else (paper notes) a section name, created in
+    paper order when the note has no such section yet."""
+    blocks = await list_blocks(ctx.conn, note.id)
+    for b in blocks:
+        if b.id == value and b.type in ("heading", "section"):
+            return b.id, (b.section_key if b.type == "section" else None)
+    if note.target_kind != "paper":
+        return None, None
+    pcid = int(note.target_id)
+    wanted = value.strip().casefold()
+    names = await _section_order(ctx.conn, pcid)
+    name = next((n for n in names if n.casefold() == wanted), None)
+    if name is None:
+        return None, None
+    return await ensure_section(ctx.conn, note.id, pcid, name), name
+
+
+def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
+             section: str | None) -> dict[str, Any]:
+    done = set(applied)
+    touched = [o for o in ops if o.op != "insert" and o.block_id in done]
+    return {
+        "added": len(applied) - len(touched),
+        "updated": sum(o.op in ("update", "move") for o in touched),
+        "deleted": sum(o.op == "delete" for o in touched),
+        "suggested": suggested, "rejected": rejected, "section": section,
+    }
+
+
+def _current(block: object) -> object:
+    """A rejected block's current state, its text wrapped as data."""
+    if block is None:
+        return None
+    if isinstance(block, Block):
+        return {"block_id": block.id, "type": block.type,
+                "text": html.escape(_text(block), quote=False)}
+    return block
+
+
+def _invalid(label: str | None, hint: str) -> dict[str, Any]:
+    return {"block_id": label, "reason": "invalid", "current": None,
+            "hint": hint}
+
+
+async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+    base = args["base_revision"]
+    if not isinstance(base, int) or isinstance(base, bool) or base < 0:
+        return error_outcome("base_revision must be a non-negative integer.")
+    raw_ops = args["ops"]
+    if not isinstance(raw_ops, list) or not raw_ops:
+        return error_outcome("ops must be a non-empty list.")
+    try:
+        note = await note_ref(ctx.conn, str(args["note"]), ctx.session_id)
+        ops = [Op.model_validate(o) for o in raw_ops]
+    except (ValueError, LookupError, ValidationError) as exc:
+        return error_outcome(str(exc))
+    if base > note.revision:
+        return error_outcome(
+            f"base_revision {base} is ahead of the note (revision "
+            f"{note.revision}); read the note again.")
+    rejected: list[dict[str, Any]] = []
+    valid: list[Op] = []
+    section: str | None = None
+    for op in ops:
+        label = op.block_id or op.after or op.before or op.under_heading
+        if op.op == "insert" and not (op.after or op.before or op.under_heading):
+            rejected.append(_invalid(
+                label, "an insert must name after, before or under_heading"))
+            continue
+        if op.under_heading is not None:
+            bid, name = await _resolve_heading(ctx, note, op.under_heading)
+            if bid is None:
+                rejected.append(_invalid(
+                    op.under_heading,
+                    "under_heading must be a heading or section block id "
+                    "(or a section name of a paper note)"))
+                continue
+            op = op.model_copy(update={"under_heading": bid})
+            section = section or name
+        valid.append(op)
+    record: dict[str, Any] = {
+        "tool": "notes:edit", "note": ref_of(note, ctx.session_id),
+        "note_id": note.id, "base_revision": base, "revision": note.revision,
+        "ops": [o.model_dump(exclude_none=True) for o in ops],
+        "applied": [], "suggested": [], "rejected": []}
+    revision = note.revision
+    if valid:
+        res = await apply_ops(ctx.conn, note.id, base_revision=base, ops=valid,
+                              actor="agent", run_id=ctx.run_id)
+        revision = res.revision
+        record.update(
+            revision=revision, change_set_id=res.change_set_id,
+            applied=res.applied, suggested=res.suggested)
+        rejected += [{**r, "current": _current(r.get("current"))}
+                     for r in res.rejected]
+        seen = (await _read_revisions(ctx.conn, ctx.session_id)).get(note.id, 0)
+        if revision == seen + 1:  # nothing but this write since it last looked
+            await _record_reads(ctx, {note.id: revision})
+    record["rejected"] = rejected
+    result = {"revision": revision, "applied": record["applied"],
+              "suggested": record["suggested"], "rejected": rejected}
+    events: list[tuple[str, dict[str, Any]]] = []
+    if record["applied"] or record["suggested"]:
+        record["note_title"] = note.title
+        record["summary"] = _summary(
+            valid, record["applied"], len(record["suggested"]), len(rejected),
+            section)
+        events.append(("notes_changed", {
+            "change_set_id": record["change_set_id"], "note_id": note.id,
+            "note_title": note.title, "summary": record["summary"],
+            "revision": revision}))
+    return ToolOutcome(
+        content=json.dumps(result, ensure_ascii=False), record=record,
+        events=events)
+
+
 def register_note_tools(registry: ToolRegistry) -> None:
     specs = [
         ToolSpec(
@@ -349,6 +472,45 @@ def register_note_tools(registry: ToolRegistry) -> None:
                  "page": {"type": "integer", "minimum": 1}},
              "required": ["note"]},
             Tier.FREE, _read_note,
+        ),
+        ToolSpec(
+            "edit_note",
+            "Change a note as one undoable change set; the user sees a card "
+            "with Undo. Read the note first and pass its `revision` as "
+            "`base_revision`. `ops` is a list: insert {block: {type, content}, "
+            "and one of after / before / under_heading}, update {block_id, "
+            "block}, delete {block_id}, move {block_id, and a place}. "
+            "`under_heading` is a heading or section block id; on a paper "
+            "note it can be a section name such as 'Method'. An insert "
+            "without a place is invalid. Your blocks are marked as AI. The "
+            "user's own blocks are never overwritten: your update or delete "
+            "on one becomes a suggestion they can accept. A block changed "
+            "since base_revision is rejected with its current text; read "
+            "again and retry only if still wanted. Write in the user's "
+            "language, short and in the note's own style.",
+            {"type": "object",
+             "properties": {
+                 "note": {"type": "string",
+                          "description": "'chat', 'paper:<id>', 'idea:<id>' "
+                                         "or 'note:<id>'."},
+                 "base_revision": {"type": "integer", "minimum": 0},
+                 "ops": {"type": "array", "minItems": 1, "items": {
+                     "type": "object",
+                     "properties": {
+                         "op": {"type": "string",
+                                "enum": ["insert", "update", "delete", "move"]},
+                         "block_id": {"type": "string"},
+                         "block": {"type": "object", "properties": {
+                             "type": {"type": "string"},
+                             "props": {"type": "object"},
+                             "content": {}},
+                             "required": ["type"]},
+                         "after": {"type": "string"},
+                         "before": {"type": "string"},
+                         "under_heading": {"type": "string"}},
+                     "required": ["op"]}}},
+             "required": ["note", "base_revision", "ops"]},
+            Tier.SHOW_UNDO, _edit_note,
         ),
     ]
     for s in specs:

@@ -95,7 +95,7 @@ DUPLICATE_CALL_CONTENT = (
 # chips and confirmation cards (ruling R11), in the order they streamed.
 # Plan H5a adds the outbound checkpoint's decisions on paper search.
 REPLAYED_UI_EVENTS = frozenset(
-    {"paper_added", "memory_saved", "confirm_request"} | OUTBOUND_EVENTS)
+    {"paper_added", "memory_saved", "confirm_request", "notes_changed"} | OUTBOUND_EVENTS)
 _PROPOSAL = re.compile(r"<proposal>(.*?)</proposal>", re.DOTALL)
 _WORK_RECORD = re.compile(r"\s*<work_record>.*?</work_record>", re.DOTALL)
 
