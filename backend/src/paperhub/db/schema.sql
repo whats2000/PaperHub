@@ -525,6 +525,34 @@ CREATE TABLE IF NOT EXISTS note_revisions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (note_id, revision)
 );
+-- One row per apply_ops call (the unit Undo / Apply again acts on), and the
+-- agent's proposed changes to the user's blocks, which wait for a decision.
+CREATE TABLE IF NOT EXISTS note_change_sets (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    actor TEXT NOT NULL,
+    run_id INTEGER,
+    base_revision INTEGER NOT NULL,
+    result_revision INTEGER NOT NULL,
+    ops_json TEXT NOT NULL,
+    outcome_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('applied', 'undone')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS note_suggestions (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    block_id TEXT NOT NULL,
+    change_set_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('update', 'delete')),
+    proposed_json TEXT,
+    status TEXT NOT NULL CHECK (status IN ('open', 'accepted', 'rejected', 'withdrawn')),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_note_suggestions_change_set
+    ON note_suggestions(change_set_id);
 
 -- Full-text index over live note_blocks.text (external content on the
 -- implicit rowid; soft-deleted blocks are kept out of the index).
