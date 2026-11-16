@@ -201,3 +201,78 @@ describe("MessageBubble", () => {
     expect(await screen.findByRole("button", { name: /Apply again/ })).toBeInTheDocument();
   });
 });
+
+describe("NotesChangeCard after Undo / Apply again", () => {
+  it("refetches the Details after each Undo and Apply again", async () => {
+    let gets = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => {
+        gets += 1;
+        return HttpResponse.json(
+          gets === 1
+            ? detail()
+            : detail({ changes: [{ kind: "added", block_id: "b1", text: `fetch ${gets}` }] }),
+        );
+      }),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/undo`, ({ params }) =>
+        HttpResponse.json({ note_id: 7, revision: 6, change_set_id: params.id, applied: [], suggested: [], rejected: [], reparented: [] }),
+      ),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/reapply`, () =>
+        HttpResponse.json({ note_id: 7, revision: 7, change_set_id: "cs_2", applied: [], suggested: [], rejected: [], reparented: [] }),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    expect(await screen.findByText("fetch 2")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Apply again/ }));
+    expect(await screen.findByText("fetch 3")).toBeInTheDocument();
+  });
+
+  it("an Apply again that put nothing back shows the failure and stays undone", async () => {
+    const { toast } = await import("sonner");
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
+        HttpResponse.json(detail({ status: "undone", head: { id: "cs_1", status: "undone" } })),
+      ),
+      http.post(`${API_BASE_URL}/notes/change-sets/cs_1/reapply`, () =>
+        HttpResponse.json({
+          note_id: 7, revision: 7, change_set_id: null, applied: [], suggested: [], reparented: [],
+          rejected: [{ block_id: "b1", reason: "changed_since_base", current: null }],
+        }),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Apply again/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /Apply again/ })).toBeEnabled();
+    expect(screen.getByText(/Undone/)).toBeInTheDocument();
+  });
+
+  it("keeps the kept-notes line while Undone folds away, clears it on the next Undo", async () => {
+    let undos = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/undo`, ({ params }) => {
+        undos += 1;
+        return HttpResponse.json({
+          note_id: 7, revision: 6, change_set_id: params.id, applied: [], suggested: [], reparented: [],
+          rejected: undos === 1 ? [{ block_id: "b1", reason: "changed_since_base", current: null }] : [],
+        });
+      }),
+      http.post(`${API_BASE_URL}/notes/change-sets/:id/reapply`, () =>
+        HttpResponse.json({ note_id: 7, revision: 7, change_set_id: "cs_2", applied: ["b1"], suggested: [], rejected: [], reparented: [] }),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    expect(await screen.findByText(/1 note you edited since was kept/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Apply again/ }));
+    await screen.findByRole("button", { name: /Undo/ });
+    // Still there while the line folds away.
+    expect(screen.getByText(/1 note you edited since was kept/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    await screen.findByRole("button", { name: /Apply again/ });
+    await waitFor(() => expect(screen.queryByText(/edited since/)).toBeNull());
+  });
+});

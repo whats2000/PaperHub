@@ -66,6 +66,14 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
 
   const undone = live?.status === "undone";
 
+  /** The Details again (what Undo / Apply again changed: suggestion status,
+   * the text of the user's lines). Errors keep the last Details. */
+  const refetch = () =>
+    getChangeSet(data.change_set_id).then(
+      (d) => setDetail(d),
+      () => undefined,
+    );
+
   const toggle = () => {
     if (!live || busy) return;
     const target = live;
@@ -74,14 +82,20 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
       .then(async () => {
         if (target.status === "applied") {
           const res = await undoChangeSet(target.id);
+          // Set on Undo only: the line keeps its text while it folds away.
           setKept(res.rejected.length);
           setLive({ id: target.id, status: "undone" });
         } else {
           const res = await reapplyChangeSet(target.id);
-          setKept(0);
-          setLive({ id: res.change_set_id ?? target.id, status: "applied" });
+          if (res.change_set_id === null) {
+            // Nothing was put back: the change stays undone.
+            refreshNote(data.note_id);
+            throw new Error("nothing applied again");
+          }
+          setLive({ id: res.change_set_id, status: "applied" });
         }
         refreshNote(data.note_id);
+        await refetch();
       })
       .catch(() => {
         toast.error(t("notes:card.failed", "Couldn't change the note. Try again."));
