@@ -485,6 +485,31 @@ async def list_paper_sections(paper_content_id: int) -> list[str]:
     return [str(r[0]) for r in rows]
 
 
+class ChunkAnchor(BaseModel):
+    id: int
+    dom_id: str
+    section: str | None
+
+
+@router.get("/content/{paper_content_id}/chunk-anchors")
+async def list_chunk_anchors(paper_content_id: int) -> list[ChunkAnchor]:
+    """The chunks with a ``phchunk-N`` span in the rendered HTML, in chunk
+    order: the reader maps a selection to chunk ids and its section (a
+    mark's anchor and its note section) from the nearest span."""
+    settings = load_settings()
+    async with (
+        open_db(settings.db_path) as conn,
+        conn.execute(
+            "SELECT id, dom_id, section FROM chunks WHERE paper_content_id = ? "
+            "AND dom_id IS NOT NULL ORDER BY id",
+            (paper_content_id,),
+        ) as cur,
+    ):
+        rows = await cur.fetchall()
+    return [ChunkAnchor(id=int(r[0]), dom_id=str(r[1]),
+                        section=str(r[2]) if r[2] else None) for r in rows]
+
+
 @router.get("/content/{paper_content_id}/document", response_model=DocumentModeResponse)
 async def document_mode(paper_content_id: int) -> DocumentModeResponse:
     """Return whether this paper should be viewed as HTML or PDF.
