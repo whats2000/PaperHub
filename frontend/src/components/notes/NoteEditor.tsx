@@ -17,7 +17,7 @@ import {
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
-import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
+import { AtSign, CloudOff, FileText, Hash, Keyboard, Lightbulb, Sigma, TextQuote } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,7 +30,11 @@ import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
+import { EditorTip } from "./EditorTip";
+import { NoteFormattingBar } from "./FormattingBar";
+import { codeFence, inlineMarks } from "./inlineMarks";
 import { noteSchema, paperhubKeys } from "./schema";
+import { ShortcutsGuide } from "./ShortcutsGuide";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
   diffDocuments,
@@ -106,7 +110,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
         return tree.length ? (tree as never) : undefined;
       })(),
       dictionary: dictionaryFor(i18n.language),
-      extensions: [paperhubKeys, syntaxHighlighter],
+      extensions: [paperhubKeys, inlineMarks, codeFence, syntaxHighlighter],
     },
     [noteId],
   );
@@ -276,6 +280,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
     [editor, noteId, paperContentId, t],
   );
 
+  const [guideOpen, setGuideOpen] = useState(false);
+
   const loadColors = useNotesStore((s) => s.loadColors);
   useEffect(() => {
     void loadColors();
@@ -308,14 +314,37 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus }: NoteEditorProps) {
             </p>
           </div>
         </div>
+        {variant === "pane" && (
+          <div className="flex items-start">
+            <div className="min-w-0 flex-1">
+              <EditorTip onOpenGuide={() => setGuideOpen(true)} />
+            </div>
+            <ShortcutsGuide
+              open={guideOpen}
+              onOpenChange={setGuideOpen}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={t("notes:guide.title", "Shortcuts")}
+                  title={t("notes:guide.title", "Shortcuts")}
+                  className="mx-2 mt-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Keyboard className="size-3.5" aria-hidden />
+                </button>
+              }
+            />
+          </div>
+        )}
         <UnsavedDrafts noteId={noteId} />
         <BlockNoteView
           editor={editor}
           theme={resolvedTheme === "dark" ? "dark" : "light"}
           slashMenu={false}
+          formattingToolbar={false}
           onChange={onChange}
           onSelectionChange={onSelectionChange}
         >
+          <NoteFormattingBar />
           <SuggestionMenuController triggerCharacter="/" getItems={slashItems} />
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
         </BlockNoteView>
