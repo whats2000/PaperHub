@@ -476,7 +476,9 @@ async def test_span_guard_checks_cached_sends(conn: aiosqlite.Connection) -> Non
     d = await checkpoint.check(_req(q), conn=conn, adapter=ad, tracer=None)  # type: ignore[arg-type]
     assert d.action == "send"
     # same ref, text now holds the query: the cached send echoes it
-    private_material.set([PrivateItem("chunk", "c7", "Wafer report", f"x {q} y")])
+    # (through add_private: the span guard is built when material is added)
+    private_material.set([])
+    add_private(PrivateItem("chunk", "c7", "Wafer report", f"x {q} y"))
     d2 = await checkpoint.check(_req(q), conn=conn, adapter=StubAdapter(), tracer=None)  # type: ignore[arg-type]
     assert (d2.action, d2.stage) == ("ask", "span")
 

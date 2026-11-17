@@ -6,7 +6,7 @@ import unicodedata
 import pytest
 
 from paperhub.outbound import context, spans
-from paperhub.outbound.context import PrivateItem, add_private, begin_turn, private_windows
+from paperhub.outbound.context import PrivateItem, add_private, begin_turn, echoes_private
 
 JA = "NMC811セルを45度で300サイクル運転した後、容量が18%低下した"
 ZH = "我们在 2025 年用 GPT4 微调了客服模型，准确率提升到 93.5% 之后上线"
@@ -38,17 +38,17 @@ def test_nfkc_and_casefold() -> None:
     assert spans.shares_span("ｔｈｅ ｑｕｉｃｋ ｂｒｏｗｎ ｆｏｘ ｊｕｍｐｓ ｏｖｅｒ ｔｈｅ ｌａｚｙ", [private])
 
 
-def test_private_windows_are_built_once_per_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_guard_windows_are_built_once_per_item(monkeypatch: pytest.MonkeyPatch) -> None:
     begin_turn()
-    add_private(PrivateItem("document", "1", "t", "one two three four five six seven eight nine"))
     calls: list[str] = []
     real = context.windows
     monkeypatch.setattr(context, "windows", lambda t: (calls.append(t), real(t))[1])
-    first = private_windows()
-    assert private_windows() is first and private_windows() is first
-    assert len(calls) == 1
+    add_private(PrivateItem("document", "1", "t", "one two three four five six seven eight nine"))
     add_private(PrivateItem("document", "2", "t", "alpha beta gamma delta epsilon zeta eta theta"))
-    assert len(private_windows()) > len(first) and len(calls) == 3  # item 1 rebuilt with item 2
+    assert len(calls) == 2  # each item once, at add time
+    assert echoes_private("alpha beta gamma delta epsilon zeta eta theta")
+    assert echoes_private("two three four five six seven eight nine")
+    assert len(calls) == 4  # only the two queries; no rebuild of the items
 
 
 def test_guarded_title_needs_three_words_and_twelve_characters() -> None:

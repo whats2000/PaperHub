@@ -5,26 +5,35 @@ documents, chunks of them, or an idea's problem text register the material
 here; the checkpoint then judges every outbound query against all of it.
 The list is mutated in place once it exists, so child tasks that copied the
 context keep adding to the same turn's list.
+
+Two budgets: the review model sees at most ``MAX_PRIVATE_CHARS`` of the
+material (oldest chunk text trimmed first), while the verbatim-span guard
+keeps the window digests of every item's FULL text, taken when it is added,
+so trimming never takes a passage out of the guard.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from contextvars import ContextVar
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
 
 from paperhub.outbound.models import PrivateItem
 from paperhub.outbound.spans import windows
 
-__all__ = ["MAX_PRIVATE_CHARS", "OutboundScope", "PrivateItem", "add_private",
-           "begin_scope", "begin_turn", "outbound_scope",
-           "current_private", "mark_incomplete", "material_incomplete",
-           "private_material", "private_windows"]
+__all__ = ["MAX_GUARD_WINDOWS", "MAX_PRIVATE_CHARS", "OutboundScope", "PrivateItem",
+           "add_private", "begin_scope", "begin_turn", "outbound_scope",
+           "current_private", "echoes_private", "guard_sources",
+           "mark_incomplete", "material_incomplete", "private_material"]
 
 logger = logging.getLogger(__name__)
 
 #: Total private text the review sees; oldest chunk text is trimmed first.
 MAX_PRIVATE_CHARS = 12_000
+#: Distinct guard windows a turn may hold; past it the turn's material is
+#: marked incomplete (the unsure policy), never silently left unguarded.
+MAX_GUARD_WINDOWS = 200_000
+_TOO_LARGE = "private material too large to guard"
 
 private_material: ContextVar[list[PrivateItem]] = ContextVar("outbound_private_material")
 
@@ -34,33 +43,77 @@ private_material: ContextVar[list[PrivateItem]] = ContextVar("outbound_private_m
 _incomplete: ContextVar[list[str]] = ContextVar("outbound_material_incomplete")
 
 
-# [signature, windows] of this turn's private text, built once and rebuilt only
-# when the material changes (a mutable cell, shared with child tasks).
-_windows_cache: ContextVar[list[Any]] = ContextVar("outbound_private_windows")
+@dataclass
+class _Guard:
+    """The span guard's digests for one turn's material list (``owner``):
+    every window of each item's full text, by ``(kind, ref)``."""
+
+    owner: list[PrivateItem]
+    by_ref: dict[tuple[str, str], set[bytes]] = field(default_factory=dict)
+    digests: set[bytes] = field(default_factory=set)
 
 
-def private_windows() -> frozenset[str]:
-    """The verbatim-span windows of this turn's private material (memoised)."""
-    items = private_material.get([])
-    sig = tuple((i.kind, i.ref, hash(i.text)) for i in items)
+# One mutable cell per turn, shared by reference with child tasks.
+_guard: ContextVar[_Guard] = ContextVar("outbound_span_guard")
+
+
+def _digests(text: str) -> set[bytes]:
+    """Digests of the verbatim-span windows of ``text`` (H5a windows)."""
+    return {hashlib.sha256(w.encode("utf-8")).digest()[:16] for w in windows(text)}
+
+
+def _turn_guard(items: list[PrivateItem]) -> _Guard:
+    """The guard of ``items``; a context holding a new list gets a new guard."""
     try:
-        cell = _windows_cache.get()
+        guard = _guard.get()
     except LookupError:
-        cell = []
-        _windows_cache.set(cell)
-    if cell and cell[0] == sig:
-        return cell[1]  # type: ignore[no-any-return]
-    ws = frozenset(w for i in items for w in windows(i.text))
-    cell[:] = [sig, ws]
-    return ws
+        guard = None
+    if guard is None or guard.owner is not items:
+        guard = _Guard(items)
+        _guard.set(guard)
+    return guard
+
+
+def _current_guard() -> _Guard | None:
+    items = private_material.get(None)
+    if items is None:
+        return None
+    guard = _guard.get(None)
+    return guard if guard is not None and guard.owner is items else None
+
+
+def echoes_private(text: str) -> bool:
+    """``text`` repeats a verbatim-span window of this turn's private material."""
+    guard = _current_guard()
+    return guard is not None and not guard.digests.isdisjoint(_digests(text))
+
+
+def guard_sources(text: str) -> list[tuple[str, str]]:
+    """``(kind, ref)`` of every item ``text`` repeats a window of, in add order."""
+    guard = _current_guard()
+    if guard is None:
+        return []
+    mine = _digests(text)
+    return [key for key, ds in guard.by_ref.items() if not mine.isdisjoint(ds)]
+
+
+def _guard_add(items: list[PrivateItem], item: PrivateItem) -> None:
+    guard = _turn_guard(items)
+    mine = _digests(item.text)
+    if len(guard.digests | mine) > MAX_GUARD_WINDOWS:
+        mark_incomplete(_TOO_LARGE)
+        return
+    guard.digests |= mine
+    guard.by_ref.setdefault((item.kind, item.ref), set()).update(mine)
 
 
 def begin_turn() -> None:
     """Start a turn with an empty private-material list (call once, in the
     turn's own task, before any tool runs). Also clears the incomplete flag."""
-    private_material.set([])
+    items: list[PrivateItem] = []
+    private_material.set(items)
     _incomplete.set([])
-    _windows_cache.set([])
+    _guard.set(_Guard(items))
 
 
 def mark_incomplete(reason: str) -> None:
@@ -109,6 +162,8 @@ def add_private(item: PrivateItem) -> None:
                        item.kind, item.ref)
         items = []
         private_material.set(items)
+    # Guarded on every add, a duplicate ref included: its text may differ.
+    _guard_add(items, item)
     if any(i.kind == item.kind and i.ref == item.ref for i in items):
         return
     items.append(PrivateItem(item.kind, item.ref, item.title, item.text))

@@ -30,7 +30,12 @@ from paperhub.db.connection import write_lock
 from paperhub.llm.adapter import LlmAdapter
 from paperhub.llm.prompts.registry import PromptRegistry
 from paperhub.outbound import held, log
-from paperhub.outbound.context import current_private, material_incomplete, private_windows
+from paperhub.outbound.context import (
+    current_private,
+    echoes_private,
+    guard_sources,
+    material_incomplete,
+)
 from paperhub.outbound.destinations import PUBLIC_WEB_SEARCH, OutboundBlocked, check_destination
 from paperhub.outbound.log import utc_now
 from paperhub.outbound.models import (
@@ -43,7 +48,7 @@ from paperhub.outbound.models import (
     parse_note_ref,
 )
 from paperhub.outbound.policy import OutboundPolicy, load_policy
-from paperhub.outbound.spans import contains_title, guarded_title, windows
+from paperhub.outbound.spans import contains_title, guarded_title
 from paperhub.tracing.tracer import Tracer
 
 logger = logging.getLogger(__name__)
@@ -172,10 +177,10 @@ _SPAN_REASON = "contains a passage from private material"
 _TITLE_REASON = "contains the title of a private document"
 
 
-def _echoes(text: str, items: list[PrivateItem]) -> bool:
-    """``text`` copies a passage of this turn's private material (the window
-    set is built once per turn, see ``context.private_windows``)."""
-    return bool(items) and not private_windows().isdisjoint(windows(text))
+def _echoes(text: str) -> bool:
+    """``text`` copies a passage of this turn's private material (the guard
+    holds every item's full text, see ``context.echoes_private``)."""
+    return echoes_private(text)
 
 
 def names_private_title(
@@ -209,24 +214,21 @@ def _span_leak(
     a constant: it never echoes the title or the passage."""
     if names_private_title(text, items, any_order=any_order):
         return _TITLE_REASON
-    if _echoes(text, items):
+    if _echoes(text):
         return _SPAN_REASON
     return None
 
 
-def _span_sources(text: str, items: list[PrivateItem]) -> list[dict[str, Any]]:
+def _span_sources(text: str) -> list[dict[str, Any]]:
     """Which items ``text`` copies a passage of, by id only (never the text):
     a note as ``{kind, note_id, block_ids, comment_ids}`` (empty lists left
     out), any other item as ``{kind, ref}``."""
-    mine = set(windows(text))
     out: list[dict[str, Any]] = []
     notes: dict[int, dict[str, Any]] = {}
-    for item in items:
-        if mine.isdisjoint(windows(item.text)):
-            continue
-        parsed = parse_note_ref(item.ref) if item.kind == "note" else None
+    for kind, ref in guard_sources(text):
+        parsed = parse_note_ref(ref) if kind == "note" else None
         if parsed is None:
-            src = {"kind": item.kind, "ref": item.ref}
+            src = {"kind": kind, "ref": ref}
             if src not in out:
                 out.append(src)
             continue
@@ -254,11 +256,11 @@ def _sources_text(sources: list[dict[str, Any]]) -> str:
 
 
 def _span_outcome(policy: OutboundPolicy, req: OutboundRequest, text: str,
-                  reason: str, items: list[PrivateItem]) -> _Outcome:
+                  reason: str) -> _Outcome:
     """The unsure policy at stage ``span``; a passage hit names its sources."""
     out = _unsure(policy, req, "span", reason)
     if reason == _SPAN_REASON:
-        out.sources = _span_sources(text, items)
+        out.sources = _span_sources(text)
     return out
 
 
@@ -453,7 +455,7 @@ async def _decide(
                                 f"cached rewrite contains the sensitive term {hit!r}", hit), None
             leak = _span_leak(sent, titled)
             if leak is not None:
-                return _span_outcome(policy, req, sent, leak, items), None
+                return _span_outcome(policy, req, sent, leak), None
             return _Outcome("send", sent, "cache", _safe_reason(
                 str(cached.get("reason", "")), titled, policy.terms)), None
         if cached["action"] == "block":
@@ -472,7 +474,7 @@ async def _decide(
         # a rewrite swapped the figures for the document's title). Not cached.
         # The trace's `verdict` keeps the raw rewrite (local record principle,
         # R50); the log reason and the held row never carry it.
-        return _span_outcome(policy, req, sent, leak, items), verdict
+        return _span_outcome(policy, req, sent, leak), verdict
     if outcome.stage == "review" and outcome.action in ("send", "block"):
         try:
             await _cache_put(conn, key, {"action": outcome.action,

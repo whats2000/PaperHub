@@ -303,3 +303,74 @@ async def test_block_read_then_rewritten_keeps_both_texts(
             "type": "paragraph", "content": [{"type": "text", "text": _SECRET}]}}])
     assert out.record["applied"] == [bid]
     assert _is_span(await _check(migrated_db, _SECRET))
+
+
+async def test_note_text_past_the_review_cap_stays_guarded(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Full read_note pages of about 6,000 characters each, past the 12k
+    review cap: the first block, trimmed out of the review's material,
+    still holds the query."""
+    nid = await _note(migrated_db)
+    filler = [_p(f"filler {i} " + "lorem ipsum " * 495) for i in range(3)]
+    await _fill(migrated_db, nid, [_p(_SECRET), *filler])
+    bid = await _block_id(migrated_db, nid, _SECRET)
+    begin_turn()
+    ctx = _ctx(migrated_db, fake_tracer)
+    first = await _run(ctx, "read_note", note="chat")
+    assert first.record["next_page"] == 2
+    await _run(ctx, "read_note", note="chat", page=2)
+    await _run(ctx, "read_note", note="chat", page=3)
+    items = current_private()
+    assert sum(len(i.text) for i in items) == 12_000  # the review's cap
+    assert next(i for i in items if ":block:" + bid in i.ref).text == ""
+    d = await _check(migrated_db, _SECRET, fake_tracer)
+    assert _is_span(d)
+    async with migrated_db.execute(
+        "SELECT result_summary_json FROM tool_calls WHERE tool = 'outbound:review' "
+        "ORDER BY rowid DESC LIMIT 1",
+    ) as cur:
+        step = await cur.fetchone()
+    assert step is not None
+    assert {"kind": "note", "note_id": nid, "block_ids": [bid]} in json.loads(
+        step[0])["span_sources"]
+
+
+async def test_private_document_past_the_review_cap_stays_guarded(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    from paperhub.outbound.context import PrivateItem, add_private
+    begin_turn()
+    add_private(PrivateItem("document", "doc:41", "Yield review", f"Intro. {_SECRET}."))
+    add_private(PrivateItem("chunk", "chunk:7", "Yield review", "y " * 7000))
+    add_private(PrivateItem("document", "doc:42", "Other review", "z " * 7000))
+    assert current_private()[0].text == ""
+    assert _is_span(await _check(migrated_db, _SECRET))
+
+
+async def test_review_model_input_stays_capped(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The guard keeps every window, but the review sees at most 12k chars."""
+    import html
+    import re
+
+    from paperhub.outbound.context import PrivateItem, add_private
+    seen: list[str] = []
+
+    class _Capture(_Allow):
+        async def structured(self, **kw: Any) -> ReviewVerdict:
+            seen.append(kw["variables"]["private_material"])
+            return await super().structured(**kw)
+
+    begin_turn()
+    for i in range(4):
+        add_private(PrivateItem("note", f"note:1:block:b{i}", "N", f"w{i} " * 2000))
+    req = OutboundRequest(caller="research.search", kind="s2_search",
+                          destination="api.semanticscholar.org", text="robot grasping")
+    d = await checkpoint.check(req, conn=migrated_db, adapter=_Capture(),  # type: ignore[arg-type]
+                               tracer=None)
+    assert d.action == "send"
+    [material] = seen
+    texts = re.findall(r"<private_item [^>]*>(.*?)</private_item>", material, re.S)
+    assert sum(len(html.unescape(t)) for t in texts) == 12_000
