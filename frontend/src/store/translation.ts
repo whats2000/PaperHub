@@ -60,6 +60,9 @@ export interface MarkReveal {
   paperId: number;
   markId: string;
   n: number;
+  /** A reader that cannot find the mark may try the paper's other view
+   * (a mark made in one view shows in the other where its text is found). */
+  fallback?: boolean;
 }
 
 interface TranslationState {
@@ -81,6 +84,9 @@ interface TranslationState {
    * Back to <language>, which restores the previous state. Returns that
    * previous state (null: not a mark on a translation, or unknown). */
   showMark: (markId: string) => TranslationShown | null;
+  /** Asks the reader showing `paperId` to scroll to a mark and flash it,
+   * leaving translation as it is (a mark on the paper's own text). */
+  requestReveal: (paperId: number, markId: string, opts?: { fallback?: boolean }) => void;
   /** Puts a paper's translation back as it was before `showMark` (its
    * result) — only while the translation is still as `showMark` left it;
    * once the user has changed it since, this does nothing. */
@@ -226,6 +232,14 @@ export const useTranslationStore = create<TranslationState>()(
           },
         );
         return prev;
+      },
+      requestReveal: (paperId, markId, opts) => {
+        revealCount += 1;
+        const n = revealCount;
+        set({ reveal: { paperId, markId, n, fallback: opts?.fallback } });
+        setTimeout(() => {
+          if (!claimed.has(n) && get().reveal?.n === n) set({ reveal: null });
+        }, REVEAL_TTL_MS);
       },
       claimReveal: (n) => {
         claimed.add(n);

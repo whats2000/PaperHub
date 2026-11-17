@@ -61,6 +61,10 @@ interface CanvasState {
   /** How the reader shows its paper (the HTML or a PDF: a PDF-only paper or
    *  the PDF tab), published by CitationCanvas; null when it shows none. */
   readerView: ReaderView | null;
+  /** A request to show a paper in one of its views (an HTML paper with a
+   *  page PDF: its HTML or PDF tab), e.g. the view a mark was made in. */
+  readerTabRequest: { paperId: number; tab: "html" | "pdf"; n: number } | null;
+  requestReaderTab: (paperId: number, tab: "html" | "pdf") => void;
   /** User-adjustable panel width (px), set by dragging the divider. Persisted. */
   width: number;
   openCitation: (chunkId: number, endChunkId?: number) => void;
@@ -118,6 +122,9 @@ export const useCanvasStore = create<CanvasState>()(
       activePaperId: null,
       readingSection: null,
       readerView: null,
+      readerTabRequest: null,
+      requestReaderTab: (paperId, tab) =>
+        set((s) => ({ readerTabRequest: { paperId, tab, n: (s.readerTabRequest?.n ?? 0) + 1 } })),
       width: CANVAS_DEFAULT_WIDTH,
       openCitation: (chunkId, endChunkId) =>
         set((s) => ({

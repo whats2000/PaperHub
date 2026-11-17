@@ -256,6 +256,9 @@ export interface HtmlMarksHandle {
    * the way (`loading`), failed (`unavailable`), or no longer holding
    * the marked words (`changed`). Null when it is not a marker. */
   markerReason: (markId: string) => "off" | "loading" | "unavailable" | "changed" | null;
+  /** Where a mark is drawn, in the document's client coordinates: its line
+   * boxes, else its 文 marker or its margin icon (empty: not drawn). */
+  rects: (markId: string) => DOMRect[];
   /** Removes every overlay node, style and listener. */
   detach: () => void;
 }
@@ -882,6 +885,16 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         }
       }
       return true;
+    },
+    rects: (markId) => {
+      const d = drawn.get(markId);
+      if (!d) return [];
+      const els = d.els.length
+        ? d.els
+        : d.markerEl
+          ? [d.markerEl]
+          : [...icons.values()].filter((i) => i.marks.includes(markId)).map((i) => i.el);
+      return els.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 || r.height > 0);
     },
     shownAs: (markId) => {
       const d = drawn.get(markId);

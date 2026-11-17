@@ -16,6 +16,7 @@ import {
   getChunkAnchors,
   listMarkColors,
   listMarks,
+  patchMarkColor,
   restoreMark,
   restorePiece,
   splitMark,
@@ -25,7 +26,16 @@ import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
-import type { Mark, MarkColor, MarkColorInfo, MarkCreated, MarkIn, SavedTo, SplitResult } from "@/types/notes";
+import type {
+  Mark,
+  MarkColor,
+  MarkColorInfo,
+  MarkColorPatch,
+  MarkCreated,
+  MarkIn,
+  SavedTo,
+  SplitResult,
+} from "@/types/notes";
 
 const UNDO_MS = 5000;
 
@@ -59,6 +69,9 @@ interface MarksState {
    * only: the chunk anchors are not fetched. */
   refetchMarks: (paperId: number, signal?: AbortSignal) => Promise<void>;
   loadColors: () => Promise<void>;
+  /** Renames a colour or shows / hides its marks (shown at once, kept on
+   * the server; put back with a toast when the server refuses). */
+  patchColor: (color: MarkColor, patch: MarkColorPatch) => Promise<void>;
   /** The paper's chunk spans, loading them (again) when they aren't here
    * yet. Throws when they can't be had. */
   ensureChunks: (paperId: number) => Promise<ChunkMap>;
@@ -557,6 +570,21 @@ export const useMarksStore = create<MarksState>()(
               colorsRequest = null; // try again next time
             });
           return colorsRequest;
+        },
+
+        patchColor: async (color, patch) => {
+          const before = get().colors;
+          const show = (colors: MarkColorInfo[]) => {
+            set({ colors });
+            useNotesStore.setState({ colorNames: Object.fromEntries(colors.map((c) => [c.color, c.name])) });
+          };
+          show(before.map((c) => (c.color === color ? { ...c, ...patch } : c)));
+          try {
+            show(await patchMarkColor(color, patch));
+          } catch {
+            show(before);
+            toast.error(t("notes:myMarks.saveFailed", "Couldn't save the colour."));
+          }
         },
 
         create: async (body, opts) => {
