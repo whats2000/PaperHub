@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_MARK_PARAGRAPHS, useHtmlMarks } from "@/components/canvas/useHtmlMarks";
+import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
+import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";

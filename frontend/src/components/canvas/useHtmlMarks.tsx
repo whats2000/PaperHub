@@ -11,13 +11,12 @@ import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover"
 import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
 import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { groupBySection, selectionToPieces, type ChunkMap, type HtmlPiece } from "@/lib/marks/anchor";
+import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
-/** The most paragraphs one mark takes (a select-all is not a quote). */
-export const MAX_MARK_PARAGRAPHS = 12;
 
 interface Selected {
   /** The document it was made in (a new document drops it). */

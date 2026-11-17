@@ -23,9 +23,10 @@ import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
-import { MAX_MARK_PARAGRAPHS } from "@/components/canvas/useHtmlMarks";
 import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
-import { listPaperBlocks } from "@/lib/api";
+import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
+import { usePdfFollow } from "@/components/canvas/usePdfFollow";
+import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import {
   boxMark,
   captionFor,
@@ -42,11 +43,7 @@ import type { Mark, MarkColor, MarkColorInfo, MarkPiece, PaperPageBlock } from "
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
-/** How long the reader rests before the section being read is reported. */
-const READING_SETTLE_MS = 150;
 const FLASH_MS = 1600;
-/** Blocks Follow never reports from (running heads, page numbers). */
-const NOT_READING = new Set(["PageHeader", "PageFooter"]);
 
 /** Pieces as stored (the section rides on the mark), grouped by section:
  * a mark files under one. */
@@ -138,36 +135,7 @@ export function usePdfMarks({
   }, [allMarks, colors]);
 
   // The Marker blocks of each page, loaded as pages come into view.
-  const [blocks, setBlocks] = useState<Record<number, PaperPageBlock[]>>({});
-  const blocksRef = useRef(blocks);
-  useEffect(() => {
-    blocksRef.current = blocks;
-  }, [blocks]);
-  const requests = useRef(new Map<number, Promise<PaperPageBlock[]>>());
-  const loadBlocks = useCallback(
-    (page: number): Promise<PaperPageBlock[]> => {
-      if (paperId === null) return Promise.resolve(NO_BLOCKS);
-      const have = blocksRef.current[page];
-      if (have) return Promise.resolve(have);
-      let req = requests.current.get(page);
-      if (!req) {
-        req = listPaperBlocks(paperId, page).then(
-          (list) => {
-            blocksRef.current = { ...blocksRef.current, [page]: list };
-            setBlocks((prev) => ({ ...prev, [page]: list }));
-            return list;
-          },
-          () => {
-            requests.current.delete(page); // try again next time
-            return NO_BLOCKS;
-          },
-        );
-        requests.current.set(page, req);
-      }
-      return req;
-    },
-    [paperId],
-  );
+  const { blocks, blocksRef, loadBlocks } = usePdfBlocks(paperId);
 
   const [target, setTarget] = useState<Target | null>(null);
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
@@ -249,7 +217,7 @@ export function usePdfMarks({
       root.removeEventListener("mousedown", onDown);
       root.removeEventListener("keyup", onKeyUp);
     };
-  }, [paperId, readerRef, measure]);
+  }, [paperId, readerRef, measure, blocksRef]);
 
   // The popover follows what it marks while the reader scrolls; out of
   // view, it closes.
@@ -314,53 +282,7 @@ export function usePdfMarks({
   );
 
   // Follow: the section of the Marker block at the top of the view.
-  const onReadingRef = useRef(onReadingHeading);
-  useEffect(() => {
-    onReadingRef.current = onReadingHeading;
-  }, [onReadingHeading]);
-  const following = onReadingHeading !== undefined && paperId !== null;
-  const reportReading = useCallback(() => {
-    const root = readerRef.current;
-    if (!root) return;
-    const view = root.getBoundingClientRect();
-    const line = view.top + 4;
-    let best: string | null = null;
-    let bestD = Infinity;
-    for (const el of Array.from(root.querySelectorAll(PAGE))) {
-      const r = el.getBoundingClientRect();
-      if (r.bottom <= line || r.top >= view.bottom) continue;
-      const list = blocksRef.current[Number(el.getAttribute("data-page-number")) - 1];
-      for (const b of list ?? NO_BLOCKS) {
-        if (!b.section || NOT_READING.has(b.type)) continue;
-        const top = r.top + b.box[1] * r.height;
-        const bottom = r.top + b.box[3] * r.height;
-        if (bottom <= line) continue;
-        const d = top <= line ? 0 : top - line;
-        if (d < bestD) {
-          bestD = d;
-          best = b.section;
-        }
-      }
-    }
-    if (best !== null) onReadingRef.current?.(best, []);
-  }, [readerRef]);
-  useEffect(() => {
-    const root = readerRef.current;
-    if (!following || !root) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const report = () => {
-      clearTimeout(timer);
-      timer = setTimeout(reportReading, READING_SETTLE_MS);
-    };
-    report();
-    root.addEventListener("scroll", report, { passive: true });
-    window.addEventListener("resize", report);
-    return () => {
-      clearTimeout(timer);
-      root.removeEventListener("scroll", report);
-      window.removeEventListener("resize", report);
-    };
-  }, [following, readerRef, reportReading, blocks]);
+  usePdfFollow({ enabled: paperId !== null, readerRef, blocks, blocksRef, onReadingHeading });
 
   const [hot, setHot] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -439,7 +361,7 @@ export function usePdfMarks({
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadBlocks, pageEl],
+    [target, readerRef, saveMarks, loadBlocks, pageEl, blocksRef],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(
