@@ -1359,38 +1359,40 @@ export async function getChangeSet(changeSetId: string): Promise<ChangeSetStatus
 
 // ---- Reading marks ----------------------------------------------------------
 
-export async function createMark(body: MarkIn): Promise<MarkCreated> {
-  return apiFetch<MarkCreated>("/marks", { method: "POST", body: JSON.stringify(body) });
+export async function createMark(body: MarkIn, signal?: AbortSignal): Promise<MarkCreated> {
+  return apiFetch<MarkCreated>("/marks", { method: "POST", body: JSON.stringify(body), signal });
 }
 
 export async function listMarks(paperContentId: number): Promise<Mark[]> {
   return apiFetch<Mark[]>(`/marks?paper_content_id=${paperContentId}`);
 }
 
-export async function deleteMark(markId: string): Promise<ApplyResult> {
-  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}`, { method: "DELETE" });
+export async function deleteMark(markId: string, signal?: AbortSignal): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}`, { method: "DELETE", signal });
 }
 
-export async function restoreMark(markId: string): Promise<ApplyResult> {
-  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}/restore`, { method: "POST" });
+export async function restoreMark(markId: string, signal?: AbortSignal): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}/restore`, { method: "POST", signal });
 }
 
-export async function erasePiece(markId: string, index: number): Promise<Mark> {
+export async function erasePiece(markId: string, index: number, signal?: AbortSignal): Promise<Mark> {
   return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/pieces/${index}`, {
     method: "DELETE",
+    signal,
   });
 }
 
-export async function restorePiece(markId: string, index: number): Promise<Mark> {
+export async function restorePiece(markId: string, index: number, signal?: AbortSignal): Promise<Mark> {
   return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/pieces/${index}/restore`, {
     method: "POST",
+    signal,
   });
 }
 
 /** The newest piece becomes its own mark; returns the new mark with the
  * original as it now is. */
-export async function splitMark(markId: string): Promise<SplitResult> {
-  return apiFetch<SplitResult>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST" });
+export async function splitMark(markId: string, signal?: AbortSignal): Promise<SplitResult> {
+  return apiFetch<SplitResult>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST", signal });
 }
 
 /** The chunks with a `phchunk-N` span in the paper's HTML: a selection's

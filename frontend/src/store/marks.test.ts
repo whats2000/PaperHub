@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { waitFor } from "@testing-library/react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { markHint, queueMarkOp, resetMarkOps, useMarksStore } from "@/store/marks";
+import { MarkOpTimeout, markHint, queueMarkOp, resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, NoteBlock } from "@/types/notes";
 
@@ -316,3 +316,80 @@ describe("useMarksStore.split", () => {
     expect(list[1]).toMatchObject({ id: "mk_2", note_id: 7 });
   });
 });
+
+describe("the mark-op queue", () => {
+  it("gives up a hung op: its own error toast, then the queue carries on", async () => {
+    resetMarkOps(40);
+    const onTimeout = vi.fn();
+    let aborted = false;
+    const hung = queueMarkOp((signal) => {
+      signal.addEventListener("abort", () => (aborted = true));
+      return new Promise<never>(() => undefined);
+    }, onTimeout);
+    const next = queueMarkOp(() => Promise.resolve("next"));
+    await expect(hung).rejects.toBeInstanceOf(MarkOpTimeout);
+    await expect(next).resolves.toBe("next");
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(aborted).toBe(true);
+  });
+
+  it("an erase whose request never answers says so once, and a later split still runs", async () => {
+    resetMarkOps(40);
+    const calls: string[] = [];
+    const two: Mark = {
+      ...MARK,
+      note_id: 7,
+      pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+    };
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/0`, () => {
+        calls.push("erase");
+        return new Promise<never>(() => undefined);
+      }),
+      http.post(`${API_BASE_URL}/marks/mk_1/split`, () => {
+        calls.push("split");
+        return HttpResponse.json({ ...MARK, id: "mk_2", pieces: [two.pieces[1]], original: two });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [two] } });
+    await useMarksStore.getState().erase("mk_1", 0);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith("Couldn't erase that piece.");
+    await useMarksStore.getState().split("mk_1");
+    expect(calls).toEqual(["erase", "split"]);
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useMarksStore.remove in the queue", () => {
+  it("a delete made while a join is saving waits for it", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => {
+        calls.push("delete");
+        return HttpResponse.json({ revision: 5, applied: ["b_q"], rejected: [], change_set_id: null });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    let finishJoin!: () => void;
+    const join = queueMarkOp(
+      () =>
+        new Promise<void>((resolve) => {
+          finishJoin = () => {
+            calls.push("join");
+            resolve();
+          };
+        }),
+    );
+    const del = useMarksStore.getState().remove("mk_1");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls).toEqual([]);
+    // Not taken off the paper yet either: the join may still change it.
+    expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1);
+    finishJoin();
+    await Promise.all([join, del]);
+    expect(calls).toEqual(["join", "delete"]);
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+  });
+});
+

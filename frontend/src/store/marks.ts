@@ -60,7 +60,7 @@ interface MarksState {
   /** Saves a mark (its block lands in the paper's note) and, unless
    * `quiet`, confirms where (`toastSaved`); unless `silent`, a failure is
    * said in a toast. */
-  create: (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean }) => Promise<MarkCreated>;
+  create: (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean; signal?: AbortSignal }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
   /** Erases one piece of a mark and keeps the rest, with Undo (then Erase
@@ -186,19 +186,48 @@ export function useMarkFocusIds(paperId: number | null): ReadonlySet<string> | n
 }
 
 /** Mark operations that must not overtake each other: highlighter strokes
- * (a join), erase, restore and split run one after another, in the order
- * the user made them. */
+ * (a join), erase, restore, split and delete run one after another, in the
+ * order the user made them. */
 let markOps: Promise<unknown> = Promise.resolve();
 
-export function queueMarkOp<T>(op: () => Promise<T>): Promise<T> {
-  const run = markOps.then(op);
+/** How long one queued operation may take before it is given up. */
+export const MARK_OP_TIMEOUT_MS = 20_000;
+let opTimeoutMs = MARK_OP_TIMEOUT_MS;
+
+/** A queued mark operation that took too long (it was aborted). */
+export class MarkOpTimeout extends Error {
+  constructor() {
+    super("mark operation timed out");
+  }
+}
+
+/** Runs `op` after every operation queued before it. Each gets at most
+ * `MARK_OP_TIMEOUT_MS`: then its requests are aborted (`signal`), `onTimeout`
+ * says so (the op's own error toast), it fails with `MarkOpTimeout`, and the
+ * queue carries on, so one hung request never blocks later strokes,
+ * erases, splits or deletes. An op stays quiet about a failure once its
+ * signal has aborted (the timeout said it). */
+export function queueMarkOp<T>(op: (signal: AbortSignal) => Promise<T>, onTimeout?: () => void): Promise<T> {
+  const run = markOps.then(() => {
+    const ctl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        ctl.abort();
+        onTimeout?.();
+        reject(new MarkOpTimeout());
+      }, opTimeoutMs);
+    });
+    return Promise.race([op(ctl.signal), late]).finally(() => clearTimeout(timer));
+  });
   markOps = run.catch(() => undefined);
   return run;
 }
 
-/** Test isolation: forget pending mark operations. */
-export function resetMarkOps(): void {
+/** Test isolation: forget pending mark operations (and set the timeout). */
+export function resetMarkOps(timeoutMs = MARK_OP_TIMEOUT_MS): void {
   markOps = Promise.resolve();
+  opTimeoutMs = timeoutMs;
 }
 
 let colorsRequest: Promise<void> | null = null;
@@ -211,7 +240,9 @@ export const useMarksStore = create<MarksState>()(
       const put = (paperId: number, fn: (list: Mark[]) => Mark[]) =>
         set((s) => ({ marksByPaper: { ...s.marksByPaper, [paperId]: fn(s.marksByPaper[paperId] ?? []) } }));
 
-      const remove = async (markId: string): Promise<void> => {
+      /** Deletes a mark, after any pending stroke has saved (a join to it
+       * lands first, so it can't bring the mark back). */
+      const removeNow = async (markId: string, signal: AbortSignal): Promise<void> => {
         const entry = Object.entries(get().marksByPaper)
           .map(([pid, list]) => [Number(pid), list.find((m) => m.id === markId)] as const)
           .find(([, m]) => m !== undefined);
@@ -219,10 +250,10 @@ export const useMarksStore = create<MarksState>()(
         const [paperId, mark] = entry as [number, Mark];
         put(paperId, (list) => list.filter((m) => m.id !== markId));
         try {
-          await deleteMark(markId);
+          await deleteMark(markId, signal);
         } catch {
           put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
-          toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark."));
+          if (!signal.aborted) toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark."));
           return;
         }
         refreshNote(mark.note_id);
@@ -234,21 +265,31 @@ export const useMarksStore = create<MarksState>()(
             onClick: () => {
               if (undone) return;
               undone = true;
-              void restoreMark(markId).then(
-                () => {
-                  put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
-                  refreshNote(mark.note_id);
-                  toast(t("notes:marks.restored", "Mark restored"), {
-                    duration: UNDO_MS,
-                    action: { label: t("notes:marks.deleteAgain", "Delete again"), onClick: () => void remove(markId) },
-                  });
-                },
-                () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark.")),
-              );
+              const failed = () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark."));
+              void queueMarkOp(async (signal) => {
+                try {
+                  await restoreMark(markId, signal);
+                } catch {
+                  if (!signal.aborted) failed();
+                  return;
+                }
+                put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
+                refreshNote(mark.note_id);
+                toast(t("notes:marks.restored", "Mark restored"), {
+                  duration: UNDO_MS,
+                  action: { label: t("notes:marks.deleteAgain", "Delete again"), onClick: () => void remove(markId) },
+                });
+              }, failed).catch(() => undefined);
             },
           },
         });
       };
+
+      const remove = (markId: string): Promise<void> =>
+        queueMarkOp(
+          (signal) => removeNow(markId, signal),
+          () => toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark.")),
+        ).catch(() => undefined);
 
       /** The paper and mark of an id. */
       const find = (markId: string): [number, Mark] | null => {
@@ -275,16 +316,16 @@ export const useMarksStore = create<MarksState>()(
 
       /** Erases one piece, after any pending stroke has saved. The server
        * decides whether that leaves the mark empty (then deleted). */
-      const eraseNow = async (markId: string, index: number): Promise<void> => {
+      const eraseNow = async (markId: string, index: number, signal: AbortSignal): Promise<void> => {
         const entry = find(markId);
         if (!entry) return;
         const [paperId, mark] = entry;
         if (!livePieceIndexes(mark.pieces).includes(index)) return;
         let res: Mark;
         try {
-          res = await erasePiece(markId, index);
+          res = await erasePiece(markId, index, signal);
         } catch {
-          toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece."));
+          if (!signal.aborted) toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece."));
           return;
         }
         const deleted = res.deleted_at !== null;
@@ -299,12 +340,13 @@ export const useMarksStore = create<MarksState>()(
             onClick: () => {
               if (undone) return;
               undone = true;
-              void queueMarkOp(async () => {
+              const failed = () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark."));
+              void queueMarkOp(async (signal) => {
                 let back: Mark;
                 try {
-                  back = await restorePiece(markId, index);
+                  back = await restorePiece(markId, index, signal);
                 } catch {
-                  toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark."));
+                  if (!signal.aborted) failed();
                   return;
                 }
                 if (back.deleted_at === null) upsert(paperId, find(markId)?.[1] ?? mark, back);
@@ -316,25 +358,29 @@ export const useMarksStore = create<MarksState>()(
                     onClick: () => void erase(markId, index),
                   },
                 });
-              });
+              }, failed).catch(() => undefined);
             },
           },
         });
       };
-      const erase = (markId: string, index: number): Promise<void> => queueMarkOp(() => eraseNow(markId, index));
+      const erase = (markId: string, index: number): Promise<void> =>
+        queueMarkOp(
+          (signal) => eraseNow(markId, index, signal),
+          () => toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece.")),
+        ).catch(() => undefined);
 
       /** The newest piece its own mark, after any pending stroke has saved;
        * both marks as the server now has them. */
       const split = (markId: string): Promise<void> =>
-        queueMarkOp(async () => {
+        queueMarkOp(async (signal) => {
           const entry = find(markId);
           if (!entry) return;
           const [paperId, mark] = entry;
           let made: SplitResult;
           try {
-            made = await splitMark(markId);
+            made = await splitMark(markId, signal);
           } catch {
-            toast.error(t("notes:marks.splitFailed", "Couldn't split the mark."));
+            if (!signal.aborted) toast.error(t("notes:marks.splitFailed", "Couldn't split the mark."));
             return;
           }
           const { original, ...fresh } = made;
@@ -342,7 +388,7 @@ export const useMarksStore = create<MarksState>()(
           upsert(paperId, mark, fresh);
           refreshNote(mark.note_id);
           toast(t("notes:marks.splitDone", "Split into its own mark"));
-        });
+        }, () => toast.error(t("notes:marks.splitFailed", "Couldn't split the mark."))).catch(() => undefined);
 
       return {
         marksByPaper: {},
@@ -403,7 +449,7 @@ export const useMarksStore = create<MarksState>()(
         create: async (body, opts) => {
           let res: MarkCreated;
           try {
-            res = await createMark(body);
+            res = await createMark(body, opts?.signal);
           } catch (err) {
             // `silent`: the caller says so itself (the highlighter, with Retry).
             if (!opts?.silent) toast.error(t("notes:marks.saveFailed", "Couldn't save the mark."));
