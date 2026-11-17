@@ -163,3 +163,28 @@ def test_guard_follows_the_turn_list() -> None:
         return echoes_private(_SECRET)
 
     assert not _run(body)
+
+
+class _NoCopySet(set):  # type: ignore[type-arg]
+    """A digest set that fails any copy of itself (``|`` / ``copy``)."""
+
+    def __or__(self, other):  # type: ignore[no-untyped-def]
+        raise AssertionError("the turn's digest set was copied")
+
+    def copy(self):  # type: ignore[no-untyped-def]
+        raise AssertionError("the turn's digest set was copied")
+
+
+def test_guard_add_never_copies_the_turn_digest_set() -> None:
+    """Each add costs the item's windows, not the turn's: filling toward the
+    ceiling stays linear."""
+    def body() -> bool:
+        add_private(PrivateItem("chunk", "chunk:0", "R", _SECRET))
+        guard = context._guard.get()
+        guard.digests = _NoCopySet(guard.digests)
+        for i in range(1, 50):
+            add_private(PrivateItem("chunk", f"chunk:{i}", "R", f"{i} " + _SECRET))
+        return echoes_private(_SECRET)
+
+    assert _run(body)
+

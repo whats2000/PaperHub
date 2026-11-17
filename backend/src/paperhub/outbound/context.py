@@ -100,7 +100,8 @@ def guard_sources(text: str) -> list[tuple[str, str]]:
 def _guard_add(items: list[PrivateItem], item: PrivateItem) -> None:
     guard = _turn_guard(items)
     mine = _digests(item.text)
-    if len(guard.digests | mine) > MAX_GUARD_WINDOWS:
+    # Counted without copying the turn's set: an add costs its own windows.
+    if len(guard.digests) + len(mine - guard.digests) > MAX_GUARD_WINDOWS:
         mark_incomplete(_TOO_LARGE)
         return
     guard.digests |= mine
