@@ -109,12 +109,12 @@ export function PdfMarksPage({
     const el = rootRef.current;
     if (!el || !loadBlocks) return;
     if (typeof IntersectionObserver === "undefined") {
-      void loadBlocks(page);
+      void loadBlocks(page).catch(() => undefined); // loaded again when needed
       return;
     }
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) {
-        void loadBlocks(page);
+        void loadBlocks(page).catch(() => undefined); // loaded again when needed
         io.disconnect();
       }
     });

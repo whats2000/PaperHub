@@ -13,9 +13,9 @@ vi.mock("@/lib/api", async (orig) => ({
   listPaperBlocks: vi.fn(),
   locateText: vi.fn(),
 }));
-const { toastFn, toastMessage } = vi.hoisted(() => ({ toastFn: vi.fn(), toastMessage: vi.fn() }));
+const { toastFn, toastMessage, toastError } = vi.hoisted(() => ({ toastFn: vi.fn(), toastMessage: vi.fn(), toastError: vi.fn() }));
 vi.mock("sonner", () => ({
-  toast: Object.assign(toastFn, { error: vi.fn(), message: toastMessage, success: vi.fn() }),
+  toast: Object.assign(toastFn, { error: toastError, message: toastMessage, success: vi.fn() }),
 }));
 
 const HIT: LocateResult = {
@@ -49,6 +49,7 @@ let create: CreateMock;
 beforeEach(() => {
   toastFn.mockReset();
   toastMessage.mockReset();
+  toastError.mockReset();
   create = resetStores();
   vi.mocked(listPaperBlocks).mockReset();
   vi.mocked(listPaperBlocks).mockResolvedValue([]); // no blocks.json
@@ -107,5 +108,29 @@ describe("Follow on a PDF without Marker blocks", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(onReading).toHaveBeenLastCalledWith("2 Method");
     expect(onReading).not.toHaveBeenCalledWith(null);
+  });
+});
+
+describe("a page whose blocks failed to load", () => {
+  it("says so and saves nothing, rather than locating and finding nothing; a retry saves", async () => {
+    vi.mocked(listPaperBlocks).mockRejectedValue(new Error("503"));
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    select("s1", "s2");
+    await screen.findByRole("toolbar");
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringContaining("layout")));
+    expect(locateText).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(toastMessage).not.toHaveBeenCalled();
+    // The blocks load on the next try: the mark files by its block.
+    vi.mocked(listPaperBlocks).mockResolvedValue([
+      { block_id: "/page/0/Text/1", type: "Text", page: 0, box: [0.05, 0.05, 0.6, 0.1], text: "Robots learn from demos.", section: "1 Introduction" },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].section_key).toBe("1 Introduction");
+    expect(locateText).not.toHaveBeenCalled();
   });
 });

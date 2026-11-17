@@ -310,10 +310,13 @@ export function usePdfMarks({
         box: boxOf(fracToClient(frac, el.getBoundingClientRect()), origin),
       };
       setTarget(next);
-      void loadBlocks(page).then((list) => {
-        const result = boxMark({ page, box: frac, blocks: list, spans, scanned });
-        setTarget((cur) => (cur === next ? { ...next, result } : cur));
-      });
+      void loadBlocks(page).then(
+        (list) => {
+          const result = boxMark({ page, box: frac, blocks: list, spans, scanned });
+          setTarget((cur) => (cur === next ? { ...next, result } : cur));
+        },
+        () => undefined, // worked out (and the failure said) when it is saved
+      );
     },
     [measure, loadBlocks],
   );
@@ -342,6 +345,20 @@ export function usePdfMarks({
   );
 
   const { busy, save: saveMarks } = useMarkSave(paperId);
+  /** The blocks of these pages, or null when a page's could not be loaded
+   * (said in a toast; the popover stays to try again). A failed load is
+   * never taken for a page without blocks. */
+  const loadPages = useCallback(
+    async (pages: number[]): Promise<PaperPageBlock[][] | null> => {
+      try {
+        return await Promise.all(pages.map((p) => loadBlocks(p)));
+      } catch {
+        toast.error(t("marks.layoutFailed", "Couldn't load this page's layout, so the mark can't be filed yet. Try again."));
+        return null;
+      }
+    },
+    [loadBlocks, t],
+  );
   const save = useCallback(
     async (color: MarkColor | null, addNote: boolean) => {
       const cur = target;
@@ -358,7 +375,8 @@ export function usePdfMarks({
           groups: async () => {
             // The blocks of every page it is on, loaded by now.
             const pages = [...new Set(cur.fragments.map((f) => f.page))];
-            const loaded = await Promise.all(pages.map((p) => loadBlocks(p)));
+            const loaded = await loadPages(pages);
+            if (!loaded) return null;
             const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
             const pieces = piecesFromFragments(cur.fragments, byPage);
             if (!pieces.length || paperId === null) return null;
@@ -397,12 +415,14 @@ export function usePdfMarks({
         });
       } else {
         // A box over most of an equation is that equation; else a region.
+        const blocks = cur.result ? null : await loadPages([cur.page]);
+        if (!cur.result && !blocks) return;
         const result =
           cur.result ??
           boxMark({
             page: cur.page,
             box: cur.frac,
-            blocks: await loadBlocks(cur.page),
+            blocks: blocks![0]!,
             spans: cur.scanned ? [] : layerSpans(pageEl(cur.page) ?? root),
             scanned: cur.scanned,
           });
@@ -416,7 +436,7 @@ export function usePdfMarks({
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadBlocks, pageEl, blocksRef, paperId, t],
+    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, paperId, t],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(

@@ -1,7 +1,8 @@
 /** The Marker blocks of a PDF's pages (Plan H5b.1), loaded per page as
- * the page comes into view, kept for the reader's life; a failed request is
- * tried again next time. A page without blocks (the LaTeX-compiled PDF of an
- * HTML paper) loads as an empty list. */
+ * the page comes into view, kept for the reader's life. A page without
+ * blocks (the LaTeX-compiled PDF of an HTML paper) loads as an empty list;
+ * a failed request rejects (never passes for "no blocks") and is tried
+ * again on the next call. */
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listPaperBlocks } from "@/lib/api";
@@ -30,9 +31,9 @@ export function usePdfBlocks(paperId: number | null) {
             setBlocks((prev) => ({ ...prev, [page]: list }));
             return list;
           },
-          () => {
+          (err: unknown) => {
             requests.current.delete(page); // try again next time
-            return NO_BLOCKS;
+            throw err;
           },
         );
         requests.current.set(page, req);
