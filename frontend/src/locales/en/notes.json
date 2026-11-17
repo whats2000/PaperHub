@@ -238,7 +238,9 @@
     "comingSoon": "Coming soon",
     "exporting": "Exporting…",
     "exportDocxNeedsPandoc": "Needs pandoc on the server: winget install pandoc, or your package manager",
+    "exportDocxPandocTooOld": "Needs pandoc 2.15 or newer on the server: winget upgrade pandoc, or your package manager",
     "exportNoPandoc": "Word export needs pandoc: install it with winget install pandoc",
+    "exportPandocTooOld": "Word export needs pandoc 2.15 or newer: update it with winget upgrade pandoc",
     "exportFailed": "Couldn't export the note",
     "shortcuts": "Shortcuts"
   },

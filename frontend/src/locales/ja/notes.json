@@ -238,7 +238,9 @@
     "comingSoon": "近日対応",
     "exporting": "書き出し中…",
     "exportDocxNeedsPandoc": "サーバーに pandoc が必要です：winget install pandoc、またはお使いのパッケージマネージャーで",
+    "exportDocxPandocTooOld": "サーバーに pandoc 2.15 以降が必要です：winget upgrade pandoc、またはお使いのパッケージマネージャーで",
     "exportNoPandoc": "Word の書き出しには pandoc が必要です：winget install pandoc でインストールしてください",
+    "exportPandocTooOld": "Word の書き出しには pandoc 2.15 以降が必要です：winget upgrade pandoc で更新してください",
     "exportFailed": "ノートを書き出せませんでした",
     "shortcuts": "ショートカット"
   },

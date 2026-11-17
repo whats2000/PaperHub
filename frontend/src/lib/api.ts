@@ -1468,9 +1468,32 @@ export async function locateText(paperContentId: number, text: string): Promise<
 
 export type NoteExportFormat = "md" | "docx";
 
-/** Which note export formats work on this server (Word needs pandoc). */
-export async function getNoteExportCapabilities(): Promise<Record<NoteExportFormat, boolean>> {
-  return apiFetch<Record<NoteExportFormat, boolean>>("/notes/export/capabilities");
+/** Why Word export is unavailable: no pandoc, or one without `--sandbox`. */
+export type DocxUnavailableReason = "pandoc_missing" | "pandoc_too_old";
+
+export interface NoteExportCapabilities {
+  md: boolean;
+  docx: boolean;
+  docx_reason: DocxUnavailableReason | null;
+}
+
+/** Which note export formats work on this server (Word needs pandoc 2.15+). */
+export async function getNoteExportCapabilities(): Promise<NoteExportCapabilities> {
+  return apiFetch<NoteExportCapabilities>("/notes/export/capabilities");
+}
+
+/** A download's file name from its Content-Disposition: the UTF-8
+ * `filename*` (a CJK title kept), else the ASCII `filename`, else `fallback`. */
+export function exportFileName(disposition: string, fallback: string): string {
+  const star = /filename\*=UTF-8''([^;\s]+)/i.exec(disposition)?.[1];
+  if (star) {
+    try {
+      return decodeURIComponent(star);
+    } catch {
+      // A malformed name: fall through to the ASCII one.
+    }
+  }
+  return /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallback;
 }
 
 /** A note exported as a Markdown zip or a .docx, with the server's file name. */
@@ -1480,7 +1503,9 @@ export async function exportNote(
 ): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(`${API_BASE_URL}/notes/${noteId}/export?format=${format}`);
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const name = /filename="([^"]+)"/.exec(disposition)?.[1];
-  return { blob: await res.blob(), filename: name ?? `note-notes.${format === "md" ? "zip" : "docx"}` };
+  const filename = exportFileName(
+    res.headers.get("content-disposition") ?? "",
+    `note-notes.${format === "md" ? "zip" : "docx"}`,
+  );
+  return { blob: await res.blob(), filename };
 }

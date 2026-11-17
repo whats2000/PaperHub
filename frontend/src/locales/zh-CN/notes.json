@@ -238,7 +238,9 @@
     "comingSoon": "即将推出",
     "exporting": "导出中…",
     "exportDocxNeedsPandoc": "服务器需安装 pandoc：winget install pandoc，或使用你的包管理器",
+    "exportDocxPandocTooOld": "服务器需 pandoc 2.15 及以上版本：winget upgrade pandoc，或使用你的包管理器",
     "exportNoPandoc": "导出 Word 需要 pandoc：请用 winget install pandoc 安装",
+    "exportPandocTooOld": "导出 Word 需要 pandoc 2.15 及以上版本：请用 winget upgrade pandoc 更新",
     "exportFailed": "无法导出这份笔记",
     "shortcuts": "快捷键"
   },

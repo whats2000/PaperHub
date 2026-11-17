@@ -7,6 +7,7 @@ import { Ellipsis, FileDown, FileText, Keyboard, Loader2, LocateFixed, ScanEye }
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { DocxUnavailableReason } from "@/lib/api";
 import { hasOpenLayer } from "@/lib/openLayer";
 import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
@@ -28,8 +29,9 @@ export interface NotesToolbarProps {
   /** Export the note (the item shows busy until it settles); the items
    * wait as "Coming soon" until it is given. */
   onExport?: (format: ExportFormat) => void | Promise<void>;
-  /** False when the server has no pandoc: Word is disabled with the reason. */
-  docxAvailable?: boolean;
+  /** Why the server cannot make Word (no pandoc, or one without
+   * `--sandbox`): Word is disabled with that reason. */
+  docxReason?: DocxUnavailableReason | null;
   guideOpen: boolean;
   onGuideOpenChange: (open: boolean) => void;
 }
@@ -73,7 +75,7 @@ export function NotesToolbar({
   followAvailable = true,
   sharedBy = null,
   onExport,
-  docxAvailable = true,
+  docxReason = null,
   guideOpen,
   onGuideOpenChange,
 }: NotesToolbarProps) {
@@ -246,12 +248,17 @@ export function NotesToolbar({
                   }
                   busy={busy === "docx"}
                   reason={
-                    onExport && !docxAvailable
-                      ? t(
-                          "notes:toolbar.exportDocxNeedsPandoc",
-                          "Needs pandoc on the server: winget install pandoc, or your package manager",
-                        )
-                      : null
+                    !onExport || !docxReason
+                      ? null
+                      : docxReason === "pandoc_too_old"
+                        ? t(
+                            "notes:toolbar.exportDocxPandocTooOld",
+                            "Needs pandoc 2.15 or newer on the server: winget upgrade pandoc, or your package manager",
+                          )
+                        : t(
+                            "notes:toolbar.exportDocxNeedsPandoc",
+                            "Needs pandoc on the server: winget install pandoc, or your package manager",
+                          )
                   }
                   onClick={runExport && (() => runExport("docx"))}
                 />

@@ -159,7 +159,7 @@ describe("NotesToolbar", () => {
 
   it("Export as Word disabled with reason", async () => {
     const onExport = vi.fn();
-    render(<Toolbar onExport={onExport} docxAvailable={false} />);
+    render(<Toolbar onExport={onExport} docxReason="pandoc_missing" />);
     fireEvent.click(screen.getByRole("button", { name: "More" }));
     const menu = await screen.findByRole("menu");
     const docx = within(menu).getByRole("menuitem", { name: /Export as Word/ });
@@ -169,6 +169,15 @@ describe("NotesToolbar", () => {
     expect(onExport).not.toHaveBeenCalled();
     const md = within(menu).getByRole("menuitem", { name: /Export as Markdown/ });
     expect(md).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("Export as Word names a pandoc too old for the sandbox", async () => {
+    render(<Toolbar onExport={vi.fn()} docxReason="pandoc_too_old" />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    const docx = within(menu).getByRole("menuitem", { name: /Export as Word/ });
+    expect(docx).toHaveAttribute("aria-disabled", "true");
+    expect(docx).toHaveTextContent("Needs pandoc 2.15 or newer on the server: winget upgrade pandoc");
   });
 
   it("shows the export busy until it settles, then closes the menu", async () => {
