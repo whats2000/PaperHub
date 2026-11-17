@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -52,6 +53,67 @@ class ExportPaper:
     arxiv_id: str | None = None
     # The paper's cache dir: page crops and figure images come from it.
     source_dir: Path | None = None
+
+
+# --- user text -------------------------------------------------------------
+
+# Characters that carry no user meaning but can steer a Markdown parser or
+# forge the exporter's own placeholders: C0/C1 controls except tab and line
+# feed, U+2028/U+2029, the BOM, private use (the BMP area and planes
+# 15-16), lone surrogates and the U+FFFE/U+FFFF noncharacters.
+_UNSAFE = re.compile(
+    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u2028\u2029\ufeff\ue000-\uf8ff"
+    "\U000f0000-\U0010ffff\ud800-\udfff\ufffe\uffff]")
+
+
+def _user_text(s: str) -> str:
+    """The one normalisation every user string gets before it is written.
+
+    ``\\r\\n`` and a lone ``\\r`` become ``\\n``: CommonMark ends a line at
+    either, so a ``\\r`` would otherwise start a heading, list or image
+    where the exporter sees one line. Then the characters in ``_UNSAFE``
+    are dropped: controls other than ``\\t`` and ``\\n``, the Unicode line
+    and paragraph separators, the BOM, private-use code points (the
+    exporter's placeholders are built from them, so user text can never
+    forge one), lone surrogates and noncharacters.
+
+    Zero-width and bidi format characters (U+200B-U+200F, U+2060,
+    U+202A-U+202E, U+2066-U+2069) are kept: ZWJ/ZWNJ carry meaning in
+    emoji and several scripts, and none of them is Markdown syntax or
+    whitespace to any reader, so they can neither open nor close a
+    construct; every construct the exporter fears is escaped whatever
+    stands next to it.
+    """
+    return _UNSAFE.sub("", s.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _clean(v: Any) -> Any:
+    """``v`` with every string in it (nested lists and dict values) passed
+    through ``_user_text``."""
+    if isinstance(v, str):
+        return _user_text(v)
+    if isinstance(v, list):
+        return [_clean(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _clean(x) for k, x in v.items()}
+    return v
+
+
+def _clean_inputs(
+    note: Note, blocks: list[Block], papers: Mapping[int, ExportPaper],
+) -> tuple[Note, list[Block], dict[int, ExportPaper]]:
+    """The note, blocks and papers with all their text normalised: the
+    single point user text enters the exporter."""
+    note = note.model_copy(update={"title": _user_text(note.title)})
+    blocks = [b.model_copy(update={
+        "props": _clean(b.props), "content": _clean(b.content),
+        "section_key": _clean(b.section_key)}) for b in blocks]
+    cleaned = {pid: ExportPaper(
+        id=p.id, title=_user_text(p.title),
+        authors=[_user_text(a) for a in p.authors], year=p.year,
+        arxiv_id=_clean(p.arxiv_id), source_dir=p.source_dir)
+        for pid, p in papers.items()}
+    return note, blocks, cleaned
 
 
 # --- citations -------------------------------------------------------------
@@ -243,7 +305,10 @@ def _code_span(code: str) -> str:
     return _wrap(code, fence + pad, pad + fence)
 
 
-_HELD = re.compile(r"\ue000(\d+)\ue001")
+# A held code span's placeholder: private-use delimiters (which
+# ``_user_text`` drops from every user string, so note text can never hold
+# one) around a per-export random nonce and the span's index.
+_HELD = re.compile(r"\ue000[0-9a-f]{16}:\d+\ue001")
 
 
 class _Writer:
@@ -264,7 +329,8 @@ class _Writer:
         self._image_count = 0
         # Inline code spans, held out of the line-level escaping (hard
         # breaks, line starts, indents) until the block is written.
-        self._held: list[str] = []
+        self._held: dict[str, str] = {}
+        self._nonce = secrets.token_hex(8)
 
     def cite(self, pid: int | None, locator: str = "") -> str:
         if pid is None or pid not in self.papers:
@@ -416,12 +482,15 @@ class _Writer:
         return None
 
     def _hold(self, span: str) -> str:
-        self._held.append(span)
-        return f"\ue000{len(self._held) - 1}\ue001"
+        token = f"\ue000{self._nonce}:{len(self._held)}\ue001"
+        self._held[token] = span
+        return token
 
     def release(self, text: str) -> str:
-        """``text`` with its held code spans put back."""
-        return _HELD.sub(lambda m: self._held[int(m[1])], text)
+        """``text`` with its held code spans put back, each at the one place
+        its token was written. Only this export's own tokens are replaced,
+        each once; anything else of that shape is dropped."""
+        return _HELD.sub(lambda m: self._held.pop(m[0], ""), text)
 
     def _name(self, ext: str) -> str:
         """The next image file name: by index, never by block id (an id
@@ -554,6 +623,7 @@ def note_to_markdown(
     """``(markdown, image files by relative path, BibTeX)`` of a note.
     ``blocks`` in document order; ``chunk_papers`` maps a cited chunk id to
     its paper, ``mark_papers`` a reference block's mark id to its paper."""
+    note, blocks, papers = _clean_inputs(note, blocks, papers)
     w = _Writer(note, papers, chunk_papers or {}, mark_papers or {})
     offset = 2 if any(b.type == "section" for b in blocks) else 1
     indent: dict[str, str] = {}
