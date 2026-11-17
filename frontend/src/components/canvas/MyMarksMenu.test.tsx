@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MyMarksMenu } from "@/components/canvas/MyMarksMenu";
 import { patchMarkColor } from "@/lib/api";
+import { chunkMap } from "@/lib/marks/anchor";
+import { markPositions } from "@/lib/marks/pieces";
 import { useCanvasStore } from "@/store/canvas";
 import { useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
@@ -135,5 +137,118 @@ describe("My marks", () => {
     openPaper.mockRestore();
     tab.mockRestore();
     reveal.mockRestore();
+  });
+});
+
+describe("My marks, fix round 1", () => {
+  it("sends a rename once, on Enter (which leaves the field) or on leaving it", async () => {
+    vi.mocked(patchMarkColor).mockResolvedValue(COLORS);
+    const menu = await openMenu();
+    const input = within(menu).getByDisplayValue("Key result");
+    fireEvent.change(input, { target: { value: "Findings" } });
+    input.focus();
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    expect(patchMarkColor).toHaveBeenCalledTimes(1);
+    const other = within(menu).getByDisplayValue("Method");
+    fireEvent.change(other, { target: { value: "Ours" } });
+    fireEvent.blur(other);
+    fireEvent.blur(other);
+    expect(patchMarkColor).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders marks anchored to the text and marks only on a page together, as the paper reads", async () => {
+    useMarksStore.setState({
+      // §1 holds chunks 1-2, §7 chunk 9.
+      chunksByPaper: {
+        3: chunkMap([
+          { id: 1, dom_id: "phchunk-0", section: "1 Intro" },
+          { id: 2, dom_id: "phchunk-1", section: "1 Intro" },
+          { id: 9, dom_id: "phchunk-2", section: "7 Discussion" },
+        ]),
+      },
+      marksByPaper: {
+        3: [
+          mark("late", "7 Discussion", 9),
+          // A figure boxed on page 2, in §1: no chunk.
+          mark("fig", "1 Intro", 0, {
+            kind: "figure",
+            view: "pdf",
+            pieces: [{ quote: "Figure 1", page: 1, box: [0.1, 0.3, 0.9, 0.6] }],
+          }),
+          mark("early", "1 Intro", 2),
+        ],
+      },
+    });
+    const menu = await openMenu();
+    const sections = within(menu).getAllByRole("region");
+    expect(sections.map((s) => s.getAttribute("aria-label"))).toEqual(["§1", "§7"]);
+    expect(within(sections[0]!).getAllByRole("button").map((r) => r.dataset.testid)).toEqual([
+      "my-mark-fig",
+      "my-mark-early",
+    ]);
+  });
+
+  it("places a page-only mark between text marks through a mark that has both", () => {
+    const chunks = [1, 2, 3, 4].map((id) => ({ id, section: "2 Method" }));
+    const located = mark("located", "2 Method", 3, {
+      view: "pdf",
+      pieces: [{ quote: "located", page: 4, rects: [[0.1, 0.2, 0.5, 0.22]], chunk_start: 3, chunk_end: 3 }],
+    });
+    const box = mark("box", "2 Method", 0, {
+      kind: "region",
+      view: "pdf",
+      pieces: [{ quote: "region", page: 5, box: [0.1, 0.5, 0.5, 0.6] }],
+    });
+    const first = mark("first", "2 Method", 1);
+    const last = mark("last", "2 Method", 4);
+    const pos = markPositions([last, box, located, first], chunks);
+    const order = ["first", "located", "box", "last"].map((id) => pos.get(id)!);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("jumps to a mark whose colour is hidden: shows it for now, with Hide again", async () => {
+    const reveal = vi.spyOn(useTranslationStore.getState(), "requestReveal");
+    useMarksStore.setState({
+      colors: COLORS.map((c) => (c.color === "blue" ? { ...c, visible: false } : c)),
+      marksByPaper: { 3: [mark("m3", "3 Results", 30, { color: "blue" })] },
+    });
+    const menu = await openMenu(1);
+    fireEvent.click(within(menu).getByTestId("my-mark-m3"));
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(3, "m3", { fallback: true }));
+    expect(useMarksStore.getState().colors.find((c) => c.color === "blue")!.visible).toBe(true);
+    // Nothing is saved.
+    expect(patchMarkColor).not.toHaveBeenCalled();
+    const call = toastFn.mock.calls.find((c) => c[0] === "Showing a hidden colour")!;
+    const hide = (call[1] as { action: { label: string; onClick: () => void } }).action;
+    expect(hide.label).toBe("Hide again");
+    hide.onClick();
+    expect(useMarksStore.getState().colors.find((c) => c.color === "blue")!.visible).toBe(false);
+    reveal.mockRestore();
+  });
+
+  it("lists by kind, each entry with its kind, a snippet and its note", async () => {
+    useMarksStore.setState({
+      marksByPaper: {
+        3: [
+          mark("h1", "2 Method", 10),
+          mark("f1", "2 Method", 11, { kind: "figure", part_label: "2 Method · 2" }),
+        ],
+      },
+    });
+    const menu = await openMenu(2);
+    const fig = within(menu).getByTestId("my-mark-f1");
+    expect(within(fig).getByRole("img", { name: "Figure" })).toBeInTheDocument();
+    expect(fig).toHaveTextContent("quote f1");
+    expect(fig).toHaveTextContent("note 2");
+    expect(within(menu).getByTestId("my-mark-h1")).toHaveTextContent("note 1");
+    const kinds = within(menu).getByRole("group", { name: "Kinds to list" });
+    fireEvent.click(within(kinds).getByRole("button", { name: "Figure" }));
+    expect(within(kinds).getByRole("button", { name: "Figure" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(menu).queryByTestId("my-mark-f1")).toBeNull();
+    expect(within(menu).getByTestId("my-mark-h1")).toBeInTheDocument();
+    expect(kinds).toHaveTextContent("1 of 2");
+    // The trigger still counts every mark on the paper.
+    expect(screen.getByTestId("my-marks-count")).toHaveTextContent("2");
   });
 });

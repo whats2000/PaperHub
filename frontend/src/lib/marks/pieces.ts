@@ -6,7 +6,7 @@
  * skipped words unmarked. A place is a string: `h:<n>` for an HTML
  * paragraph element (named for this page's life), `p:<page>:<block>` for a
  * PDF Marker block. */
-import type { MarkColor, MarkPiece } from "@/types/notes";
+import type { Mark, MarkColor, MarkPiece } from "@/types/notes";
 
 /** A mark the pen made in this pen session, and the places it covers. */
 export interface PenMark {
@@ -136,4 +136,83 @@ export function clearIfStill(doc: Document, range: Range): void {
   ) {
     sel.removeAllRanges();
   }
+}
+
+// ---- Where a mark sits in the paper ------------------------------------
+
+/** A chunk of the paper, in the paper's order (the reader's chunk anchors). */
+export interface PaperChunk {
+  id: number;
+  section: string | null;
+}
+
+const isLivePiece = (p: MarkPiece) => !p.erased && !p.removed;
+
+/** A piece's place on the pages: its page plus how far down (0–1) it starts. */
+function pagePlace(p: MarkPiece): number | null {
+  if (typeof p.page !== "number") return null;
+  const boxes = Array.isArray(p.rects) ? (p.rects as Quad[]) : p.box ? [p.box] : [];
+  const top = boxes.length ? Math.min(...boxes.map((b) => num(b[1], 0))) : 0;
+  return p.page + Math.min(Math.max(top, 0), 0.999);
+}
+
+/**
+ * One reading position per mark, comparable across every kind of anchor, so
+ * a list of marks reads as the paper does:
+ *
+ * - a mark anchored to the text (a chunk) sits at its chunk's place in the
+ *   paper, then its offset;
+ * - a mark only on a page (a box, a figure, an equation, unlocated PDF text)
+ *   is mapped onto the chunks through the marks that have both a chunk and
+ *   a page (interpolated by page and height); with none, it sits at the
+ *   start of its section's chunks, in page order;
+ * - with no chunks at all (a PDF-only paper), every mark sits by page, then
+ *   height.
+ *
+ * Each mark is placed by its first live piece in reading order.
+ */
+export function markPositions(marks: readonly Mark[], chunks: readonly PaperChunk[]): Map<string, number> {
+  const ord = new Map(chunks.map((c, i) => [c.id, i] as const));
+  const sectionStart = new Map<string, number>();
+  chunks.forEach((c, i) => {
+    if (c.section !== null && !sectionStart.has(c.section)) sectionStart.set(c.section, i);
+  });
+  const chunkPlace = (p: MarkPiece): number | null => {
+    const at = typeof p.chunk_start === "number" ? ord.get(p.chunk_start) : undefined;
+    if (at === undefined) return null;
+    return at + Math.min(num(p.text_start, 0), 999_999) / 1e6;
+  };
+  const firsts = marks.map((m) => [m, readingOrder(m.pieces.filter(isLivePiece))[0]] as const);
+  // Calibration: pieces placed both ways.
+  const calib = marks
+    .flatMap((m) => m.pieces.filter(isLivePiece))
+    .map((p) => [pagePlace(p), chunkPlace(p)] as const)
+    .filter((x): x is readonly [number, number] => x[0] !== null && x[1] !== null)
+    .sort((a, b) => a[0] - b[0]);
+  const onChunks = (x: number): number => {
+    const first = calib[0]!;
+    const last = calib[calib.length - 1]!;
+    if (x <= first[0]) return first[1] - (first[0] - x) * 1e-3;
+    if (x >= last[0]) return last[1] + (x - last[0]) * 1e-3;
+    const i = calib.findIndex((c) => c[0] >= x);
+    const [x0, y0] = calib[i - 1]!;
+    const [x1, y1] = calib[i]!;
+    return x1 === x0 ? y0 : y0 + ((x - x0) / (x1 - x0)) * (y1 - y0);
+  };
+  const out = new Map<string, number>();
+  for (const [m, p] of firsts) {
+    let pos = Infinity;
+    if (p) {
+      const c = chunkPlace(p);
+      const pg = pagePlace(p);
+      if (!chunks.length) pos = pg ?? num(p.chunk_start);
+      else if (c !== null) pos = c;
+      else if (pg !== null) {
+        const start = m.section_key !== null ? sectionStart.get(m.section_key) : undefined;
+        pos = calib.length ? onChunks(pg) : start !== undefined ? start + pg / 1e4 : chunks.length + pg;
+      }
+    }
+    out.set(m.id, pos);
+  }
+  return out;
 }
