@@ -111,13 +111,21 @@ def _safe(name: str) -> str:
 
 def _media_filter(items: list[tuple[str, str]]) -> str:
     """A Lua filter adding each ``(media name, file)`` to the media bag, so
-    the sandboxed writer embeds exactly these. Files are pandoc-cwd
-    relative; names and files are checked by ``_safe``."""
+    the sandboxed writer embeds exactly these, and prefixing every heading
+    id with ``h-``. Files are pandoc-cwd relative; names and files are
+    checked by ``_safe``."""
     rows = ", ".join(
         f'{{"{name}", "{file}", "{_MIME.get(Path(name).suffix.lower(), "")}"}}'
         for name, file in items)
     return (
         f"local items = {{{rows}}}\n"
+        # A heading's anchor gets a prefix no citeproc id has (``refs``,
+        # ``ref-<key>``), so a heading titled "refs" never shares the
+        # bibliography's bookmark. Filters run before --citeproc.
+        "function Header(h)\n"
+        "  if h.identifier ~= '' then h.identifier = 'h-' .. h.identifier end\n"
+        "  return h\n"
+        "end\n"
         "function Pandoc(doc)\n"
         "  for _, it in ipairs(items) do\n"
         "    local f = io.open(it[2], 'rb')\n"

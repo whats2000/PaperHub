@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from paperhub.notes.export import note_to_markdown
+from paperhub.notes.export import ExportPaper, note_to_markdown
 from paperhub.notes.models import Block, Note
 from paperhub.notes.pandoc import markdown_to_docx
 
@@ -44,4 +44,26 @@ def test_docx_has_curly_quotes_and_heading_bookmarks() -> None:
     assert "–" in text  # -- is an en dash
     # The note title and both headings carry bookmarks (heading anchors).
     assert xml.count("<w:bookmarkStart") >= 3
-    assert 'w:name="first-part"' in xml
+    assert 'w:name="h-first-part"' in xml
+
+
+def test_heading_titled_refs_keeps_off_the_bibliography_bookmark() -> None:
+    paper = ExportPaper(id=7, title="Deep Residual Learning", authors=["Kaiming He"],
+                        year=2016)
+    blocks = [
+        _blk("h1", "heading", [{"type": "text", "text": "refs", "styles": {}}],
+             {"level": 1}),
+        _blk("h2", "heading", [{"type": "text", "styles": {},
+                                "text": "ref he2016deep"}], {"level": 1}),
+        _blk("p1", "paragraph", [{"type": "text", "text": "See [fig:7/f1].",
+                                  "styles": {}}]),
+    ]
+    md, images, bib = note_to_markdown(
+        Note(id=1, target_kind="session", target_id="1", title="refs",
+             revision=1, updated_at=""), blocks, {7: paper})
+    docx = markdown_to_docx(md, {**images, "references.bib": bib.encode()})
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    names = re.findall(r'<w:bookmarkStart[^>]*w:name="([^"]+)"', xml)
+    assert names.count("refs") == 1 and names.count("ref-he2016deep") == 1, names
+    assert len(names) == len(set(names)), names
