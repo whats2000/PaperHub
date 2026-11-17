@@ -9,12 +9,23 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 
 import { partsOfNote } from "@/components/notes/parts";
 import { sectionLabel } from "@/components/notes/blocks/markProps";
-import { createMark, deleteMark, getChunkAnchors, listMarkColors, listMarks, restoreMark } from "@/lib/api";
+import {
+  createMark,
+  deleteMark,
+  erasePiece,
+  getChunkAnchors,
+  listMarkColors,
+  listMarks,
+  restoreMark,
+  restorePiece,
+  splitMark,
+} from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
+import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
-import type { Mark, MarkColorInfo, MarkCreated, MarkIn, SavedTo } from "@/types/notes";
+import type { Mark, MarkColor, MarkColorInfo, MarkCreated, MarkIn, SavedTo } from "@/types/notes";
 
 const UNDO_MS = 5000;
 
@@ -27,9 +38,19 @@ interface MarksState {
   /** "Show my marks": off hides every mark on the paper (kept, not deleted). */
   showMarks: boolean;
   setShowMarks: (on: boolean) => void;
-  /** The Box tool (PDF pages): a drag draws a box instead of selecting text. */
+  /** The Box tool (PDF pages): a drag draws a box instead of selecting
+   * text. Turning it on turns the highlighter off. */
   boxOn: boolean;
   setBoxOn: (on: boolean) => void;
+  /** The highlighter: every drag marks at once in `penColor` (the colour
+   * chosen last, remembered). Turning it on turns Box off. */
+  penOn: boolean;
+  penColor: MarkColor;
+  /** The marks the pen made since it was turned on: a stroke joins one of
+   * them. Turning the pen off ends the session. */
+  penSession: PenMark[];
+  setPen: (on: boolean, color?: MarkColor) => void;
+  notePenMark: (mark: PenMark) => void;
   /** Loads a paper's marks and chunk spans. */
   loadPaper: (paperId: number) => Promise<void>;
   loadColors: () => Promise<void>;
@@ -41,6 +62,11 @@ interface MarksState {
   create: (body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
+  /** Erases one piece of a mark and keeps the rest, with Undo (then Erase
+   * again); erasing the last piece deletes the mark (`remove`). */
+  erase: (markId: string, index: number) => Promise<void>;
+  /** The newest piece of a joined mark becomes its own mark. */
+  split: (markId: string) => Promise<void>;
 }
 
 /** localStorage that never throws (private windows, blocked site data). */
@@ -206,6 +232,83 @@ export const useMarksStore = create<MarksState>()(
         });
       };
 
+      /** The paper and mark of an id. */
+      const find = (markId: string): [number, Mark] | null => {
+        for (const [pid, list] of Object.entries(get().marksByPaper)) {
+          const m = list.find((x) => x.id === markId);
+          if (m) return [Number(pid), m];
+        }
+        return null;
+      };
+      /** A mark as the server returned it, keeping what only the list has. */
+      const replace = (paperId: number, prev: Mark, next: Mark) =>
+        put(paperId, (list) =>
+          list.map((m) => (m.id === prev.id ? { ...next, note_id: prev.note_id, part_label: prev.part_label } : m)),
+        );
+
+      const erase = async (markId: string, index: number): Promise<void> => {
+        const entry = find(markId);
+        if (!entry) return;
+        const [paperId, mark] = entry;
+        const live = livePieceIndexes(mark.pieces);
+        if (!live.includes(index)) return;
+        if (live.length <= 1) return remove(markId);
+        let res: Mark;
+        try {
+          res = await erasePiece(markId, index);
+        } catch {
+          toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece."));
+          return;
+        }
+        replace(paperId, mark, res);
+        refreshNote(mark.note_id);
+        let undone = false;
+        toast(t("notes:marks.erased", "Piece erased"), {
+          duration: UNDO_MS,
+          action: {
+            label: t("notes:marks.undo", "Undo"),
+            onClick: () => {
+              if (undone) return;
+              undone = true;
+              void restorePiece(markId, index).then(
+                (back) => {
+                  const cur = find(markId);
+                  if (cur) replace(cur[0], cur[1], back);
+                  refreshNote(mark.note_id);
+                  toast(t("notes:marks.pieceRestored", "Piece restored"), {
+                    duration: UNDO_MS,
+                    action: { label: t("notes:marks.eraseAgain", "Erase again"), onClick: () => void erase(markId, index) },
+                  });
+                },
+                () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark.")),
+              );
+            },
+          },
+        });
+      };
+
+      const split = async (markId: string): Promise<void> => {
+        const entry = find(markId);
+        if (!entry) return;
+        const [paperId, mark] = entry;
+        let made: Mark;
+        try {
+          made = await splitMark(markId);
+        } catch {
+          toast.error(t("notes:marks.splitFailed", "Couldn't split the mark."));
+          return;
+        }
+        // The server flags the moved piece `removed` in the original.
+        const last = livePieceIndexes(mark.pieces).pop();
+        const pieces = mark.pieces.map((p, i) => (i === last ? { ...p, removed: true } : p));
+        put(paperId, (list) => [
+          ...list.filter((m) => m.id !== made.id).map((m) => (m.id === markId ? { ...m, pieces } : m)),
+          { ...made, note_id: mark.note_id },
+        ]);
+        refreshNote(mark.note_id);
+        toast(t("notes:marks.splitDone", "Split into its own mark"));
+      };
+
       return {
         marksByPaper: {},
         chunksByPaper: {},
@@ -213,7 +316,18 @@ export const useMarksStore = create<MarksState>()(
         showMarks: true,
         setShowMarks: (on) => set({ showMarks: on }),
         boxOn: false,
-        setBoxOn: (on) => set({ boxOn: on }),
+        setBoxOn: (on) => set(on ? { boxOn: true, penOn: false, penSession: [] } : { boxOn: false }),
+        penOn: false,
+        penColor: "green",
+        penSession: [],
+        setPen: (on, color) =>
+          set((s) =>
+            on
+              ? { penOn: true, penColor: color ?? s.penColor, boxOn: false }
+              : { penOn: false, penSession: [] },
+          ),
+        notePenMark: (mark) =>
+          set((s) => (s.penOn ? { penSession: [...s.penSession.filter((m) => m.id !== mark.id), mark] } : {})),
 
         loadPaper: async (paperId) => {
           const chunks = get().ensureChunks(paperId).catch(() => undefined);
@@ -270,12 +384,14 @@ export const useMarksStore = create<MarksState>()(
         },
 
         remove,
+        erase,
+        split,
       };
     },
     {
       name: "paperhub-marks-v1",
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ showMarks: s.showMarks }),
+      partialize: (s) => ({ showMarks: s.showMarks, penColor: s.penColor }),
     },
   ),
 );

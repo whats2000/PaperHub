@@ -162,3 +162,98 @@ describe("markHint", () => {
     expect(markHint(3)).toBe("p1");
   });
 });
+
+describe("the highlighter (pen)", () => {
+  it("turns the pen and Box off each other, keeps its colour, and ends the session when off", () => {
+    const s = () => useMarksStore.getState();
+    s().setBoxOn(true);
+    s().setPen(true, "blue");
+    expect(s()).toMatchObject({ penOn: true, penColor: "blue", boxOn: false });
+    s().notePenMark({ id: "mk_1", color: "blue", places: ["h:1"] });
+    expect(s().penSession).toHaveLength(1);
+    s().setBoxOn(true);
+    expect(s()).toMatchObject({ penOn: false, boxOn: true, penColor: "blue", penSession: [] });
+    // Back on: the colour chosen last.
+    s().setPen(true);
+    expect(s()).toMatchObject({ penOn: true, penColor: "blue", boxOn: false });
+    s().setPen(false);
+    expect(s().penSession).toEqual([]);
+  });
+});
+
+describe("useMarksStore.erase", () => {
+  const TWO: Mark = {
+    ...MARK,
+    note_id: 7,
+    pieces: [
+      { quote: "agent pose", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" },
+      { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" },
+    ],
+  };
+
+  it("erases one piece and keeps the rest, with Undo, then Erase again", async () => {
+    const calls: string[] = [];
+    const erased = { ...TWO, pieces: [TWO.pieces[0], { ...TWO.pieces[1], erased: true }] };
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/1`, () => {
+        calls.push("erase");
+        return HttpResponse.json({ ...erased, note_id: undefined });
+      }),
+      http.post(`${API_BASE_URL}/marks/mk_1/pieces/1/restore`, () => {
+        calls.push("restore");
+        return HttpResponse.json({ ...TWO, note_id: undefined });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [TWO] } });
+    await useMarksStore.getState().erase("mk_1", 1);
+    const after = useMarksStore.getState().marksByPaper[3]![0]!;
+    expect(after.pieces[0]!.erased).toBeUndefined();
+    expect(after.pieces[1]!.erased).toBe(true);
+    expect(after.note_id).toBe(7);
+    expect(toastFn.mock.lastCall?.[0]).toBe("Piece erased");
+
+    const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    expect(undo.label).toBe("Undo");
+    undo.onClick();
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece restored", expect.anything()));
+    expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[1]!.erased).toBeUndefined();
+
+    const again = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    expect(again.label).toBe("Erase again");
+    again.onClick();
+    await waitFor(() => expect(calls).toEqual(["erase", "restore", "erase"]));
+  });
+
+  it("erasing a mark's last piece deletes the mark (Undo, then Delete again)", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => {
+        calls.push("delete");
+        return HttpResponse.json({ revision: 5, applied: ["b_q"], rejected: [], change_set_id: null });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().erase("mk_1", 0);
+    expect(calls).toEqual(["delete"]);
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    expect(toastFn.mock.lastCall?.[0]).toBe("Mark deleted");
+  });
+});
+
+describe("useMarksStore.split", () => {
+  it("makes the newest piece its own mark", async () => {
+    const two: Mark = {
+      ...MARK,
+      note_id: 7,
+      pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+    };
+    const split: Mark = { ...MARK, id: "mk_2", block_id: "b_2", pieces: [two.pieces[1]!] };
+    server.use(http.post(`${API_BASE_URL}/marks/mk_1/split`, () => HttpResponse.json(split)));
+    useMarksStore.setState({ marksByPaper: { 3: [two] } });
+    await useMarksStore.getState().split("mk_1");
+    const list = useMarksStore.getState().marksByPaper[3]!;
+    expect(list.map((m) => m.id)).toEqual(["mk_1", "mk_2"]);
+    expect(list[0]!.pieces[1]!.removed).toBe(true);
+    expect(list[1]).toMatchObject({ id: "mk_2", note_id: 7 });
+  });
+});
