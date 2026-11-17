@@ -50,6 +50,13 @@ export function pdfPlace(page: number, blockId: string | null | undefined): stri
   return blockId ? `p:${page}:${blockId}` : null;
 }
 
+/** A piece located in the paper's reading text (a PDF page without Marker
+ * blocks): its paragraph there (none when it crosses a break, or when it
+ * wasn't located: never joins). */
+export function locatedPlace(paragraph: number | null | undefined): string | null {
+  return typeof paragraph === "number" ? `l:${paragraph}` : null;
+}
+
 /** Whether a piece is still on the paper (neither erased nor split away). */
 export const isLive = (p: MarkPiece) => !p.erased && !p.removed;
 
@@ -58,10 +65,39 @@ export function livePieceIndexes(pieces: readonly MarkPiece[]): number[] {
   return pieces.flatMap((p, i) => (isLive(p) ? [i] : []));
 }
 
-/** One quote for a mark of several pieces: "…" between them. */
+const num = (v: unknown, fallback = Infinity) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+
+type Quad = [number, number, number, number];
+
+function readingKey(p: MarkPiece, pdf: boolean): number[] {
+  if (pdf) {
+    const boxes = Array.isArray(p.rects) ? (p.rects as Quad[]) : p.box ? [p.box] : [];
+    const top = boxes.length ? Math.min(...boxes.map((b) => num(b[1]))) : Infinity;
+    const left = boxes.length ? Math.min(...boxes.map((b) => num(b[0]))) : Infinity;
+    return [num(p.page), top, left];
+  }
+  return [num(p.chunk_start), num(p.text_start, 0)];
+}
+
+/** Pieces as the paper reads them, for showing only: the stored list stays
+ * in stroke order (erase, restore and split address pieces by index; the
+ * last live one is the newest). A PDF piece (it has a page) reads by page,
+ * then top, then left; an HTML piece by its chunk, then its offset in the
+ * reading text. Mirrors the backend's `reading_order` (notes/marks.py). */
+export function readingOrder<P extends MarkPiece>(pieces: readonly P[]): P[] {
+  const pdf = pieces.length > 0 && pieces.every((p) => typeof p.page === "number");
+  const keyed = pieces.map((p, i) => ({ p, i, k: readingKey(p, pdf) }));
+  keyed.sort((a, b) => {
+    for (let j = 0; j < a.k.length; j++) if (a.k[j] !== b.k[j]) return a.k[j]! < b.k[j]! ? -1 : 1;
+    return a.i - b.i;
+  });
+  return keyed.map((x) => x.p);
+}
+
+/** One quote for a mark of several pieces, in reading order: "…" between
+ * them. */
 export function joinedQuote(pieces: readonly MarkPiece[]): string {
-  return pieces
-    .filter(isLive)
+  return readingOrder(pieces.filter(isLive))
     .map((p) => String(p.quote ?? "").trim())
     .filter(Boolean)
     .join(" … ");

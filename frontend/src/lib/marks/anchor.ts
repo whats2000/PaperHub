@@ -36,6 +36,8 @@ export interface HtmlPiece extends MarkPiece {
   chunk_end: number | null;
   prefix: string;
   suffix: string;
+  text_start?: number;
+  text_end?: number;
 }
 
 const CONTEXT = 32;
@@ -324,6 +326,10 @@ function placedPiecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null)
         chunk_end: heading ? first : chunkAt(index, e - 1, chunks),
         prefix: index.text.slice(Math.max(0, s - CONTEXT), s),
         suffix: index.text.slice(e, e + CONTEXT),
+        // Its span in the reading text (the backend's re-anchor keeps it
+        // current): the order pieces read in, and a hint among repeats.
+        text_start: s,
+        text_end: e,
         heading,
         block,
       });

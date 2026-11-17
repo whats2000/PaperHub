@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { htmlPlace, joinedQuote, joinTarget, livePieceIndexes, pdfPlace, type PenMark } from "@/lib/marks/pieces";
+import { htmlPlace, joinedQuote, joinTarget, livePieceIndexes, pdfPlace, readingOrder, type PenMark } from "@/lib/marks/pieces";
 import type { MarkPiece } from "@/types/notes";
 
 const session: PenMark[] = [
@@ -60,5 +60,22 @@ describe("pieces", () => {
   it("quotes a mark of several pieces with … between them", () => {
     expect(joinedQuote(pieces)).toBe("first words … last words");
     expect(joinedQuote([{ quote: "only" }])).toBe("only");
+  });
+});
+
+describe("reading order (shown only; stored pieces keep stroke order)", () => {
+  it("reads HTML pieces by chunk, then offset in the reading text", () => {
+    const later = { quote: "ahead of time", chunk_start: 4, text_start: 80 };
+    const earlier = { quote: "We predict", chunk_start: 4, text_start: 10 };
+    const before = { quote: "Robots", chunk_start: 3, text_start: 900 };
+    expect(readingOrder([later, earlier, before]).map((p) => p.quote)).toEqual(["Robots", "We predict", "ahead of time"]);
+    expect(joinedQuote([later, earlier])).toBe("We predict … ahead of time");
+  });
+
+  it("reads PDF pieces by page, then top, then left", () => {
+    const lower = { quote: "lower", page: 0, rects: [[0.1, 0.5, 0.3, 0.52]] };
+    const upper = { quote: "upper", page: 0, rects: [[0.1, 0.2, 0.3, 0.22]] };
+    const next = { quote: "page one", page: 1, box: [0.1, 0.1, 0.3, 0.12] as [number, number, number, number] };
+    expect(joinedQuote([next, lower, upper])).toBe("upper … lower … page one");
   });
 });

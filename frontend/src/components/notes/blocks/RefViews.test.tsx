@@ -60,7 +60,7 @@ describe("paper reference blocks for whole objects", () => {
 });
 
 describe("a highlight of several pieces", () => {
-  it("shows one quote with … between the pieces and the piece count", () => {
+  it("shows one quote in reading order with … between the pieces and the piece count", () => {
     inNote(
       <PaperQuoteView
         id="b1"
@@ -68,7 +68,11 @@ describe("a highlight of several pieces", () => {
           kind: "highlight",
           color: "green",
           quote: "agent pose of time",
-          pieces: JSON.stringify([{ quote: "agent pose" }, { quote: "of time" }]),
+          // Drawn later piece first: shown in the paper's order.
+          pieces: JSON.stringify([
+            { quote: "of time", chunk_start: 2, text_start: 30 },
+            { quote: "agent pose", chunk_start: 2, text_start: 5 },
+          ]),
         })}
       />,
     );
