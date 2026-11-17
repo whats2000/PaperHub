@@ -663,3 +663,13 @@ CREATE INDEX IF NOT EXISTS idx_note_comments_note
     ON note_comments(note_id, status);
 CREATE INDEX IF NOT EXISTS idx_note_comment_items_comment
     ON note_comment_items(comment_id);
+
+-- Plan H5b.1: every export of a note (a local download), with who made it.
+CREATE TABLE IF NOT EXISTS note_exports (
+    id INTEGER PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL,
+    note_id INTEGER NOT NULL,
+    format TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);

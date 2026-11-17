@@ -417,6 +417,8 @@ def create_app() -> FastAPI:
         # (FR-11) for ownership checks; without it in allow_headers the browser
         # CORS preflight is rejected and the request fails before reaching us.
         allow_headers=["Content-Type", "X-Paperhub-Session-Id"],
+        # A note export's file name (`<slug>-notes.zip`) travels in it.
+        expose_headers=["Content-Disposition"],
     )
     app.include_router(health.router)
     app.include_router(chat.router)
