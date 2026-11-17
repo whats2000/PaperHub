@@ -14,7 +14,7 @@ import {
 } from "@/store/markNav";
 import { resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
-import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
+import { clearPendingNoteOps, pendingNoteOps, useNotesStore } from "@/store/notes";
 import { useTranslationStore } from "@/store/translation";
 import type { Mark, NoteBlock } from "@/types/notes";
 
@@ -503,5 +503,76 @@ describe("a click on the paper", () => {
     // The reader has shown it (or said why it can't): the card opens.
     act(() => useTranslationStore.getState().revealed(reveal.n));
     expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
+  });
+});
+
+describe("two editors on one note, fix round 2", () => {
+  type Pm = HTMLElement & {
+    editor: {
+      commands: { insertContentAt: (pos: number, text: string) => boolean };
+      state: { doc: { descendants: (f: (n: { textContent: string; isText: boolean }, pos: number) => void) => void } };
+    };
+  };
+  const endOf = (pm: Pm, text: string) => {
+    let at = -1;
+    pm.editor.state.doc.descendants((n, pos) => {
+      if (n.isText && n.textContent === text) at = pos + text.length;
+    });
+    return at;
+  };
+
+  it("keeps a pane edit and a card edit to other blocks, each queued once", async () => {
+    seed([mark("mk_1", "q1"), mark("mk_3", "q3")]);
+    render(<NoteEditor noteId={7} variant="pane" />);
+    await screen.findByTestId("paper-ref-q1");
+    await openCard();
+    const card = screen.getByTestId("note-card");
+    const pane = screen.getAllByTestId("note-editor").find((e) => !card.contains(e))!;
+    await waitFor(() => expect(within(card).getByText("My thoughts")).toBeInTheDocument());
+    const panePm = pane.querySelector(".ProseMirror") as Pm;
+    const cardPm = card.querySelector(".ProseMirror") as Pm;
+    // Typed in the pane (not sent yet), then in the card on another block.
+    act(() => {
+      panePm.editor.commands.insertContentAt(endOf(panePm, "First note words"), " A");
+    });
+    act(() => {
+      cardPm.editor.commands.insertContentAt(endOf(cardPm, "My thoughts"), " B");
+    });
+    const blocks = useNotesStore.getState().notes[7]!.blocks;
+    expect(blocks.find((b) => b.id === "p1")!.text).toBe("First note words A");
+    expect(blocks.find((b) => b.id === "p2")!.text).toBe("My thoughts B");
+    await waitFor(() => expect(within(pane).getByText("My thoughts B")).toBeInTheDocument());
+    expect(within(pane).getByText("First note words A")).toBeInTheDocument();
+    // One update per block waits to be sent: nothing sent twice.
+    const ops = pendingNoteOps(7);
+    expect(ops.filter((o) => o.block_id === "p1")).toHaveLength(1);
+    expect(ops.filter((o) => o.block_id === "p2")).toHaveLength(1);
+    expect(ops).toHaveLength(2);
+  });
+
+  it("replaces the whole document when another editor's block can't be placed in this one", async () => {
+    seed([mark("mk_1", "q1"), mark("mk_3", "q3")]);
+    render(<NoteEditor noteId={7} variant="pane" />);
+    await screen.findByTestId("paper-ref-q1");
+    // Another editor nested a new line under "My thoughts": an only child,
+    // with no sibling here to put it beside.
+    const child: NoteBlock = {
+      ...BLOCKS.find((b) => b.id === "p2")!,
+      id: "n1",
+      parent_id: "p2",
+      content: [{ type: "text", text: "A nested line", styles: {} }],
+      text: "A nested line",
+    };
+    act(() => {
+      useNotesStore.setState((s) => ({
+        notes: { ...s.notes, 7: { ...s.notes[7]!, blocks: [...s.notes[7]!.blocks, child] } },
+        localEdits: { 7: { seq: 99, origin: "another-editor", blockIds: ["n1"] } },
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("A nested line")).toBeInTheDocument());
+    // Everything else is still there, and the change is not sent back.
+    expect(screen.getByText("My thoughts")).toBeInTheDocument();
+    expect(screen.getByTestId("paper-ref-q1")).toBeInTheDocument();
+    expect(pendingNoteOps(7)).toHaveLength(0);
   });
 });
