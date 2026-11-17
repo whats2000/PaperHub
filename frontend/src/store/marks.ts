@@ -258,10 +258,33 @@ export function resetMarkOps(timeoutMs = MARK_OP_TIMEOUT_MS): void {
 let colorsRequest: Promise<void> | null = null;
 /** Per paper, the latest refetch: an older one's answer is dropped. */
 const refetchGen = new Map<number, number>();
-/** When each mark was created here (a sequence), so a refetch sent before
- * it doesn't drop it. */
-let createSeq = 0;
-const createdAt = new Map<string, number>();
+/** A sequence of local mark changes that don't wait in the queue (a create,
+ * a join), and each mark's last one, so a refetch sent before the change
+ * neither drops nor overwrites it. Kept only while a refetch is out: the
+ * `since` of each refetch in flight. */
+let changeSeq = 0;
+const changedAt = new Map<string, number>();
+const refetchesOut: number[] = [];
+
+function noteLocalChange(markId: string): void {
+  changeSeq += 1;
+  if (refetchesOut.length > 0) changedAt.set(markId, changeSeq);
+}
+
+/** Forgets the changes no refetch in flight was sent before. */
+function pruneLocalChanges(): void {
+  if (refetchesOut.length === 0) {
+    changedAt.clear();
+    return;
+  }
+  const oldest = Math.min(...refetchesOut);
+  for (const [id, seq] of changedAt) if (seq <= oldest) changedAt.delete(id);
+}
+
+/** Test hook: how many local changes are remembered. */
+export function trackedMarkChanges(): number {
+  return changedAt.size;
+}
 const chunkRequests = new Map<number, Promise<ChunkMap>>();
 
 export const useMarksStore = create<MarksState>()(
@@ -458,21 +481,32 @@ export const useMarksStore = create<MarksState>()(
         refetchMarks: async (paperId, signal) => {
           const gen = (refetchGen.get(paperId) ?? 0) + 1;
           refetchGen.set(paperId, gen);
-          const since = createSeq;
-          const marks = await listMarks(paperId, signal);
-          // Aborted (its op timed out) or overtaken: a late snapshot.
-          if (signal?.aborted || refetchGen.get(paperId) !== gen) return;
-          const ids = new Set(marks.map((m) => m.id));
-          set((s) => ({
-            marksByPaper: {
-              ...s.marksByPaper,
-              [paperId]: [
-                ...marks,
-                // Created here after the request went out: not in its snapshot.
-                ...(s.marksByPaper[paperId] ?? []).filter((m) => !ids.has(m.id) && (createdAt.get(m.id) ?? -1) > since),
-              ],
-            },
-          }));
+          const since = changeSeq;
+          refetchesOut.push(since);
+          try {
+            const marks = await listMarks(paperId, signal);
+            // Aborted (its op timed out) or overtaken: a late snapshot.
+            if (signal?.aborted || refetchGen.get(paperId) !== gen) return;
+            // Changed here after the request went out: newer than its snapshot.
+            const newer = (m: Mark) => (changedAt.get(m.id) ?? -1) > since;
+            set((s) => {
+              const local = s.marksByPaper[paperId] ?? [];
+              const mine = new Map(local.filter(newer).map((m) => [m.id, m]));
+              const ids = new Set(marks.map((m) => m.id));
+              return {
+                marksByPaper: {
+                  ...s.marksByPaper,
+                  [paperId]: [
+                    ...marks.map((m) => mine.get(m.id) ?? m),
+                    ...local.filter((m) => newer(m) && !ids.has(m.id)),
+                  ],
+                },
+              };
+            });
+          } finally {
+            refetchesOut.splice(refetchesOut.indexOf(since), 1);
+            pruneLocalChanges();
+          }
         },
 
         loadPaper: async (paperId) => {
@@ -522,8 +556,7 @@ export const useMarksStore = create<MarksState>()(
           }
           const saved = res.saved_to;
           const mark: Mark = { ...res.mark, note_id: saved.note_id };
-          createSeq += 1;
-          createdAt.set(mark.id, createSeq);
+          noteLocalChange(mark.id);
           put(body.paper_content_id, (list) => [...list.filter((m) => m.id !== mark.id), mark]);
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);

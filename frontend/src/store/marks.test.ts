@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { waitFor } from "@testing-library/react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { MarkOpTimeout, markHint, queueMarkOp, resetMarkOps, useMarksStore } from "@/store/marks";
+import { MarkOpTimeout, markHint, queueMarkOp, resetMarkOps, trackedMarkChanges, useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, NoteBlock } from "@/types/notes";
 
@@ -585,5 +585,46 @@ describe("the refetch merge", () => {
     const newer = useMarksStore.getState().refetchMarks(3);
     await Promise.all([older, newer]);
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_fresh"]);
+  });
+
+  it("a join made while the refetch is out shows, not the snapshot's older copy", async () => {
+    const joined: Mark = {
+      ...MARK,
+      pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+    };
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(created(joined))),
+      http.get(`${API_BASE_URL}/marks`, async () => {
+        // A join (not queued) lands while the refetch is out.
+        await useMarksStore.getState().create({ ...body, join_to: "mk_1" }, { quiet: true });
+        // The snapshot was taken before it.
+        return HttpResponse.json([MARK]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().refetchMarks(3);
+    const marks = useMarksStore.getState().marksByPaper[3]!;
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.pieces).toHaveLength(2);
+  });
+
+  it("keeps no record of local changes once no refetch needs it", async () => {
+    let n = 0;
+    const make = () => created({ ...MARK, id: `mk_${(n += 1)}`, block_id: `b_${n}` });
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(make())),
+      http.get(`${API_BASE_URL}/marks`, async () => {
+        await useMarksStore.getState().create(body, { quiet: true });
+        expect(trackedMarkChanges()).toBe(1);
+        return HttpResponse.json([]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    // No refetch out: nothing to remember.
+    for (let i = 0; i < 3; i += 1) await useMarksStore.getState().create(body, { quiet: true });
+    expect(trackedMarkChanges()).toBe(0);
+    await useMarksStore.getState().refetchMarks(3);
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_4"]);
+    expect(trackedMarkChanges()).toBe(0);
   });
 });
