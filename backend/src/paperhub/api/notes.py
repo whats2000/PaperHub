@@ -185,24 +185,30 @@ async def export_note(note_id: int,
         if note is None:
             raise HTTPException(404, f"note {note_id} not found")
         blocks = await list_blocks(conn, note_id)
-        papers, chunk_papers, mark_papers = await export_sources(conn, note, blocks)
-        md, images, bib = await asyncio.to_thread(functools.partial(
-            note_to_markdown, note, blocks, papers, chunk_papers=chunk_papers,
-            mark_papers=mark_papers))
-        name = slug(note.title) + "-notes"
-        full_name = display_name(note.title) + "-notes"
-        if format == "md":
-            body = _zip(md, images, bib)
-            media, ext = "application/zip", "zip"
-        else:
-            try:
+        try:
+            papers, chunk_papers, mark_papers = await export_sources(
+                conn, note, blocks)
+            md, images, bib = await asyncio.to_thread(functools.partial(
+                note_to_markdown, note, blocks, papers,
+                chunk_papers=chunk_papers, mark_papers=mark_papers))
+            name = slug(note.title) + "-notes"
+            full_name = display_name(note.title) + "-notes"
+            if format == "md":
+                body = _zip(md, images, bib)
+                media, ext = "application/zip", "zip"
+            else:
                 body = await asyncio.to_thread(
                     note_pandoc.markdown_to_docx, md,
                     {**images, note_pandoc.BIB_NAME: bib.encode("utf-8")})
-            except note_pandoc.PandocError as exc:
-                logger.warning("note %s: Word export failed: %s", note_id, exc)
-                raise HTTPException(500, "pandoc_failed") from exc
-            media, ext = _DOCX_TYPE, "docx"
+                media, ext = _DOCX_TYPE, "docx"
+        except note_pandoc.PandocError as exc:
+            logger.warning("note %s: Word export failed: %s", note_id, exc)
+            raise HTTPException(500, "pandoc_failed") from exc
+        except Exception as exc:
+            # Any other failure is a clean 500 with the cause in the log,
+            # never a traceback to the client.
+            logger.exception("note %s: %s export failed", note_id, format)
+            raise HTTPException(500, "export_failed") from exc
         await _record_export(conn, note_id, format)
     logger.info("note export: note=%s format=%s blocks=%d images=%d",
                 note_id, format, len(blocks), len(images))

@@ -198,3 +198,18 @@ async def test_lone_surrogate_in_json_pieces_exports(client: AsyncClient,
     assert r.status_code == 200, r.text
     if fmt == "md":
         assert "> a b" in _zip(r.content)["note.md"].decode("utf-8")
+
+
+async def test_unexpected_export_error_is_a_clean_500(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture) -> None:
+    from paperhub.api import notes as notes_api
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogates not allowed")
+    monkeypatch.setattr(notes_api, "note_to_markdown", boom)
+    nid = await _paper_note(client)
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    assert r.status_code == 500
+    assert r.json() == {"detail": "export_failed"}
+    assert "export failed" in caplog.text
