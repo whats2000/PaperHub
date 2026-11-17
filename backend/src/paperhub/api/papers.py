@@ -11,12 +11,13 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import pymupdf
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from paperhub.agents.research_tools import (
     NoIngestibleSourceError,
@@ -26,6 +27,7 @@ from paperhub.api.deps import get_llm
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db, write_transaction
 from paperhub.ideation.domains import assign_color_indices
+from paperhub.notes.locate import locate_text
 from paperhub.outbound.destinations import OutboundBlocked
 from paperhub.pipelines.page_pdf import is_compiled_pdf, page_pdf_path
 from paperhub.pipelines.paper_asset import (
@@ -508,6 +510,39 @@ async def list_chunk_anchors(paper_content_id: int) -> list[ChunkAnchor]:
         rows = await cur.fetchall()
     return [ChunkAnchor(id=int(r[0]), dom_id=str(r[1]),
                         section=str(r[2]) if r[2] else None) for r in rows]
+
+
+class LocateIn(BaseModel):
+    text: str
+
+
+class LocateMatch(BaseModel):
+    chunk_start: int
+    chunk_end: int
+    chunk_ids: list[int]
+    section: str | None
+    text_start: int        # span in the reading text (the HTML reader's)
+    text_end: int
+
+
+class LocateOut(BaseModel):
+    match: LocateMatch | None
+    #: How the match was decided (words compared, which runs, why a miss).
+    meta: dict[str, Any] = Field(serialization_alias="_meta")
+
+
+@router.post("/content/{paper_content_id}/locate", response_model_by_alias=True)
+async def locate(paper_content_id: int, body: LocateIn) -> LocateOut:
+    """Where text read off the LaTeX-compiled PDF of an HTML paper sits in
+    its reading text: the chunks, the section and the span; ``match`` is
+    null when it is not found. A PDF mark there files under that section,
+    and Follow reports it. The decision rides in ``_meta`` and the log."""
+    settings = load_settings()
+    async with open_db(settings.db_path) as conn:
+        found, meta = await locate_text(conn, paper_content_id, body.text[:4000])
+    logger.info("locate paper=%s words=%s matched=%s reason=%s", paper_content_id,
+              meta.get("query_words"), meta.get("matched"), meta.get("reason"))
+    return LocateOut(match=LocateMatch(**found) if found else None, meta=meta)
 
 
 @router.get("/content/{paper_content_id}/document", response_model=DocumentModeResponse)
