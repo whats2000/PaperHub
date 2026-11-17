@@ -3,12 +3,18 @@
 Sections become ``##`` headings; a quote from a paper a block quote with
 "— <paper>, §<section>, p. <page> [@key]" under it; figures, equations and
 boxes an image file (the figure's own image, else a page crop) with its
-caption; math ``$…$`` / ``$$…$$``; dividers ``---``. Citations
+caption; math blocks and equations ``$$…$$``; dividers ``---``. Citations
 (``[chunk:N]``, ``[fig:P/ID]``, ``[view:P/N/box]``, an ``@`` mention of a
 paper) become ``[@key]`` with one ``references.bib`` entry per paper cited.
 
 Comment threads are never note text: a commented range exports as plain
 text and the thread stays out. Hidden text exports as plain text.
+
+Note text is untrusted Markdown input: everything Markdown gives a meaning
+is escaped (``!`` included, so text never forms an image; ``$`` included,
+since the editor has no inline math), line starts are escaped against
+block syntax, link targets are percent-encoded and a code block's language
+must be a plain name. Only the exporter's own references are images.
 """
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import aiosqlite
 
@@ -32,6 +39,8 @@ from paperhub.translation.language import canonical_language
 logger = logging.getLogger(__name__)
 
 IMAGE_UNAVAILABLE = "[image unavailable]"
+# A figure image larger than this exports as unavailable.
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -124,16 +133,38 @@ def _bib_entry(key: str, p: ExportPaper) -> str:
 
 # --- inline text -----------------------------------------------------------
 
-_MATH = re.compile(r"(\$\$[^$]+\$\$|\$[^$\n]+\$)")
-_SPECIAL = re.compile(r"([\\`*_\[\]<>~^@|])")
-_LINE_START = re.compile(r"^(\s*)([#>+-]|\d+[.)])(?=\s|$)")
+# Every character Markdown (or a pandoc extension) gives a meaning inline.
+# ``!`` keeps note text from ever forming an image: only the exporter's own
+# references are images. ``$`` is literal: the editor has no inline math
+# (math blocks and equations are written as math by the exporter).
+_SPECIAL = re.compile(r"([\\`*_\[\]<>~^@|!${}])")
+# A line start that would open a heading, list, quote or setext underline.
+_LINE_START = re.compile(r"^([ \t]*)(?:([#>+=-])|(\d+)([.)])(?=\s|$))", re.M)
+# A code block's language as a plain class name: no ``{=openxml}`` raw
+# block, no attributes.
+_CODE_LANG = re.compile(r"^[A-Za-z0-9_+#.-]{1,32}$")
+# Characters a link target keeps as written; the rest is percent-encoded,
+# so a target can neither leave its ``<…>`` nor read as more Markdown.
+_URL_SAFE = ":/?#@&=+,;%~-._*'"
 
 
 def _escape(text: str) -> str:
-    """Markdown-escape ``text``, leaving ``$…$`` math as written."""
-    parts = _MATH.split(text)
-    return "".join(p if i % 2 else _SPECIAL.sub(r"\\\1", p)
-                   for i, p in enumerate(parts))
+    """Markdown-escape ``text`` (inline text of one block)."""
+    return _SPECIAL.sub(r"\\\1", text)
+
+
+def _line_starts(text: str) -> str:
+    """Escape every line start that would read as block syntax."""
+    def sub(m: re.Match[str]) -> str:
+        if m[2]:
+            return f"{m[1]}\\{m[2]}"
+        return f"{m[1]}{m[3]}\\{m[4]}"
+    return _LINE_START.sub(sub, text)
+
+
+def _hard_breaks(text: str) -> str:
+    """Line breaks inside a block kept as hard breaks, each line escaped."""
+    return "\\\n".join(_line_starts(text).split("\n"))
 
 
 def _runs(content: Any) -> list[dict[str, Any]]:
@@ -163,29 +194,34 @@ def _wrap(text: str, mark: str, end: str | None = None) -> str:
 
 class _Writer:
     def __init__(self, note: Note, papers: Mapping[int, ExportPaper],
-                 chunk_papers: Mapping[int, int]) -> None:
+                 chunk_papers: Mapping[int, int],
+                 mark_papers: Mapping[str, int]) -> None:
         self.note = note
         self.papers = papers
         self.chunk_papers = chunk_papers
+        self.mark_papers = mark_papers
         self.images: dict[str, bytes] = {}
         self.cited: list[int] = []  # papers in first-cited order
-        self.keys = self._keys()
+        # Keys are given as papers are first cited, so a collision suffix is
+        # only ever spent on a paper that is in references.bib.
+        self.keys: dict[int, str] = {}
+        self._bases: dict[str, int] = {}
         self._assets: dict[int, Any] = {}
 
-    def _keys(self) -> dict[int, str]:
-        keys: dict[int, str] = {}
-        seen: dict[str, int] = {}
-        for pid in sorted(self.papers):
-            base = bib_key(self.papers[pid])
-            n = seen.get(base, 0)
-            seen[base] = n + 1
-            keys[pid] = base if n == 0 else f"{base}{chr(ord('a') + n - 1)}"
-        return keys
-
     def cite(self, pid: int | None, locator: str = "") -> str:
-        if pid is None or pid not in self.keys:
+        if pid is None or pid not in self.papers:
             return ""
-        if pid not in self.cited:
+        if pid not in self.keys:
+            base = bib_key(self.papers[pid])
+            n = self._bases.get(base, 0)
+            used = set(self.keys.values())
+            while True:
+                key = base if n == 0 else base + (chr(ord("a") + n - 1) if n <= 26 else str(n))
+                n += 1
+                if key not in used:
+                    break
+            self._bases[base] = n
+            self.keys[pid] = key
             self.cited.append(pid)
         return f"@{self.keys[pid]}{locator}"
 
@@ -222,8 +258,9 @@ class _Writer:
         for run in _runs(content):
             kind = run.get("type", "text")
             if kind == "link":
-                label = self.inline(run.get("content")) or _escape(str(run.get("href", "")))
-                out.append(f"[{label}](<{run.get('href', '')}>)")
+                href = quote(str(run.get("href") or ""), safe=_URL_SAFE)
+                label = self.inline(run.get("content")) or _escape(href)
+                out.append(f"[{label}](<{href}>)")
             elif kind == "mention":
                 props = run.get("props") or {}
                 label = _escape(str(props.get("label") or ""))
@@ -256,9 +293,14 @@ class _Writer:
     # --- paper references --------------------------------------------------
 
     def block_paper(self, b: Block) -> int | None:
+        """A reference block's paper: its own prop, else its mark's paper,
+        else the note's paper."""
         pid = b.props.get("paperContentId")
         if isinstance(pid, int):
             return pid
+        mark = b.props.get("markId")
+        if isinstance(mark, str) and mark in self.mark_papers:
+            return self.mark_papers[mark]
         if self.note.target_kind == "paper" and self.note.target_id.isdigit():
             return int(self.note.target_id)
         return None
@@ -298,7 +340,13 @@ class _Writer:
                             if f.id == fig_id), None)
                 path = fig.abs_image_path(paper.source_dir) if fig else None
                 if path is not None and path.is_file():
-                    return f"images/{b.id}{path.suffix.lower() or '.png'}", path.read_bytes()
+                    if path.stat().st_size > MAX_IMAGE_BYTES:
+                        logger.warning("note export: figure image of block %s is "
+                                       "over %d bytes", b.id, MAX_IMAGE_BYTES)
+                        return None
+                    ext = path.suffix.lower()
+                    ext = ext if re.fullmatch(r"\.[a-z0-9]{1,5}", ext) else ".png"
+                    return f"images/{b.id}{ext}", path.read_bytes()
             box = piece.get("box")
             page = piece.get("page")
             if isinstance(box, list) and len(box) == 4 and isinstance(page, int):
@@ -315,7 +363,7 @@ class _Writer:
         got = self.image(b, pid)
         cap = " ".join(caption.split())
         if got is None:
-            return [p for p in (self.text(cap), IMAGE_UNAVAILABLE) if p]
+            return [p for p in (_line_starts(self.text(cap)), IMAGE_UNAVAILABLE) if p]
         name, data = got
         self.images[name] = data
         return [f"![{self.text(cap)}]({name})"]
@@ -337,6 +385,7 @@ def _quoted(lines: list[str]) -> str:
 _LIST_MARKER = {"bulletListItem": "-", "numberedListItem": "1.",
                 "checkListItem": "-"}
 _LIST = set(_LIST_MARKER)
+_REF_TYPES = frozenset({"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
 
 
 def _block(w: _Writer, b: Block, heading_offset: int) -> str:
@@ -346,7 +395,8 @@ def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     if t == "heading":
         level = b.props.get("level")
         level = level if isinstance(level, int) else 1
-        return f"{'#' * min(6, level + heading_offset)} {w.inline(b.content)}"
+        title = " ".join(w.inline(b.content).split("\n"))
+        return f"{'#' * min(6, level + heading_offset)} {title}"
     if t == "divider":
         return "---"
     if t == "math":
@@ -360,21 +410,23 @@ def _block(w: _Writer, b: Block, heading_offset: int) -> str:
         while fence in code:
             fence += "`"
         lang = str(b.props.get("language") or "").strip()
+        if not _CODE_LANG.match(lang):
+            lang = ""
         return f"{fence}{lang}\n{code}\n{fence}"
     if t in ("quote", "callout"):
-        return _quoted(w.inline(b.content).split("\n"))
+        return _quoted(_hard_breaks(w.inline(b.content)).split("\n"))
     if t == "bulletListItem":
-        return f"- {w.inline(b.content)}"
+        return f"- {_hard_breaks(w.inline(b.content))}"
     if t == "numberedListItem":
-        return f"1. {w.inline(b.content)}"
+        return f"1. {_hard_breaks(w.inline(b.content))}"
     if t == "checkListItem":
-        return f"- [{'x' if b.props.get('checked') else ' '}] {w.inline(b.content)}"
+        box = "x" if b.props.get("checked") else " "
+        return f"- [{box}] {_hard_breaks(w.inline(b.content))}"
     if t == "paperQuote":
         return _paper_quote(w, b)
     if t in ("paperFigure", "paperEquation", "paperRegion"):
         return _paper_media(w, b)
-    text = w.inline(b.content)
-    return _LINE_START.sub(r"\1\\\2", text)
+    return _hard_breaks(w.inline(b.content))
 
 
 def _paper_quote(w: _Writer, b: Block) -> str:
@@ -382,7 +434,10 @@ def _paper_quote(w: _Writer, b: Block) -> str:
     live = live_pieces(_json(b.props.get("pieces"), []))
     quote = joined_quote(live) if live else ""
     quote = quote or str(b.props.get("quote") or "")
-    lines = [w.text(ln) for ln in quote.split("\n")]
+    # Each paragraph of the quote is its own paragraph in the block quote.
+    lines: list[str] = []
+    for ln in quote.split("\n"):
+        lines += ["", _line_starts(w.text(ln))] if lines else [_line_starts(w.text(ln))]
     lang = b.props.get("lang")
     if isinstance(lang, str) and lang.strip():
         label = canonical_language(lang)
@@ -411,7 +466,8 @@ def _paper_media(w: _Writer, b: Block) -> str:
             w.images[got[0]] = got[1]
             parts.append(f"![{w.text(' '.join(caption.split()))}]({got[0]})")
         elif not parts:
-            parts += [w.text(caption), IMAGE_UNAVAILABLE]
+            parts += [_line_starts(w.text(" ".join(caption.split()))),
+                      IMAGE_UNAVAILABLE]
     else:
         parts += w.figure(b, pid, caption)
     source = w.source_line(b, pid)
@@ -423,11 +479,12 @@ def _paper_media(w: _Writer, b: Block) -> str:
 def note_to_markdown(
     note: Note, blocks: list[Block], papers: Mapping[int, ExportPaper], *,
     chunk_papers: Mapping[int, int] | None = None,
+    mark_papers: Mapping[str, int] | None = None,
 ) -> tuple[str, dict[str, bytes], str]:
     """``(markdown, image files by relative path, BibTeX)`` of a note.
     ``blocks`` in document order; ``chunk_papers`` maps a cited chunk id to
-    its paper."""
-    w = _Writer(note, papers, chunk_papers or {})
+    its paper, ``mark_papers`` a reference block's mark id to its paper."""
+    w = _Writer(note, papers, chunk_papers or {}, mark_papers or {})
     offset = 2 if any(b.type == "section" for b in blocks) else 1
     indent: dict[str, str] = {}
     types = {b.id: b.type for b in blocks}
@@ -456,10 +513,29 @@ def note_to_markdown(
 
 async def export_sources(
     conn: aiosqlite.Connection, note: Note, blocks: list[Block],
-) -> tuple[dict[int, ExportPaper], dict[int, int]]:
-    """The papers a note's export may cite (its own paper, mentioned and
-    cited ones) and the paper of each chunk it cites."""
+) -> tuple[dict[int, ExportPaper], dict[int, int], dict[str, int]]:
+    """The papers a note's export may cite (its own paper, the papers of
+    its reference blocks, mentioned and cited ones), the paper of each chunk
+    it cites and the paper of each reference block's mark."""
     pids, chunk_ids = _cited(blocks)
+    mark_ids: set[str] = set()
+    for b in blocks:
+        if b.type not in _REF_TYPES:
+            continue
+        own = b.props.get("paperContentId")
+        if isinstance(own, int):
+            pids.add(own)
+        elif isinstance(b.props.get("markId"), str) and b.props["markId"]:
+            mark_ids.add(b.props["markId"])
+    mark_papers: dict[str, int] = {}
+    if mark_ids:
+        marks = ",".join("?" * len(mark_ids))
+        async with conn.execute(
+            f"SELECT id, paper_content_id FROM note_marks WHERE id IN ({marks})",  # noqa: S608
+            tuple(mark_ids),
+        ) as cur:
+            mark_papers = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
+    pids |= set(mark_papers.values())
     chunk_papers: dict[int, int] = {}
     if chunk_ids:
         marks = ",".join("?" * len(chunk_ids))
@@ -486,7 +562,7 @@ async def export_sources(
                     authors=[str(a) for a in authors if str(a).strip()],
                     year=int(r[3]) if r[3] else None, arxiv_id=r[4] or None,
                     source_dir=Path(r[5]) if r[5] else None)
-    return papers, chunk_papers
+    return papers, chunk_papers, mark_papers
 
 
 def slug(title: str) -> str:
@@ -494,3 +570,11 @@ def slug(title: str) -> str:
     s = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
     s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
     return s[:60].rstrip("-") or "note"
+
+
+def display_name(title: str) -> str:
+    """A note's title as a file name: path and control characters dropped
+    ("note" when nothing is left)."""
+    s = re.sub(r'[\/:*?"<>|\x00-\x1f]+', "-", title)
+    s = " ".join(s.split()).strip(" .-")
+    return s[:100] or "note"

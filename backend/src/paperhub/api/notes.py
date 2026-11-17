@@ -4,12 +4,14 @@ only a second Apply again of one change set is a 409."""
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import json
 import logging
 import zipfile
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import quote
 
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Path, Query
@@ -21,7 +23,12 @@ from paperhub.db.connection import in_write_transaction, open_db, write_lock
 from paperhub.notes import comments as note_comments
 from paperhub.notes import ops as note_ops
 from paperhub.notes import pandoc as note_pandoc
-from paperhub.notes.export import export_sources, note_to_markdown, slug
+from paperhub.notes.export import (
+    display_name,
+    export_sources,
+    note_to_markdown,
+    slug,
+)
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
@@ -134,9 +141,12 @@ _DOCX_TYPE = ("application/vnd.openxmlformats-officedocument."
 
 
 @router.get("/export/capabilities")
-async def export_capabilities() -> dict[str, bool]:
-    """Which export formats work here: Word needs pandoc."""
-    return {"md": True, "docx": note_pandoc.pandoc_available()}
+async def export_capabilities() -> dict[str, Any]:
+    """Which export formats work here: Word needs pandoc 2.15+ (its
+    ``--sandbox``); ``docx_reason`` says why it is unavailable."""
+    status = note_pandoc.pandoc_status()
+    return {"md": True, "docx": status == "ok",
+            "docx_reason": None if status == "ok" else status}
 
 
 def _zip(md: str, images: dict[str, bytes], bib: str) -> bytes:
@@ -166,20 +176,24 @@ async def export_note(note_id: int,
     """The note as a Markdown zip (``note.md``, ``images/``,
     ``references.bib``) or a ``.docx``; 409 ``pandoc_missing`` for Word
     without pandoc. Each export is recorded in ``note_exports``."""
-    if format == "docx" and not note_pandoc.pandoc_available():
-        raise HTTPException(409, "pandoc_missing")
+    if format == "docx":
+        status = note_pandoc.pandoc_status()
+        if status != "ok":
+            raise HTTPException(409, status)
     async with open_db(load_settings().db_path) as conn:
         note = await get_note(conn, note_id)
         if note is None:
             raise HTTPException(404, f"note {note_id} not found")
         blocks = await list_blocks(conn, note_id)
-        papers, chunk_papers = await export_sources(conn, note, blocks)
-        md, images, bib = await asyncio.to_thread(
-            note_to_markdown, note, blocks, papers, chunk_papers=chunk_papers)
+        papers, chunk_papers, mark_papers = await export_sources(conn, note, blocks)
+        md, images, bib = await asyncio.to_thread(functools.partial(
+            note_to_markdown, note, blocks, papers, chunk_papers=chunk_papers,
+            mark_papers=mark_papers))
         name = slug(note.title) + "-notes"
+        full_name = display_name(note.title) + "-notes"
         if format == "md":
             body = _zip(md, images, bib)
-            media, filename = "application/zip", f"{name}.zip"
+            media, ext = "application/zip", "zip"
         else:
             try:
                 body = await asyncio.to_thread(
@@ -188,12 +202,15 @@ async def export_note(note_id: int,
             except note_pandoc.PandocError as exc:
                 logger.warning("note %s: Word export failed: %s", note_id, exc)
                 raise HTTPException(500, "pandoc_failed") from exc
-            media, filename = _DOCX_TYPE, f"{name}.docx"
+            media, ext = _DOCX_TYPE, "docx"
         await _record_export(conn, note_id, format)
     logger.info("note export: note=%s format=%s blocks=%d images=%d",
                 note_id, format, len(blocks), len(images))
     return Response(body, media_type=media, headers={
-        "Content-Disposition": f'attachment; filename="{filename}"'})
+        # An ASCII name for old clients, the title as typed for the rest.
+        "Content-Disposition": (
+            f'attachment; filename="{name}.{ext}"; '
+            f"filename*=UTF-8''{quote(f'{full_name}.{ext}', safe='')}")})
 
 
 class BlockPlace(BaseModel):

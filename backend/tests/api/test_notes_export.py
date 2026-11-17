@@ -87,10 +87,11 @@ async def test_capabilities_reports_pandoc(client: AsyncClient,
                                            monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(note_pandoc, "pandoc_available", lambda: False)
     r = await client.get("/notes/export/capabilities")
-    assert r.json() == {"md": True, "docx": False}
+    assert r.json() == {"md": True, "docx": False, "docx_reason": "pandoc_missing"}
     monkeypatch.setattr(note_pandoc, "pandoc_available", lambda: True)
+    monkeypatch.setattr(note_pandoc, "pandoc_version", lambda: (3, 1, 9))
     assert (await client.get("/notes/export/capabilities")).json() == {
-        "md": True, "docx": True}
+        "md": True, "docx": True, "docx_reason": None}
 
 
 async def test_docx_without_pandoc_409_reason(client: AsyncClient,
@@ -100,6 +101,33 @@ async def test_docx_without_pandoc_409_reason(client: AsyncClient,
     r = await client.get(f"/notes/{nid}/export", params={"format": "docx"})
     assert r.status_code == 409
     assert r.json() == {"detail": "pandoc_missing"}
+
+
+async def test_docx_with_pandoc_without_sandbox_409(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """pandoc older than 2.15 has no --sandbox: Word is refused, not run."""
+    monkeypatch.setattr(note_pandoc, "pandoc_available", lambda: True)
+    monkeypatch.setattr(note_pandoc, "pandoc_version", lambda: (2, 14, 2))
+    caps = (await client.get("/notes/export/capabilities")).json()
+    assert caps == {"md": True, "docx": False, "docx_reason": "pandoc_too_old"}
+    nid = await _paper_note(client)
+    r = await client.get(f"/notes/{nid}/export", params={"format": "docx"})
+    assert r.status_code == 409
+    assert r.json() == {"detail": "pandoc_too_old"}
+
+
+async def test_download_name_keeps_a_cjk_title(client: AsyncClient,
+                                               tmp_path: Path) -> None:
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute("INSERT INTO chat_sessions (id, title) VALUES (5, '注意力 筆記')")
+        await conn.commit()
+    nid = (await client.get("/notes/target", params={"kind": "session", "id": 5})
+           ).json()["note"]["id"]
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    cd = r.headers["content-disposition"]
+    assert 'filename="note-notes.zip"' in cd
+    assert ("filename*=UTF-8''%E6%B3%A8%E6%84%8F%E5%8A%9B%20%E7%AD%86%E8%A8%98"
+            "-notes.zip") in cd
 
 
 async def test_export_unknown_note_and_format(client: AsyncClient) -> None:
