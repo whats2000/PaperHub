@@ -384,3 +384,23 @@ export function boxMark({ page, box, blocks, spans, scanned }: BoxInput): BoxRes
   }
   return { kind: "region", section: sectionForBox(blocks, box), piece };
 }
+
+/** The text of the first lines of a page's text layer at or below a
+ * client y (the top of the reader's view), a line break between lines. */
+export function linesBelow(page: Element, clientY: number, lines = 2): string {
+  const pb = page.getBoundingClientRect();
+  const y = (clientY - pb.top) / (pb.height || 1);
+  const rows: { top: number; bottom: number; text: string }[] = [];
+  for (const s of layerSpans(page)) {
+    if (s.box[3] <= y) continue;
+    const row = rows.find((r) => Math.min(r.bottom, s.box[3]) - Math.max(r.top, s.box[1]) > (s.box[3] - s.box[1]) / 2);
+    if (row) row.text += s.text;
+    else rows.push({ top: s.box[1], bottom: s.box[3], text: s.text });
+  }
+  return rows
+    .sort((a, b) => a.top - b.top)
+    .slice(0, lines)
+    .map((r) => r.text.trim())
+    .filter(Boolean)
+    .join("\n");
+}

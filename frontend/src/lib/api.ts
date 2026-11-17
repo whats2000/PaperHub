@@ -1437,3 +1437,25 @@ export async function listPaperBlocks(
 ): Promise<PaperPageBlock[]> {
   return apiFetch<PaperPageBlock[]>(`/papers/content/${paperContentId}/blocks?page=${page}`);
 }
+
+/** Where text read off the LaTeX-compiled PDF of an HTML paper sits in its
+ * reading text (`match` null: not found); `_meta` says how it was decided. */
+export interface LocateResult {
+  match: {
+    chunk_start: number;
+    chunk_end: number;
+    chunk_ids: number[];
+    section: string | null;
+    /** The span in the reading text (the HTML reader's). */
+    text_start: number;
+    text_end: number;
+  } | null;
+  _meta: Record<string, unknown>;
+}
+
+export async function locateText(paperContentId: number, text: string): Promise<LocateResult> {
+  return apiFetch<LocateResult>(`/papers/content/${paperContentId}/locate`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}

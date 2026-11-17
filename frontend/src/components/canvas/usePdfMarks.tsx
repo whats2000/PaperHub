@@ -26,6 +26,7 @@ import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
 import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
+import { locateText, type LocateResult } from "@/lib/api";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import {
   boxMark,
@@ -47,14 +48,27 @@ const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
 const FLASH_MS = 1600;
 
+/** A piece placed in the paper's reading text (a page with no Marker
+ * blocks): its chunks and its span there. */
+type Located = NonNullable<LocateResult["match"]>;
+
 /** Pieces as stored (the section rides on the mark), grouped by section:
  * a mark files under one. */
-function groupPieces(pieces: readonly PdfPiece[]): MarkGroup[] {
+function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): MarkGroup[] {
   const groups: MarkGroup[] = [];
-  for (const p of pieces) {
-    const { section, block_id } = p;
-    const base: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
-    const piece: MarkPiece = block_id ? { ...base, block_id } : base;
+  for (const { piece: p, at } of pieces) {
+    const section = at ? at.section : p.section;
+    let piece: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
+    if (p.block_id) piece.block_id = p.block_id;
+    if (at) {
+      piece = {
+        ...piece,
+        chunk_start: at.chunk_start,
+        chunk_end: at.chunk_end,
+        text_start: at.text_start,
+        text_end: at.text_end,
+      };
+    }
     const last = groups[groups.length - 1];
     if (last && last.section === section) last.pieces.push(piece);
     else groups.push({ section, pieces: [piece] });
@@ -299,7 +313,7 @@ export function usePdfMarks({
   );
 
   // Follow: the section of the Marker block at the top of the view.
-  usePdfFollow({ enabled: paperId !== null, readerRef, blocks, blocksRef, onReadingHeading });
+  usePdfFollow({ paperId, readerRef, blocks, blocksRef, onReadingHeading });
 
   const [hot, setHot] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -329,6 +343,7 @@ export function usePdfMarks({
       if (!cur || !root) return;
       let ok: boolean;
       if (cur.type === "text") {
+        let missed = false;
         ok = await saveMarks({
           kind: color ? "highlight" : "quote",
           color,
@@ -340,10 +355,27 @@ export function usePdfMarks({
             const loaded = await Promise.all(pages.map((p) => loadBlocks(p)));
             const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
             const pieces = piecesFromFragments(cur.fragments, byPage);
-            return pieces.length ? groupPieces(pieces) : null;
+            if (!pieces.length || paperId === null) return null;
+            // A page with no Marker blocks (the LaTeX-compiled PDF of an
+            // HTML paper): the section and chunks come from finding the
+            // text in the paper's reading text.
+            const placed = await Promise.all(
+              pieces.map(async (piece) => {
+                if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
+                const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
+                if (!at) missed = true;
+                return { piece, at };
+              }),
+            );
+            return groupPieces(placed);
           },
         });
         if (ok) window.getSelection()?.removeAllRanges();
+        if (ok && missed) {
+          toast.message(
+            t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text."),
+          );
+        }
       } else if (cur.type === "object") {
         const b = cur.block;
         const piece: MarkPiece =
@@ -378,7 +410,7 @@ export function usePdfMarks({
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadBlocks, pageEl, blocksRef],
+    [target, readerRef, saveMarks, loadBlocks, pageEl, blocksRef, paperId, t],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(

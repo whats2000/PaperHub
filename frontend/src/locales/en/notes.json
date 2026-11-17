@@ -310,6 +310,7 @@
     "markFigure": "Mark figure",
     "markEquation": "Mark equation",
     "box": "Box",
-    "boxHint": "Box: drag a rectangle on the page to quote a figure, an equation or any region. Esc to stop."
+    "boxHint": "Box: drag a rectangle on the page to quote a figure, an equation or any region. Esc to stop.",
+    "notLocated": "Saved without a section: this passage wasn't found in the paper's text."
   }
 }
