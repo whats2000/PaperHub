@@ -9,6 +9,11 @@ import { mathToKatexHtml } from "@/lib/pdfTranslation";
 import { useTranslationStore } from "@/store/translation";
 import type { ParagraphsResponse, PdfFragment, TranslateRequest } from "@/types/translation";
 
+const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(toastFn, { error: vi.fn(), message: vi.fn(), success: vi.fn(), dismiss: vi.fn() }),
+}));
+
 vi.mock("@/lib/api", () => ({
   getPdfParagraphs: vi.fn(),
   translateBlocks: vi.fn(),
@@ -799,10 +804,78 @@ describe("PdfTranslationLayer — a mark on the card asked to be shown", () => {
     await waitFor(() => expect(card()).toHaveTextContent("它是凸的"));
     expect(screen.getByRole("button", { name: /unpin translation/i })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(card().querySelector('[data-card-mark="mt"]')).not.toBeNull());
-    expect((card().querySelector('[data-card-mark="mt"]') as HTMLElement).style.boxShadow).not.toBe("");
+    await waitFor(() =>
+      expect((card().querySelector('[data-card-mark="mt"]') as HTMLElement).style.boxShadow).not.toBe(""),
+    );
     expect(setCardShown).toHaveBeenLastCalledWith(new Set(["mt"]));
     // Done: a reader opened later does not show it again.
     expect(useTranslationStore.getState().reveal).toBeNull();
     rects.mockRestore();
+  });
+});
+
+describe("PdfTranslationLayer — a mark the card can't show", () => {
+  function ctxWith(status: "ok" | "translation_changed") {
+    return {
+      visible: true,
+      blocks: {},
+      setCardShown: vi.fn(),
+      openCard: vi.fn(),
+      trMarks: [
+        {
+          id: "mt",
+          paper_content_id: 7,
+          block_id: "b",
+          kind: "highlight",
+          color: "purple",
+          view: "pdf",
+          pieces: [{ quote: "它是凸的", orig: "It is convex.", lang: "繁體中文", source_ref: P1, page: 0 }],
+          lang: "繁體中文",
+          source_ref: P1,
+          section_key: null,
+          status,
+          created_at: "2026-11-17T00:00:00Z",
+          deleted_at: null,
+        },
+      ],
+    } as unknown as PdfMarksApi;
+  }
+  async function reveal(status: "ok" | "translation_changed") {
+    toastFn.mockReset();
+    render(
+      <PdfMarksProvider value={ctxWith(status)}>
+        <Harness />
+      </PdfMarksProvider>,
+    );
+    await waitFor(() => expect(fragmentsOf(P1)).toHaveLength(2));
+    act(() => {
+      useTranslationStore.setState({ reveal: { paperId: 7, markId: "mt", n: 2 } });
+    });
+  }
+
+  it("says the paragraph's translation isn't available, with Show original", async () => {
+    mockedTranslate.mockResolvedValue({ results: [{ key: P1, status: "unavailable", text: null, model: null, stale_terminology: false }] });
+    await reveal("ok");
+    const message = "This paragraph's translation isn't available, so the mark can't be shown in it";
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith(message, expect.anything()));
+    const { action } = toastFn.mock.calls.find((c) => c[0] === message)![1] as { action: { label: string } };
+    expect(action.label).toBe("Show original");
+  });
+
+  it("says the translation changed for a flagged mark", async () => {
+    await reveal("translation_changed");
+    await waitFor(() =>
+      expect(toastFn).toHaveBeenCalledWith("The translation changed since you marked it", expect.anything()),
+    );
+  });
+
+  it("says the translation changed when the card's text no longer holds the words", async () => {
+    mockedTranslate.mockImplementation((req: TranslateRequest) =>
+      Promise.resolve({ results: req.blocks.map((b) => ({ key: b.key, status: "ok" as const, text: "全新的翻譯。", model: "m", stale_terminology: false })) }),
+    );
+    await reveal("ok");
+    await waitFor(() =>
+      expect(toastFn).toHaveBeenCalledWith("The translation changed since you marked it", expect.anything()),
+    );
   });
 });

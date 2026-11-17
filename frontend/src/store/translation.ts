@@ -5,6 +5,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import i18n, { LANGUAGE_ENDONYMS, type SupportedLanguage } from "@/lib/i18n";
 import { langShort } from "@/components/notes/blocks/markProps";
 import { useMarksStore } from "@/store/marks";
+import type { Mark } from "@/types/notes";
 
 const MAX_RECENT = 5;
 
@@ -89,6 +90,36 @@ interface TranslationState {
   /** The reader has shown the mark (or given up): the request is done (a
    * reader opened later does not show it again). */
   revealed: (n: number) => void;
+}
+
+/** How often a reader looks again for a mark it was asked to show, and how
+ * long it waits for the mark's translation to arrive. */
+export const REVEAL_EVERY_MS = 150;
+export const REVEAL_WAIT_MS = 30_000;
+
+/** Why a mark on a translation could not be shown in its words. */
+export type UnshownReason = "unavailable" | "changed" | "timeout";
+
+/** Says why a mark asked to be shown can't be shown in the translation,
+ * with Show original (the paragraph it translates) where it has one. */
+export function explainUnshown(mark: Mark, reason: UnshownReason): void {
+  const t = i18n.t.bind(i18n) as TFunction;
+  const message =
+    reason === "unavailable"
+      ? t("notes:marks.trUnavailable", "This paragraph's translation isn't available, so the mark can't be shown in it")
+      : reason === "changed"
+        ? t("notes:marks.trChanged", "The translation changed since you marked it")
+        : t("notes:marks.trTimeout", "The translation didn't arrive in time to show this mark");
+  const orig = mark.pieces.map((p) => p.orig).find((o): o is string => typeof o === "string" && o !== "");
+  toast(message, {
+    id: "tr-unshown",
+    action: orig
+      ? {
+          label: t("notes:marks.trShowOriginal", "Show original"),
+          onClick: () => toast(t("notes:marks.trOriginal", "Original text"), { description: orig, duration: 15_000 }),
+        }
+      : undefined,
+  });
 }
 
 /** A request no reader takes up within this long is dropped: its paper

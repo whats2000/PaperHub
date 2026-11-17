@@ -23,7 +23,9 @@
  * the marks.
  */
 import { prefersReducedMotion } from "@/lib/motion";
+import { sameLanguage } from "@/lib/language";
 import { buildTextIndex, findPiece, rangeAt, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
+import { TR_LANG_ATTR } from "@/lib/htmlTranslation";
 import {
   TR_BOX,
   findInTranslation,
@@ -249,6 +251,11 @@ export interface HtmlMarksHandle {
   flash: (markId: string) => boolean;
   /** How a mark is drawn now: its words (`text`), a 文 marker, or not. */
   shownAs: (markId: string) => "text" | "marker" | null;
+  /** Why a mark on a translation shows as its 文 marker: translation off
+   * or in another language (`off`), its paragraph's translation still on
+   * the way (`loading`), failed (`unavailable`), or no longer holding
+   * the marked words (`changed`). Null when it is not a marker. */
+  markerReason: (markId: string) => "off" | "loading" | "unavailable" | "changed" | null;
   /** Removes every overlay node, style and listener. */
   detach: () => void;
 }
@@ -419,6 +426,20 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   let detached = false;
   // A new chunk map re-places every mark (it is the hint among repeats).
   let chunkGen = 0;
+  // Each translation mark's source paragraph, found once by its own text:
+  // a translation coming or going re-reads only that paragraph's
+  // translation, never the whole paper.
+  const sources = new Map<string, { key: string; el: Element | null }>();
+  const sourceFor = (m: Mark, shown: [MarkPiece, number][]): Element | null => {
+    const key = `${chunkGen}:${JSON.stringify(shown.map(([p]) => [p.orig, p.chunk_start, p.text_start]))}`;
+    const hit = sources.get(m.id);
+    // Not found (yet: MathJax may still be typesetting) is looked for again.
+    if (hit && hit.key === key && hit.el?.isConnected) return hit.el;
+    index ??= buildTextIndex(doc);
+    const el = shown.map(([p]) => sourceParagraph(index!, p, o.chunks)).find((x) => x !== null) ?? null;
+    sources.set(m.id, { key, el });
+    return el;
+  };
 
   const later = (fn: () => void, ms: number) => {
     const id = setTimeout(() => {
@@ -657,13 +678,12 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       };
       let marker: Element | null = null;
       if (m.lang) {
-        index ??= buildTextIndex(doc);
         const shown = shownPieces(m);
-        const source = shown.map(([p]) => sourceParagraph(index!, p, o.chunks)).find((el) => el !== null) ?? null;
+        const source = sourceFor(m, shown);
         // Its words, highlighted, where they are on screen; else 文 on the
         // paragraph (translation off, another language, the words changed).
         const box =
-          source && m.status !== "translation_changed" && o.translation === m.lang ? translationUnder(source, m.lang) : null;
+          source && m.status !== "translation_changed" && sameLanguage(o.translation, m.lang) ? translationUnder(source, m.lang) : null;
         if (box) {
           const tIndex = translationIndex(box);
           placeEach((p) => findInTranslation(tIndex, p));
@@ -867,6 +887,19 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       const d = drawn.get(markId);
       if (!d) return null;
       return d.els.length ? "text" : d.markerEl ? "marker" : null;
+    },
+    markerReason: (markId) => {
+      const d = drawn.get(markId);
+      const m = o.marks.find((x) => x.id === markId);
+      if (!d?.marker || !m?.lang) return null;
+      if (m.status === "translation_changed") return "changed";
+      if (!sameLanguage(o.translation, m.lang)) return "off";
+      const box = d.marker.nextElementSibling;
+      if (!box?.matches(TR_BOX) || box.hasAttribute("data-ph-tr-leaving")) return "loading";
+      const state = box.getAttribute("data-ph-tr-state");
+      if (state === "unavailable") return "unavailable";
+      if (state !== "ok" || !sameLanguage(box.getAttribute(TR_LANG_ATTR), m.lang)) return "loading";
+      return "changed";
     },
     detach: () => {
       detached = true;

@@ -29,7 +29,7 @@ import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject
 import { clearIfStill, htmlPlace, translationPlace } from "@/lib/marks/pieces";
 import { translationSelection, type PlacedTranslationPiece } from "@/lib/marks/translationMarks";
 import { langShort } from "@/components/notes/blocks/markProps";
-import { useTranslationStore } from "@/store/translation";
+import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import { hasOpenLayer } from "@/lib/openLayer";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
@@ -48,9 +48,6 @@ interface Selected {
   object?: HtmlObject;
 }
 
-/** How long a request to show a mark waits for its translation to load. */
-const REVEAL_TRIES = 40;
-const REVEAL_EVERY_MS = 150;
 
 /** A translation selection as marks: one per translated paragraph. */
 function translationGroups(placed: PlacedTranslationPiece[]): MarkGroup[] {
@@ -283,28 +280,35 @@ export function useHtmlMarks({
     if (!reveal || reveal.paperId !== paperId || !doc) return;
     // This reader shows it: the request is not dropped as unclaimed.
     useTranslationStore.getState().claimReveal(reveal.n);
-    let tries = 0;
+    const started = Date.now();
     let scrolled = false;
+    const done = (): true => {
+      useTranslationStore.getState().revealed(reveal.n);
+      return true;
+    };
     const tick = (): boolean => {
       const handle = handleRef.current;
       const as = handle?.shownAs(reveal.markId) ?? null;
-      if (as === "text" && handle!.flash(reveal.markId)) {
-        useTranslationStore.getState().revealed(reveal.n);
-        return true;
-      }
+      if (as === "text" && handle!.flash(reveal.markId)) return done();
       // The marker's paragraph first: its translation loads once in view.
       if (as === "marker" && !scrolled) scrolled = handle!.flash(reveal.markId);
+      const reason = as === "marker" ? handle!.markerReason(reveal.markId) : null;
+      const mark = latest.current.marks.find((m) => m.id === reveal.markId);
+      // It can't be shown in the translation: say why.
+      if (mark && (reason === "unavailable" || reason === "changed")) {
+        explainUnshown(mark, reason);
+        return done();
+      }
+      // Still on the way: wait for it, within reason.
+      if (Date.now() - started >= REVEAL_WAIT_MS) {
+        if (mark && as === "marker") explainUnshown(mark, "timeout");
+        return done();
+      }
       return false;
     };
     if (tick()) return;
     const timer = setInterval(() => {
-      tries += 1;
       if (tick()) clearInterval(timer);
-      else if (tries >= REVEAL_TRIES) {
-        // Not there to show: the request ends here.
-        clearInterval(timer);
-        useTranslationStore.getState().revealed(reveal.n);
-      }
     }, REVEAL_EVERY_MS);
     return () => clearInterval(timer);
   }, [reveal, paperId, doc]);

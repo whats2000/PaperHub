@@ -13,7 +13,7 @@ import {
 } from "@/lib/marks/translationMarks";
 import { useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
-import { REVEAL_TTL_MS, useTranslationStore } from "@/store/translation";
+import { REVEAL_TTL_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColorInfo, MarkCreated, MarkIn } from "@/types/notes";
 
 const { toastFn, toastError, toastMessage, toastDismiss } = vi.hoisted(() => ({
@@ -468,5 +468,131 @@ describe("useHtmlMarks on a translation", () => {
     expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
     expect(useTranslationStore.getState().language).toBe(LANG);
     expect(toastFn).toHaveBeenCalledWith("Translation turned on (繁中) to show this mark", expect.anything());
+  });
+});
+
+describe("useHtmlMarks on a translation: what the reader does next", () => {
+  function frameDoc(body: string): Document {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument!;
+    doc.body.innerHTML = body;
+    const FrameRange = (frame.contentWindow as unknown as { Range: typeof Range }).Range;
+    FrameRange.prototype.getClientRects = () => [new DOMRect(10, 40, 30, 16)] as unknown as DOMRectList;
+    FrameRange.prototype.getBoundingClientRect = () => new DOMRect(10, 40, 100, 16);
+    return doc;
+  }
+  function Host({ doc }: { doc: Document }) {
+    return createElement("div", null, useHtmlMarks({ paperId: 3, doc, isDark: false }));
+  }
+  const nextFrame = (doc: Document) =>
+    act(() => new Promise<void>((r) => doc.defaultView!.requestAnimationFrame(() => setTimeout(r, 0))));
+  /** The H1 overlay putting the translation under the second paragraph. */
+  function addBox(doc: Document, state = "ok", text = TRANSLATED, lang = LANG) {
+    const box = doc.createElement("div");
+    box.className = "ph-tr";
+    box.setAttribute("data-ph-tr-key", "h:3");
+    box.setAttribute("data-ph-tr-state", state);
+    box.setAttribute("data-ph-tr-lang", lang);
+    box.innerHTML = `<div class="ph-tr-inner">${text}</div>`;
+    doc.getElementById("p2")!.after(box);
+    return box;
+  }
+
+  beforeEach(() => {
+    toastFn.mockReset();
+    useMarksStore.setState({
+      marksByPaper: { 3: [trMark()] },
+      chunksByPaper: { 3: CHUNKS },
+      colors: COLORS,
+      showMarks: true,
+      penOn: false,
+      loadPaper: vi.fn(() => Promise.resolve()),
+      loadColors: vi.fn(() => Promise.resolve()),
+    });
+    useTranslationStore.setState({ language: LANG, enabledByPaper: { 3: true }, reveal: null });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    document.querySelectorAll("iframe").forEach((f) => f.remove());
+  });
+
+  it("swaps the 文 marker for the highlight as the translation arrives, and back as it leaves", async () => {
+    const doc = frameDoc(paper(false));
+    render(createElement(Host, { doc }));
+    expect(doc.querySelector('.ph-mk-tr[data-mark="mt"]')).not.toBeNull();
+    const box = addBox(doc);
+    await nextFrame(doc);
+    await waitFor(() => expect(doc.querySelector('.ph-mk[data-mark="mt"]')).not.toBeNull());
+    expect(doc.querySelector('.ph-mk-tr[data-mark="mt"]:not([data-leaving])')).toBeNull();
+    // Translation turned off: the overlay collapses the box away.
+    box.setAttribute("data-ph-tr-leaving", "");
+    await nextFrame(doc);
+    await waitFor(() => expect(doc.querySelector('.ph-mk-tr[data-mark="mt"]:not([data-leaving])')).not.toBeNull());
+    expect(doc.querySelector('.ph-mk[data-mark="mt"]:not([data-leaving])')).toBeNull();
+  });
+
+  it("the 文 marker turns translation on; once the translation arrives its words flash", async () => {
+    useTranslationStore.setState({ language: "English", enabledByPaper: {} });
+    const doc = frameDoc(paper(false));
+    render(createElement(Host, { doc }));
+    act(() => doc.querySelector<HTMLButtonElement>('.ph-mk-tr[data-mark="mt"]')!.click());
+    expect(useTranslationStore.getState().reveal).toMatchObject({ markId: "mt" });
+    // The overlay fills the paragraph's translation a moment later.
+    addBox(doc);
+    await nextFrame(doc);
+    await waitFor(() => expect(useTranslationStore.getState().reveal).toBeNull());
+    expect(doc.querySelector('.ph-mk[data-mark="mt"]')!.hasAttribute("data-flash")).toBe(true);
+  });
+
+  it.each([
+    ["the paragraph's translation failed", () => paper(false), "unavailable", "This paragraph's translation isn't available, so the mark can't be shown in it"],
+    ["the words left the translation", () => paper(false), "changed-text", "The translation changed since you marked it"],
+  ])("says why when %s, with Show original", async (_why, body, kind, message) => {
+    const doc = frameDoc(body());
+    if (kind === "unavailable") addBox(doc, "unavailable", "");
+    else addBox(doc, "ok", "全新的翻譯。");
+    render(createElement(Host, { doc }));
+    act(() => {
+      useTranslationStore.getState().showMark("mt");
+    });
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith(message, expect.anything()));
+    const { action } = toastFn.mock.calls.find((c) => c[0] === message)![1] as { action: { label: string; onClick: () => void } };
+    expect(action.label).toBe("Show original");
+    action.onClick();
+    expect(toastFn).toHaveBeenLastCalledWith("Original text", expect.objectContaining({ description: SOURCE }));
+    expect(useTranslationStore.getState().reveal).toBeNull();
+  });
+
+  it("says the translation changed for a mark the re-anchor flagged", async () => {
+    useMarksStore.setState({ marksByPaper: { 3: [trMark({ status: "translation_changed" })] } });
+    const doc = frameDoc(paper());
+    render(createElement(Host, { doc }));
+    act(() => {
+      useTranslationStore.getState().showMark("mt");
+    });
+    await waitFor(() =>
+      expect(toastFn).toHaveBeenCalledWith("The translation changed since you marked it", expect.anything()),
+    );
+  });
+
+  it("waits for a slow translation, then says it didn't arrive", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const doc = frameDoc(paper(false));
+    addBox(doc, "pending", "");
+    render(createElement(Host, { doc }));
+    act(() => {
+      useTranslationStore.getState().showMark("mt");
+    });
+    act(() => {
+      vi.advanceTimersByTime(REVEAL_WAIT_MS / 2);
+    });
+    expect(useTranslationStore.getState().reveal).not.toBeNull();
+    expect(toastFn).not.toHaveBeenCalledWith("The translation didn't arrive in time to show this mark", expect.anything());
+    act(() => {
+      vi.advanceTimersByTime(REVEAL_WAIT_MS);
+    });
+    expect(toastFn).toHaveBeenCalledWith("The translation didn't arrive in time to show this mark", expect.anything());
+    expect(useTranslationStore.getState().reveal).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ import {
   type TextIndex,
 } from "@/lib/marks/anchor";
 import { TR_CLASS, TR_LANG_ATTR } from "@/lib/htmlTranslation";
+import { sameLanguage } from "@/lib/language";
 import type { Mark, MarkPiece } from "@/types/notes";
 
 /** A translation under an HTML paragraph (`lib/htmlTranslation.ts`). */
@@ -96,7 +97,7 @@ export function sourceOf(box: Element): Element | null {
 export function translationUnder(block: Element, lang: string): HTMLElement | null {
   const next = block.nextElementSibling;
   if (!next?.matches(TR_BOX) || !isLiveBox(next)) return null;
-  return next.getAttribute(TR_LANG_ATTR) === lang ? (next as HTMLElement) : null;
+  return sameLanguage(next.getAttribute(TR_LANG_ATTR), lang) ? (next as HTMLElement) : null;
 }
 
 /** A translation box's words, as one text (the same rule as the paper's). */

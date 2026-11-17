@@ -25,6 +25,7 @@ import { bboxToRect, markerPageToPageNumber } from "@/lib/bboxHighlight";
 import { describeBreak, glidesBetween, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { cardSelection, paragraphBlock } from "@/lib/marks/translationMarks";
 import { prefersReducedMotion } from "@/lib/motion";
+import { sameLanguage } from "@/lib/language";
 import { mathToKatexHtml } from "@/lib/pdfTranslation";
 import {
   createTranslationQueue,
@@ -32,7 +33,7 @@ import {
   type TranslationQueueStatus,
 } from "@/lib/translationQueue";
 import { cn } from "@/lib/utils";
-import { useTranslationStore } from "@/store/translation";
+import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type {
   ParagraphsResponse,
   PdfParagraph,
@@ -54,9 +55,6 @@ const HINT_ANNOUNCE_MS = 50;
 const GLIDE_MS = 200;
 /** A mark asked to be shown rings this long in the card. */
 const FLASH_MS = 1600;
-/** How long a request to show a mark waits for its paragraph to render. */
-const REVEAL_TRIES = 40;
-const REVEAL_EVERY_MS = 150;
 
 const BREAK = /⟦BR⟧/g;
 
@@ -599,14 +597,20 @@ ${next.side}`;
     () =>
       shown && marksVisible
         ? (trMarks ?? []).filter(
-            (m) => m.source_ref === shown.key && m.lang === language && m.status !== "translation_changed",
+            (m) => m.source_ref === shown.key && sameLanguage(m.lang, language) && m.status !== "translation_changed",
           )
         : [],
     [shown, trMarks, marksVisible, language],
   );
   const setCardShown = marksCtx?.setCardShown;
+  // The marks the card draws now (a request to show one checks it).
+  const cardShownRef = useRef<ReadonlySet<string>>(new Set());
   const onMarksShown = useCallback(
-    (ids: ReadonlySet<string>) => setCardShown?.(open && !outOfView ? ids : new Set()),
+    (ids: ReadonlySet<string>) => {
+      const now = open && !outOfView ? ids : new Set<string>();
+      cardShownRef.current = now;
+      setCardShown?.(now);
+    },
     [setCardShown, open, outOfView],
   );
   const openCard = marksCtx?.openCard;
@@ -638,41 +642,78 @@ ${next.side}`;
     return () => clearTimeout(timer);
   }, [flashId]);
   const trMarksRef = useRef(trMarks);
+  const resultsRef = useRef(results);
+  const languageRef = useRef(language);
   useLayoutEffect(() => {
     trMarksRef.current = trMarks;
-  }, [trMarks]);
+    resultsRef.current = results;
+    languageRef.current = language;
+  }, [trMarks, results, language]);
   useEffect(() => {
     if (!reveal || reveal.paperId !== paperId || !enabled) return;
     // This reader shows it: the request is not dropped as unclaimed.
     useTranslationStore.getState().claimReveal(reveal.n);
-    let tries = 0;
-    const tick = (): boolean => {
-      const key = trMarksRef.current?.find((m) => m.id === reveal.markId)?.source_ref;
-      const frag = key
-        ? readerRef.current?.querySelector<HTMLElement>(`[data-paragraph-key="${CSS.escape(key)}"]`)
-        : null;
-      if (!key || !frag) return false;
-      if (typeof frag.scrollIntoView === "function") {
-        frag.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-      }
-      clearHideTimer();
-      pinnedKeyRef.current = key;
-      setPinned(key);
-      setHover(key);
-      place(key);
-      setFlashId(reveal.markId);
+    const started = Date.now();
+    let pinnedKey: string | null = null;
+    // A translation that has arrived is given one more look (the card
+    // draws its marks after it renders) before it is judged.
+    let seenOk = false;
+    const done = (): true => {
       useTranslationStore.getState().revealed(reveal.n);
       return true;
     };
+    const tick = (): boolean => {
+      const mark = trMarksRef.current?.find((m) => m.id === reveal.markId);
+      const key = mark?.source_ref ?? null;
+      if (pinnedKey === null) {
+        // First the paragraph: scrolled to, its card pinned open.
+        const frag = key
+          ? readerRef.current?.querySelector<HTMLElement>(`[data-paragraph-key="${CSS.escape(key)}"]`)
+          : null;
+        if (key && frag) {
+          if (typeof frag.scrollIntoView === "function") {
+            frag.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+          }
+          clearHideTimer();
+          pinnedKeyRef.current = key;
+          setPinned(key);
+          setHover(key);
+          place(key);
+          pinnedKey = key;
+        }
+      }
+      if (mark && pinnedKey !== null && sameLanguage(languageRef.current, mark.lang)) {
+        // Then the mark in the card, or why it can't be there.
+        if (mark.status === "translation_changed") {
+          explainUnshown(mark, "changed");
+          return done();
+        }
+        const result = resultsRef.current[pinnedKey];
+        if (result?.status === "unavailable") {
+          explainUnshown(mark, "unavailable");
+          return done();
+        }
+        if (result?.status === "ok") {
+          if (cardShownRef.current.has(mark.id)) {
+            setFlashId(mark.id);
+            return done();
+          }
+          if (seenOk) {
+            explainUnshown(mark, "changed");
+            return done();
+          }
+          seenOk = true;
+        }
+      }
+      if (Date.now() - started >= REVEAL_WAIT_MS) {
+        if (mark) explainUnshown(mark, "timeout");
+        return done();
+      }
+      return false;
+    };
     if (tick()) return;
     const timer = setInterval(() => {
-      tries += 1;
       if (tick()) clearInterval(timer);
-      else if (tries >= REVEAL_TRIES) {
-        // Not there to show: the request ends here.
-        clearInterval(timer);
-        useTranslationStore.getState().revealed(reveal.n);
-      }
     }, REVEAL_EVERY_MS);
     return () => clearInterval(timer);
   }, [reveal, paperId, enabled, readerRef, place, clearHideTimer]);
