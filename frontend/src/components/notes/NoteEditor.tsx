@@ -19,7 +19,7 @@ import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
 import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -75,6 +75,52 @@ function partsViewOf(noteId: number): PartsView {
 
 function dictionaryFor(lang: string) {
   return DICTIONARIES[lang as keyof typeof DICTIONARIES] ?? (lang.startsWith("zh") ? zh : en);
+}
+
+/** What `takeBlocks` uses of the editor. */
+interface BlockOps {
+  getBlock: (id: string) => { id: string } | undefined;
+  getPrevBlock: (id: string) => { id: string } | undefined;
+  getNextBlock: (id: string) => { id: string } | undefined;
+  removeBlocks: (ids: string[]) => unknown;
+  updateBlock: (id: string, update: never) => unknown;
+  insertBlocks: (blocks: never, ref: string, placement: "before" | "after") => unknown;
+}
+
+/** Puts `ids` as they are in `tree` into the editor: changed, moved, added
+ * or removed, each in place. False when one can't be placed (the caller
+ * then replaces the whole document). */
+function takeBlocks(editor: BlockOps, tree: EditorBlock[], ids: readonly string[]): boolean {
+  const where = new Map<string, { block: EditorBlock; siblings: EditorBlock[]; index: number }>();
+  const walk = (list: EditorBlock[]) =>
+    list.forEach((b, index) => {
+      where.set(b.id, { block: b, siblings: list, index });
+      walk(b.children);
+    });
+  walk(tree);
+  for (const id of ids) {
+    const want = where.get(id);
+    const have = editor.getBlock(id);
+    if (!want) {
+      if (have) editor.removeBlocks([id]);
+      continue;
+    }
+    const prev = want.siblings[want.index - 1];
+    const next = want.siblings[want.index + 1];
+    const inPlace =
+      have &&
+      (prev ? editor.getPrevBlock(id)?.id === prev.id : !editor.getPrevBlock(id)) &&
+      (!next || editor.getNextBlock(id)?.id === next.id || !editor.getBlock(next.id));
+    if (have && inPlace) {
+      editor.updateBlock(id, { type: want.block.type, props: want.block.props, content: want.block.content } as never);
+      continue;
+    }
+    if (have) editor.removeBlocks([id]);
+    if (prev && editor.getBlock(prev.id)) editor.insertBlocks([want.block] as never, prev.id, "after");
+    else if (next && editor.getBlock(next.id)) editor.insertBlocks([want.block] as never, next.id, "before");
+    else return false;
+  }
+  return true;
 }
 
 export function NoteEditor(props: NoteEditorProps) {
@@ -178,14 +224,41 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     useNotesStore.getState().keepFolds(noteId, dividers);
   }, [doc, noteId]);
 
+  // This editor, among the editors open on the note (the card and the pane).
+  const origin = useId();
   const onChange = useCallback(() => {
     keepFolds();
     if (applyingRemote.current || synced.current === null) return;
     const next = pruneUnsavedEmpty(doc(), treeIds(synced.current));
     const ops = diffDocuments(synced.current, next);
     synced.current = next;
-    if (ops.length) applyLocal(noteId, ops);
-  }, [applyLocal, doc, noteId, keepFolds]);
+    if (ops.length) applyLocal(noteId, ops, origin);
+  }, [applyLocal, doc, noteId, keepFolds, origin]);
+
+  // Another editor open on this note (the note card while the pane is open
+  // behind it, or the other way round) changed blocks: they are taken here
+  // in place, from the shared store, so this editor never sends an older
+  // copy of them back. What was typed here first goes out as usual, and
+  // this editor's undo history stays.
+  useEffect(
+    () =>
+      useNotesStore.subscribe((s, prev) => {
+        const e = s.localEdits[noteId];
+        if (!e || e === prev.localEdits[noteId] || e.origin === origin) return;
+        onChange();
+        const tree = toEditorBlocks(useNotesStore.getState().notes[noteId]?.blocks ?? []);
+        applyingRemote.current = true;
+        try {
+          if (!takeBlocks(editor, tree, e.blockIds)) {
+            editor.replaceBlocks(editor.document, (tree.length ? tree : [{ type: "paragraph" }]) as never);
+          }
+        } finally {
+          applyingRemote.current = false;
+        }
+        synced.current = pruneUnsavedEmpty(doc(), new Set([...treeIds(synced.current ?? []), ...treeIds(tree)]));
+      }),
+    [editor, noteId, origin, onChange, doc],
+  );
 
   const comments = useNoteComments(editor, noteId);
   // Comment threads to put back over their quotes once an accepted

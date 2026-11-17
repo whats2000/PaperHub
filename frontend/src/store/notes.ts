@@ -59,6 +59,13 @@ export interface NoteState {
   sharedBy?: number;
 }
 
+/** An edit one editor made: the blocks it changed (another editor shows them). */
+export interface LocalEdit {
+  seq: number;
+  origin: string;
+  blockIds: string[];
+}
+
 /** A bump tells open editors to reload `blockIds` (null = the whole note). */
 export interface NoteReload {
   seq: number;
@@ -76,6 +83,10 @@ interface NotesStore {
   /** `${kind}:${id}` -> note id. */
   byTarget: Record<string, number>;
   reloads: Record<number, NoteReload>;
+  /** The last edit an editor made to each note (`origin`: which editor),
+   * so another editor open on the same note (the note card and the notes
+   * pane) takes the changed blocks in place. */
+  localEdits: Record<number, LocalEdit>;
   /** Notes whose last burst failed and is waiting to be retried. */
   retrying: Record<number, boolean>;
   /** New blocks the server would not take, kept here unsaved: per note,
@@ -84,7 +95,7 @@ interface NotesStore {
   drafts: Record<number, Record<string, NoteOp>>;
   loadTarget: (kind: NoteTargetKind, id: number) => Promise<number>;
   loadNote: (noteId: number) => Promise<void>;
-  applyLocal: (noteId: number, ops: NoteOp[]) => void;
+  applyLocal: (noteId: number, ops: NoteOp[], origin?: string) => void;
   flush: (noteId: number) => Promise<void>;
   onConflict: (noteId: number, rejected: RejectedOp[]) => Promise<void>;
 
@@ -644,6 +655,7 @@ export const useNotesStore = create<NotesStore>()(
         notes: {},
         byTarget: {},
         reloads: {},
+        localEdits: {},
         retrying: {},
         drafts: {},
 
@@ -679,16 +691,20 @@ export const useNotesStore = create<NotesStore>()(
           await reload(noteId);
         },
 
-        applyLocal: (noteId, ops) => {
+        applyLocal: (noteId, ops, origin) => {
           if (!ops.length) return;
           set((s) => {
             const cur = s.notes[noteId];
             if (!cur) return {};
+            const blockIds = [...new Set(ops.map((o) => o.block_id).filter((id): id is string => !!id))];
             return {
               notes: {
                 ...s.notes,
                 [noteId]: { ...cur, blocks: applyOpsLocally(noteId, cur.blocks, ops) },
               },
+              localEdits: origin
+                ? { ...s.localEdits, [noteId]: { seq: (s.localEdits[noteId]?.seq ?? 0) + 1, origin, blockIds } }
+                : s.localEdits,
             };
           });
           // An edit of an unsaved draft is one more try at saving it; a
