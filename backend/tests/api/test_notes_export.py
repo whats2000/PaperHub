@@ -213,3 +213,16 @@ async def test_unexpected_export_error_is_a_clean_500(
     assert r.status_code == 500
     assert r.json() == {"detail": "export_failed"}
     assert "export failed" in caplog.text
+
+
+async def test_download_name_drops_controls_and_bidi(client: AsyncClient,
+                                                     tmp_path: Path) -> None:
+    title = "a\u202egpj.exe\u2066b\r\nc\x85d\u2028e"
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute("INSERT INTO chat_sessions (id, title) VALUES (6, ?)", (title,))
+        await conn.commit()
+    nid = (await client.get("/notes/target", params={"kind": "session", "id": 6})
+           ).json()["note"]["id"]
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    cd = r.headers["content-disposition"]
+    assert "filename*=UTF-8''agpj.exeb-cde-notes.zip" in cd, cd

@@ -730,16 +730,24 @@ async def export_sources(
     return papers, chunk_papers, mark_papers
 
 
+# Bidi override and isolate controls: in a file name they only reorder
+# how the name reads, so names drop them (U+202A-U+202E, U+2066-U+2069).
+_BIDI = re.compile(f"[{chr(0x202A)}-{chr(0x202E)}{chr(0x2066)}-{chr(0x2069)}]")
+
+
 def slug(title: str) -> str:
     """A file-name slug of a note's title ("note" when nothing is left)."""
-    s = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
+    s = unicodedata.normalize("NFKD", _user_text(title))
+    s = s.encode("ascii", "ignore").decode()
     s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
     return s[:60].rstrip("-") or "note"
 
 
 def display_name(title: str) -> str:
-    """A note's title as a file name: path and control characters dropped
-    ("note" when nothing is left)."""
-    s = re.sub(r'[\/:*?"<>|\x00-\x1f]+', "-", title)
+    """A note's title as a file name: normalised like note text, bidi
+    controls dropped, path and control characters replaced ("note" when
+    nothing is left)."""
+    s = _BIDI.sub("", _user_text(title))
+    s = re.sub(r'[\/:*?"<>|\x00-\x1f]+', "-", s)
     s = " ".join(s.split()).strip(" .-")
     return s[:100] or "note"
