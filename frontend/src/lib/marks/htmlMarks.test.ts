@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { chunkMap } from "@/lib/marks/anchor";
-import { MK_STYLE_ID, attachHtmlMarks, type HtmlMarksOptions } from "@/lib/marks/htmlMarks";
+import {
+  MK_STYLE_ID,
+  attachHtmlMarks,
+  darkPreimage,
+  darkRendered,
+  type HtmlMarksOptions,
+} from "@/lib/marks/htmlMarks";
 import type { Mark, MarkColorInfo } from "@/types/notes";
 
 function makeDoc(body: string): Document {
@@ -61,8 +67,9 @@ function opts(over: Partial<HtmlMarksOptions> = {}): HtmlMarksOptions {
 
 // jsdom has no layout: every range gets one line box per text it covers,
 // placed by the paragraph it sits in.
+let rangeRects: MockInstance<(this: Range) => DOMRectList>;
 beforeEach(() => {
-  vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
+  rangeRects = vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
     const p = this.startContainer.parentElement?.closest("p");
     const top = p?.id === "p2" ? 60 : 20;
     const left = this.startOffset * 6;
@@ -93,16 +100,22 @@ describe("attachHtmlMarks", () => {
     const [q] = rects(doc, "m2");
     expect(q!.dataset.kind).toBe("quote");
     expect(q!.dataset.color).toBeUndefined();
-    // A margin icon on each marked line.
-    expect(doc.querySelectorAll(".ph-mk-icon")).toHaveLength(2);
+    // Quoted passages show as boxes only: margin icons are for notes with no quote.
+    expect(doc.querySelectorAll(".ph-mk-icon")).toHaveLength(0);
   });
 
-  it("counts the marks that share a line on one margin icon", () => {
+  it("puts a note with no quote in the margin, one icon with a count per line", () => {
     const doc = makeDoc(PAPER);
-    attachHtmlMarks(
+    const handle = attachHtmlMarks(
       doc,
-      opts({ marks: [mark("m1", "agent pose", 102), mark("m3", "ahead of time", 102, { color: "blue" })] }),
+      opts({
+        chunks: null,
+        marks: [mark("m1", "", 102, { kind: "quote", color: null }), mark("m3", "", 102, { kind: "quote", color: null })],
+      }),
     );
+    // Its place is its chunk's span: none until the chunk map is there.
+    expect(doc.querySelectorAll(".ph-mk-icon")).toHaveLength(0);
+    handle.update({ chunks: CHUNKS });
     const icons = doc.querySelectorAll<HTMLElement>(".ph-mk-icon");
     expect(icons).toHaveLength(1);
     expect(icons[0]!.textContent).toBe("2");
@@ -181,5 +194,65 @@ describe("attachHtmlMarks", () => {
     expect(doc.documentElement.outerHTML).not.toBe(before);
     handle.detach();
     expect(doc.documentElement.outerHTML).toBe(before);
+  });
+});
+
+describe("attachHtmlMarks in a live document", () => {
+  function frameDoc(body: string): Document {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument!;
+    doc.body.innerHTML = body;
+    // The frame's own Range: give it the same fake geometry.
+    const FrameRange = (frame.contentWindow as unknown as { Range: typeof Range }).Range;
+    FrameRange.prototype.getClientRects = function (this: Range) {
+      return Range.prototype.getClientRects.call(this);
+    };
+    return doc;
+  }
+
+  it("redraws when the paper reflows without a resize (math typeset, a translation)", async () => {
+    const doc = frameDoc(PAPER);
+    attachHtmlMarks(doc, opts());
+    expect(rects(doc, "m1")[0]!.style.top).toBe("20px");
+    rangeRects.mockImplementation(
+      () => [new DOMRect(0, 44, 30, 16)] as unknown as DOMRectList,
+    );
+    doc.getElementById("p2")!.appendChild(doc.createTextNode(" More."));
+    await vi.waitFor(() => expect(rects(doc, "m1")[0]!.style.top).toBe("44px"));
+  });
+
+  it("takes a click on a mark over a link: the link and the lightbox stay put", () => {
+    const doc = frameDoc(
+      '<p id="p1"><span id="phchunk-1"></span>See <a href="#fig1">the agent pose</a> here.</p>',
+    );
+    const onClick = vi.fn();
+    const lightbox = vi.fn();
+    doc.addEventListener("click", lightbox);
+    attachHtmlMarks(doc, opts({ marks: [mark("m1", "the agent pose", 102)], onClick }));
+    const a = doc.querySelector("a")!;
+    const ev = new MouseEvent("click", { clientX: 3, clientY: 25, bubbles: true, cancelable: true });
+    a.dispatchEvent(ev);
+    expect(onClick).toHaveBeenCalledWith("m1");
+    expect(ev.defaultPrevented).toBe(true);
+    expect(lightbox).not.toHaveBeenCalled();
+  });
+});
+
+describe("the dark reader", () => {
+  it("draws each colour so the inverted page shows the validated dark palette", () => {
+    const channels = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+    const off = (a: string, b: string) => Math.max(...channels(a).map((v, i) => Math.abs(v - channels(b)[i]!)));
+    for (const hex of ["#36a067", "#4b86dc", "#9670dc", "#8a8a8a", "#bdbdbd"]) {
+      expect(off(darkRendered(darkPreimage(hex)), hex)).toBeLessThanOrEqual(1); // rounding
+    }
+    // Pink is at the gamut's edge: within a few steps per channel.
+    expect(off(darkRendered(darkPreimage("#d9578a")), "#d9578a")).toBeLessThanOrEqual(4);
+    const doc = makeDoc(PAPER);
+    attachHtmlMarks(doc, opts({ dark: true }));
+    const layer = doc.querySelector<HTMLElement>(".ph-mk-layer")!;
+    expect(layer.style.getPropertyValue("--mk-green")).toBe(darkPreimage("#36a067"));
+    expect(layer.style.getPropertyValue("--mk-alpha")).toBe("32%");
+    expect(layer.style.filter).toBe("");
   });
 });

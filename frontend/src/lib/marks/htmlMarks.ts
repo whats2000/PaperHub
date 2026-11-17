@@ -2,13 +2,15 @@
  *
  * OVERLAY ONLY: the paper's nodes are never touched. One layer (`div.ph-mk-
  * layer`, behind the text) holds a box per line of each marked passage and a
- * margin icon per marked line; one `<style id="ph-mk-style">` styles them.
- * The layer takes no pointer events: clicks and hovers are hit-tested
- * against the drawn boxes, so the text under a mark stays selectable.
+ * margin icon for each note with no quote; one `<style id="ph-mk-style">`
+ * styles them. The layer takes no pointer events: clicks and hovers are
+ * hit-tested against the drawn boxes, so the text under a mark stays
+ * selectable.
  *
- * A highlight is a box in its colour, a quote a thin neutral underline, and
- * every marked line has a margin icon (with a count when several marks share
- * it). Hidden colours are not drawn; "Show my marks" off fades the layer out.
+ * A highlight is a box in its colour, a quote a thin neutral underline, a
+ * note on a passage with no quote a margin icon (with a count when several
+ * share a line). Hidden colours are not drawn; "Show my marks" off fades the
+ * layer out.
  */
 import { prefersReducedMotion } from "@/lib/motion";
 import { buildTextIndex, findPiece, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
@@ -31,18 +33,62 @@ const FALLBACK: Record<"light" | "dark", Record<MarkColor, string>> = {
   dark: { green: "#36a067", blue: "#4b86dc", pink: "#d9578a", purple: "#9670dc" },
 };
 
+/** The overlay's greys: the quote underline, the hover / flash ring, a
+ * hovered icon's text and background. */
+const NEUTRAL = {
+  light: { neutral: "#7b7b7b", ring: "#8f8f8f", hotFg: "#262626" },
+  dark: { neutral: "#8a8a8a", ring: "#bdbdbd", hotFg: "#f0f0f0" },
+};
+
+// The dark reader is the light page put through `invert(0.9)
+// hue-rotate(180deg)` (applyIframeTheme), and the layer is part of the page.
+// So in the dark theme each colour is drawn as the colour that this filter
+// turns into the palette colour: what shows is the validated dark palette at
+// its alpha over the dark page.
+const HUE_180 = [
+  [-0.574, 1.43, 0.144],
+  [0.426, 0.43, 0.144],
+  [0.426, 1.43, -0.856],
+] as const;
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = Number.parseInt(m[1]!, 16);
+  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+function toHex(c: readonly number[]): string {
+  return `#${c.map((v) => Math.round(clamp01(v) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** The colour that the dark page's filter shows as `hex` (pre-image of
+ * `hue-rotate(180deg)` after `invert(0.9)`; clamped to the gamut). */
+export function darkPreimage(hex: string): string {
+  const c = parseHex(hex);
+  if (!c) return hex;
+  const h = HUE_180.map((r) => r[0] * c[0] + r[1] * c[1] + r[2] * c[2]);
+  return toHex(h.map((y) => (0.9 - y) / 0.8));
+}
+
+/** What the dark page's filter shows for a drawn colour. */
+export function darkRendered(hex: string): string {
+  const c = parseHex(hex);
+  if (!c) return hex;
+  const inv = c.map((v) => clamp01(0.9 - 0.8 * v));
+  return toHex(HUE_180.map((r) => r[0] * inv[0]! + r[1] * inv[1]! + r[2] * inv[2]!));
+}
+
 // The layer sits behind the text (z-index -1: above the page background,
-// below the words). In the dark theme the whole page is inverted
-// (applyIframeTheme); the layer is inverted back, like the figures, so the
-// dark palette shows as itself.
+// below the words).
 const STYLE = `
 .${LAYER_CLASS} {
   position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: -1;
   pointer-events: none; transition: opacity 200ms ease-out;
-  --mk-neutral: oklch(0.55 0 0); --mk-ring: oklch(0.55 0 0);
 }
 .${LAYER_CLASS}[data-hidden] { opacity: 0; }
-.${LAYER_CLASS}[data-dark] { filter: invert(1) hue-rotate(180deg); --mk-ring: oklch(0.75 0 0); }
 .ph-mk {
   position: absolute; border-radius: 2px;
   transition: opacity 200ms ease-out, box-shadow 150ms ease-out, background-color 200ms ease-out;
@@ -58,11 +104,12 @@ ${MARK_COLORS.map((c) => `.ph-mk[data-color="${c}"] { --mk-c: var(--mk-${c}); }`
   position: absolute; display: inline-flex; align-items: center; gap: 1px;
   height: ${ICON_SIZE}px; padding: 0 2px; border-radius: 4px; color: var(--mk-neutral);
   font: 500 10.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
-  transition: opacity 200ms ease-out, color 150ms ease-out, background-color 150ms ease-out;
+  transition: opacity 200ms ease-out, color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out;
   animation: ph-mk-in 200ms ease-out;
 }
 .ph-mk-icon svg { width: 12px; height: 12px; }
-.ph-mk-icon[data-hot] { color: oklch(0.2 0 0); background: oklch(0 0 0 / 6%); }
+.ph-mk-icon[data-hot] { color: var(--mk-hot-fg); background: var(--mk-hot-bg); }
+.ph-mk-icon[data-flash] { box-shadow: 0 0 0 2px var(--mk-ring); }
 .ph-mk-icon[data-dim] { opacity: .3; }
 .ph-mk[data-leaving], .ph-mk-icon[data-leaving] { opacity: 0; animation: none; }
 @keyframes ph-mk-in { from { opacity: 0; } }
@@ -102,7 +149,10 @@ interface Box {
 
 interface Drawn {
   key: string;
+  /** The marked passages (a quote mark), or none (a note with no quote). */
   ranges: Range[];
+  /** Where a note with no quote sits: its chunk spans. */
+  spots: Element[];
   els: HTMLElement[];
   boxes: Box[];
 }
@@ -118,11 +168,13 @@ function livePieces(m: Mark) {
   return m.pieces.filter((p) => !p.erased && !p.removed && !p.lost);
 }
 
+const hasQuote = (m: Mark) => livePieces(m).some((p) => typeof p.quote === "string" && p.quote.trim() !== "");
+
 /** Whether the HTML reader draws this mark (translation marks come later). */
 function drawable(m: Mark, hidden: ReadonlySet<string>): boolean {
   if (m.deleted_at !== null || m.lang) return false;
-  if (m.kind === "quote") return true;
-  return m.kind === "highlight" && (m.color === null || !hidden.has(m.color));
+  if (m.color !== null && hidden.has(m.color)) return false;
+  return m.kind === "quote" || m.kind === "highlight";
 }
 
 /** One box per line: line boxes of the same line that touch are merged. */
@@ -161,13 +213,12 @@ function iconSvg(doc: Document): SVGElement {
 
 /** The app's palette for the current theme (its `--hl-*` tokens). */
 function palette(dark: boolean): Record<MarkColor, string> {
-  const fallback = FALLBACK[dark ? "dark" : "light"];
-  const out = { ...fallback };
+  const out = { ...FALLBACK[dark ? "dark" : "light"] };
   try {
     const css = getComputedStyle(document.documentElement);
     for (const c of MARK_COLORS) {
       const v = css.getPropertyValue(`--hl-${c}`).trim();
-      if (v) out[c] = v;
+      if (parseHex(v)) out[c] = v;
     }
   } catch {
     /* no app document: the fallback */
@@ -189,6 +240,10 @@ function contains(box: Box, x: number, y: number): boolean {
 function setFlag(el: Element, name: string, on: boolean): void {
   if (on) el.setAttribute(name, "");
   else el.removeAttribute(name);
+}
+
+interface MathJaxStartup {
+  MathJax?: { startup?: { promise?: Promise<unknown> } };
 }
 
 export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlMarksHandle {
@@ -213,6 +268,9 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let hot: string | null = null;
   let index: TextIndex | null = null;
+  let detached = false;
+  // A new chunk map re-places every mark (it is the hint among repeats).
+  let chunkGen = 0;
 
   const later = (fn: () => void, ms: number) => {
     const id = setTimeout(() => {
@@ -235,36 +293,45 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   };
 
   const theme = () => {
-    setFlag(layer, "data-dark", o.dark);
+    const mode = o.dark ? "dark" : "light";
+    const draw = (hex: string) => (o.dark ? darkPreimage(hex) : hex);
     layer.style.setProperty("--mk-alpha", o.dark ? "32%" : "22%");
     const p = palette(o.dark);
-    for (const c of MARK_COLORS) layer.style.setProperty(`--mk-${c}`, p[c]);
+    for (const c of MARK_COLORS) layer.style.setProperty(`--mk-${c}`, draw(p[c]));
+    layer.style.setProperty("--mk-neutral", draw(NEUTRAL[mode].neutral));
+    layer.style.setProperty("--mk-ring", draw(NEUTRAL[mode].ring));
+    layer.style.setProperty("--mk-hot-fg", draw(NEUTRAL[mode].hotFg));
+    // A dark veil on the light page; under the dark page's inversion, light.
+    layer.style.setProperty("--mk-hot-bg", "rgb(0 0 0 / 7%)");
   };
 
   /** Positions every drawn mark and the margin icons from the live layout. */
   const layout = () => {
+    if (detached) return;
     const at = origin();
     const lines = new Map<string, { box: Box; marks: string[] }>();
     const viewRight = (doc.documentElement.clientWidth || win?.innerWidth || 0) - at.left;
     for (const [id, d] of drawn) {
       const boxes: Box[] = [];
       for (const range of d.ranges) {
-        const rangeLines = lineBoxes(Array.from(range.getClientRects()));
-        for (const r of rangeLines) {
+        for (const r of lineBoxes(Array.from(range.getClientRects()))) {
           boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
         }
-        // The margin icon of the passage's first line.
-        const first = rangeLines[0];
-        const block = (range.startContainer.parentElement ?? null)?.closest("p, li, figcaption, td, th, dd, blockquote, div");
-        if (first && block) {
-          const right = block.getBoundingClientRect().right - at.left + ICON_GAP;
-          const left = Math.max(0, viewRight > 0 ? Math.min(right, viewRight - ICON_SIZE - 4) : right);
-          const top = first.top - at.top + (first.height - ICON_SIZE) / 2;
-          const key = `${Math.round(left)}:${Math.round(first.top - at.top)}`;
-          const line = lines.get(key) ?? { box: { left, top, width: ICON_SIZE + 10, height: ICON_SIZE }, marks: [] };
-          if (!line.marks.includes(id)) line.marks.push(id);
-          lines.set(key, line);
-        }
+      }
+      // A note with no quote: a margin icon on its passage's first line.
+      for (const spot of d.spots) {
+        const block = spot.parentElement?.closest("p, li, figcaption, td, th, dd, blockquote, h1, h2, h3, h4, h5, h6, div");
+        if (!block) continue;
+        const line = doc.createRange();
+        line.selectNodeContents(block);
+        const first = lineBoxes(Array.from(line.getClientRects()))[0] ?? block.getBoundingClientRect();
+        const right = block.getBoundingClientRect().right - at.left + ICON_GAP;
+        const left = Math.max(0, viewRight > 0 ? Math.min(right, viewRight - ICON_SIZE - 4) : right);
+        const top = first.top - at.top + (first.height - ICON_SIZE) / 2;
+        const key = `${Math.round(left)}:${Math.round(first.top - at.top)}`;
+        const entry = lines.get(key) ?? { box: { left, top, width: ICON_SIZE + 10, height: ICON_SIZE }, marks: [] };
+        if (!entry.marks.includes(id)) entry.marks.push(id);
+        lines.set(key, entry);
       }
       d.boxes = boxes;
       // Reuse the mark's boxes (no re-animation on relayout).
@@ -320,6 +387,17 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     }
   };
 
+  /** The chunk spans of a note with no quote. */
+  const spotsOf = (m: Mark): Element[] => {
+    const out: Element[] = [];
+    for (const p of livePieces(m)) {
+      const id = typeof p.chunk_start === "number" ? o.chunks?.byId.get(p.chunk_start)?.dom_id : undefined;
+      const el = id ? doc.getElementById(id) : null;
+      if (el) out.push(el);
+    }
+    return out;
+  };
+
   /** Which marks are drawn, and where their pieces are in the document. */
   const sync = () => {
     const hidden = new Set(o.colors.filter((c) => !c.visible).map((c) => c.color));
@@ -330,19 +408,25 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       drawn.delete(id);
     }
     for (const [id, m] of want) {
-      const key = JSON.stringify(livePieces(m));
+      const key = `${chunkGen}:${JSON.stringify(livePieces(m))}`;
       const prev = drawn.get(id);
       if (prev?.key === key) continue;
-      index ??= buildTextIndex(doc);
-      const ranges = livePieces(m)
-        .map((p) => findPiece(index!, p, o.chunks))
-        .filter((r): r is Range => r !== null);
-      if (!ranges.length) {
+      let ranges: Range[] = [];
+      let spots: Element[] = [];
+      if (hasQuote(m)) {
+        index ??= buildTextIndex(doc);
+        ranges = livePieces(m)
+          .map((p) => findPiece(index!, p, o.chunks))
+          .filter((r): r is Range => r !== null);
+      } else {
+        spots = spotsOf(m);
+      }
+      if (!ranges.length && !spots.length) {
         prev?.els.forEach(leave);
         drawn.delete(id);
         continue;
       }
-      drawn.set(id, { key, ranges, els: prev?.els ?? [], boxes: [] });
+      drawn.set(id, { key, ranges, spots, els: prev?.els ?? [], boxes: [] });
     }
     index = null; // the document may change before the next sync
     setFlag(layer, "data-hidden", !o.visible);
@@ -370,30 +454,45 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
 
   const onMove = (e: MouseEvent) => setHot(hit(e.clientX, e.clientY));
   const onLeave = () => setHot(null);
+  // Capture: a mark over a link or a figure takes the click, so the link is
+  // not followed and the figure lightbox does not open as well.
   const onClick = (e: MouseEvent) => {
     const sel = doc.getSelection();
     if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
     const id = hit(e.clientX, e.clientY);
-    if (id !== null) o.onClick?.(id);
+    if (id === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    o.onClick?.(id);
   };
   doc.addEventListener("mousemove", onMove);
-  doc.addEventListener("click", onClick);
+  doc.addEventListener("click", onClick, true);
   doc.documentElement.addEventListener("mouseleave", onLeave);
 
-  // Text moves when the paper reflows (a resize, translations opening under
-  // paragraphs, math typesetting): redraw on the next frame.
+  // Text moves when the paper reflows — a resize, translations opening under
+  // paragraphs, MathJax typesetting, fonts loading: redraw on the next frame.
   let frame = 0;
   const schedule = () => {
-    if (frame || !win) return;
+    if (frame || !win || detached) return;
     frame = win.requestAnimationFrame(() => {
       frame = 0;
       layout();
     });
   };
   const RO = (win as (Window & { ResizeObserver?: typeof ResizeObserver }) | null)?.ResizeObserver ?? globalThis.ResizeObserver;
-  const observer = RO ? new RO(schedule) : null;
-  observer?.observe(root);
+  const resizes = RO ? new RO(schedule) : null;
+  resizes?.observe(root);
+  const MO = (win as (Window & { MutationObserver?: typeof MutationObserver }) | null)?.MutationObserver ?? globalThis.MutationObserver;
+  const mutations = MO
+    ? new MO((records) => {
+        // Our own boxes and icons are not a reflow of the paper.
+        if (records.some((r) => !layer.contains(r.target) && r.target !== style && !style.contains(r.target))) schedule();
+      })
+    : null;
+  mutations?.observe(root, { childList: true, subtree: true, characterData: true });
   win?.addEventListener("resize", schedule);
+  void doc.fonts?.ready.then(schedule).catch(() => undefined);
+  void (win as (Window & MathJaxStartup) | null)?.MathJax?.startup?.promise?.then(schedule).catch(() => undefined);
 
   theme();
   sync();
@@ -401,16 +500,18 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   return {
     update: (next) => {
       const themeChanged = next.dark !== undefined && next.dark !== o.dark;
+      if (next.chunks !== undefined && next.chunks !== o.chunks) chunkGen += 1;
       o = { ...o, ...next };
       if (themeChanged) theme();
       sync();
     },
     flash: (markId) => {
       const d = drawn.get(markId);
-      if (!d?.els.length) return false;
-      for (const el of d.els) el.setAttribute("data-flash", "");
-      later(() => d.els.forEach((el) => el.removeAttribute("data-flash")), FLASH_MS);
-      const box = d.boxes[0];
+      const els = d?.els.length ? d.els : [...icons.values()].filter((i) => i.marks.includes(markId)).map((i) => i.el);
+      if (!d || !els.length) return false;
+      for (const el of els) el.setAttribute("data-flash", "");
+      later(() => els.forEach((el) => el.removeAttribute("data-flash")), FLASH_MS);
+      const box = d.boxes[0] ?? [...icons.values()].find((i) => i.marks.includes(markId))?.box;
       if (box && win) {
         const top = layer.getBoundingClientRect().top + box.top;
         if (top < 0 || top + box.height > win.innerHeight) {
@@ -423,10 +524,12 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       return true;
     },
     detach: () => {
+      detached = true;
       doc.removeEventListener("mousemove", onMove);
-      doc.removeEventListener("click", onClick);
+      doc.removeEventListener("click", onClick, true);
       doc.documentElement.removeEventListener("mouseleave", onLeave);
-      observer?.disconnect();
+      resizes?.disconnect();
+      mutations?.disconnect();
       win?.removeEventListener("resize", schedule);
       if (frame && win) win.cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
