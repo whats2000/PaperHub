@@ -201,26 +201,46 @@ export class MarkOpTimeout extends Error {
   }
 }
 
+export interface MarkOpOptions {
+  /** Says the op timed out (its own error toast). */
+  onTimeout?: () => void;
+  /** The paper the op changes: after a timeout its marks are fetched again. */
+  paperId?: number | null;
+}
+
+/** Runs `op` within `ms`, else aborts it and fails with `MarkOpTimeout`. */
+function within<T>(ms: number, op: (signal: AbortSignal) => Promise<T>, onTimeout?: () => void): Promise<T> {
+  const ctl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ctl.abort();
+      onTimeout?.();
+      reject(new MarkOpTimeout());
+    }, ms);
+  });
+  return Promise.race([op(ctl.signal), late]).finally(() => clearTimeout(timer));
+}
+
+/** After a timeout: the paper's marks as the server has them. The request
+ * may have landed there (the answer just came too late), so the client's
+ * copy can't be trusted; the next queued op sees the refetched marks. */
+async function reconcile(paperId: number): Promise<void> {
+  await within(opTimeoutMs, () => useMarksStore.getState().loadPaper(paperId)).catch(() => undefined);
+}
+
 /** Runs `op` after every operation queued before it. Each gets at most
  * `MARK_OP_TIMEOUT_MS`: then its requests are aborted (`signal`), `onTimeout`
- * says so (the op's own error toast), it fails with `MarkOpTimeout`, and the
- * queue carries on, so one hung request never blocks later strokes,
- * erases, splits or deletes. An op stays quiet about a failure once its
- * signal has aborted (the timeout said it). */
-export function queueMarkOp<T>(op: (signal: AbortSignal) => Promise<T>, onTimeout?: () => void): Promise<T> {
-  const run = markOps.then(() => {
-    const ctl = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        ctl.abort();
-        onTimeout?.();
-        reject(new MarkOpTimeout());
-      }, opTimeoutMs);
-    });
-    return Promise.race([op(ctl.signal), late]).finally(() => clearTimeout(timer));
-  });
-  markOps = run.catch(() => undefined);
+ * says so (the op's own error toast), it fails with `MarkOpTimeout`, the
+ * paper's marks are fetched again (`paperId`), and only then does the queue
+ * carry on, so one hung request never blocks later strokes, erases, splits
+ * or deletes, and a Retry sees what actually landed. An op stays quiet about
+ * a failure once its signal has aborted (the timeout said it). */
+export function queueMarkOp<T>(op: (signal: AbortSignal) => Promise<T>, opts: MarkOpOptions = {}): Promise<T> {
+  const run = markOps.then(() => within(opTimeoutMs, op, opts.onTimeout));
+  markOps = run.catch((err: unknown) =>
+    err instanceof MarkOpTimeout && typeof opts.paperId === "number" ? reconcile(opts.paperId) : undefined,
+  );
   return run;
 }
 
@@ -279,17 +299,25 @@ export const useMarksStore = create<MarksState>()(
                   duration: UNDO_MS,
                   action: { label: t("notes:marks.deleteAgain", "Delete again"), onClick: () => void remove(markId) },
                 });
-              }, failed).catch(() => undefined);
+              }, { onTimeout: failed, paperId }).catch(() => undefined);
             },
           },
         });
       };
 
       const remove = (markId: string): Promise<void> =>
-        queueMarkOp(
-          (signal) => removeNow(markId, signal),
-          () => toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark.")),
-        ).catch(() => undefined);
+        queueMarkOp((signal) => removeNow(markId, signal), {
+          onTimeout: () => toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark.")),
+          paperId: paperOf(markId),
+        }).catch(() => undefined);
+
+      /** The paper a mark is on (null: not in the store). */
+      const paperOf = (markId: string): number | null => {
+        for (const [pid, list] of Object.entries(get().marksByPaper)) {
+          if (list.some((m) => m.id === markId)) return Number(pid);
+        }
+        return null;
+      };
 
       /** The paper and mark of an id. */
       const find = (markId: string): [number, Mark] | null => {
@@ -358,16 +386,16 @@ export const useMarksStore = create<MarksState>()(
                     onClick: () => void erase(markId, index),
                   },
                 });
-              }, failed).catch(() => undefined);
+              }, { onTimeout: failed, paperId }).catch(() => undefined);
             },
           },
         });
       };
       const erase = (markId: string, index: number): Promise<void> =>
-        queueMarkOp(
-          (signal) => eraseNow(markId, index, signal),
-          () => toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece.")),
-        ).catch(() => undefined);
+        queueMarkOp((signal) => eraseNow(markId, index, signal), {
+          onTimeout: () => toast.error(t("notes:marks.eraseFailed", "Couldn't erase that piece.")),
+          paperId: paperOf(markId),
+        }).catch(() => undefined);
 
       /** The newest piece its own mark, after any pending stroke has saved;
        * both marks as the server now has them. */
@@ -388,7 +416,10 @@ export const useMarksStore = create<MarksState>()(
           upsert(paperId, mark, fresh);
           refreshNote(mark.note_id);
           toast(t("notes:marks.splitDone", "Split into its own mark"));
-        }, () => toast.error(t("notes:marks.splitFailed", "Couldn't split the mark."))).catch(() => undefined);
+        }, {
+          onTimeout: () => toast.error(t("notes:marks.splitFailed", "Couldn't split the mark.")),
+          paperId: paperOf(markId),
+        }).catch(() => undefined);
 
       return {
         marksByPaper: {},

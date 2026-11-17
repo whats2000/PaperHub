@@ -325,7 +325,7 @@ describe("the mark-op queue", () => {
     const hung = queueMarkOp((signal) => {
       signal.addEventListener("abort", () => (aborted = true));
       return new Promise<never>(() => undefined);
-    }, onTimeout);
+    }, { onTimeout });
     const next = queueMarkOp(() => Promise.resolve("next"));
     await expect(hung).rejects.toBeInstanceOf(MarkOpTimeout);
     await expect(next).resolves.toBe("next");
@@ -393,3 +393,34 @@ describe("useMarksStore.remove in the queue", () => {
   });
 });
 
+describe("an op that reached the server but timed out", () => {
+  it("is followed by one refetch, so the store matches the server", async () => {
+    resetMarkOps(40);
+    const two: Mark = {
+      ...MARK,
+      note_id: 7,
+      pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+    };
+    // The server's copy: the erase lands there, its answer never arrives.
+    let onServer: Mark = two;
+    let refetches = 0;
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/0`, () => {
+        onServer = { ...two, pieces: [{ ...two.pieces[0]!, erased: true }, two.pieces[1]!] };
+        return new Promise<never>(() => undefined);
+      }),
+      http.get(`${API_BASE_URL}/marks`, () => {
+        refetches += 1;
+        return HttpResponse.json([onServer]);
+      }),
+      http.get(`${API_BASE_URL}/papers/content/3/chunk-anchors`, () => HttpResponse.json([])),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [two] } });
+    await useMarksStore.getState().erase("mk_1", 0);
+    expect(toastError).toHaveBeenCalledWith("Couldn't erase that piece.");
+    // The next op runs after the reconcile.
+    await queueMarkOp(() => Promise.resolve());
+    expect(refetches).toBe(1);
+    expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[0]!.erased).toBe(true);
+  });
+});
