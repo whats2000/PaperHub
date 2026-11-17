@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -178,3 +179,22 @@ async def test_comments_not_exported(client: AsyncClient, tmp_path: Path,
     assert "this claim" in text and "entirely." in text
     assert "ZebraThreadRemark" not in text
     assert thread["id"] not in text and "PLACEHOLDER" not in text
+
+
+@pytest.mark.parametrize("fmt", [
+    "md",
+    pytest.param("docx", marks=pytest.mark.skipif(
+        shutil.which("pandoc") is None, reason="pandoc not installed")),
+])
+async def test_lone_surrogate_in_json_pieces_exports(client: AsyncClient,
+                                                     fmt: str) -> None:
+    nid = await _paper_note(client)
+    # The editor's shape: pieces and source as JSON strings.
+    await _write(client, nid, [{"type": "paperQuote", "props": {
+        "kind": "quote", "quote": "q",
+        "pieces": json.dumps([{"quote": "a" + chr(0xD83D) + " b", "page": 0}]),
+        "source": json.dumps({"section": "S" + chr(0xD83D), "page": 0})}}])
+    r = await client.get(f"/notes/{nid}/export", params={"format": fmt})
+    assert r.status_code == 200, r.text
+    if fmt == "md":
+        assert "> a b" in _zip(r.content)["note.md"].decode("utf-8")

@@ -76,10 +76,16 @@ def test_every_field_is_normalised(monkeypatch: pytest.MonkeyPatch) -> None:
         _blk("q", "paperQuote", section=p(), props={
             "paperContentId": 5, "quote": p(), "lang": "en", "orig": p()}),
         _blk("q2", "paperQuote", props={
-            "paperContentId": 5, "quote": "q", "source": {"section": p()}}),
+            "paperContentId": 5, "quote": "q",
+            "source": json.dumps({"section": p()})}),
+        # The editor stores pieces and source as JSON strings.
+        _blk("q3", "paperQuote", props={
+            "paperContentId": 5, "quote": "q",
+            "pieces": json.dumps([{"quote": p(), "page": 0}])}),
         _blk("f", "paperFigure", props={"paperContentId": 5, "quote": p()}),
         _blk("e", "paperEquation", props={
-            "paperContentId": 5, "quote": p(), "pieces": [{"latex": p()}]}),
+            "paperContentId": 5, "quote": p(),
+            "pieces": json.dumps([{"latex": p()}])}),
     ]
     paper = ExportPaper(id=5, title=p(), authors=[p()], year=2017, arxiv_id=p())
     md, _images, bib = note_to_markdown(note, blocks, {5: paper})
@@ -90,7 +96,7 @@ def test_every_field_is_normalised(monkeypatch: pytest.MonkeyPatch) -> None:
         assert f"Z{n}" in out and f"Q{n}" in out, n
     # The code language is not probed: it is validated, so a probe never
     # reaches the output (it is still cleaned with the other props).
-    assert len(used) == 21
+    assert len(used) == 22
 
 
 def _para(*runs: dict[str, Any]) -> Block:
@@ -140,3 +146,24 @@ def test_forged_placeholder_in_math_forms_no_image() -> None:
             (reader, md)
     tokens = MarkdownIt("commonmark").parse(md)
     assert not any(c.type == "image" for t in tokens for c in t.children or []), md
+
+
+@needs_pandoc
+def test_lone_surrogate_in_json_pieces_exports() -> None:
+    from paperhub.api.notes import _zip
+    from paperhub.notes.pandoc import markdown_to_docx
+    bad = chr(0xD83D)
+    blocks = [
+        _blk("q1", "paperQuote", props={
+            "quote": "q", "pieces": json.dumps([{"quote": f"a{bad} b\r# h\r- x"}]),
+            "source": json.dumps({"section": f"S{bad}"})}),
+        _blk("e1", "paperEquation", props={
+            "quote": "c", "pieces": json.dumps([{"latex": f"x{bad}+1"}])}),
+    ]
+    md, images, bib = note_to_markdown(NOTE, blocks, {})
+    assert bad not in md and "\r" not in md
+    assert "a b" in md and "x+1" in md
+    _zip(md, images, bib)
+    markdown_to_docx(md, images)
+    kinds = [t.type for t in MarkdownIt("commonmark").parse(md)]
+    assert kinds.count("heading_open") == 1 and "bullet_list_open" not in kinds, md

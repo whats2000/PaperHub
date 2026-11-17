@@ -285,9 +285,13 @@ def _runs(content: Any) -> list[dict[str, Any]]:
 
 
 def _json(v: Any, default: Any) -> Any:
+    """A prop the editor may store as a JSON string (``pieces``,
+    ``source``), decoded. What it decodes is normalised like every other
+    user string: the JSON text's escapes (``\\r``, a lone surrogate) only
+    become characters here, after ``_clean_inputs`` ran."""
     if isinstance(v, str):
         try:
-            v = json.loads(v)
+            v = _clean(json.loads(v))
         except ValueError:
             return default
     return v if isinstance(v, type(default)) else default
