@@ -33,6 +33,9 @@ export interface MarkPopoverProps {
    * equation or a box taken whole — then the plain action reads "Add to
    * note" (there is no passage to quote). */
   target?: "selection" | "figure" | "equation" | "box";
+  /** Placed in the window (`anchor` and `bounds` in window coordinates):
+   * a selection outside the reader, e.g. in the translation card. */
+  fixed?: boolean;
   onHighlight: (color: MarkColor) => void;
   onQuote: () => void;
   onAddNote: () => void;
@@ -52,6 +55,7 @@ export function MarkPopover({
   busy = false,
   autoFocus = false,
   target = "selection",
+  fixed = false,
   onHighlight,
   onQuote,
   onAddNote,
@@ -139,7 +143,8 @@ export function MarkPopover({
       data-side={place.side}
       style={{ top: place.top, left: place.left }}
       className={cn(
-        "absolute z-30 flex items-center gap-0.5 rounded-[10px] border border-border bg-popover p-1 text-popover-foreground shadow-md",
+        fixed ? "fixed z-[60]" : "absolute z-30",
+        "flex items-center gap-0.5 rounded-[10px] border border-border bg-popover p-1 text-popover-foreground shadow-md",
         "duration-150 ease-out data-[side=below]:origin-top data-[side=above]:origin-bottom",
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",

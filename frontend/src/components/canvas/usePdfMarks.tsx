@@ -462,11 +462,10 @@ export function usePdfMarks({
         });
         return;
       }
-      const origin = measure();
-      if (!origin) return;
-      setTarget({ type: "translation", piece: sel.piece, keyboard: sel.keyboard, box: boxOf(sel.rect, origin) });
+      // In the card, outside the reader: placed under it in the window.
+      setTarget({ type: "translation", piece: sel.piece, keyboard: sel.keyboard, box: { ...sel.rect } });
     },
-    [measure, penSave, cardSection],
+    [penSave, cardSection],
   );
 
   // Follow: the section of the Marker block at the top of the view.
@@ -631,7 +630,8 @@ export function usePdfMarks({
       <MarkPopover
         open={target !== null}
         anchor={target?.box ?? null}
-        bounds={bounds}
+        bounds={target?.type === "translation" ? { width: window.innerWidth, height: window.innerHeight } : bounds}
+        fixed={target?.type === "translation"}
         colors={colors}
         busy={busy}
         target={popoverTarget}

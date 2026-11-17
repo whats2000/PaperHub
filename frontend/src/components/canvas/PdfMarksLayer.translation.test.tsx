@@ -66,7 +66,7 @@ function Reader() {
 function CardSelect() {
   const ctx = useContext(PdfMarksContext);
   return (
-    <button type="button" onClick={() => ctx?.openCard({ piece: PIECE, rect: { top: 40, bottom: 56, left: 30, right: 200 }, keyboard: false })}>
+    <button type="button" onClick={() => ctx?.openCard({ piece: PIECE, rect: { top: 40, bottom: 56, left: 300, right: 500 }, keyboard: false })}>
       select in card
     </button>
   );
@@ -101,6 +101,18 @@ describe("marks on the PDF translation card", () => {
       section_key: "1 Introduction",
       pieces: [{ quote: "從示範學習", orig: "Robots learn from demos.", block_id: "/page/0/Text/1", page: 0 }],
     });
+  });
+
+  it("the popover sits under the selection in the card, in the window, not at the reader's edge", async () => {
+    render(<Reader />);
+    layOut();
+    // The reader starts at x = 600; the card (and the selection) is left of it.
+    place(screen.getByTestId("reader"), 600, 0, 600, 400);
+    fireEvent.click(screen.getByRole("button", { name: "select in card" }));
+    const bar = await screen.findByRole("toolbar", { name: "Mark the selection" });
+    expect(bar.className).toContain("fixed");
+    // Centred under the selection (300 to 500), in window coordinates.
+    expect(bar.style.left).toBe("230px");
   });
 
   it("with the highlighter on, a selection in the card marks at once in the pen colour", async () => {
