@@ -333,5 +333,15 @@
     "trTurnedOn": "已打开翻译（{{lang}}）以显示这个标记",
     "trTurnOff": "关闭",
     "trBackTo": "回到{{lang}}"
+  },
+  "langShort": {
+    "en": "英文",
+    "zh-Hant": "繁中",
+    "zh-Hans": "简中",
+    "ja": "日文",
+    "ko": "韩文",
+    "fr": "法文",
+    "de": "德文",
+    "es": "西班牙文"
   }
 }

@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
+import { shortLanguage } from "@/lib/language";
 import { useNotesStore } from "@/store/notes";
 import type { MarkPiece } from "@/types/notes";
 
@@ -94,17 +95,9 @@ export function whereLabel(src: MarkSource, t: TFunction): string {
   return parts.join(" · ");
 }
 
-/** Short names of the translation languages ("繁中"); literal by design. */
-const LANG_SHORT: Record<string, string> = {
-  "zh-TW": "繁中",
-  "zh-CN": "简中",
-  ja: "日本語",
-  en: "English",
-  ko: "한국어",
-};
-
+/** A translation language's short name ("繁中"; `lib/language.ts`). */
 export function langShort(lang: string): string {
-  return LANG_SHORT[lang] ?? lang;
+  return shortLanguage(lang);
 }
 
 const DEFAULT_COLOR_NAMES: Record<string, [string, string]> = {

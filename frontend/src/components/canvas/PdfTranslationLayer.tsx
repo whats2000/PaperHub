@@ -643,6 +643,8 @@ ${next.side}`;
   }, [trMarks]);
   useEffect(() => {
     if (!reveal || reveal.paperId !== paperId || !enabled) return;
+    // This reader shows it: the request is not dropped as unclaimed.
+    useTranslationStore.getState().claimReveal(reveal.n);
     let tries = 0;
     const tick = (): boolean => {
       const key = trMarksRef.current?.find((m) => m.id === reveal.markId)?.source_ref;

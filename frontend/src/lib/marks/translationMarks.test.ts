@@ -13,16 +13,17 @@ import {
 } from "@/lib/marks/translationMarks";
 import { useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
-import { useTranslationStore } from "@/store/translation";
+import { REVEAL_TTL_MS, useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColorInfo, MarkCreated, MarkIn } from "@/types/notes";
 
-const { toastFn, toastError, toastMessage } = vi.hoisted(() => ({
+const { toastFn, toastError, toastMessage, toastDismiss } = vi.hoisted(() => ({
   toastFn: vi.fn(),
   toastError: vi.fn(),
   toastMessage: vi.fn(),
+  toastDismiss: vi.fn(),
 }));
 vi.mock("sonner", () => ({
-  toast: Object.assign(toastFn, { error: toastError, message: toastMessage, success: vi.fn() }),
+  toast: Object.assign(toastFn, { error: toastError, message: toastMessage, success: vi.fn(), dismiss: toastDismiss }),
 }));
 
 const LANG = "繁體中文";
@@ -248,8 +249,12 @@ describe("drawing a mark on a translation", () => {
 });
 
 describe("showMark", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     toastFn.mockReset();
+    toastDismiss.mockReset();
     useMarksStore.setState({ marksByPaper: { 3: [trMark()] } });
     useTranslationStore.setState({ language: "English", recent: [], enabledByPaper: {}, reveal: null });
   });
@@ -262,7 +267,7 @@ describe("showMark", () => {
     expect(s.language).toBe(LANG);
     expect(s.reveal).toMatchObject({ paperId: 3, markId: "mt" });
     expect(toastFn).toHaveBeenCalledWith(
-      `Translation turned on (${LANG}) to show this mark`,
+      "Translation turned on (繁中) to show this mark",
       expect.anything(),
     );
     const { action } = toastFn.mock.calls[0]![1] as { action: { label: string; onClick: () => void } };
@@ -289,6 +294,58 @@ describe("showMark", () => {
     expect(useTranslationStore.getState().showMark("mt")).toEqual({ paperId: 3, enabled: true, language: LANG });
     expect(toastFn).not.toHaveBeenCalled();
     expect(useTranslationStore.getState().reveal).not.toBe(before);
+  });
+
+  it("restores nothing once the user has changed the translation since", () => {
+    useTranslationStore.getState().showMark("mt");
+    const { action } = toastFn.mock.calls[0]![1] as { action: { onClick: () => void } };
+    // The user picks another language in the pill...
+    useTranslationStore.getState().setLanguage("日本語");
+    expect(toastDismiss).toHaveBeenCalledWith("tr-show-mark");
+    action.onClick();
+    // ...so Turn off is stale: their choice stays.
+    expect(useTranslationStore.getState().language).toBe("日本語");
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+  });
+
+  it("restores nothing after the user turned translation off and on again elsewhere", () => {
+    useTranslationStore.getState().showMark("mt");
+    const { action } = toastFn.mock.calls[0]![1] as { action: { onClick: () => void } };
+    useTranslationStore.getState().toggle(3);
+    action.onClick();
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(false);
+    expect(useTranslationStore.getState().language).toBe(LANG);
+  });
+
+  it("two in a row leave one toast whose way back is the state before the first", () => {
+    useMarksStore.setState({ marksByPaper: { 3: [trMark(), trMark({ id: "mj", lang: "日本語" })] } });
+    useTranslationStore.getState().showMark("mt");
+    useTranslationStore.getState().showMark("mj");
+    expect(toastFn).toHaveBeenCalledTimes(2);
+    const ids = toastFn.mock.calls.map((c) => (c[1] as { id?: string }).id);
+    expect(ids).toEqual(["tr-show-mark", "tr-show-mark"]);
+    const { action } = toastFn.mock.calls[1]![1] as { action: { label: string; onClick: () => void } };
+    expect(action.label).toBe("Turn off");
+    action.onClick();
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(false);
+    expect(useTranslationStore.getState().language).toBe("English");
+  });
+
+  it("adds the mark's language to the recent languages, like a pick in the pill", () => {
+    useTranslationStore.getState().showMark("mt");
+    expect(useTranslationStore.getState().recent[0]).toBe(LANG);
+  });
+
+  it("a request no reader takes up is dropped (a paper that never opens)", () => {
+    vi.useFakeTimers();
+    useTranslationStore.getState().showMark("mt");
+    vi.advanceTimersByTime(REVEAL_TTL_MS + 10);
+    expect(useTranslationStore.getState().reveal).toBeNull();
+    // One a reader took up stays until that reader is done.
+    useTranslationStore.getState().showMark("mt");
+    useTranslationStore.getState().claimReveal(useTranslationStore.getState().reveal!.n);
+    vi.advanceTimersByTime(REVEAL_TTL_MS + 10);
+    expect(useTranslationStore.getState().reveal).not.toBeNull();
   });
 
   it("is null for a mark on the paper's own text", () => {
@@ -403,10 +460,13 @@ describe("useHtmlMarks on a translation", () => {
     const doc = frameDoc(paper(false));
     render(createElement(Host, { doc }));
     const marker = doc.querySelector<HTMLButtonElement>('.ph-mk-tr[data-mark="mt"]')!;
-    expect(marker.getAttribute("aria-label")).toBe(`A mark on the ${LANG} translation. Show it`);
+    expect(marker.getAttribute("aria-label")).toBe("A mark on the 繁中 translation. Show it");
+    const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
     act(() => marker.click());
+    expect(showMark).toHaveBeenCalledTimes(1);
+    showMark.mockRestore();
     expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
     expect(useTranslationStore.getState().language).toBe(LANG);
-    expect(toastFn).toHaveBeenCalledWith(`Translation turned on (${LANG}) to show this mark`, expect.anything());
+    expect(toastFn).toHaveBeenCalledWith("Translation turned on (繁中) to show this mark", expect.anything());
   });
 });

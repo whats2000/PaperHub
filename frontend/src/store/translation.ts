@@ -80,14 +80,43 @@ interface TranslationState {
    * Back to <language>, which restores the previous state. Returns that
    * previous state (null: not a mark on a translation, or unknown). */
   showMark: (markId: string) => TranslationShown | null;
-  /** Puts a paper's translation back as it was (`showMark`'s result). */
+  /** Puts a paper's translation back as it was before `showMark` (its
+   * result) — only while the translation is still as `showMark` left it;
+   * once the user has changed it since, this does nothing. */
   restore: (prev: TranslationShown) => void;
-  /** The reader has shown the mark: the request is done (a reader opened
-   * later does not show it again). */
+  /** A reader has taken the request up (it is not dropped as unclaimed). */
+  claimReveal: (n: number) => void;
+  /** The reader has shown the mark (or given up): the request is done (a
+   * reader opened later does not show it again). */
   revealed: (n: number) => void;
 }
 
+/** A request no reader takes up within this long is dropped: its paper
+ * isn't open (and a reader opened much later must not jump to it). */
+export const REVEAL_TTL_MS = 10_000;
+/** The one "Translation turned on" toast: a newer one replaces it. */
+const SHOW_MARK_TOAST = "tr-show-mark";
+
 let revealCount = 0;
+const claimed = new Set<number>();
+/** What the open toast's way back restores, and the state `showMark` set
+ * (the way back acts only while the translation is still that). */
+let pending: { prev: TranslationShown; set: TranslationShown } | null = null;
+
+const isShown = (
+  s: { language: string; enabledByPaper: Record<number, boolean> },
+  shown: TranslationShown,
+) => !!s.enabledByPaper[shown.paperId] === shown.enabled && s.language === shown.language;
+
+/** The user changed the translation themselves: the toast's way back is stale. */
+function dropPending(): void {
+  if (!pending) return;
+  pending = null;
+  toast.dismiss(SHOW_MARK_TOAST);
+}
+
+const withRecent = (recent: unknown, l: string) =>
+  [l, ...(Array.isArray(recent) ? (recent as string[]) : []).filter((r) => r !== l)].slice(0, MAX_RECENT);
 
 /** The paper and mark of an id, from the loaded marks. */
 function findMark(markId: string) {
@@ -108,18 +137,18 @@ export const useTranslationStore = create<TranslationState>()(
       setLanguage: (language) => {
         const l = language.trim();
         if (!l) return;
-        set((s) => ({
-          language: l,
-          recent: [l, ...(Array.isArray(s.recent) ? s.recent : []).filter((r) => r !== l)].slice(0, MAX_RECENT),
-        }));
+        dropPending();
+        set((s) => ({ language: l, recent: withRecent(s.recent, l) }));
       },
-      toggle: (paperId) =>
+      toggle: (paperId) => {
+        dropPending();
         set((s) => ({
           enabledByPaper: {
             ...s.enabledByPaper,
             [paperId]: !s.enabledByPaper[paperId],
           },
-        })),
+        }));
+      },
       markHintSeen: () => set({ hintSeen: true }),
       reveal: null,
       showMark: (markId) => {
@@ -128,14 +157,26 @@ export const useTranslationStore = create<TranslationState>()(
         if (!found || !lang) return null;
         const { paperId } = found;
         const s = get();
-        const prev: TranslationShown = { paperId, enabled: !!s.enabledByPaper[paperId], language: s.language };
+        const now: TranslationShown = { paperId, enabled: !!s.enabledByPaper[paperId], language: s.language };
+        // A second request while the first's toast still holds: its way back
+        // is still the state before the first.
+        const prev = pending && pending.set.paperId === paperId && isShown(s, pending.set) ? pending.prev : now;
         revealCount += 1;
+        const n = revealCount;
         set({
           language: lang,
+          recent: withRecent(s.recent, lang),
           enabledByPaper: { ...s.enabledByPaper, [paperId]: true },
-          reveal: { paperId, markId, n: revealCount },
+          reveal: { paperId, markId, n },
         });
-        if (prev.enabled && prev.language === lang) return prev;
+        setTimeout(() => {
+          if (!claimed.has(n) && get().reveal?.n === n) set({ reveal: null });
+        }, REVEAL_TTL_MS);
+        if (prev.enabled && prev.language === lang) {
+          dropPending();
+          return now;
+        }
+        pending = { prev, set: { paperId, enabled: true, language: lang } };
         // Nothing changes silently: say so, with the way back.
         const t = i18n.t.bind(i18n) as TFunction;
         toast(
@@ -144,6 +185,7 @@ export const useTranslationStore = create<TranslationState>()(
             lang: langShort(lang),
           }),
           {
+            id: SHOW_MARK_TOAST,
             action: {
               label: prev.enabled
                 ? t("notes:marks.trBackTo", { defaultValue: "Back to {{lang}}", lang: langShort(prev.language) })
@@ -154,12 +196,21 @@ export const useTranslationStore = create<TranslationState>()(
         );
         return prev;
       },
-      revealed: (n) => set((s) => (s.reveal?.n === n ? { reveal: null } : s)),
-      restore: (prev) =>
+      claimReveal: (n) => {
+        claimed.add(n);
+      },
+      revealed: (n) => {
+        claimed.delete(n);
+        set((s) => (s.reveal?.n === n ? { reveal: null } : s));
+      },
+      restore: (prev) => {
+        if (!pending || pending.prev !== prev || !isShown(get(), pending.set)) return;
+        pending = null;
         set((s) => ({
           language: prev.language,
           enabledByPaper: { ...s.enabledByPaper, [prev.paperId]: prev.enabled },
-        })),
+        }));
+      },
     }),
     {
       name: "paperhub-translation-v1",

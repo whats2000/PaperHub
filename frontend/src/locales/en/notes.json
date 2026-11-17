@@ -333,5 +333,15 @@
     "trTurnedOn": "Translation turned on ({{lang}}) to show this mark",
     "trTurnOff": "Turn off",
     "trBackTo": "Back to {{lang}}"
+  },
+  "langShort": {
+    "en": "English",
+    "zh-Hant": "繁中",
+    "zh-Hans": "简中",
+    "ja": "日本語",
+    "ko": "한국어",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
   }
 }

@@ -281,6 +281,8 @@ export function useHtmlMarks({
   const reveal = useTranslationStore((s) => s.reveal);
   useEffect(() => {
     if (!reveal || reveal.paperId !== paperId || !doc) return;
+    // This reader shows it: the request is not dropped as unclaimed.
+    useTranslationStore.getState().claimReveal(reveal.n);
     let tries = 0;
     let scrolled = false;
     const tick = (): boolean => {
