@@ -332,7 +332,13 @@
     "trMarker": "标在{{lang}}译文上的标记，点击显示",
     "trTurnedOn": "已打开翻译（{{lang}}）以显示这个标记",
     "trTurnOff": "关闭",
-    "trBackTo": "回到{{lang}}"
+    "trBackTo": "回到{{lang}}",
+    "noWords": "这段选取没有可标记的文字。",
+    "trUnavailable": "这段的译文无法获取，所以无法在译文中显示这个标记",
+    "trChanged": "你标记之后，译文已经变更",
+    "trTimeout": "译文没有及时送达，无法显示这个标记",
+    "trShowOriginal": "显示原文",
+    "trOriginal": "原文"
   },
   "langShort": {
     "en": "英文",

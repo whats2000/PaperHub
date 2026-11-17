@@ -332,7 +332,13 @@
     "trMarker": "A mark on the {{lang}} translation. Show it",
     "trTurnedOn": "Translation turned on ({{lang}}) to show this mark",
     "trTurnOff": "Turn off",
-    "trBackTo": "Back to {{lang}}"
+    "trBackTo": "Back to {{lang}}",
+    "noWords": "There are no words in this selection to mark.",
+    "trUnavailable": "This paragraph's translation isn't available, so the mark can't be shown in it",
+    "trChanged": "The translation changed since you marked it",
+    "trTimeout": "The translation didn't arrive in time to show this mark",
+    "trShowOriginal": "Show original",
+    "trOriginal": "Original text"
   },
   "langShort": {
     "en": "English",

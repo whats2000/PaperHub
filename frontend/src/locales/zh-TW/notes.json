@@ -332,7 +332,13 @@
     "trMarker": "標在{{lang}}譯文上的標記，按一下顯示",
     "trTurnedOn": "已開啟翻譯（{{lang}}）以顯示這個標記",
     "trTurnOff": "關閉",
-    "trBackTo": "回到{{lang}}"
+    "trBackTo": "回到{{lang}}",
+    "noWords": "這段選取沒有可標記的文字。",
+    "trUnavailable": "這段的譯文無法取得，所以無法在譯文中顯示這個標記",
+    "trChanged": "你標記之後，譯文已經變更",
+    "trTimeout": "譯文沒有及時送達，無法顯示這個標記",
+    "trShowOriginal": "顯示原文",
+    "trOriginal": "原文"
   },
   "langShort": {
     "en": "英文",

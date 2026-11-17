@@ -332,7 +332,13 @@
     "trMarker": "{{lang}}の訳文に付けたマーク。クリックで表示",
     "trTurnedOn": "このマークを表示するため翻訳（{{lang}}）をオンにしました",
     "trTurnOff": "オフにする",
-    "trBackTo": "{{lang}}に戻す"
+    "trBackTo": "{{lang}}に戻す",
+    "noWords": "この選択範囲には印を付けられる文字がありません。",
+    "trUnavailable": "この段落の訳文を取得できないため、訳文上にこのマークを表示できません",
+    "trChanged": "マークを付けた後で訳文が変わりました",
+    "trTimeout": "訳文が間に合わず、このマークを表示できませんでした",
+    "trShowOriginal": "原文を表示",
+    "trOriginal": "原文"
   },
   "langShort": {
     "en": "英語",

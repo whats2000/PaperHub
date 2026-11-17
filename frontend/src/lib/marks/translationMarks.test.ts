@@ -134,9 +134,9 @@ describe("translationSelection", () => {
     expect(section).toBe("2 Method");
   });
 
-  it("is null for a selection on the paper's own text", () => {
+  it("is empty for a selection on the paper's own text", () => {
     const doc = makeDoc(paper());
-    expect(translationSelection(doc, rangeOver(doc, doc.body, "agent pose"), CHUNKS)).toBeNull();
+    expect(translationSelection(doc, rangeOver(doc, doc.body, "agent pose"), CHUNKS)).toEqual([]);
   });
 
   it("never joins a translation stroke with a mark on the original text", () => {
@@ -424,6 +424,41 @@ describe("useHtmlMarks on a translation", () => {
       section_key: "2 Method",
       pieces: [{ quote: "預測代理的姿態", lang: LANG, source_ref: "h:3", orig: SOURCE, chunk_start: 102 }],
     });
+  });
+
+  it("a selection from a paragraph into its translation marks both, the original and the translated words", async () => {
+    const doc = frameDoc(paper());
+    render(createElement(Host, { doc }));
+    const sel = doc.getSelection()!;
+    sel.removeAllRanges();
+    const range = doc.createRange();
+    range.setStart(rangeOver(doc, doc.getElementById("p2")!, "ahead of time.").startContainer, SOURCE.indexOf("ahead"));
+    const tr = rangeOver(doc, doc.querySelector(".ph-tr")!, "我們提前");
+    range.setEnd(tr.endContainer, tr.endOffset);
+    sel.addRange(range);
+    act(() => {
+      doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await screen.findByRole("toolbar", { name: "Mark the selection" });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Disagree" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    const bodies = create.mock.calls.map((c) => c[0]);
+    expect(bodies[0]).toMatchObject({ pieces: [{ quote: "ahead of time." }] });
+    expect(bodies[0]!.lang ?? null).toBeNull();
+    expect(bodies[1]).toMatchObject({ lang: LANG, source_ref: "h:3", pieces: [{ quote: "我們提前" }] });
+  });
+
+  it("a drag in a translation still loading says there is nothing to mark", () => {
+    const doc = frameDoc(paper().replace('data-ph-tr-state="ok"', 'data-ph-tr-state="pending"'));
+    render(createElement(Host, { doc }));
+    vi.useFakeTimers();
+    selectIn(doc, "預測代理");
+    act(() => {
+      vi.runAllTimers();
+    });
+    vi.useRealTimers();
+    expect(toastMessage).toHaveBeenCalledWith("There are no words in this selection to mark.");
+    expect(screen.queryByRole("toolbar", { name: "Mark the selection" })).toBeNull();
   });
 
   it("a highlighter stroke in the translation makes a translation piece at once", async () => {

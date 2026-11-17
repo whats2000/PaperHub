@@ -27,7 +27,7 @@ import {
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
 import { clearIfStill, htmlPlace, translationPlace } from "@/lib/marks/pieces";
-import { translationSelection, type PlacedTranslationPiece } from "@/lib/marks/translationMarks";
+import { inTranslation, translationSelection, type PlacedTranslationPiece } from "@/lib/marks/translationMarks";
 import { langShort } from "@/components/notes/blocks/markProps";
 import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import { hasOpenLayer } from "@/lib/openLayer";
@@ -56,7 +56,14 @@ function translationGroups(placed: PlacedTranslationPiece[]): MarkGroup[] {
 
 /** A selection holding no translated words, or a paragraph not tied to
  * the paper's text (no chunk): it can't be marked. */
-const untied = (placed: readonly PlacedTranslationPiece[]) => !placed.length || placed.some((p) => p.piece.chunk_start === null);
+const untied = (placed: readonly PlacedTranslationPiece[]) => placed.some((p) => p.piece.chunk_start === null);
+
+/** What a selection marks: the paper's own text it holds and the translated
+ * words it holds (a selection from a paragraph into its translation is
+ * both; no words are dropped). */
+function selectionParts(doc: Document, range: Range, chunks: ChunkMap | null) {
+  return { original: selectionToPieces(doc, range, chunks), translated: translationSelection(doc, range, chunks) };
+}
 
 /** How long a corner button stays after the pointer leaves its object. */
 const OBJECT_HIDE_MS = 120;
@@ -352,32 +359,32 @@ export function useHtmlMarks({
             toast.error(tRef.current("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
             return null;
           }
-          // A stroke on a translation: its translated words, filed under
-          // the paragraph they translate (never joining the original's).
+          // Translated words file under the paragraph they translate and
+          // never join a mark on the original.
           const tr = translationSelection(doc, captured, map);
-          if (tr) {
-            if (untied(tr)) {
-              toast.error(tRef.current("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
-              return null;
-            }
-            return tr.map(({ piece, block, section }) => ({
-              piece,
-              section,
-              place: translationPlace(piece.lang, htmlPlace(block)),
-            }));
-          }
           const placed = selectionToPlacedPieces(doc, captured, map);
-          if (!placed.length || placed.some((p) => p.piece.chunk_start === null)) {
+          if (!placed.length && !tr.length) {
+            toast.message(tRef.current("marks.noWords", "There are no words in this selection to mark."));
+            return null;
+          }
+          if (untied(tr) || placed.some((p) => p.piece.chunk_start === null)) {
             toast.error(tRef.current("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
             return null;
           }
           // A stroke never crosses a paragraph: one piece per paragraph,
           // each filed under its own section.
-          return placed.map(({ piece, block }) => ({
-            piece,
-            place: htmlPlace(block),
-            section: (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null,
-          }));
+          return [
+            ...placed.map(({ piece, block }) => ({
+              piece,
+              place: htmlPlace(block),
+              section: (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null,
+            })),
+            ...tr.map(({ piece, block, section }) => ({
+              piece,
+              section,
+              place: translationPlace(piece.lang, htmlPlace(block)),
+            })),
+          ];
         },
         done: (ok) => {
           if (ok) clearIfStill(doc, captured);
@@ -394,11 +401,16 @@ export function useHtmlMarks({
         // The highlighter marks what the pointer drags; a keyboard
         // selection waits for the pen to go off.
         if (penNow && keyboard) return;
-        // On a translation: its translated words; else the paper's text.
-        const tr = range ? translationSelection(doc, range, latest.current.chunks) : null;
-        const pieces = tr ? tr.map((p) => p.piece) : range ? selectionToPieces(doc, range, latest.current.chunks) : [];
+        // The paper's own text and the translated words it holds.
+        const parts = range ? selectionParts(doc, range, latest.current.chunks) : null;
+        const pieces = parts ? [...parts.original, ...parts.translated.map((p) => p.piece)] : [];
         if (!range || !pieces.length) {
           setSelected(null);
+          // A drag inside a translation still loading (or failed): say why
+          // nothing can be marked, once per selection.
+          if (range && !keyboard && inTranslation(range.commonAncestorContainer)) {
+            toast.message(tRef.current("marks.noWords", "There are no words in this selection to mark."));
+          }
           return;
         }
         if (pieces.length > MAX_MARK_PARAGRAPHS) {
@@ -488,21 +500,18 @@ export function useHtmlMarks({
             }
             return [group];
           }
-          const tr = translationSelection(doc, selected.range, map);
-          if (tr) {
-            if (untied(tr)) {
-              toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
-              return null;
-            }
-            return translationGroups(tr);
+          const { original, translated } = selectionParts(doc, selected.range, map);
+          if (!original.length && !translated.length) {
+            toast.message(t("marks.noWords", "There are no words in this selection to mark."));
+            return null;
           }
-          const pieces = selectionToPieces(doc, selected.range, map);
-          if (!pieces.length || pieces.some((p) => p.chunk_start === null)) {
+          if (untied(translated) || original.some((p) => p.chunk_start === null)) {
             toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
             return null;
           }
-          // A selection across a section break: one mark per section.
-          return groupBySection(pieces, map);
+          // A selection across a section break: one mark per section; the
+          // translated words, one mark per translated paragraph.
+          return [...groupBySection(original, map), ...translationGroups(translated)];
         },
       });
       if (!ok) return;

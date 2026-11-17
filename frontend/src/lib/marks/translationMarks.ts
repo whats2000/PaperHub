@@ -72,6 +72,12 @@ function wordsIn(index: TextIndex, range: Range) {
 
 // ---- HTML: the translation under each paragraph ------------------------
 
+/** Whether a node is inside a translation box (in any state). */
+export function inTranslation(node: Node | null): boolean {
+  const el = node ? (node.nodeType === 1 ? (node as Element) : node.parentElement) : null;
+  return !!el?.closest(TR_BOX);
+}
+
 /** The live, filled translation box a node sits in (null: none, or one
  * still loading or leaving). */
 export function translationBoxOf(node: Node | null): HTMLElement | null {
@@ -113,13 +119,10 @@ export interface PlacedTranslationPiece {
   section: string | null;
 }
 
-/** A selection on the translations under the paper's paragraphs: one piece
- * per translated paragraph it touches (the paper's own text between them
- * is left out). Null when the selection neither starts nor ends in a
- * translation (it is on the paper); empty when it holds no translated
- * words or a paragraph is not tied to the paper's text. */
-export function translationSelection(doc: Document, range: Range, chunks: ChunkMap | null): PlacedTranslationPiece[] | null {
-  if (!translationBoxOf(range.startContainer) && !translationBoxOf(range.endContainer)) return null;
+/** The translated words a selection holds: one piece per translated
+ * paragraph it touches (the paper's own text it holds is the paper's
+ * pieces, `selectionToPieces`). Empty when it holds none. */
+export function translationSelection(doc: Document, range: Range, chunks: ChunkMap | null): PlacedTranslationPiece[] {
   const out: PlacedTranslationPiece[] = [];
   for (const box of Array.from(doc.querySelectorAll(TR_BOX))) {
     if (!isLiveBox(box) || !range.intersectsNode(box)) continue;
