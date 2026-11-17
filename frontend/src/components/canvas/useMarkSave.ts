@@ -4,7 +4,7 @@
  * caret after the new block. Highlighter strokes (`usePenSave`) save the
  * same way, one after another with erase and split (`queueMarkOp`). */
 import type { TFunction } from "i18next";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ApiError } from "@/lib/api";
@@ -169,19 +169,42 @@ const refusedJoin = (err: unknown) => err instanceof ApiError && err.status === 
  * too). */
 export function usePenSave(paperId: number | null): (stroke: PenStroke) => void {
   const create = useMarksStore((s) => s.create);
-  // Per stroke (by what it marks): what it has saved so far.
+  // Per stroke (by what it marks): what a failed stroke saved so far, for a
+  // re-stroke of the same text. It is forgotten when the pen session ends
+  // or the paper changes; a Retry keeps its own record.
   const progress = useRef(new Map<string, Map<string, MarkCreated>>());
+  useEffect(() => {
+    const forget = progress.current;
+    forget.clear();
+    const unsubscribe = useMarksStore.subscribe((now, before) => {
+      if (before.penOn && !now.penOn) forget.clear();
+    });
+    return () => {
+      unsubscribe();
+      forget.clear();
+    };
+  }, [paperId]);
 
   return useCallback(
     (stroke: PenStroke) => {
       // The colour the stroke was drawn in.
       const color = useMarksStore.getState().penColor;
       const t = i18n.t.bind(i18n) as TFunction;
+      // What the stroke marks, once read, and what it has saved: a Retry
+      // carries on from there.
+      let placedOnce: PenPiece[] | undefined;
+      let savedOnce: Map<string, MarkCreated> | undefined;
 
-      const run = async (known?: PenPiece[]): Promise<void> => {
+      const failed = () =>
+        toast.error(t("notes:marks.saveFailed", "Couldn't save the mark."), {
+          action: { label: t("notes:marks.retry", "Retry"), onClick: () => enqueue() },
+        });
+
+      const run = async (signal: AbortSignal): Promise<void> => {
         if (paperId === null) return stroke.done?.(false);
-        const placed = known ?? (await stroke.pieces());
+        const placed = placedOnce ?? (await stroke.pieces());
         if (!placed?.length) return stroke.done?.(false);
+        placedOnce = placed;
         // A stroke drawn just before the pen went off still saves; it only
         // joins nothing (the session ended).
         const { penSession, marksByPaper, notePenMark } = useMarksStore.getState();
@@ -201,9 +224,12 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         }
         const plain = groups.map(({ section, pieces }) => ({ section, pieces }));
         const key = progressKey(kind, color, stroke.view, plain);
-        const done = progress.current.get(key) ?? new Map<string, MarkCreated>();
+        const done = savedOnce ?? progress.current.get(key) ?? new Map<string, MarkCreated>();
+        savedOnce = done;
         progress.current.set(key, done);
-        let joined = target;
+        // Set only when this run itself joined a piece to a mark.
+        let joinedNow: string | null = null;
+        const opts = { quiet: true, silent: true, signal };
         try {
           const results = await saveMissing(
             create,
@@ -213,13 +239,14 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
             {
               silent: true,
               save: async (body) => {
-                if (!joined) return create(body, { quiet: true, silent: true });
+                if (!target) return create(body, opts);
                 try {
-                  return await create({ ...body, join_to: joined }, { quiet: true, silent: true });
+                  const res = await create({ ...body, join_to: target }, opts);
+                  joinedNow = target;
+                  return res;
                 } catch (err) {
                   if (!refusedJoin(err)) throw err;
-                  joined = null;
-                  return create(body, { quiet: true, silent: true });
+                  return create(body, opts);
                 }
               },
               // In the session as soon as it is saved: a stroke that fails
@@ -232,18 +259,22 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
             },
           );
           progress.current.delete(key);
-          if (joined) toastJoined(joined);
+          if (joinedNow) toastJoined(joinedNow);
           else toastSaved(paperId, results);
           stroke.done?.(true);
         } catch {
-          // What saved stays saved; Retry saves the rest.
-          toast.error(t("notes:marks.saveFailed", "Couldn't save the mark."), {
-            action: { label: t("notes:marks.retry", "Retry"), onClick: () => void queueMarkOp(() => run(placed)) },
-          });
+          // What saved stays saved; Retry saves the rest. A timeout already
+          // said so (queueMarkOp).
+          if (!signal.aborted) failed();
           stroke.done?.(false);
         }
       };
-      void queueMarkOp(() => run()).catch(() => stroke.done?.(false));
+      const enqueue = () =>
+        void queueMarkOp(run, () => {
+          failed();
+          stroke.done?.(false);
+        }).catch(() => undefined);
+      enqueue();
     },
     [paperId, create],
   );

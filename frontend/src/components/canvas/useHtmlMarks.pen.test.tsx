@@ -1,8 +1,9 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HighlighterControl } from "@/components/canvas/HighlighterControl";
 import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
+import { usePenSave, type PenPiece } from "@/components/canvas/useMarkSave";
 import { ApiError, erasePiece } from "@/lib/api";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { resetMarkOps, useMarksStore } from "@/store/marks";
@@ -371,7 +372,7 @@ describe("strokes, erases and splits keep the user's order", () => {
     await tick();
     expect(erasePiece).not.toHaveBeenCalled();
     await answer();
-    await waitFor(() => expect(erasePiece).toHaveBeenCalledWith("mk_1", 0));
+    await waitFor(() => expect(erasePiece).toHaveBeenCalledWith("mk_1", 0, expect.any(AbortSignal)));
     // The mark was not deleted: the joined piece is still on it.
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece erased", expect.anything()));
     const m = useMarksStore.getState().marksByPaper[3]![0]!;
@@ -457,6 +458,50 @@ describe("a stroke that partly fails", () => {
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §1, §2", expect.anything()));
   });
 
+  it("after the pen session ends a re-stroke starts fresh, while the old Retry still saves only what's missing", async () => {
+    const doc = frameDoc(TWO_SECTIONS);
+    useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    failSecondOnce();
+    strokeAcross(doc);
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    const retry = (toastError.mock.lastCall![1] as { action: { onClick: () => void } }).action;
+    // A new session: the failed stroke's progress is forgotten.
+    act(() => useMarksStore.getState().setPen(false));
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    strokeAcross(doc);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls.slice(2).map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
+    // The Retry kept its own record: only §2.
+    act(() => retry.onClick());
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(5));
+    expect(create.mock.calls[4]![0].section_key).toBe("2 Method");
+  });
+
+  it("a retried join says Joined; a retry that only finishes a stroke says Saved", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "We predict");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const inner = create.getMockImplementation()!;
+    let failed = false;
+    create.mockImplementation((body, opts) => {
+      if (body.join_to && !failed) {
+        failed = true;
+        return Promise.reject(new ApiError(500, "boom"));
+      }
+      return inner(body, opts);
+    });
+    stroke(doc, "ahead of time");
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    const retry = (toastError.mock.lastCall![1] as { action: { onClick: () => void } }).action;
+    act(() => retry.onClick());
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Joined to the same mark", expect.anything()));
+    expect(create.mock.calls[2]![0].join_to).toBe("mk_1");
+  });
+
   it("stroking the same text again saves only what is missing too", async () => {
     const doc = frameDoc(TWO_SECTIONS);
     useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
@@ -498,3 +543,59 @@ describe("Escape and the selection", () => {
     expect(doc.getSelection()!.isCollapsed).toBe(true);
   });
 });
+
+describe("a stroke whose request never answers", () => {
+  it("times out with the error toast and Retry; the next stroke still saves", async () => {
+    resetMarkOps(60);
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const inner = create.getMockImplementation()!;
+    let hang = true;
+    create.mockImplementation((body, opts) => {
+      if (hang) {
+        hang = false;
+        return new Promise<MarkCreated>(() => undefined);
+      }
+      return inner(body, opts);
+    });
+    stroke(doc, "We predict");
+    await tick();
+    stroke(doc, "latency drops");
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't save the mark.", expect.anything()));
+    expect((toastError.mock.lastCall![1] as { action: { label: string } }).action.label).toBe("Retry");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]![0].pieces[0]!.quote).toBe("latency drops");
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("usePenSave across papers", () => {
+  it("forgets a failed stroke's progress when the paper changes", async () => {
+    const piece = (quote: string, section: string): PenPiece => ({ section, piece: { quote }, place: null });
+    const placed = [piece("one", "1 Intro"), piece("two", "2 Method")];
+    let failed = false;
+    create.mockImplementation((body) => {
+      if (body.section_key === "2 Method" && !failed) {
+        failed = true;
+        return Promise.reject(new ApiError(500, "boom"));
+      }
+      return Promise.resolve({
+        mark: mark(`mk_${body.section_key}_${create.mock.calls.length}`, { pieces: body.pieces }),
+        block: null,
+        saved_to: { note_id: 7, paper_title: "Duo", section: body.section_key, part_index: 0, part_count: 1 },
+      });
+    });
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const { result, rerender } = renderHook(({ pid }) => usePenSave(pid), { initialProps: { pid: 3 } });
+    act(() => result.current({ view: "html", pieces: () => placed }));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    rerender({ pid: 4 });
+    rerender({ pid: 3 });
+    act(() => result.current({ view: "html", pieces: () => placed }));
+    // Both sections again: what the earlier stroke saved was forgotten.
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls.slice(2).map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
+  });
+});
+
