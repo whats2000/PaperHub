@@ -780,12 +780,14 @@ class PageBlock(BaseModel):
     page: int                  # 0-based
     box: list[float]           # page fractions x0,y0,x1,y1
     text: str
+    section: str | None = None  # the section the block sits in
 
 
 @router.get("/content/{paper_content_id}/blocks")
 async def page_blocks(paper_content_id: int, page: int) -> list[PageBlock]:
     """The reading blocks of one page (from ``blocks.json``), boxes as page
-    fractions, for picking a region mark. Empty when the paper has none."""
+    fractions, with their section: where a PDF mark files, and what the
+    reader's Follow reports. Empty when the paper has none."""
     cache = await _cache_dir(paper_content_id)
     got = read_block_assets(cache)
     if got is None:
@@ -805,7 +807,7 @@ async def page_blocks(paper_content_id: int, page: int) -> list[PageBlock]:
             block_id=b.block_id, type=b.block_type, page=b.page,
             box=[max(0.0, x0 / w), max(0.0, y0 / h),
                  min(1.0, x1 / w), min(1.0, y1 / h)],
-            text=_plain_text(b.html)))
+            text=_plain_text(b.html), section=b.section))
     return out
 
 

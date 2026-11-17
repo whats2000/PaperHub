@@ -80,9 +80,11 @@ async def test_blocks_endpoint_fractions(client: AsyncClient) -> None:
     [b] = r.json()  # b3 has no geometry and is left out
     assert b["block_id"] == "b1" and b["type"] == "Text" and b["page"] == 0
     assert b["text"] == "Hello & world"
+    assert b["section"] == "Intro"  # a PDF mark's note section, and Follow
     assert b["box"] == pytest.approx([0.1, 0.1, 0.5, 0.15])
     p2 = (await client.get("/papers/content/1/blocks", params={"page": 1})).json()
     assert p2[0]["box"] == pytest.approx([0.0, 0.0, 1.0, 0.5])
+    assert p2[0]["section"] is None
     assert (await client.get("/papers/content/1/blocks",
                              params={"page": 7})).json() == []
     assert (await client.get("/papers/content/2/blocks",
