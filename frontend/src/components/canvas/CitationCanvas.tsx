@@ -43,6 +43,9 @@ import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { BoxToolButton } from "@/components/canvas/BoxTool";
 import { HighlighterControl } from "@/components/canvas/HighlighterControl";
 import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
+import { MyMarksMenu } from "@/components/canvas/MyMarksMenu";
+import { NoteCard } from "@/components/canvas/NoteCard";
+import { BackToNotePill } from "@/components/canvas/BackToNotePill";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
@@ -210,6 +213,29 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
 
   // Papers we've already kicked off a fetch for (prefetch dedupe).
   const fetchedDocs = useRef<Set<number>>(new Set());
+  // The documents as last set (read by store subscriptions), and a request
+  // for a paper's view that waits for its document.
+  const docByPaperRef = useRef(docByPaper);
+  useEffect(() => {
+    docByPaperRef.current = docByPaper;
+  }, [docByPaper]);
+  const pendingTabRef = useRef<{ paperId: number; tab: ReaderTab } | null>(null);
+  // Shows a paper in a view it has (a PDF-only paper has one).
+  const applyReaderTab = useCallback(
+    (pid: number, want: ReaderTab, doc: DocEntry) => {
+      if (doc.mode !== "html" || doc.status !== "ready") return;
+      const tab: ReaderTab = want === "pdf" && doc.pagePdf ? "pdf" : "html";
+      // The track slides only for the paper already shown (a paper switch jumps).
+      setSlideTrack(useCanvasStore.getState().activePaperId === pid);
+      setReaderTabByPaper((prev) => (prev[pid] === tab ? prev : { ...prev, [pid]: tab }));
+      if (tab === "pdf") ensurePagePdf(pid);
+    },
+    [ensurePagePdf],
+  );
+  const applyReaderTabRef = useRef(applyReaderTab);
+  useEffect(() => {
+    applyReaderTabRef.current = applyReaderTab;
+  }, [applyReaderTab]);
 
   // Fetch one paper's document (mode + content) once, populating docByPaper.
   // Used by the background prefetch (enabled refs) AND on-demand when a citation
@@ -245,6 +271,11 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 ),
               };
         setDocByPaper((prev) => ({ ...prev, [pid]: entry }));
+        const waiting = pendingTabRef.current;
+        if (waiting?.paperId === pid) {
+          pendingTabRef.current = null;
+          applyReaderTabRef.current(pid, waiting.tab, entry);
+        }
       } catch {
         setDocByPaper((prev) => ({
           ...prev,
@@ -627,6 +658,24 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A request to show a paper in one of its views (the view a mark was made
+  // in): its tab, when the paper has that view. Read in the subscription, so
+  // the state updates never run in an effect body.
+  const prevTabRequestRef = useRef(useCanvasStore.getState().readerTabRequest?.n ?? 0);
+  useEffect(() => {
+    if (standalone) return;
+    return useCanvasStore.subscribe((state) => {
+      const req = state.readerTabRequest;
+      if (!req || req.n === prevTabRequestRef.current) return;
+      prevTabRequestRef.current = req.n;
+      const doc = docByPaperRef.current[req.paperId];
+      // A paper not loaded yet takes it once its document arrives.
+      if (doc) applyReaderTabRef.current(req.paperId, req.tab, doc);
+      else pendingTabRef.current = { paperId: req.paperId, tab: req.tab };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Background prefetch: fetch every enabled reference's document when the
   // session's reference set changes, so each paper is ready before the user
   // opens it. `ensureDoc` dedupes so each paper loads once. (Toggled-off papers
@@ -896,6 +945,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
               ))}
             </div>
             <span className="flex-1" />
+            {!standalone && effectivePaperId != null && (
+              <MyMarksMenu paperId={effectivePaperId} shown={marksToggleShown} />
+            )}
             {!standalone && <BoxToolButton shown={boxToolShown} />}
             {!standalone && <HighlighterControl shown={marksToggleShown} />}
             {!standalone && <ShowMarksToggle shown={marksToggleShown} />}
@@ -1076,6 +1128,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             </DeferredRemount>
           )}
 
+        {/* "↩ back to note" after a note's source chip opened the paper. */}
+        {!standalone && <BackToNotePill paperId={effectivePaperId} />}
+
         {/* Floating translate control (HTML and PDF). */}
         {effectivePaperId != null && (
           <TranslatePill
@@ -1104,6 +1159,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
           />
         )}
       </div>
+
+      {/* The note card a click on a mark opens (the notes pane hidden). */}
+      {!standalone && <NoteCard />}
 
       {/* Full-screen figure previewer (portals to body, covers the viewport). */}
       {lightbox && (

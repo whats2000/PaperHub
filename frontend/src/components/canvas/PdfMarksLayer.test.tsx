@@ -15,6 +15,8 @@ import { selectionToPdfPieces } from "@/lib/marks/pdfGeometry";
 import { listPaperBlocks } from "@/lib/api";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
+import { useCanvasStore } from "@/store/canvas";
+import { useMarkNavStore } from "@/store/markNav";
 
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listPaperBlocks: vi.fn() }));
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
@@ -132,7 +134,9 @@ describe("PDF text marks", () => {
       }),
     ]);
     const openAt = vi.fn();
-    useNotesPaneStore.setState({ openAt });
+    // The notes pane beside the reader: a click opens the mark's block there.
+    useNotesPaneStore.setState({ openAt, open: true });
+    useCanvasStore.setState({ open: true, width: 900 });
     render(<Reader />);
     layOut();
     const layer = document.querySelector<HTMLElement>("[data-pdf-marks]")!;
@@ -150,6 +154,28 @@ describe("PDF text marks", () => {
     fireEvent.pointerDown(screen.getByTestId("s3"), { clientX: 60, clientY: 95 });
     fireEvent.click(screen.getByTestId("s3"), { clientX: 60, clientY: 95 });
     expect(openAt).not.toHaveBeenCalled();
+  });
+
+  it("opens the note card on a click when the notes pane is hidden", () => {
+    resetStores([
+      pdfMark({
+        pieces: [{ quote: "Robots", page: 0, block_id: "/page/0/Text/1", rects: [[0.05, 0.05, 0.25, 0.07]] }],
+      }),
+    ]);
+    const openAt = vi.fn();
+    useNotesPaneStore.setState({ openAt, open: false });
+    useMarkNavStore.setState({ card: null });
+    const outside = vi.fn();
+    window.addEventListener("click", outside);
+    render(<Reader />);
+    layOut();
+    fireEvent.pointerDown(screen.getByTestId("s1"), { clientX: 60, clientY: 45 });
+    fireEvent.click(screen.getByTestId("s1"), { clientX: 60, clientY: 45 });
+    expect(openAt).not.toHaveBeenCalled();
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
+    // The click stops at the page: the card does not take it for a click outside.
+    expect(outside).not.toHaveBeenCalled();
+    window.removeEventListener("click", outside);
   });
 
   it("hides the marks when Show my marks is off", () => {

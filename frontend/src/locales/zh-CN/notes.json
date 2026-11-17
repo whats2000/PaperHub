@@ -338,7 +338,8 @@
     "trChanged": "你标记之后，译文已经变更",
     "trTimeout": "译文没有及时送达，无法显示这个标记",
     "trShowOriginal": "显示原文",
-    "trOriginal": "原文"
+    "trOriginal": "原文",
+    "notFound": "这个标记没有画在这里的论文上。"
   },
   "langShort": {
     "en": "英文",
@@ -349,5 +350,36 @@
     "fr": "法文",
     "de": "德文",
     "es": "西班牙文"
+  },
+  "noteCard": {
+    "label": "这段文字的笔记",
+    "where": "› {{section}} · 第 {{index}} 条，共 {{count}} 条",
+    "whereOne": "› {{section}}",
+    "folded_one": "笔记 {{index}} · {{count}} 个块",
+    "folded_other": "笔记 {{index}} · {{count}} 个块",
+    "delete": "删除这个标记",
+    "deleteHint": "删除这个标记（你自己写的笔记会保留）",
+    "close": "关闭",
+    "footer": "直接在这里编辑 · 自动保存",
+    "openInNotes": "在笔记中打开",
+    "show": "显示",
+    "showHint": "在论文中显示这段文字",
+    "showNamed": "在论文中显示这段文字：{{where}}",
+    "trMarkedIn": "标记在{{lang}}上；论文目前显示{{shown}}",
+    "trOriginal": "原文",
+    "trSwitch": "切换到{{lang}}"
+  },
+  "backPill": "回到笔记",
+  "myMarks": {
+    "button": "我的标记",
+    "label": "我的标记",
+    "colours": "颜色 — 点击名称即可重命名",
+    "show": "显示",
+    "rename": "这个颜色的名称",
+    "showColor": "显示「{{name}}」",
+    "empty": "这篇论文还没有标记。",
+    "noSection": "第一节之前",
+    "note": "笔记 {{index}}",
+    "saveFailed": "无法保存颜色。"
   }
 }

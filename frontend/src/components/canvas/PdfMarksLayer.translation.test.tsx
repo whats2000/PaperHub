@@ -10,8 +10,17 @@ import { PdfMarksContext, PdfMarksProvider, usePdfMarks } from "@/components/can
 import { listPaperBlocks } from "@/lib/api";
 import type { CardPlacement } from "@/lib/cardPlacement";
 import type { TranslationPiece } from "@/lib/marks/translationMarks";
+import { useCanvasStore } from "@/store/canvas";
+import { useMarkNavStore } from "@/store/markNav";
 import { useMarksStore } from "@/store/marks";
+import { useNotesPaneStore } from "@/store/notesPane";
 import { useTranslationStore } from "@/store/translation";
+
+/** The notes pane open beside the reader (side by side). */
+function paneBeside() {
+  useNotesPaneStore.setState({ open: true, openAt: vi.fn() });
+  useCanvasStore.setState({ open: true, width: 900 });
+}
 import type { Mark } from "@/types/notes";
 
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listPaperBlocks: vi.fn() }));
@@ -127,6 +136,7 @@ describe("marks on the PDF translation card", () => {
 
   it("a mark whose words the card isn't showing is a 文 marker on its block; Enter shows it once", async () => {
     resetStores([trMark()]);
+    paneBeside();
     const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
     render(<Reader />);
     layOut();
@@ -146,6 +156,7 @@ describe("marks on the PDF translation card", () => {
 
   it("a pointer click over the marker is hit-tested on the page, once", async () => {
     resetStores([trMark()]);
+    paneBeside();
     const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
     render(<Reader />);
     layOut();
@@ -154,6 +165,21 @@ describe("marks on the PDF translation card", () => {
     fireEvent.click(screen.getByTestId("s1"), { clientX: 370, clientY: 48, detail: 1 });
     expect(showMark).toHaveBeenCalledTimes(1);
     expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+    showMark.mockRestore();
+  });
+
+  it("with the notes pane hidden, the marker opens the mark's note card", async () => {
+    resetStores([trMark()]);
+    useNotesPaneStore.setState({ open: false });
+    useMarkNavStore.setState({ card: null });
+    const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
+    render(<Reader />);
+    layOut();
+    const marker = await screen.findByRole("button", { name: "A mark on the 繁中 translation. Show it" });
+    place(marker, 362, 40, 18, 18);
+    fireEvent.click(screen.getByTestId("s1"), { clientX: 370, clientY: 48, detail: 1 });
+    expect(showMark).not.toHaveBeenCalled();
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mt" });
     showMark.mockRestore();
   });
 

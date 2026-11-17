@@ -34,7 +34,7 @@ import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import { useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
 import { objectPiece, storedPiece, usePdfPen, type Located, type PlaceText } from "@/components/canvas/usePdfPen";
@@ -54,12 +54,20 @@ import {
 } from "@/lib/marks/pdfGeometry";
 import { translationPlace } from "@/lib/marks/pieces";
 import type { TranslationPiece } from "@/lib/marks/translationMarks";
+import { prefersReducedMotion } from "@/lib/motion";
+import { useCanvasStore } from "@/store/canvas";
+import { activateMark, hoverMark, registerMarkAnchors } from "@/store/markNav";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
+import { useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColor, MarkColorInfo, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
 const FLASH_MS = 1600;
+/** How long the reader looks for a mark it was asked to show before it tries
+ * the HTML view, and before it says it can't. */
+const NOT_HERE_MS = 1500;
+const GIVE_UP_MS = 6000;
 
 /** Pieces as stored, grouped by section: a mark files under one. */
 function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): MarkGroup[] {
@@ -471,25 +479,109 @@ export function usePdfMarks({
   // Follow: the section of the Marker block at the top of the view.
   usePdfFollow({ paperId, readerRef, blocks, blocksRef, onReadingHeading });
 
-  const [hot, setHot] = useState<string | null>(null);
+  const [hot, setHotIn] = useState<string | null>(null);
+  // The notes pane tints the hovered mark's block.
+  const setHot = useCallback((id: string | null) => {
+    setHotIn(id);
+    hoverMark(id);
+  }, []);
   const [flashId, setFlashId] = useState<string | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(flashTimer.current), []);
-  const marksRef = useRef(marks);
-  useEffect(() => {
-    marksRef.current = marks;
-  }, [marks]);
   const openMark = useCallback(
     (markId: string) => {
       if (paperId === null) return;
       setFlashId(markId);
       clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlashId(null), FLASH_MS);
-      // Until the note card: the mark's block opens in the notes pane.
-      openMarkInNotes(paperId, marksRef.current.find((m) => m.id === markId));
+      // Its block in the visible notes pane, else its note card.
+      activateMark(paperId, markId);
     },
     [paperId],
   );
+
+  // Where each mark is on screen, for the note card's arrow.
+  useEffect(() => {
+    if (paperId === null) return;
+    return registerMarkAnchors(paperId, {
+      find: (markId) => {
+        const root = readerRef.current;
+        if (!root) return null;
+        const id = CSS.escape(markId);
+        const els = root.querySelectorAll(
+          `[data-pdf-marks] [data-mark="${id}"]:not([data-leaving]), [data-tr-marker="${id}"]:not([data-leaving])`,
+        );
+        return { rects: Array.from(els, (el) => el.getBoundingClientRect()), viewport: root.getBoundingClientRect() };
+      },
+      subscribe: (onMove) => {
+        const root = readerRef.current;
+        root?.addEventListener("scroll", onMove, { passive: true });
+        return () => root?.removeEventListener("scroll", onMove);
+      },
+    });
+  }, [paperId, readerRef]);
+
+  // Asked to show a mark (a source chip, My marks, a jumper): scroll to it
+  // and flash it. A mark on a translation is the translation layer's; one
+  // this view doesn't draw (made in the HTML, its text not found here) is
+  // tried in the HTML view.
+  const reveal = useTranslationStore((s) => s.reveal);
+  const onScreen = useCanvasStore(
+    (s) => s.readerView === null || (s.readerView.paperId === paperId && s.readerView.kind === "pdf"),
+  );
+  useEffect(() => {
+    if (!reveal || paperId === null || reveal.paperId !== paperId || !onScreen) return;
+    const known = useMarksStore.getState().marksByPaper[paperId]?.find((m) => m.id === reveal.markId);
+    if (known?.lang) return;
+    useTranslationStore.getState().claimReveal(reveal.n);
+    const started = Date.now();
+    let toPage = false;
+    const done = (): true => {
+      useTranslationStore.getState().revealed(reveal.n);
+      return true;
+    };
+    const tick = (): boolean => {
+      const root = readerRef.current;
+      const mark = useMarksStore.getState().marksByPaper[paperId]?.find((m) => m.id === reveal.markId);
+      const el = root?.querySelector<HTMLElement>(
+        `[data-pdf-marks] [data-mark="${CSS.escape(reveal.markId)}"]:not([data-leaving])`,
+      );
+      if (el) {
+        if (typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+        }
+        setFlashId(reveal.markId);
+        clearTimeout(flashTimer.current);
+        flashTimer.current = setTimeout(() => setFlashId(null), FLASH_MS);
+        return done();
+      }
+      // Its page first: the page draws it once its text has laid out.
+      const page = mark?.pieces.find((p) => typeof p.page === "number" && !p.erased && !p.removed)?.page;
+      if (!toPage && mark?.view === "pdf" && typeof page === "number") {
+        const pageNode = pageEl(page);
+        if (pageNode && typeof pageNode.scrollIntoView === "function") {
+          pageNode.scrollIntoView({ block: "start", behavior: "auto" });
+          toPage = true;
+        }
+      }
+      const waited = Date.now() - started;
+      if (mark && reveal.fallback && waited >= NOT_HERE_MS) {
+        useCanvasStore.getState().requestReaderTab(paperId, "html");
+        useTranslationStore.getState().requestReveal(paperId, reveal.markId);
+        return done();
+      }
+      if (waited >= GIVE_UP_MS) {
+        if (mark) toast.message(tRef.current("marks.notFound", "This mark isn't drawn in the paper here."));
+        return done();
+      }
+      return false;
+    };
+    if (tick()) return;
+    const timer = setInterval(() => {
+      if (tick()) clearInterval(timer);
+    }, 150);
+    return () => clearInterval(timer);
+  }, [reveal, paperId, onScreen, readerRef, pageEl]);
 
   const { busy, save: saveMarks } = useMarkSave(paperId);
   const save = useCallback(
@@ -602,6 +694,7 @@ export function usePdfMarks({
       blocks,
       loadBlocks,
       hot,
+      setHot,
       flashId,
       pen,
       openMark,

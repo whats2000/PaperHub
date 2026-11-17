@@ -9,7 +9,9 @@
  *
  * A mark made on the translation card's text whose words the card is not
  * showing sits as a 文 marker in its colour at the paragraph's Marker block;
- * a click (hit-tested) or Enter on it turns translation on to show it. */
+ * a click (hit-tested) or Enter on it turns translation on to show it (the
+ * notes pane visible), else opens its note card. A click that opens a mark
+ * goes no further (the note card would take it for a click outside). */
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -22,7 +24,7 @@ import { MARK_PALETTE } from "@/lib/marks/htmlMarks";
 import { EQUATION_TYPE, FIGURE_TYPES, findInPage, pageText, type Frac } from "@/lib/marks/pdfGeometry";
 import { cn } from "@/lib/utils";
 import { langShort } from "@/components/notes/blocks/markProps";
-import { useTranslationStore } from "@/store/translation";
+import { activateMarker } from "@/store/markNav";
 import type { Mark, MarkColor, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
@@ -275,13 +277,17 @@ export function PdfMarksPage({
       if (e.target instanceof Element && e.target.closest("[data-tr-marker]")) return;
       const marker = markerAt(e);
       if (marker) {
-        useTranslationStore.getState().showMark(marker);
+        e.stopPropagation();
+        activateMarker(c.paperId, marker);
         return;
       }
       const [x, y] = at(e);
       const hit = markAt(x, y);
       if (!c.pen) {
-        if (hit) c.openMark(hit.id);
+        if (hit) {
+          e.stopPropagation();
+          c.openMark(hit.id);
+        }
         return;
       }
       // The highlighter: a mark's piece is erased; a figure or an equation
@@ -381,7 +387,10 @@ export function PdfMarksPage({
               tabIndex={ctx.visible && !m.leaving ? 0 : -1}
               aria-label={label}
               title={label}
-              onClick={() => useTranslationStore.getState().showMark(m.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                activateMarker(ctx.paperId, m.id);
+              }}
               style={{
                 left: pct(m.box[2]),
                 top: `calc(${pct(m.box[1])} + ${m.slot * (MARKER_PX + MARKER_GAP_PX)}px)`,

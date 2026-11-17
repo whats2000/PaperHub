@@ -6,17 +6,18 @@
  * a figure or display equation marks it whole, and a click on a mark erases
  * the piece under it. A selection (or stroke) on the translation under a
  * paragraph marks the translated words (`lib/marks/translationMarks.ts`);
- * a click on a 文 marker turns translation on to show its mark
- * (`showMark`), and a request to show a mark (`reveal`) scrolls to it and
- * flashes it. Returns the popover and the corner buttons to render over the
- * iframe. */
+ * a click on a mark opens its block in the visible notes pane, else its note
+ * card (a 文 marker: translation turns on to show it, or its card), and a
+ * request to show a mark (`reveal`) scrolls to it and flashes it — in the
+ * PDF view instead when it isn't drawn here. Returns the popover and the
+ * corner buttons to render over the iframe. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import { useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import {
   groupBySection,
   selectionToPieces,
@@ -31,6 +32,8 @@ import { inTranslation, translationSelection, type PlacedTranslationPiece } from
 import { langShort } from "@/components/notes/blocks/markProps";
 import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import { hasOpenLayer } from "@/lib/openLayer";
+import { useCanvasStore } from "@/store/canvas";
+import { activateMark, activateMarker, hoverMark, registerMarkAnchors, useMarkNavStore } from "@/store/markNav";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
 
@@ -64,6 +67,12 @@ const untied = (placed: readonly PlacedTranslationPiece[]) => placed.some((p) =>
 function selectionParts(doc: Document, range: Range, chunks: ChunkMap | null) {
   return { original: selectionToPieces(doc, range, chunks), translated: translationSelection(doc, range, chunks) };
 }
+
+/** How long a reader looks for a mark it was asked to show before it tries
+ * the paper's other view. */
+const NOT_HERE_MS = 1500;
+/** ... and before it says it can't (no other view to try). */
+const GIVE_UP_MS = 6000;
 
 /** How long a corner button stays after the pointer leaves its object. */
 const OBJECT_HIDE_MS = 120;
@@ -249,21 +258,24 @@ export function useHtmlMarks({
       visible: true,
       focusIds: null,
       dark: false,
-      // Until the note card: a click opens the mark's block in the notes.
-      // With the highlighter on, it erases the piece under it.
+      // A click opens the mark's block in the visible notes pane, else its
+      // note card. With the highlighter on, it erases the piece under it.
       onClick: (markId, piece) => {
-        const { marks: list, paperId: pid, pen: penNow } = latest.current;
+        const { paperId: pid, pen: penNow } = latest.current;
         if (penNow && piece !== null) {
           void useMarksStore.getState().erase(markId, piece);
           return;
         }
-        const mark = list.find((m) => m.id === markId);
         handleRef.current?.flash(markId);
-        if (pid !== null) openMarkInNotes(pid, mark);
+        if (pid !== null) activateMark(pid, markId);
       },
-      // A mark on a translation not on screen: turn translation on (or to
-      // its language) and show it.
-      onMarker: (markId) => void useTranslationStore.getState().showMark(markId),
+      // A mark on a translation not on screen: translation turns on to show
+      // it (the notes pane visible), else its note card.
+      onMarker: (markId) => {
+        const pid = latest.current.paperId;
+        if (pid !== null) activateMarker(pid, markId);
+      },
+      onHover: (markId) => hoverMark(markId),
       markerLabel: (m) =>
         tRef.current("marks.trMarker", {
           defaultValue: "A mark on the {{lang}} translation. Show it",
@@ -280,11 +292,63 @@ export function useHtmlMarks({
     handleRef.current?.update({ marks, colors, chunks, visible, focusIds, dark: isDark, pen, translation });
   }, [doc, marks, colors, chunks, visible, focusIds, isDark, pen, translation]);
 
+  // Where each mark is on screen (the note card points at it), in the
+  // window's coordinates; and the card closes on a click elsewhere in the
+  // paper (a click on a mark is the overlay's) or on Escape.
+  useEffect(() => {
+    if (paperId === null || !doc?.body) return;
+    const win = doc.defaultView;
+    const frame = win?.frameElement ?? null;
+    const off = registerMarkAnchors(paperId, {
+      find: (markId) => {
+        const handle = handleRef.current;
+        if (!handle || !frame) return null;
+        const at = frame.getBoundingClientRect();
+        const rects = handle.rects(markId).map((r) => ({
+          top: r.top + at.top,
+          bottom: r.bottom + at.top,
+          left: r.left + at.left,
+          right: r.right + at.left,
+          width: r.width,
+          height: r.height,
+        }));
+        return { rects, viewport: at };
+      },
+      subscribe: (onMove) => {
+        win?.addEventListener("scroll", onMove, { passive: true });
+        return () => win?.removeEventListener("scroll", onMove);
+      },
+    });
+    const ours = () => useMarkNavStore.getState().card?.paperId === paperId;
+    const onClick = (e: MouseEvent) => {
+      if (!e.defaultPrevented && ours()) useMarkNavStore.getState().closeCard();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented && ours()) {
+        e.preventDefault();
+        useMarkNavStore.getState().closeCard();
+      }
+    };
+    doc.addEventListener("click", onClick);
+    // Before the reader's own Escape (the pen), on the way down.
+    doc.addEventListener("keydown", onKey, true);
+    return () => {
+      off();
+      doc.removeEventListener("click", onClick);
+      doc.removeEventListener("keydown", onKey, true);
+    };
+  }, [doc, paperId]);
+
   // Asked to show a mark (its 文 marker, a note's source chip): scroll to
   // it and flash it — its words once their translation has loaded.
   const reveal = useTranslationStore((s) => s.reveal);
+  // Only the view on screen shows it (the HTML stays mounted behind the
+  // PDF tab).
+  const onScreen = useCanvasStore(
+    (s) => s.readerView === null || (s.readerView.paperId === paperId && s.readerView.kind === "html"),
+  );
   useEffect(() => {
-    if (!reveal || reveal.paperId !== paperId || !doc) return;
+    if (!reveal || reveal.paperId !== paperId || !doc || !onScreen) return;
     // This reader shows it: the request is not dropped as unclaimed.
     useTranslationStore.getState().claimReveal(reveal.n);
     const started = Date.now();
@@ -301,6 +365,17 @@ export function useHtmlMarks({
       if (as === "marker" && !scrolled) scrolled = handle!.flash(reveal.markId);
       const reason = as === "marker" ? handle!.markerReason(reveal.markId) : null;
       const mark = latest.current.marks.find((m) => m.id === reveal.markId);
+      // Not drawn here (made in the PDF view, its text not found in the
+      // HTML): the PDF view, once.
+      if (as === null && mark && !mark.lang && reveal.fallback && Date.now() - started >= NOT_HERE_MS) {
+        useCanvasStore.getState().requestReaderTab(reveal.paperId, "pdf");
+        useTranslationStore.getState().requestReveal(reveal.paperId, reveal.markId);
+        return done();
+      }
+      if (as === null && mark && !mark.lang && !reveal.fallback && Date.now() - started >= GIVE_UP_MS) {
+        toast.message(tRef.current("marks.notFound", "This mark isn't drawn in the paper here."));
+        return done();
+      }
       // It can't be shown in the translation: say why.
       if (mark && (reason === "unavailable" || reason === "changed")) {
         explainUnshown(mark, reason);
@@ -318,7 +393,7 @@ export function useHtmlMarks({
       if (tick()) clearInterval(timer);
     }, REVEAL_EVERY_MS);
     return () => clearInterval(timer);
-  }, [reveal, paperId, doc]);
+  }, [reveal, paperId, doc, onScreen]);
 
   // A selection opens the popover under it.
   const [selectedIn, setSelected] = useState<Selected | null>(null);

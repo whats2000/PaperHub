@@ -338,7 +338,8 @@
     "trChanged": "マークを付けた後で訳文が変わりました",
     "trTimeout": "訳文が間に合わず、このマークを表示できませんでした",
     "trShowOriginal": "原文を表示",
-    "trOriginal": "原文"
+    "trOriginal": "原文",
+    "notFound": "このマークはここでは論文上に描かれていません。"
   },
   "langShort": {
     "en": "英語",
@@ -349,5 +350,36 @@
     "fr": "フランス語",
     "de": "ドイツ語",
     "es": "スペイン語"
+  },
+  "noteCard": {
+    "label": "この箇所のノート",
+    "where": "› {{section}} · ノート {{index}}/{{count}}",
+    "whereOne": "› {{section}}",
+    "folded_one": "ノート {{index}} · {{count}} ブロック",
+    "folded_other": "ノート {{index}} · {{count}} ブロック",
+    "delete": "このマークを削除",
+    "deleteHint": "このマークを削除（自分で書いたノートは残ります）",
+    "close": "閉じる",
+    "footer": "ここで直接編集 · 自動保存",
+    "openInNotes": "ノートで開く",
+    "show": "表示",
+    "showHint": "論文でこの箇所を表示",
+    "showNamed": "論文でこの箇所を表示：{{where}}",
+    "trMarkedIn": "{{lang}}でマーク済み。論文は{{shown}}を表示中",
+    "trOriginal": "原文",
+    "trSwitch": "{{lang}}に切り替え"
+  },
+  "backPill": "ノートに戻る",
+  "myMarks": {
+    "button": "マイマーク",
+    "label": "マイマーク",
+    "colours": "色 — 名前をクリックして変更",
+    "show": "表示",
+    "rename": "この色の名前",
+    "showColor": "「{{name}}」を表示",
+    "empty": "この論文にはまだマークがありません。",
+    "noSection": "最初の節より前",
+    "note": "ノート {{index}}",
+    "saveFailed": "色を保存できませんでした。"
   }
 }

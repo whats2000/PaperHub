@@ -33,6 +33,7 @@ import {
   type TranslationQueueStatus,
 } from "@/lib/translationQueue";
 import { cn } from "@/lib/utils";
+import { useMarkNavStore } from "@/store/markNav";
 import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type {
   ParagraphsResponse,
@@ -363,6 +364,8 @@ export function PdfTranslationLayer({
             cardHeight: cardRef.current?.offsetHeight ?? 0,
             reader: { left: box.left, right: box.right },
             pinned: isPinned,
+            // An open note card sits above it: the two stack.
+            stackBelow: useMarkNavStore.getState().cardBox?.bottom ?? null,
           })
         : null;
       if (!next) {
@@ -396,6 +399,14 @@ ${next.side}`;
     const key = activeKeyRef.current;
     if (key !== null) place(key);
   }, [place]);
+  // The note card opened, moved or closed: stack under it again.
+  useEffect(
+    () =>
+      useMarkNavStore.subscribe((s, prev) => {
+        if (s.cardBox !== prev.cardBox) reflow();
+      }),
+    [reflow],
+  );
 
   const close = useCallback(() => {
     clearHideTimer();

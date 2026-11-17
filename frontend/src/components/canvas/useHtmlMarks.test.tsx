@@ -4,8 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
+import { useCanvasStore } from "@/store/canvas";
+import { useMarkNavStore } from "@/store/markNav";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
+import { useTranslationStore } from "@/store/translation";
 import { useNotesStore } from "@/store/notes";
 import type { MarkCreated, MarkIn } from "@/types/notes";
 
@@ -252,5 +255,70 @@ describe("useHtmlMarks", () => {
     fireEvent.keyDown(document.activeElement!, { key: "Escape", bubbles: true });
     expect(focus).toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("toolbar").dataset.state).toBe("closed"));
+  });
+});
+
+describe("the reader and the note card", () => {
+  beforeEach(() => {
+    useMarkNavStore.setState({ card: null, hovered: null, back: null });
+    useCanvasStore.setState({ readerView: null, readerTabRequest: null });
+  });
+
+  it("closes the note card on Escape or a click in the paper", () => {
+    const doc = frameDoc(PAPER);
+    render(<Host doc={doc} />);
+    act(() => useMarkNavStore.getState().openCard(3, "mk_1"));
+    act(() => {
+      doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(useMarkNavStore.getState().card).toBeNull();
+    act(() => useMarkNavStore.getState().openCard(3, "mk_1"));
+    act(() => {
+      doc.body.querySelector("p")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(useMarkNavStore.getState().card).toBeNull();
+  });
+
+  it("tries the PDF view for a mark it can't find in the HTML", async () => {
+    const doc = frameDoc(PAPER);
+    useMarksStore.setState({
+      marksByPaper: {
+        3: [
+          {
+            id: "mk_pdf",
+            paper_content_id: 3,
+            block_id: "b1",
+            kind: "highlight",
+            color: "green",
+            view: "pdf",
+            pieces: [{ quote: "words drawn only on a page", page: 1 }],
+            lang: null,
+            source_ref: null,
+            section_key: "2 Method",
+            status: "ok",
+            created_at: "2026-11-17T00:00:00Z",
+            deleted_at: null,
+          },
+        ],
+      },
+    });
+    render(<Host doc={doc} />);
+    act(() => useTranslationStore.getState().requestReveal(3, "mk_pdf", { fallback: true }));
+    await waitFor(() => expect(useCanvasStore.getState().readerTabRequest).toMatchObject({ paperId: 3, tab: "pdf" }), {
+      timeout: 3000,
+    });
+    // Asked again, with no further fallback.
+    expect(useTranslationStore.getState().reveal).toMatchObject({ paperId: 3, markId: "mk_pdf" });
+    expect(useTranslationStore.getState().reveal?.fallback).toBeUndefined();
+  });
+
+  it("leaves a request to the PDF view while the PDF tab shows", () => {
+    const doc = frameDoc(PAPER);
+    useCanvasStore.setState({ readerView: { paperId: 3, kind: "pdf" } });
+    render(<Host doc={doc} />);
+    const claim = vi.spyOn(useTranslationStore.getState(), "claimReveal");
+    act(() => useTranslationStore.getState().requestReveal(3, "mk_x", { fallback: true }));
+    expect(claim).not.toHaveBeenCalled();
+    claim.mockRestore();
   });
 });

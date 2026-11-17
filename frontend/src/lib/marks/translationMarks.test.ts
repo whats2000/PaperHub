@@ -11,10 +11,26 @@ import {
   paragraphText,
   translationSelection,
 } from "@/lib/marks/translationMarks";
+import { CANVAS_DEFAULT_WIDTH, useCanvasStore } from "@/store/canvas";
+import { useMarkNavStore } from "@/store/markNav";
 import { useMarksStore } from "@/store/marks";
+import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import { REVEAL_TTL_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColorInfo, MarkCreated, MarkIn } from "@/types/notes";
+
+/** The notes pane open beside the reader: a 文 marker turns translation on
+ * to show its mark (hidden, it opens the mark's note card). */
+function paneBeside() {
+  useNotesPaneStore.setState({ open: true, openAt: vi.fn() });
+  useCanvasStore.setState({ open: true, width: 900 });
+}
+
+afterEach(() => {
+  useNotesPaneStore.setState({ open: false });
+  useCanvasStore.setState({ width: CANVAS_DEFAULT_WIDTH });
+  useMarkNavStore.setState({ card: null, hovered: null });
+});
 
 const { toastFn, toastError, toastMessage, toastDismiss } = vi.hoisted(() => ({
   toastFn: vi.fn(),
@@ -490,6 +506,7 @@ describe("useHtmlMarks on a translation", () => {
   });
 
   it("a click on the 文 marker turns translation on to show the mark", () => {
+    paneBeside();
     useTranslationStore.setState({ language: "English", enabledByPaper: {} });
     useMarksStore.setState({ marksByPaper: { 3: [trMark()] }, chunksByPaper: { 3: CHUNKS } });
     const doc = frameDoc(paper(false));
@@ -503,6 +520,19 @@ describe("useHtmlMarks on a translation", () => {
     expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
     expect(useTranslationStore.getState().language).toBe(LANG);
     expect(toastFn).toHaveBeenCalledWith("Translation turned on (繁中) to show this mark", expect.anything());
+  });
+
+  it("with the notes pane hidden, a click on the 文 marker opens the mark's note card", () => {
+    useTranslationStore.setState({ language: "English", enabledByPaper: {} });
+    useMarksStore.setState({ marksByPaper: { 3: [trMark()] }, chunksByPaper: { 3: CHUNKS } });
+    const doc = frameDoc(paper(false));
+    render(createElement(Host, { doc }));
+    const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
+    act(() => doc.querySelector<HTMLButtonElement>('.ph-mk-tr[data-mark="mt"]')!.click());
+    expect(showMark).not.toHaveBeenCalled();
+    showMark.mockRestore();
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mt" });
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBeFalsy();
   });
 });
 
@@ -568,6 +598,7 @@ describe("useHtmlMarks on a translation: what the reader does next", () => {
   });
 
   it("the 文 marker turns translation on; once the translation arrives its words flash", async () => {
+    paneBeside();
     useTranslationStore.setState({ language: "English", enabledByPaper: {} });
     const doc = frameDoc(paper(false));
     render(createElement(Host, { doc }));

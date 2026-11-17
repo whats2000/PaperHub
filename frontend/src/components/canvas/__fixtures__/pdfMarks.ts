@@ -3,7 +3,10 @@
 import { screen } from "@testing-library/react";
 import { vi } from "vitest";
 
+import { CANVAS_DEFAULT_WIDTH, useCanvasStore } from "@/store/canvas";
+import { useMarkNavStore } from "@/store/markNav";
 import { useMarksStore } from "@/store/marks";
+import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, MarkIn, PaperPageBlock } from "@/types/notes";
 
@@ -74,6 +77,10 @@ export function resetStores(marks: Mark[] = []): CreateMock {
     create,
   });
   useNotesStore.setState({ caretAfter: null, byTarget: {}, quoteTarget: null });
+  // The notes pane hidden, no note card: a click on a mark opens the card.
+  useNotesPaneStore.setState({ open: false });
+  useMarkNavStore.setState({ card: null, hovered: null, back: null });
+  useCanvasStore.setState({ width: CANVAS_DEFAULT_WIDTH });
   return create;
 }
 

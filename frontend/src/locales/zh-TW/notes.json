@@ -338,7 +338,8 @@
     "trChanged": "你標記之後，譯文已經變更",
     "trTimeout": "譯文沒有及時送達，無法顯示這個標記",
     "trShowOriginal": "顯示原文",
-    "trOriginal": "原文"
+    "trOriginal": "原文",
+    "notFound": "這個標記沒有畫在這裡的論文上。"
   },
   "langShort": {
     "en": "英文",
@@ -349,5 +350,36 @@
     "fr": "法文",
     "de": "德文",
     "es": "西班牙文"
+  },
+  "noteCard": {
+    "label": "這段文字的筆記",
+    "where": "› {{section}} · 第 {{index}} 則，共 {{count}} 則",
+    "whereOne": "› {{section}}",
+    "folded_one": "筆記 {{index}} · {{count}} 個區塊",
+    "folded_other": "筆記 {{index}} · {{count}} 個區塊",
+    "delete": "刪除這個標記",
+    "deleteHint": "刪除這個標記（你自己寫的筆記會保留）",
+    "close": "關閉",
+    "footer": "直接在這裡編輯 · 自動儲存",
+    "openInNotes": "在筆記中開啟",
+    "show": "顯示",
+    "showHint": "在論文中顯示這段文字",
+    "showNamed": "在論文中顯示這段文字：{{where}}",
+    "trMarkedIn": "標記在{{lang}}上；論文目前顯示{{shown}}",
+    "trOriginal": "原文",
+    "trSwitch": "切換到{{lang}}"
+  },
+  "backPill": "回到筆記",
+  "myMarks": {
+    "button": "我的標記",
+    "label": "我的標記",
+    "colours": "顏色 — 點名稱即可重新命名",
+    "show": "顯示",
+    "rename": "這個顏色的名稱",
+    "showColor": "顯示「{{name}}」",
+    "empty": "這篇論文還沒有標記。",
+    "noSection": "第一節之前",
+    "note": "筆記 {{index}}",
+    "saveFailed": "無法儲存顏色。"
   }
 }
