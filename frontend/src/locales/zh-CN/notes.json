@@ -325,6 +325,8 @@
     "pieceRestored": "已还原这一段",
     "eraseAgain": "再次擦掉",
     "eraseFailed": "无法擦掉这一段。",
-    "retry": "重试"
+    "retry": "重试",
+    "placeTimeout": "没能及时找到这段文字在论文中的位置。",
+    "alreadySaved": "已经保存过了"
   }
 }

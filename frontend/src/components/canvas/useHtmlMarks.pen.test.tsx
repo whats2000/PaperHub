@@ -458,7 +458,7 @@ describe("a stroke that partly fails", () => {
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §1, §2", expect.anything()));
   });
 
-  it("after the pen session ends a re-stroke starts fresh, while the old Retry still saves only what's missing", async () => {
+  it("after the pen session ends, neither a re-stroke nor the old Retry marks the saved text twice", async () => {
     const doc = frameDoc(TWO_SECTIONS);
     useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
     render(<Reader doc={doc} />);
@@ -471,12 +471,13 @@ describe("a stroke that partly fails", () => {
     act(() => useMarksStore.getState().setPen(false));
     act(() => useMarksStore.getState().setPen(true, "green"));
     strokeAcross(doc);
-    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
-    expect(create.mock.calls.slice(2).map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
-    // The Retry kept its own record: only §2.
+    // §1 is already marked (the first attempt saved it): only §2 is new.
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls[2]![0].section_key).toBe("2 Method");
+    // The old Retry finds both saved now: no duplicate.
     act(() => retry.onClick());
-    await waitFor(() => expect(create).toHaveBeenCalledTimes(5));
-    expect(create.mock.calls[4]![0].section_key).toBe("2 Method");
+    await waitFor(() => expect(toastFn.mock.lastCall?.[0]).toBe("Already saved"));
+    expect(create).toHaveBeenCalledTimes(3);
   });
 
   it("a retried join says Joined; a retry that only finishes a stroke says Saved", async () => {
@@ -567,6 +568,52 @@ describe("a stroke whose request never answers", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     expect(create.mock.calls[1]![0].pieces[0]!.quote).toBe("latency drops");
     expect(toastError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a stroke that reached the server but timed out", () => {
+  it("is reconciled from the server, and Retry adds no duplicate", async () => {
+    resetMarkOps(60);
+    const doc = frameDoc(PAPER);
+    // The server's marks: what a refetch (loadPaper) brings back.
+    const server: Mark[] = [];
+    const loadPaper = vi.fn(() => {
+      useMarksStore.setState((st) => ({ marksByPaper: { ...st.marksByPaper, 3: [...server] } }));
+      return Promise.resolve();
+    });
+    useMarksStore.setState({ loadPaper });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    loadPaper.mockClear();
+    // The create lands on the server, but its answer never arrives.
+    create.mockImplementation((body) => {
+      server.push(mark("mk_s1", { color: body.color, pieces: body.pieces.map((p) => ({ ...p, stroke: 0 })) }));
+      return new Promise<MarkCreated>(() => undefined);
+    });
+    stroke(doc, "agent pose");
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't save the mark.", expect.anything()));
+    // Reconciled once: the store now holds the server's mark.
+    await waitFor(() => expect(loadPaper).toHaveBeenCalledWith(3));
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_s1"]));
+    const retry = (toastError.mock.lastCall![1] as { action: { onClick: () => void } }).action;
+    act(() => retry.onClick());
+    await waitFor(() => expect(toastFn.mock.lastCall?.[0]).toBe("Already saved"));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1);
+  });
+
+  it("a PDF stroke whose place can't be found in time says so", async () => {
+    resetMarkOps(60);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const { result } = renderHook(() => usePenSave(3));
+    act(() => result.current({ view: "pdf", pieces: () => new Promise<PenPiece[]>(() => undefined) }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Couldn't find where this passage is in the paper in time.",
+        expect.anything(),
+      ),
+    );
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

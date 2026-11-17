@@ -148,6 +148,42 @@ export interface PenStroke {
   done?: (ok: boolean) => void;
 }
 
+/** A piece as compared with the server's copy: without what the server
+ * adds or changes later (its stroke, erased / lost flags). */
+const SERVER_KEYS = new Set(["stroke", "erased", "removed", "lost"]);
+
+function pieceKey(p: MarkPiece): string {
+  return JSON.stringify(
+    Object.keys(p)
+      .filter((k) => !SERVER_KEYS.has(k))
+      .sort()
+      .map((k) => [k, p[k]]),
+  );
+}
+
+/** The server's mark that already holds every piece of `body` (an earlier
+ * attempt that landed but whose answer timed out), as a save result. */
+function alreadyOnServer(paperId: number, body: MarkIn): MarkCreated | null {
+  const want = body.pieces.map(pieceKey);
+  const mark = (useMarksStore.getState().marksByPaper[paperId] ?? []).find((m) => {
+    if (m.deleted_at !== null || m.kind !== body.kind || m.color !== body.color || m.view !== body.view) return false;
+    const have = new Set(m.pieces.filter((x) => !x.erased && !x.removed).map(pieceKey));
+    return want.every((k) => have.has(k));
+  });
+  if (!mark) return null;
+  return {
+    mark,
+    block: null,
+    saved_to: {
+      note_id: mark.note_id ?? 0,
+      paper_title: "",
+      section: mark.section_key,
+      part_index: 0,
+      part_count: 1,
+    },
+  };
+}
+
 /** "Joined to the same mark", with Split: the newest piece its own mark. */
 function toastJoined(markId: string): void {
   const t = i18n.t.bind(i18n) as TFunction;
@@ -195,16 +231,19 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
       let placedOnce: PenPiece[] | undefined;
       let savedOnce: Map<string, MarkCreated> | undefined;
 
-      const failed = () =>
-        toast.error(t("notes:marks.saveFailed", "Couldn't save the mark."), {
-          action: { label: t("notes:marks.retry", "Retry"), onClick: () => enqueue() },
-        });
+      const retry = { label: t("notes:marks.retry", "Retry"), onClick: () => enqueue() };
+      const failed = () => toast.error(t("notes:marks.saveFailed", "Couldn't save the mark."), { action: retry });
+      // Still finding where the stroke is (a PDF locate, the chunk map), or
+      // saving it: a timeout says which.
+      let placing = true;
 
       const run = async (signal: AbortSignal): Promise<void> => {
         if (paperId === null) return stroke.done?.(false);
+        placing = !placedOnce;
         const placed = placedOnce ?? (await stroke.pieces());
         if (!placed?.length) return stroke.done?.(false);
         placedOnce = placed;
+        placing = false;
         // A stroke drawn just before the pen went off still saves; it only
         // joins nothing (the session ended).
         const { penSession, marksByPaper, notePenMark } = useMarksStore.getState();
@@ -229,6 +268,8 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         progress.current.set(key, done);
         // Set only when this run itself joined a piece to a mark.
         let joinedNow: string | null = null;
+        // What this run itself saved (none: it was all there already).
+        const savedNow: MarkCreated[] = [];
         const opts = { quiet: true, silent: true, signal };
         try {
           const results = await saveMissing(
@@ -239,15 +280,23 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
             {
               silent: true,
               save: async (body) => {
-                if (!target) return create(body, opts);
-                try {
-                  const res = await create({ ...body, join_to: target }, opts);
-                  joinedNow = target;
-                  return res;
-                } catch (err) {
-                  if (!refusedJoin(err)) throw err;
-                  return create(body, opts);
-                }
+                const there = alreadyOnServer(paperId, body);
+                // The server already has it (an earlier attempt landed but
+                // timed out; the queue refetched the marks since).
+                if (there) return there;
+                const res = await (async () => {
+                  if (!target) return create(body, opts);
+                  try {
+                    const joined = await create({ ...body, join_to: target }, opts);
+                    joinedNow = target;
+                    return joined;
+                  } catch (err) {
+                    if (!refusedJoin(err)) throw err;
+                    return create(body, opts);
+                  }
+                })();
+                savedNow.push(res);
+                return res;
               },
               // In the session as soon as it is saved: a stroke that fails
               // later still lets the next stroke join what did save.
@@ -260,7 +309,9 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
           );
           progress.current.delete(key);
           if (joinedNow) toastJoined(joinedNow);
-          else toastSaved(paperId, results);
+          // The whole stroke, as one confirmation; nothing new: say so.
+          else if (savedNow.length) toastSaved(paperId, results);
+          else toast(t("notes:marks.alreadySaved", "Already saved"));
           stroke.done?.(true);
         } catch {
           // What saved stays saved; Retry saves the rest. A timeout already
@@ -270,9 +321,19 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         }
       };
       const enqueue = () =>
-        void queueMarkOp(run, () => {
-          failed();
-          stroke.done?.(false);
+        void queueMarkOp(run, {
+          onTimeout: () => {
+            if (placing) {
+              toast.error(
+                t("notes:marks.placeTimeout", "Couldn't find where this passage is in the paper in time."),
+                { action: retry },
+              );
+            } else failed();
+            stroke.done?.(false);
+          },
+          // The create may have landed: the queue refetches the paper's
+          // marks before anything else (a Retry included) runs.
+          paperId,
         }).catch(() => undefined);
       enqueue();
     },

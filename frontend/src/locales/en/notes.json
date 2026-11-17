@@ -325,6 +325,8 @@
     "pieceRestored": "Piece restored",
     "eraseAgain": "Erase again",
     "eraseFailed": "Couldn't erase that piece.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "placeTimeout": "Couldn't find where this passage is in the paper in time.",
+    "alreadySaved": "Already saved"
   }
 }

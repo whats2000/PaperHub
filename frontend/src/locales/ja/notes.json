@@ -325,6 +325,8 @@
     "pieceRestored": "この部分を元に戻しました",
     "eraseAgain": "もう一度消す",
     "eraseFailed": "この部分を消せませんでした。",
-    "retry": "再試行"
+    "retry": "再試行",
+    "placeTimeout": "この箇所が論文のどこにあるか、時間内に見つけられませんでした。",
+    "alreadySaved": "保存済みです"
   }
 }
