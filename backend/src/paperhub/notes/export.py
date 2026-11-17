@@ -179,13 +179,22 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+_BARE_DOLLAR = re.compile(r"(?<!\\)((?:\\\\)*)\$")
+
+
 def _math(latex: str) -> str:
     """LaTeX for ``$$…$$``: a ``$`` becomes ``\\$`` (so nothing closes the
     math early) and ``![`` / ``<`` get an empty group ``{}`` after them, so
     the LaTeX never reads as an image, an autolink or HTML in a Markdown
     viewer. Blank lines are dropped (they would end the math)."""
-    out = "\n".join(ln for ln in latex.splitlines() if ln.strip())
-    out = out.replace("$", "\\$").replace("![", "!{}[").replace("<", "<{}")
+    # Continuation lines are indented 4 spaces: inside a paragraph that
+    # starts no fence, heading, quote or list in any reader (LaTeX ignores
+    # the spaces), so a GFM viewer keeps the whole math between its $$.
+    out = "\n    ".join(ln.strip() for ln in latex.splitlines() if ln.strip())
+    # Every $ ends up after an odd run of backslashes (a bare one gets one
+    # more; an escaped \$ is kept), so no reader takes it as a delimiter.
+    out = _BARE_DOLLAR.sub(r"\1\\$", out)
+    out = out.replace("![", "!{}[").replace("<", "<{}")
     # A trailing backslash would escape the closing $$ in some viewers.
     return out + " " if out.endswith("\\") else out
 
