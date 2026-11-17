@@ -243,14 +243,25 @@ const t = () => i18n.t.bind(i18n) as TFunction;
  * it shows for now, with a toast to hide it again. Nothing is saved. */
 function showHiddenFor(mark: Mark): void {
   const marks = useMarksStore.getState();
+  const color = mark.color;
+  const visible = color !== null && marks.colors.some((c) => c.color === color && c.visible);
+  // Hidden now, or shown only for the moment by an earlier jump.
   const hiddenColor =
-    mark.color !== null && marks.colors.some((c) => c.color === mark.color && !c.visible) ? mark.color : null;
-  const marksOff = !marks.showMarks;
+    color !== null && marks.colors.some((c) => c.color === color) && (!visible || marks.shownForNow.colors.includes(color))
+      ? color
+      : null;
+  const marksOff = !marks.showMarks || marks.shownForNow.marks;
   if (!hiddenColor && !marksOff) return;
   const setVisible = (on: boolean) =>
     useMarksStore.setState((s) => ({
       colors: hiddenColor ? s.colors.map((c) => (c.color === hiddenColor ? { ...c, visible: on } : c)) : s.colors,
       ...(marksOff ? { showMarks: on } : {}),
+      shownForNow: {
+        colors: hiddenColor
+          ? [...s.shownForNow.colors.filter((c) => c !== hiddenColor), ...(on ? [hiddenColor] : [])]
+          : s.shownForNow.colors,
+        marks: marksOff ? on : s.shownForNow.marks,
+      },
     }));
   setVisible(true);
   toast(t()("notes:marks.showingHidden", "Showing a hidden colour"), {

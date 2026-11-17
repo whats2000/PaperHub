@@ -47,6 +47,10 @@ interface MarksState {
   colors: MarkColorInfo[];
   /** "Show my marks": off hides every mark on the paper (kept, not deleted). */
   showMarks: boolean;
+  /** What a jump to a mark showed for the moment (a hidden colour, Show my
+   * marks off): each later jump there offers to hide it again, until it is
+   * hidden again or made visible for good. */
+  shownForNow: { colors: MarkColor[]; marks: boolean };
   setShowMarks: (on: boolean) => void;
   /** The Box tool (PDF pages): a drag draws a box instead of selecting
    * text. Turning it on turns the highlighter off. */
@@ -490,7 +494,8 @@ export const useMarksStore = create<MarksState>()(
         chunksByPaper: {},
         colors: [],
         showMarks: true,
-        setShowMarks: (on) => set({ showMarks: on }),
+        setShowMarks: (on) => set((s) => ({ showMarks: on, shownForNow: { ...s.shownForNow, marks: false } })),
+        shownForNow: { colors: [], marks: false },
         boxOn: false,
         setBoxOn: (on) => set(on ? { boxOn: true, penOn: false, penSession: [] } : { boxOn: false }),
         penOn: false,
@@ -573,6 +578,10 @@ export const useMarksStore = create<MarksState>()(
         },
 
         patchColor: async (color, patch) => {
+          // Shown or hidden by choice: no longer just for the moment.
+          if (patch.visible !== undefined) {
+            set((s) => ({ shownForNow: { ...s.shownForNow, colors: s.shownForNow.colors.filter((c) => c !== color) } }));
+          }
           const before = get().colors;
           const show = (colors: MarkColorInfo[]) => {
             set({ colors });
