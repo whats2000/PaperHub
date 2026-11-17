@@ -3,8 +3,8 @@
  * ⋯ menu with the rarely needed items: the note's details, Export as Markdown
  * or Word, and Shortcuts (the guide grows from the ⋯ button). */
 import { Menu } from "@base-ui/react/menu";
-import { Ellipsis, FileDown, FileText, Keyboard, LocateFixed, ScanEye } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { Ellipsis, FileDown, FileText, Keyboard, Loader2, LocateFixed, ScanEye } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { hasOpenLayer } from "@/lib/openLayer";
@@ -25,8 +25,11 @@ export interface NotesToolbarProps {
   followAvailable?: boolean;
   /** How many chats share the note, when known. */
   sharedBy?: number | null;
-  /** Export the note; the items wait as "Coming soon" until it is given. */
-  onExport?: (format: ExportFormat) => void;
+  /** Export the note (the item shows busy until it settles); the items
+   * wait as "Coming soon" until it is given. */
+  onExport?: (format: ExportFormat) => void | Promise<void>;
+  /** False when the server has no pandoc: Word is disabled with the reason. */
+  docxAvailable?: boolean;
   guideOpen: boolean;
   onGuideOpenChange: (open: boolean) => void;
 }
@@ -36,12 +39,30 @@ const BUTTON =
 const ITEM =
   "flex w-full cursor-default items-center gap-2 rounded-md px-2 py-[5px] text-left text-[12.5px] text-foreground outline-none select-none data-[highlighted]:bg-accent data-[disabled]:opacity-50";
 
-function ExportItem(props: { icon: ReactNode; label: string; hint: string; onClick?: () => void }) {
+function ExportItem(props: {
+  icon: ReactNode;
+  label: string;
+  hint: string;
+  busy?: boolean;
+  /** Why the item is unavailable, on its own line under the label. */
+  reason?: string | null;
+  onClick?: () => void;
+}) {
   return (
-    <Menu.Item className={ITEM} disabled={!props.onClick} onClick={props.onClick}>
-      {props.icon}
+    <Menu.Item
+      className={cn(ITEM, props.reason && "flex-wrap")}
+      disabled={!props.onClick || !!props.reason}
+      closeOnClick={false}
+      aria-busy={props.busy || undefined}
+      title={props.reason ?? undefined}
+      onClick={props.onClick}
+    >
+      {props.busy ? <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : props.icon}
       {props.label}
       <small className="ml-auto pl-2.5 text-[11px] text-muted-foreground">{props.hint}</small>
+      {props.reason && (
+        <span className="basis-full pl-5 text-[11px] whitespace-normal text-muted-foreground">{props.reason}</span>
+      )}
     </Menu.Item>
   );
 }
@@ -52,6 +73,7 @@ export function NotesToolbar({
   followAvailable = true,
   sharedBy = null,
   onExport,
+  docxAvailable = true,
   guideOpen,
   onGuideOpenChange,
 }: NotesToolbarProps) {
@@ -64,6 +86,28 @@ export function NotesToolbar({
     noteId === null ? null : (s.notes[noteId]?.note.revision ?? null),
   );
   const moreRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [busy, setBusy] = useState<ExportFormat | null>(null);
+
+  // The item shows busy while the download is made; the menu closes after.
+  const runExport =
+    onExport &&
+    ((format: ExportFormat) => {
+      if (busy) return;
+      setBusy(format);
+      let done: void | Promise<void>;
+      try {
+        done = onExport(format);
+      } catch {
+        done = undefined;
+      }
+      void Promise.resolve(done)
+        .catch(() => {})
+        .finally(() => {
+          setBusy(null);
+          setMenuOpen(false);
+        });
+    });
 
   // Esc stops Focus, unless it is closing something open over the page (a
   // menu, the slash / @ menu, a dialog): checked before that closes, in the
@@ -105,6 +149,7 @@ export function NotesToolbar({
           })
         : t("notes:toolbar.revision", "Revision {{revision}}", { revision });
   const soon = t("notes:toolbar.comingSoon", "Coming soon");
+  const exporting = t("notes:toolbar.exporting", "Exporting…");
   const focusLabel = t("notes:toolbar.focus", "Focus");
 
   return (
@@ -163,7 +208,7 @@ export function NotesToolbar({
         <span className="@max-[380px]:hidden">{focusLabel}</span>
       </button>
       <span className="inline-flex">
-        <Menu.Root>
+        <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <Menu.Trigger
             ref={moreRef}
             aria-label={t("notes:toolbar.more", "More")}
@@ -184,15 +229,31 @@ export function NotesToolbar({
                   icon={<FileDown className="size-3 shrink-0" aria-hidden />}
                   label={t("notes:toolbar.exportMd", "Export as Markdown")}
                   hint={
-                    onExport ? t("notes:toolbar.exportMdHint", ".md, images, references.bib") : soon
+                    !onExport
+                      ? soon
+                      : busy === "md"
+                        ? exporting
+                        : t("notes:toolbar.exportMdHint", ".md, images, references.bib")
                   }
-                  onClick={onExport && (() => onExport("md"))}
+                  busy={busy === "md"}
+                  onClick={runExport && (() => runExport("md"))}
                 />
                 <ExportItem
                   icon={<FileText className="size-3 shrink-0" aria-hidden />}
                   label={t("notes:toolbar.exportDocx", "Export as Word")}
-                  hint={onExport ? t("notes:toolbar.exportDocxHint", ".docx") : soon}
-                  onClick={onExport && (() => onExport("docx"))}
+                  hint={
+                    !onExport ? soon : busy === "docx" ? exporting : t("notes:toolbar.exportDocxHint", ".docx")
+                  }
+                  busy={busy === "docx"}
+                  reason={
+                    onExport && !docxAvailable
+                      ? t(
+                          "notes:toolbar.exportDocxNeedsPandoc",
+                          "Needs pandoc on the server: winget install pandoc, or your package manager",
+                        )
+                      : null
+                  }
+                  onClick={runExport && (() => runExport("docx"))}
                 />
                 <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
                 <Menu.Item className={ITEM} onClick={() => onGuideOpenChange(true)}>

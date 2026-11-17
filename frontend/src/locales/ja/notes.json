@@ -236,6 +236,10 @@
     "exportDocx": "Word で書き出す",
     "exportDocxHint": ".docx",
     "comingSoon": "近日対応",
+    "exporting": "書き出し中…",
+    "exportDocxNeedsPandoc": "サーバーに pandoc が必要です：winget install pandoc、またはお使いのパッケージマネージャーで",
+    "exportNoPandoc": "Word の書き出しには pandoc が必要です：winget install pandoc でインストールしてください",
+    "exportFailed": "ノートを書き出せませんでした",
     "shortcuts": "ショートカット"
   },
   "card": {

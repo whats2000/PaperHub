@@ -236,6 +236,10 @@
     "exportDocx": "匯出為 Word",
     "exportDocxHint": ".docx",
     "comingSoon": "即將推出",
+    "exporting": "匯出中…",
+    "exportDocxNeedsPandoc": "伺服器需安裝 pandoc：winget install pandoc，或使用你的套件管理員",
+    "exportNoPandoc": "匯出 Word 需要 pandoc：請用 winget install pandoc 安裝",
+    "exportFailed": "無法匯出這份筆記",
     "shortcuts": "快速鍵"
   },
   "card": {

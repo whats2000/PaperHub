@@ -15,6 +15,7 @@ import { notePanelId, noteTabId } from "./noteTabIds";
 import { NotesTabs, type NoteTab } from "./NotesTabs";
 import { NotesToolbar } from "./NotesToolbar";
 import { useFollowReading } from "./useFollowReading";
+import { useNoteExport } from "./useNoteExport";
 
 interface Props {
   onClose: () => void;
@@ -163,6 +164,7 @@ export function NotesPane({ onClose }: Props) {
   }, [request, panel, noteId, consumeRequest]);
 
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
+  const { onExport, docxAvailable } = useNoteExport(noteId);
 
   return (
     <section
@@ -183,6 +185,8 @@ export function NotesPane({ onClose }: Props) {
         followLabel={followLabel}
         followAvailable={tab === "paper"}
         sharedBy={sharedBy}
+        onExport={noteId === null ? undefined : onExport}
+        docxAvailable={docxAvailable}
         guideOpen={guideOpen}
         onGuideOpenChange={setGuideOpen}
       />

@@ -1465,3 +1465,22 @@ export async function locateText(paperContentId: number, text: string): Promise<
     body: JSON.stringify({ text }),
   });
 }
+
+export type NoteExportFormat = "md" | "docx";
+
+/** Which note export formats work on this server (Word needs pandoc). */
+export async function getNoteExportCapabilities(): Promise<Record<NoteExportFormat, boolean>> {
+  return apiFetch<Record<NoteExportFormat, boolean>>("/notes/export/capabilities");
+}
+
+/** A note exported as a Markdown zip or a .docx, with the server's file name. */
+export async function exportNote(
+  noteId: number,
+  format: NoteExportFormat,
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}/export?format=${format}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1];
+  return { blob: await res.blob(), filename: name ?? `note-notes.${format === "md" ? "zip" : "docx"}` };
+}

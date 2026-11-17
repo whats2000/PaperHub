@@ -156,6 +156,38 @@ describe("NotesToolbar", () => {
     fireEvent.click(docx);
     expect(onExport).toHaveBeenCalledWith("docx");
   });
+
+  it("Export as Word disabled with reason", async () => {
+    const onExport = vi.fn();
+    render(<Toolbar onExport={onExport} docxAvailable={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    const docx = within(menu).getByRole("menuitem", { name: /Export as Word/ });
+    expect(docx).toHaveAttribute("aria-disabled", "true");
+    expect(docx).toHaveTextContent("Needs pandoc on the server: winget install pandoc");
+    fireEvent.click(docx);
+    expect(onExport).not.toHaveBeenCalled();
+    const md = within(menu).getByRole("menuitem", { name: /Export as Markdown/ });
+    expect(md).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("shows the export busy until it settles, then closes the menu", async () => {
+    let finish!: () => void;
+    const onExport = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    render(<Toolbar onExport={onExport} />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Export as Markdown/ }));
+    const md = within(menu).getByRole("menuitem", { name: /Export as Markdown/ });
+    await waitFor(() => expect(md).toHaveAttribute("aria-busy", "true"));
+    expect(md).toHaveTextContent("Exporting…");
+    expect(onExport).toHaveBeenCalledWith("md");
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
 });
 
 describe("useFollowReading", () => {

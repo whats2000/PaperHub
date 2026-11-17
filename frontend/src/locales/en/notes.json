@@ -236,6 +236,10 @@
     "exportDocx": "Export as Word",
     "exportDocxHint": ".docx",
     "comingSoon": "Coming soon",
+    "exporting": "Exporting…",
+    "exportDocxNeedsPandoc": "Needs pandoc on the server: winget install pandoc, or your package manager",
+    "exportNoPandoc": "Word export needs pandoc: install it with winget install pandoc",
+    "exportFailed": "Couldn't export the note",
     "shortcuts": "Shortcuts"
   },
   "card": {
