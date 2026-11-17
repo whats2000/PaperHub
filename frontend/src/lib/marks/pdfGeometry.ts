@@ -263,6 +263,9 @@ export const PAGE = "[data-page-number]";
 /** A piece of a text selection on a PDF page (one per Marker block). */
 export interface PdfPiece {
   quote: string;
+  /** The text as the page lays it out, a line break between lines (what
+   * the paper's reading text is searched with). */
+  raw: string;
   /** 0-based. */
   page: number;
   block_id: string | null;
@@ -271,21 +274,22 @@ export interface PdfPiece {
   rects: Frac[];
 }
 
-/** The pieces of a selection on the reader's PDF pages: the selected
- * text-layer characters, split by the Marker block (per page) whose box
- * holds them. */
-export function selectionToPdfPieces(
-  range: Range,
-  root: Element,
-  blocksByPage: Readonly<Record<number, readonly PaperPageBlock[]>>,
-): PdfPiece[] {
-  const out: (PdfPiece & { text: string; all: Frac[] })[] = [];
+/** The selected part of one text-layer node, read off the page when the
+ * selection was made (the text layer may re-render before it is saved). */
+export interface PdfFragment {
+  page: number;
+  text: string;
+  rects: Frac[];
+}
+
+/** What a selection covers on the reader's PDF pages, node by node. */
+export function selectionFragments(range: Range, root: Element): PdfFragment[] {
+  const out: PdfFragment[] = [];
   const doc = root.ownerDocument;
   // Only the part of the reader the selection spans (not every page).
   const common = range.commonAncestorContainer;
   const scope = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
   const walker = doc.createTreeWalker(scope && root.contains(scope) ? scope : root, NodeFilter.SHOW_TEXT);
-  let lastBottom: number | null = null;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const node = n as Text;
     if (!range.intersectsNode(node)) continue;
@@ -295,33 +299,47 @@ export function selectionToPdfPieces(
     const start = node === range.startContainer ? range.startOffset : 0;
     const end = node === range.endContainer ? range.endOffset : node.data.length;
     if (end <= start || !node.data.slice(start, end).trim()) continue;
-    const page = Number(pageEl.getAttribute("data-page-number")) - 1;
     const pageBox = pageEl.getBoundingClientRect();
     const rects = nodeRects(node, start, end).map((r) => toFrac(r, pageBox));
-    const all = union(rects);
-    if (!all) continue;
-    const block = blockAt(blocksByPage[page] ?? [], (all[0] + all[2]) / 2, (all[1] + all[3]) / 2);
+    if (!rects.length) continue;
+    out.push({ page: Number(pageEl.getAttribute("data-page-number")) - 1, text: node.data.slice(start, end), rects });
+  }
+  return out;
+}
+
+/** Fragments as pieces: split by the Marker block (per page) whose box
+ * holds each fragment's middle. */
+export function piecesFromFragments(
+  fragments: readonly PdfFragment[],
+  blocksByPage: Readonly<Record<number, readonly PaperPageBlock[]>>,
+): PdfPiece[] {
+  const out: (PdfPiece & { all: Frac[] })[] = [];
+  let lastBottom: number | null = null;
+  for (const f of fragments) {
+    const all = union(f.rects)!;
+    const block = blockAt(blocksByPage[f.page] ?? [], (all[0] + all[2]) / 2, (all[1] + all[3]) / 2);
     const blockId = block?.block_id ?? null;
     const last = out[out.length - 1];
-    if (last && last.page === page && last.block_id === blockId) {
-      // A new line reads as a space; spans on one line join as they are.
-      if (lastBottom !== null && all[1] >= lastBottom - 0.002) last.text += " ";
-      last.text += node.data.slice(start, end);
-      last.all.push(...rects);
+    if (last && last.page === f.page && last.block_id === blockId) {
+      // A new line reads as a line break; spans on one line join as they are.
+      if (lastBottom !== null && all[1] >= lastBottom - 0.002) last.raw += "\n";
+      last.raw += f.text;
+      last.all.push(...f.rects);
     } else {
-      out.push({
-        quote: "",
-        page,
-        block_id: blockId,
-        section: block?.section ?? null,
-        rects: [],
-        text: node.data.slice(start, end),
-        all: [...rects],
-      });
+      out.push({ quote: "", raw: f.text, page: f.page, block_id: blockId, section: block?.section ?? null, rects: [], all: [...f.rects] });
     }
     lastBottom = all[3];
   }
-  return out.map(({ text, all, ...p }) => ({ ...p, quote: tidy(text), rects: lineBoxes(all) }));
+  return out.map(({ all, ...p }) => ({ ...p, quote: tidy(p.raw), rects: lineBoxes(all) }));
+}
+
+/** The pieces of a selection on the reader's PDF pages. */
+export function selectionToPdfPieces(
+  range: Range,
+  root: Element,
+  blocksByPage: Readonly<Record<number, readonly PaperPageBlock[]>>,
+): PdfPiece[] {
+  return piecesFromFragments(selectionFragments(range, root), blocksByPage);
 }
 
 

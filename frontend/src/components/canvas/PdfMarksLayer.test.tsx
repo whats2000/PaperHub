@@ -54,6 +54,7 @@ describe("selectionToPdfPieces", () => {
     expect(selectionToPdfPieces(range, screen.getByTestId("reader"), { 0: BLOCKS })).toEqual([
       {
         quote: "Robots learn from demos.",
+        raw: "Robots learn from demos.",
         page: 0,
         block_id: "/page/0/Text/1",
         section: "1 Introduction",
@@ -104,6 +105,24 @@ describe("PDF text marks", () => {
     expect(piece).not.toHaveProperty("section");
     await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
     expect(window.getSelection()!.isCollapsed).toBe(true);
+  });
+
+  it("saves what was selected even after the text layer re-renders", async () => {
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalledWith(3, 0));
+    selectSpans("s1", 0, "s2", "from demos.".length);
+    fireEvent.mouseUp(screen.getByTestId("s2"));
+    await screen.findByRole("toolbar", { name: "Mark the selection" });
+    // A resize re-renders the text layer: the selected text nodes go.
+    screen.getByTestId("s1").firstChild!.remove();
+    screen.getByTestId("s2").firstChild!.remove();
+    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      section_key: "1 Introduction",
+      pieces: [{ quote: "Robots learn from demos.", page: 0, block_id: "/page/0/Text/1", rects: [[0.05, 0.05, 0.5, 0.07]] }],
+    });
   });
 
   it("draws marks on a layer that takes no pointer events, hit-tested on click", () => {

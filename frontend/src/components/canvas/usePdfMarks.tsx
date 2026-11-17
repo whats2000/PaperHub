@@ -33,9 +33,11 @@ import {
   FIGURE_TYPES,
   layerSpans,
   PAGE,
-  selectionToPdfPieces,
+  piecesFromFragments,
+  selectionFragments,
   type BoxResult,
   type Frac,
+  type PdfFragment,
   type PdfPiece,
 } from "@/lib/marks/pdfGeometry";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
@@ -49,8 +51,10 @@ const FLASH_MS = 1600;
  * a mark files under one. */
 function groupPieces(pieces: readonly PdfPiece[]): MarkGroup[] {
   const groups: MarkGroup[] = [];
-  for (const { section, block_id, ...rest } of pieces) {
-    const piece: MarkPiece = block_id ? { ...rest, block_id } : rest;
+  for (const p of pieces) {
+    const { section, block_id } = p;
+    const base: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
+    const piece: MarkPiece = block_id ? { ...base, block_id } : base;
     const last = groups[groups.length - 1];
     if (last && last.section === section) last.pieces.push(piece);
     else groups.push({ section, pieces: [piece] });
@@ -59,7 +63,15 @@ function groupPieces(pieces: readonly PdfPiece[]): MarkGroup[] {
 }
 
 type Target =
-  | { type: "text"; range: Range; keyboard: boolean; box: SelectionBox }
+  | {
+      type: "text";
+      range: Range;
+      /** What was selected, read when it was: saved even if the text layer
+       * re-renders (a resize) before the choice. */
+      fragments: PdfFragment[];
+      keyboard: boolean;
+      box: SelectionBox;
+    }
   | { type: "object"; kind: MarkableObject; page: number; block: PaperPageBlock; box: SelectionBox }
   | { type: "box"; page: number; frac: Frac; scanned: boolean; result: BoxResult | null; box: SelectionBox };
 
@@ -176,9 +188,8 @@ export function usePdfMarks({
         if (boxOnRef.current) return;
         const sel = window.getSelection();
         const range = sel && !sel.isCollapsed && sel.rangeCount ? sel.getRangeAt(0) : null;
-        const pieces = range && root.contains(range.commonAncestorContainer)
-          ? selectionToPdfPieces(range, root, blocksRef.current)
-          : [];
+        const fragments = range && root.contains(range.commonAncestorContainer) ? selectionFragments(range, root) : [];
+        const pieces = piecesFromFragments(fragments, blocksRef.current);
         if (!range || !pieces.length) {
           setTarget((cur) => (cur?.type === "text" ? null : cur));
           return;
@@ -200,7 +211,13 @@ export function usePdfMarks({
         capped = "";
         const origin = measure();
         if (!origin) return;
-        setTarget({ type: "text", range: range.cloneRange(), keyboard, box: boxOf(range.getBoundingClientRect(), origin) });
+        setTarget({
+          type: "text",
+          range: range.cloneRange(),
+          fragments,
+          keyboard,
+          box: boxOf(range.getBoundingClientRect(), origin),
+        });
       }, 0);
     };
     const onMouseUp = () => read(false);
@@ -318,11 +335,11 @@ export function usePdfMarks({
           view: "pdf",
           addNote,
           groups: async () => {
-            const first = selectionToPdfPieces(cur.range, root, blocksRef.current);
-            const pages = [...new Set(first.map((p) => p.page))];
+            // The blocks of every page it is on, loaded by now.
+            const pages = [...new Set(cur.fragments.map((f) => f.page))];
             const loaded = await Promise.all(pages.map((p) => loadBlocks(p)));
             const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
-            const pieces = selectionToPdfPieces(cur.range, root, byPage);
+            const pieces = piecesFromFragments(cur.fragments, byPage);
             return pieces.length ? groupPieces(pieces) : null;
           },
         });
