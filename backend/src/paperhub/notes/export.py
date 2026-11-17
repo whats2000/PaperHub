@@ -234,6 +234,9 @@ def _code_span(code: str) -> str:
     return _wrap(code, fence + pad, pad + fence)
 
 
+_HELD = re.compile(r"\ue000(\d+)\ue001")
+
+
 class _Writer:
     def __init__(self, note: Note, papers: Mapping[int, ExportPaper],
                  chunk_papers: Mapping[int, int],
@@ -250,6 +253,9 @@ class _Writer:
         self._bases: dict[str, int] = {}
         self._assets: dict[int, Any] = {}
         self._image_count = 0
+        # Inline code spans, held out of the line-level escaping (hard
+        # breaks, line starts, indents) until the block is written.
+        self._held: list[str] = []
 
     def cite(self, pid: int | None, locator: str = "") -> str:
         if pid is None or pid not in self.papers:
@@ -317,7 +323,8 @@ class _Writer:
     def _styled(self, run: dict[str, Any]) -> str:
         styles = run.get("styles") or {}
         if styles.get("code"):
-            return _code_span(run["text"])
+            # A code span cannot hold a line break: it reads as a space.
+            return self._hold(_code_span(" ".join(run["text"].split("\n"))))
         # ``hidden`` and ``comment`` add nothing: plain text.
         text = self.text(run["text"])
         if styles.get("strike"):
@@ -398,6 +405,14 @@ class _Writer:
         except Exception:  # noqa: BLE001 - one missing image never fails the export
             logger.warning("note export: no image for block %s", b.id, exc_info=True)
         return None
+
+    def _hold(self, span: str) -> str:
+        self._held.append(span)
+        return f"\ue000{len(self._held) - 1}\ue001"
+
+    def release(self, text: str) -> str:
+        """``text`` with its held code spans put back."""
+        return _HELD.sub(lambda m: self._held[int(m[1])], text)
 
     def _name(self, ext: str) -> str:
         """The next image file name: by index, never by block id (an id
@@ -542,7 +557,7 @@ def note_to_markdown(
         if parent in indent:
             pad = indent[parent] + ("    " if types.get(parent) in _LIST else "")
         indent[b.id] = pad
-        body = _block(w, b, offset)
+        body = w.release(_block(w, b, offset))
         if not body.strip():
             continue
         marker = _LIST_MARKER.get(b.type)

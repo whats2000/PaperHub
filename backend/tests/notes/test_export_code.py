@@ -87,3 +87,22 @@ def test_docx_shows_inline_code_literally() -> None:
     assert 'w:val="Title"' not in xml
     assert "custom-style=&quot;Title&quot;" in xml
     assert "![br](http://127.0.0.1:9/x.png)" in xml
+
+
+@needs_pandoc
+def test_inline_code_across_lines_is_left_alone() -> None:
+    code = "first()\n    # not a heading\n\tsecond()"
+    md, _i, _b = note_to_markdown(NOTE, [_para(
+        _txt("before\n  indented "), _code(code), _txt("\nafter"))], {})
+    span = md[md.index("first()") - 1: md.index("second()") + len("second()") + 1]
+    assert "\\" not in span and "\u00a0" not in span, md
+    for reader in READERS:
+        nodes = _nodes(md, reader)
+        codes = [n["c"][1] for n in nodes if n["t"] == "Code"]
+        assert len(codes) == 1, (reader, md)
+        assert "first()" in codes[0] and "second()" in codes[0]
+        assert "\\" not in codes[0] and "\u00a0" not in codes[0]
+        assert [n["t"] for n in nodes].count("Header") == 1, (reader, md)  # the title
+        assert "CodeBlock" not in {n["t"] for n in nodes}, (reader, md)
+    # The text around the code keeps its own line breaks and indent escape.
+    assert "before\\\n\u00a0\u00a0indented" in md
