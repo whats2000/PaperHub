@@ -408,6 +408,18 @@
     opacity: 0;
     visibility: hidden;
 }
+/* The note card shows one note of the section (partsDecorations.ts); its
+   editor sits closer to the card's edge, and the folded notes' chevrons
+   line up with a reference's bar (--note-card-pad + 1.5px). */
+.paperhub-notes .bn-block-outer[data-card-hidden="true"] {
+    display: none;
+}
+.note-card {
+    --note-card-pad: 26px;
+}
+.note-card .paperhub-notes[data-variant="card"] .bn-editor {
+    padding-inline: var(--note-card-pad) 10px;
+}
 /* The fold chevron shows on hover, on focus and while folded. */
 .paperhub-notes .note-fold {
     opacity: 0;

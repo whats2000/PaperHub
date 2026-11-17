@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { useMarkNavStore } from "@/store/markNav";
 import { useNotesStore } from "@/store/notes";
 
 import { foldLine, foldSummary, partsOfNote, type PartBlock } from "../parts";
@@ -27,7 +28,8 @@ function flatten(list: DocBlock[], out: PartBlock[] = []): PartBlock[] {
 /** A divider's line: its fold chevron at the content edge (centred on a
  * reference's bar, so it reaches into the side menu's column: it sits above
  * BlockNote's side menu, z-20, or the drag handle would take its clicks),
- * the rule darkened when it frames the part you're in, and the folded
+ * the rule darkened when it frames the part you're in (or, while the
+ * pointer is over a mark on the paper, the part quoting it), and the folded
  * part's one-line summary, which unfolds it. The parts come from the
  * editor's own document, so a divider just typed is right before its sync
  * reaches the store. */
@@ -39,15 +41,17 @@ export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
   const folded = useNotesStore((s) => (s.folded[noteId] ?? []).includes(id));
   const active = useNotesStore((s) => s.activePart[noteId] ?? null);
   const toggleFold = useNotesStore((s) => s.toggleFold);
+  const hovered = useMarkNavStore((s) => s.hovered);
 
   const { summary, edge } = useMemo(() => {
     const parts = partsOfNote(blocks);
     const mine = parts.find((p) => p.id === id);
-    const at = active === null ? -1 : parts.findIndex((p) => p.id === active);
+    const hot = hovered === null ? -1 : parts.findIndex((p) => p.blocks.some((b) => b.props?.markId === hovered));
+    const at = hot >= 0 ? hot : active === null ? -1 : parts.findIndex((p) => p.id === active);
     // The dividers just above and below the active part frame it.
     const framing = at >= 0 && (parts[at]!.dividerId === id || parts[at + 1]?.dividerId === id);
     return { summary: mine ? foldSummary(mine) : { blocks: 0, marks: 0 }, edge: framing };
-  }, [blocks, active, id]);
+  }, [blocks, active, hovered, id]);
 
   const line = foldLine(t, summary);
 

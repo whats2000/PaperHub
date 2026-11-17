@@ -13,12 +13,16 @@ export interface NoteEditorContextValue {
   /** The paper of a paper note (marks live there); null for other notes. */
   paperContentId: number | null;
   paperTitle: string | null;
+  /** In the note card: the mark clicked (only its reference is tinted) and
+   * where another reference's Show ↗ goes. */
+  card?: { markId: string; onJump: (markId: string) => void } | null;
 }
 
 export const NoteEditorContext = createContext<NoteEditorContextValue>({
   noteId: 0,
   paperContentId: null,
   paperTitle: null,
+  card: null,
 });
 
 export function useNoteEditorContext(): NoteEditorContextValue {

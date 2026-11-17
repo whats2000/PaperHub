@@ -59,6 +59,10 @@ export interface NoteEditorProps {
   onBlockFocus?: (blockId: string) => void;
   /** Opens the shortcuts guide (the tip's "All shortcuts"). */
   onOpenGuide?: () => void;
+  /** The note card: the one note of the section shown (a part id; the rest
+   * of the note is hidden), the mark clicked (its reference is tinted) and
+   * where another reference's Show ↗ goes. */
+  card?: { partId: string; markId: string; onJump: (markId: string) => void };
 }
 
 const DICTIONARIES = { en, ja, "zh-TW": zhTW, "zh-CN": zh } as const;
@@ -108,7 +112,7 @@ function NoteEditorFrame(props: NoteEditorProps) {
   );
 }
 
-function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEditorProps) {
+function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: NoteEditorProps) {
   const { t, i18n } = useTranslation();
   const { resolvedTheme } = useTheme();
   const note = useNotesStore((s) => s.notes[noteId]!.note);
@@ -124,6 +128,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
   const suggestionHost = useSuggestionHosts();
   // Badges for open comment threads whose words are gone.
   const lostBadges = useLostCommentBadges(noteId);
+  // The note card shows one part, and nothing else.
+  const cardPart = card?.partId ?? null;
 
   const editor = useCreateBlockNote(
     {
@@ -140,7 +146,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
         codeFence,
         dividerRule,
         syntaxHighlighter,
-        noteParts(() => partsViewOf(noteId)),
+        noteParts(() => partsViewOf(noteId), cardPart),
         noteSuggestionMarks(() => ({
           suggestions: useNotesStore.getState().notes[noteId]?.suggestions ?? [],
           host: suggestionHost,
@@ -261,11 +267,11 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
   // The part decorations read the store; redraw them when it changes.
   useEffect(() => {
     try {
-      refreshPartDecorations(editor._tiptapEditor.view);
+      refreshPartDecorations(editor._tiptapEditor.view, variant === "card" ? cardPart : undefined);
     } catch {
       /* not mounted yet: the decorations draw on mount */
     }
-  }, [editor, focusOn, activePart, folded]);
+  }, [editor, focusOn, activePart, folded, cardPart, variant]);
 
   const onSelectionChange = useCallback(() => {
     let blockId: string;
@@ -398,15 +404,23 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
     void loadColors();
   }, [loadColors]);
 
+  const cardMarkId = card?.markId ?? null;
+  const onJump = card?.onJump;
   const ctx = useMemo(
-    () => ({ noteId, paperContentId, paperTitle: paperContentId !== null ? note.title : null }),
-    [noteId, paperContentId, note.title],
+    () => ({
+      noteId,
+      paperContentId,
+      paperTitle: paperContentId !== null ? note.title : null,
+      card: cardMarkId !== null && onJump ? { markId: cardMarkId, onJump } : null,
+    }),
+    [noteId, paperContentId, note.title, cardMarkId, onJump],
   );
 
   return (
     <NoteEditorContext.Provider value={ctx}>
       <div
         data-testid="note-editor"
+        data-variant={variant}
         onClick={comments.onEditorClick}
         onClickCapture={(e) => {
           // A paper link made from selected words opens the paper, like its chip.
@@ -419,7 +433,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
         data-lang={i18n.language}
         className={cn(
           "paperhub-notes min-w-0 animate-in fade-in-0 duration-200 motion-reduce:animate-none",
-          variant === "pane" ? "h-full overflow-y-auto py-2" : "max-h-80 overflow-y-auto py-1 text-[13px]",
+          variant === "pane" ? "h-full overflow-y-auto py-2" : "py-1 text-[13px]",
         )}
       >
         <div
