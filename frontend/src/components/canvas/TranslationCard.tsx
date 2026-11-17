@@ -269,8 +269,12 @@ export function TranslationCard({
     >
       <span
         aria-hidden="true"
+        data-stacked={placement.stacked ? "true" : undefined}
         className={cn(
           "absolute size-2.5 rotate-45 border border-foreground/15 bg-secondary dark:border-foreground/20",
+          // Stacked under the note card, which points at the paragraph.
+          "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+          placement.stacked && "opacity-0",
           side === "below"
             ? "-top-[6px] border-r-0 border-b-0"
             : side === "above"

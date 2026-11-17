@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_EDGE,
   NARROW_GUTTER_PX,
+  STACK_GAP,
   contentScrollTop,
   describeBreak,
   glidesBetween,
@@ -337,5 +338,43 @@ describe("placeCard — pinned (QA F5)", () => {
         cardHeight: 200,
       }),
     ).toBeNull();
+  });
+});
+
+describe("placeCard — stacked under the note card", () => {
+  it("sits under the card above it, its arrow left to that card", () => {
+    const alone = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: WIDE,
+      cardHeight: 120,
+      reader: READER,
+    })!;
+    expect(alone.stacked).toBeUndefined();
+    const p = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: WIDE,
+      cardHeight: 120,
+      reader: READER,
+      stackBelow: 420,
+    })!;
+    expect(p.top).toBe(420 + STACK_GAP);
+    expect(p.stacked).toBe(true);
+    // Shortened to what is left of the reading area under it.
+    expect(p.maxHeight).toBe(900 - CARD_EDGE - (420 + STACK_GAP));
+  });
+
+  it("stays where it is when the card above ends higher", () => {
+    const p = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: WIDE,
+      cardHeight: 120,
+      reader: READER,
+      stackBelow: 200,
+    })!;
+    expect(p.top).toBe(300);
+    expect(p.stacked).toBeUndefined();
   });
 });

@@ -43,6 +43,9 @@ export interface PlaceCardInput {
   /** A pinned card never steps aside: with its paragraph out of view it docks
    *  to the viewport edge the paragraph left by. */
   pinned?: boolean;
+  /** The bottom of a card already open above this one (the note card over the
+   *  translation card): this one stacks under it, never over it. */
+  stackBelow?: number | null;
 }
 
 export interface CardPlacement {
@@ -64,6 +67,25 @@ export interface CardPlacement {
   activeFragment: number;
   /** Share (0–1) of the active fragment scrolled past the viewport top. */
   scrollFraction: number;
+  /** Pushed down under the card above it (`stackBelow`): its arrow is that
+   *  card's to show. */
+  stacked?: boolean;
+}
+
+/** Gap between two cards stacked in the gutter. */
+export const STACK_GAP = 8;
+
+/** A card under another one (`stackBelow`): never higher than its bottom. */
+function stackUnder(p: CardPlacement | null, stackBelow: number | null | undefined, viewportBottom: number): CardPlacement | null {
+  if (!p || stackBelow == null) return p;
+  const floor = stackBelow + STACK_GAP;
+  if (p.top >= floor) return p;
+  return {
+    ...p,
+    top: floor,
+    maxHeight: Math.max(0, Math.min(p.maxHeight, viewportBottom - CARD_EDGE - floor)),
+    stacked: true,
+  };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
@@ -73,13 +95,17 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi
  * least 260px wide (clamped inside the viewport while the paragraph is
  * visible, `maxHeight` = the visible height), otherwise inside the reader under
  * the paragraph, or over it when there is no room below (`maxHeight` ≤ 45 % of
- * the viewport). When neither side holds the whole card it takes the roomier
+ * the viewport). Under another open card (`stackBelow`) it stacks below it. When neither side holds the whole card it takes the roomier
  * side, shortened; it covers the paragraph only when neither side has a usable
  * strip left. For a paragraph split
  * across columns or pages, the fragment most in view is the anchor. Returns
  * `null` when no fragment is in view.
  */
-export function placeCard({
+export function placeCard(input: PlaceCardInput): CardPlacement | null {
+  return stackUnder(placeAlone(input), input.stackBelow, input.viewport.bottom);
+}
+
+function placeAlone({
   paraRects,
   viewport,
   gutter,
