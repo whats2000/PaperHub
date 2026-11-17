@@ -75,6 +75,13 @@ async function openMenu(count = 3) {
 }
 
 describe("My marks", () => {
+  it("names an unnumbered section once", async () => {
+    useMarksStore.setState({ marksByPaper: { 3: [mark("m1", "Introduction", 12)] } });
+    const menu = await openMenu(1);
+    const [section] = within(menu).getAllByRole("region");
+    expect(within(section!).getByRole("heading").textContent).toBe("§ Introduction1");
+  });
+
   it("lists the marks by section in reading order, with counts and the note they are in", async () => {
     const menu = await openMenu();
     const sections = within(menu).getAllByRole("region");

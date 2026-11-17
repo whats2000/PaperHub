@@ -43,6 +43,13 @@ interface MarkSection {
   marks: Mark[];
 }
 
+/** "§2 Method"; an unnumbered section is named once ("§ Introduction"). */
+function sectionHeading(key: string): string {
+  const label = sectionLabel(key);
+  const name = key.replace(/^\d+(?:\.\d+)*\s*/, "");
+  return label.endsWith(name) ? label : `${label} ${name}`;
+}
+
 /** The marks grouped by section, sections and marks in reading order (one
  * position for every kind of anchor: `markPositions`). */
 function marksBySection(marks: readonly Mark[], chunks: readonly PaperChunk[]): MarkSection[] {
@@ -169,7 +176,7 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
               <section key={s.key ?? ""} aria-label={s.key ? sectionLabel(s.key) : undefined} className="mb-1">
                 <h4 className="flex items-center justify-between px-1 pt-1 text-[11.5px] font-medium text-muted-foreground">
                   <span className="truncate" title={s.key ?? undefined}>
-                    {s.key ? `${sectionLabel(s.key)} ${s.key.replace(/^\d+(?:\.\d+)*\s*/, "")}` : t("myMarks.noSection", "Before the first section")}
+                    {s.key ? sectionHeading(s.key) : t("myMarks.noSection", "Before the first section")}
                   </span>
                   <span className="shrink-0 tabular-nums">{s.marks.length}</span>
                 </h4>
