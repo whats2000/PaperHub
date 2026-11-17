@@ -35,6 +35,7 @@ import aiosqlite
 from paperhub.agents.memory_recall import build_active_memory_block
 from paperhub.db.connection import write_transaction
 from paperhub.llm.adapter import LlmAdapter
+from paperhub.notes.translated import recheck_translation_marks
 from paperhub.translation.cache import CachedRow, get_cached, put_cached
 from paperhub.translation.models import (
     TranslateBlock,
@@ -167,6 +168,7 @@ class TranslationService:
                 owned.append(b)
 
         translated: dict[str, tuple[str, str]] = {}
+        marks_changed: list[str] = []
         try:
             if owned:
                 async with self._sem(pid):
@@ -174,6 +176,8 @@ class TranslationService:
                         pid, language, terminology, owned, req.blocks, cached,
                     )
                 await self._store(conn, pid, language, memory_hash, owned, translated)
+                marks_changed = await self._recheck_marks(
+                    conn, pid, language, [b.key for b in owned if b.key in translated])
         finally:
             for b in owned:
                 fut = futures[b.key]
@@ -205,7 +209,8 @@ class TranslationService:
             else:
                 results[b.key] = TranslateResult(key=b.key, status="unavailable")
 
-        return TranslateResponse(results=[results[k] for k in keys])
+        return TranslateResponse(results=[results[k] for k in keys],
+                                 marks_changed=marks_changed)
 
     @staticmethod
     async def _store(
@@ -234,6 +239,31 @@ class TranslationService:
                 pid, [b.key for b, _ in hits], language,
                 f"{type(exc).__name__}: {exc}",
             )
+
+    @staticmethod
+    async def _recheck_marks(
+        conn: aiosqlite.Connection, pid: int, language: str, keys: list[str],
+    ) -> list[str]:
+        """The marks made on these freshly cached blocks whose words left (or
+        came back to) the translation, re-judged now (H5b). Logged with what
+        was checked; a failure is logged and leaves the marks as they were
+        (the next re-anchor judges them)."""
+        if not keys:
+            return []
+        try:
+            changed = await recheck_translation_marks(conn, pid, keys, language)
+        except Exception as exc:  # noqa: BLE001 — the translation still goes back
+            logger.warning(
+                "translation mark recheck failed: paper=%s keys=%s language=%s error=%s",
+                pid, keys, language, f"{type(exc).__name__}: {exc}",
+            )
+            return []
+        if changed:
+            logger.info(
+                "translation marks rechecked: paper=%s keys=%s language=%s changed=%s",
+                pid, keys, language, changed,
+            )
+        return changed
 
     async def _translate_misses(
         self,

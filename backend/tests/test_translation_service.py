@@ -567,3 +567,26 @@ async def test_request_time_is_bounded(migrated_db: aiosqlite.Connection) -> Non
     resp = await svc.translate(migrated_db, _req(pid, ("h:5", "z")))
     assert loop.time() - start < 1.0
     assert resp.results[0].status == "unavailable"
+
+
+async def test_a_new_translation_rechecks_the_marks_made_on_it(migrated_db: aiosqlite.Connection) -> None:
+    """R-b: a forced re-translation that loses a mark's words sets the mark
+    translation_changed at once, and the response names it."""
+    from paperhub.notes.marks import MarkIn, create_mark, list_marks
+
+    pid = await _seed(migrated_db)
+    await _put(migrated_db, pid, "h:0", "繁體中文", source_hash("The cat sat."), "m",
+               "貓坐著。", SMALL)
+    mark, _ = await create_mark(migrated_db, MarkIn(
+        paper_content_id=pid, kind="highlight", color="green", view="html",
+        pieces=[{"quote": "貓坐著", "orig": "The cat sat.", "lang": "繁體中文",
+                 "source_ref": "h:0"}],
+        lang="繁體中文", source_ref="h:0", section_key=None))
+    svc = _svc(StubLlm(override=lambda k, t, m: "那隻貓待著。"))
+    res = await svc.translate(migrated_db, _req(pid, ("h:0", "The cat sat."), force=True))
+    assert res.marks_changed == [mark["id"]]
+    assert (await list_marks(migrated_db, pid))[0]["status"] == "translation_changed"
+    # A translation that keeps the words changes nothing.
+    svc = _svc(StubLlm(override=lambda k, t, m: "那隻貓待著。"))
+    res = await svc.translate(migrated_db, _req(pid, ("h:0", "The cat sat."), force=True))
+    assert res.marks_changed == []

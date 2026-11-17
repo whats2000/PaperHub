@@ -45,6 +45,9 @@ class TranslateResult(BaseModel):
 
 class TranslateResponse(BaseModel):
     results: list[TranslateResult]
+    # Marks made on these blocks whose status this batch changed (their
+    # words left the new translation, or came back): the reader refetches.
+    marks_changed: list[str] = Field(default_factory=list)
 
 
 class TranslateConfig(BaseModel):
