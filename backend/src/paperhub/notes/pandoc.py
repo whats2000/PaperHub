@@ -135,7 +135,11 @@ def markdown_to_docx(md: str, resources: dict[str, bytes]) -> bytes:
     citations, which pandoc's citeproc then renders with a reference list)."""
     names = [_safe(n) for n in resources]
     images = [n for n in names if n != BIB_NAME]
-    with tempfile.TemporaryDirectory() as tmp:
+    try:
+        workdir = tempfile.TemporaryDirectory()
+    except OSError as exc:
+        raise PandocError(f"could not make a temp dir: {exc!r}") from exc
+    with workdir as tmp:
         root = Path(tmp)
         # Each image is saved under its index, never its own name (a name
         # like CON or AUX is a device on Windows); the filter maps it back.

@@ -351,3 +351,13 @@ def test_leading_spaces_never_make_a_code_block() -> None:
     assert not re.search(r"^(?: {4}|\t)", body, re.M), body
     assert "\u00a0\u00a0\u00a0\u00a0indented start" in md
     assert "- \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0item" in md
+
+
+def test_temp_dir_failure_is_a_pandoc_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from paperhub.notes import pandoc as note_pandoc
+
+    def no_dir(*_a: Any, **_k: Any) -> Any:
+        raise OSError("no space left for a temp dir")
+    monkeypatch.setattr(note_pandoc.tempfile, "TemporaryDirectory", no_dir)
+    with pytest.raises(PandocError):
+        markdown_to_docx("# x", {})
