@@ -105,5 +105,8 @@ async def restore_piece(mark_id: str, index: int) -> dict[str, Any]:
 
 @router.post("/{mark_id}/split")
 async def split_mark(mark_id: str) -> dict[str, Any]:
+    """The new mark, with ``original``: the mark it came from as it now is
+    (its moved piece flagged ``removed``)."""
     async with _db() as conn:
-        return await marks_store.split_last_piece(conn, mark_id)
+        new = await marks_store.split_last_piece(conn, mark_id)
+        return {**new, "original": await marks_store.get_mark(conn, mark_id)}

@@ -82,6 +82,9 @@ async def test_pieces_erase_restore_split(client: AsyncClient) -> None:
     assert (await client.delete(f"/marks/{mid}/pieces/7")).status_code == 422
     s = await client.post(f"/marks/{mid}/split")
     assert s.status_code == 200 and s.json()["id"] != mid
+    # The original as it now is, so the reader needn't guess what moved.
+    orig = s.json()["original"]
+    assert orig["id"] == mid and orig["pieces"][1]["removed"] is True
     assert (await client.post(f"/marks/{mid}/split")).status_code == 422
 
 
