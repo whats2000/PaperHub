@@ -75,9 +75,11 @@ export interface CardPlacement {
 /** Gap between two cards stacked in the gutter. */
 export const STACK_GAP = 8;
 
-/** A card under another one (`stackBelow`): never higher than its bottom. */
+/** A card under another one (`stackBelow`): never higher than its bottom.
+ * Only cards in the gutter stack (a card inside the reader is in another
+ * column). */
 function stackUnder(p: CardPlacement | null, stackBelow: number | null | undefined, viewportBottom: number): CardPlacement | null {
-  if (!p || stackBelow == null) return p;
+  if (!p || stackBelow == null || p.side !== "left") return p;
   const floor = stackBelow + STACK_GAP;
   if (p.top >= floor) return p;
   return {

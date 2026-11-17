@@ -378,3 +378,26 @@ describe("placeCard — stacked under the note card", () => {
     expect(p.stacked).toBeUndefined();
   });
 });
+
+describe("placeCard — stacking needs one column", () => {
+  it("doesn't push a card inside the reader under a card in the gutter", () => {
+    const narrow = { left: 12, right: 200 };
+    const alone = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: narrow,
+      cardHeight: 120,
+      reader: READER,
+    })!;
+    const p = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: narrow,
+      cardHeight: 120,
+      reader: READER,
+      stackBelow: 700,
+    })!;
+    expect(p.side).not.toBe("left");
+    expect(p).toEqual(alone);
+  });
+});
