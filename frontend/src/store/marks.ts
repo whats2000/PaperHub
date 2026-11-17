@@ -283,8 +283,11 @@ export const useMarksStore = create<MarksState>()(
         try {
           await deleteMark(markId, signal);
         } catch {
+          // Timed out: the delete may have landed; the refetch decides. Only
+          // a definite failure puts the mark back.
+          if (signal.aborted) return;
           put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
-          if (!signal.aborted) toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark."));
+          toast.error(t("notes:marks.deleteFailed", "Couldn't delete the mark."));
           return;
         }
         refreshNote(mark.note_id);

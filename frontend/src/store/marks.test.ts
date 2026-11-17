@@ -543,4 +543,25 @@ describe("the refetch merge", () => {
     await queueMarkOp(() => Promise.resolve());
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
   });
+
+  it("a timed-out delete is not undone locally: the refetch decides, and a refused one comes back", async () => {
+    resetMarkOps(40);
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => new Promise<never>(() => undefined)),
+      // The refetch can't settle it either (it hangs too).
+      http.get(`${API_BASE_URL}/marks`, () => new Promise<never>(() => undefined)),
+      http.delete(`${API_BASE_URL}/marks/mk_2`, () => HttpResponse.json({ detail: "no" }, { status: 500 })),
+    );
+    const other: Mark = { ...MARK, id: "mk_2", block_id: "b_2", note_id: 7 };
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }, other] } });
+    await useMarksStore.getState().remove("mk_1");
+    await queueMarkOp(() => Promise.resolve());
+    // Unknown outcome: not put back as if the delete had failed.
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_2"]);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    // A definite failure: the mark is still there.
+    await useMarksStore.getState().remove("mk_2");
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_2"]);
+    expect(toastError).toHaveBeenCalledTimes(2);
+  });
 });
