@@ -24,7 +24,24 @@ WS = "[ \t\n\r\f\v   -     　﻿]"
 _WS_ONE = re.compile(WS)
 _WS_RUN = re.compile(WS + "+")
 
-_SKIP_TAGS = {"script", "style", "noscript", "template", "head", "title"}
+# The reader reads <body> only: <head> (and a <title> outside the body,
+# which a browser puts in the head) is not reading text; an svg <title>
+# inside the body is, as in the reader.
+_SKIP_TAGS = {"script", "style", "noscript", "template", "head"}
+# A start tag that closes an open <p> (HTML's implied end tags; the
+# browser does this, Python's HTMLParser does not).
+_CLOSES_P = {
+    "address", "article", "aside", "blockquote", "center", "details", "dialog",
+    "dir", "div", "dl", "fieldset", "figcaption", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "main",
+    "menu", "nav", "ol", "p", "pre", "search", "section", "summary", "table",
+    "ul", "xmp", "listing",
+}
+_LIST = frozenset({"ul", "ol"})
+_DLIST = frozenset({"dl"})
+# Elements a <p> / <li> / <dd> search does not look past (button scope).
+_SCOPE = {"table", "td", "th", "caption", "html", "button", "object",
+          "marquee", "applet", "template", "svg", "math"}
 _SKIP_CLASSES = {"ph-tr"}
 _BLOCK_TAGS = {
     "p", "li", "figcaption", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th",
@@ -118,8 +135,11 @@ class _Builder(HTMLParser):
             if tag not in _VOID:
                 self.stack.append(_El(tag, False, False, False))
             return
+        self._implied_end(tag)
         classes = set((a.get("class") or "").split())
-        skip = tag in _SKIP_TAGS or bool(classes & _SKIP_CLASSES) or "data-ph-overlay" in a
+        outside_body = not any(e.tag == "body" for e in self.stack)
+        skip = (tag in _SKIP_TAGS or (tag == "title" and outside_body)
+                or bool(classes & _SKIP_CLASSES) or "data-ph-overlay" in a)
         math = not skip and ("math" in classes or tag in ("mjx-container", "math"))
         self.uids += 1
         el = _El(tag, skip, math, tag in _BLOCK_TAGS, self.uids)
@@ -133,6 +153,27 @@ class _Builder(HTMLParser):
             self.math_depth = len(self.stack)
             self.math_source = []
             self.math_annotation = None
+
+    def _open_in_scope(self, tags: set[str],
+                       bounds: frozenset[str] = frozenset()) -> str | None:
+        """The innermost open element named in ``tags`` that a start tag
+        may close (none past a scope boundary or one of ``bounds``)."""
+        for e in reversed(self.stack):
+            if e.tag in tags:
+                return e.tag
+            if e.tag in _SCOPE or e.tag in bounds:
+                return None
+        return None
+
+    def _implied_end(self, tag: str) -> None:
+        """Close what the browser closes before ``tag`` opens."""
+        if tag in _CLOSES_P and self._open_in_scope({"p"}):
+            self.handle_endtag("p")
+        if tag == "li" and (open_ := self._open_in_scope({"li"}, _LIST)):
+            self.handle_endtag(open_)
+        if tag in ("dd", "dt") and (
+                open_ := self._open_in_scope({"dd", "dt"}, _DLIST)):
+            self.handle_endtag(open_)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _VOID:

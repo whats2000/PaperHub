@@ -1,5 +1,5 @@
 {
-  "text": "2 Method We keep the hidden state $h_{t}$ as a function of the previous one, as in Fig. 1. The latency drops by 89% (see Table 2) & stays low. $L = \\sum_i \\ell(x_i)$ First item Second item with code a b Last words. ",
+  "text": "2 Method We keep the hidden state $h_{t}$ as a function of the previous one, as in Fig. 1. The latency drops by 89% (see Table 2) & stays low. $L = \\sum_i \\ell(x_i)$ First item Second item with code a b A chart Latency chart inline. An unclosed paragraph then a block, an unclosed item and the next Last words. ",
   "spans": [
     [
       "phchunk-0",
@@ -11,7 +11,7 @@
     ],
     [
       "phchunk-2",
-      203
+      299
     ]
   ]
 }

@@ -37,3 +37,21 @@ def test_blocks_and_skipped_parts() -> None:
         "<body><p>one</p><p>two</p><div class='ph-tr'>nope</div>"
         "<script>nope</script><p>th<b>ree</b></p></body>")
     assert idx.text == "one two three"
+
+
+def test_implied_end_tags_close_as_a_browser_does() -> None:
+    from paperhub.notes.html_text import _Builder
+
+    def open_tags(html: str) -> list[str]:
+        b = _Builder()
+        b.feed(html)
+        return [e.tag for e in b.stack]
+
+    # A block start closes an open <p>; a <li> closes the open item, not
+    # the item of an outer list; a table cell is a scope boundary.
+    assert open_tags("<body><p>a<div>b") == ["body", "div"]
+    assert open_tags("<ul><li>a<li>b") == ["ul", "li"]
+    assert open_tags("<ul><li>a<ul><li>b") == ["ul", "li", "ul", "li"]
+    assert open_tags("<dl><dt>a<dd>b") == ["dl", "dd"]
+    assert open_tags("<p>a<table><tr><td><div>x") == ["table", "tr", "td", "div"]
+    assert open_tags("<p><span>a<div>b") == ["div"]
