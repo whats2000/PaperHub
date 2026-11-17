@@ -17,6 +17,8 @@ import type { PaperPageBlock } from "@/types/notes";
 const READING_SETTLE_MS = 150;
 /** Blocks Follow never reports from (running heads, page numbers). */
 const NOT_READING = new Set(["PageHeader", "PageFooter"]);
+/** Lines under the top ones sent as context when locating them. */
+const FOLLOW_CONTEXT_LINES = 3;
 
 export function usePdfFollow({
   paperId,
@@ -77,18 +79,24 @@ export function usePdfFollow({
     // No Marker blocks on the page at the top: find its text in the paper.
     const topBlocks = topPage ? blocksRef.current[Number(topPage.getAttribute("data-page-number")) - 1] : undefined;
     if (!topPage || !topBlocks || topBlocks.length > 0) return;
-    const text = linesBelow(topPage, line);
+    // The top lines, and the lines under them as context: a short or common
+    // top line is placed where the text after it is too (as a selection is).
+    const [first = "", second, ...rest] = linesBelow(topPage, line, 2 + FOLLOW_CONTEXT_LINES).split("\n");
+    const text = [first, second].filter((l) => l !== undefined).join("\n");
+    const after = rest.join("\n");
     if (!text) return;
-    if (located.current.has(text)) {
-      say(located.current.get(text)!);
+    // The same lines with other text after them may sit elsewhere.
+    const key = `${text}\n\n${after}`;
+    if (located.current.has(key)) {
+      say(located.current.get(key)!);
       return;
     }
-    asking.current = text;
-    locateText(paperId, text).then(
+    asking.current = key;
+    (after ? locateText(paperId, text, { before: "", after }) : locateText(paperId, text)).then(
       (res) => {
         const section = res.match?.section ?? null;
-        located.current.set(text, section);
-        if (asking.current === text) say(section);
+        located.current.set(key, section);
+        if (asking.current === key) say(section);
       },
       () => undefined, // keep the last section; asked again on the next scroll
     );

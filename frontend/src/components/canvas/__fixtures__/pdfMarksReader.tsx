@@ -9,8 +9,11 @@ import { PdfMarksProvider, usePdfMarks } from "@/components/canvas/usePdfMarks";
 export function Reader({
   hasText = true,
   onReading,
+  thirdLine,
 }: {
   hasText?: boolean;
+  /** A third line of text on the page (the text below the top lines). */
+  thirdLine?: string;
   onReading?: (heading: string | null) => void;
 }) {
   const readerRef = useRef<HTMLDivElement>(null);
@@ -32,6 +35,12 @@ export function Reader({
                   <span data-testid="s2">from demos.</span>
                   <br />
                   <span data-testid="s3">Next line here.</span>
+                  {thirdLine && (
+                    <>
+                      <br />
+                      <span data-testid="s4">{thirdLine}</span>
+                    </>
+                  )}
                 </>
               )}
             </div>

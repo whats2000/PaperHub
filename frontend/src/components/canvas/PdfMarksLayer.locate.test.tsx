@@ -30,6 +30,8 @@ function scrollTo(top: number) {
   place(screen.getByTestId("s1"), 30, top + 40, 120, 16);
   place(screen.getByTestId("s2"), 150, top + 40, 150, 16);
   place(screen.getByTestId("s3"), 30, top + 90, 170, 16);
+  const s4 = screen.queryByTestId("s4");
+  if (s4) place(s4, 30, top + 140, 170, 16);
   fireEvent.scroll(screen.getByTestId("reader"));
 }
 
@@ -120,6 +122,22 @@ describe("Follow on a PDF without Marker blocks", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(onReading).toHaveBeenLastCalledWith("2 Method");
     expect(onReading).not.toHaveBeenCalledWith(null);
+  });
+});
+
+describe("Follow on a PDF without Marker blocks, with more text below", () => {
+  it("sends the lines below the top ones as context", async () => {
+    vi.mocked(locateText).mockResolvedValue(HIT);
+    const onReading = vi.fn();
+    render(<Reader onReading={onReading} thirdLine="Third line below." />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    scrollTo(-30);
+    await waitFor(() => expect(onReading).toHaveBeenLastCalledWith("2 Method"));
+    expect(locateText).toHaveBeenCalledWith(3, "Robots learn from demos.\nNext line here.", {
+      before: "",
+      after: "Third line below.",
+    });
   });
 });
 

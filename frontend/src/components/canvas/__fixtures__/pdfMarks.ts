@@ -28,6 +28,7 @@ export function layOut(): void {
     ["s1", 30, 40, 120, 16],
     ["s2", 150, 40, 150, 16],
     ["s3", 30, 90, 170, 16],
+    ["s4", 30, 140, 170, 16],
   ];
   for (const [id, ...box] of spans) {
     const el = screen.queryByTestId(id);
