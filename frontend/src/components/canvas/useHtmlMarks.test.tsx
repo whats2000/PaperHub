@@ -170,6 +170,24 @@ describe("useHtmlMarks", () => {
     expect(toastFn.mock.calls[0]![0]).toBe("Saved to Duo › §1, §2");
   });
 
+  it("a retry with another action starts fresh: every section saves with the new kind", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Host doc={doc} />);
+    create.mockImplementationOnce((body) => Promise.resolve(created(body.section_key ?? "", "b1")));
+    create.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    select(doc, "Robots", "agent pose");
+    await screen.findByRole("toolbar");
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls.slice(2).map((c) => [c[0].kind, c[0].color, c[0].section_key])).toEqual([
+      ["quote", null, "1 Introduction"],
+      ["quote", null, "2 Method"],
+    ]);
+    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+  });
+
   it("waits for the chunk anchors, and never saves a mark without them", async () => {
     const doc = frameDoc(PAPER);
     render(<Host doc={doc} />);

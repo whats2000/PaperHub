@@ -29,15 +29,17 @@ interface Selected {
 
 /** What one selection has saved so far: a retry after a failure saves only
  * the sections still missing. Keyed by what is selected (each piece's chunk
- * range and quote), not by the Range object: re-reading the same selection
- * (a key press, a new mouseup) makes a new Range over the same text. */
+ * range and quote, and the action's kind and colour), not by the Range
+ * object: re-reading the same selection (a key press, a new mouseup) makes a
+ * new Range over the same text. Another action starts fresh; the marks it
+ * already saved stay as they are. */
 interface Progress {
   key: string;
   saved: Map<string, MarkCreated>;
 }
 
-const selectionKey = (pieces: readonly HtmlPiece[]) =>
-  JSON.stringify(pieces.map((p) => [p.chunk_start, p.chunk_end, p.quote]));
+const selectionKey = (pieces: readonly HtmlPiece[], kind: string, color: string | null) =>
+  JSON.stringify([kind, color, pieces.map((p) => [p.chunk_start, p.chunk_end, p.quote])]);
 
 function boxOf(range: Range): SelectionBox {
   const r = range.getBoundingClientRect();
@@ -207,7 +209,7 @@ export function useHtmlMarks({
           toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
           return;
         }
-        const key = selectionKey(pieces);
+        const key = selectionKey(pieces, kind, color);
         if (progress.current?.key !== key) progress.current = { key, saved: new Map() };
         const done = progress.current.saved;
         const hint = markHint(paperId);
