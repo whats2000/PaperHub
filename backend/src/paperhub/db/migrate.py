@@ -248,6 +248,14 @@ HELD_REQUESTS_DDL = """CREATE TABLE {name} (
 )"""
 
 
+async def has_table(conn: aiosqlite.Connection, name: str) -> bool:
+    """Whether the database has a table (or virtual table) called ``name``."""
+    async with conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ) as cur:
+        return await cur.fetchone() is not None
+
+
 async def apply_schema(conn: aiosqlite.Connection) -> None:
     sql = (files("paperhub.db") / "schema.sql").read_text(encoding="utf-8")
     await _dedupe_implicit_feedback(conn)

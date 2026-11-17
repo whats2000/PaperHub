@@ -18,6 +18,7 @@ from typing import Any
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.db.migrate import apply_schema, has_table
 from paperhub.notes.ideas import idea_note_text_or_none, paragraphs, set_idea_note_text
 
 
@@ -26,6 +27,11 @@ async def migrate(db_path: Path, *, dry_run: bool) -> list[dict[str, Any]]:
     ``skipped_exists`` (already has an idea note) or ``skipped_empty``."""
     rows: list[dict[str, Any]] = []
     async with open_db(db_path) as conn:
+        # Run before the new backend ever started here: a real run brings the
+        # schema up to date; a dry run changes nothing (no notes table yet).
+        if not dry_run:
+            await apply_schema(conn)
+        has_notes = await has_table(conn, "notes")
         async with conn.execute("SELECT id, note FROM ideas ORDER BY id") as cur:
             ideas = list(await cur.fetchall())
         for iid, note in ideas:
@@ -33,7 +39,7 @@ async def migrate(db_path: Path, *, dry_run: bool) -> list[dict[str, Any]]:
             paras = paragraphs(str(note or ""))
             if not paras:
                 row["status"] = "skipped_empty"
-            elif await idea_note_text_or_none(conn, int(iid)) is not None:
+            elif has_notes and await idea_note_text_or_none(conn, int(iid)) is not None:
                 row["status"] = "skipped_exists"
             else:
                 row["paragraphs"] = len(paras)

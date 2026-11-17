@@ -20,6 +20,7 @@ from typing import Any
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
+from paperhub.db.migrate import apply_schema, has_table
 from paperhub.notes.anchors import reanchor_paper
 
 
@@ -28,6 +29,12 @@ async def migrate(db_path: Path, *, dry_run: bool) -> list[dict[str, Any]]:
     (``ok``, ``moved``, ``lost``, ``partly_lost``)."""
     rows: list[dict[str, Any]] = []
     async with open_db(db_path) as conn:
+        # Run before the new backend ever started here: a real run brings the
+        # schema up to date; a dry run changes nothing (no table, no marks).
+        if not dry_run:
+            await apply_schema(conn)
+        elif not await has_table(conn, "note_marks"):
+            return rows
         async with conn.execute(
             "SELECT DISTINCT paper_content_id FROM note_marks "
             "ORDER BY paper_content_id",

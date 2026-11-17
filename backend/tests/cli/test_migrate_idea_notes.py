@@ -8,6 +8,7 @@ import aiosqlite
 from paperhub.cli.migrate_idea_notes import migrate
 from paperhub.db.migrate import apply_schema
 from paperhub.notes.ideas import idea_note_text
+from tests.cli._pre_notes import table_names
 
 _NOTES = {
     1: "First thought.\n\nSecond paragraph\nwith a soft break.\n\n\n  \nThird.",
@@ -95,3 +96,17 @@ async def test_soft_deleted_idea_note_is_skipped_not_duplicated(tmp_path: Path) 
         async with conn.execute("SELECT COUNT(*) FROM notes") as cur:
             assert (await cur.fetchone()) == (2,)
         assert await idea_note_text(conn, 1) == ""
+
+
+async def test_dry_run_before_the_notes_layer_changes_nothing(pre_notes_db: Path) -> None:
+    before = await table_names(pre_notes_db)
+    rows = await migrate(pre_notes_db, dry_run=True)
+    assert [(r["idea_id"], r["status"]) for r in rows] == [(1, "would_migrate")]
+    assert await table_names(pre_notes_db) == before
+
+
+async def test_real_run_before_the_notes_layer_moves_the_note(pre_notes_db: Path) -> None:
+    rows = await migrate(pre_notes_db, dry_run=False)
+    assert [(r["idea_id"], r["status"]) for r in rows] == [(1, "migrated")]
+    async with aiosqlite.connect(pre_notes_db) as conn:
+        assert await idea_note_text(conn, 1) == "Old thought."
