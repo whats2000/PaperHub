@@ -312,6 +312,18 @@
     "box": "框選",
     "boxHint": "框選：在頁面上拖出一個方框，引用圖、公式或任何區域。按 Esc 結束。",
     "notLocated": "已儲存，但未歸入章節：在論文正文中找不到這段文字。",
-    "layoutFailed": "無法載入這一頁的版面，所以還不能歸檔這個標記。請再試一次。"
+    "layoutFailed": "無法載入這一頁的版面，所以還不能歸檔這個標記。請再試一次。",
+    "highlighter": "螢光筆",
+    "highlighterOn": "螢光筆：{{name}}",
+    "highlighterHint": "螢光筆：拖過文字即可直接標記；點一張圖或一條公式就標記整個；點一個標記即可擦掉。按 Esc 結束。",
+    "highlighterColor": "螢光筆顏色",
+    "joined": "已併入同一個標記",
+    "split": "拆開",
+    "splitDone": "已拆成獨立的標記",
+    "splitFailed": "無法拆開這個標記。",
+    "erased": "已擦掉這一段",
+    "pieceRestored": "已還原這一段",
+    "eraseAgain": "再次擦掉",
+    "eraseFailed": "無法擦掉這一段。"
   }
 }

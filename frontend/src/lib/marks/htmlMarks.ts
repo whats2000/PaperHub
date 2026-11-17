@@ -10,7 +10,10 @@
  * A highlight is a box in its colour, a quote a thin neutral underline, a
  * note on a passage with no quote a margin icon (with a count when several
  * share a line). Hidden colours are not drawn; "Show my marks" off fades the
- * layer out.
+ * layer out. A mark of several pieces (highlighter strokes joined) draws
+ * each piece, the skipped words between them unmarked; a click reports the
+ * piece under it. With the highlighter on (`pen`), a selection shows in the
+ * pen colour and a hovered mark shows the dashed ring of "click to erase".
  */
 import { prefersReducedMotion } from "@/lib/motion";
 import { buildTextIndex, findPiece, rangeAt, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
@@ -19,6 +22,7 @@ import type { Mark, MarkColor, MarkColorInfo, MarkPiece } from "@/types/notes";
 export const MK_STYLE_ID = "ph-mk-style";
 const LAYER_CLASS = "ph-mk-layer";
 const HOT_ATTR = "data-ph-mk-hot";
+const PEN_ATTR = "data-ph-pen";
 /** Matches the 200 ms fades below plus a margin. */
 const LEAVE_MS = 220;
 const FLASH_MS = 1600;
@@ -32,6 +36,8 @@ const FIGURE_SEL = 'figure, div[class^="figure"], img';
 /** A display equation (inline math stays part of the sentence's text). */
 const DISPLAY_MATH = 'mjx-container[display="true"], .math.display, math[display="block"]';
 const NOT_PAPER = ".ph-tr, [data-ph-overlay]";
+/** What a highlighter click marks whole (ringed on hover while the pen is on). */
+const PEN_OBJECTS = `figure, div[class^="figure"], ${DISPLAY_MATH}`;
 
 /** A figure or display equation a mark can take whole. */
 export interface HtmlObject {
@@ -151,6 +157,7 @@ const STYLE = `
 ${MARK_COLORS.map((c) => `.ph-mk[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
 .ph-mk[data-dim] { opacity: .25; }
 .ph-mk[data-hot] { box-shadow: 0 0 0 1px var(--mk-ring); }
+html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline: 1.5px dashed var(--mk-hot-fg); outline-offset: 1px; }
 .ph-mk[data-flash] { box-shadow: 0 0 0 3px var(--mk-ring); }
 .ph-mk-icon {
   position: absolute; display: inline-flex; align-items: center; gap: 1px;
@@ -180,7 +187,11 @@ export interface HtmlMarksOptions {
   /** Focus: marks outside this set fade (null: no focus). */
   focusIds: ReadonlySet<string> | null;
   dark: boolean;
-  onClick?: (markId: string) => void;
+  /** The highlighter's colour while it is on (null: off). */
+  pen?: MarkColor | null;
+  /** A click on a mark, with the index of the piece under it (null: not
+   * one piece, e.g. a margin icon). */
+  onClick?: (markId: string, piece: number | null) => void;
   onHover?: (markId: string | null) => void;
 }
 
@@ -203,6 +214,8 @@ interface Drawn {
   key: string;
   /** The marked passages (a quote mark), or none (a note with no quote). */
   ranges: Range[];
+  /** The index in `mark.pieces` of each range. */
+  rangePiece: number[];
   /** A figure or equation taken whole: one box around each range and each
    * of `targets`. */
   whole: boolean;
@@ -211,6 +224,8 @@ interface Drawn {
   spots: Element[];
   els: HTMLElement[];
   boxes: Box[];
+  /** The piece each box draws (null: the whole object). */
+  boxPiece: (number | null)[];
 }
 
 interface Icon {
@@ -219,9 +234,16 @@ interface Icon {
   marks: string[];
 }
 
+const isShown = (p: MarkPiece) => !p.erased && !p.removed && !p.lost;
+
 /** The pieces a mark shows on the paper (not erased, moved or lost). */
 function livePieces(m: Mark) {
-  return m.pieces.filter((p) => !p.erased && !p.removed && !p.lost);
+  return m.pieces.filter(isShown);
+}
+
+/** The shown pieces with their index in `mark.pieces`. */
+function shownPieces(m: Mark): [MarkPiece, number][] {
+  return m.pieces.flatMap((p, i) => (isShown(p) ? [[p, i] as [MarkPiece, number]] : []));
 }
 
 const hasQuote = (m: Mark) => livePieces(m).some((p) => typeof p.quote === "string" && p.quote.trim() !== "");
@@ -365,6 +387,18 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     layer.style.setProperty("--mk-hot-fg", draw(NEUTRAL[mode].hotFg));
     // A dark veil on the light page; under the dark page's inversion, light.
     layer.style.setProperty("--mk-hot-bg", "rgb(0 0 0 / 7%)");
+    // With the highlighter on, a selection shows in the pen colour, and the
+    // figure or display equation under the pointer (what a click marks) is
+    // ringed in it.
+    style.textContent = [
+      STYLE,
+      `html[${PEN_ATTR}] :is(${PEN_OBJECTS}) { outline: 2px solid transparent; outline-offset: 3px; transition: outline-color 150ms ease-out; }`,
+      `@media (prefers-reduced-motion: reduce) { html[${PEN_ATTR}] :is(${PEN_OBJECTS}) { transition: none; } }`,
+      ...MARK_COLORS.flatMap((c) => [
+        `html[${PEN_ATTR}="${c}"] ::selection { background: color-mix(in srgb, ${draw(p[c])} 45%, transparent); }`,
+        `html[${PEN_ATTR}="${c}"] :is(${PEN_OBJECTS}):hover { outline-color: ${draw(p[c])}; cursor: pointer; }`,
+      ]),
+    ].join("\n");
   };
 
   /** Positions every drawn mark and the margin icons from the live layout. */
@@ -375,16 +409,21 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     const viewRight = (doc.documentElement.clientWidth || win?.innerWidth || 0) - at.left;
     for (const [id, d] of drawn) {
       const boxes: Box[] = [];
+      const boxPiece: (number | null)[] = [];
       if (d.whole) {
         for (const r of [...d.ranges, ...d.targets].map((x) => x.getBoundingClientRect())) {
-          if (r.width > 0 && r.height > 0) boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
-        }
-      } else {
-        for (const range of d.ranges) {
-          for (const r of lineBoxes(Array.from(range.getClientRects()))) {
+          if (r.width > 0 && r.height > 0) {
             boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
+            boxPiece.push(null);
           }
         }
+      } else {
+        d.ranges.forEach((range, ri) => {
+          for (const r of lineBoxes(Array.from(range.getClientRects()))) {
+            boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
+            boxPiece.push(d.rangePiece[ri] ?? null);
+          }
+        });
       }
       // A note with no quote: a margin icon on its passage's first line.
       for (const spot of d.spots) {
@@ -402,6 +441,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         lines.set(key, entry);
       }
       d.boxes = boxes;
+      d.boxPiece = boxPiece;
       // Reuse the mark's boxes (no re-animation on relayout).
       while (d.els.length > boxes.length) d.els.pop()!.remove();
       while (d.els.length < boxes.length) {
@@ -479,25 +519,31 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       const key = `${chunkGen}:${JSON.stringify(livePieces(m))}`;
       const prev = drawn.get(id);
       if (prev?.key === key) continue;
-      let ranges: Range[] = [];
+      const ranges: Range[] = [];
+      const rangePiece: number[] = [];
       let spots: Element[] = [];
       let targets: Element[] = [];
       const whole = m.kind === "figure" || m.kind === "equation";
       const figureId = livePieces(m).find((p) => typeof p.figure_id === "string")?.figure_id;
+      /** Each shown piece's range (one not found is not drawn). */
+      const placeEach = (find: (p: MarkPiece) => Range | null) => {
+        for (const [p, i] of shownPieces(m)) {
+          const r = find(p);
+          if (r) {
+            ranges.push(r);
+            rangePiece.push(i);
+          }
+        }
+      };
       if (m.view === "pdf") {
         index ??= buildTextIndex(doc);
-        ranges = livePieces(m)
-          .filter(located)
-          .map((p) => rangeAt(index!, p.text_start as number, p.text_end as number))
-          .filter((r): r is Range => r !== null);
+        placeEach((p) => (located(p) ? rangeAt(index!, p.text_start as number, p.text_end as number) : null));
       } else if (m.kind === "figure" && typeof figureId === "string") {
         const el = figureById(doc, figureId);
         targets = el ? [el] : [];
       } else if (hasQuote(m)) {
         index ??= buildTextIndex(doc);
-        ranges = livePieces(m)
-          .map((p) => findPiece(index!, p, o.chunks))
-          .filter((r): r is Range => r !== null);
+        placeEach((p) => findPiece(index!, p, o.chunks));
       } else {
         spots = spotsOf(m);
       }
@@ -507,23 +553,32 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         drawn.delete(id);
         continue;
       }
-      drawn.set(id, { key, ranges, whole, targets, spots, els: prev?.els ?? [], boxes: [] });
+      drawn.set(id, { key, ranges, rangePiece, whole, targets, spots, els: prev?.els ?? [], boxes: [], boxPiece: [] });
     }
     index = null; // the document may change before the next sync
     setFlag(layer, "data-hidden", !o.visible);
+    if (o.pen) doc.documentElement.setAttribute(PEN_ATTR, o.pen);
+    else doc.documentElement.removeAttribute(PEN_ATTR);
     layout();
   };
 
-  const hit = (x: number, y: number): string | null => {
+  const hitPiece = (x: number, y: number): { id: string; piece: number | null } | null => {
     if (!o.visible) return null;
     const at = origin();
     const lx = x - at.left;
     const ly = y - at.top;
-    for (const icon of icons.values()) if (contains(icon.box, lx, ly)) return icon.marks[0] ?? null;
-    let found: string | null = null;
-    for (const [id, d] of drawn) if (d.boxes.some((b) => contains(b, lx, ly))) found = id;
+    for (const icon of icons.values()) {
+      if (contains(icon.box, lx, ly)) return icon.marks[0] ? { id: icon.marks[0], piece: null } : null;
+    }
+    let found: { id: string; piece: number | null } | null = null;
+    for (const [id, d] of drawn) {
+      const i = d.boxes.findIndex((b) => contains(b, lx, ly));
+      // A figure or equation taken whole is its one piece.
+      if (i >= 0) found = { id, piece: d.whole ? 0 : (d.boxPiece[i] ?? null) };
+    }
     return found;
   };
+  const hit = (x: number, y: number): string | null => hitPiece(x, y)?.id ?? null;
 
   const setHot = (id: string | null) => {
     if (id === hot) return;
@@ -540,11 +595,11 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const onClick = (e: MouseEvent) => {
     const sel = doc.getSelection();
     if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
-    const id = hit(e.clientX, e.clientY);
-    if (id === null) return;
+    const found = hitPiece(e.clientX, e.clientY);
+    if (found === null) return;
     e.preventDefault();
     e.stopPropagation();
-    o.onClick?.(id);
+    o.onClick?.(found.id, found.piece);
   };
   doc.addEventListener("mousemove", onMove);
   doc.addEventListener("click", onClick, true);
@@ -618,6 +673,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       layer.remove();
       style.remove();
       doc.documentElement.removeAttribute(HOT_ATTR);
+      doc.documentElement.removeAttribute(PEN_ATTR);
       drawn.clear();
       icons.clear();
     },

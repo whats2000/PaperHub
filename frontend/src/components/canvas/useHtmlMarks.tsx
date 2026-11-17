@@ -1,18 +1,28 @@
 /** Marks in the HTML reader (Plan H5b.1): draws the paper's marks over the
  * loaded document and turns a selection into a mark through the popover
  * under it; a figure or a display equation is marked whole from the button
- * at its corner. Returns the popover and the corner buttons to render over
- * the iframe. */
+ * at its corner. With the highlighter on, a drag marks at once in the pen
+ * colour (joining the pen session's mark in the same paragraph), a click on
+ * a figure or display equation marks it whole, and a click on a mark erases
+ * the piece under it. Returns the popover and the corner buttons to render
+ * over the iframe. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
-import { groupBySection, selectionToPieces, type ChunkMap, type HtmlPiece } from "@/lib/marks/anchor";
+import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import {
+  groupBySection,
+  selectionToPieces,
+  selectionToPlacedPieces,
+  type ChunkMap,
+  type HtmlPiece,
+} from "@/lib/marks/anchor";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
+import { clearIfStill, htmlPlace } from "@/lib/marks/pieces";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
 
@@ -148,6 +158,15 @@ function objectPiece(doc: Document, obj: HtmlObject, map: ChunkMap): HtmlPiece |
   };
 }
 
+/** A figure or equation taken whole, as the one group it files under
+ * (null: not tied to the paper's text). */
+function objectGroup(doc: Document, obj: HtmlObject, map: ChunkMap): MarkGroup | null {
+  const piece = objectPiece(doc, obj, map);
+  if (!piece) return null;
+  const section = (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null;
+  return { section, pieces: [piece] };
+}
+
 function boxOf(range: Range): SelectionBox {
   const r = range.getBoundingClientRect();
   return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
@@ -172,6 +191,9 @@ export function useHtmlMarks({
   const loadPaper = useMarksStore((s) => s.loadPaper);
   const loadColors = useMarksStore((s) => s.loadColors);
   const ensureChunks = useMarksStore((s) => s.ensureChunks);
+  const penOn = useMarksStore((s) => s.penOn);
+  const penColor = useMarksStore((s) => s.penColor);
+  const pen = paperId !== null && penOn ? penColor : null;
   const focusIds = useMarkFocusIds(paperId);
 
   useEffect(() => {
@@ -180,10 +202,10 @@ export function useHtmlMarks({
     void loadColors();
   }, [paperId, loadPaper, loadColors]);
 
-  const latest = useRef({ marks, chunks, paperId });
+  const latest = useRef({ marks, chunks, paperId, pen });
   useEffect(() => {
-    latest.current = { marks, chunks, paperId };
-  }, [marks, chunks, paperId]);
+    latest.current = { marks, chunks, paperId, pen };
+  }, [marks, chunks, paperId, pen]);
 
   // The overlay, one per loaded document.
   const handleRef = useRef<HtmlMarksHandle | null>(null);
@@ -197,8 +219,13 @@ export function useHtmlMarks({
       focusIds: null,
       dark: false,
       // Until the note card: a click opens the mark's block in the notes.
-      onClick: (markId) => {
-        const { marks: list, paperId: pid } = latest.current;
+      // With the highlighter on, it erases the piece under it.
+      onClick: (markId, piece) => {
+        const { marks: list, paperId: pid, pen: penNow } = latest.current;
+        if (penNow && piece !== null) {
+          void useMarksStore.getState().erase(markId, piece);
+          return;
+        }
         const mark = list.find((m) => m.id === markId);
         handleRef.current?.flash(markId);
         if (pid !== null) openMarkInNotes(pid, mark);
@@ -211,12 +238,23 @@ export function useHtmlMarks({
     };
   }, [doc, paperId]);
   useEffect(() => {
-    handleRef.current?.update({ marks, colors, chunks, visible, focusIds, dark: isDark });
-  }, [doc, marks, colors, chunks, visible, focusIds, isDark]);
+    handleRef.current?.update({ marks, colors, chunks, visible, focusIds, dark: isDark, pen });
+  }, [doc, marks, colors, chunks, visible, focusIds, isDark, pen]);
 
   // A selection opens the popover under it.
   const [selectedIn, setSelected] = useState<Selected | null>(null);
   const selected = selectedIn && selectedIn.doc === doc && paperId !== null ? selectedIn : null;
+  // Turning the highlighter on closes the popover (strokes need none).
+  const [seenPen, setSeenPen] = useState(pen);
+  if (seenPen !== pen) {
+    setSeenPen(pen);
+    if (pen && selectedIn) setSelected(null);
+  }
+  const penSave = usePenSave(paperId);
+  const penSaveRef = useRef(penSave);
+  useEffect(() => {
+    penSaveRef.current = penSave;
+  }, [penSave]);
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
   const tRef = useRef(t);
   useEffect(() => {
@@ -227,12 +265,48 @@ export function useHtmlMarks({
     const win = doc.defaultView;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let capped = "";
+    /** A highlighter stroke: marked at once, no popover. */
+    const stroke = (range: Range) => {
+      const pid = paperId;
+      const captured = range.cloneRange();
+      penSaveRef.current({
+        view: "html",
+        pieces: async () => {
+          let map;
+          try {
+            map = await useMarksStore.getState().ensureChunks(pid);
+          } catch {
+            toast.error(tRef.current("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
+            return null;
+          }
+          const placed = selectionToPlacedPieces(doc, captured, map);
+          if (!placed.length || placed.some((p) => p.piece.chunk_start === null)) {
+            toast.error(tRef.current("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+            return null;
+          }
+          // A stroke never crosses a paragraph: one piece per paragraph,
+          // each filed under its own section.
+          return placed.map(({ piece, block }) => ({
+            piece,
+            place: htmlPlace(block),
+            section: (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null,
+          }));
+        },
+        done: (ok) => {
+          if (ok) clearIfStill(doc, captured);
+        },
+      });
+    };
     const read = (keyboard: boolean) => {
       clearTimeout(timer);
       // After the browser has settled the selection for this mouseup / key.
       timer = setTimeout(() => {
         const sel = doc.getSelection();
         const range = sel && !sel.isCollapsed && sel.rangeCount ? sel.getRangeAt(0) : null;
+        const penNow = latest.current.pen;
+        // The highlighter marks what the pointer drags; a keyboard
+        // selection waits for the pen to go off.
+        if (penNow && keyboard) return;
         const pieces = range ? selectionToPieces(doc, range, latest.current.chunks) : [];
         if (!range || !pieces.length) {
           setSelected(null);
@@ -253,6 +327,10 @@ export function useHtmlMarks({
           return;
         }
         capped = "";
+        if (penNow) {
+          stroke(range);
+          return;
+        }
         setBounds({ width: win?.innerWidth ?? 0, height: win?.innerHeight ?? 0 });
         setSelected({ doc, range: range.cloneRange(), box: boxOf(range), pieces, keyboard });
       }, 0);
@@ -260,7 +338,11 @@ export function useHtmlMarks({
     const onMouseUp = () => read(false);
     const onDown = () => setSelected(null);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
+      if (e.key !== "Escape") return;
+      setSelected(null);
+      // The reader's own Escape (focus in the paper) turns the pen off;
+      // one a popover took is not for the pen.
+      if (latest.current.pen && !e.defaultPrevented) useMarksStore.getState().setPen(false);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== "Escape") read(true);
@@ -309,14 +391,12 @@ export function useHtmlMarks({
             return null;
           }
           if (obj) {
-            const piece = objectPiece(doc, obj, map);
-            if (!piece) {
+            const group = objectGroup(doc, obj, map);
+            if (!group) {
               toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
               return null;
             }
-            const section = (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null;
-            const groups: MarkGroup[] = [{ section, pieces: [piece] }];
-            return groups;
+            return [group];
           }
           const pieces = selectionToPieces(doc, selected.range, map);
           if (!pieces.length || pieces.some((p) => p.chunk_start === null)) {
@@ -333,6 +413,44 @@ export function useHtmlMarks({
     },
     [selected, paperId, doc, ensureChunks, saveMarks, t],
   );
+
+  // With the highlighter on, a click on a figure or display equation marks
+  // it whole in the pen colour (a click on a mark is the overlay's: erase).
+  useEffect(() => {
+    if (paperId === null || !doc?.body || !pen) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      const sel = doc.getSelection();
+      if (sel && !sel.isCollapsed) return; // the end of a stroke
+      const target = e.target as Node | null;
+      const obj = target ? markableObjects(doc).find((o) => o.el.contains(target)) : undefined;
+      if (!obj) return;
+      // Not the figure's lightbox or a link as well.
+      e.preventDefault();
+      e.stopPropagation();
+      penSaveRef.current({
+        view: "html",
+        kind: obj.kind,
+        pieces: async () => {
+          let map;
+          try {
+            map = await useMarksStore.getState().ensureChunks(paperId);
+          } catch {
+            toast.error(tRef.current("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
+            return null;
+          }
+          const group = objectGroup(doc, obj, map);
+          if (!group) {
+            toast.error(tRef.current("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+            return null;
+          }
+          return [{ section: group.section, piece: group.pieces[0]!, place: null }];
+        },
+      });
+    };
+    doc.addEventListener("click", onClick, true);
+    return () => doc.removeEventListener("click", onClick, true);
+  }, [doc, paperId, pen]);
 
   const objects = useHtmlObjects(doc, paperId !== null);
   const [overButton, setOverButton] = useState<string | null>(null);
@@ -362,6 +480,8 @@ export function useHtmlMarks({
           key={obj.key}
           kind={obj.kind}
           shown={objects.hovered === obj.key || overButton === obj.key}
+          // The highlighter marks an object with a click on it instead.
+          disabled={pen !== null}
           style={{
             left: right,
             top,

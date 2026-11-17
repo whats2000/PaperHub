@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/popover";
 import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { BoxToolButton } from "@/components/canvas/BoxTool";
+import { HighlighterControl } from "@/components/canvas/HighlighterControl";
 import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
@@ -839,7 +840,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       </header>
 
       {/* The reader bar: HTML | PDF tabs for an HTML paper with a page PDF,
-          "Show my marks" for any paper and Box on a PDF. Always mounted: the bar's
+          the Highlighter and "Show my marks" for any paper and Box on a PDF. Always mounted: the bar's
           height opens and closes so the reader below glides. */}
       <div
         data-reader-tabs
@@ -896,6 +897,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             </div>
             <span className="flex-1" />
             {!standalone && <BoxToolButton shown={boxToolShown} />}
+            {!standalone && <HighlighterControl shown={marksToggleShown} />}
             {!standalone && <ShowMarksToggle shown={marksToggleShown} />}
           </div>
         </div>

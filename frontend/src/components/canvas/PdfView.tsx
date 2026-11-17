@@ -139,6 +139,9 @@ export function PdfView({
     readerRef: containerRef,
     onReadingHeading,
   });
+  // With the highlighter on, a selection on the text layer shows in the pen
+  // colour (index.css).
+  const pen = pdfMarks.ctx?.pen ?? null;
 
   // pdfjs TRANSFERS (detaches) the ArrayBuffer it's given to its worker, so
   // passing the cached bytes directly would corrupt them and make a second
@@ -367,6 +370,8 @@ export function PdfView({
       // Focusable (not in the tab order): Escape from a mark popover gives
       // focus back here.
       tabIndex={-1}
+      data-pen={pen ?? undefined}
+      style={pen ? { ["--pen" as string]: `var(--hl-${pen})` } : undefined}
       className="h-full w-full overflow-auto bg-neutral-100 p-3 outline-none dark:bg-neutral-900"
     >
       {/* Always mounted (disabled without `translation`) so toggling

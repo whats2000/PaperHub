@@ -312,6 +312,18 @@
     "box": "框选",
     "boxHint": "框选：在页面上拖出一个方框，引用图、公式或任何区域。按 Esc 结束。",
     "notLocated": "已保存，但未归入章节：在论文正文中找不到这段文字。",
-    "layoutFailed": "无法加载这一页的版面，所以还不能归档这个标记。请再试一次。"
+    "layoutFailed": "无法加载这一页的版面，所以还不能归档这个标记。请再试一次。",
+    "highlighter": "荧光笔",
+    "highlighterOn": "荧光笔：{{name}}",
+    "highlighterHint": "荧光笔：拖过文字即可直接标记；点一张图或一条公式就标记整个；点一个标记即可擦掉。按 Esc 结束。",
+    "highlighterColor": "荧光笔颜色",
+    "joined": "已并入同一个标记",
+    "split": "拆开",
+    "splitDone": "已拆成独立的标记",
+    "splitFailed": "无法拆开这个标记。",
+    "erased": "已擦掉这一段",
+    "pieceRestored": "已还原这一段",
+    "eraseAgain": "再次擦掉",
+    "eraseFailed": "无法擦掉这一段。"
   }
 }

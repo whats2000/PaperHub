@@ -285,8 +285,22 @@ export function selectionToPieces(doc: Document, range: Range, chunks: ChunkMap 
 }
 
 export function piecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null): HtmlPiece[] {
+  return placedPiecesIn(index, range, chunks).map((p) => p.piece);
+}
+
+/** A selection's pieces with the paragraph element each sits in (the
+ * highlighter joins strokes of one paragraph). */
+export function selectionToPlacedPieces(
+  doc: Document,
+  range: Range,
+  chunks: ChunkMap | null,
+): { piece: HtmlPiece; block: Element }[] {
+  return placedPiecesIn(buildTextIndex(doc), range, chunks);
+}
+
+function placedPiecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null): { piece: HtmlPiece; block: Element }[] {
   const [start, end] = rangeSpan(index, range);
-  const pieces: (HtmlPiece & { heading: boolean })[] = [];
+  const pieces: (HtmlPiece & { heading: boolean; block: Element })[] = [];
   let a = start;
   while (a < end) {
     const block = blockAt(index, a);
@@ -311,6 +325,7 @@ export function piecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null
         prefix: index.text.slice(Math.max(0, s - CONTEXT), s),
         suffix: index.text.slice(e, e + CONTEXT),
         heading,
+        block,
       });
     }
     a = b;
@@ -318,7 +333,7 @@ export function piecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null
   // A heading caught between paragraphs is not what was marked; a heading
   // alone is kept.
   const text = pieces.filter((p) => !p.heading);
-  return (text.length ? text : pieces).map(({ heading: _heading, ...p }) => p);
+  return (text.length ? text : pieces).map(({ heading: _heading, block, ...p }) => ({ piece: p, block }));
 }
 
 /** Consecutive pieces under the same section (a mark files under one). */

@@ -3,7 +3,9 @@
  * — clicks and hovers are hit-tested on the page, so the text under a mark
  * stays selectable — and holds the corner mark buttons of the page's
  * figures and equations and the Box tool's drag surface. The reader's side
- * (marks, blocks, popover, saving, Follow) is `usePdfMarks`. */
+ * (marks, blocks, popover, saving, Follow) is `usePdfMarks`. With the
+ * highlighter on, a click on a mark erases the piece under it (a hovered
+ * mark shows a dashed ring) and a click on a figure or equation marks it. */
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { DraftBox } from "@/components/canvas/BoxTool";
@@ -34,6 +36,13 @@ interface Drawn {
   kind: Mark["kind"];
   color: MarkColor | null;
   boxes: Frac[];
+  /** The index in `mark.pieces` each box draws. */
+  boxPiece: number[];
+}
+
+interface Placed {
+  boxes: Frac[];
+  boxPiece: number[];
 }
 
 /** The page's marks, plus those just removed while they fade out. */
@@ -66,13 +75,16 @@ function markStyle(d: Drawn, box: Frac): CSSProperties {
   return { ...base, outline: `1.5px solid color-mix(in srgb, ${c ?? NEUTRAL} 70%, transparent)`, outlineOffset: 1 };
 }
 
-function boxesOn(m: Mark, page: number): Frac[] {
-  const out: Frac[] = [];
-  for (const p of m.pieces) {
-    if (p.erased || p.removed || p.lost || p.page !== page) continue;
-    if (Array.isArray(p.rects)) out.push(...(p.rects as Frac[]));
-    else if (p.box) out.push(p.box);
-  }
+function boxesOn(m: Mark, page: number): Placed {
+  const out: Placed = { boxes: [], boxPiece: [] };
+  m.pieces.forEach((p, i) => {
+    if (p.erased || p.removed || p.lost || p.page !== page) return;
+    const boxes = Array.isArray(p.rects) ? (p.rects as Frac[]) : p.box ? [p.box] : [];
+    for (const b of boxes) {
+      out.boxes.push(b);
+      out.boxPiece.push(i);
+    }
+  });
   return out;
 }
 
@@ -125,19 +137,24 @@ export function PdfMarksPage({
   // Marks made in the HTML view of the paper show here wherever their
   // quote is in the page's text layer (not found: not drawn).
   const htmlMarks = useMemo(() => (ctx?.marks ?? NO_MARKS).filter((m) => m.view === "html"), [ctx?.marks]);
-  const [found, setFound] = useState<Readonly<Record<string, Frac[]>>>({});
+  const [found, setFound] = useState<Readonly<Record<string, Placed>>>({});
   useEffect(() => {
     const el = rootRef.current?.parentElement;
     if (!el || !htmlMarks.length || !textVersion) return;
     // After the text layer has laid out.
     const frame = requestAnimationFrame(() => {
       const text = pageText(el);
-      const next: Record<string, Frac[]> = {};
+      const next: Record<string, Placed> = {};
       for (const m of htmlMarks) {
-        const boxes = m.pieces
-          .filter((p) => !p.erased && !p.removed && !p.lost)
-          .flatMap((p) => findInPage(text, String(p.quote ?? "")) ?? []);
-        if (boxes.length) next[m.id] = boxes;
+        const placed: Placed = { boxes: [], boxPiece: [] };
+        m.pieces.forEach((p, i) => {
+          if (p.erased || p.removed || p.lost) return;
+          for (const b of findInPage(text, String(p.quote ?? "")) ?? []) {
+            placed.boxes.push(b);
+            placed.boxPiece.push(i);
+          }
+        });
+        if (placed.boxes.length) next[m.id] = placed;
       }
       setFound(next);
     });
@@ -151,7 +168,7 @@ export function PdfMarksPage({
           id: m.id,
           kind: m.kind,
           color: m.color,
-          boxes: m.view === "html" ? (found[m.id] ?? []) : boxesOn(m, page),
+          ...(m.view === "html" ? (found[m.id] ?? { boxes: [], boxPiece: [] }) : boxesOn(m, page)),
         }))
         .filter((d) => d.boxes.length > 0),
     [ctx?.marks, page, found],
@@ -183,18 +200,21 @@ export function PdfMarksPage({
       const r = el.getBoundingClientRect();
       return [(e.clientX - r.left) / (r.width || 1), (e.clientY - r.top) / (r.height || 1)];
     };
-    const markAt = (x: number, y: number): string | null => {
+    const markAt = (x: number, y: number): { id: string; piece: number | null } | null => {
       const { drawn: list, ctx: c } = latest.current;
       if (!c?.visible) return null;
-      let found: string | null = null;
-      for (const d of list) if (d.boxes.some((b) => within(b, x, y))) found = d.id;
-      return found;
+      let hit: { id: string; piece: number | null } | null = null;
+      for (const d of list) {
+        const i = d.boxes.findIndex((b) => within(b, x, y));
+        if (i >= 0) hit = { id: d.id, piece: d.boxPiece[i] ?? null };
+      }
+      return hit;
     };
     const onMove = (e: PointerEvent) => {
       const { ctx: c, objects: objs, boxTool: drawing } = latest.current;
       if (!c || drawing) return;
       const [x, y] = at(e);
-      const id = markAt(x, y);
+      const id = markAt(x, y)?.id ?? null;
       if (id !== c.hot) c.setHot(id);
       setHoverObject(objs.find((b) => within(b.box, x, y))?.block_id ?? null);
     };
@@ -213,8 +233,20 @@ export function PdfMarksPage({
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP_PX) return;
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
-      const id = markAt(...at(e));
-      if (id !== null) c.openMark(id);
+      const [x, y] = at(e);
+      const hit = markAt(x, y);
+      if (!c.pen) {
+        if (hit) c.openMark(hit.id);
+        return;
+      }
+      // The highlighter: a mark's piece is erased; a figure or an equation
+      // is marked whole.
+      if (hit) {
+        if (hit.piece !== null) c.erasePiece(hit.id, hit.piece);
+        return;
+      }
+      const obj = latest.current.objects.find((b) => within(b.box, x, y));
+      if (obj) c.penObject(page, obj);
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerleave", onLeave);
@@ -226,10 +258,13 @@ export function PdfMarksPage({
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("click", onClick);
     };
-  }, [ctx !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ctx !== null, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ctx) return null;
   const pending = ctx.pendingBox?.page === page ? ctx.pendingBox.frac : null;
+  // With the pen on, the figure or equation under the pointer is what a
+  // click marks: ringed in the pen colour.
+  const penTarget = ctx.pen && !shown.some((d) => d.id === ctx.hot) ? objects.find((b) => b.block_id === hoverObject) : undefined;
   return (
     <div
       ref={rootRef}
@@ -250,26 +285,32 @@ export function PdfMarksPage({
         {shown.map((d) =>
           d.boxes.map((b, i) => {
             const dim = ctx.focusIds !== null && !ctx.focusIds.has(d.id);
-            const ring = ctx.flashId === d.id ? `0 0 0 3px ${RING}` : ctx.hot === d.id ? `0 0 0 1px ${RING}` : undefined;
+            const hot = ctx.hot === d.id;
+            const ring = ctx.flashId === d.id ? `0 0 0 3px ${RING}` : hot && !ctx.pen ? `0 0 0 1px ${RING}` : undefined;
+            // With the pen on, a hovered mark is what a click erases.
+            const erase = hot && ctx.pen ? { outline: "1.5px dashed #404040", outlineOffset: 1 } : undefined;
             return (
               <div
                 key={`${d.id}:${i}`}
                 data-mark={d.id}
                 data-kind={d.kind}
+                data-erase={erase ? "true" : undefined}
                 data-leaving={d.leaving ? "" : undefined}
-                style={{ ...markStyle(d, b), boxShadow: ring, opacity: d.leaving ? 0 : dim ? 0.25 : undefined }}
+                style={{ ...markStyle(d, b), ...erase, boxShadow: ring, opacity: d.leaving ? 0 : dim ? 0.25 : undefined }}
                 className="absolute rounded-[2px] transition-[opacity,box-shadow] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none"
               />
             );
           }),
         )}
       </div>
+      <PenObjectRing box={penTarget?.box ?? null} color={ctx.pen} />
       {objects.map((b) => (
         <ObjectMarkButton
           key={b.block_id}
           kind={FIGURE_TYPES.has(b.type) ? "figure" : "equation"}
           shown={hoverObject === b.block_id || overButton === b.block_id}
-          disabled={boxTool}
+          // The highlighter marks an object with a click on it instead.
+          disabled={boxTool || ctx.pen !== null}
           style={{
             left: pct(b.box[2]),
             top: pct(b.box[1]),
@@ -281,5 +322,32 @@ export function PdfMarksPage({
       ))}
       <DraftBox box={live ?? pending} />
     </div>
+  );
+}
+
+/** The ring round the figure or equation a pen click would mark; it fades
+ * in and out where it is. */
+function PenObjectRing({ box, color }: { box: Frac | null; color: MarkColor | null }) {
+  const [last, setLast] = useState<{ box: Frac; color: MarkColor } | null>(null);
+  if (box && color && (last?.box !== box || last.color !== color)) setLast({ box, color });
+  const on = box !== null && color !== null;
+  if (!last) return null;
+  const b = last.box;
+  return (
+    <div
+      aria-hidden
+      data-pen-target={on ? "true" : "false"}
+      style={{
+        left: pct(b[0]),
+        top: pct(b[1]),
+        width: pct(b[2] - b[0]),
+        height: pct(b[3] - b[1]),
+        boxShadow: `0 0 0 2px ${MARK_PALETTE.light[last.color]}`,
+      }}
+      className={cn(
+        "pointer-events-none absolute rounded-[3px] transition-opacity duration-150 ease-out motion-reduce:transition-none",
+        on ? "opacity-100" : "opacity-0",
+      )}
+    />
   );
 }

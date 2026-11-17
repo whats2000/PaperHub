@@ -421,3 +421,10 @@
     .paperhub-notes .bn-block-outer,
     .paperhub-notes .bn-block-outer[data-part-body] { transition: none; }
 }
+
+/* The highlighter (Plan H5b.1): with the pen on, a selection on a PDF's text
+   layer shows in the pen colour (the HTML reader does the same in its
+   iframe). */
+[data-pen] .textLayer span::selection {
+    background: color-mix(in srgb, var(--pen) 45%, transparent);
+}

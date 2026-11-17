@@ -312,6 +312,18 @@
     "box": "Box",
     "boxHint": "Box: drag a rectangle on the page to quote a figure, an equation or any region. Esc to stop.",
     "notLocated": "Saved without a section: this passage wasn't found in the paper's text.",
-    "layoutFailed": "Couldn't load this page's layout, so the mark can't be filed yet. Try again."
+    "layoutFailed": "Couldn't load this page's layout, so the mark can't be filed yet. Try again.",
+    "highlighter": "Highlighter",
+    "highlighterOn": "Highlighter: {{name}}",
+    "highlighterHint": "Highlighter: drag across words to mark them at once; click a figure or equation to mark it; click a mark to erase it. Esc to stop.",
+    "highlighterColor": "Highlighter colour",
+    "joined": "Joined to the same mark",
+    "split": "Split",
+    "splitDone": "Split into its own mark",
+    "splitFailed": "Couldn't split the mark.",
+    "erased": "Piece erased",
+    "pieceRestored": "Piece restored",
+    "eraseAgain": "Erase again",
+    "eraseFailed": "Couldn't erase that piece."
   }
 }

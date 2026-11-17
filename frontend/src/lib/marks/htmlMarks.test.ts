@@ -173,7 +173,7 @@ describe("attachHtmlMarks", () => {
     expect(onHover).toHaveBeenLastCalledWith("m1");
     expect(rects(doc, "m1")[0]!.dataset.hot).toBe("");
     doc.body.dispatchEvent(new MouseEvent("click", { clientX: x, clientY: 25, bubbles: true }));
-    expect(onClick).toHaveBeenCalledWith("m1");
+    expect(onClick).toHaveBeenCalledWith("m1", 0);
     doc.dispatchEvent(new MouseEvent("mousemove", { clientX: 5, clientY: 300, bubbles: true }));
     expect(onHover).toHaveBeenLastCalledWith(null);
   });
@@ -186,6 +186,42 @@ describe("attachHtmlMarks", () => {
     expect(rects(doc, "m1")[0]!.dataset.flash).toBe("");
     vi.advanceTimersByTime(2000);
     expect(rects(doc, "m1")[0]!.dataset.flash).toBeUndefined();
+  });
+
+  it("draws each piece of a joined mark, the skipped words unmarked, and reports the piece clicked", () => {
+    const doc = makeDoc(PAPER);
+    const onClick = vi.fn();
+    const two = mark("m5", "We predict", 102, {
+      pieces: [
+        { quote: "We predict", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "" },
+        { quote: "gone", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "", erased: true },
+        { quote: "ahead of time", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "" },
+      ],
+    });
+    attachHtmlMarks(doc, opts({ marks: [two], onClick }));
+    const boxes = rects(doc, "m5");
+    expect(boxes).toHaveLength(2);
+    // "the agent pose" between the pieces is not covered.
+    expect(boxes[0]!.style.width).toBe(`${"We predict".length * 6}px`);
+    expect(boxes[1]!.style.left).toBe(`${"We predict the agent pose ".length * 6}px`);
+    const second = "We predict the agent pose ".length * 6 + 3;
+    doc.body.dispatchEvent(new MouseEvent("click", { clientX: second, clientY: 25, bubbles: true }));
+    expect(onClick).toHaveBeenLastCalledWith("m5", 2);
+    doc.body.dispatchEvent(new MouseEvent("click", { clientX: 3, clientY: 25, bubbles: true }));
+    expect(onClick).toHaveBeenLastCalledWith("m5", 0);
+  });
+
+  it("with the highlighter on, a selection shows in the pen colour; off again, the page is as it was", () => {
+    const doc = makeDoc(PAPER);
+    const before = doc.documentElement.outerHTML;
+    const handle = attachHtmlMarks(doc, opts({ pen: "blue" }));
+    expect(doc.documentElement.getAttribute("data-ph-pen")).toBe("blue");
+    expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain('html[data-ph-pen="blue"] ::selection');
+    handle.update({ pen: null });
+    expect(doc.documentElement.hasAttribute("data-ph-pen")).toBe(false);
+    handle.update({ pen: "pink" });
+    handle.detach();
+    expect(doc.documentElement.outerHTML).toBe(before);
   });
 
   it("leaves the document as it was once detached", () => {
@@ -234,7 +270,7 @@ describe("attachHtmlMarks in a live document", () => {
     const a = doc.querySelector("a")!;
     const ev = new MouseEvent("click", { clientX: 3, clientY: 25, bubbles: true, cancelable: true });
     a.dispatchEvent(ev);
-    expect(onClick).toHaveBeenCalledWith("m1");
+    expect(onClick).toHaveBeenCalledWith("m1", 0);
     expect(ev.defaultPrevented).toBe(true);
     expect(lightbox).not.toHaveBeenCalled();
   });

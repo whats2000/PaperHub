@@ -7,6 +7,11 @@
  * A text mark keeps its line boxes as page fractions, taken from the
  * rendered text layer, and the Marker block that holds the selection's
  * centre (its `section` is where the mark files). The PDF is never changed.
+ *
+ * With the highlighter on, a drag on the text layer marks at once in the
+ * pen colour (joining the pen session's mark in the same Marker block), a
+ * click on a figure or an equation marks it whole, a box drawn on a scanned
+ * page marks at once, and a click on a mark erases the piece under it.
  */
 import {
   createContext,
@@ -23,11 +28,12 @@ import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup, type PenPiece } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
 import { locateText, type LocateResult } from "@/lib/api";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
+import { clearIfStill, pdfPlace } from "@/lib/marks/pieces";
 import {
   boxMark,
   captionFor,
@@ -52,28 +58,40 @@ const FLASH_MS = 1600;
  * blocks): its chunks and its span there. */
 type Located = NonNullable<LocateResult["match"]>;
 
-/** Pieces as stored (the section rides on the mark), grouped by section:
- * a mark files under one. */
+/** A text piece as stored (the section rides on the mark). */
+function storedPiece(p: PdfPiece, at?: Located): MarkPiece {
+  let piece: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
+  if (p.block_id) piece.block_id = p.block_id;
+  if (at) {
+    piece = {
+      ...piece,
+      chunk_start: at.chunk_start,
+      chunk_end: at.chunk_end,
+      text_start: at.text_start,
+      text_end: at.text_end,
+    };
+  }
+  return piece;
+}
+
+/** Pieces as stored, grouped by section: a mark files under one. */
 function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): MarkGroup[] {
   const groups: MarkGroup[] = [];
   for (const { piece: p, at } of pieces) {
     const section = at ? at.section : p.section;
-    let piece: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
-    if (p.block_id) piece.block_id = p.block_id;
-    if (at) {
-      piece = {
-        ...piece,
-        chunk_start: at.chunk_start,
-        chunk_end: at.chunk_end,
-        text_start: at.text_start,
-        text_end: at.text_end,
-      };
-    }
+    const piece = storedPiece(p, at);
     const last = groups[groups.length - 1];
     if (last && last.section === section) last.pieces.push(piece);
     else groups.push({ section, pieces: [piece] });
   }
   return groups;
+}
+
+/** A figure (its caption) or an equation (its LaTeX) taken whole. */
+function objectPiece(kind: MarkableObject, page: number, b: PaperPageBlock, pageBlocks: readonly PaperPageBlock[]): MarkPiece {
+  return kind === "figure"
+    ? { quote: captionFor(pageBlocks, b), page, block_id: b.block_id, box: b.box }
+    : { quote: b.text, latex: b.text, page, block_id: b.block_id, box: b.box };
 }
 
 type Target =
@@ -101,8 +119,14 @@ export interface PdfMarksApi {
   hot: string | null;
   setHot: (id: string | null) => void;
   flashId: string | null;
+  /** The highlighter's colour while it is on (null: off). */
+  pen: MarkColor | null;
   /** A click on a mark. */
   openMark: (markId: string) => void;
+  /** A pen click on a mark: erases the piece under it. */
+  erasePiece: (markId: string, piece: number) => void;
+  /** A pen click on a figure or equation: marks it whole at once. */
+  penObject: (page: number, block: PaperPageBlock) => void;
   openObject: (page: number, block: PaperPageBlock) => void;
   openBox: (page: number, box: Frac, pageEl: Element, scanned: boolean) => void;
   /** The box waiting for its popover choice (drawn on its page). */
@@ -143,6 +167,9 @@ export function usePdfMarks({
   const colors = useMarksStore((s) => s.colors);
   const visible = useMarksStore((s) => s.showMarks);
   const boxOn = useMarksStore((s) => s.boxOn);
+  const penOn = useMarksStore((s) => s.penOn);
+  const penColor = useMarksStore((s) => s.penColor);
+  const pen = paperId !== null && penOn ? penColor : null;
   const loadPaper = useMarksStore((s) => s.loadPaper);
   const loadColors = useMarksStore((s) => s.loadColors);
   const focusIds = useMarkFocusIds(paperId);
@@ -188,15 +215,25 @@ export function usePdfMarks({
     tRef.current = t;
   }, [t]);
   const boxOnRef = useRef(boxOn);
+  const penRef = useRef(pen);
   useEffect(() => {
     boxOnRef.current = boxOn;
-  }, [boxOn]);
-  // Turning Box on drops a text selection's popover.
+    penRef.current = pen;
+  }, [boxOn, pen]);
+  // Turning Box on drops a text selection's popover; turning the pen on
+  // drops any (strokes need none).
   const [seenBoxOn, setSeenBoxOn] = useState(boxOn);
   if (seenBoxOn !== boxOn) {
     setSeenBoxOn(boxOn);
     if (boxOn && target?.type === "text") setTarget(null);
   }
+  const [seenPen, setSeenPen] = useState(pen);
+  if (seenPen !== pen) {
+    setSeenPen(pen);
+    if (pen && target) setTarget(null);
+  }
+  const penSave = usePenSave(paperId);
+  const strokeRef = useRef<(range: Range, fragments: PdfFragment[]) => void>(() => undefined);
   useEffect(() => {
     const root = readerRef.current;
     if (paperId === null || !root) return;
@@ -206,6 +243,9 @@ export function usePdfMarks({
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (boxOnRef.current) return;
+        // The highlighter marks what the pointer drags; a keyboard
+        // selection waits for the pen to go off.
+        if (penRef.current && keyboard) return;
         const sel = window.getSelection();
         const range = sel && !sel.isCollapsed && sel.rangeCount ? sel.getRangeAt(0) : null;
         const fragments = range && root.contains(range.commonAncestorContainer) ? selectionFragments(range, root) : [];
@@ -229,6 +269,10 @@ export function usePdfMarks({
           return;
         }
         capped = "";
+        if (penRef.current) {
+          strokeRef.current(range.cloneRange(), fragments);
+          return;
+        }
         const origin = measure();
         if (!origin) return;
         setTarget({
@@ -296,11 +340,39 @@ export function usePdfMarks({
     [measure, pageEl],
   );
 
+  /** The blocks of these pages, or null when a page's could not be loaded
+   * (said in a toast; the popover stays to try again). A failed load is
+   * never taken for a page without blocks. */
+  const loadPages = useCallback(
+    async (pages: number[]): Promise<PaperPageBlock[][] | null> => {
+      try {
+        return await Promise.all(pages.map((p) => loadBlocks(p)));
+      } catch {
+        toast.error(t("marks.layoutFailed", "Couldn't load this page's layout, so the mark can't be filed yet. Try again."));
+        return null;
+      }
+    },
+    [loadBlocks, t],
+  );
   const openBox = useCallback(
     (page: number, frac: Frac, el: Element, scanned: boolean) => {
+      const spans = scanned ? [] : layerSpans(el);
+      if (penRef.current) {
+        // The highlighter: the box marks at once in the pen colour.
+        penSave({
+          view: "pdf",
+          kind: "region",
+          pieces: async () => {
+            const loaded = await loadPages([page]);
+            if (!loaded) return null;
+            const result = boxMark({ page, box: frac, blocks: loaded[0]!, spans, scanned });
+            return [{ section: result.section, piece: result.piece, place: null, kind: result.kind }];
+          },
+        });
+        return;
+      }
       const origin = measure();
       if (!origin) return;
-      const spans = scanned ? [] : layerSpans(el);
       const next: Target = {
         type: "box",
         page,
@@ -318,7 +390,7 @@ export function usePdfMarks({
         () => undefined, // worked out (and the failure said) when it is saved
       );
     },
-    [measure, loadBlocks],
+    [measure, loadBlocks, loadPages, penSave],
   );
 
   // Follow: the section of the Marker block at the top of the view.
@@ -344,20 +416,76 @@ export function usePdfMarks({
     [paperId],
   );
 
+  const erasePiece = useCallback((markId: string, piece: number) => {
+    void useMarksStore.getState().erase(markId, piece);
+  }, []);
+
   const { busy, save: saveMarks } = useMarkSave(paperId);
-  /** The blocks of these pages, or null when a page's could not be loaded
-   * (said in a toast; the popover stays to try again). A failed load is
-   * never taken for a page without blocks. */
-  const loadPages = useCallback(
-    async (pages: number[]): Promise<PaperPageBlock[][] | null> => {
-      try {
-        return await Promise.all(pages.map((p) => loadBlocks(p)));
-      } catch {
-        toast.error(t("marks.layoutFailed", "Couldn't load this page's layout, so the mark can't be filed yet. Try again."));
-        return null;
-      }
+  /** A text selection's pieces, each placed: by its Marker block, or on a
+   * page without blocks (the LaTeX-compiled PDF of an HTML paper) by
+   * finding its text in the paper's reading text (`missed`: not found).
+   * Null when a page's layout can't be loaded (said in a toast). */
+  const placeText = useCallback(
+    async (fragments: readonly PdfFragment[]) => {
+      const pages = [...new Set(fragments.map((f) => f.page))];
+      const loaded = await loadPages(pages);
+      if (!loaded) return null;
+      const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
+      const pieces = piecesFromFragments(fragments, byPage);
+      if (!pieces.length || paperId === null) return null;
+      let missed = false;
+      const placed = await Promise.all(
+        pieces.map(async (piece) => {
+          if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
+          const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
+          if (!at) missed = true;
+          return { piece, at };
+        }),
+      );
+      return { placed, missed };
     },
-    [loadBlocks, t],
+    [loadPages, paperId],
+  );
+  const notLocated = useCallback(
+    () => toast.message(t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text.")),
+    [t],
+  );
+  // A highlighter stroke on the text layer: marked at once, no popover.
+  useEffect(() => {
+    strokeRef.current = (range, fragments) => {
+      let missed = false;
+      penSave({
+        view: "pdf",
+        pieces: async () => {
+          const r = await placeText(fragments);
+          if (!r) return null;
+          missed = r.missed;
+          return r.placed.map(
+            ({ piece, at }): PenPiece => ({
+              section: at ? at.section : piece.section,
+              piece: storedPiece(piece, at),
+              place: pdfPlace(piece.page, piece.block_id),
+            }),
+          );
+        },
+        done: (ok) => {
+          if (!ok) return;
+          clearIfStill(document, range);
+          if (missed) notLocated();
+        },
+      });
+    };
+  }, [penSave, placeText, notLocated]);
+  const penObject = useCallback(
+    (page: number, b: PaperPageBlock) => {
+      const kind: MarkableObject = FIGURE_TYPES.has(b.type) ? "figure" : "equation";
+      penSave({
+        view: "pdf",
+        kind,
+        pieces: () => [{ section: b.section, piece: objectPiece(kind, page, b, blocksRef.current[page] ?? NO_BLOCKS), place: null }],
+      });
+    },
+    [penSave, blocksRef],
   );
   const save = useCallback(
     async (color: MarkColor | null, addNote: boolean) => {
@@ -373,39 +501,17 @@ export function usePdfMarks({
           view: "pdf",
           addNote,
           groups: async () => {
-            // The blocks of every page it is on, loaded by now.
-            const pages = [...new Set(cur.fragments.map((f) => f.page))];
-            const loaded = await loadPages(pages);
-            if (!loaded) return null;
-            const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
-            const pieces = piecesFromFragments(cur.fragments, byPage);
-            if (!pieces.length || paperId === null) return null;
-            // A page with no Marker blocks (the LaTeX-compiled PDF of an
-            // HTML paper): the section and chunks come from finding the
-            // text in the paper's reading text.
-            const placed = await Promise.all(
-              pieces.map(async (piece) => {
-                if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
-                const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
-                if (!at) missed = true;
-                return { piece, at };
-              }),
-            );
-            return groupPieces(placed);
+            const r = await placeText(cur.fragments);
+            if (!r) return null;
+            missed = r.missed;
+            return groupPieces(r.placed);
           },
         });
         if (ok) window.getSelection()?.removeAllRanges();
-        if (ok && missed) {
-          toast.message(
-            t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text."),
-          );
-        }
+        if (ok && missed) notLocated();
       } else if (cur.type === "object") {
         const b = cur.block;
-        const piece: MarkPiece =
-          cur.kind === "figure"
-            ? { quote: captionFor(blocksRef.current[cur.page] ?? NO_BLOCKS, b), page: cur.page, block_id: b.block_id, box: b.box }
-            : { quote: b.text, latex: b.text, page: cur.page, block_id: b.block_id, box: b.box };
+        const piece = objectPiece(cur.kind, cur.page, b, blocksRef.current[cur.page] ?? NO_BLOCKS);
         ok = await saveMarks({
           kind: cur.kind,
           color,
@@ -436,7 +542,7 @@ export function usePdfMarks({
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, paperId, t],
+    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(
@@ -455,12 +561,33 @@ export function usePdfMarks({
             hot,
             setHot,
             flashId,
+            pen,
             openMark,
+            erasePiece,
+            penObject,
             openObject,
             openBox,
             pendingBox: target?.type === "box" ? { page: target.page, frac: target.frac } : null,
           },
-    [paperId, marks, colors, visible, focusIds, boxOn, blocks, loadBlocks, hot, flashId, openMark, openObject, openBox, target],
+    [
+      paperId,
+      marks,
+      colors,
+      visible,
+      focusIds,
+      boxOn,
+      blocks,
+      loadBlocks,
+      hot,
+      flashId,
+      pen,
+      openMark,
+      erasePiece,
+      penObject,
+      openObject,
+      openBox,
+      target,
+    ],
   );
 
   const popoverTarget =
