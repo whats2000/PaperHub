@@ -324,6 +324,7 @@
     "erased": "Piece erased",
     "pieceRestored": "Piece restored",
     "eraseAgain": "Erase again",
-    "eraseFailed": "Couldn't erase that piece."
+    "eraseFailed": "Couldn't erase that piece.",
+    "retry": "Retry"
   }
 }

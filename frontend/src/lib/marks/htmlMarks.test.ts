@@ -217,6 +217,8 @@ describe("attachHtmlMarks", () => {
     const handle = attachHtmlMarks(doc, opts({ pen: "blue" }));
     expect(doc.documentElement.getAttribute("data-ph-pen")).toBe("blue");
     expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain('html[data-ph-pen="blue"] ::selection');
+    // The dashed "click to erase" ring fades rather than snapping on.
+    expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain("outline-color 150ms ease-out");
     handle.update({ pen: null });
     expect(doc.documentElement.hasAttribute("data-ph-pen")).toBe(false);
     handle.update({ pen: "pink" });

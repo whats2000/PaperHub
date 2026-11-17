@@ -1,0 +1,500 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { HighlighterControl } from "@/components/canvas/HighlighterControl";
+import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
+import { ApiError, erasePiece } from "@/lib/api";
+import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
+import { resetMarkOps, useMarksStore } from "@/store/marks";
+import { useNotesStore } from "@/store/notes";
+import type { Mark, MarkCreated, MarkIn } from "@/types/notes";
+
+vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), erasePiece: vi.fn() }));
+
+/** The store's own erase (the tests' default stands in a mock). */
+const realErase = useMarksStore.getState().erase;
+
+const { toastFn, toastError, toastMessage } = vi.hoisted(() => ({
+  toastFn: vi.fn(),
+  toastError: vi.fn(),
+  toastMessage: vi.fn(),
+}));
+vi.mock("sonner", () => ({
+  toast: Object.assign(toastFn, { error: toastError, message: toastMessage, success: vi.fn() }),
+}));
+
+const PAPER = `
+  <h2>2 Method</h2>
+  <p id="p1"><span id="phchunk-1"></span>We predict the agent pose ahead of time.</p>
+  <p id="p2"><span id="phchunk-2"></span>The latency drops by 89% on all trajectories.</p>
+`;
+
+const CHUNKS: ChunkMap = chunkMap([
+  { id: 102, dom_id: "phchunk-1", section: "2 Method" },
+  { id: 103, dom_id: "phchunk-2", section: "2 Method" },
+]);
+
+/** A paper in an iframe; each range has one line box, placed by its
+ * paragraph and offsets (jsdom has no layout). */
+function frameDoc(body: string): Document {
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument!;
+  doc.body.innerHTML = body;
+  const FrameRange = (frame.contentWindow as unknown as { Range: typeof Range }).Range;
+  FrameRange.prototype.getClientRects = function (this: Range) {
+    const p = this.startContainer.parentElement?.closest("p");
+    const top = p?.id === "p2" ? 60 : 20;
+    return [new DOMRect(this.startOffset * 6, top, (this.endOffset - this.startOffset) * 6, 16)] as unknown as DOMRectList;
+  };
+  FrameRange.prototype.getBoundingClientRect = () => new DOMRect(10, 40, 100, 16);
+  return doc;
+}
+
+function Reader({ doc }: { doc: Document }) {
+  return (
+    <>
+      <HighlighterControl shown />
+      <div>{useHtmlMarks({ paperId: 3, doc, isDark: false })}</div>
+    </>
+  );
+}
+
+/** Drags over `text` in `doc` (selects it, then the mouse comes up). */
+function stroke(doc: Document, text: string) {
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let node: Text | null = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if ((n as Text).data.includes(text)) {
+      node = n as Text;
+      break;
+    }
+  }
+  const range = doc.createRange();
+  range.setStart(node!, node!.data.indexOf(text));
+  range.setEnd(node!, node!.data.indexOf(text) + text.length);
+  const sel = doc.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(range);
+  act(() => {
+    doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+}
+
+function mark(id: string, over: Partial<Mark> = {}): Mark {
+  return {
+    id,
+    paper_content_id: 3,
+    block_id: `b_${id}`,
+    kind: "highlight",
+    color: "green",
+    view: "html",
+    pieces: [],
+    lang: null,
+    source_ref: null,
+    section_key: "2 Method",
+    status: "ok",
+    created_at: "2026-11-17T00:00:00Z",
+    deleted_at: null,
+    note_id: 7,
+    ...over,
+  };
+}
+
+let created = 0;
+let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>>>;
+let split: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
+let erase: ReturnType<typeof vi.fn<(id: string, index: number) => Promise<void>>>;
+
+beforeEach(() => {
+  resetMarkOps();
+  vi.mocked(erasePiece).mockReset();
+  toastFn.mockReset();
+  toastError.mockReset();
+  toastMessage.mockReset();
+  created = 0;
+  // The server: a new mark, or the joined one with the piece appended.
+  create = vi.fn((body: MarkIn) => {
+    const list = useMarksStore.getState().marksByPaper[3] ?? [];
+    const joined = body.join_to ? list.find((m) => m.id === body.join_to) : undefined;
+    const m = joined
+      ? { ...joined, pieces: [...joined.pieces, ...body.pieces] }
+      : mark(`mk_${++created}`, { color: body.color, kind: body.kind, pieces: body.pieces });
+    useMarksStore.setState((s) => ({
+      marksByPaper: { ...s.marksByPaper, 3: [...(s.marksByPaper[3] ?? []).filter((x) => x.id !== m.id), m] },
+    }));
+    return Promise.resolve({
+      mark: m,
+      block: null,
+      saved_to: { note_id: 7, paper_title: "Duo", section: body.section_key, part_index: 0, part_count: 1 },
+    });
+  });
+  split = vi.fn(() => Promise.resolve());
+  erase = vi.fn(() => Promise.resolve());
+  useMarksStore.setState({
+    marksByPaper: {},
+    chunksByPaper: { 3: CHUNKS },
+    colors: [],
+    showMarks: true,
+    boxOn: false,
+    penOn: false,
+    penColor: "green",
+    penSession: [],
+    loadPaper: vi.fn(() => Promise.resolve()),
+    loadColors: vi.fn(() => Promise.resolve()),
+    ensureChunks: vi.fn(() => Promise.resolve(CHUNKS)),
+    create,
+    split,
+    erase,
+  });
+  useNotesStore.setState({ caretAfter: null, byTarget: {}, quoteTarget: null });
+});
+
+afterEach(() => {
+  document.querySelectorAll("iframe").forEach((f) => f.remove());
+});
+
+describe("the highlighter in the HTML reader", () => {
+  it("marks a drag at once in the pen colour, with no popover", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "pink"));
+    stroke(doc, "agent pose");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      kind: "highlight",
+      color: "pink",
+      section_key: "2 Method",
+      pieces: [{ quote: "agent pose", chunk_start: 102 }],
+    });
+    expect(create.mock.calls[0]![0].join_to).toBeUndefined();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    await waitFor(() => expect(doc.getSelection()!.isCollapsed).toBe(true));
+  });
+
+  it("joins a stroke in the same paragraph and colour; Split makes the newest piece its own mark", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "We predict");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    stroke(doc, "ahead of time");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]![0]).toMatchObject({ join_to: "mk_1", pieces: [{ quote: "ahead of time" }] });
+    expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces).toHaveLength(2);
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Joined to the same mark", expect.anything()));
+    const action = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    expect(action.label).toBe("Split");
+    action.onClick();
+    expect(split).toHaveBeenCalledWith("mk_1");
+  });
+
+  it("never joins across paragraphs, colours, or an earlier pen session", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "We predict");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    // Another paragraph.
+    stroke(doc, "latency drops");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]![0].join_to).toBeUndefined();
+    // Another colour, same paragraph.
+    act(() => useMarksStore.getState().setPen(true, "blue"));
+    stroke(doc, "agent pose");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls[2]![0].join_to).toBeUndefined();
+    // The pen off and on again: a new session; older marks don't join.
+    act(() => useMarksStore.getState().setPen(false));
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "ahead of time");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls[3]![0].join_to).toBeUndefined();
+  });
+
+  it("a stroke across paragraphs files a piece per paragraph under its section", async () => {
+    const doc = frameDoc(`
+      <h2>1 Intro</h2>
+      <p><span id="phchunk-1"></span>We predict the agent pose ahead of time.</p>
+      <h2>2 Method</h2>
+      <p><span id="phchunk-2"></span>The latency drops by 89% on all trajectories.</p>
+    `);
+    useMarksStore.setState({
+      ensureChunks: vi.fn(() =>
+        Promise.resolve(
+          chunkMap([
+            { id: 102, dom_id: "phchunk-1", section: "1 Intro" },
+            { id: 103, dom_id: "phchunk-2", section: "2 Method" },
+          ]),
+        ),
+      ),
+    });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const [a, b] = Array.from(doc.querySelectorAll("p")).map((p) => p.lastChild as Text);
+    const range = doc.createRange();
+    range.setStart(a!, 3);
+    range.setEnd(b!, 11);
+    doc.getSelection()!.addRange(range);
+    act(() => {
+      doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
+    expect(create.mock.calls[0]![0].pieces).toHaveLength(1);
+  });
+
+  it("a pen click on a mark erases the piece under it", async () => {
+    const doc = frameDoc(PAPER);
+    useMarksStore.setState({
+      marksByPaper: {
+        3: [
+          mark("mk_9", {
+            pieces: [
+              { quote: "We predict", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "" },
+              { quote: "ahead of time", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "" },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    await waitFor(() => expect(doc.querySelectorAll('.ph-mk[data-mark="mk_9"]')).toHaveLength(2));
+    const x = "We predict the agent pose ".length * 6 + 3;
+    act(() => {
+      doc.body.dispatchEvent(new MouseEvent("click", { clientX: x, clientY: 25, bubbles: true }));
+    });
+    expect(erase).toHaveBeenCalledWith("mk_9", 1);
+  });
+
+  it("a pen click on a figure marks it whole in the pen colour, and opens no lightbox", async () => {
+    const doc = frameDoc(`${PAPER}<span id="phfig-001"></span><figure><img src="a.png"><figcaption>Figure 1: Robot arm.</figcaption></figure>`);
+    const lightbox = vi.fn();
+    doc.body.addEventListener("click", lightbox);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "purple"));
+    act(() => {
+      doc.querySelector("img")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      kind: "figure",
+      color: "purple",
+      pieces: [{ quote: "Figure 1: Robot arm.", figure_id: "fig-001" }],
+    });
+    expect(lightbox).not.toHaveBeenCalled();
+  });
+
+  it("with the pen off, a selection opens the popover again; Escape in the paper turns the pen off", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    expect(doc.documentElement.getAttribute("data-ph-pen")).toBe("green");
+    act(() => {
+      doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(useMarksStore.getState().penOn).toBe(false);
+    expect(doc.documentElement.hasAttribute("data-ph-pen")).toBe(false);
+    stroke(doc, "agent pose");
+    expect(await screen.findByRole("toolbar", { name: "Mark the selection" })).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+/** Lets a mouseup's read (a timer) run. */
+const tick = () => act(() => new Promise((r) => setTimeout(r, 0)));
+
+/** A `create` whose answers the test gives, one by one. */
+function heldCreates() {
+  const pending: (() => Promise<void>)[] = [];
+  const inner = create.getMockImplementation()!;
+  create.mockImplementation(
+    (body: MarkIn, opts?: { quiet?: boolean }) =>
+      new Promise<MarkCreated>((resolve, reject) => {
+        pending.push(() => inner(body, opts).then(resolve, reject));
+      }),
+  );
+  return async () => {
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+    await act(() => pending.shift()!());
+  };
+}
+
+describe("strokes, erases and splits keep the user's order", () => {
+  it("fast strokes, each before the last has saved, join in order", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const answer = heldCreates();
+    stroke(doc, "We predict");
+    await tick();
+    stroke(doc, "agent pose");
+    await tick();
+    stroke(doc, "ahead of time");
+    await tick();
+    // One at a time: the second waits for the first.
+    expect(create).toHaveBeenCalledTimes(1);
+    await answer();
+    await answer();
+    await answer();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls.map((c) => [c[0].pieces[0]!.quote, c[0].join_to])).toEqual([
+      ["We predict", undefined],
+      ["agent pose", "mk_1"],
+      ["ahead of time", "mk_1"],
+    ]);
+    expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces).toHaveLength(3);
+  });
+
+  it("a pen click while a join is saving erases after it: the joined piece is kept", async () => {
+    const doc = frameDoc(PAPER);
+    useMarksStore.setState({ erase: realErase });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "We predict");
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
+    await waitFor(() => expect(doc.querySelectorAll('.ph-mk[data-mark="mk_1"]')).toHaveLength(1));
+    const answer = heldCreates();
+    vi.mocked(erasePiece).mockImplementation((id, index) => {
+      const m = useMarksStore.getState().marksByPaper[3]!.find((x) => x.id === id)!;
+      return Promise.resolve({ ...m, pieces: m.pieces.map((p, i) => (i === index ? { ...p, erased: true } : p)) });
+    });
+    stroke(doc, "ahead of time");
+    await tick();
+    // The first piece, clicked before the join has saved (the press
+    // collapses the stroke's selection first).
+    act(() => {
+      doc.getSelection()!.removeAllRanges();
+      doc.body.dispatchEvent(new MouseEvent("click", { clientX: 3, clientY: 25, bubbles: true }));
+    });
+    await tick();
+    expect(erasePiece).not.toHaveBeenCalled();
+    await answer();
+    await waitFor(() => expect(erasePiece).toHaveBeenCalledWith("mk_1", 0));
+    // The mark was not deleted: the joined piece is still on it.
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece erased", expect.anything()));
+    const m = useMarksStore.getState().marksByPaper[3]![0]!;
+    expect(m.deleted_at).toBeNull();
+    expect(m.pieces.map((p) => [p.quote, !!p.erased])).toEqual([
+      ["We predict", true],
+      ["ahead of time", false],
+    ]);
+  });
+
+  it("a join the server refuses (the mark was deleted meanwhile) becomes a mark of its own", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "We predict");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const inner = create.getMockImplementation()!;
+    create.mockImplementation((body, opts) =>
+      body.join_to ? Promise.reject(new ApiError(422, "cannot join a deleted mark")) : inner(body, opts),
+    );
+    stroke(doc, "ahead of time");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls[1]![0].join_to).toBe("mk_1");
+    expect(create.mock.calls[2]![0].join_to).toBeUndefined();
+    expect(create.mock.calls[2]![0].pieces[0]!.quote).toBe("ahead of time");
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §2", expect.anything()));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe("a stroke that partly fails", () => {
+  const TWO_SECTIONS = `
+    <h2>1 Intro</h2>
+    <p><span id="phchunk-1"></span>We predict the agent pose ahead of time.</p>
+    <h2>2 Method</h2>
+    <p><span id="phchunk-2"></span>The latency drops by 89% on all trajectories.</p>
+  `;
+  const MAP = chunkMap([
+    { id: 102, dom_id: "phchunk-1", section: "1 Intro" },
+    { id: 103, dom_id: "phchunk-2", section: "2 Method" },
+  ]);
+
+  function strokeAcross(doc: Document) {
+    const [a, b] = Array.from(doc.querySelectorAll("p")).map((p) => p.lastChild as Text);
+    const range = doc.createRange();
+    range.setStart(a!, 3);
+    range.setEnd(b!, 11);
+    const sel = doc.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    act(() => {
+      doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  }
+
+  function failSecondOnce() {
+    const inner = create.getMockImplementation()!;
+    let failed = false;
+    create.mockImplementation((body, opts) => {
+      if (body.section_key === "2 Method" && !failed) {
+        failed = true;
+        return Promise.reject(new ApiError(500, "boom"));
+      }
+      return inner(body, opts);
+    });
+  }
+
+  it("says so with Retry, which saves only the section still missing", async () => {
+    const doc = frameDoc(TWO_SECTIONS);
+    useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    failSecondOnce();
+    strokeAcross(doc);
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't save the mark.", expect.anything()));
+    // What saved is in the pen session already.
+    expect(useMarksStore.getState().penSession.map((m) => m.id)).toEqual(["mk_1"]);
+    const retry = (toastError.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    expect(retry.label).toBe("Retry");
+    act(() => retry.onClick());
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method", "2 Method"]);
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §1, §2", expect.anything()));
+  });
+
+  it("stroking the same text again saves only what is missing too", async () => {
+    const doc = frameDoc(TWO_SECTIONS);
+    useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    failSecondOnce();
+    strokeAcross(doc);
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    strokeAcross(doc);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method", "2 Method"]);
+  });
+});
+
+describe("Escape and the selection", () => {
+  it("an Escape in the paper while a menu or dialog is open leaves the pen on", () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    act(() => {
+      doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(useMarksStore.getState().penOn).toBe(true);
+    dialog.remove();
+  });
+
+  it("turning the pen on clears a selection left in the paper (it would look marked)", () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    const text = doc.querySelector("p")!.lastChild as Text;
+    const range = doc.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 6);
+    doc.getSelection()!.addRange(range);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    expect(doc.getSelection()!.isCollapsed).toBe(true);
+  });
+});

@@ -23,6 +23,7 @@ import {
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
 import { clearIfStill, htmlPlace } from "@/lib/marks/pieces";
+import { hasOpenLayer } from "@/lib/openLayer";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
 
@@ -250,6 +251,11 @@ export function useHtmlMarks({
     setSeenPen(pen);
     if (pen && selectedIn) setSelected(null);
   }
+  // A selection left in the paper would show in the pen colour as if it
+  // were marked: the pen starts with none.
+  useEffect(() => {
+    if (pen) doc?.getSelection()?.removeAllRanges();
+  }, [pen, doc]);
   const penSave = usePenSave(paperId);
   const penSaveRef = useRef(penSave);
   useEffect(() => {
@@ -341,8 +347,9 @@ export function useHtmlMarks({
       if (e.key !== "Escape") return;
       setSelected(null);
       // The reader's own Escape (focus in the paper) turns the pen off;
-      // one a popover took is not for the pen.
-      if (latest.current.pen && !e.defaultPrevented) useMarksStore.getState().setPen(false);
+      // one a popover took, or one while a menu or dialog is open, is not
+      // for the pen.
+      if (latest.current.pen && !e.defaultPrevented && !hasOpenLayer()) useMarksStore.getState().setPen(false);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== "Escape") read(true);

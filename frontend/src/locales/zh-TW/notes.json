@@ -324,6 +324,7 @@
     "erased": "已擦掉這一段",
     "pieceRestored": "已還原這一段",
     "eraseAgain": "再次擦掉",
-    "eraseFailed": "無法擦掉這一段。"
+    "eraseFailed": "無法擦掉這一段。",
+    "retry": "重試"
   }
 }

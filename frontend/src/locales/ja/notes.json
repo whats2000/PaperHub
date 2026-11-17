@@ -324,6 +324,7 @@
     "erased": "この部分を消しました",
     "pieceRestored": "この部分を元に戻しました",
     "eraseAgain": "もう一度消す",
-    "eraseFailed": "この部分を消せませんでした。"
+    "eraseFailed": "この部分を消せませんでした。",
+    "retry": "再試行"
   }
 }

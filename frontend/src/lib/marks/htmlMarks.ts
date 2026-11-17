@@ -145,7 +145,7 @@ const STYLE = `
 .${LAYER_CLASS}[data-hidden] { opacity: 0; }
 .ph-mk {
   position: absolute; border-radius: 2px;
-  transition: opacity 200ms ease-out, box-shadow 150ms ease-out, background-color 200ms ease-out;
+  transition: opacity 200ms ease-out, box-shadow 150ms ease-out, background-color 200ms ease-out, outline-color 150ms ease-out;
   animation: ph-mk-in 200ms ease-out;
 }
 .ph-mk[data-kind="highlight"] { background: color-mix(in srgb, var(--mk-c) var(--mk-alpha), transparent); }
@@ -157,7 +157,10 @@ const STYLE = `
 ${MARK_COLORS.map((c) => `.ph-mk[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
 .ph-mk[data-dim] { opacity: .25; }
 .ph-mk[data-hot] { box-shadow: 0 0 0 1px var(--mk-ring); }
-html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline: 1.5px dashed var(--mk-hot-fg); outline-offset: 1px; }
+/* With the pen on, the hovered mark is what a click erases: a dashed ring
+   fades in (and out) round it. */
+html[${PEN_ATTR}] .ph-mk:is([data-kind="highlight"], [data-kind="quote"]) { outline: 1.5px dashed transparent; outline-offset: 1px; }
+html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline-style: dashed; outline-color: var(--mk-hot-fg); }
 .ph-mk[data-flash] { box-shadow: 0 0 0 3px var(--mk-ring); }
 .ph-mk-icon {
   position: absolute; display: inline-flex; align-items: center; gap: 1px;

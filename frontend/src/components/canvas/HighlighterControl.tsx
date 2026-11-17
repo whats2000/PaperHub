@@ -6,7 +6,7 @@
  * popover or menu is open) or the button turns it off. Pen and Box turn each
  * other off. */
 import { Highlighter } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { colorLabel } from "@/components/notes/blocks/markProps";
@@ -71,7 +71,13 @@ export function HighlighterControl({ shown }: { shown: boolean }) {
         )}
       >
         <Highlighter aria-hidden className="size-3.5" />
-        {on ? t("marks.highlighterOn", { defaultValue: "Highlighter: {{name}}", name: name(color) }) : t("marks.highlighter", "Highlighter")}
+        <GlidingLabel
+          text={
+            on
+              ? t("marks.highlighterOn", { defaultValue: "Highlighter: {{name}}", name: name(color) })
+              : t("marks.highlighter", "Highlighter")
+          }
+        />
       </button>
       {/* The colours open out of the button while the pen is on, and fold
           back into it when it goes off. */}
@@ -106,6 +112,29 @@ export function HighlighterControl({ shown }: { shown: boolean }) {
             />
           </button>
         ))}
+      </span>
+    </span>
+  );
+}
+
+/** A label whose width glides to its new text (the colour name coming and
+ * going), so the buttons beside it move smoothly instead of jumping. */
+function GlidingLabel({ text }: { text: string }) {
+  const outer = useRef<HTMLSpanElement>(null);
+  const inner = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const o = outer.current;
+    const w = inner.current?.offsetWidth ?? 0;
+    // Not laid out (hidden, or no layout at all): its natural width.
+    if (o) o.style.width = w > 0 ? `${w}px` : "";
+  }, [text]);
+  return (
+    <span
+      ref={outer}
+      className="inline-block overflow-hidden whitespace-nowrap transition-[width] duration-200 ease-out motion-reduce:transition-none"
+    >
+      <span ref={inner} className="inline-block">
+        {text}
       </span>
     </span>
   );
