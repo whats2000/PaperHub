@@ -81,11 +81,13 @@ class TextIndex:
 
 def paragraph_at(index: TextIndex, at: int) -> int | None:
     """The id of the block element (paragraph) the character at ``at`` is
-    in (None outside the text)."""
+    in. None outside the text, and for loose text directly under <body>
+    (the implicit body, id -1), which is no one paragraph."""
     if not 0 <= at < len(index.text) or not index.paragraphs:
         return None
     i = bisect_right(index.paragraphs, at, key=lambda p: p[0]) - 1
-    return index.paragraphs[i][1] if i >= 0 else None
+    block = index.paragraphs[i][1] if i >= 0 else -1
+    return None if block == -1 else block
 
 
 @dataclass

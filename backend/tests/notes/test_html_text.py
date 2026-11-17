@@ -7,7 +7,7 @@ text from the same HTML, or a quote made in the reader is not found again.
 import json
 from pathlib import Path
 
-from paperhub.notes.html_text import build_text_index, tex_text
+from paperhub.notes.html_text import build_text_index, paragraph_at, tex_text
 
 FIXTURE = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "lib"
            / "__fixtures__" / "mark_text")
@@ -55,3 +55,16 @@ def test_implied_end_tags_close_as_a_browser_does() -> None:
     assert open_tags("<dl><dt>a<dd>b") == ["dl", "dd"]
     assert open_tags("<p>a<table><tr><td><div>x") == ["table", "tr", "td", "div"]
     assert open_tags("<p><span>a<div>b") == ["div"]
+
+
+def test_text_directly_under_body_is_in_no_paragraph() -> None:
+    """Loose text under <body> (the implicit body, id -1) is not one
+    paragraph: two unrelated passages there must never join."""
+    index = build_text_index("<html><body>Loose words here.<p>A real paragraph.</p>More loose text.</body></html>")
+    loose = index.text.index("Loose")
+    later = index.text.index("More loose")
+    inside = index.text.index("real")
+    assert paragraph_at(index, loose) is None
+    assert paragraph_at(index, later) is None
+    assert isinstance(paragraph_at(index, inside), int)
+
