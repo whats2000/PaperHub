@@ -167,7 +167,8 @@ function alreadyOnServer(paperId: number, body: MarkIn): MarkCreated | null {
   const want = body.pieces.map(pieceKey);
   const mark = (useMarksStore.getState().marksByPaper[paperId] ?? []).find((m) => {
     if (m.deleted_at !== null || m.kind !== body.kind || m.color !== body.color || m.view !== body.view) return false;
-    const have = new Set(m.pieces.filter((x) => !x.erased && !x.removed).map(pieceKey));
+    // A piece the server lost (after a re-ingest) is not held.
+    const have = new Set(m.pieces.filter((x) => !x.erased && !x.removed && !x.lost).map(pieceKey));
     return want.every((k) => have.has(k));
   });
   if (!mark) return null;

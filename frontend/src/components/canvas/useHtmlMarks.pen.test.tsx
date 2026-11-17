@@ -480,6 +480,27 @@ describe("a stroke that partly fails", () => {
     expect(create).toHaveBeenCalledTimes(3);
   });
 
+  it("pen off/on forgets a failed stroke's progress: a mark deleted since is made again", async () => {
+    const doc = frameDoc(TWO_SECTIONS);
+    useMarksStore.setState({ ensureChunks: vi.fn(() => Promise.resolve(MAP)) });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    failSecondOnce();
+    strokeAcross(doc);
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    // §1's mark is deleted (elsewhere) before the stroke is redone: the
+    // server has nothing to match it, so only the progress record could
+    // skip it.
+    act(() => {
+      useMarksStore.setState({ marksByPaper: { 3: [] } });
+    });
+    act(() => useMarksStore.getState().setPen(false));
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    strokeAcross(doc);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls.slice(2).map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
+  });
+
   it("a retried join says Joined; a retry that only finishes a stroke says Saved", async () => {
     const doc = frameDoc(PAPER);
     render(<Reader doc={doc} />);
@@ -575,16 +596,15 @@ describe("a stroke that reached the server but timed out", () => {
   it("is reconciled from the server, and Retry adds no duplicate", async () => {
     resetMarkOps(60);
     const doc = frameDoc(PAPER);
-    // The server's marks: what a refetch (loadPaper) brings back.
+    // The server's marks: what the refetch brings back.
     const server: Mark[] = [];
-    const loadPaper = vi.fn(() => {
+    const refetchMarks = vi.fn(() => {
       useMarksStore.setState((st) => ({ marksByPaper: { ...st.marksByPaper, 3: [...server] } }));
       return Promise.resolve();
     });
-    useMarksStore.setState({ loadPaper });
+    useMarksStore.setState({ refetchMarks });
     render(<Reader doc={doc} />);
     act(() => useMarksStore.getState().setPen(true, "green"));
-    loadPaper.mockClear();
     // The create lands on the server, but its answer never arrives.
     create.mockImplementation((body) => {
       server.push(mark("mk_s1", { color: body.color, pieces: body.pieces.map((p) => ({ ...p, stroke: 0 })) }));
@@ -593,13 +613,30 @@ describe("a stroke that reached the server but timed out", () => {
     stroke(doc, "agent pose");
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't save the mark.", expect.anything()));
     // Reconciled once: the store now holds the server's mark.
-    await waitFor(() => expect(loadPaper).toHaveBeenCalledWith(3));
+    await waitFor(() => expect(refetchMarks).toHaveBeenCalledWith(3, expect.any(AbortSignal)));
     await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_s1"]));
     const retry = (toastError.mock.lastCall![1] as { action: { onClick: () => void } }).action;
     act(() => retry.onClick());
     await waitFor(() => expect(toastFn.mock.lastCall?.[0]).toBe("Already saved"));
     expect(create).toHaveBeenCalledTimes(1);
     expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1);
+  });
+
+  it("a piece the server lost is not held: re-stroking it marks it again", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke(doc, "agent pose");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    // After a re-ingest the server lost that piece.
+    act(() => {
+      useMarksStore.setState((st) => ({
+        marksByPaper: { 3: st.marksByPaper[3]!.map((m) => ({ ...m, pieces: m.pieces.map((p) => ({ ...p, lost: true })) })) },
+      }));
+    });
+    stroke(doc, "agent pose");
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(toastFn.mock.lastCall?.[0]).not.toBe("Already saved");
   });
 
   it("a PDF stroke whose place can't be found in time says so", async () => {
