@@ -564,4 +564,26 @@ describe("the refetch merge", () => {
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_2"]);
     expect(toastError).toHaveBeenCalledTimes(2);
   });
+
+  it("an older refetch answering after a newer one started never writes", async () => {
+    const stale: Mark = { ...MARK, id: "mk_stale" };
+    const fresh: Mark = { ...MARK, id: "mk_fresh" };
+    let calls = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/marks`, async () => {
+        calls += 1;
+        if (calls === 1) {
+          await new Promise((r) => setTimeout(r, 60));
+          return HttpResponse.json([stale]);
+        }
+        return HttpResponse.json([fresh]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    // Neither is aborted: only the generation tells them apart.
+    const older = useMarksStore.getState().refetchMarks(3);
+    const newer = useMarksStore.getState().refetchMarks(3);
+    await Promise.all([older, newer]);
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_fresh"]);
+  });
 });
