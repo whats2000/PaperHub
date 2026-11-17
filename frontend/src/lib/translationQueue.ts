@@ -1,4 +1,5 @@
 import { translateBlocks } from "@/lib/api";
+import { marksChanged } from "@/store/marks";
 import type {
   TranslateRequest,
   TranslateResponse,
@@ -18,6 +19,9 @@ export interface TranslationQueueOptions {
   send?: (req: TranslateRequest) => Promise<TranslateResponse>;
   maxInFlight?: number;
   batchSize?: number;
+  /** Marks a new translation re-judged (default: the reader's marks and an
+   * open note are refreshed). */
+  onMarksChanged?: (markIds: string[]) => void;
 }
 
 /** What the reader may want to act on: keys whose last result was
@@ -62,6 +66,7 @@ export function createTranslationQueue(
     send = translateBlocks,
     maxInFlight = 2,
     batchSize = 5,
+    onMarksChanged = (ids: string[]) => marksChanged(paperId, ids),
   } = opts;
 
   let order: string[] = [];
@@ -192,6 +197,7 @@ export function createTranslationQueue(
         blocks: keys.map((key) => ({ key, text: text[key] ?? "" })),
       });
       results = res.results;
+      if (res.marks_changed?.length) onMarksChanged(res.marks_changed);
     } catch {
       results = [];
     }

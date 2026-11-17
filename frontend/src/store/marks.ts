@@ -149,6 +149,20 @@ export function toastSaved(paperId: number, results: readonly MarkCreated[]): vo
   });
 }
 
+/** Marks the server re-judged (a paragraph translated again): the paper's
+ * marks and their open notes as the server now has them. */
+export function marksChanged(paperId: number, markIds: readonly string[]): void {
+  void useMarksStore
+    .getState()
+    .refetchMarks(paperId)
+    .then(() => {
+      const list = useMarksStore.getState().marksByPaper[paperId] ?? [];
+      const notes = new Set(list.filter((m) => markIds.includes(m.id)).map((m) => m.note_id));
+      notes.forEach((id) => refreshNote(id));
+    })
+    .catch(() => undefined);
+}
+
 /** Shows a note's new state in an open editor (the server changed it). */
 function refreshNote(noteId: number | undefined): void {
   if (noteId === undefined) return;

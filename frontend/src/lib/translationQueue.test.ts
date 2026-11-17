@@ -395,3 +395,24 @@ describe("translation queue: retry all failed (QA F2)", () => {
     expect(statuses.at(-1)).toEqual({ failed: 0, paused: false });
   });
 });
+
+describe("marks the new translations changed (H5b)", () => {
+  it("passes the marks the server re-judged on to onMarksChanged", async () => {
+    const changed: string[][] = [];
+    const q = createTranslationQueue({
+      paperId: 1,
+      language: "日本語",
+      fullPaper: false,
+      send: (req) =>
+        Promise.resolve({
+          results: req.blocks.map((b) => ({ key: b.key, status: "ok" as const, text: "T", model: "m", stale_terminology: false })),
+          marks_changed: ["mk_1"],
+        }),
+      onMarksChanged: (ids) => changed.push(ids),
+    });
+    q.setBlocks(["h:0"], { "h:0": "x" });
+    q.setVisible(["h:0"]);
+    await flush();
+    expect(changed).toEqual([["mk_1"]]);
+  });
+});

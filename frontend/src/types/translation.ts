@@ -22,6 +22,9 @@ export interface TranslateResult {
 
 export interface TranslateResponse {
   results: TranslateResult[];
+  /** Marks made on these blocks whose status the new translations changed
+   * (their words left the translation, or came back). */
+  marks_changed?: string[];
 }
 
 export interface TranslateConfig {
