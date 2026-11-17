@@ -6,6 +6,7 @@ import {
   attachHtmlMarks,
   darkPreimage,
   darkRendered,
+  markableObjects,
   type HtmlMarksOptions,
 } from "@/lib/marks/htmlMarks";
 import type { Mark, MarkColorInfo } from "@/types/notes";
@@ -254,5 +255,38 @@ describe("the dark reader", () => {
     expect(layer.style.getPropertyValue("--mk-green")).toBe(darkPreimage("#36a067"));
     expect(layer.style.getPropertyValue("--mk-alpha")).toBe("32%");
     expect(layer.style.filter).toBe("");
+  });
+});
+
+describe("figures and display equations", () => {
+  const OBJECTS = `
+    <p id="p1"><span id="phchunk-1"></span>We predict the agent pose ahead of time.</p>
+    <span id="phfig-001"></span><figure id="f1"><img alt="arm"><figcaption>Figure 1: Robot arm.</figcaption></figure>
+    <p id="p2">Inline <span class="math inline">\\(x\\)</span> stays text; <span class="math display">\\[E = mc^2\\]</span></p>
+  `;
+
+  it("finds the figures behind phfig anchors and the display equations, not inline math", () => {
+    const doc = makeDoc(OBJECTS);
+    expect(markableObjects(doc).map((o) => [o.kind, o.figureId, o.el.className || o.el.id])).toEqual([
+      ["figure", "fig-001", "f1"],
+      ["equation", null, "math display"],
+    ]);
+  });
+
+  it("draws a figure mark as one ring around the figure, in its colour", () => {
+    const doc = makeDoc(OBJECTS);
+    doc.getElementById("f1")!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 200);
+    const fig = mark("mf", "Figure 1: Robot arm.", 102, {
+      kind: "figure",
+      color: "pink",
+      pieces: [{ quote: "Figure 1: Robot arm.", chunk_start: 102, chunk_end: 102, prefix: "", suffix: "", figure_id: "fig-001" }],
+    });
+    attachHtmlMarks(doc, opts({ marks: [fig] }));
+    const boxes = doc.querySelectorAll<HTMLElement>('.ph-mk[data-mark="mf"]');
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0]!.dataset.kind).toBe("figure");
+    expect(boxes[0]!.dataset.color).toBe("pink");
+    expect(boxes[0]!.style.width).toBe("300px");
+    expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain('.ph-mk[data-kind="figure"]');
   });
 });

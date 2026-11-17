@@ -237,4 +237,6 @@ export interface PaperPageBlock {
   /** Page fractions x0, y0, x1, y1. */
   box: [number, number, number, number];
   text: string;
+  /** The section the block sits in (where a mark on it files). */
+  section: string | null;
 }

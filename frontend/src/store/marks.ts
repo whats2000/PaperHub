@@ -27,6 +27,9 @@ interface MarksState {
   /** "Show my marks": off hides every mark on the paper (kept, not deleted). */
   showMarks: boolean;
   setShowMarks: (on: boolean) => void;
+  /** The Box tool (PDF pages): a drag draws a box instead of selecting text. */
+  boxOn: boolean;
+  setBoxOn: (on: boolean) => void;
   /** Loads a paper's marks and chunk spans. */
   loadPaper: (paperId: number) => Promise<void>;
   loadColors: () => Promise<void>;
@@ -209,6 +212,8 @@ export const useMarksStore = create<MarksState>()(
         colors: [],
         showMarks: true,
         setShowMarks: (on) => set({ showMarks: on }),
+        boxOn: false,
+        setBoxOn: (on) => set({ boxOn: on }),
 
         loadPaper: async (paperId) => {
           const chunks = get().ensureChunks(paperId).catch(() => undefined);

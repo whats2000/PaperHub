@@ -303,6 +303,14 @@
     "savedToSections": "Saved to {{paper}} › {{sections}}",
     "tooLong": "A mark holds up to {{count}} paragraphs. Select less to mark it.",
     "anchorsFailed": "Couldn't load where this passage sits in the paper. Try again.",
-    "noAnchor": "This passage isn't tied to the paper's text, so it can't be marked."
+    "noAnchor": "This passage isn't tied to the paper's text, so it can't be marked.",
+    "popoverFigure": "Mark the figure",
+    "popoverEquation": "Mark the equation",
+    "popoverBox": "Mark the box",
+    "addToNote": "Add to note",
+    "markFigure": "Mark figure",
+    "markEquation": "Mark equation",
+    "box": "Box",
+    "boxHint": "Box: drag a rectangle on the page to quote a figure, an equation or any region. Esc to stop."
   }
 }

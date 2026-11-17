@@ -29,6 +29,10 @@ export interface MarkPopoverProps {
   busy?: boolean;
   /** The selection was made from the keyboard: focus moves into the popover. */
   autoFocus?: boolean;
+  /** What is being marked: a passage (the default), or a figure, an
+   * equation or a box taken whole — then the plain action reads "Add to
+   * note" (there is no passage to quote). */
+  target?: "selection" | "figure" | "equation" | "box";
   onHighlight: (color: MarkColor) => void;
   onQuote: () => void;
   onAddNote: () => void;
@@ -47,6 +51,7 @@ export function MarkPopover({
   colors,
   busy = false,
   autoFocus = false,
+  target = "selection",
   onHighlight,
   onQuote,
   onAddNote,
@@ -119,7 +124,15 @@ export function MarkPopover({
     <div
       ref={ref}
       role="toolbar"
-      aria-label={t("marks.popover", "Mark the selection")}
+      aria-label={
+        target === "figure"
+          ? t("marks.popoverFigure", "Mark the figure")
+          : target === "equation"
+            ? t("marks.popoverEquation", "Mark the equation")
+            : target === "box"
+              ? t("marks.popoverBox", "Mark the box")
+              : t("marks.popover", "Mark the selection")
+      }
       data-state={presence.state}
       data-side={place.side}
       style={{ top: place.top, left: place.left }}
@@ -165,7 +178,7 @@ export function MarkPopover({
         className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
       >
         <TextQuote aria-hidden className="size-3.5" />
-        {t("marks.quote", "Quote to note")}
+        {target === "selection" ? t("marks.quote", "Quote to note") : t("marks.addToNote", "Add to note")}
       </button>
       <button
         type="button"

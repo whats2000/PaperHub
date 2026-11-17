@@ -1,14 +1,17 @@
 /** Marks in the HTML reader (Plan H5b.1): draws the paper's marks over the
  * loaded document and turns a selection into a mark through the popover
- * under it. Returns the popover to render over the iframe. */
+ * under it; a figure or a display equation is marked whole from the button
+ * at its corner. Returns the popover and the corner buttons to render over
+ * the iframe. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
-import { groupBySection, selectionToPieces, type HtmlPiece } from "@/lib/marks/anchor";
-import { attachHtmlMarks, type HtmlMarksHandle } from "@/lib/marks/htmlMarks";
-import { openMarkInNotes, useMarkSave } from "@/components/canvas/useMarkSave";
+import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
+import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import { groupBySection, selectionToPieces, type ChunkMap, type HtmlPiece } from "@/lib/marks/anchor";
+import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
 
@@ -24,6 +27,126 @@ interface Selected {
   pieces: HtmlPiece[];
   /** Made from the keyboard: the popover takes focus. */
   keyboard: boolean;
+  /** A figure or equation taken whole (its corner button). */
+  object?: HtmlObject;
+}
+
+/** How long a corner button stays after the pointer leaves its object. */
+const OBJECT_HIDE_MS = 120;
+
+interface PlacedObject {
+  obj: HtmlObject;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+interface MathJaxStartup {
+  MathJax?: { startup?: { promise?: Promise<unknown> } };
+}
+
+/** The paper's figures and display equations in view, placed in the
+ * iframe's coordinates, and which one the pointer is over. */
+function useHtmlObjects(doc: Document | null, enabled: boolean) {
+  // Placed for one document: another document starts with none.
+  const [placed, setPlaced] = useState<{ doc: Document; list: PlacedObject[] } | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled || !doc?.body) return;
+    const win = doc.defaultView;
+    let list = markableObjects(doc);
+    const place = () => {
+      const height = win?.innerHeight || Infinity;
+      setPlaced({
+        doc,
+        list: list
+          .map((obj) => {
+            const r = obj.el.getBoundingClientRect();
+            return { obj, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+          })
+          .filter((p) => p.right > p.left && p.bottom > p.top && p.bottom > 0 && p.top < height),
+      });
+    };
+    let frame = 0;
+    const schedule = () => {
+      if (frame || !win) return;
+      frame = win.requestAnimationFrame(() => {
+        frame = 0;
+        place();
+      });
+    };
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const onMove = (e: MouseEvent) => {
+      // The document's own Node (an iframe has its own globals).
+      const target = e.target as Node | null;
+      const hit = target ? list.find((o) => o.el.contains(target)) : undefined;
+      clearTimeout(hideTimer);
+      if (hit) setHovered(hit.key);
+      else hideTimer = setTimeout(() => setHovered(null), OBJECT_HIDE_MS);
+    };
+    const onLeave = () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => setHovered(null), OBJECT_HIDE_MS);
+    };
+    place();
+    // MathJax typesets display math after load: find the objects again.
+    void (win as (Window & MathJaxStartup) | null)?.MathJax?.startup?.promise
+      ?.then(() => {
+        list = markableObjects(doc);
+        schedule();
+      })
+      .catch(() => undefined);
+    win?.addEventListener("scroll", schedule, { passive: true });
+    win?.addEventListener("resize", schedule);
+    doc.addEventListener("mousemove", onMove);
+    doc.documentElement.addEventListener("mouseleave", onLeave);
+    return () => {
+      clearTimeout(hideTimer);
+      if (frame && win) win.cancelAnimationFrame(frame);
+      win?.removeEventListener("scroll", schedule);
+      win?.removeEventListener("resize", schedule);
+      doc.removeEventListener("mousemove", onMove);
+      doc.documentElement.removeEventListener("mouseleave", onLeave);
+    };
+  }, [doc, enabled]);
+  return { placed: enabled && placed?.doc === doc ? placed.list : [], hovered };
+}
+
+/** The chunk of the last `phchunk` span before an element. */
+function chunkBefore(el: Element, map: ChunkMap): number | null {
+  let found: number | null = null;
+  for (const span of Array.from(el.ownerDocument.querySelectorAll('span[id^="phchunk-"]'))) {
+    if (!(span.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+    found = map.byDom.get(span.id)?.id ?? found;
+  }
+  return found;
+}
+
+/** The one piece of a figure or equation taken whole: its caption or TeX
+ * as the quote (anchored like a passage), and its figure id or LaTeX (the
+ * paper's own source, not a model's transcription). */
+function objectPiece(doc: Document, obj: HtmlObject, map: ChunkMap): HtmlPiece | null {
+  const range = doc.createRange();
+  range.selectNode(obj.el);
+  const pieces = selectionToPieces(doc, range, map);
+  if (obj.kind === "equation") {
+    const p = pieces[0];
+    if (!p || p.chunk_start === null) return null;
+    return { ...p, latex: p.quote.replace(/^\$|\$$/g, ""), latex_from: "source" };
+  }
+  const first = pieces[0];
+  const last = pieces[pieces.length - 1];
+  const chunk = first?.chunk_start ?? chunkBefore(obj.el, map);
+  if (chunk === null) return null;
+  return {
+    quote: pieces.map((p) => p.quote).join(" "),
+    chunk_start: chunk,
+    chunk_end: last?.chunk_end ?? chunk,
+    prefix: first?.prefix ?? "",
+    suffix: last?.suffix ?? "",
+    figure_id: obj.figureId,
+  };
 }
 
 function boxOf(range: Range): SelectionBox {
@@ -170,8 +293,9 @@ export function useHtmlMarks({
   const save = useCallback(
     async (kind: "highlight" | "quote", color: MarkColor | null, addNote: boolean) => {
       if (!selected || paperId === null || !doc) return;
+      const obj = selected.object;
       const ok = await saveMarks({
-        kind,
+        kind: obj ? obj.kind : kind,
         color,
         view: "html",
         addNote,
@@ -184,6 +308,16 @@ export function useHtmlMarks({
           } catch {
             toast.error(t("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
             return null;
+          }
+          if (obj) {
+            const piece = objectPiece(doc, obj, map);
+            if (!piece) {
+              toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+              return null;
+            }
+            const section = (piece.chunk_start !== null && map.byId.get(piece.chunk_start)?.section) || null;
+            const groups: MarkGroup[] = [{ section, pieces: [piece] }];
+            return groups;
           }
           const pieces = selectionToPieces(doc, selected.range, map);
           if (!pieces.length || pieces.some((p) => p.chunk_start === null)) {
@@ -201,23 +335,60 @@ export function useHtmlMarks({
     [selected, paperId, doc, ensureChunks, saveMarks, t],
   );
 
+  const objects = useHtmlObjects(doc, paperId !== null);
+  const [overButton, setOverButton] = useState<string | null>(null);
+  const openObject = (obj: HtmlObject) => {
+    if (!doc) return;
+    const win = doc.defaultView;
+    const range = doc.createRange();
+    range.selectNode(obj.el);
+    doc.getSelection()?.removeAllRanges();
+    setBounds({ width: win?.innerWidth ?? 0, height: win?.innerHeight ?? 0 });
+    const r = obj.el.getBoundingClientRect();
+    setSelected({
+      doc,
+      range,
+      box: { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      pieces: [],
+      keyboard: false,
+      object: obj,
+    });
+  };
+
   if (paperId === null) return null;
   return (
-    <MarkPopover
-      open={selected !== null}
-      anchor={selected?.box ?? null}
-      bounds={bounds}
-      colors={colors}
-      busy={busy}
-      autoFocus={selected?.keyboard ?? false}
-      onHighlight={(c) => void save("highlight", c, false)}
-      onQuote={() => void save("quote", null, false)}
-      onAddNote={() => void save("quote", null, true)}
-      onClose={(opts) => {
-        setSelected(null);
-        // Escape from the popover: back to the reader, selection kept.
-        if (opts?.returnFocus) doc?.defaultView?.focus();
-      }}
-    />
+    <>
+      {objects.placed.map(({ obj, top, right }) => (
+        <ObjectMarkButton
+          key={obj.key}
+          kind={obj.kind}
+          shown={objects.hovered === obj.key || overButton === obj.key}
+          style={{
+            left: right,
+            top,
+            transform: obj.kind === "figure" ? "translate(calc(-100% - 6px), 6px)" : "translate(-100%, calc(-100% - 2px))",
+          }}
+          onHoverChange={(over) => setOverButton(over ? obj.key : null)}
+          onActivate={() => openObject(obj)}
+        />
+      ))}
+      <MarkPopover
+        open={selected !== null}
+        anchor={selected?.box ?? null}
+        bounds={bounds}
+        colors={colors}
+        busy={busy}
+        target={selected?.object?.kind ?? "selection"}
+        autoFocus={selected?.keyboard ?? false}
+        onHighlight={(c) => void save("highlight", c, false)}
+        onQuote={() => void save("quote", null, false)}
+        onAddNote={() => void save("quote", null, true)}
+        onClose={(opts) => {
+          setSelected(null);
+          // Escape from the popover: back to the reader, selection kept.
+          if (opts?.returnFocus) doc?.defaultView?.focus();
+        }}
+      />
+    </>
   );
 }

@@ -303,6 +303,14 @@
     "savedToSections": "已存到 {{paper}} › {{sections}}",
     "tooLong": "一個標記最多 {{count}} 段。請選少一點再標記。",
     "anchorsFailed": "無法載入這段文字在論文中的位置，請再試一次。",
-    "noAnchor": "這段文字沒有對應到論文內文，無法標記。"
+    "noAnchor": "這段文字沒有對應到論文內文，無法標記。",
+    "popoverFigure": "標記這張圖",
+    "popoverEquation": "標記這條公式",
+    "popoverBox": "標記這個框",
+    "addToNote": "加入筆記",
+    "markFigure": "標記圖",
+    "markEquation": "標記公式",
+    "box": "框選",
+    "boxHint": "框選：在頁面上拖出一個方框，引用圖、公式或任何區域。按 Esc 結束。"
   }
 }

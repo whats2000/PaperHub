@@ -40,6 +40,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { PaperLoading } from "@/components/canvas/PaperLoading";
+import { BoxToolButton } from "@/components/canvas/BoxTool";
 import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
@@ -682,8 +683,8 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // Stay mounted while there are references to prefetch (even when closed) so
   // their content loads + caches for the session; render nothing only when
   // closed AND there's nothing to prefetch.
-  // Publish how the paper is shown: a PDF (a PDF-only paper or the PDF tab)
-  // does not report the section being read yet, so the notes' Follow says so.
+  // Publish how the paper is shown: the HTML, or a PDF (a PDF-only paper or
+  // the PDF tab), where the reader bar offers the Box tool.
   const readerKind: "html" | "pdf" | null =
     !open || effectivePaperId == null || !activeDoc
       ? null
@@ -720,8 +721,10 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // side by side on a track that slides toward the chosen one.
   const activeHasPagePdf =
     activeDoc?.mode === "html" && activeDoc.status === "ready" && activeDoc.pagePdf === true;
-  // Marks are drawn on HTML papers (PDF marks come with the PDF layer).
-  const marksToggleShown = !standalone && activeDoc?.mode === "html" && activeDoc.status === "ready";
+  // Marks are drawn on every paper the chat's reader shows (HTML and PDF);
+  // the Box tool is for PDF pages.
+  const marksToggleShown = !standalone && activeDoc?.status === "ready";
+  const boxToolShown = marksToggleShown && readerKind === "pdf";
   const readerBarOpen = activeHasPagePdf || marksToggleShown;
   const readerTab: ReaderTab =
     effectivePaperId != null && activeHasPagePdf
@@ -836,7 +839,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       </header>
 
       {/* The reader bar: HTML | PDF tabs for an HTML paper with a page PDF,
-          and "Show my marks" for an HTML paper. Always mounted: the bar's
+          "Show my marks" for any paper and Box on a PDF. Always mounted: the bar's
           height opens and closes so the reader below glides. */}
       <div
         data-reader-tabs
@@ -892,6 +895,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
               ))}
             </div>
             <span className="flex-1" />
+            {!standalone && <BoxToolButton shown={boxToolShown} />}
             {!standalone && <ShowMarksToggle shown={marksToggleShown} />}
           </div>
         </div>
@@ -951,7 +955,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 html={doc.html}
                 isDark={isDark}
                 onReadingHeading={
-                  isActive && !standalone ? (h, within) => setReadingSection(pid, h, within) : undefined
+                  isActive && !standalone && readerTab === "html"
+                    ? (h, within) => setReadingSection(pid, h, within)
+                    : undefined
                 }
                 scrollBehavior={scrollAnimate ? "smooth" : "instant"}
                 nonce={
@@ -1025,6 +1031,12 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                   bbox={regionTarget?.paper === effectivePaperId ? regionTarget.bbox : null}
                   nonce={regionTarget?.paper === effectivePaperId ? highlightNonce : 0}
                   onHighlightMiss={() => toast.message(t("toast.regionGone"))}
+                  marks={standalone ? undefined : { paperId: effectivePaperId }}
+                  onReadingHeading={
+                    !standalone && readerTab === "pdf"
+                      ? (h, within) => setReadingSection(effectivePaperId, h, within)
+                      : undefined
+                  }
                 />
               </DeferredRemount>
             ))}
@@ -1047,6 +1059,10 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 nonce={pdfTarget(effectivePaperId) ? highlightNonce : 0}
                 onHighlightMiss={() =>
                   toast.message(t("toast.passageNotFoundPdf"))
+                }
+                marks={standalone ? undefined : { paperId: effectivePaperId }}
+                onReadingHeading={
+                  standalone ? undefined : (h, within) => setReadingSection(effectivePaperId, h, within)
                 }
                 translation={{
                   ...translationFor(effectivePaperId),

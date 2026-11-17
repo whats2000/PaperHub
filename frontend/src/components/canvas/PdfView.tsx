@@ -6,6 +6,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
 import { PaperLoading } from "@/components/canvas/PaperLoading";
+import { PdfMarksPage } from "@/components/canvas/PdfMarksLayer";
+import { PdfMarksProvider, usePdfMarks } from "@/components/canvas/usePdfMarks";
 import {
   PdfTranslationLayer,
   PdfTranslationPage,
@@ -80,6 +82,13 @@ interface Props {
   onHighlightMiss?: () => void;
   /** Hover/pin translation card for this PDF's paragraphs. */
   translation?: PdfTranslationOptions;
+  /** Plan H5b.1 marks: the paper's marks drawn on its pages, a selection,
+   * a figure / equation or a box turned into a mark. Omitted keeps the
+   * reader without marks. */
+  marks?: { paperId: number };
+  /** The section of the Marker block at the top of the view, after each
+   * scroll settles (Follow in the notes). Needs `marks`. */
+  onReadingHeading?: (heading: string | null, within: string[]) => void;
 }
 
 /**
@@ -101,6 +110,8 @@ export function PdfView({
   nonce = 0,
   onHighlightMiss,
   translation,
+  marks,
+  onReadingHeading,
 }: Props) {
   const { t } = useTranslation("canvas");
   // F2.1 A2': a non-null page + a well-formed length-4 bbox means we draw the
@@ -117,6 +128,14 @@ export function PdfView({
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   // Per-document text-item strings, built once and reused across passages.
   const pageTextRef = useRef<string[][] | null>(null);
+  // Pages whose text layer holds no text (a scan) by 1-based page number:
+  // a drag there draws a box.
+  const [scannedPages, setScannedPages] = useState<Record<number, boolean>>({});
+  const pdfMarks = usePdfMarks({
+    paperId: marks?.paperId ?? null,
+    readerRef: containerRef,
+    onReadingHeading,
+  });
 
   // pdfjs TRANSFERS (detaches) the ArrayBuffer it's given to its worker, so
   // passing the cached bytes directly would corrupt them and make a second
@@ -292,12 +311,19 @@ export function PdfView({
                   : { ...prev, [i + 1]: page.originalWidth },
               )
             }
+            onGetTextSuccess={({ items }) => {
+              const scanned = !items.some((it) => "str" in it && it.str.trim() !== "");
+              setScannedPages((prev) =>
+                prev[i + 1] === scanned ? prev : { ...prev, [i + 1]: scanned },
+              );
+            }}
           >
             <PdfTranslationPage
               pageNumber={i + 1}
               renderedWidth={width}
               originalWidth={pageWidths[i + 1] ?? 0}
             />
+            <PdfMarksPage pageNumber={i + 1} hasTextLayer={!scannedPages[i + 1]} />
             {isTarget && highlight && (
               <div
                 key={`${highlight.key}:${nonce}`}
@@ -325,12 +351,14 @@ export function PdfView({
   );
 
   return (
+    <div className="relative h-full w-full">
     <div
       ref={containerRef}
       className="h-full w-full overflow-auto bg-neutral-100 p-3 dark:bg-neutral-900"
     >
       {/* Always mounted (disabled without `translation`) so toggling
           translation never restructures — and so never reloads — the PDF. */}
+      <PdfMarksProvider value={pdfMarks.ctx}>
       <PdfTranslationLayer
         paperId={translation?.paperId ?? 0}
         language={translation?.language ?? ""}
@@ -346,6 +374,10 @@ export function PdfView({
       >
         {pdfDocument}
       </PdfTranslationLayer>
+      </PdfMarksProvider>
+    </div>
+    {/* Over the reader, outside its scroll: placed in the reader's box. */}
+    {pdfMarks.popover}
     </div>
   );
 }

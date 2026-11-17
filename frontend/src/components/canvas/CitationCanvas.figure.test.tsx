@@ -32,6 +32,7 @@ vi.mock("@/components/canvas/PdfView", () => ({
 
 import { CitationCanvas } from "@/components/canvas/CitationCanvas";
 import { API_BASE_URL } from "@/lib/api";
+import { useMarksStore } from "@/store/marks";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import type { ReferenceItem } from "@/types/domain";
@@ -237,11 +238,27 @@ describe("CitationCanvas — figure and region citations", () => {
     expect(screen.getByRole("tab", { name: "PDF" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "PDF" })).toHaveFocus();
 
-    // A PDF paper has no tabs: the bar collapses (stays mounted, animates).
+    // A PDF paper has no tabs (hidden, faded); the bar stays for its marks:
+    // Show my marks and the Box tool.
     act(() => useCanvasStore.getState().openPaper(PDF_PAPER));
-    await waitFor(() =>
-      expect(container.querySelector("[data-reader-tabs]")?.getAttribute("data-open")).toBe("false"));
-    expect(screen.queryByRole("tab", { name: "HTML" })).toBeNull();   // hidden from a11y
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "HTML" })).toBeNull()); // hidden from a11y
+    expect(container.querySelector("[data-reader-tabs]")?.getAttribute("data-open")).toBe("true");
+    expect(screen.getByRole("button", { name: "Box" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Show my marks" })).toBeInTheDocument();
+  });
+
+  it("offers the Box tool on a PDF only, and stops it when the reader leaves the PDF", async () => {
+    const user = userEvent.setup();
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LATEX_PAPER));
+    await screen.findByRole("tab", { name: "PDF" });
+    expect(screen.queryByRole("button", { name: "Box" })).toBeNull(); // hidden on the HTML
+    await user.click(screen.getByRole("tab", { name: "PDF" }));
+    const box = await screen.findByRole("button", { name: "Box" });
+    await user.click(box);
+    expect(useMarksStore.getState().boxOn).toBe(true);
+    await user.click(screen.getByRole("tab", { name: "HTML" }));
+    await waitFor(() => expect(useMarksStore.getState().boxOn).toBe(false));
   });
 
   it("publishes whether the reader shows the paper as HTML or as a PDF (Follow in the notes)", async () => {

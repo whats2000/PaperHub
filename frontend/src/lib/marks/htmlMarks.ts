@@ -27,8 +27,56 @@ const ICON_GAP = 6;
 
 export const MARK_COLORS: readonly MarkColor[] = ["green", "blue", "pink", "purple"];
 
+/** What a figure citation opens on, after its `phfig-NNN` anchor. */
+const FIGURE_SEL = 'figure, div[class^="figure"], img';
+/** A display equation (inline math stays part of the sentence's text). */
+const DISPLAY_MATH = 'mjx-container[display="true"], .math.display, math[display="block"]';
+const NOT_PAPER = ".ph-tr, [data-ph-overlay]";
+
+/** A figure or display equation a mark can take whole. */
+export interface HtmlObject {
+  key: string;
+  el: HTMLElement;
+  kind: "figure" | "equation";
+  /** The asset figure id (`fig-001`) of a figure. */
+  figureId: string | null;
+}
+
+/** The figure after a `phfig-NNN` anchor (as a [fig:] citation finds it). */
+function figureAfter(anchor: Element, figures: readonly HTMLElement[]): HTMLElement | null {
+  return figures.find((el) => anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) ?? null;
+}
+
+function paperFigures(doc: Document): HTMLElement[] {
+  return Array.from(doc.querySelectorAll<HTMLElement>(FIGURE_SEL)).filter((el) => !el.closest(NOT_PAPER));
+}
+
+/** A figure by its asset id (`fig-001` → after `#phfig-001`). */
+export function figureById(doc: Document, figureId: string): HTMLElement | null {
+  const anchor = doc.getElementById(`ph${figureId}`);
+  return anchor ? figureAfter(anchor, paperFigures(doc)) : null;
+}
+
+/** The paper's figures (those with a `phfig` anchor) and display
+ * equations, in document order. */
+export function markableObjects(doc: Document): HtmlObject[] {
+  const out: HtmlObject[] = [];
+  const figures = paperFigures(doc);
+  const taken = new Set<Element>();
+  for (const anchor of Array.from(doc.querySelectorAll('span[id^="phfig-"]'))) {
+    const el = figureAfter(anchor, figures);
+    if (!el || taken.has(el)) continue;
+    taken.add(el);
+    out.push({ key: anchor.id, el, kind: "figure", figureId: anchor.id.slice(2) });
+  }
+  Array.from(doc.querySelectorAll<HTMLElement>(DISPLAY_MATH))
+    .filter((el) => !el.closest(NOT_PAPER) && !el.parentElement?.closest(DISPLAY_MATH))
+    .forEach((el, i) => out.push({ key: `eq:${i}`, el, kind: "equation", figureId: null }));
+  return out.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+}
+
 /** The palette (index.css `--hl-*`), used when the app's tokens can't be read. */
-const FALLBACK: Record<"light" | "dark", Record<MarkColor, string>> = {
+export const MARK_PALETTE: Record<"light" | "dark", Record<MarkColor, string>> = {
   light: { green: "#2f9e63", blue: "#3b7dd8", pink: "#d6457e", purple: "#8b5cd6" },
   dark: { green: "#36a067", blue: "#4b86dc", pink: "#d9578a", purple: "#9670dc" },
 };
@@ -96,6 +144,10 @@ const STYLE = `
 }
 .ph-mk[data-kind="highlight"] { background: color-mix(in srgb, var(--mk-c) var(--mk-alpha), transparent); }
 .ph-mk[data-kind="quote"] { border-bottom: 1px solid var(--mk-neutral); border-radius: 0; }
+.ph-mk[data-kind="figure"], .ph-mk[data-kind="equation"] {
+  outline: 2px solid color-mix(in srgb, var(--mk-c, var(--mk-neutral)) 70%, transparent);
+  outline-offset: 3px; border-radius: 4px;
+}
 ${MARK_COLORS.map((c) => `.ph-mk[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
 .ph-mk[data-dim] { opacity: .25; }
 .ph-mk[data-hot] { box-shadow: 0 0 0 1px var(--mk-ring); }
@@ -151,6 +203,10 @@ interface Drawn {
   key: string;
   /** The marked passages (a quote mark), or none (a note with no quote). */
   ranges: Range[];
+  /** A figure or equation taken whole: one box around each range and each
+   * of `targets`. */
+  whole: boolean;
+  targets: Element[];
   /** Where a note with no quote sits: its chunk spans. */
   spots: Element[];
   els: HTMLElement[];
@@ -174,7 +230,7 @@ const hasQuote = (m: Mark) => livePieces(m).some((p) => typeof p.quote === "stri
 function drawable(m: Mark, hidden: ReadonlySet<string>): boolean {
   if (m.deleted_at !== null || m.lang) return false;
   if (m.color !== null && hidden.has(m.color)) return false;
-  return m.kind === "quote" || m.kind === "highlight";
+  return m.kind === "quote" || m.kind === "highlight" || m.kind === "figure" || m.kind === "equation";
 }
 
 /** One box per line: line boxes of the same line that touch are merged. */
@@ -213,7 +269,7 @@ function iconSvg(doc: Document): SVGElement {
 
 /** The app's palette for the current theme (its `--hl-*` tokens). */
 function palette(dark: boolean): Record<MarkColor, string> {
-  const out = { ...FALLBACK[dark ? "dark" : "light"] };
+  const out = { ...MARK_PALETTE[dark ? "dark" : "light"] };
   try {
     const css = getComputedStyle(document.documentElement);
     for (const c of MARK_COLORS) {
@@ -313,9 +369,15 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     const viewRight = (doc.documentElement.clientWidth || win?.innerWidth || 0) - at.left;
     for (const [id, d] of drawn) {
       const boxes: Box[] = [];
-      for (const range of d.ranges) {
-        for (const r of lineBoxes(Array.from(range.getClientRects()))) {
-          boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
+      if (d.whole) {
+        for (const r of [...d.ranges, ...d.targets].map((x) => x.getBoundingClientRect())) {
+          if (r.width > 0 && r.height > 0) boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
+        }
+      } else {
+        for (const range of d.ranges) {
+          for (const r of lineBoxes(Array.from(range.getClientRects()))) {
+            boxes.push({ left: r.left - at.left, top: r.top - at.top, width: r.width, height: r.height });
+          }
         }
       }
       // A note with no quote: a margin icon on its passage's first line.
@@ -375,7 +437,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       if (!m) continue;
       for (const el of d.els) {
         el.dataset.kind = m.kind;
-        if (m.kind === "highlight" && m.color) el.dataset.color = m.color;
+        if (m.kind !== "quote" && m.color) el.dataset.color = m.color;
         else delete el.dataset.color;
         setFlag(el, "data-dim", o.focusIds !== null && !o.focusIds.has(id));
         setFlag(el, "data-hot", hot === id);
@@ -413,7 +475,13 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       if (prev?.key === key) continue;
       let ranges: Range[] = [];
       let spots: Element[] = [];
-      if (hasQuote(m)) {
+      let targets: Element[] = [];
+      const whole = m.kind === "figure" || m.kind === "equation";
+      const figureId = livePieces(m).find((p) => typeof p.figure_id === "string")?.figure_id;
+      if (m.kind === "figure" && typeof figureId === "string") {
+        const el = figureById(doc, figureId);
+        targets = el ? [el] : [];
+      } else if (hasQuote(m)) {
         index ??= buildTextIndex(doc);
         ranges = livePieces(m)
           .map((p) => findPiece(index!, p, o.chunks))
@@ -421,12 +489,13 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       } else {
         spots = spotsOf(m);
       }
-      if (!ranges.length && !spots.length) {
+      if (whole) spots = [];
+      if (!ranges.length && !spots.length && !targets.length) {
         prev?.els.forEach(leave);
         drawn.delete(id);
         continue;
       }
-      drawn.set(id, { key, ranges, spots, els: prev?.els ?? [], boxes: [] });
+      drawn.set(id, { key, ranges, whole, targets, spots, els: prev?.els ?? [], boxes: [] });
     }
     index = null; // the document may change before the next sync
     setFlag(layer, "data-hidden", !o.visible);

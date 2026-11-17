@@ -303,6 +303,14 @@
     "savedToSections": "{{paper}} › {{sections}} に保存しました",
     "tooLong": "印は {{count}} 段落までです。選択を減らしてから印をつけてください。",
     "anchorsFailed": "この箇所が論文のどこにあるか読み込めませんでした。もう一度お試しください。",
-    "noAnchor": "この箇所は論文本文に対応していないため、印をつけられません。"
+    "noAnchor": "この箇所は論文本文に対応していないため、印をつけられません。",
+    "popoverFigure": "この図をマーク",
+    "popoverEquation": "この数式をマーク",
+    "popoverBox": "この枠をマーク",
+    "addToNote": "ノートに追加",
+    "markFigure": "図をマーク",
+    "markEquation": "数式をマーク",
+    "box": "ボックス",
+    "boxHint": "ボックス：ページ上で四角形をドラッグして、図・数式・任意の領域を引用します。Esc で終了。"
   }
 }

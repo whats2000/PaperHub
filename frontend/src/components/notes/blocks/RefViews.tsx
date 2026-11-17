@@ -53,6 +53,9 @@ export function PaperEquationView({ id, props }: ViewProps) {
   const { t } = useTranslation();
   const piece = markPieces(props)[0];
   const latex = typeof piece?.latex === "string" ? piece.latex : "";
+  // The HTML reader's LaTeX is the paper's own source; a PDF's is Marker's
+  // transcription, to check against the crop.
+  const transcribed = latex !== "" && piece?.latex_from !== "source";
   const html = useMemo(
     () => (latex ? katex.renderToString(latex, { displayMode: true, throwOnError: false }) : ""),
     [latex],
@@ -64,7 +67,7 @@ export function PaperEquationView({ id, props }: ViewProps) {
       icon={<Sigma className="size-3 shrink-0" aria-hidden />}
       label={t("notes:ref.equation", "Equation from the paper")}
       tagExtra={
-        latex ? (
+        transcribed ? (
           <span className="ml-1 inline-flex items-center gap-0.5">
             <Sparkles className="size-3" aria-hidden />
             {t("notes:ref.latexByModel", "LaTeX transcribed by the model · check it against the page")}

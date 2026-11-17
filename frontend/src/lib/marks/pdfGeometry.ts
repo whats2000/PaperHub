@@ -1,0 +1,367 @@
+/** Geometry for marks on PDF pages (Plan H5b.1).
+ *
+ * Everything is in page fractions `[x0, y0, x1, y1]` (0..1, top-left
+ * origin), the unit Marker's blocks come in (`GET …/blocks`) and marks are
+ * stored in, so a mark keeps its place at any zoom. Text marks take their
+ * line boxes from the rendered text layer (react-pdf's spans); the Marker
+ * block that holds a selection's centre gives its block id and section —
+ * the two layouts can disagree by a little, so no exact match is needed.
+ */
+import type { MarkPiece, PaperPageBlock } from "@/types/notes";
+
+export type Frac = [number, number, number, number];
+
+/** The text layer react-pdf renders on each page. */
+export const TEXT_LAYER = ".react-pdf__Page__textContent, .textLayer";
+/** Marker blocks a mark can take whole (the corner mark button). */
+export const FIGURE_TYPES = new Set(["Figure", "Picture"]);
+export const EQUATION_TYPE = "Equation";
+/** A box covering more than this share of an equation becomes that equation. */
+export const EQUATION_SNAP = 0.5;
+/** A box this much inside a figure (and smaller than it) is one of its panels. */
+const PANEL_INSIDE = 0.9;
+const PANEL_MAX_SHARE = 0.85;
+/** Line boxes closer than this (page widths) on one line join. */
+const LINE_GAP = 0.02;
+
+const round = (v: number) => Math.round(v * 10000) / 10000;
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** A client rect as fractions of the page's client rect. */
+export function toFrac(r: Box, page: Box): Frac {
+  const w = page.right - page.left || 1;
+  const h = page.bottom - page.top || 1;
+  return [
+    round(clamp01((r.left - page.left) / w)),
+    round(clamp01((r.top - page.top) / h)),
+    round(clamp01((r.right - page.left) / w)),
+    round(clamp01((r.bottom - page.top) / h)),
+  ];
+}
+
+export function area(b: Frac): number {
+  return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+}
+
+export function intersection(a: Frac, b: Frac): number {
+  const w = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** The share of `target` that `box` covers. */
+export function coverage(box: Frac, target: Frac): number {
+  const a = area(target);
+  return a > 0 ? intersection(box, target) / a : 0;
+}
+
+export function union(boxes: readonly Frac[]): Frac | null {
+  if (!boxes.length) return null;
+  return [
+    Math.min(...boxes.map((b) => b[0])),
+    Math.min(...boxes.map((b) => b[1])),
+    Math.max(...boxes.map((b) => b[2])),
+    Math.max(...boxes.map((b) => b[3])),
+  ];
+}
+
+const centre = (b: Frac): [number, number] => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+const inside = (b: Frac, x: number, y: number) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
+
+/** One box per line: boxes on the same line that touch are joined. */
+export function lineBoxes(boxes: readonly Frac[]): Frac[] {
+  const out: Frac[] = [];
+  for (const b of boxes) {
+    if (b[2] <= b[0] || b[3] <= b[1]) continue;
+    const line = out.find((o) => {
+      const overlap = Math.min(o[3], b[3]) - Math.max(o[1], b[1]);
+      const minH = Math.min(o[3] - o[1], b[3] - b[1]);
+      return overlap > minH / 2 && b[0] <= o[2] + LINE_GAP && b[2] >= o[0] - LINE_GAP;
+    });
+    if (line) {
+      line[0] = Math.min(line[0], b[0]);
+      line[1] = Math.min(line[1], b[1]);
+      line[2] = Math.max(line[2], b[2]);
+      line[3] = Math.max(line[3], b[3]);
+    } else {
+      out.push([...b]);
+    }
+  }
+  return out.map((b) => b.map(round) as Frac);
+}
+
+/** The client rects of characters `[start, end)` of a text-layer node: the
+ * browser's own when it lays them out, else the span's box cut by the share
+ * of characters (pdf.js stretches each span to its text's width). */
+export function nodeRects(node: Text, start: number, end: number): Box[] {
+  const doc = node.ownerDocument;
+  const sub = doc.createRange();
+  sub.setStart(node, start);
+  sub.setEnd(node, end);
+  const own = typeof sub.getClientRects === "function" ? Array.from(sub.getClientRects()) : [];
+  const real = own.filter((r) => r.width > 0 && r.height > 0);
+  if (real.length) return real;
+  const span = node.parentElement;
+  if (!span) return [];
+  const r = span.getBoundingClientRect();
+  const len = node.data.length || 1;
+  const w = r.right - r.left;
+  return [{ left: r.left + (w * start) / len, right: r.left + (w * end) / len, top: r.top, bottom: r.bottom }];
+}
+
+/** The Marker block holding a point: the smallest that contains it, else
+ * the nearest (the text layer and Marker's layout differ a little). */
+export function blockAt(blocks: readonly PaperPageBlock[], x: number, y: number): PaperPageBlock | null {
+  const holding = blocks.filter((b) => inside(b.box, x, y));
+  if (holding.length) return holding.reduce((a, b) => (area(b.box) < area(a.box) ? b : a));
+  let best: PaperPageBlock | null = null;
+  let bestD = 0.05; // further than this is no block of this text
+  for (const b of blocks) {
+    const dx = Math.max(b.box[0] - x, 0, x - b.box[2]);
+    const dy = Math.max(b.box[1] - y, 0, y - b.box[3]);
+    const d = Math.hypot(dx, dy);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+/** One text-layer span on a page, as fractions. */
+export interface LayerSpan {
+  text: string;
+  node: Text;
+  box: Frac;
+}
+
+/** The text-layer spans of a page, in reading (DOM) order. */
+export function layerSpans(page: Element): LayerSpan[] {
+  const layer = page.querySelector(TEXT_LAYER);
+  if (!layer) return [];
+  const pb = page.getBoundingClientRect();
+  const out: LayerSpan[] = [];
+  const walker = page.ownerDocument.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const node = n as Text;
+    if (!node.data.trim() || !node.parentElement) continue;
+    const r = node.parentElement.getBoundingClientRect();
+    out.push({ text: node.data, node, box: toFrac(r, pb) });
+  }
+  return out;
+}
+
+const tidy = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** The text of the spans under a box, in reading order; of a span the box
+ * cuts across, the words whose middle is inside it (pdf.js stretches a
+ * span to its text's width, so a character's place is its share). */
+export function textUnderBox(spans: readonly LayerSpan[], box: Frac): string {
+  const parts: string[] = [];
+  let lastBottom: number | null = null;
+  for (const s of spans) {
+    const cy = (s.box[1] + s.box[3]) / 2;
+    if (cy < box[1] || cy > box[3]) continue;
+    if (s.box[2] < box[0] || s.box[0] > box[2]) continue;
+    const w = s.box[2] - s.box[0];
+    const len = s.text.length || 1;
+    let text = "";
+    for (const m of s.text.matchAll(/\S+|\s+/g)) {
+      if (!m[0].trim()) {
+        text += m[0];
+        continue;
+      }
+      const mid = s.box[0] + (w * (m.index + m[0].length / 2)) / len;
+      if (mid >= box[0] && mid <= box[2]) text += m[0];
+    }
+    if (!text.trim()) continue;
+    if (lastBottom !== null && s.box[1] >= lastBottom - 0.002) parts.push(" ");
+    parts.push(text);
+    lastBottom = s.box[3];
+  }
+  return tidy(parts.join(""));
+}
+
+/** The text Marker's OCR read inside a box (a scanned page): the blocks
+ * mostly inside it, or whose middle it holds. */
+export function ocrTextUnderBox(blocks: readonly PaperPageBlock[], box: Frac): string {
+  return tidy(
+    blocks
+      .filter((b) => b.text.trim() && (coverage(box, b.box) > 0.5 || inside(box, ...centre(b.box))))
+      .map((b) => b.text)
+      .join(" "),
+  );
+}
+
+/** The equation a box covers more than half of (the most covered). */
+export function snapEquation(blocks: readonly PaperPageBlock[], box: Frac): PaperPageBlock | null {
+  let best: PaperPageBlock | null = null;
+  let bestC = EQUATION_SNAP;
+  for (const b of blocks) {
+    if (b.type !== EQUATION_TYPE) continue;
+    const c = coverage(box, b.box);
+    if (c > bestC) {
+      bestC = c;
+      best = b;
+    }
+  }
+  return best;
+}
+
+/** The figure a box lies inside and is smaller than: the box is a panel. */
+export function figureAround(blocks: readonly PaperPageBlock[], box: Frac): PaperPageBlock | null {
+  const a = area(box);
+  if (a <= 0) return null;
+  return (
+    blocks.find(
+      (b) =>
+        FIGURE_TYPES.has(b.type) &&
+        intersection(box, b.box) / a >= PANEL_INSIDE &&
+        a < PANEL_MAX_SHARE * area(b.box),
+    ) ?? null
+  );
+}
+
+/** The section of the block a box covers most (blocks with a section). */
+export function sectionForBox(blocks: readonly PaperPageBlock[], box: Frac): string | null {
+  let best: string | null = null;
+  let bestA = 0;
+  for (const b of blocks) {
+    if (!b.section) continue;
+    const a = intersection(box, b.box);
+    if (a > bestA) {
+      bestA = a;
+      best = b.section;
+    }
+  }
+  return best;
+}
+
+/** A figure's caption: the Caption block just below it (else just above)
+ * that shares its columns; "" when there is none. */
+export function captionFor(blocks: readonly PaperPageBlock[], figure: PaperPageBlock): string {
+  const f = figure.box;
+  const caps = blocks.filter(
+    (b) => b.type === "Caption" && Math.min(b.box[2], f[2]) - Math.max(b.box[0], f[0]) > 0,
+  );
+  const gap = (b: PaperPageBlock) => (b.box[1] >= f[3] - 0.01 ? b.box[1] - f[3] : f[1] - b.box[3] + 0.05);
+  const near = caps.filter((b) => gap(b) < 0.08).sort((a, b) => gap(a) - gap(b));
+  return near[0] ? tidy(near[0].text) : "";
+}
+
+/** Pages in the reader (react-pdf puts the 1-based number on each). */
+export const PAGE = "[data-page-number]";
+
+/** A piece of a text selection on a PDF page (one per Marker block). */
+export interface PdfPiece {
+  quote: string;
+  /** 0-based. */
+  page: number;
+  block_id: string | null;
+  section: string | null;
+  /** Line boxes, page fractions. */
+  rects: Frac[];
+}
+
+/** The pieces of a selection on the reader's PDF pages: the selected
+ * text-layer characters, split by the Marker block (per page) whose box
+ * holds them. */
+export function selectionToPdfPieces(
+  range: Range,
+  root: Element,
+  blocksByPage: Readonly<Record<number, readonly PaperPageBlock[]>>,
+): PdfPiece[] {
+  const out: (PdfPiece & { text: string; all: Frac[] })[] = [];
+  const doc = root.ownerDocument;
+  // Only the part of the reader the selection spans (not every page).
+  const common = range.commonAncestorContainer;
+  const scope = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
+  const walker = doc.createTreeWalker(scope && root.contains(scope) ? scope : root, NodeFilter.SHOW_TEXT);
+  let lastBottom: number | null = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const node = n as Text;
+    if (!range.intersectsNode(node)) continue;
+    const span = node.parentElement;
+    const pageEl = span?.closest(PAGE);
+    if (!span || !pageEl || !span.closest(TEXT_LAYER) || !root.contains(pageEl)) continue;
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.data.length;
+    if (end <= start || !node.data.slice(start, end).trim()) continue;
+    const page = Number(pageEl.getAttribute("data-page-number")) - 1;
+    const pageBox = pageEl.getBoundingClientRect();
+    const rects = nodeRects(node, start, end).map((r) => toFrac(r, pageBox));
+    const all = union(rects);
+    if (!all) continue;
+    const block = blockAt(blocksByPage[page] ?? [], (all[0] + all[2]) / 2, (all[1] + all[3]) / 2);
+    const blockId = block?.block_id ?? null;
+    const last = out[out.length - 1];
+    if (last && last.page === page && last.block_id === blockId) {
+      // A new line reads as a space; spans on one line join as they are.
+      if (lastBottom !== null && all[1] >= lastBottom - 0.002) last.text += " ";
+      last.text += node.data.slice(start, end);
+      last.all.push(...rects);
+    } else {
+      out.push({
+        quote: "",
+        page,
+        block_id: blockId,
+        section: block?.section ?? null,
+        rects: [],
+        text: node.data.slice(start, end),
+        all: [...rects],
+      });
+    }
+    lastBottom = all[3];
+  }
+  return out.map(({ text, all, ...p }) => ({ ...p, quote: tidy(text), rects: lineBoxes(all) }));
+}
+
+
+export interface BoxInput {
+  /** 0-based page. */
+  page: number;
+  box: Frac;
+  blocks: readonly PaperPageBlock[];
+  spans: readonly LayerSpan[];
+  /** The page has no text layer: the text is Marker's OCR. */
+  scanned: boolean;
+}
+
+export interface BoxResult {
+  kind: "equation" | "region";
+  section: string | null;
+  piece: MarkPiece;
+}
+
+/** What a box drawn on a page marks: the equation it covers more than half
+ * of (LaTeX + crop), else a region whose text is the text layer under it
+ * (Marker's OCR on a scanned page) — one panel of a figure it lies in. */
+export function boxMark({ page, box, blocks, spans, scanned }: BoxInput): BoxResult {
+  const eq = snapEquation(blocks, box);
+  if (eq) {
+    return {
+      kind: "equation",
+      section: eq.section ?? sectionForBox(blocks, box),
+      piece: { quote: eq.text, latex: eq.text, page, block_id: eq.block_id, box: eq.box },
+    };
+  }
+  const quote = scanned ? ocrTextUnderBox(blocks, box) : textUnderBox(spans, box);
+  const piece: MarkPiece = { quote, page, box, ocr: scanned };
+  const figure = figureAround(blocks, box);
+  if (figure) {
+    // One panel of the figure (Fig. 3A): tied to it.
+    return {
+      kind: "region",
+      section: figure.section ?? sectionForBox(blocks, box),
+      piece: { ...piece, block_id: figure.block_id, panel: true },
+    };
+  }
+  return { kind: "region", section: sectionForBox(blocks, box), piece };
+}
