@@ -354,7 +354,10 @@ export function PdfView({
     <div className="relative h-full w-full">
     <div
       ref={containerRef}
-      className="h-full w-full overflow-auto bg-neutral-100 p-3 dark:bg-neutral-900"
+      // Focusable (not in the tab order): Escape from a mark popover gives
+      // focus back here.
+      tabIndex={-1}
+      className="h-full w-full overflow-auto bg-neutral-100 p-3 outline-none dark:bg-neutral-900"
     >
       {/* Always mounted (disabled without `translation`) so toggling
           translation never restructures — and so never reloads — the PDF. */}

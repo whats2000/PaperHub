@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { usePresence } from "@/hooks/usePresence";
+import { hasOpenLayer } from "@/lib/openLayer";
 import type { Frac } from "@/lib/marks/pdfGeometry";
 import { cn } from "@/lib/utils";
 import { useMarksStore } from "@/store/marks";
@@ -24,11 +25,14 @@ export function BoxToolButton({ shown }: { shown: boolean }) {
   }, [shown, on, setOn]);
   useEffect(() => {
     if (!on) return;
+    // On the window, after the document's own listeners: an Escape a
+    // popover, menu or dialog took (or one closing an open layer) is theirs.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOn(false);
+      if (e.key !== "Escape" || e.defaultPrevented || hasOpenLayer()) return;
+      setOn(false);
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [on, setOn]);
 
   return (

@@ -81,6 +81,8 @@ export function MarkPopover({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Handled here: a mode the Escape would also stop (Box) waits for the next.
+      e.preventDefault();
       const inside = ref.current?.contains(document.activeElement) ?? false;
       onCloseRef.current(inside ? { returnFocus: true } : undefined);
     };

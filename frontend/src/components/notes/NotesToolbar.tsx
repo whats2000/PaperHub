@@ -7,6 +7,7 @@ import { Ellipsis, FileDown, FileText, Keyboard, LocateFixed, ScanEye } from "lu
 import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { hasOpenLayer } from "@/lib/openLayer";
 import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
 
@@ -14,11 +15,6 @@ import { partsOfNote } from "./parts";
 import { ShortcutsGuide } from "./ShortcutsGuide";
 
 export type ExportFormat = "md" | "docx";
-
-/** Open layers an Esc closes first (then Focus stays on). */
-const OPEN_LAYER = ["[role=\"menu\"]", "[role=\"listbox\"]", "[role=\"dialog\"]", ".bn-suggestion-menu"]
-  .map((s) => `${s}:not([data-closed]):not([hidden])`)
-  .join(", ");
 
 export interface NotesToolbarProps {
   /** The note shown (null while none is loaded). */
@@ -76,7 +72,7 @@ export function NotesToolbar({
     if (!focusOn) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (document.querySelector(OPEN_LAYER)) return;
+      if (hasOpenLayer()) return;
       setFocusOn(false);
     };
     document.addEventListener("keydown", onKey, true);

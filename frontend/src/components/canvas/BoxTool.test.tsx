@@ -172,3 +172,45 @@ describe("drawing a box", () => {
     expect(screen.queryByRole("toolbar")).toBeNull();
   });
 });
+
+describe("Escape, layer by layer", () => {
+  it("the first Escape closes the box's popover and gives focus back; the second stops Box", async () => {
+    render(
+      <>
+        <BoxToolButton shown />
+        <Reader />
+      </>,
+    );
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    act(() => useMarksStore.getState().setBoxOn(true));
+    drag(24, 32, 312, 64);
+    const bar = await screen.findByRole("toolbar", { name: "Mark the box" });
+    bar.querySelector("button")!.focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape", bubbles: true });
+    await waitFor(() => expect(bar.dataset.state).toBe("closed"));
+    expect(useMarksStore.getState().boxOn).toBe(true);
+    expect(document.activeElement).toBe(screen.getByTestId("reader"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape", bubbles: true });
+    expect(useMarksStore.getState().boxOn).toBe(false);
+  });
+
+  it("an Escape another layer handled, or one while a dialog is open, leaves Box on", () => {
+    render(<BoxToolButton shown />);
+    act(() => useMarksStore.getState().setBoxOn(true));
+    const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    handled.preventDefault();
+    act(() => {
+      document.body.dispatchEvent(handled);
+    });
+    expect(useMarksStore.getState().boxOn).toBe(true);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(useMarksStore.getState().boxOn).toBe(true);
+    dialog.remove();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(useMarksStore.getState().boxOn).toBe(false);
+  });
+});

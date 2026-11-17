@@ -21,7 +21,8 @@ export function Reader({
   });
   return (
     <div>
-      <div ref={readerRef} data-testid="reader">
+      {/* Focusable, as PdfView's scroll container: Escape gives focus back here. */}
+      <div ref={readerRef} data-testid="reader" tabIndex={-1}>
         <PdfMarksProvider value={ctx}>
           <div className="react-pdf__Page" data-page-number="1" data-testid="page-1">
             <div className="react-pdf__Page__textContent textLayer">
