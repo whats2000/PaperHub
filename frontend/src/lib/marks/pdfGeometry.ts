@@ -272,6 +272,10 @@ export interface PdfPiece {
   section: string | null;
   /** Line boxes, page fractions. */
   rects: Frac[];
+  /** The page text just before / after the selection (on its first / last
+   * piece): which occurrence of a few common words it is. */
+  before?: string;
+  after?: string;
 }
 
 /** The selected part of one text-layer node, read off the page when the
@@ -280,6 +284,39 @@ export interface PdfFragment {
   page: number;
   text: string;
   rects: Frac[];
+  /** On the selection's first / last fragment: the page text around it. */
+  before?: string;
+  after?: string;
+}
+
+/** Page text kept on each side of a selection. */
+export const CONTEXT_CHARS = 80;
+
+/** The text of a page's text layer on one side of a point: before it (the
+ * last CONTEXT_CHARS) or after it (the first). A line break in the layer
+ * reads as one. */
+function textBeside(layer: Element, node: Node, offset: number, side: "before" | "after"): string {
+  const doc = layer.ownerDocument;
+  const at = doc.createRange();
+  at.setStart(node, offset);
+  const wanted = side === "before" ? -1 : 1;
+  const walker = doc.createTreeWalker(layer, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let out = "";
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      if ((n as Element).tagName === "BR" && at.comparePoint(n, 0) === wanted) out += "\n";
+      continue;
+    }
+    const t = n as Text;
+    const startCmp = at.comparePoint(t, 0);
+    const endCmp = at.comparePoint(t, t.length);
+    if (side === "before") {
+      if (endCmp <= 0) out += t.data;
+      else if (startCmp < 0 && t === node) out += t.data.slice(0, offset);
+    } else if (startCmp >= 0) out += t.data;
+    else if (endCmp > 0 && t === node) out += t.data.slice(offset);
+  }
+  return side === "before" ? out.slice(-CONTEXT_CHARS) : out.slice(0, CONTEXT_CHARS);
 }
 
 /** What a selection covers on the reader's PDF pages, node by node. */
@@ -304,6 +341,14 @@ export function selectionFragments(range: Range, root: Element): PdfFragment[] {
     if (!rects.length) continue;
     out.push({ page: Number(pageEl.getAttribute("data-page-number")) - 1, text: node.data.slice(start, end), rects });
   }
+  const layerOf = (n: Node) =>
+    (n.nodeType === Node.TEXT_NODE ? n.parentElement : (n as Element))?.closest(TEXT_LAYER) ?? null;
+  const first = out[0];
+  const last = out[out.length - 1];
+  const startLayer = layerOf(range.startContainer);
+  const endLayer = layerOf(range.endContainer);
+  if (first && startLayer) first.before = textBeside(startLayer, range.startContainer, range.startOffset, "before");
+  if (last && endLayer) last.after = textBeside(endLayer, range.endContainer, range.endOffset, "after");
   return out;
 }
 
@@ -325,8 +370,13 @@ export function piecesFromFragments(
       if (lastBottom !== null && all[1] >= lastBottom - 0.002) last.raw += "\n";
       last.raw += f.text;
       last.all.push(...f.rects);
+      if (f.after !== undefined) last.after = f.after;
     } else {
-      out.push({ quote: "", raw: f.text, page: f.page, block_id: blockId, section: block?.section ?? null, rects: [], all: [...f.rects] });
+      out.push({
+        quote: "", raw: f.text, page: f.page, block_id: blockId, section: block?.section ?? null, rects: [], all: [...f.rects],
+        ...(f.before !== undefined ? { before: f.before } : {}),
+        ...(f.after !== undefined ? { after: f.after } : {}),
+      });
     }
     lastBottom = all[3];
   }

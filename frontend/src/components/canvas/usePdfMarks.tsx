@@ -394,7 +394,8 @@ export function usePdfMarks({
       const placed = await Promise.all(
         pieces.map(async (piece) => {
           if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
-          const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
+          const context = piece.before || piece.after ? { before: piece.before ?? "", after: piece.after ?? "" } : undefined;
+          const at = (await (context ? locateText(paperId, piece.raw, context) : locateText(paperId, piece.raw)).catch(() => null))?.match ?? undefined;
           if (!at) missed = true;
           return { piece, at };
         }),

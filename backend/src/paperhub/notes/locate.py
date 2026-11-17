@@ -139,18 +139,36 @@ def prepare(reading: str) -> Prepared:
 
 
 def match_text(reading: str, query: str, *, words: Prepared | None = None,
+               before: str = "", after: str = "",
                ) -> tuple[tuple[int, int] | None, dict[str, Any]]:
     """The span in ``reading`` of text read off a PDF page, or None; and how
     it was decided (for the response's ``_meta``). ``words``: the reading
     text already prepared (cached per file version).
+
+    ``before`` / ``after``: the page's text around the selection. A few words
+    occur all over a paper; the place where the selection with its context
+    (both sides, else one) is found decides which occurrence it is
+    (``context`` in the meta: ``matched``, ``missed`` or ``none``). When the
+    context is not in the reading text (a figure caption, a page header)
+    and the selection occurs more than once, it is a miss
+    (``reason: ambiguous``): filed nowhere rather than at a guess.
 
     A query longer than ``MAX_QUERY_CHARS`` is matched by its head and its
     tail, which must line up in order; the span runs from the head's start to
     the tail's end, so it still covers the whole selection."""
     prep = words if words is not None else prepare(reading)
     if len(query) <= MAX_QUERY_CHARS:
-        span, whole = _match(prep, query)
+        within: tuple[int, int] | None = None
+        context = "none"
+        if before.strip() or after.strip():
+            within = _context_span(prep, before, query, after)
+            context = "matched" if within is not None else "missed"
+        span, whole = _match(prep, query, within=within)
         whole["split"] = False
+        whole["context"] = context
+        if span is not None and context == "missed" and whole.get("ambiguous"):
+            whole.update(matched=False, reason="ambiguous")
+            return None, whole
         return span, whole
     half = MAX_QUERY_CHARS // 2
     head = query[:half].rsplit(None, 1)[0]
@@ -170,7 +188,34 @@ def match_text(reading: str, query: str, *, words: Prepared | None = None,
     return (first[0], last[1]), meta
 
 
-def _match(prep: Prepared, query: str) -> tuple[tuple[int, int] | None, dict[str, Any]]:
+def _query_words(text: str) -> int:
+    return sum(1 for w, _, _ in _tokens(pdf_normalise(text), math=False) if w)
+
+
+def _context_span(prep: Prepared, before: str, query: str, after: str,
+                  ) -> tuple[int, int] | None:
+    """Where the selection with the page text around it is in the reading
+    text: both sides, else the side after, else the side before. A match
+    counts only when its two anchor runs take in the selection's own words
+    (a match of the context alone says nothing about the selection)."""
+    nq = _query_words(query)
+    for b, a in ((before, after), ("", after), (before, "")):
+        if not b.strip() and not a.strip():
+            continue
+        span, meta = _match(prep, "\n".join(x for x in (b, query, a) if x.strip()))
+        if span is None:
+            continue
+        nb = _query_words(b)
+        k = min(ANCHOR_WORDS, int(meta["query_words"]))
+        if meta["start_word"] <= nb and meta["end_word"] + k >= nb + nq:
+            return span
+    return None
+
+
+def _match(prep: Prepared, query: str, *, within: tuple[int, int] | None = None,
+           ) -> tuple[tuple[int, int] | None, dict[str, Any]]:
+    """``within``: a span of the reading text the match should start in;
+    used when one does (else any place)."""
     q = [w for w, _, _ in _tokens(pdf_normalise(query), math=False) if w]
     meta: dict[str, Any] = {"query_words": len(q), "matched": False}
     if len(q) < MIN_WORDS:
@@ -194,6 +239,9 @@ def _match(prep: Prepared, query: str) -> tuple[tuple[int, int] | None, dict[str
     if not pairs:
         meta["reason"] = "runs_apart"
         return None, meta
+    if within is not None:
+        inside = [pr for pr in pairs if within[0] <= toks[pr[1]][1] < within[1]]
+        pairs = inside or pairs
     pairs.sort()
     _, a, b = pairs[0]
     # The runs grow outward over the query's remaining words and math.
@@ -259,15 +307,18 @@ def chunks_in(index: TextIndex, ids: dict[str, int], s: int, e: int) -> list[int
 
 
 async def locate_text(conn: aiosqlite.Connection, pcid: int, text: str,
+                      *, before: str = "", after: str = "",
                       ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Where text read off a PDF page sits in the paper: its chunks, the
     section of the first, and its span in the reading text; None when it
-    is not found. The second value records the decision."""
+    is not found. ``before`` / ``after``: the page text around it, which
+    picks the occurrence (``match_text``). The second value records the
+    decision."""
     reading = await reading_index(conn, pcid)
     if reading is None:
         return None, {"source": "html_text", "matched": False, "reason": "no_reading_text"}
     index, ids, words = reading
-    span, meta = match_text(index.text, text, words=words)
+    span, meta = match_text(index.text, text, words=words, before=before, after=after)
     meta["source"] = "html_text"
     if span is None:
         return None, meta

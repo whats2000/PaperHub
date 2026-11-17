@@ -63,6 +63,9 @@ describe("selectionToPdfPieces", () => {
         block_id: "/page/0/Text/1",
         section: "1 Introduction",
         rects: [[0.05, 0.05, 0.5, 0.07]],
+        // The page text around it (none before: it starts the page).
+        before: "",
+        after: "\nNext line here.",
       },
     ]);
   });
@@ -78,6 +81,10 @@ describe("selectionToPdfPieces", () => {
     ]);
     // "Robots " is 7 of the span's 13 characters: the box starts there.
     expect(pieces[0]!.rects[0]![0]).toBeCloseTo((30 + (120 * 7) / 13) / 600, 3);
+    // The text around the selection rides on its first and last piece.
+    expect([pieces[0]!.before, pieces[0]!.after, pieces[1]!.before, pieces[1]!.after]).toEqual([
+      "Robots ", undefined, undefined, " here.",
+    ]);
   });
 
   it("without Marker blocks a piece has no block and no section", () => {

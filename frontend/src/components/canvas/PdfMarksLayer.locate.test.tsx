@@ -77,6 +77,18 @@ describe("marks on a PDF without Marker blocks", () => {
     expect(toastMessage).not.toHaveBeenCalled();
   });
 
+  it("send the page text around a selection, which says where a few common words are", async () => {
+    vi.mocked(locateText).mockResolvedValue(HIT);
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    select("s2", "s2");
+    await screen.findByRole("toolbar", { name: "Mark the selection" });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(locateText).toHaveBeenCalledWith(3, "from demos.", { before: "Robots learn ", after: "\nNext line here." });
+  });
+
   it("not found: saved with no section, and the toast says so", async () => {
     vi.mocked(locateText).mockResolvedValue(MISS);
     render(<Reader />);

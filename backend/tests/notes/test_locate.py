@@ -209,3 +209,70 @@ async def test_relocate_refreshes_the_note_block_and_drops_a_lost_place(conn, tm
     before = (await get_note(conn, note_id)).revision
     await reanchor_paper(conn, 1)
     assert (await get_note(conn, note_id)).revision == before
+
+
+async def test_a_short_selection_is_placed_by_the_words_around_it() -> None:
+    """Two words occur all over a paper: the page text around the
+    selection says which occurrence it is."""
+    text = ("Related work tunes the capacity factor by hand. "
+            "Ablation. Decreasing the capacity factor from two to one degrades it.")
+    span, meta = match_text(text, "capacity factor",
+                            before="Ablation. Decreasing the", after="from two to one degrades")
+    assert span is not None and text[span[0]:span[1]] == "capacity factor"
+    assert span[0] == text.index("capacity factor", 40)
+    assert meta["context"] == "matched"
+    # Without context the first one wins, as before.
+    plain, meta = match_text(text, "capacity factor")
+    assert plain is not None and plain[0] == text.index("capacity factor")
+    assert meta["context"] == "none" and meta["ambiguous"] is True
+
+
+async def test_context_that_is_not_found_falls_back_to_the_selection() -> None:
+    text = "One. The capacity factor is two. Two."
+    span, meta = match_text(text, "capacity factor", before="zzz qqq www", after="vvv yyy")
+    assert span is not None and text[span[0]:span[1]] == "capacity factor"
+    assert meta["context"] == "missed"
+
+
+async def test_locate_files_a_short_selection_under_its_own_section(conn, tmp_path: Path) -> None:
+    ids = await _paper(conn, tmp_path, [
+        ("2 Related Work", "Prior work tunes the capacity factor by hand."),
+        ("5 Ablation", "Decreasing the capacity factor from two to one degrades it."),
+    ])
+    found, _ = await locate_text(conn, 1, "capacity factor",
+                                 before="Decreasing the", after="from two to one")
+    assert found is not None
+    assert found["section"] == "5 Ablation" and found["chunk_start"] == ids[1]
+
+
+async def test_one_side_of_the_context_is_enough() -> None:
+    """The text before may be a figure or a page header the reading text
+    does not have; the text after still places the selection."""
+    text = "A capacity factor of two. Later the capacity factor drops to one."
+    span, meta = match_text(text, "capacity factor",
+                            before="Figure 4: (a) Varying the", after="drops to one.")
+    assert span is not None and span[0] == text.index("capacity factor", 10)
+    assert meta["context"] == "matched"
+
+
+async def test_common_words_in_text_the_paper_does_not_have_are_a_miss() -> None:
+    """A caption the reading text lacks: its common words are filed
+    nowhere rather than under their first occurrence."""
+    text = "Related work fixes the capacity factor. Our capacity factor is two."
+    span, meta = match_text(text, "capacity factor",
+                            before="Figure 4: (a) Varying the", after="from two to one degrades")
+    assert span is None
+    assert meta["context"] == "missed" and meta["reason"] == "ambiguous"
+
+
+async def test_context_found_away_from_the_selection_does_not_place_it() -> None:
+    """Part of a caption may be in the paper ("the capacity factor in our
+    method") while the selected words after it are not: a context match
+    that leaves out the selection's own words places nothing."""
+    text = ("Related work fixes the capacity factor. Ablation. We study the capacity "
+            "factor in our expert choice method and more. Our capacity factor is two.")
+    span, meta = match_text(
+        text, "capacity factor",
+        before="Figure 4: (a) Varying the capacity factor in our expert choice method: Decreasing the",
+        after="from two to one degrades")
+    assert span is None and meta["reason"] == "ambiguous"

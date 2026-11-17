@@ -1459,10 +1459,16 @@ export interface LocateResult {
   _meta: Record<string, unknown>;
 }
 
-export async function locateText(paperContentId: number, text: string): Promise<LocateResult> {
+/** `context`: the page text around a selection, which says which
+ * occurrence of a few common words it is. */
+export async function locateText(
+  paperContentId: number,
+  text: string,
+  context?: { before: string; after: string },
+): Promise<LocateResult> {
   return apiFetch<LocateResult>(`/papers/content/${paperContentId}/locate`, {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...context }),
   });
 }
 

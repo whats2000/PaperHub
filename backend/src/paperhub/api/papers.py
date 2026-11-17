@@ -516,6 +516,9 @@ class LocateIn(BaseModel):
     # A long selection is matched by its head and tail (notes/locate.py);
     # this only bounds the request.
     text: str = Field(max_length=200_000)
+    # The page text just around the selection: which occurrence it is.
+    before: str = Field("", max_length=2_000)
+    after: str = Field("", max_length=2_000)
 
 
 class LocateMatch(BaseModel):
@@ -543,9 +546,11 @@ async def locate(paper_content_id: int, body: LocateIn) -> LocateOut:
     and Follow reports it. The decision rides in ``_meta`` and the log."""
     settings = load_settings()
     async with open_db(settings.db_path) as conn:
-        found, meta = await locate_text(conn, paper_content_id, body.text)
-    logger.info("locate paper=%s words=%s matched=%s reason=%s", paper_content_id,
-              meta.get("query_words"), meta.get("matched"), meta.get("reason"))
+        found, meta = await locate_text(conn, paper_content_id, body.text,
+                                        before=body.before, after=body.after)
+    logger.info("locate paper=%s words=%s matched=%s reason=%s context=%s ambiguous=%s",
+                paper_content_id, meta.get("query_words"), meta.get("matched"),
+                meta.get("reason"), meta.get("context"), meta.get("ambiguous"))
     return LocateOut(match=LocateMatch(**found) if found else None, meta=meta)
 
 
