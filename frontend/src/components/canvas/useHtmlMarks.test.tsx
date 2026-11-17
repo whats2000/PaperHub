@@ -151,6 +151,25 @@ describe("useHtmlMarks", () => {
     expect(toastFn.mock.calls[0]![0]).toBe("Saved to Duo › §1, §2");
   });
 
+  it("a retry over a new selection of the same text saves no section twice", async () => {
+    const doc = frameDoc(PAPER);
+    render(<Host doc={doc} />);
+    create.mockImplementationOnce((body) => Promise.resolve(created(body.section_key ?? "", "b1")));
+    create.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    select(doc, "Robots", "agent pose");
+    await screen.findByRole("toolbar");
+    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    // A key press re-reads the selection: a new Range over the same text.
+    select(doc, "Robots", "agent pose", "keyboard");
+    await act(() => new Promise((r) => setTimeout(r, 10))); // the re-read settles
+    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Introduction", "2 Method", "2 Method"]);
+    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    expect(toastFn.mock.calls[0]![0]).toBe("Saved to Duo › §1, §2");
+  });
+
   it("waits for the chunk anchors, and never saves a mark without them", async () => {
     const doc = frameDoc(PAPER);
     render(<Host doc={doc} />);
