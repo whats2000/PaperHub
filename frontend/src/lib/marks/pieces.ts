@@ -164,8 +164,9 @@ function pagePlace(p: MarkPiece): number | null {
  *   paper, then its offset;
  * - a mark only on a page (a box, a figure, an equation, unlocated PDF text)
  *   is mapped onto the chunks through the marks that have both a chunk and
- *   a page (interpolated by page and height); with none, it sits at the
- *   start of its section's chunks, in page order;
+ *   a page (interpolated by page and height, kept within its section's
+ *   chunks); with none, it sits at the start of its section's chunks, in
+ *   page order;
  * - with no chunks at all (a PDF-only paper), every mark sits by page, then
  *   height.
  *
@@ -174,8 +175,10 @@ function pagePlace(p: MarkPiece): number | null {
 export function markPositions(marks: readonly Mark[], chunks: readonly PaperChunk[]): Map<string, number> {
   const ord = new Map(chunks.map((c, i) => [c.id, i] as const));
   const sectionStart = new Map<string, number>();
+  const sectionEnd = new Map<string, number>();
   chunks.forEach((c, i) => {
     if (c.section !== null && !sectionStart.has(c.section)) sectionStart.set(c.section, i);
+    if (c.section !== null) sectionEnd.set(c.section, i + 1);
   });
   const chunkPlace = (p: MarkPiece): number | null => {
     const at = typeof p.chunk_start === "number" ? ord.get(p.chunk_start) : undefined;
@@ -209,7 +212,11 @@ export function markPositions(marks: readonly Mark[], chunks: readonly PaperChun
       else if (c !== null) pos = c;
       else if (pg !== null) {
         const start = m.section_key !== null ? sectionStart.get(m.section_key) : undefined;
+        const end = m.section_key !== null ? sectionEnd.get(m.section_key) : undefined;
         pos = calib.length ? onChunks(pg) : start !== undefined ? start + pg / 1e4 : chunks.length + pg;
+        // Never outside its own section: a calibrating mark far away (sparse
+        // pairs) must not carry it past the sections between.
+        if (start !== undefined && end !== undefined) pos = Math.min(Math.max(pos, start), end - 1e-6);
       }
     }
     out.set(m.id, pos);
