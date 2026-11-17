@@ -1,11 +1,11 @@
 /** The bodies of the four paper reference blocks (quote, figure, equation,
  * region), each inside the shared `PaperRefFrame`. */
-import katex from "katex";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScanText, Sigma, Sparkles, SquareDashed, TextQuote } from "lucide-react";
 import "katex/dist/katex.min.css";
 
+import { renderDisplayMath } from "@/lib/displayMath";
 import { joinedQuote } from "@/lib/marks/pieces";
 
 import { CropImage } from "./CropImage";
@@ -56,12 +56,6 @@ export function PaperFigureView({ id, props }: ViewProps) {
   );
 }
 
-/** A paper's equation as KaTeX can draw it: KaTeX has no `\label`, and a
- * label means nothing in a note (the stored LaTeX keeps it). */
-function displayLatex(latex: string): string {
-  return latex.replace(/\\label\s*\{[^{}]*\}/g, "");
-}
-
 export function PaperEquationView({ id, props }: ViewProps) {
   const { t } = useTranslation();
   const piece = markPieces(props)[0];
@@ -69,10 +63,7 @@ export function PaperEquationView({ id, props }: ViewProps) {
   // The HTML reader's LaTeX is the paper's own source; a PDF's is Marker's
   // transcription, to check against the crop.
   const transcribed = latex !== "" && piece?.latex_from !== "source";
-  const html = useMemo(
-    () => (latex ? katex.renderToString(displayLatex(latex), { displayMode: true, throwOnError: false }) : ""),
-    [latex],
-  );
+  const html = useMemo(() => renderDisplayMath(latex), [latex]);
   return (
     <PaperRefFrame
       blockId={id}

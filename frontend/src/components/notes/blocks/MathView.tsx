@@ -1,7 +1,8 @@
-import katex from "katex";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "katex/dist/katex.min.css";
+
+import { renderDisplayMath } from "@/lib/displayMath";
 
 /** A display equation: rendered with KaTeX, click to edit its LaTeX. */
 export function MathView({
@@ -22,10 +23,7 @@ export function MathView({
     // Only the first render: a later empty LaTeX is the user clearing it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const html = useMemo(
-    () => (latex ? katex.renderToString(latex, { displayMode: true, throwOnError: false }) : ""),
-    [latex],
-  );
+  const html = useMemo(() => renderDisplayMath(latex), [latex]);
   return (
     <div contentEditable={false} className="w-full">
       <button
