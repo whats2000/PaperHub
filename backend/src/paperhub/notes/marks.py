@@ -102,6 +102,11 @@ async def _get(conn: aiosqlite.Connection, mark_id: str) -> dict[str, Any]:
     return mark_from_row(row)
 
 
+async def get_mark(conn: aiosqlite.Connection, mark_id: str) -> dict[str, Any]:
+    """A mark as stored (deleted ones too); LookupError when unknown."""
+    return await _get(conn, mark_id)
+
+
 async def write_row(conn: aiosqlite.Connection, sql: str,
                  params: tuple[Any, ...]) -> None:
     async with write_lock(conn):
@@ -113,6 +118,45 @@ async def write_row(conn: aiosqlite.Connection, sql: str,
 def live_pieces(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pieces still shown: neither erased nor moved to another mark."""
     return [p for p in pieces if not p.get("erased") and not p.get("removed")]
+
+
+_FAR = float("inf")
+
+
+def _num(v: Any, default: float = _FAR) -> float:
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else default
+
+
+def _top_left(p: dict[str, Any]) -> tuple[float, float]:
+    boxes = p.get("rects") if isinstance(p.get("rects"), list) else None
+    boxes = boxes or ([p["box"]] if isinstance(p.get("box"), list) else [])
+    if not boxes:
+        return _FAR, _FAR
+    return (min(_num(b[1]) for b in boxes), min(_num(b[0]) for b in boxes))
+
+
+def _reading_key(p: dict[str, Any], pdf: bool) -> tuple[float, ...]:
+    if pdf:
+        return (_num(p.get("page")), *_top_left(p))
+    return (_num(p.get("chunk_start")), _num(p.get("text_start"), 0.0))
+
+
+def reading_order(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pieces as the paper reads them, for showing only (the stored list
+    stays in stroke order: erase, restore and split address pieces by
+    index, and the last live one is the newest). A PDF piece (it has a
+    page) reads by page, then top, then left; an HTML piece by its chunk,
+    then its offset in the reading text. Mirrors the frontend's
+    ``readingOrder`` (lib/marks/pieces.ts)."""
+    pdf = bool(pieces) and all(isinstance(p.get("page"), int) for p in pieces)
+    return sorted(pieces, key=lambda p: _reading_key(p, pdf))
+
+
+def joined_quote(pieces: list[dict[str, Any]]) -> str:
+    """One quote for a mark's live pieces in reading order, "…" for the
+    words skipped between them."""
+    quotes = (str(p.get("quote") or "").strip() for p in reading_order(pieces))
+    return " … ".join(q for q in quotes if q)
 
 
 def _check_index(m: dict[str, Any], index: int) -> None:
@@ -141,7 +185,7 @@ def block_props(m: dict[str, Any]) -> dict[str, Any]:
         source["section"] = m["section_key"]
     props: dict[str, Any] = {
         "markId": m["id"], "color": m["color"], "kind": m["kind"],
-        "quote": " ".join(str(p.get("quote") or "") for p in live).strip(),
+        "quote": joined_quote(live),
         "pieces": live, "source": source,
     }
     if m["status"] == "lost":

@@ -65,7 +65,7 @@ async def test_join_appends_piece(conn):
     note = await paper_note(conn, 1)
     b = [x for x in await list_blocks(conn, note.id)
          if x.id == m["block_id"]][0]
-    assert b.text == "one two" and len(b.props["pieces"]) == 2
+    assert b.text == "one … two" and len(b.props["pieces"]) == 2
     assert len(await list_marks(conn, 1)) == 1
 
 
@@ -107,7 +107,7 @@ async def test_erase_piece_keeps_rest(conn):
     assert blocks[1].text == "two"
     back = await restore_piece(conn, m["id"], 0)
     assert "erased" not in back["pieces"][0]
-    assert (await list_blocks(conn, saved.note_id))[1].text == "one two"
+    assert (await list_blocks(conn, saved.note_id))[1].text == "one … two"
     # erasing every piece removes the mark; restoring one brings it back
     await erase_piece(conn, m["id"], 0)
     await erase_piece(conn, m["id"], 1)
@@ -197,7 +197,7 @@ async def test_restore_piece_does_not_revive_user_deleted_mark(conn):
     assert await list_marks(conn, 1) == []
     await restore_mark(conn, m["id"])  # block props are synced on restore
     blocks = await list_blocks(conn, saved.note_id)
-    assert blocks[1].text == "one two"
+    assert blocks[1].text == "one … two"
 
 
 async def test_split_keeps_piece_indexes_stable(conn):
@@ -251,3 +251,32 @@ async def test_block_delete_takes_its_mark_and_undo_brings_it_back(conn):
     assert await list_marks(conn, 1) == []
     await restore_blocks(conn, note.id, [m["block_id"]], actor="user")
     assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
+
+
+async def test_quote_reads_in_reading_order_pieces_keep_stroke_order(conn):
+    await _paper(conn)
+
+    def at(q, chunk, text_start):
+        return {**_piece(q, chunk), "text_start": text_start,
+                "text_end": text_start + len(q)}
+
+    m, saved = await create_mark(conn, _in([at("ahead of time", 4, 80)]))
+    m2, _ = await create_mark(conn, _in([at("We predict", 4, 10)], join_to=m["id"]))
+    # Stored in stroke order: indexes stay put for erase / restore / split.
+    assert [p["quote"] for p in m2["pieces"]] == ["ahead of time", "We predict"]
+    [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
+    # Shown (and read by the agent, searched) in reading order.
+    assert b.text == "We predict … ahead of time"
+    # Split still moves the newest piece.
+    new = await split_last_piece(conn, m["id"])
+    assert [p["quote"] for p in new["pieces"]] == ["We predict"]
+
+
+async def test_pdf_quote_reads_by_page_then_top(conn):
+    await _paper(conn)
+    lower = {"quote": "lower", "page": 0, "rects": [[0.1, 0.5, 0.3, 0.52]]}
+    upper = {"quote": "upper", "page": 0, "rects": [[0.1, 0.2, 0.3, 0.22]]}
+    first = {"quote": "page one", "page": 1, "rects": [[0.1, 0.1, 0.3, 0.12]]}
+    m, saved = await create_mark(conn, _in([first, lower, upper], view="pdf"))
+    [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
+    assert b.text == "upper … lower … page one"
