@@ -134,6 +134,16 @@ export function PdfView({
   // Bumped per page each time its text layer renders (a resize renders it
   // again): marks made in the HTML view are found in it.
   const [textVersions, setTextVersions] = useState<Record<number, number>>({});
+  // One handler per page for the life of the document: react-pdf rebuilds a
+  // page's text layer whenever `onRenderTextLayerSuccess` changes identity,
+  // and the version bump re-renders this view.
+  const onTextLayerRendered = useMemo(
+    () =>
+      Array.from({ length: numPages }, (_, i) => () =>
+        setTextVersions((prev) => ({ ...prev, [i + 1]: (prev[i + 1] ?? 0) + 1 })),
+      ),
+    [numPages],
+  );
   const pdfMarks = usePdfMarks({
     paperId: marks?.paperId ?? null,
     readerRef: containerRef,
@@ -317,9 +327,7 @@ export function PdfView({
                   : { ...prev, [i + 1]: page.originalWidth },
               )
             }
-            onRenderTextLayerSuccess={() =>
-              setTextVersions((prev) => ({ ...prev, [i + 1]: (prev[i + 1] ?? 0) + 1 }))
-            }
+            onRenderTextLayerSuccess={onTextLayerRendered[i]}
             onGetTextSuccess={({ items }) => {
               const scanned = !items.some((it) => "str" in it && it.str.trim() !== "");
               setScannedPages((prev) =>
