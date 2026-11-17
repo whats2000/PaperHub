@@ -4,8 +4,12 @@
  * at its corner. With the highlighter on, a drag marks at once in the pen
  * colour (joining the pen session's mark in the same paragraph), a click on
  * a figure or display equation marks it whole, and a click on a mark erases
- * the piece under it. Returns the popover and the corner buttons to render
- * over the iframe. */
+ * the piece under it. A selection (or stroke) on the translation under a
+ * paragraph marks the translated words (`lib/marks/translationMarks.ts`);
+ * a click on a 文 marker turns translation on to show its mark
+ * (`showMark`), and a request to show a mark (`reveal`) scrolls to it and
+ * flashes it. Returns the popover and the corner buttons to render over the
+ * iframe. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -22,7 +26,10 @@ import {
 } from "@/lib/marks/anchor";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { attachHtmlMarks, markableObjects, type HtmlMarksHandle, type HtmlObject } from "@/lib/marks/htmlMarks";
-import { clearIfStill, htmlPlace } from "@/lib/marks/pieces";
+import { clearIfStill, htmlPlace, translationPlace } from "@/lib/marks/pieces";
+import { translationSelection, type PlacedTranslationPiece } from "@/lib/marks/translationMarks";
+import { langShort } from "@/components/notes/blocks/markProps";
+import { useTranslationStore } from "@/store/translation";
 import { hasOpenLayer } from "@/lib/openLayer";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor } from "@/types/notes";
@@ -40,6 +47,19 @@ interface Selected {
   /** A figure or equation taken whole (its corner button). */
   object?: HtmlObject;
 }
+
+/** How long a request to show a mark waits for its translation to load. */
+const REVEAL_TRIES = 40;
+const REVEAL_EVERY_MS = 150;
+
+/** A translation selection as marks: one per translated paragraph. */
+function translationGroups(placed: PlacedTranslationPiece[]): MarkGroup[] {
+  return placed.map(({ piece, section }) => ({ section, pieces: [piece], lang: piece.lang, source_ref: piece.source_ref }));
+}
+
+/** A selection holding no translated words, or a paragraph not tied to
+ * the paper's text (no chunk): it can't be marked. */
+const untied = (placed: readonly PlacedTranslationPiece[]) => !placed.length || placed.some((p) => p.piece.chunk_start === null);
 
 /** How long a corner button stays after the pointer leaves its object. */
 const OBJECT_HIDE_MS = 120;
@@ -196,6 +216,8 @@ export function useHtmlMarks({
   const penColor = useMarksStore((s) => s.penColor);
   const pen = paperId !== null && penOn ? penColor : null;
   const focusIds = useMarkFocusIds(paperId);
+  // The language of the translations under the paragraphs (null: off).
+  const translation = useTranslationStore((s) => (paperId !== null && s.enabledByPaper[paperId] ? s.language : null));
 
   useEffect(() => {
     if (paperId === null) return;
@@ -203,6 +225,10 @@ export function useHtmlMarks({
     void loadColors();
   }, [paperId, loadPaper, loadColors]);
 
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const latest = useRef({ marks, chunks, paperId, pen });
   useEffect(() => {
     latest.current = { marks, chunks, paperId, pen };
@@ -231,6 +257,14 @@ export function useHtmlMarks({
         handleRef.current?.flash(markId);
         if (pid !== null) openMarkInNotes(pid, mark);
       },
+      // A mark on a translation not on screen: turn translation on (or to
+      // its language) and show it.
+      onMarker: (markId) => void useTranslationStore.getState().showMark(markId),
+      markerLabel: (m) =>
+        tRef.current("marks.trMarker", {
+          defaultValue: "A mark on the {{lang}} translation. Show it",
+          lang: langShort(m.lang ?? ""),
+        }),
     });
     handleRef.current = handle;
     return () => {
@@ -239,8 +273,39 @@ export function useHtmlMarks({
     };
   }, [doc, paperId]);
   useEffect(() => {
-    handleRef.current?.update({ marks, colors, chunks, visible, focusIds, dark: isDark, pen });
-  }, [doc, marks, colors, chunks, visible, focusIds, isDark, pen]);
+    handleRef.current?.update({ marks, colors, chunks, visible, focusIds, dark: isDark, pen, translation });
+  }, [doc, marks, colors, chunks, visible, focusIds, isDark, pen, translation]);
+
+  // Asked to show a mark (its 文 marker, a note's source chip): scroll to
+  // it and flash it — its words once their translation has loaded.
+  const reveal = useTranslationStore((s) => s.reveal);
+  useEffect(() => {
+    if (!reveal || reveal.paperId !== paperId || !doc) return;
+    let tries = 0;
+    let scrolled = false;
+    const tick = (): boolean => {
+      const handle = handleRef.current;
+      const as = handle?.shownAs(reveal.markId) ?? null;
+      if (as === "text" && handle!.flash(reveal.markId)) {
+        useTranslationStore.getState().revealed(reveal.n);
+        return true;
+      }
+      // The marker's paragraph first: its translation loads once in view.
+      if (as === "marker" && !scrolled) scrolled = handle!.flash(reveal.markId);
+      return false;
+    };
+    if (tick()) return;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (tick()) clearInterval(timer);
+      else if (tries >= REVEAL_TRIES) {
+        // Not there to show: the request ends here.
+        clearInterval(timer);
+        useTranslationStore.getState().revealed(reveal.n);
+      }
+    }, REVEAL_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [reveal, paperId, doc]);
 
   // A selection opens the popover under it.
   const [selectedIn, setSelected] = useState<Selected | null>(null);
@@ -262,10 +327,6 @@ export function useHtmlMarks({
     penSaveRef.current = penSave;
   }, [penSave]);
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
-  const tRef = useRef(t);
-  useEffect(() => {
-    tRef.current = t;
-  }, [t]);
   useEffect(() => {
     if (paperId === null || !doc?.body) return;
     const win = doc.defaultView;
@@ -284,6 +345,20 @@ export function useHtmlMarks({
           } catch {
             toast.error(tRef.current("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
             return null;
+          }
+          // A stroke on a translation: its translated words, filed under
+          // the paragraph they translate (never joining the original's).
+          const tr = translationSelection(doc, captured, map);
+          if (tr) {
+            if (untied(tr)) {
+              toast.error(tRef.current("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+              return null;
+            }
+            return tr.map(({ piece, block, section }) => ({
+              piece,
+              section,
+              place: translationPlace(piece.lang, htmlPlace(block)),
+            }));
           }
           const placed = selectionToPlacedPieces(doc, captured, map);
           if (!placed.length || placed.some((p) => p.piece.chunk_start === null)) {
@@ -313,7 +388,9 @@ export function useHtmlMarks({
         // The highlighter marks what the pointer drags; a keyboard
         // selection waits for the pen to go off.
         if (penNow && keyboard) return;
-        const pieces = range ? selectionToPieces(doc, range, latest.current.chunks) : [];
+        // On a translation: its translated words; else the paper's text.
+        const tr = range ? translationSelection(doc, range, latest.current.chunks) : null;
+        const pieces = tr ? tr.map((p) => p.piece) : range ? selectionToPieces(doc, range, latest.current.chunks) : [];
         if (!range || !pieces.length) {
           setSelected(null);
           return;
@@ -404,6 +481,14 @@ export function useHtmlMarks({
               return null;
             }
             return [group];
+          }
+          const tr = translationSelection(doc, selected.range, map);
+          if (tr) {
+            if (untied(tr)) {
+              toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+              return null;
+            }
+            return translationGroups(tr);
           }
           const pieces = selectionToPieces(doc, selected.range, map);
           if (!pieces.length || pieces.some((p) => p.chunk_start === null)) {

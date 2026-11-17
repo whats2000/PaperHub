@@ -14,6 +14,8 @@ function props(over: Partial<MarkProps>): MarkProps {
     source: "{}",
     lang: "",
     orig: "",
+    sourceRef: "",
+    translationChanged: false,
     anchorLost: false,
     piecesLost: 0,
     ...over,
@@ -103,3 +105,29 @@ describe("a highlight of one selection across paragraphs", () => {
   });
 });
 
+
+describe("a quote marked on a translation", () => {
+  const tr = {
+    kind: "highlight",
+    color: "purple",
+    quote: "預測代理的姿態",
+    lang: "繁體中文",
+    orig: "We predict the agent pose ahead of time.",
+    sourceRef: "h:3",
+    pieces: JSON.stringify([{ quote: "預測代理的姿態", lang: "繁體中文", source_ref: "h:3" }]),
+  };
+
+  it("is tagged as translated, with Show original", () => {
+    inNote(<PaperQuoteView id="b1" props={props(tr)} />);
+    expect(screen.getByText(/Translated · 繁體中文/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show original/ })).toBeTruthy();
+    expect(screen.getByTestId("orig-b1").textContent).toContain("We predict the agent pose ahead of time.");
+    expect(screen.queryByTestId("translation-changed-b1")).toBeNull();
+  });
+
+  it("keeps its quote and says so when the translation changed", () => {
+    inNote(<PaperQuoteView id="b1" props={props({ ...tr, translationChanged: true })} />);
+    expect(screen.getByTestId("translation-changed-b1").textContent).toContain("no longer in the 繁體中文 translation");
+    expect(screen.getByText("預測代理的姿態")).toBeTruthy();
+  });
+});

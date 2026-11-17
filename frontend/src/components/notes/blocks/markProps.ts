@@ -35,6 +35,8 @@ export const markPropSchema = {
   source: { default: "{}" },
   lang: { default: "" },
   orig: { default: "" },
+  sourceRef: { default: "" },
+  translationChanged: { default: false },
   anchorLost: { default: false },
   piecesLost: { default: 0 },
 } as const;
@@ -48,6 +50,10 @@ export interface MarkProps {
   source: string;
   lang: string;
   orig: string;
+  /** The translation block a mark on a translation was made on. */
+  sourceRef: string;
+  /** Its words are no longer in that translation (re-translated). */
+  translationChanged: boolean;
   anchorLost: boolean;
   piecesLost: number;
 }

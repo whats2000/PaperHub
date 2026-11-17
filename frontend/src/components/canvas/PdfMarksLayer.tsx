@@ -5,22 +5,28 @@
  * figures and equations and the Box tool's drag surface. The reader's side
  * (marks, blocks, popover, saving, Follow) is `usePdfMarks`. With the
  * highlighter on, a click on a mark erases the piece under it (a hovered
- * mark shows a dashed ring) and a click on a figure or equation marks it. */
+ * mark shows a dashed ring) and a click on a figure or equation marks it.
+ *
+ * A mark made on the translation card's text whose words the card is not
+ * showing sits as a 文 marker in its colour at the paragraph's Marker block;
+ * a click (hit-tested) or Enter on it turns translation on to show it. */
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 
 import { DraftBox } from "@/components/canvas/BoxTool";
 import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
 import { useBoxDrag } from "@/components/canvas/useBoxDrag";
+import { useLeaving } from "@/components/canvas/useLeaving";
 import { PdfMarksContext } from "@/components/canvas/usePdfMarks";
 import { MARK_PALETTE } from "@/lib/marks/htmlMarks";
 import { EQUATION_TYPE, FIGURE_TYPES, findInPage, pageText, type Frac } from "@/lib/marks/pdfGeometry";
-import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { langShort } from "@/components/notes/blocks/markProps";
+import { useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColor, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
-const LEAVE_MS = 200;
 /** A press that travels this far is a drag (a selection), not a click. */
 const CLICK_SLOP_PX = 4;
 /** Slop around a mark's boxes for a click (page fractions). */
@@ -47,28 +53,6 @@ interface Placed {
   boxPiece: number[];
 }
 
-/** The page's marks, plus those just removed while they fade out. */
-function useLeaving(items: Drawn[]): (Drawn & { leaving?: boolean })[] {
-  const [state, setState] = useState<{ items: Drawn[]; leaving: Drawn[] }>({ items, leaving: [] });
-  // A mark gone from the list stays, fading, for the exit (adjusted while
-  // rendering: the list changed).
-  if (state.items !== items) {
-    const ids = new Set(items.map((i) => i.id));
-    const gone = prefersReducedMotion() ? [] : state.items.filter((p) => !ids.has(p.id));
-    setState({ items, leaving: [...state.leaving.filter((x) => !ids.has(x.id)), ...gone] });
-  }
-  const { leaving } = state;
-  useEffect(() => {
-    if (!leaving.length) return;
-    const timer = setTimeout(
-      () => setState((s) => ({ ...s, leaving: s.leaving.filter((x) => !leaving.includes(x)) })),
-      LEAVE_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [leaving]);
-  return useMemo(() => [...items, ...leaving.map((l) => ({ ...l, leaving: true }))], [items, leaving]);
-}
-
 function markStyle(d: Drawn, box: Frac): CSSProperties {
   const c = d.color ? MARK_PALETTE.light[d.color] : null;
   const base: CSSProperties = { left: pct(box[0]), top: pct(box[1]), width: pct(box[2] - box[0]), height: pct(box[3] - box[1]) };
@@ -90,6 +74,20 @@ function boxesOn(m: Mark, page: number): Placed {
   return out;
 }
 
+/** A 文 marker's side (px), and the gap between markers on one block. */
+const MARKER_PX = 18;
+const MARKER_GAP_PX = 4;
+
+interface TrMarker {
+  id: string;
+  color: MarkColor | null;
+  lang: string;
+  /** Its block's box (page fractions). */
+  box: Frac;
+  /** Its place among the markers on that block. */
+  slot: number;
+}
+
 const within = (b: Frac, x: number, y: number) =>
   x >= b[0] - HIT_SLOP && x <= b[2] + HIT_SLOP && y >= b[1] - HIT_SLOP && y <= b[3] + HIT_SLOP;
 
@@ -107,6 +105,7 @@ export function PdfMarksPage({
   textVersion?: number;
 }) {
   const ctx = useContext(PdfMarksContext);
+  const { t } = useTranslation("notes");
   const page = pageNumber - 1;
   const rootRef = useRef<HTMLDivElement>(null);
   const blocks = ctx?.blocks[page] ?? NO_BLOCKS;
@@ -176,6 +175,27 @@ export function PdfMarksPage({
     [ctx?.marks, page, found],
   );
   const shown = useLeaving(drawn);
+
+  // Marks on a translation the card is not showing: a 文 marker on the
+  // paragraph's (first) Marker block.
+  const markers = useMemo<TrMarker[]>(() => {
+    const out: TrMarker[] = [];
+    const perBlock = new Map<string, number>();
+    for (const m of ctx?.trMarks ?? NO_MARKS) {
+      if (ctx?.cardShown.has(m.id)) continue;
+      const p = m.pieces.find((x) => !x.erased && !x.removed && x.page === page);
+      if (!p) continue;
+      const box = blocks.find((b) => b.block_id === p.block_id)?.box ?? p.box ?? null;
+      if (!box) continue;
+      const key = typeof p.block_id === "string" ? p.block_id : box.join(",");
+      const slot = perBlock.get(key) ?? 0;
+      perBlock.set(key, slot + 1);
+      out.push({ id: m.id, color: m.color, lang: m.lang ?? "", box, slot });
+    }
+    return out;
+  }, [ctx?.trMarks, ctx?.cardShown, blocks, page]);
+  const shownMarkers = useLeaving(markers);
+  const markersRef = useRef<HTMLDivElement>(null);
   const objects = useMemo(
     () => blocks.filter((b) => FIGURE_TYPES.has(b.type) || b.type === EQUATION_TYPE),
     [blocks],
@@ -212,15 +232,31 @@ export function PdfMarksPage({
       }
       return hit;
     };
+    /** The 文 marker under the pointer (hit-tested: it takes no pointer
+     * events, like the marks). */
+    const markerAt = (e: MouseEvent): string | null => {
+      if (!latest.current.ctx?.visible) return null;
+      for (const m of Array.from(markersRef.current?.querySelectorAll<HTMLElement>("[data-tr-marker]") ?? [])) {
+        if (m.dataset.leaving !== undefined) continue;
+        const r = m.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          return m.dataset.trMarker ?? null;
+        }
+      }
+      return null;
+    };
     const onMove = (e: PointerEvent) => {
       const { ctx: c, objects: objs, boxTool: drawing } = latest.current;
       if (!c || drawing) return;
       const [x, y] = at(e);
-      const id = markAt(x, y)?.id ?? null;
+      const marker = markerAt(e);
+      el.style.cursor = marker ? "pointer" : "";
+      const id = marker ?? markAt(x, y)?.id ?? null;
       if (id !== c.hot) c.setHot(id);
       setHoverObject(objs.find((b) => within(b.box, x, y))?.block_id ?? null);
     };
     const onLeave = () => {
+      el.style.cursor = "";
       latest.current.ctx?.setHot(null);
       setHoverObject(null);
     };
@@ -235,6 +271,11 @@ export function PdfMarksPage({
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP_PX) return;
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
+      const marker = markerAt(e);
+      if (marker) {
+        useTranslationStore.getState().showMark(marker);
+        return;
+      }
       const [x, y] = at(e);
       const hit = markAt(x, y);
       if (!c.pen) {
@@ -259,6 +300,7 @@ export function PdfMarksPage({
       el.removeEventListener("pointerleave", onLeave);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("click", onClick);
+      el.style.cursor = "";
     };
   }, [ctx !== null, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -313,6 +355,51 @@ export function PdfMarksPage({
             );
           }),
         )}
+      </div>
+      <div
+        ref={markersRef}
+        aria-hidden={!ctx.visible || undefined}
+        className={cn(
+          "pointer-events-none absolute inset-0 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          !ctx.visible && "opacity-0",
+        )}
+      >
+        {shownMarkers.map((m) => {
+          const c = m.color ? MARK_PALETTE.light[m.color] : NEUTRAL;
+          const label = t("marks.trMarker", {
+            defaultValue: "A mark on the {{lang}} translation. Show it",
+            lang: langShort(m.lang),
+          });
+          return (
+            <button
+              key={m.id}
+              type="button"
+              data-tr-marker={m.id}
+              data-leaving={m.leaving ? "" : undefined}
+              tabIndex={ctx.visible && !m.leaving ? 0 : -1}
+              aria-label={label}
+              title={label}
+              onClick={() => useTranslationStore.getState().showMark(m.id)}
+              style={{
+                left: pct(m.box[2]),
+                top: `calc(${pct(m.box[1])} + ${m.slot * (MARKER_PX + MARKER_GAP_PX)}px)`,
+                width: MARKER_PX,
+                height: MARKER_PX,
+                borderColor: c,
+                background: `color-mix(in srgb, ${c} ${ctx.hot === m.id ? 34 : 18}%, #fff)`,
+                boxShadow: ctx.flashId === m.id ? `0 0 0 3px ${RING}` : undefined,
+                opacity: m.leaving ? 0 : ctx.focusIds !== null && !ctx.focusIds.has(m.id) ? 0.3 : undefined,
+              }}
+              className={cn(
+                "pointer-events-none absolute ml-1 inline-flex items-center justify-center rounded-[5px] border-[1.5px] p-0 font-sans text-[11px] leading-none font-semibold text-neutral-800",
+                "transition-[opacity,background-color,box-shadow] duration-200 ease-out animate-in fade-in-0 zoom-in-95 motion-reduce:animate-none motion-reduce:transition-none",
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500",
+              )}
+            >
+              文
+            </button>
+          );
+        })}
       </div>
       <PenObjectRing box={penTarget?.box ?? null} color={ctx.pen} />
       {objects.map((b) => (

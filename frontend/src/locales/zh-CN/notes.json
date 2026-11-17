@@ -32,7 +32,8 @@
     "pageCrop": "第 {{page}} 页截图",
     "page": "第 {{page}} 页",
     "openInPaper": "在论文中打开",
-    "openInPaperNamed": "在论文中打开：{{where}}"
+    "openInPaperNamed": "在论文中打开：{{where}}",
+    "translationChanged": "译文已变更：{{lang}}译文中已没有这段文字。你的引文仍保留。"
   },
   "math": {
     "edit": "点击以编辑 LaTeX",
@@ -327,6 +328,10 @@
     "eraseFailed": "无法擦掉这一段。",
     "retry": "重试",
     "placeTimeout": "没能及时找到这段文字在论文中的位置。",
-    "alreadySaved": "已经保存过了"
+    "alreadySaved": "已经保存过了",
+    "trMarker": "标在{{lang}}译文上的标记，点击显示",
+    "trTurnedOn": "已打开翻译（{{lang}}）以显示这个标记",
+    "trTurnOff": "关闭",
+    "trBackTo": "回到{{lang}}"
   }
 }

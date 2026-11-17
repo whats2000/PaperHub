@@ -15,10 +15,18 @@ import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece } from "@/types/notes";
 
-/** The pieces of one mark and the section it files under. */
+/** The pieces of one mark and the section it files under. A mark made on
+ * a translation also names its language and translation block. */
 export interface MarkGroup {
   section: string | null;
   pieces: MarkPiece[];
+  lang?: string | null;
+  source_ref?: string | null;
+}
+
+/** The language and translation block a group's mark was made on. */
+function translationOf(g: MarkGroup): Pick<MarkIn, "lang" | "source_ref"> {
+  return g.lang ? { lang: g.lang, source_ref: g.source_ref ?? null } : {};
 }
 
 export interface MarkSaveRequest {
@@ -63,7 +71,7 @@ async function saveMissing(
   for (const [i, group] of groups.entries()) {
     const k = groupKey(group);
     if (done.has(k)) continue;
-    const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section };
+    const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section, ...translationOf(group) };
     const res = opts.save ? await opts.save(full) : await create(full, { quiet: true, silent: opts.silent });
     done.set(k, res);
     opts.each?.(res, i);
@@ -253,16 +261,26 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         const kind = placed[0]!.kind ?? stroke.kind ?? "highlight";
         const one = placed.length === 1 ? placed[0]! : null;
         const target = kind === "highlight" && one ? joinTarget(session, { color, place: one.place }) : null;
-        // Consecutive pieces under one section make one mark.
+        // Consecutive pieces under one section make one mark; a mark made
+        // on a translation holds one translated paragraph.
         const groups: (MarkGroup & { places: string[] })[] = [];
         for (const p of placed) {
           const last = groups[groups.length - 1];
-          if (last && last.section === p.section) {
+          const lang = typeof p.piece.lang === "string" ? p.piece.lang : null;
+          const ref = typeof p.piece.source_ref === "string" ? p.piece.source_ref : null;
+          if (last && last.section === p.section && (last.lang ?? null) === lang && (last.source_ref ?? null) === ref) {
             last.pieces.push(p.piece);
             if (p.place) last.places.push(p.place);
-          } else groups.push({ section: p.section, pieces: [p.piece], places: p.place ? [p.place] : [] });
+          } else {
+            groups.push({
+              section: p.section,
+              pieces: [p.piece],
+              places: p.place ? [p.place] : [],
+              ...(lang ? { lang, source_ref: ref } : {}),
+            });
+          }
         }
-        const plain = groups.map(({ section, pieces }) => ({ section, pieces }));
+        const plain = groups.map(({ places: _places, ...group }) => group);
         const key = progressKey(kind, color, stroke.view, plain);
         const done = savedOnce ?? progress.current.get(key) ?? new Map<string, MarkCreated>();
         savedOnce = done;

@@ -76,6 +76,18 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
           )}
         </div>
       )}
+      {!props.anchorLost && props.lang && props.translationChanged && (
+        <div
+          data-testid={`translation-changed-${blockId}`}
+          className="mt-1 flex items-center gap-1 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-2 py-1 font-sans text-xs text-amber-700 dark:text-amber-300"
+        >
+          <Languages className="size-3 shrink-0" aria-hidden />
+          {t("notes:ref.translationChanged", {
+            defaultValue: "Translation changed: these words are no longer in the {{lang}} translation. Your quote is kept.",
+            lang: langShort(props.lang),
+          })}
+        </div>
+      )}
       {!props.anchorLost && props.piecesLost > 0 && (
         <div className="mt-1 inline-flex items-center gap-1 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-2 py-0.5 font-sans text-[11px] text-amber-700 dark:text-amber-300">
           <Unlink className="size-3 shrink-0" aria-hidden />

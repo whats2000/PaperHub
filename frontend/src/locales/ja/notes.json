@@ -32,7 +32,8 @@
     "pageCrop": "{{page}} ページの切り抜き",
     "page": "p. {{page}}",
     "openInPaper": "論文で開く",
-    "openInPaperNamed": "論文で開く：{{where}}"
+    "openInPaperNamed": "論文で開く：{{where}}",
+    "translationChanged": "訳文が変わりました：{{lang}}の訳文にこの文はもうありません。引用は残っています。"
   },
   "math": {
     "edit": "クリックして LaTeX を編集",
@@ -327,6 +328,10 @@
     "eraseFailed": "この部分を消せませんでした。",
     "retry": "再試行",
     "placeTimeout": "この箇所が論文のどこにあるか、時間内に見つけられませんでした。",
-    "alreadySaved": "保存済みです"
+    "alreadySaved": "保存済みです",
+    "trMarker": "{{lang}}の訳文に付けたマーク。クリックで表示",
+    "trTurnedOn": "このマークを表示するため翻訳（{{lang}}）をオンにしました",
+    "trTurnOff": "オフにする",
+    "trBackTo": "{{lang}}に戻す"
   }
 }

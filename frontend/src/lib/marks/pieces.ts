@@ -50,6 +50,14 @@ export function pdfPlace(page: number, blockId: string | null | undefined): stri
   return blockId ? `p:${page}:${blockId}` : null;
 }
 
+/** A piece marked on a translation: the paragraph it translates (an HTML
+ * paragraph's place, or a PDF paragraph's key), in that language. Never a
+ * place of the paper's own text, so a stroke on a translation never joins
+ * a mark on the original. */
+export function translationPlace(lang: string, source: string | null): string | null {
+  return source ? `t:${lang}:${source}` : null;
+}
+
 /** A piece located in the paper's reading text (a PDF page without Marker
  * blocks): its paragraph there (none when it crosses a break, or when it
  * wasn't located: never joins). */
@@ -70,13 +78,16 @@ const num = (v: unknown, fallback = Infinity) => (typeof v === "number" && Numbe
 type Quad = [number, number, number, number];
 
 function readingKey(p: MarkPiece, pdf: boolean): number[] {
+  // Pieces of one translated paragraph share their source's place: they
+  // read by where they sit in the translation.
+  const tr = num(p.tr_start, 0);
   if (pdf) {
     const boxes = Array.isArray(p.rects) ? (p.rects as Quad[]) : p.box ? [p.box] : [];
     const top = boxes.length ? Math.min(...boxes.map((b) => num(b[1]))) : Infinity;
     const left = boxes.length ? Math.min(...boxes.map((b) => num(b[0]))) : Infinity;
-    return [num(p.page), top, left];
+    return [num(p.page), top, left, tr];
   }
-  return [num(p.chunk_start), num(p.text_start, 0)];
+  return [num(p.chunk_start), num(p.text_start, 0), tr];
 }
 
 /** Pieces as the paper reads them, for showing only: the stored list stays

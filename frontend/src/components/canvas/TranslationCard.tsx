@@ -1,13 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Info, Loader2, Pin, PinOff, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "katex/dist/katex.min.css";
 
+import { useLeaving } from "@/components/canvas/useLeaving";
 import { usePresence } from "@/hooks/usePresence";
 import { contentScrollTop, type CardPlacement } from "@/lib/cardPlacement";
+import { cardIndex, findInTranslation } from "@/lib/marks/translationMarks";
 import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import type { Mark } from "@/types/notes";
 
 export type TranslationCardStatus = "loading" | "ok" | "unavailable";
 
@@ -19,6 +22,20 @@ export interface CardScroll {
   /** The `⟦BR⟧` dividers line up with the fragments: scroll within spans. */
   perFragment: boolean;
 }
+
+/** One line of a mark drawn in the card, in the content's coordinates. */
+interface CardMarkBox {
+  id: string;
+  mark: string;
+  kind: Mark["kind"];
+  color: Mark["color"];
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+const NO_BOXES: CardMarkBox[] = [];
 
 /** Progress change that resumes the sync after the user scrolled the card. */
 const RESUME_SYNC_DELTA = 0.02;
@@ -50,6 +67,15 @@ interface Props {
   onRetry: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
+  /** Marks made on this paragraph's translation in this language: drawn
+   * over their words (those whose words are gone are not). */
+  marks?: readonly Mark[];
+  /** A mark to ring for a moment (asked to be shown). */
+  flashId?: string | null;
+  /** The marks drawn in the card now (the rest show as a 文 marker). */
+  onMarksShown?: (ids: ReadonlySet<string>) => void;
+  /** Text selected in the card (by pointer or keyboard). */
+  onSelectText?: (range: Range, keyboard: boolean, content: HTMLElement) => void;
 }
 
 /**
@@ -77,6 +103,10 @@ export function TranslationCard({
   onRetry,
   onMouseEnter,
   onMouseLeave,
+  marks,
+  flashId = null,
+  onMarksShown,
+  onSelectText,
 }: Props) {
   const { t } = useTranslation("canvas");
   const { mounted, state } = usePresence(open && placement !== null);
@@ -145,6 +175,67 @@ export function TranslationCard({
     ro.observe(el);
     return () => ro.disconnect();
   }, [mounted, cardRef]);
+
+  // Marks on the card's words: one box per line, behind the text.
+  const textRef = useRef<HTMLDivElement>(null);
+  const [boxes, setBoxes] = useState<CardMarkBox[]>(NO_BOXES);
+  const onShownRef = useRef(onMarksShown);
+  useLayoutEffect(() => {
+    onShownRef.current = onMarksShown;
+  }, [onMarksShown]);
+  const width = placement?.width;
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const text = textRef.current;
+    if (!mounted || !content || !text || !marks?.length || status !== "ok") {
+      setBoxes(NO_BOXES);
+      onShownRef.current?.(new Set());
+      return;
+    }
+    const index = cardIndex(text);
+    const at = content.getBoundingClientRect();
+    const next: CardMarkBox[] = [];
+    const shown = new Set<string>();
+    for (const m of marks) {
+      const live = m.pieces.filter((p) => !p.erased && !p.removed && !p.lost);
+      const ranges = live.map((p) => findInTranslation(index, p));
+      // Every piece's words, or the 文 marker on the page instead.
+      if (!live.length || ranges.some((r) => r === null)) continue;
+      shown.add(m.id);
+      ranges.forEach((r, ri) =>
+        Array.from(r!.getClientRects()).forEach((rect, li) => {
+          if (rect.width <= 0 || rect.height <= 0) return;
+          next.push({
+            id: `${m.id}:${ri}:${li}`,
+            mark: m.id,
+            kind: m.kind,
+            color: m.color,
+            left: rect.left - at.left,
+            top: rect.top - at.top + content.scrollTop,
+            width: rect.width,
+            height: rect.height,
+          });
+        }),
+      );
+    }
+    setBoxes(next);
+    onShownRef.current?.(shown);
+  }, [mounted, marks, html, status, width, contentKey]);
+  useEffect(() => () => onShownRef.current?.(new Set()), []);
+  const drawn = useLeaving(boxes);
+
+  // A selection in the card: after the browser has settled it.
+  const readSelection = (keyboard: boolean) => {
+    if (!onSelectText) return;
+    setTimeout(() => {
+      const content = contentRef.current;
+      const sel = window.getSelection();
+      if (!content || !sel || sel.isCollapsed || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!content.contains(range.commonAncestorContainer)) return;
+      onSelectText(range.cloneRange(), keyboard, textRef.current ?? content);
+    }, 0);
+  };
 
   if (!mounted || !placement) return null;
   const showMathNote = mathNote && status === "ok" && html !== null;
@@ -222,10 +313,36 @@ export function TranslationCard({
         onWheel={pauseSync}
         onTouchMove={pauseSync}
         onKeyDown={pauseSync}
+        onMouseUp={() => readSelection(false)}
+        onKeyUp={(e) => {
+          if (e.shiftKey || e.key === "Shift") readSelection(true);
+        }}
         className="relative min-h-0 flex-1 animate-in rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring overflow-y-auto text-[13.5px] leading-[1.75] duration-150 fade-in-0 motion-reduce:animate-none"
       >
+        {drawn.map((b) => (
+          <div
+            key={b.id}
+            aria-hidden="true"
+            data-card-mark={b.mark}
+            className={cn(
+              "pointer-events-none absolute rounded-[2px] transition-[opacity,box-shadow] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none",
+              b.leaving && "opacity-0",
+            )}
+            style={{
+              left: b.left,
+              top: b.top,
+              width: b.width,
+              height: b.height,
+              ...(b.kind === "quote" || !b.color
+                ? { borderBottom: "1px solid var(--muted-foreground)", borderRadius: 0 }
+                : { background: `color-mix(in srgb, var(--hl-${b.color}) 26%, transparent)` }),
+              boxShadow: flashId === b.mark ? "0 0 0 3px var(--ring)" : undefined,
+            }}
+          />
+        ))}
         {status === "ok" && html !== null ? (
-          <div dangerouslySetInnerHTML={{ __html: html }} />
+          // Positioned, so the words paint over the marks behind them.
+          <div ref={textRef} className="relative" dangerouslySetInnerHTML={{ __html: html }} />
         ) : status === "unavailable" ? (
           <div className="flex items-center justify-between gap-2 text-foreground/65">
             <span>{t("translation.unavailable", "Translation unavailable")}</span>

@@ -23,6 +23,8 @@ import type {
 
 export const TR_STYLE_ID = "ph-tr-style";
 export const TR_CLASS = "ph-tr";
+/** The language a translation box holds (a mark made on it records it). */
+export const TR_LANG_ATTR = "data-ph-tr-lang";
 
 const BLOCK_SELECTOR = "p, li, figcaption, h1, h2, h3, h4, h5, h6";
 const EXCLUDED_ANCESTOR = `math, .math.display, pre, .${TR_CLASS}`;
@@ -549,10 +551,14 @@ export function attachHtmlTranslation(
     fullPaper: opts.fullPaper,
     send: opts.send,
   });
+  /** Renders a block's translation, tagged with its language (a mark made
+   * on it records the language; one made in another is not drawn on it). */
+  const show = (block: HtmlBlock, result: TranslateResult | "pending", onRetry?: () => void) =>
+    renderTranslation(block, result, labels, onRetry).setAttribute(TR_LANG_ATTR, opts.language);
   const retry = (block: HtmlBlock) => () => {
     if (disposed) return;
     resolved.delete(block.key);
-    renderTranslation(block, "pending", labels);
+    show(block, "pending");
     queue.retry([block.key]);
   };
   const unsubscribe = queue.onResult((r) => {
@@ -560,7 +566,7 @@ export function attachHtmlTranslation(
     if (disposed || !block) return;
     resolved.add(r.key);
     results.set(r.key, r);
-    renderTranslation(block, r, labels, retry(block));
+    show(block, r, retry(block));
     reportStale();
   });
   const unsubscribeStatus = opts.onStatusChange
@@ -585,7 +591,7 @@ export function attachHtmlTranslation(
           if (entry.isIntersecting) {
             visible.add(key);
             if (!resolved.has(key) && !liveBox(byKey.get(key)!)) {
-              renderTranslation(byKey.get(key)!, "pending", labels);
+              show(byKey.get(key)!, "pending");
             }
           } else {
             visible.delete(key);
@@ -625,7 +631,7 @@ export function attachHtmlTranslation(
         const block = byKey.get(key);
         if (!block) continue;
         resolved.delete(key);
-        if (liveBox(block)) renderTranslation(block, "pending", labels);
+        if (liveBox(block)) show(block, "pending");
       }
     },
   });

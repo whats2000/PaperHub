@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PdfTranslationLayer, PdfTranslationPage } from "@/components/canvas/PdfTranslationLayer";
+import { PdfMarksProvider, type PdfMarksApi } from "@/components/canvas/usePdfMarks";
 import { getPdfParagraphs, translateBlocks } from "@/lib/api";
 import { mathToKatexHtml } from "@/lib/pdfTranslation";
 import { useTranslationStore } from "@/store/translation";
@@ -756,5 +757,52 @@ describe("PdfTranslationLayer own paragraphs fetch", () => {
     const onLoaded = vi.fn();
     render(<Reporting onLoaded={onLoaded} />);
     await waitFor(() => expect(onLoaded).toHaveBeenCalledWith(READY));
+  });
+});
+
+describe("PdfTranslationLayer — a mark on the card asked to be shown", () => {
+  it("pins the paragraph's card, rings the mark there and reports it shown", async () => {
+    const rects = vi.spyOn(Range.prototype, "getClientRects").mockImplementation(() => [new DOMRect(10, 10, 40, 16)] as unknown as DOMRectList);
+    const setCardShown = vi.fn();
+    const ctx = {
+      visible: true,
+      blocks: {},
+      setCardShown,
+      openCard: vi.fn(),
+      trMarks: [
+        {
+          id: "mt",
+          paper_content_id: 7,
+          block_id: "b",
+          kind: "highlight",
+          color: "purple",
+          view: "pdf",
+          pieces: [{ quote: "它是凸的", lang: "繁體中文", source_ref: P1, page: 0, block_id: "/page/0/Text/1" }],
+          lang: "繁體中文",
+          source_ref: P1,
+          section_key: null,
+          status: "ok",
+          created_at: "2026-11-17T00:00:00Z",
+          deleted_at: null,
+        },
+      ],
+    } as unknown as PdfMarksApi;
+    render(
+      <PdfMarksProvider value={ctx}>
+        <Harness />
+      </PdfMarksProvider>,
+    );
+    await waitFor(() => expect(fragmentsOf(P1)).toHaveLength(2));
+    act(() => {
+      useTranslationStore.setState({ reveal: { paperId: 7, markId: "mt", n: 1 } });
+    });
+    await waitFor(() => expect(card()).toHaveTextContent("它是凸的"));
+    expect(screen.getByRole("button", { name: /unpin translation/i })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(card().querySelector('[data-card-mark="mt"]')).not.toBeNull());
+    expect((card().querySelector('[data-card-mark="mt"]') as HTMLElement).style.boxShadow).not.toBe("");
+    expect(setCardShown).toHaveBeenLastCalledWith(new Set(["mt"]));
+    // Done: a reader opened later does not show it again.
+    expect(useTranslationStore.getState().reveal).toBeNull();
+    rects.mockRestore();
   });
 });

@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { TranslatePill } from "./TranslatePill";
+import { useMarksStore } from "@/store/marks";
 import { useTranslationStore } from "@/store/translation";
+import type { Mark } from "@/types/notes";
+
+const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
+vi.mock("sonner", () => ({ toast: Object.assign(toastFn, { error: vi.fn(), message: vi.fn(), success: vi.fn() }) }));
 
 const PAPER = 7;
 
@@ -283,5 +288,54 @@ describe("TranslatePill: retry all failed (QA F2) and untranslatable HTML (QA B2
     expect(screen.getByRole("button", { name: toggleName })).toHaveAccessibleDescription(
       /can't be translated/i,
     );
+  });
+});
+
+describe("TranslatePill and a mark on a translation", () => {
+  const mark: Mark = {
+    id: "mt",
+    paper_content_id: PAPER,
+    block_id: "b",
+    kind: "highlight",
+    color: "purple",
+    view: "html",
+    pieces: [{ quote: "預測", lang: "繁體中文", source_ref: "h:3", orig: "We predict." }],
+    lang: "繁體中文",
+    source_ref: "h:3",
+    section_key: null,
+    status: "ok",
+    created_at: "2026-11-17T00:00:00Z",
+    deleted_at: null,
+  };
+  beforeEach(() => {
+    toastFn.mockReset();
+    useMarksStore.setState({ marksByPaper: { [PAPER]: [mark] } });
+    useTranslationStore.setState({ language: "English", recent: ["English"], enabledByPaper: {}, reveal: null });
+  });
+
+  it("asking to see the mark presses the pill in the mark's language; Turn off lets it go", () => {
+    renderPill();
+    const icon = screen.getByRole("button", { name: toggleName });
+    expect(icon).toHaveAttribute("aria-pressed", "false");
+    act(() => void useTranslationStore.getState().showMark("mt"));
+    expect(icon).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /translation language/i })).toHaveTextContent("繁體中文");
+    const { action } = toastFn.mock.calls[0]![1] as { action: { label: string; onClick: () => void } };
+    expect(action.label).toBe("Turn off");
+    act(() => action.onClick());
+    expect(icon).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("switches the pill's language and Back to <language> switches it back", () => {
+    useTranslationStore.setState({ language: "日本語", enabledByPaper: { [PAPER]: true } });
+    renderPill();
+    act(() => void useTranslationStore.getState().showMark("mt"));
+    const label = screen.getByRole("button", { name: /translation language/i });
+    expect(label).toHaveTextContent("繁體中文");
+    const { action } = toastFn.mock.calls[0]![1] as { action: { label: string; onClick: () => void } };
+    expect(action.label).toBe("Back to 日本語");
+    act(() => action.onClick());
+    expect(screen.getByRole("button", { name: /translation language/i })).toHaveTextContent("日本語");
+    expect(screen.getByRole("button", { name: toggleName })).toHaveAttribute("aria-pressed", "true");
   });
 });

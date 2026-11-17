@@ -14,13 +14,29 @@
  * each piece, the skipped words between them unmarked; a click reports the
  * piece under it. With the highlighter on (`pen`), a selection shows in the
  * pen colour and a hovered mark shows the dashed ring of "click to erase".
+ *
+ * A mark made on a translation (H1) is highlighted in the translation under
+ * its paragraph while that language is on screen; otherwise its paragraph
+ * shows a 文 marker in the mark's colour (there is no reliable word
+ * alignment, so the original text is never highlighted for it). The markers
+ * are buttons in a layer of their own (keyboard-reachable), hit-tested like
+ * the marks.
  */
 import { prefersReducedMotion } from "@/lib/motion";
 import { buildTextIndex, findPiece, rangeAt, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
+import {
+  TR_BOX,
+  findInTranslation,
+  sourceParagraph,
+  translationIndex,
+  translationUnder,
+} from "@/lib/marks/translationMarks";
 import type { Mark, MarkColor, MarkColorInfo, MarkPiece } from "@/types/notes";
 
 export const MK_STYLE_ID = "ph-mk-style";
 const LAYER_CLASS = "ph-mk-layer";
+const TR_LAYER_CLASS = "ph-mk-trl";
+const MARKER_CLASS = "ph-mk-tr";
 const HOT_ATTR = "data-ph-mk-hot";
 const PEN_ATTR = "data-ph-pen";
 /** Matches the 200 ms fades below plus a margin. */
@@ -173,11 +189,32 @@ html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline-style: dashed; ou
 .ph-mk-icon[data-hot] { color: var(--mk-hot-fg); background: var(--mk-hot-bg); }
 .ph-mk-icon[data-flash] { box-shadow: 0 0 0 2px var(--mk-ring); }
 .ph-mk-icon[data-dim] { opacity: .3; }
-.ph-mk[data-leaving], .ph-mk-icon[data-leaving] { opacity: 0; animation: none; }
+.${TR_LAYER_CLASS} {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 1;
+  pointer-events: none; transition: opacity 200ms ease-out;
+}
+.${TR_LAYER_CLASS}[data-hidden] { opacity: 0; }
+.${MARKER_CLASS} {
+  position: absolute; box-sizing: border-box; width: ${ICON_SIZE + 2}px; height: ${ICON_SIZE + 2}px;
+  margin: 0; padding: 0; border-radius: 5px; pointer-events: none;
+  border: 1.5px solid var(--mk-c, var(--mk-neutral));
+  background: color-mix(in srgb, var(--mk-c, var(--mk-neutral)) 18%, #fff);
+  color: var(--mk-hot-fg);
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: opacity 200ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, top 200ms ease-out;
+  animation: ph-mk-in 200ms ease-out;
+}
+${MARK_COLORS.map((c) => `.${MARKER_CLASS}[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
+.${MARKER_CLASS}[data-hot] { background: color-mix(in srgb, var(--mk-c, var(--mk-neutral)) 34%, #fff); }
+.${MARKER_CLASS}[data-flash] { box-shadow: 0 0 0 3px var(--mk-ring); }
+.${MARKER_CLASS}[data-dim] { opacity: .3; }
+.${MARKER_CLASS}:focus-visible { outline: 2px solid var(--mk-ring); outline-offset: 2px; }
+.ph-mk[data-leaving], .ph-mk-icon[data-leaving], .${MARKER_CLASS}[data-leaving] { opacity: 0; animation: none; }
 @keyframes ph-mk-in { from { opacity: 0; } }
 html[${HOT_ATTR}], html[${HOT_ATTR}] * { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
-  .${LAYER_CLASS}, .ph-mk, .ph-mk-icon { transition: none; animation: none; }
+  .${LAYER_CLASS}, .ph-mk, .ph-mk-icon, .${TR_LAYER_CLASS}, .${MARKER_CLASS} { transition: none; animation: none; }
 }
 `;
 
@@ -196,12 +233,22 @@ export interface HtmlMarksOptions {
    * one piece, e.g. a margin icon). */
   onClick?: (markId: string, piece: number | null) => void;
   onHover?: (markId: string | null) => void;
+  /** The language of the translations on screen under the paragraphs
+   * (null: translation off). */
+  translation?: string | null;
+  /** A click (or Enter) on a 文 marker: a mark on a translation whose words
+   * are not on screen. */
+  onMarker?: (markId: string) => void;
+  /** A 文 marker's accessible name. */
+  markerLabel?: (mark: Mark) => string;
 }
 
 export interface HtmlMarksHandle {
   update: (next: Partial<HtmlMarksOptions>) => void;
   /** Rings a mark for a moment and scrolls it into view; false if not drawn. */
   flash: (markId: string) => boolean;
+  /** How a mark is drawn now: its words (`text`), a 文 marker, or not. */
+  shownAs: (markId: string) => "text" | "marker" | null;
   /** Removes every overlay node, style and listener. */
   detach: () => void;
 }
@@ -225,6 +272,11 @@ interface Drawn {
   targets: Element[];
   /** Where a note with no quote sits: its chunk spans. */
   spots: Element[];
+  /** A mark on a translation not on screen: the paragraph its 文 marker
+   * sits on, the marker and where it is. */
+  marker: Element | null;
+  markerEl: HTMLElement | null;
+  markerBox: Box | null;
   els: HTMLElement[];
   boxes: Box[];
   /** The piece each box draws (null: the whole object). */
@@ -255,11 +307,13 @@ const hasQuote = (m: Mark) => livePieces(m).some((p) => typeof p.quote === "stri
  * (located when it was saved). */
 const located = (p: MarkPiece) => typeof p.text_start === "number" && typeof p.text_end === "number";
 
-/** Whether the HTML reader draws this mark (translation marks come later).
- * A mark made on the PDF tab shows here where its text was found. */
+/** Whether the HTML reader draws this mark. A mark made on the PDF tab
+ * shows here where its text was found; one made on a translation, in the
+ * translation or as a 文 marker. */
 function drawable(m: Mark, hidden: ReadonlySet<string>): boolean {
-  if (m.deleted_at !== null || m.lang) return false;
+  if (m.deleted_at !== null) return false;
   if (m.color !== null && hidden.has(m.color)) return false;
+  if (m.lang) return m.view === "html" && (m.kind === "quote" || m.kind === "highlight");
   if (m.view === "pdf") return (m.kind === "quote" || m.kind === "highlight") && livePieces(m).some(located);
   return m.kind === "quote" || m.kind === "highlight" || m.kind === "figure" || m.kind === "equation";
 }
@@ -350,6 +404,13 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   layer.style.pointerEvents = "none";
   root.appendChild(layer);
 
+  // The 文 markers: buttons (focusable, named), so not under the layer's
+  // aria-hidden; hit-tested like the marks.
+  const trLayer = doc.createElement("div");
+  trLayer.className = TR_LAYER_CLASS;
+  trLayer.setAttribute("data-ph-overlay", "");
+  root.appendChild(trLayer);
+
   const drawn = new Map<string, Drawn>();
   let icons = new Map<string, Icon>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -382,14 +443,16 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const theme = () => {
     const mode = o.dark ? "dark" : "light";
     const draw = (hex: string) => (o.dark ? darkPreimage(hex) : hex);
-    layer.style.setProperty("--mk-alpha", o.dark ? "32%" : "22%");
     const p = palette(o.dark);
-    for (const c of MARK_COLORS) layer.style.setProperty(`--mk-${c}`, draw(p[c]));
-    layer.style.setProperty("--mk-neutral", draw(NEUTRAL[mode].neutral));
-    layer.style.setProperty("--mk-ring", draw(NEUTRAL[mode].ring));
-    layer.style.setProperty("--mk-hot-fg", draw(NEUTRAL[mode].hotFg));
-    // A dark veil on the light page; under the dark page's inversion, light.
-    layer.style.setProperty("--mk-hot-bg", "rgb(0 0 0 / 7%)");
+    for (const el of [layer, trLayer]) {
+      el.style.setProperty("--mk-alpha", o.dark ? "32%" : "22%");
+      for (const c of MARK_COLORS) el.style.setProperty(`--mk-${c}`, draw(p[c]));
+      el.style.setProperty("--mk-neutral", draw(NEUTRAL[mode].neutral));
+      el.style.setProperty("--mk-ring", draw(NEUTRAL[mode].ring));
+      el.style.setProperty("--mk-hot-fg", draw(NEUTRAL[mode].hotFg));
+      // A dark veil on the light page; under the dark page's inversion, light.
+      el.style.setProperty("--mk-hot-bg", "rgb(0 0 0 / 7%)");
+    }
     // With the highlighter on, a selection shows in the pen colour, and the
     // figure or display equation under the pointer (what a click marks) is
     // ringed in it.
@@ -475,7 +538,44 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     }
     for (const [key, icon] of icons) if (!next.has(key)) leave(icon.el);
     icons = next;
+    placeMarkers(at, viewRight, lines);
     paint();
+  };
+
+  /** Each 文 marker on its paragraph's first line, right of it; markers
+   * (and a note icon) on one line stack downwards. */
+  const placeMarkers = (at: { left: number; top: number }, viewRight: number, lines: Map<string, unknown>) => {
+    const used = new Map<string, number>();
+    for (const [id, d] of drawn) {
+      if (!d.marker) continue;
+      const line = doc.createRange();
+      line.selectNodeContents(d.marker);
+      const first = lineBoxes(Array.from(line.getClientRects()))[0] ?? d.marker.getBoundingClientRect();
+      const right = d.marker.getBoundingClientRect().right - at.left + ICON_GAP;
+      const left = Math.max(0, viewRight > 0 ? Math.min(right, viewRight - ICON_SIZE - 6) : right);
+      const key = `${Math.round(left)}:${Math.round(first.top - at.top)}`;
+      const n = used.get(key) ?? (lines.has(key) ? 1 : 0);
+      used.set(key, n + 1);
+      const box = {
+        left,
+        top: first.top - at.top + (first.height - ICON_SIZE) / 2 + n * (ICON_SIZE + 6),
+        width: ICON_SIZE + 2,
+        height: ICON_SIZE + 2,
+      };
+      let el = d.markerEl;
+      if (!el) {
+        const button = doc.createElement("button");
+        button.type = "button";
+        button.className = MARKER_CLASS;
+        button.dataset.mark = id;
+        button.textContent = "文";
+        trLayer.appendChild(button);
+        el = d.markerEl = button;
+      }
+      el.style.left = `${box.left}px`;
+      el.style.top = `${box.top}px`;
+      d.markerBox = box;
+    }
   };
 
   /** Colour, focus and hover flags. */
@@ -490,6 +590,17 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         else delete el.dataset.color;
         setFlag(el, "data-dim", o.focusIds !== null && !o.focusIds.has(id));
         setFlag(el, "data-hot", hot === id);
+      }
+      if (d.markerEl) {
+        const el = d.markerEl;
+        if (m.color) el.dataset.color = m.color;
+        else delete el.dataset.color;
+        setFlag(el, "data-dim", o.focusIds !== null && !o.focusIds.has(id));
+        setFlag(el, "data-hot", hot === id);
+        const label = o.markerLabel?.(m) ?? `文 ${m.lang ?? ""}`;
+        el.setAttribute("aria-label", label);
+        el.title = label;
+        el.tabIndex = o.visible ? 0 : -1;
       }
     }
     for (const icon of icons.values()) {
@@ -513,15 +624,21 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const sync = () => {
     const hidden = new Set(o.colors.filter((c) => !c.visible).map((c) => c.color));
     const want = new Map(o.marks.filter((m) => drawable(m, hidden)).map((m) => [m.id, m]));
+    const gone = (d: Drawn) => {
+      d.els.forEach(leave);
+      if (d.markerEl) leave(d.markerEl);
+    };
     for (const [id, d] of drawn) {
       if (want.has(id)) continue;
-      d.els.forEach(leave);
+      gone(d);
       drawn.delete(id);
     }
     for (const [id, m] of want) {
-      const key = `${chunkGen}:${JSON.stringify(livePieces(m))}`;
+      // A mark on a translation follows the translations on screen, so it
+      // is placed again on every sync.
+      const key = m.lang ? null : `${chunkGen}:${JSON.stringify(livePieces(m))}`;
       const prev = drawn.get(id);
-      if (prev?.key === key) continue;
+      if (key !== null && prev?.key === key) continue;
       const ranges: Range[] = [];
       const rangePiece: number[] = [];
       let spots: Element[] = [];
@@ -538,7 +655,25 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
           }
         }
       };
-      if (m.view === "pdf") {
+      let marker: Element | null = null;
+      if (m.lang) {
+        index ??= buildTextIndex(doc);
+        const shown = shownPieces(m);
+        const source = shown.map(([p]) => sourceParagraph(index!, p, o.chunks)).find((el) => el !== null) ?? null;
+        // Its words, highlighted, where they are on screen; else 文 on the
+        // paragraph (translation off, another language, the words changed).
+        const box =
+          source && m.status !== "translation_changed" && o.translation === m.lang ? translationUnder(source, m.lang) : null;
+        if (box) {
+          const tIndex = translationIndex(box);
+          placeEach((p) => findInTranslation(tIndex, p));
+        }
+        if (!box || ranges.length < shown.length) {
+          ranges.length = 0;
+          rangePiece.length = 0;
+          marker = source;
+        }
+      } else if (m.view === "pdf") {
         index ??= buildTextIndex(doc);
         placeEach((p) => (located(p) ? rangeAt(index!, p.text_start as number, p.text_end as number) : null));
       } else if (m.kind === "figure" && typeof figureId === "string") {
@@ -551,25 +686,52 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         spots = spotsOf(m);
       }
       if (whole) spots = [];
-      if (!ranges.length && !spots.length && !targets.length) {
-        prev?.els.forEach(leave);
+      if (!ranges.length && !spots.length && !targets.length && !marker) {
+        if (prev) gone(prev);
         drawn.delete(id);
         continue;
       }
-      drawn.set(id, { key, ranges, rangePiece, whole, targets, spots, els: prev?.els ?? [], boxes: [], boxPiece: [] });
+      // A highlight that gives way to the 文 marker (or back) fades out.
+      const els = prev?.els ?? [];
+      if (!ranges.length && !targets.length && els.length) els.splice(0).forEach(leave);
+      let markerEl = prev?.markerEl ?? null;
+      if (!marker && markerEl) {
+        leave(markerEl);
+        markerEl = null;
+      }
+      drawn.set(id, {
+        key: key ?? "",
+        ranges,
+        rangePiece,
+        whole,
+        targets,
+        spots,
+        marker,
+        markerEl,
+        markerBox: null,
+        els,
+        boxes: [],
+        boxPiece: [],
+      });
     }
     index = null; // the document may change before the next sync
     setFlag(layer, "data-hidden", !o.visible);
+    setFlag(trLayer, "data-hidden", !o.visible);
+    if (o.visible) trLayer.removeAttribute("aria-hidden");
+    else trLayer.setAttribute("aria-hidden", "true");
     if (o.pen) doc.documentElement.setAttribute(PEN_ATTR, o.pen);
     else doc.documentElement.removeAttribute(PEN_ATTR);
     layout();
   };
 
-  const hitPiece = (x: number, y: number): { id: string; piece: number | null } | null => {
+  const hitPiece = (x: number, y: number): { id: string; piece: number | null; marker?: boolean } | null => {
     if (!o.visible) return null;
     const at = origin();
     const lx = x - at.left;
     const ly = y - at.top;
+    for (const [id, d] of drawn) {
+      if (d.markerBox && contains(d.markerBox, lx, ly)) return { id, piece: null, marker: true };
+    }
     for (const icon of icons.values()) {
       if (contains(icon.box, lx, ly)) return icon.marks[0] ? { id: icon.marks[0], piece: null } : null;
     }
@@ -596,13 +758,24 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   // Capture: a mark over a link or a figure takes the click, so the link is
   // not followed and the figure lightbox does not open as well.
   const onClick = (e: MouseEvent) => {
+    // A 文 marker pressed from the keyboard (Enter / Space on it).
+    const target = e.target as Element | null;
+    const button = target?.nodeType === 1 ? target.closest(`.${MARKER_CLASS}`) : null;
+    if (button && trLayer.contains(button)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = (button as HTMLElement).dataset.mark;
+      if (id) o.onMarker?.(id);
+      return;
+    }
     const sel = doc.getSelection();
     if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
     const found = hitPiece(e.clientX, e.clientY);
     if (found === null) return;
     e.preventDefault();
     e.stopPropagation();
-    o.onClick?.(found.id, found.piece);
+    if (found.marker) o.onMarker?.(found.id);
+    else o.onClick?.(found.id, found.piece);
   };
   doc.addEventListener("mousemove", onMove);
   doc.addEventListener("click", onClick, true);
@@ -611,12 +784,25 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   // Text moves when the paper reflows — a resize, translations opening under
   // paragraphs, MathJax typesetting, fonts loading: redraw on the next frame.
   let frame = 0;
+  // A translation came, changed or went: marks on translations are placed
+  // again (their words, or the 文 marker), not just laid out.
+  let trChanged = false;
   const schedule = () => {
     if (frame || !win || detached) return;
     frame = win.requestAnimationFrame(() => {
       frame = 0;
-      layout();
+      if (trChanged) {
+        trChanged = false;
+        sync();
+      } else layout();
     });
+  };
+  const touchesTranslation = (r: MutationRecord) => {
+    const el = r.target.nodeType === 1 ? (r.target as Element) : r.target.parentElement;
+    if (el?.closest(TR_BOX)) return true;
+    return [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].some(
+      (n) => n.nodeType === 1 && (n as Element).matches(TR_BOX),
+    );
   };
   const RO = (win as (Window & { ResizeObserver?: typeof ResizeObserver }) | null)?.ResizeObserver ?? globalThis.ResizeObserver;
   const resizes = RO ? new RO(schedule) : null;
@@ -625,10 +811,21 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const mutations = MO
     ? new MO((records) => {
         // Our own boxes and icons are not a reflow of the paper.
-        if (records.some((r) => !layer.contains(r.target) && r.target !== style && !style.contains(r.target))) schedule();
+        const paper = records.filter(
+          (r) => !layer.contains(r.target) && !trLayer.contains(r.target) && r.target !== style && !style.contains(r.target),
+        );
+        if (!paper.length) return;
+        if (o.marks.some((m) => m.lang) && paper.some(touchesTranslation)) trChanged = true;
+        schedule();
       })
     : null;
-  mutations?.observe(root, { childList: true, subtree: true, characterData: true });
+  mutations?.observe(root, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["data-ph-tr-leaving", "data-ph-tr-state"],
+  });
   win?.addEventListener("resize", schedule);
   void doc.fonts?.ready.then(schedule).catch(() => undefined);
   void (win as (Window & MathJaxStartup) | null)?.MathJax?.startup?.promise?.then(schedule).catch(() => undefined);
@@ -646,11 +843,15 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     },
     flash: (markId) => {
       const d = drawn.get(markId);
-      const els = d?.els.length ? d.els : [...icons.values()].filter((i) => i.marks.includes(markId)).map((i) => i.el);
+      const els = d?.els.length
+        ? d.els
+        : d?.markerEl
+          ? [d.markerEl]
+          : [...icons.values()].filter((i) => i.marks.includes(markId)).map((i) => i.el);
       if (!d || !els.length) return false;
       for (const el of els) el.setAttribute("data-flash", "");
       later(() => els.forEach((el) => el.removeAttribute("data-flash")), FLASH_MS);
-      const box = d.boxes[0] ?? [...icons.values()].find((i) => i.marks.includes(markId))?.box;
+      const box = d.boxes[0] ?? d.markerBox ?? [...icons.values()].find((i) => i.marks.includes(markId))?.box;
       if (box && win) {
         const top = layer.getBoundingClientRect().top + box.top;
         if (top < 0 || top + box.height > win.innerHeight) {
@@ -661,6 +862,11 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         }
       }
       return true;
+    },
+    shownAs: (markId) => {
+      const d = drawn.get(markId);
+      if (!d) return null;
+      return d.els.length ? "text" : d.markerEl ? "marker" : null;
     },
     detach: () => {
       detached = true;
@@ -674,6 +880,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       timers.forEach(clearTimeout);
       timers.clear();
       layer.remove();
+      trLayer.remove();
       style.remove();
       doc.documentElement.removeAttribute(HOT_ATTR);
       doc.documentElement.removeAttribute(PEN_ATTR);

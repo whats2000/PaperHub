@@ -115,8 +115,24 @@ export interface TextIndex {
 }
 
 export function buildTextIndex(doc: Document): TextIndex {
+  return buildTextIndexIn(doc.body ?? doc.documentElement);
+}
+
+/** What an index of part of a page leaves out, and reads as math. */
+export interface TextIndexOptions {
+  /** Left out (default: translations, overlays, scripts). */
+  skip?: string;
+  /** Each read as one `$TeX$` unit (default: MathJax and MathML math). */
+  math?: string;
+}
+
+/** The reading text of one element: the paper's body, or a translation
+ * (which the paper's own index leaves out). */
+export function buildTextIndexIn(root: Element, opts: TextIndexOptions = {}): TextIndex {
+  const skip = opts.skip ?? SKIPPED;
+  const mathSel = opts.math ?? MATH;
+  const doc = root.ownerDocument;
   const index: TextIndex = { doc, text: "", units: [], unitOf: [], offsetOf: [], spans: [] };
-  const root = doc.body ?? doc.documentElement;
   const chars: string[] = [];
   let prevSpace = true; // no leading space
   let prevBlock: Element | null = null;
@@ -159,8 +175,8 @@ export function buildTextIndex(doc: Document): TextIndex {
       }
       if (n.nodeType !== 1) continue;
       const child = n as Element;
-      if (child.matches(SKIPPED)) continue;
-      if (child.matches(MATH)) {
+      if (child.matches(skip)) continue;
+      if (child.matches(mathSel)) {
         const tex = texText(mathSource(child));
         if (!tex) continue;
         const block = child.closest(BLOCK) ?? root;
@@ -233,7 +249,7 @@ const same = (p: Point, node: Node, off: number) => p[0] === node && p[1] === of
 
 /** The characters of `index` inside `range`, as [start, end). A math unit
  * the range overlaps at all is taken whole. */
-function rangeSpan(index: TextIndex, range: Range): [number, number] {
+export function rangeSpan(index: TextIndex, range: Range): [number, number] {
   const n = index.text.length;
   const start = firstTrue(n, (i) => {
     const math = mathOf(index, i);

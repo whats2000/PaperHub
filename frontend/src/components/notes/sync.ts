@@ -24,11 +24,13 @@ export type Block = EditorBlock;
 const JSON_PROPS = new Set(["pieces", "source"]);
 const MARK_TYPES = new Set(["paperQuote", "paperFigure", "paperEquation", "paperRegion"]);
 /** Optional mark props whose editor default means "absent" (a quote with no
- * colour, a mark not made on a translation, an anchor not lost). */
+ * colour, a mark not made on a translation or its words still there, an anchor not lost). */
 const MARK_OPTIONAL_DEFAULTS: Record<string, unknown> = {
   color: "",
   lang: "",
   orig: "",
+  sourceRef: "",
+  translationChanged: false,
   anchorLost: false,
   piecesLost: 0,
 };

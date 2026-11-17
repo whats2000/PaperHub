@@ -12,6 +12,12 @@
  * pen colour (joining the pen session's mark in the same Marker block), a
  * click on a figure or an equation marks it whole, a box drawn on a scanned
  * page marks at once, and a click on a mark erases the piece under it.
+ *
+ * A selection in the translation card (`openCard`) marks the translated
+ * words of the card's paragraph the same way (at once with the
+ * highlighter); such marks show in the card while it shows their
+ * paragraph in their language, and as a 文 marker on the paragraph's
+ * Marker block otherwise.
  */
 import {
   createContext,
@@ -28,7 +34,7 @@ import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
+import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
 import { objectPiece, storedPiece, usePdfPen, type Located, type PlaceText } from "@/components/canvas/usePdfPen";
@@ -46,6 +52,8 @@ import {
   type PdfFragment,
   type PdfPiece,
 } from "@/lib/marks/pdfGeometry";
+import { translationPlace } from "@/lib/marks/pieces";
+import type { TranslationPiece } from "@/lib/marks/translationMarks";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import type { Mark, MarkColor, MarkColorInfo, PaperPageBlock } from "@/types/notes";
 
@@ -77,7 +85,18 @@ type Target =
       box: SelectionBox;
     }
   | { type: "object"; kind: MarkableObject; page: number; block: PaperPageBlock; box: SelectionBox }
-  | { type: "box"; page: number; frac: Frac; scanned: boolean; result: BoxResult | null; box: SelectionBox };
+  | { type: "box"; page: number; frac: Frac; scanned: boolean; result: BoxResult | null; box: SelectionBox }
+  | { type: "translation"; piece: TranslationPiece; keyboard: boolean; box: SelectionBox };
+
+/** A selection in the translation card: its piece, where it is on screen,
+ * and whether it was made from the keyboard. */
+export interface CardSelection {
+  piece: TranslationPiece;
+  rect: { top: number; bottom: number; left: number; right: number };
+  keyboard: boolean;
+}
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 export interface PdfMarksApi {
   paperId: number;
@@ -103,6 +122,15 @@ export interface PdfMarksApi {
   openBox: (page: number, box: Frac, pageEl: Element, scanned: boolean) => void;
   /** The box waiting for its popover choice (drawn on its page). */
   pendingBox: { page: number; frac: Frac } | null;
+  /** Marks made on the translation card's text (shown in the card, or as
+   * a 文 marker on their paragraph). */
+  trMarks: Mark[];
+  /** The marks the open card shows in their words (no 文 marker then). */
+  cardShown: ReadonlySet<string>;
+  setCardShown: (ids: ReadonlySet<string>) => void;
+  /** A selection in the translation card: the popover (or, with the
+   * highlighter, a mark at once). */
+  openCard: (sel: CardSelection) => void;
 }
 
 export const PdfMarksContext = createContext<PdfMarksApi | null>(null);
@@ -164,6 +192,21 @@ export function usePdfMarks({
         !(m.color !== null && hidden.has(m.color)),
     );
   }, [allMarks, colors]);
+
+  // Marks on the translation card's text (PDF paragraphs).
+  const trMarks = useMemo(() => {
+    const hidden = new Set(colors.filter((c) => !c.visible).map((c) => c.color));
+    return allMarks.filter(
+      (m) => !!m.lang && m.view === "pdf" && m.deleted_at === null && !(m.color !== null && hidden.has(m.color)),
+    );
+  }, [allMarks, colors]);
+  const [cardShownIn, setCardShownIn] = useState<ReadonlySet<string>>(NO_IDS);
+  const setCardShown = useCallback(
+    (ids: ReadonlySet<string>) =>
+      setCardShownIn((cur) => (cur.size === ids.size && [...ids].every((i) => cur.has(i)) ? cur : ids)),
+    [],
+  );
+  const cardShown = cardShownIn;
 
   // The Marker blocks of each page, loaded as pages come into view.
   const { blocks, blocksRef, loadBlocks } = usePdfBlocks(paperId);
@@ -278,7 +321,8 @@ export function usePdfMarks({
     if (!root || !target) return;
     const onScroll = () =>
       setTarget((cur) => {
-        if (!cur) return cur;
+        // The card stays where it is while the reader scrolls.
+        if (!cur || cur.type === "translation") return cur;
         const origin = root.getBoundingClientRect();
         let client: { top: number; bottom: number; left: number; right: number } | null = null;
         if (cur.type === "text") client = cur.range.getBoundingClientRect();
@@ -388,6 +432,43 @@ export function usePdfMarks({
     [measure, loadBlocks, penTools],
   );
 
+  /** A card piece's section: its paragraph's Marker block's (null when its
+   * page's layout can't be had: said in a toast). */
+  const cardSection = useCallback(
+    async (piece: TranslationPiece): Promise<{ section: string | null } | null> => {
+      const loaded = await loadPages([typeof piece.page === "number" ? piece.page : 0]);
+      if (!loaded) return null;
+      return { section: loaded[0]!.find((b) => b.block_id === piece.block_id)?.section ?? null };
+    },
+    [loadPages],
+  );
+  const penSave = usePenSave(paperId);
+  const openCard = useCallback(
+    (sel: CardSelection) => {
+      const lang = sel.piece.lang;
+      if (penRef.current) {
+        // The highlighter: marked at once; it joins only marks on the same
+        // translated paragraph.
+        penSave({
+          view: "pdf",
+          pieces: async () => {
+            const at = await cardSection(sel.piece);
+            if (!at) return null;
+            return [{ piece: sel.piece, section: at.section, place: translationPlace(lang, sel.piece.source_ref) }];
+          },
+          done: (ok) => {
+            if (ok) window.getSelection()?.removeAllRanges();
+          },
+        });
+        return;
+      }
+      const origin = measure();
+      if (!origin) return;
+      setTarget({ type: "translation", piece: sel.piece, keyboard: sel.keyboard, box: boxOf(sel.rect, origin) });
+    },
+    [measure, penSave, cardSection],
+  );
+
   // Follow: the section of the Marker block at the top of the view.
   usePdfFollow({ paperId, readerRef, blocks, blocksRef, onReadingHeading });
 
@@ -434,6 +515,20 @@ export function usePdfMarks({
         });
         if (ok) window.getSelection()?.removeAllRanges();
         if (ok && missed) notLocated();
+      } else if (cur.type === "translation") {
+        const piece = cur.piece;
+        ok = await saveMarks({
+          kind: color ? "highlight" : "quote",
+          color,
+          view: "pdf",
+          addNote,
+          groups: async () => {
+            const at = await cardSection(piece);
+            if (!at) return null;
+            return [{ section: at.section, pieces: [piece], lang: piece.lang, source_ref: piece.source_ref }];
+          },
+        });
+        if (ok) window.getSelection()?.removeAllRanges();
       } else if (cur.type === "object") {
         const b = cur.block;
         const piece = objectPiece(cur.kind, cur.page, b, blocksRef.current[cur.page] ?? NO_BLOCKS);
@@ -467,7 +562,7 @@ export function usePdfMarks({
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated],
+    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated, cardSection],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(
@@ -493,6 +588,10 @@ export function usePdfMarks({
             openObject,
             openBox,
             pendingBox: target?.type === "box" ? { page: target.page, frac: target.frac } : null,
+            trMarks,
+            cardShown,
+            setCardShown,
+            openCard,
           },
     [
       paperId,
@@ -512,6 +611,10 @@ export function usePdfMarks({
       openObject,
       openBox,
       target,
+      trMarks,
+      cardShown,
+      setCardShown,
+      openCard,
     ],
   );
 
@@ -532,7 +635,7 @@ export function usePdfMarks({
         colors={colors}
         busy={busy}
         target={popoverTarget}
-        autoFocus={target?.type === "text" ? target.keyboard : false}
+        autoFocus={target?.type === "text" || target?.type === "translation" ? target.keyboard : false}
         onHighlight={(c) => void save(c, false)}
         onQuote={() => void save(null, false)}
         onAddNote={() => void save(null, true)}

@@ -32,7 +32,8 @@
     "pageCrop": "Page {{page}} crop",
     "page": "p. {{page}}",
     "openInPaper": "Open in the paper",
-    "openInPaperNamed": "Open in the paper: {{where}}"
+    "openInPaperNamed": "Open in the paper: {{where}}",
+    "translationChanged": "Translation changed: these words are no longer in the {{lang}} translation. Your quote is kept."
   },
   "math": {
     "edit": "Click to edit the LaTeX",
@@ -327,6 +328,10 @@
     "eraseFailed": "Couldn't erase that piece.",
     "retry": "Retry",
     "placeTimeout": "Couldn't find where this passage is in the paper in time.",
-    "alreadySaved": "Already saved"
+    "alreadySaved": "Already saved",
+    "trMarker": "A mark on the {{lang}} translation. Show it",
+    "trTurnedOn": "Translation turned on ({{lang}}) to show this mark",
+    "trTurnOff": "Turn off",
+    "trBackTo": "Back to {{lang}}"
   }
 }

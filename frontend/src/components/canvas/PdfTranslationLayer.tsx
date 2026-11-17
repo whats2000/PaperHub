@@ -18,10 +18,13 @@ import {
   type CardScroll,
   type TranslationCardStatus,
 } from "@/components/canvas/TranslationCard";
+import { PdfMarksContext } from "@/components/canvas/usePdfMarks";
 import { usePresence } from "@/hooks/usePresence";
 import { getPdfParagraphs } from "@/lib/api";
 import { bboxToRect, markerPageToPageNumber } from "@/lib/bboxHighlight";
 import { describeBreak, glidesBetween, placeCard, type CardPlacement } from "@/lib/cardPlacement";
+import { cardSelection, paragraphBlock } from "@/lib/marks/translationMarks";
+import { prefersReducedMotion } from "@/lib/motion";
 import { mathToKatexHtml } from "@/lib/pdfTranslation";
 import {
   createTranslationQueue,
@@ -49,6 +52,11 @@ const HINT_EXIT_MS = 200;
 const HINT_ANNOUNCE_MS = 50;
 /** A move to another paragraph / fragment / side glides this long. */
 const GLIDE_MS = 200;
+/** A mark asked to be shown rings this long in the card. */
+const FLASH_MS = 1600;
+/** How long a request to show a mark waits for its paragraph to render. */
+const REVEAL_TRIES = 40;
+const REVEAL_EVERY_MS = 150;
 
 const BREAK = /⟦BR⟧/g;
 
@@ -582,6 +590,91 @@ ${next.side}`;
 
   const hintPresence = usePresence(hintOpen, HINT_EXIT_MS);
 
+  // Marks on the card's words (Plan H5b.1): the marks made on this
+  // paragraph's translation in this language, drawn over their words.
+  const marksCtx = useContext(PdfMarksContext);
+  const trMarks = marksCtx?.trMarks;
+  const marksVisible = marksCtx?.visible ?? false;
+  const cardMarks = useMemo(
+    () =>
+      shown && marksVisible
+        ? (trMarks ?? []).filter(
+            (m) => m.source_ref === shown.key && m.lang === language && m.status !== "translation_changed",
+          )
+        : [],
+    [shown, trMarks, marksVisible, language],
+  );
+  const setCardShown = marksCtx?.setCardShown;
+  const onMarksShown = useCallback(
+    (ids: ReadonlySet<string>) => setCardShown?.(open && !outOfView ? ids : new Set()),
+    [setCardShown, open, outOfView],
+  );
+  const openCard = marksCtx?.openCard;
+  const onSelectText = useCallback(
+    (range: Range, keyboard: boolean, content: HTMLElement) => {
+      if (!shown || !openCard) return;
+      const page = shown.fragments[0]?.page ?? 0;
+      const block = paragraphBlock(shown.key);
+      const box = marksCtx?.blocks[page]?.find((b) => b.block_id === block)?.box ?? null;
+      const piece = cardSelection(content, range, { key: shown.key, text: shown.text, math: shown.math, page }, language, box);
+      if (!piece) return;
+      // The card stays while the mark is chosen.
+      if (pinnedKeyRef.current === null) {
+        pinnedKeyRef.current = shown.key;
+        setPinned(shown.key);
+      }
+      openCard({ piece, rect: range.getBoundingClientRect(), keyboard });
+    },
+    [shown, openCard, marksCtx?.blocks, language],
+  );
+
+  // Asked to show a mark on a paragraph's translation: scroll to the
+  // paragraph, open (pin) its card and ring the mark there.
+  const reveal = useTranslationStore((s) => s.reveal);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  useEffect(() => {
+    if (flashId === null) return;
+    const timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashId]);
+  const trMarksRef = useRef(trMarks);
+  useLayoutEffect(() => {
+    trMarksRef.current = trMarks;
+  }, [trMarks]);
+  useEffect(() => {
+    if (!reveal || reveal.paperId !== paperId || !enabled) return;
+    let tries = 0;
+    const tick = (): boolean => {
+      const key = trMarksRef.current?.find((m) => m.id === reveal.markId)?.source_ref;
+      const frag = key
+        ? readerRef.current?.querySelector<HTMLElement>(`[data-paragraph-key="${CSS.escape(key)}"]`)
+        : null;
+      if (!key || !frag) return false;
+      if (typeof frag.scrollIntoView === "function") {
+        frag.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      }
+      clearHideTimer();
+      pinnedKeyRef.current = key;
+      setPinned(key);
+      setHover(key);
+      place(key);
+      setFlashId(reveal.markId);
+      useTranslationStore.getState().revealed(reveal.n);
+      return true;
+    };
+    if (tick()) return;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (tick()) clearInterval(timer);
+      else if (tries >= REVEAL_TRIES) {
+        // Not there to show: the request ends here.
+        clearInterval(timer);
+        useTranslationStore.getState().revealed(reveal.n);
+      }
+    }, REVEAL_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [reveal, paperId, enabled, readerRef, place, clearHideTimer]);
+
   return (
     <ActionsCtx.Provider value={actions}>
       <StateCtx.Provider value={state}>{children}</StateCtx.Provider>
@@ -623,6 +716,10 @@ ${next.side}`;
           overCardRef.current = false;
           if (pinned === null) scheduleHide();
         }}
+        marks={cardMarks}
+        flashId={flashId}
+        onMarksShown={onMarksShown}
+        onSelectText={marksCtx ? onSelectText : undefined}
       />
       {hintPresence.mounted &&
         hint &&
