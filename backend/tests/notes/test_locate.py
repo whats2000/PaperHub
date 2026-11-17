@@ -11,6 +11,7 @@ import pytest
 from paperhub.notes.anchors import reanchor_paper
 from paperhub.notes.locate import MAX_QUERY_CHARS, locate_text, match_text, pdf_normalise, prepared
 from paperhub.notes.marks import MarkIn, create_mark, list_marks
+from paperhub.notes.store import get_note, list_blocks
 
 pytestmark = pytest.mark.asyncio
 
@@ -159,3 +160,35 @@ async def test_the_reading_words_are_prepared_once_per_file_version(tmp_path: Pa
     span, _ = match_text("", "Robots learn from demonstrations", words=a)
     assert span is not None
 
+
+async def test_relocate_refreshes_the_note_block_and_drops_a_lost_place(conn, tmp_path: Path) -> None:
+    ids = await _paper(conn, tmp_path, [
+        ("1 Introduction", "Robots learn from demonstrations."),
+        ("2 Method", "We predict the agent pose ahead of time."),
+    ])
+    found = {"quote": "We predict the agent pose", "page": 0, "rects": [[0.1, 0.1, 0.5, 0.12]],
+             "chunk_start": ids[1], "chunk_end": ids[1], "text_start": 0, "text_end": 1}
+    gone = {"quote": "Robots learn from", "page": 0, "rects": [[0.1, 0.2, 0.5, 0.22]],
+            "chunk_start": ids[0], "chunk_end": ids[0], "text_start": 0, "text_end": 1}
+    m1, _ = await create_mark(conn, MarkIn(paper_content_id=1, kind="highlight", color="green",
+                                           view="pdf", pieces=[found], section_key="2 Method"))
+    m2, _ = await create_mark(conn, MarkIn(paper_content_id=1, kind="quote", color=None,
+                                           view="pdf", pieces=[gone], section_key="1 Introduction"))
+    new = await _paper(conn, tmp_path, [
+        ("1 Introduction", "Agents imitate experts."),
+        ("2 Method", "We predict the agent pose ahead of time."),
+    ])
+    await reanchor_paper(conn, 1)
+    marks = {m["id"]: m for m in await list_marks(conn, 1)}
+    note_id = marks[m1["id"]]["note_id"]
+    blocks = {b.id: b for b in await list_blocks(conn, note_id)}
+    moved = blocks[m1["block_id"]].props["pieces"][0]
+    assert (moved["chunk_start"], moved["chunk_end"]) == (new[1], new[1])
+    lost = marks[m2["id"]]["pieces"][0]
+    assert "chunk_start" not in lost and "text_start" not in lost
+    assert "chunk_start" not in blocks[m2["block_id"]].props["pieces"][0]
+    assert marks[m2["id"]]["status"] == "ok"  # the PDF geometry still marks it
+    # A second run changes nothing: no new revision.
+    before = (await get_note(conn, note_id)).revision
+    await reanchor_paper(conn, 1)
+    assert (await get_note(conn, note_id)).revision == before

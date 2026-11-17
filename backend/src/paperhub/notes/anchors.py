@@ -27,7 +27,7 @@ from typing import Any
 import aiosqlite
 
 from paperhub.notes.html_text import TextIndex, build_text_index
-from paperhub.notes.locate import chunks_in, match_text
+from paperhub.notes.locate import Prepared, chunks_in, match_text, prepare
 from paperhub.notes.marks import (
     BLOCK_TYPE,
     MARK_COLS,
@@ -266,16 +266,16 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
                     BlockIn(type=BLOCK_TYPE[m["kind"]],
                             props=block_props(m)), "Re-anchor mark")
         if not dry_run and reading is not None:
-            await _relocate_pdf_marks(conn, paper_content_id, *reading)
+            await _relocate_pdf_marks(conn, paper_content_id, *reading, note_id)
         if not dry_run and note_id is not None:
             await flag_lost_sections(conn, paper_content_id, note_id)
     return stats
 
 
-def _relocate(p: _Piece, index: TextIndex, ids: dict[str, int]) -> _Piece:
+def _relocate(p: _Piece, index: TextIndex, ids: dict[str, int], words: Prepared) -> _Piece:
     """A PDF piece's place in the reading text found again; it keeps its
     geometry, and without a match it keeps no stale chunk ids."""
-    span, _meta = match_text(index.text, str(p.get("quote") or ""))
+    span, _meta = match_text(index.text, str(p.get("quote") or ""), words=words)
     covered = chunks_in(index, ids, *span) if span else []
     if span is None or not covered:
         return {k: v for k, v in p.items()
@@ -285,18 +285,27 @@ def _relocate(p: _Piece, index: TextIndex, ids: dict[str, int]) -> _Piece:
 
 
 async def _relocate_pdf_marks(conn: aiosqlite.Connection, pcid: int,
-                              index: TextIndex, ids: dict[str, int]) -> None:
+                              index: TextIndex, ids: dict[str, int],
+                              note_id: int | None) -> None:
     """Marks made on the PDF of an HTML paper store where their text is in
     the reading text (the HTML reader draws them there): find it again.
-    Their status never changes — the PDF geometry is what they mark."""
+    Their status never changes — the PDF geometry is what they mark. Their
+    note block's props follow, as re-anchoring's do (an op, actor system)."""
+    words = prepare(index.text)
     for m in await _mark_rows(conn, pcid, html_only=False):
         if m["view"] != "pdf" or not any("chunk_start" in p for p in m["pieces"]):
             continue
-        pieces = [_relocate(p, index, ids) if "chunk_start" in p else p
+        pieces = [_relocate(p, index, ids, words) if "chunk_start" in p else p
                   for p in m["pieces"]]
-        if pieces != m["pieces"]:
-            m["pieces"] = pieces
-            await save_pieces(conn, m)
+        if pieces == m["pieces"]:
+            continue
+        m["pieces"] = pieces
+        await save_pieces(conn, m)
+        if m["deleted_at"] is None and note_id is not None:
+            await _system_update(
+                conn, note_id, m["block_id"],
+                BlockIn(type=BLOCK_TYPE[m["kind"]], props=block_props(m)),
+                "Re-anchor mark")
 
 
 async def flag_lost_sections(conn: aiosqlite.Connection, paper_content_id: int,
