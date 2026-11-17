@@ -163,7 +163,7 @@ async def test_reanchor_leaves_pdf_marks_untouched(conn):
     assert await reanchor_paper(conn, 1) == {
         "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
     lm, blk = await _block(conn, m)
-    assert lm["pieces"] == [pdf] and lm["status"] == "ok"
+    assert lm["pieces"] == [{**pdf, "stroke": 0}] and lm["status"] == "ok"
     assert "anchorLost" not in blk.props
 
 

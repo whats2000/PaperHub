@@ -153,10 +153,28 @@ def reading_order(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def joined_quote(pieces: list[dict[str, Any]]) -> str:
-    """One quote for a mark's live pieces in reading order, "…" for the
-    words skipped between them."""
-    quotes = (str(p.get("quote") or "").strip() for p in reading_order(pieces))
-    return " … ".join(q for q in quotes if q)
+    """One quote for a mark's live pieces in reading order. Pieces of one
+    stroke (a selection across paragraphs) are joined by a paragraph break;
+    pieces of strokes joined later by "…", which stands for skipped words
+    only. A piece with no ``stroke`` is a stroke of its own. Mirrors the
+    frontend's ``joinedQuote``."""
+    out = ""
+    prev: object = None
+    for i, p in enumerate(reading_order(pieces)):
+        q = str(p.get("quote") or "").strip()
+        if not q:
+            continue
+        stroke = p.get("stroke", ("own", i))
+        if out:
+            out += "\n" if stroke == prev else " … "
+        out += q
+        prev = stroke
+    return out
+
+
+def _stroked(pieces: list[dict[str, Any]], stroke: int) -> list[dict[str, Any]]:
+    """The pieces of one save (a selection or a stroke), tagged with it."""
+    return [{**p, "stroke": stroke} for p in pieces]
 
 
 def _check_index(m: dict[str, Any], index: int) -> None:
@@ -264,7 +282,7 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
         rec: dict[str, Any] = {
             "id": _mark_id(), "paper_content_id": m.paper_content_id,
             "block_id": new_block_id(), "kind": m.kind, "color": m.color,
-            "view": m.view, "pieces": m.pieces, "lang": m.lang,
+            "view": m.view, "pieces": _stroked(m.pieces, 0), "lang": m.lang,
             "source_ref": m.source_ref, "section_key": m.section_key,
             "status": "ok", "created_at": datetime.now(UTC).isoformat(),
             "deleted_at": None,
@@ -309,7 +327,9 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
             m.paper_content_id, m.color, m.kind, m.view):
         raise MarkInputError("a piece can only join a mark of the same paper, "
                          "colour, kind and view")
-    rec["pieces"] = [*rec["pieces"], *m.pieces]
+    # A later stroke: the next stroke number (its pieces read after "…").
+    nxt = 1 + max((int(p.get("stroke", 0)) for p in rec["pieces"]), default=-1)
+    rec["pieces"] = [*rec["pieces"], *_stroked(m.pieces, nxt)]
     await save_pieces(conn, rec)
     await _update_block(conn, rec)
     return rec, await _saved_to(conn, rec)

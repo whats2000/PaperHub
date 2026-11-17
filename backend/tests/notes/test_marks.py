@@ -107,7 +107,7 @@ async def test_erase_piece_keeps_rest(conn):
     assert blocks[1].text == "two"
     back = await restore_piece(conn, m["id"], 0)
     assert "erased" not in back["pieces"][0]
-    assert (await list_blocks(conn, saved.note_id))[1].text == "one … two"
+    assert (await list_blocks(conn, saved.note_id))[1].text == "one\ntwo"  # one save: a paragraph break
     # erasing every piece removes the mark; restoring one brings it back
     await erase_piece(conn, m["id"], 0)
     await erase_piece(conn, m["id"], 1)
@@ -197,7 +197,7 @@ async def test_restore_piece_does_not_revive_user_deleted_mark(conn):
     assert await list_marks(conn, 1) == []
     await restore_mark(conn, m["id"])  # block props are synced on restore
     blocks = await list_blocks(conn, saved.note_id)
-    assert blocks[1].text == "one … two"
+    assert blocks[1].text == "one\ntwo"  # one save: a paragraph break
 
 
 async def test_split_keeps_piece_indexes_stable(conn):
@@ -279,4 +279,17 @@ async def test_pdf_quote_reads_by_page_then_top(conn):
     first = {"quote": "page one", "page": 1, "rects": [[0.1, 0.1, 0.3, 0.12]]}
     m, saved = await create_mark(conn, _in([first, lower, upper], view="pdf"))
     [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
-    assert b.text == "upper … lower … page one"
+    assert b.text == "upper\nlower\npage one"  # one save
+
+
+async def test_one_stroke_across_paragraphs_reads_as_paragraphs(conn):
+    """"…" stands for skipped words only: the pieces of one selection or
+    stroke across paragraphs are joined by a paragraph break; pieces of
+    strokes joined later, by "…"."""
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("end of one", 1), _piece("start of two", 2)]))
+    assert [p["stroke"] for p in m["pieces"]] == [0, 0]
+    m2, _ = await create_mark(conn, _in([_piece("later words", 3)], join_to=m["id"]))
+    assert [p["stroke"] for p in m2["pieces"]] == [0, 0, 1]
+    [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
+    assert b.text == "end of one\nstart of two … later words"
