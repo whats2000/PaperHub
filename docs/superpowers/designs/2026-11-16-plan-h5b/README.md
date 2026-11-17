@@ -29,6 +29,17 @@ The interactive design for Plan H5b, the notes layer (#51). It is the **visual b
 - **Notes page:** a rough H5b.2 sketch only; it will be redesigned from the shipped Ideas / Feedback pages before H5b.2 is planned.
 - **Highlight palette:** validated with the dataviz validator in both themes (light `#2f9e63 #3b7dd8 #d6457e #8b5cd6`, dark `#36a067 #4b86dc #d9578a #9670dc`); every colour also has a name, so colour is never the only cue. Yellow stays reserved for citations.
 
+## Where the build differs from the prototype (H5b.1)
+
+H5b.1 is built (SRS H5b "As built (H5b.1)"). Where the shipped UI does not match the prototype:
+
+- **Add note** makes a neutral quote mark with an empty paragraph after it, not a purple highlight (purple is "Disagree").
+- **Previous / next mark** is not built; it moved to H5b.2 with subtree / all-notes export and the print view.
+- **A box on the compiled PDF of an HTML paper** is saved without a section (no Marker blocks there); a text selection there finds its section by locating its words, and a few common words in text the paper's HTML lacks (a figure caption) are saved without a section, with a toast.
+- **Marks on PDF pages** use the light palette in both themes, because the page itself is never inverted.
+- **Show my marks** and **Box** sit in the reader bar beside the highlighter; the note card for a mark that is off screen stays open, pinned to the top of the gutter, with "The mark is off screen · Show".
+- **The Notes page** is not built (H5b.2); its sketch here stays a sketch.
+
 ## Editor library — verified
 
 Spike run 2026-11-16 on BlockNote **0.57.0** (React 19.2.6, Vitest + jsdom). The spike code was throwaway and is not committed. "Method" says how each finding was checked: **test** = a Vitest jsdom test against a mounted editor, **source** = reading the installed package.
