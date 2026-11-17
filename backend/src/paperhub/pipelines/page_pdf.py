@@ -43,6 +43,24 @@ def page_pdf_path(cache_dir: Path) -> Path | None:
     return compiled if compiled.is_file() else None
 
 
+_CROP_MAX_SIDE = 1600  # px, the longest side of a page-crop PNG
+
+
+def crop_png(pdf: Path, page: int, box: tuple[float, float, float, float]) -> bytes | None:
+    """PNG of ``box`` (page fractions) at 2x, scaled down to <= 1600 px."""
+    with pymupdf.open(pdf) as doc:  # type: ignore[no-untyped-call]
+        if not 0 <= page < doc.page_count:
+            return None
+        pg = doc[page]
+        w, h = float(pg.rect.width), float(pg.rect.height)
+        clip = pymupdf.Rect(box[0] * w, box[1] * h, box[2] * w, box[3] * h)  # type: ignore[no-untyped-call]
+        scale = min(2.0, _CROP_MAX_SIDE / max(clip.width * 1.0, clip.height * 1.0))
+        if clip.width * scale < 1 or clip.height * scale < 1:
+            raise ValueError("box is smaller than one pixel")
+        pix = pg.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip)  # type: ignore[no-untyped-call]
+        return bytes(pix.tobytes("png"))
+
+
 def is_compiled_pdf(pdf: Path) -> bool:
     """A page PDF we produced (asset/paper.pdf), as opposed to the paper's own
     PDF — which may itself be an upload named ``paper.pdf``."""

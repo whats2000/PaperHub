@@ -29,7 +29,7 @@ from paperhub.db.connection import open_db, write_transaction
 from paperhub.ideation.domains import assign_color_indices
 from paperhub.notes.locate import locate_text
 from paperhub.outbound.destinations import OutboundBlocked
-from paperhub.pipelines.page_pdf import is_compiled_pdf, page_pdf_path
+from paperhub.pipelines.page_pdf import crop_png, is_compiled_pdf, page_pdf_path
 from paperhub.pipelines.paper_asset import (
     FigureAsset,
     read_block_assets,
@@ -777,24 +777,6 @@ def _page_rect(pdf: Path, page: int) -> tuple[float, float] | None:
         return float(r.width), float(r.height)
 
 
-_CROP_MAX_SIDE = 1600  # px, the longest side of a page-crop PNG
-
-
-def _crop_png(pdf: Path, page: int, box: tuple[float, float, float, float]) -> bytes | None:
-    """PNG of ``box`` (page fractions) at 2x, scaled down to <= 1600 px."""
-    with pymupdf.open(pdf) as doc:  # type: ignore[no-untyped-call]
-        if not 0 <= page < doc.page_count:
-            return None
-        pg = doc[page]
-        w, h = float(pg.rect.width), float(pg.rect.height)
-        clip = pymupdf.Rect(box[0] * w, box[1] * h, box[2] * w, box[3] * h)  # type: ignore[no-untyped-call]
-        scale = min(2.0, _CROP_MAX_SIDE / max(clip.width * 1.0, clip.height * 1.0))
-        if clip.width * scale < 1 or clip.height * scale < 1:
-            raise ValueError("box is smaller than one pixel")
-        pix = pg.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip)  # type: ignore[no-untyped-call]
-        return bytes(pix.tobytes("png"))
-
-
 @router.get("/content/{paper_content_id}/page-crop")
 async def page_crop(paper_content_id: int, page: int, x0: float, y0: float,
                     x1: float, y1: float) -> Response:
@@ -805,7 +787,7 @@ async def page_crop(paper_content_id: int, page: int, x0: float, y0: float,
     if pdf is None:
         raise HTTPException(404, f"paper_content {paper_content_id} has no page PDF")
     try:
-        png = await asyncio.to_thread(_crop_png, pdf, page, (x0, y0, x1, y1))
+        png = await asyncio.to_thread(crop_png, pdf, page, (x0, y0, x1, y1))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if png is None:
