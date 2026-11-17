@@ -142,11 +142,11 @@ def test_images_written_for_figures_and_boxes(tmp_path: Path) -> None:
             "source": {"page": 0}}),
     ]
     md, images, _bib = note_to_markdown(NOTE, blocks, {5: _paper(src)})
-    assert images["images/f1.png"] == b"\x89PNG-figure"
-    assert images["images/r1.png"].startswith(b"\x89PNG")
-    assert images["images/e1.png"].startswith(b"\x89PNG")
-    assert "![The Transformer](images/f1.png)" in md
-    assert "![Table 2 numbers](images/r1.png)" in md
+    assert images["images/0001.png"] == b"\x89PNG-figure"
+    assert images["images/0002.png"].startswith(b"\x89PNG")
+    assert images["images/0003.png"].startswith(b"\x89PNG")
+    assert "![The Transformer](images/0001.png)" in md
+    assert "![Table 2 numbers](images/0002.png)" in md
     assert r"$$\mathrm{softmax}(x)$$" in md
 
 

@@ -197,3 +197,31 @@ def test_oversized_figure_image_is_unavailable(
         NOTE, [fig], {5: _paper(5, "P", source_dir=src)})
     assert images == {}
     assert "Big\n\n[image unavailable]" in md
+
+
+# --- fix round 2 ---
+
+def test_math_cannot_close_early_or_form_markup() -> None:
+    blocks = [
+        _blk("m1", "math", props={"latex": "x$$ ![z](http://example.com/z.png) $$y"}),
+        _blk("e1", "paperEquation", props={"kind": "equation", "quote": "q", "pieces": [
+            {"latex": "a$ <http://example.com/a> ![w](http://example.com/w.png)"}]}),
+    ]
+    md, _i, _b = note_to_markdown(NOTE, blocks, {})
+    assert "![" not in md and "<http" not in md, md
+    body = md.split("\n", 1)[1]
+    # Each math span opens and closes exactly once.
+    for line in (ln for ln in body.split("\n") if ln.startswith("$$")):
+        assert line.count("$$") == 2 and "\$" in line
+
+
+def test_leading_spaces_never_make_a_code_block() -> None:
+    md, _i, _b = note_to_markdown(NOTE, [
+        _blk("p1", "paragraph", content=[_txt("    indented start\n\tand a tab")]),
+        _blk("l1", "bulletListItem", content=[_txt("      item")]),
+    ], {})
+    body = md.split("\n", 1)[1]
+    assert not re.search(r"^(?: {4}|\t)", body, re.M), body
+    assert "\u00a0\u00a0\u00a0\u00a0indented start" in md
+    assert "- \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0item" in md
+

@@ -139,7 +139,7 @@ def _bib_entry(key: str, p: ExportPaper) -> str:
 # (math blocks and equations are written as math by the exporter).
 _SPECIAL = re.compile(r"([\\`*_\[\]<>~^@|!${}])")
 # A line start that would open a heading, list, quote or setext underline.
-_LINE_START = re.compile(r"^([ \t]*)(?:([#>+=-])|(\d+)([.)])(?=\s|$))", re.M)
+_LINE_START = re.compile(r"^([ \t\u00a0]*)(?:([#>+=-])|(\d+)([.)])(?=\s|$))", re.M)
 # A code block's language as a plain class name: no ``{=openxml}`` raw
 # block, no attributes.
 _CODE_LANG = re.compile(r"^[A-Za-z0-9_+#.-]{1,32}$")
@@ -153,13 +153,41 @@ def _escape(text: str) -> str:
     return _SPECIAL.sub(r"\\\1", text)
 
 
+_LEAD = re.compile(r"^[ \t]+", re.M)
+NBSP = "\u00a0"
+
+
+def _lead(m: re.Match[str]) -> str:
+    return m[0].replace("\t", NBSP * 4).replace(" ", NBSP)
+
+
 def _line_starts(text: str) -> str:
-    """Escape every line start that would read as block syntax."""
+    """Escape every line start that would read as block syntax. Leading
+    spaces become no-break spaces: they keep the indent but never start an
+    indented code block."""
+    text = _LEAD.sub(_lead, text)
+
     def sub(m: re.Match[str]) -> str:
         if m[2]:
             return f"{m[1]}\\{m[2]}"
         return f"{m[1]}{m[3]}\\{m[4]}"
     return _LINE_START.sub(sub, text)
+
+
+def _one_line(text: str) -> str:
+    """A title on one line: its line breaks folded into spaces."""
+    return " ".join(text.split())
+
+
+def _math(latex: str) -> str:
+    """LaTeX for ``$$…$$``: a ``$`` becomes ``\\$`` (so nothing closes the
+    math early) and ``![`` / ``<`` get an empty group ``{}`` after them, so
+    the LaTeX never reads as an image, an autolink or HTML in a Markdown
+    viewer. Blank lines are dropped (they would end the math)."""
+    out = "\n".join(ln for ln in latex.splitlines() if ln.strip())
+    out = out.replace("$", "\\$").replace("![", "!{}[").replace("<", "<{}")
+    # A trailing backslash would escape the closing $$ in some viewers.
+    return out + " " if out.endswith("\\") else out
 
 
 def _hard_breaks(text: str) -> str:
@@ -207,6 +235,7 @@ class _Writer:
         self.keys: dict[int, str] = {}
         self._bases: dict[str, int] = {}
         self._assets: dict[int, Any] = {}
+        self._image_count = 0
 
     def cite(self, pid: int | None, locator: str = "") -> str:
         if pid is None or pid not in self.papers:
@@ -346,7 +375,7 @@ class _Writer:
                         return None
                     ext = path.suffix.lower()
                     ext = ext if re.fullmatch(r"\.[a-z0-9]{1,5}", ext) else ".png"
-                    return f"images/{b.id}{ext}", path.read_bytes()
+                    return self._name(ext), path.read_bytes()
             box = piece.get("box")
             page = piece.get("page")
             if isinstance(box, list) and len(box) == 4 and isinstance(page, int):
@@ -354,10 +383,16 @@ class _Writer:
                 frac = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
                 png = crop_png(pdf, page, frac) if pdf else None
                 if png:
-                    return f"images/{b.id}.png", png
+                    return self._name(".png"), png
         except Exception:  # noqa: BLE001 - one missing image never fails the export
             logger.warning("note export: no image for block %s", b.id, exc_info=True)
         return None
+
+    def _name(self, ext: str) -> str:
+        """The next image file name: by index, never by block id (an id
+        like CON or AUX is a device name on Windows)."""
+        self._image_count += 1
+        return f"images/{self._image_count:04d}{ext}"
 
     def figure(self, b: Block, pid: int | None, caption: str) -> list[str]:
         got = self.image(b, pid)
@@ -391,7 +426,8 @@ _REF_TYPES = frozenset({"paperQuote", "paperFigure", "paperEquation", "paperRegi
 def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     t = b.type
     if t == "section":
-        return f"## {w.text(str(b.props.get('title') or b.section_key or ''))}"
+        title = _one_line(str(b.props.get("title") or b.section_key or ""))
+        return f"## {w.text(title)}"
     if t == "heading":
         level = b.props.get("level")
         level = level if isinstance(level, int) else 1
@@ -400,8 +436,7 @@ def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     if t == "divider":
         return "---"
     if t == "math":
-        latex = "\n".join(ln for ln in str(b.props.get("latex") or "").splitlines()
-                          if ln.strip())
+        latex = _math(str(b.props.get("latex") or ""))
         return f"$${latex}$$" if latex else ""
     if t == "codeBlock":
         code = "".join(str(r.get("text", "")) for r in _runs(b.content))
@@ -459,7 +494,7 @@ def _paper_media(w: _Writer, b: Block) -> str:
         live = live_pieces(_json(b.props.get("pieces"), []))
         latex = live[0].get("latex") if live else None
         if isinstance(latex, str) and latex.strip():
-            parts.append(f"$${' '.join(latex.split())}$$")
+            parts.append(f"$${_math(' '.join(latex.split()))}$$")
             caption = caption or latex
         got = w.image(b, pid)
         if got is not None:
@@ -488,7 +523,7 @@ def note_to_markdown(
     offset = 2 if any(b.type == "section" for b in blocks) else 1
     indent: dict[str, str] = {}
     types = {b.id: b.type for b in blocks}
-    out = f"# {_escape(note.title)}"
+    out = f"# {_escape(_one_line(note.title))}"
     prev_marker: str | None = None
     for b in blocks:
         parent = b.parent_id
