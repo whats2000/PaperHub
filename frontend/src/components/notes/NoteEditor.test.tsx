@@ -1233,3 +1233,38 @@ describe("dividers, Focus and folding", () => {
     expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
 });
+
+describe("Add note from the reader", () => {
+  it("puts the caret on a new line after the new reference, then clears the request", async () => {
+    seed([section, quote, mine]);
+    useNotesStore.setState({ caretAfter: { noteId: 7, blockId: "q1" } });
+    mount();
+    const ids = () => [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
+    await waitFor(() => expect(ids()).toHaveLength(4));
+    const order = ids();
+    expect(order[0]).toBe("s1");
+    expect(order[1]).toBe("q1");
+    expect(order[3]).toBe("p1");
+    const line = document.querySelector(`.bn-block-outer[data-id="${order[2]}"] [data-content-type]`);
+    expect(line?.getAttribute("data-content-type")).toBe("paragraph");
+    expect(line?.textContent).toBe("");
+    expect(useNotesStore.getState().caretAfter).toBeNull();
+  });
+
+  it("waits for the reference to arrive with the note's reload", async () => {
+    seed([section, mine]);
+    useNotesStore.setState({ caretAfter: { noteId: 7, blockId: "q1" } });
+    mount();
+    expect(useNotesStore.getState().caretAfter).not.toBeNull();
+    act(() => {
+      useNotesStore.setState((s) => ({
+        notes: { 7: { ...s.notes[7]!, blocks: [section, quote, mine] } },
+        reloads: { 7: { seq: 1, blockIds: null } },
+      }));
+    });
+    await waitFor(() => expect(useNotesStore.getState().caretAfter).toBeNull());
+    const ids = [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
+    expect(ids.indexOf("q1")).toBe(1);
+    expect(ids).toHaveLength(4);
+  });
+});

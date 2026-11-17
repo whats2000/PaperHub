@@ -240,6 +240,24 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide }: NoteEd
     }
   }, [reload, editor, noteId, doc, reanchor]);
 
+  // "Add note" on a reader selection: the caret goes on a line after the new
+  // reference, ready to type (once a reload has brought the block in).
+  const caretAfter = useNotesStore((s) => (s.caretAfter?.noteId === noteId ? s.caretAfter : null));
+  const setCaretAfter = useNotesStore((s) => s.setCaretAfter);
+  useEffect(() => {
+    if (!caretAfter || variant !== "pane") return;
+    const block = editor.getBlock(caretAfter.blockId);
+    if (!block) return;
+    setCaretAfter(null);
+    const next = editor.getNextBlock(block);
+    const emptyLine =
+      next?.type === "paragraph" && Array.isArray(next.content) && next.content.length === 0 ? next : null;
+    const line = emptyLine ?? editor.insertBlocks([{ type: "paragraph" }] as never, block, "after")[0];
+    if (!line) return;
+    editor.setTextCursorPosition(line, "start");
+    editor.focus();
+  }, [caretAfter, editor, reload, variant, setCaretAfter]);
+
   // The part decorations read the store; redraw them when it changes.
   useEffect(() => {
     try {

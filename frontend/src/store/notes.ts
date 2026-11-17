@@ -102,6 +102,10 @@ interface NotesStore {
   keepFolds: (noteId: number, dividerIds: ReadonlySet<string>) => void;
   quoteTarget: QuoteTarget | null;
   setQuoteTarget: (target: QuoteTarget | null) => void;
+  /** "Add note" on a reader selection: once the editor shows this block it
+   * puts the caret on a line after it, then clears the request. */
+  caretAfter: QuoteTarget | null;
+  setCaretAfter: (target: QuoteTarget | null) => void;
 
   /** The user's names for the mark colours (empty until loaded). */
   colorNames: Record<string, string>;
@@ -753,6 +757,8 @@ export const useNotesStore = create<NotesStore>()(
         },
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
+        caretAfter: null,
+        setCaretAfter: (target) => set({ caretAfter: target }),
 
         addComment: async (noteId, blockId, quote, text) => {
           await get().flush(noteId);
