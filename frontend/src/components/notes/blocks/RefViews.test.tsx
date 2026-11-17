@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { NoteEditorContext, type MarkProps } from "./markProps";
-import { PaperEquationView, PaperFigureView } from "./RefViews";
+import { PaperEquationView, PaperFigureView, PaperQuoteView } from "./RefViews";
 
 function props(over: Partial<MarkProps>): MarkProps {
   return {
@@ -56,5 +56,23 @@ describe("paper reference blocks for whole objects", () => {
     const html = JSON.stringify([{ quote: "$E = mc^2$", latex: "E = mc^2", latex_from: "source" }]);
     inNote(<PaperEquationView id="b1" props={props({ kind: "equation", pieces: html })} />);
     expect(screen.queryByText(/transcribed by the model/)).toBeNull();
+  });
+});
+
+describe("a highlight of several pieces", () => {
+  it("shows one quote with … between the pieces and the piece count", () => {
+    inNote(
+      <PaperQuoteView
+        id="b1"
+        props={props({
+          kind: "highlight",
+          color: "green",
+          quote: "agent pose of time",
+          pieces: JSON.stringify([{ quote: "agent pose" }, { quote: "of time" }]),
+        })}
+      />,
+    );
+    expect(screen.getByText("agent pose … of time")).toBeTruthy();
+    expect(screen.getByText(/2 pieces/)).toBeTruthy();
   });
 });

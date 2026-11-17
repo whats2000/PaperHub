@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { Image, ScanText, Sigma, Sparkles, SquareDashed, TextQuote } from "lucide-react";
 import "katex/dist/katex.min.css";
 
+import { joinedQuote } from "@/lib/marks/pieces";
+
 import { CropImage } from "./CropImage";
 import { markPieces, type MarkProps } from "./markProps";
 import { PaperRefFrame } from "./PaperRefFrame";
@@ -17,6 +19,9 @@ interface ViewProps {
 
 export function PaperQuoteView({ id, props }: ViewProps) {
   const { t } = useTranslation();
+  // Highlighter strokes joined into one mark: "…" stands for the skipped words.
+  const pieces = markPieces(props);
+  const quote = pieces.length > 1 ? joinedQuote(pieces) || props.quote : props.quote;
   return (
     <PaperRefFrame
       blockId={id}
@@ -25,7 +30,7 @@ export function PaperQuoteView({ id, props }: ViewProps) {
       label={t("notes:ref.fromPaper", "From the paper")}
     >
       <blockquote className="m-0 font-paper text-[14px] leading-normal text-muted-foreground">
-        {props.quote}
+        {quote}
       </blockquote>
     </PaperRefFrame>
   );
