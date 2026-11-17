@@ -72,6 +72,18 @@ describe("box text and snapping", () => {
     });
   });
 
+  it("snaps above exactly half of the equation, never at half", () => {
+    // An equation 0.5 wide: a box over 0.25 of it is exactly half.
+    const eq: PaperPageBlock = { ...EQ, box: [0.25, 0.5, 0.75, 0.6] };
+    const kind = (x1: number) =>
+      boxMark({ page: 0, box: [0.25, 0.5, x1, 0.6], blocks: [eq], spans: [], scanned: false }).kind;
+    expect(kind(0.5)).toBe("region"); // exactly 50 %
+    expect(kind(0.49)).toBe("region"); // just below
+    expect(kind(0.51)).toBe("equation"); // just above
+    // Half of [0.2, 0.6] in floating point (0.4 - 0.2 over 0.6 - 0.2) is still half.
+    expect(boxMark({ page: 0, box: [0.2, 0.3, 0.4, 0.34], blocks: [EQ], spans: [], scanned: false }).kind).toBe("region");
+  });
+
   it("a box over less than half of it stays a region", () => {
     const res = boxMark({
       page: 0,

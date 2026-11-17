@@ -16,7 +16,8 @@ export const TEXT_LAYER = ".react-pdf__Page__textContent, .textLayer";
 /** Marker blocks a mark can take whole (the corner mark button). */
 export const FIGURE_TYPES = new Set(["Figure", "Picture"]);
 export const EQUATION_TYPE = "Equation";
-/** A box covering more than this share of an equation becomes that equation. */
+/** A box covering more than this share of an equation becomes that equation
+ * (exactly half, give or take floating-point noise, does not). */
 export const EQUATION_SNAP = 0.5;
 /** A box this much inside a figure (and smaller than it) is one of its panels. */
 const PANEL_INSIDE = 0.9;
@@ -207,7 +208,7 @@ export function snapEquation(blocks: readonly PaperPageBlock[], box: Frac): Pape
   for (const b of blocks) {
     if (b.type !== EQUATION_TYPE) continue;
     const c = coverage(box, b.box);
-    if (c > bestC) {
+    if (c > bestC + 1e-9) {
       bestC = c;
       best = b;
     }
