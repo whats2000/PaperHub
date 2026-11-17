@@ -30,6 +30,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "linkify-it-py>=2.2.0",
     "markdown-it-py>=4.2.0",
     "mypy>=2.1.0",
     "pytest>=9.0.3",
