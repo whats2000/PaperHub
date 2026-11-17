@@ -481,3 +481,47 @@ async def test_a_title_renamed_mid_turn_guards_both_titles() -> None:
     titles = [i for i in current_private() if ":title:" in i.ref]
     assert {i.text for i in titles} == {old, new}
     assert all(i.ref.startswith("note:5:title:#") for i in titles)
+
+
+_HEADING = "Notes on wafer cracks at the scribe edge during reflow"
+
+
+async def test_typed_section_name_counts_when_base_revision_is_ahead(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _note(migrated_db)
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=9,
+                      ops=[{"op": "insert", "under_heading": _HEADING,
+                            "block": _para("short")}])
+    d = await _check(migrated_db, _HEADING)
+    assert _is_span(d)
+    assert await _log_reason(migrated_db, d.log_id) == (
+        f"{_SPAN_REASON} (note {nid}: block op-0-heading)")
+
+
+async def test_typed_section_name_counts_when_the_change_set_fails(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from paperhub.agents.core import note_tools
+
+    async def broken(*_a: Any, **_k: Any) -> Any:
+        raise ValueError("base_revision moved")
+
+    monkeypatch.setattr(note_tools, "apply_ops", broken)
+    nid = await _note(migrated_db)
+    await _fill(migrated_db, nid, [_h_op("Intro")])
+    intro = await _block_id(migrated_db, nid, "Intro")
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=1,
+                      ops=[{"op": "insert", "under_heading": intro,
+                            "block": _para("short")},
+                           {"op": "insert", "under_heading": _HEADING,
+                            "block": _para("short")}])
+    assert _is_span(await _check(migrated_db, _HEADING))
+
+
+def _h_op(text: str) -> Op:
+    return Op(op="insert", block=BlockIn(
+        type="heading", props={"level": 1}, content=[{"type": "text", "text": text}]))

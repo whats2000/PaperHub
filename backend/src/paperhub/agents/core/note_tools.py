@@ -491,6 +491,17 @@ def _collect_raw(note_id: int, note_title: str, raw_ops: Any) -> None:
         for index, op in enumerate(raw_ops)], note_title)
 
 
+def _collect_headings(note: Note, ops: list[Op], known: set[str]) -> None:
+    """Add the section names the model typed in ``under_heading`` (block
+    ids of the note are not text), for the exits where no change set
+    landed: the names never reached the note but are in the agent's
+    context."""
+    collect_note_blocks(note.id, [
+        (f"op-{index}-heading", op.under_heading)
+        for index, op in enumerate(ops)
+        if op.under_heading and op.under_heading not in known], note.title)
+
+
 async def _collect_written(
     conn: aiosqlite.Connection, note: Note, ops: list[tuple[int, Op]],
     applied: list[str], shown: list[Block], known: set[str],
@@ -548,6 +559,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     known = {b.id for b in blocks}
     if base > note.revision:
         await _collect_written(ctx.conn, note, list(enumerate(ops)), [], [], known)
+        _collect_headings(note, ops, known)
         return error_outcome(
             f"base_revision {base} is ahead of the note (revision "
             f"{note.revision}); read the note again.")
@@ -612,6 +624,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 actor="agent", run_id=ctx.run_id)
         except ValueError as exc:
             await _collect_written(ctx.conn, note, [*sent, *refused], [], [], known)
+            _collect_headings(note, ops, known)
             return error_outcome(str(exc))
         revision = res.revision
         record.update(
