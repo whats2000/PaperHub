@@ -75,14 +75,11 @@ describe("NotesToolbar", () => {
     expect(screen.getByRole("button", { name: "Follow reading" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("Follow is unavailable while the reader shows a PDF, and says why", () => {
-    render(<Toolbar followUnavailable />);
+  it("Follow is never disabled: a PDF in the reader reports its section too", () => {
+    useNotesStore.setState({ followOn: false });
+    render(<Toolbar />);
     const follow = screen.getByRole("button", { name: "Follow reading" });
-    expect(follow).toHaveAttribute("aria-disabled", "true");
-    expect(follow).toHaveAttribute(
-      "title",
-      "Follow works on HTML papers for now; this paper is showing as a PDF.",
-    );
+    expect(follow).not.toHaveAttribute("aria-disabled");
     fireEvent.click(follow);
     expect(useNotesStore.getState().followOn).toBe(true);
   });

@@ -27,9 +27,6 @@ export interface NotesToolbarProps {
   followLabel: string | null;
   /** False on a note with no paper (a chat's note): Follow folds away. */
   followAvailable?: boolean;
-  /** The reader shows the paper as a PDF, which does not report its section
-   * yet: Follow is off with a hint. */
-  followUnavailable?: boolean;
   /** How many chats share the note, when known. */
   sharedBy?: number | null;
   /** Export the note; the items wait as "Coming soon" until it is given. */
@@ -57,7 +54,6 @@ export function NotesToolbar({
   noteId,
   followLabel,
   followAvailable = true,
-  followUnavailable = false,
   sharedBy = null,
   onExport,
   guideOpen,
@@ -98,7 +94,7 @@ export function NotesToolbar({
   };
 
   const followText =
-    followOn && !followUnavailable
+    followOn
       ? followLabel
         ? t("notes:toolbar.following", "Following {{section}}", { section: followLabel })
         : t("notes:toolbar.followingAny", "Following")
@@ -133,33 +129,21 @@ export function NotesToolbar({
         <div className="flex min-w-0 overflow-hidden">
           <button
             type="button"
-            aria-pressed={followOn && !followUnavailable}
-            // aria-disabled, not disabled: the hint stays readable on hover / focus.
-            aria-disabled={followUnavailable || undefined}
+            aria-pressed={followOn}
             disabled={noteId === null}
-            onClick={() => {
-              if (!followUnavailable) setFollowOn(!followOn);
-            }}
+            onClick={() => setFollowOn(!followOn)}
             title={
-              followUnavailable
+              followOn
                 ? t(
-                    "notes:toolbar.followPdf",
-                    "Follow works on HTML papers for now; this paper is showing as a PDF.",
+                    "notes:toolbar.followingTitle",
+                    "The note scrolls to the section you're reading. Click to stop following.",
                   )
-                : followOn
-                  ? t(
-                      "notes:toolbar.followingTitle",
-                      "The note scrolls to the section you're reading. Click to stop following.",
-                    )
-                  : t(
-                      "notes:toolbar.followTitle",
-                      "Click to scroll the note along with the section you're reading.",
-                    )
+                : t(
+                    "notes:toolbar.followTitle",
+                    "Click to scroll the note along with the section you're reading.",
+                  )
             }
-            className={cn(
-              BUTTON,
-              "min-w-0 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground",
-            )}
+            className={cn(BUTTON, "min-w-0")}
           >
             <LocateFixed className="size-3 shrink-0" aria-hidden />
             <span className="truncate">{followText}</span>

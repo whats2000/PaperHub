@@ -95,17 +95,15 @@ describe("ChatPage Notes pane", () => {
     expect(await screen.findByRole("menu")).toHaveTextContent("Shared by 1 chat · revision 1");
   });
 
-  it("disables Follow while the reader shows the paper as a PDF", async () => {
+  it("Follow works while the reader shows the paper as a PDF (the PDF reports its section)", async () => {
     useCanvasStore.setState({ open: true, width: 600, activePaperId: 7, readerView: { paperId: 7, kind: "pdf" } });
     render(<ChatPage />);
     await userEvent.click(notesButton());
     const bar = await screen.findByRole("toolbar", { name: "Note tools" });
     await screen.findByText("note 11");
-    expect(within(bar).getByRole("button", { name: "Follow reading" })).toHaveAttribute("aria-disabled", "true");
-    act(() => {
-      useCanvasStore.setState({ readerView: { paperId: 7, kind: "html" } });
-    });
-    expect(within(bar).getByRole("button", { name: /^Following/ })).not.toHaveAttribute("aria-disabled");
+    const follow = within(bar).getByRole("button", { name: /^Following/ });
+    expect(follow).not.toHaveAttribute("aria-disabled");
+    expect(follow).toHaveAttribute("aria-pressed", "true");
   });
 
   it("the Notes button opens and closes the pane", async () => {
