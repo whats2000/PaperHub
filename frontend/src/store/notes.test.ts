@@ -5,7 +5,7 @@ import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 
 import { API_BASE_URL } from "@/lib/api";
-import { clearPendingNoteOps, pendingNoteOps, useNotesStore } from "@/store/notes";
+import { CARET_GIVE_UP_MS, clearPendingNoteOps, pendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
@@ -754,5 +754,20 @@ describe("useNotesStore", () => {
     // again: no duplicate
     await useNotesStore.getState().setCommentStatus(7, "c_1", "open");
     expect(useNotesStore.getState().notes[7]?.comments).toHaveLength(1);
+  });
+});
+
+describe("caretAfter", () => {
+  it("is dropped when its block never shows", () => {
+    vi.useFakeTimers();
+    try {
+      useNotesStore.getState().setCaretAfter({ noteId: 7, blockId: "b_gone" });
+      vi.advanceTimersByTime(CARET_GIVE_UP_MS - 1);
+      expect(useNotesStore.getState().caretAfter).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(useNotesStore.getState().caretAfter).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

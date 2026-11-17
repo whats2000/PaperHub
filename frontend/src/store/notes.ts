@@ -103,7 +103,8 @@ interface NotesStore {
   quoteTarget: QuoteTarget | null;
   setQuoteTarget: (target: QuoteTarget | null) => void;
   /** "Add note" on a reader selection: once the editor shows this block it
-   * puts the caret on a line after it, then clears the request. */
+   * puts the caret on a line after it, then clears the request (dropped
+   * after CARET_GIVE_UP_MS if the block never shows). */
   caretAfter: QuoteTarget | null;
   setCaretAfter: (target: QuoteTarget | null) => void;
 
@@ -170,6 +171,9 @@ interface Burst {
 }
 const inRetry = new Map<number, Burst>();
 let colorsRequest: Promise<void> | null = null;
+let caretTimer: ReturnType<typeof setTimeout> | undefined;
+/** How long a caret request waits for its block (as "Open in notes" does). */
+export const CARET_GIVE_UP_MS = 5000;
 
 /** Drop every queued edit and pending flush without sending (test isolation). */
 export function clearPendingNoteOps(): void {
@@ -758,7 +762,17 @@ export const useNotesStore = create<NotesStore>()(
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
         caretAfter: null,
-        setCaretAfter: (target) => set({ caretAfter: target }),
+        setCaretAfter: (target) => {
+          set({ caretAfter: target });
+          clearTimeout(caretTimer);
+          // A block that never shows (the save was undone, another note
+          // opened) must not move the caret on a later visit.
+          if (target) {
+            caretTimer = setTimeout(() => {
+              if (get().caretAfter === target) set({ caretAfter: null });
+            }, CARET_GIVE_UP_MS);
+          }
+        },
 
         addComment: async (noteId, blockId, quote, text) => {
           await get().flush(noteId);
