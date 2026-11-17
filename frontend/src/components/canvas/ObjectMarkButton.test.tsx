@@ -91,6 +91,20 @@ describe("the corner mark button on PDF pages", () => {
     });
   });
 
+  it("stays on a scanned page, where a drag draws a box", async () => {
+    render(<Reader hasText={false} />);
+    layOut();
+    const button = await screen.findByRole("button", { name: "Mark figure" });
+    expect(button.getAttribute("aria-hidden")).toBeNull();
+    fireEvent.pointerMove(screen.getByTestId("page-1"), { clientX: 300, clientY: 360 });
+    expect(button.dataset.shown).toBe("true");
+    fireEvent.click(button);
+    await screen.findByRole("toolbar", { name: "Mark the figure" });
+    fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].kind).toBe("figure");
+  });
+
   it("is hidden while the Box tool is on", async () => {
     render(<Reader />);
     layOut();

@@ -87,7 +87,11 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
   const rootRef = useRef<HTMLDivElement>(null);
   const blocks = ctx?.blocks[page] ?? NO_BLOCKS;
   const scanned = !hasTextLayer;
+  // A drag draws a box with the Box tool on, and always on a scan (there is
+  // no text to select); the corner buttons and mark clicks give way only to
+  // the Box tool.
   const boxActive = !!ctx && (ctx.boxOn || scanned);
+  const boxTool = !!ctx?.boxOn;
   const loadBlocks = ctx?.loadBlocks;
 
   // The page's blocks load once it comes into view.
@@ -130,10 +134,10 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
   });
 
   // Hit-testing on the page: the layer itself takes no pointer events.
-  const latest = useRef({ drawn, objects, ctx, boxActive });
+  const latest = useRef({ drawn, objects, ctx, boxTool });
   useEffect(() => {
-    latest.current = { drawn, objects, ctx, boxActive };
-  }, [drawn, objects, ctx, boxActive]);
+    latest.current = { drawn, objects, ctx, boxTool };
+  }, [drawn, objects, ctx, boxTool]);
   useEffect(() => {
     const el = rootRef.current?.parentElement;
     if (!el || !ctx) return;
@@ -150,7 +154,7 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
       return found;
     };
     const onMove = (e: PointerEvent) => {
-      const { ctx: c, objects: objs, boxActive: drawing } = latest.current;
+      const { ctx: c, objects: objs, boxTool: drawing } = latest.current;
       if (!c || drawing) return;
       const [x, y] = at(e);
       const id = markAt(x, y);
@@ -167,7 +171,7 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
     const onClick = (e: MouseEvent) => {
       const start = down;
       down = null;
-      const { ctx: c, boxActive: drawing } = latest.current;
+      const { ctx: c, boxTool: drawing } = latest.current;
       if (!c || drawing) return;
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP_PX) return;
       const sel = window.getSelection();
@@ -228,7 +232,7 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
           key={b.block_id}
           kind={FIGURE_TYPES.has(b.type) ? "figure" : "equation"}
           shown={hoverObject === b.block_id || overButton === b.block_id}
-          disabled={boxActive}
+          disabled={boxTool}
           style={{
             left: pct(b.box[2]),
             top: pct(b.box[1]),
