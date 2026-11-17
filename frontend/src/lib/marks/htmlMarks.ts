@@ -154,11 +154,14 @@ export function darkRendered(hex: string): string {
 }
 
 // The layer sits behind the text (z-index -1: above the page background,
-// below the words).
+// below the words). Both layers are 0x0 boxes whose children sit outside
+// them, so they opt out of the reader's `content-visibility: auto`
+// (withBaseHref): its paint containment would clip every mark.
 const STYLE = `
 .${LAYER_CLASS} {
   position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: -1;
   pointer-events: none; transition: opacity 200ms ease-out;
+  content-visibility: visible; contain-intrinsic-size: none;
 }
 .${LAYER_CLASS}[data-hidden] { opacity: 0; }
 .ph-mk {
@@ -194,6 +197,7 @@ html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline-style: dashed; ou
 .${TR_LAYER_CLASS} {
   position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 1;
   pointer-events: none; transition: opacity 200ms ease-out;
+  content-visibility: visible; contain-intrinsic-size: none;
 }
 .${TR_LAYER_CLASS}[data-hidden] { opacity: 0; }
 .${MARKER_CLASS} {

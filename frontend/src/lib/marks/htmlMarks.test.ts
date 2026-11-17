@@ -9,6 +9,7 @@ import {
   markableObjects,
   type HtmlMarksOptions,
 } from "@/lib/marks/htmlMarks";
+import { injectPerfStyle } from "@/lib/withBaseHref";
 import type { Mark, MarkColorInfo } from "@/types/notes";
 
 function makeDoc(body: string): Document {
@@ -224,6 +225,30 @@ describe("attachHtmlMarks", () => {
     handle.update({ pen: "pink" });
     handle.detach();
     expect(doc.documentElement.outerHTML).toBe(before);
+  });
+
+  it("keeps its layers painted under the reader's lazy-layout rule", () => {
+    // The reader gives every top-level block `content-visibility: auto`
+    // (injectPerfStyle). That contains paint, and the layers are 0x0 boxes
+    // whose children sit outside them: under the rule nothing would show.
+    // jsdom cascades style sheets only in the window's own document.
+    const doc = document;
+    doc.body.innerHTML = PAPER;
+    const perf = doc.createElement("style");
+    perf.textContent = injectPerfStyle("<head></head>").match(/<style>(.*)<\/style>/s)![1]!;
+    doc.head.appendChild(perf);
+    const handle = attachHtmlMarks(doc, opts());
+    try {
+      const layers = Array.from(doc.querySelectorAll<HTMLElement>(".ph-mk-layer, .ph-mk-trl"));
+      expect(layers).toHaveLength(2);
+      for (const layer of layers) {
+        expect(getComputedStyle(layer).getPropertyValue("content-visibility")).toBe("visible");
+      }
+    } finally {
+      handle.detach();
+      perf.remove();
+      doc.body.innerHTML = "";
+    }
   });
 
   it("leaves the document as it was once detached", () => {
