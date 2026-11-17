@@ -4,7 +4,14 @@
 # ingested work on it too. Backs up workspace/paperhub.db first so a botched
 # run can be rolled back by restoring the .bak copy.
 #
+# Stop the backend first (it holds the DB), run this, then start it again.
+#
 # Steps (each idempotent, run in order):
+#   0. paperhub-apply-schema                 bring the schema up to date (the
+#                                             routine the backend runs at start):
+#                                             later steps reach tables added since
+#                                             (the H5b notes layer); -DryRun names
+#                                             the missing tables only
 #   1. paperhub-reingest                      re-chunk with the current chunker
 #                                             (spans unchanged: names updated in
 #                                             place, chunk ids kept)
@@ -111,6 +118,7 @@ function Invoke-Step([string]$label, [string[]]$cmd) {
     }
 }
 
+Invoke-Step "0/17 schema" (@("paperhub-apply-schema") + $dry)
 if (-not $SkipRechunk) {
     Invoke-Step "1/17 re-chunk" (@("paperhub-reingest") + $dry)
 }

@@ -26,6 +26,7 @@ import aiosqlite
 import tiktoken
 
 from paperhub.config import load_settings
+from paperhub.db.migrate import apply_schema
 from paperhub.db.section_rename import apply_section_renames
 from paperhub.notes.anchors import reanchor_paper
 from paperhub.pipelines.chunker import Chunk, chunk_text, strip_latex_comments
@@ -336,6 +337,10 @@ async def _amain() -> int:
 
     settings = load_settings()
     async with aiosqlite.connect(settings.db_path) as conn:
+        # Before the new backend ever started on this workspace the notes
+        # tables may be missing, and this step reaches them.
+        if not args.dry_run:
+            await apply_schema(conn)
         if args.paper_content_id is not None:
             ids = [args.paper_content_id]
         else:

@@ -23,7 +23,7 @@ _NOTES_TABLES = (
 async def pre_notes_db(tmp_path: Path) -> Path:
     """A workspace DB with today's schema minus every notes table, plus one
     document and one idea whose free-text note holds ``"Old thought."``."""
-    db = tmp_path / "pre.db"
+    db = tmp_path / "paperhub.db"  # tmp_path is the workspace
     async with aiosqlite.connect(db) as conn:
         await apply_schema(conn)
         await conn.execute("PRAGMA foreign_keys = OFF")
