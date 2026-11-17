@@ -56,6 +56,12 @@ export function PaperFigureView({ id, props }: ViewProps) {
   );
 }
 
+/** A paper's equation as KaTeX can draw it: KaTeX has no `\label`, and a
+ * label means nothing in a note (the stored LaTeX keeps it). */
+function displayLatex(latex: string): string {
+  return latex.replace(/\\label\s*\{[^{}]*\}/g, "");
+}
+
 export function PaperEquationView({ id, props }: ViewProps) {
   const { t } = useTranslation();
   const piece = markPieces(props)[0];
@@ -64,7 +70,7 @@ export function PaperEquationView({ id, props }: ViewProps) {
   // transcription, to check against the crop.
   const transcribed = latex !== "" && piece?.latex_from !== "source";
   const html = useMemo(
-    () => (latex ? katex.renderToString(latex, { displayMode: true, throwOnError: false }) : ""),
+    () => (latex ? katex.renderToString(displayLatex(latex), { displayMode: true, throwOnError: false }) : ""),
     [latex],
   );
   return (

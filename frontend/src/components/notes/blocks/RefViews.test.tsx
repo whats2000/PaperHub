@@ -59,6 +59,16 @@ describe("paper reference blocks for whole objects", () => {
     inNote(<PaperEquationView id="b1" props={props({ kind: "equation", pieces: html })} />);
     expect(screen.queryByText(/transcribed by the model/)).toBeNull();
   });
+
+  it("draws a source equation without its \\label, which KaTeX would print as text", () => {
+    const latex = String.raw`k = \frac{n \times c}{e} \label{eq:es}`;
+    const pieces = JSON.stringify([{ quote: `$${latex}$`, latex, latex_from: "source" }]);
+    const { container } = inNote(<PaperEquationView id="b1" props={props({ kind: "equation", pieces })} />);
+    const math = container.querySelector(".katex")!;
+    expect(math.textContent).not.toContain("label");
+    expect(math.textContent).not.toContain("eq:es");
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
 });
 
 describe("a highlight of several pieces", () => {
