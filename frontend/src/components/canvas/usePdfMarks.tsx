@@ -28,15 +28,14 @@ import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
-import { openMarkInNotes, useMarkSave, usePenSave, type MarkGroup, type PenPiece } from "@/components/canvas/useMarkSave";
+import { openMarkInNotes, useMarkSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
-import { locateText, type LocateResult } from "@/lib/api";
+import { objectPiece, storedPiece, usePdfPen, type Located, type PlaceText } from "@/components/canvas/usePdfPen";
+import { locateText } from "@/lib/api";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
-import { clearIfStill, pdfPlace } from "@/lib/marks/pieces";
 import {
   boxMark,
-  captionFor,
   FIGURE_TYPES,
   layerSpans,
   PAGE,
@@ -48,31 +47,11 @@ import {
   type PdfPiece,
 } from "@/lib/marks/pdfGeometry";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
-import type { Mark, MarkColor, MarkColorInfo, MarkPiece, PaperPageBlock } from "@/types/notes";
+import type { Mark, MarkColor, MarkColorInfo, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
 const FLASH_MS = 1600;
-
-/** A piece placed in the paper's reading text (a page with no Marker
- * blocks): its chunks and its span there. */
-type Located = NonNullable<LocateResult["match"]>;
-
-/** A text piece as stored (the section rides on the mark). */
-function storedPiece(p: PdfPiece, at?: Located): MarkPiece {
-  let piece: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
-  if (p.block_id) piece.block_id = p.block_id;
-  if (at) {
-    piece = {
-      ...piece,
-      chunk_start: at.chunk_start,
-      chunk_end: at.chunk_end,
-      text_start: at.text_start,
-      text_end: at.text_end,
-    };
-  }
-  return piece;
-}
 
 /** Pieces as stored, grouped by section: a mark files under one. */
 function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): MarkGroup[] {
@@ -85,13 +64,6 @@ function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): Mark
     else groups.push({ section, pieces: [piece] });
   }
   return groups;
-}
-
-/** A figure (its caption) or an equation (its LaTeX) taken whole. */
-function objectPiece(kind: MarkableObject, page: number, b: PaperPageBlock, pageBlocks: readonly PaperPageBlock[]): MarkPiece {
-  return kind === "figure"
-    ? { quote: captionFor(pageBlocks, b), page, block_id: b.block_id, box: b.box }
-    : { quote: b.text, latex: b.text, page, block_id: b.block_id, box: b.box };
 }
 
 type Target =
@@ -232,7 +204,6 @@ export function usePdfMarks({
     setSeenPen(pen);
     if (pen && target) setTarget(null);
   }
-  const penSave = usePenSave(paperId);
   const strokeRef = useRef<(range: Range, fragments: PdfFragment[]) => void>(() => undefined);
   useEffect(() => {
     const root = readerRef.current;
@@ -354,21 +325,45 @@ export function usePdfMarks({
     },
     [loadBlocks, t],
   );
+  /** A text selection's pieces, each placed: by its Marker block, or on a
+   * page without blocks (the LaTeX-compiled PDF of an HTML paper) by
+   * finding its text in the paper's reading text (`missed`: not found).
+   * Null when a page's layout can't be loaded (said in a toast). */
+  const placeText = useCallback<PlaceText>(
+    async (fragments) => {
+      const pages = [...new Set(fragments.map((f) => f.page))];
+      const loaded = await loadPages(pages);
+      if (!loaded) return null;
+      const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
+      const pieces = piecesFromFragments(fragments, byPage);
+      if (!pieces.length || paperId === null) return null;
+      let missed = false;
+      const placed = await Promise.all(
+        pieces.map(async (piece) => {
+          if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
+          const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
+          if (!at) missed = true;
+          return { piece, at };
+        }),
+      );
+      return { placed, missed };
+    },
+    [loadPages, paperId],
+  );
+  const notLocated = useCallback(
+    () => toast.message(t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text.")),
+    [t],
+  );
+  const penTools = usePdfPen({ paperId, placeText, loadPages, blocksRef, notLocated });
+  useEffect(() => {
+    strokeRef.current = penTools.stroke;
+  }, [penTools.stroke]);
   const openBox = useCallback(
     (page: number, frac: Frac, el: Element, scanned: boolean) => {
       const spans = scanned ? [] : layerSpans(el);
       if (penRef.current) {
         // The highlighter: the box marks at once in the pen colour.
-        penSave({
-          view: "pdf",
-          kind: "region",
-          pieces: async () => {
-            const loaded = await loadPages([page]);
-            if (!loaded) return null;
-            const result = boxMark({ page, box: frac, blocks: loaded[0]!, spans, scanned });
-            return [{ section: result.section, piece: result.piece, place: null, kind: result.kind }];
-          },
-        });
+        penTools.box(page, frac, spans, scanned);
         return;
       }
       const origin = measure();
@@ -390,7 +385,7 @@ export function usePdfMarks({
         () => undefined, // worked out (and the failure said) when it is saved
       );
     },
-    [measure, loadBlocks, loadPages, penSave],
+    [measure, loadBlocks, penTools],
   );
 
   // Follow: the section of the Marker block at the top of the view.
@@ -416,77 +411,7 @@ export function usePdfMarks({
     [paperId],
   );
 
-  const erasePiece = useCallback((markId: string, piece: number) => {
-    void useMarksStore.getState().erase(markId, piece);
-  }, []);
-
   const { busy, save: saveMarks } = useMarkSave(paperId);
-  /** A text selection's pieces, each placed: by its Marker block, or on a
-   * page without blocks (the LaTeX-compiled PDF of an HTML paper) by
-   * finding its text in the paper's reading text (`missed`: not found).
-   * Null when a page's layout can't be loaded (said in a toast). */
-  const placeText = useCallback(
-    async (fragments: readonly PdfFragment[]) => {
-      const pages = [...new Set(fragments.map((f) => f.page))];
-      const loaded = await loadPages(pages);
-      if (!loaded) return null;
-      const byPage = Object.fromEntries(pages.map((p, i) => [p, loaded[i]!]));
-      const pieces = piecesFromFragments(fragments, byPage);
-      if (!pieces.length || paperId === null) return null;
-      let missed = false;
-      const placed = await Promise.all(
-        pieces.map(async (piece) => {
-          if (piece.block_id !== null || (byPage[piece.page]?.length ?? 0) > 0) return { piece };
-          const at = (await locateText(paperId, piece.raw).catch(() => null))?.match ?? undefined;
-          if (!at) missed = true;
-          return { piece, at };
-        }),
-      );
-      return { placed, missed };
-    },
-    [loadPages, paperId],
-  );
-  const notLocated = useCallback(
-    () => toast.message(t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text.")),
-    [t],
-  );
-  // A highlighter stroke on the text layer: marked at once, no popover.
-  useEffect(() => {
-    strokeRef.current = (range, fragments) => {
-      let missed = false;
-      penSave({
-        view: "pdf",
-        pieces: async () => {
-          const r = await placeText(fragments);
-          if (!r) return null;
-          missed = r.missed;
-          return r.placed.map(
-            ({ piece, at }): PenPiece => ({
-              section: at ? at.section : piece.section,
-              piece: storedPiece(piece, at),
-              place: pdfPlace(piece.page, piece.block_id),
-            }),
-          );
-        },
-        done: (ok) => {
-          if (!ok) return;
-          clearIfStill(document, range);
-          if (missed) notLocated();
-        },
-      });
-    };
-  }, [penSave, placeText, notLocated]);
-  const penObject = useCallback(
-    (page: number, b: PaperPageBlock) => {
-      const kind: MarkableObject = FIGURE_TYPES.has(b.type) ? "figure" : "equation";
-      penSave({
-        view: "pdf",
-        kind,
-        pieces: () => [{ section: b.section, piece: objectPiece(kind, page, b, blocksRef.current[page] ?? NO_BLOCKS), place: null }],
-      });
-    },
-    [penSave, blocksRef],
-  );
   const save = useCallback(
     async (color: MarkColor | null, addNote: boolean) => {
       const cur = target;
@@ -563,8 +488,8 @@ export function usePdfMarks({
             flashId,
             pen,
             openMark,
-            erasePiece,
-            penObject,
+            erasePiece: penTools.erase,
+            penObject: penTools.object,
             openObject,
             openBox,
             pendingBox: target?.type === "box" ? { page: target.page, frac: target.frac } : null,
@@ -582,8 +507,8 @@ export function usePdfMarks({
       flashId,
       pen,
       openMark,
-      erasePiece,
-      penObject,
+      penTools.erase,
+      penTools.object,
       openObject,
       openBox,
       target,

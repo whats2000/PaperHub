@@ -28,6 +28,8 @@ const HIT_SLOP = 0.004;
 /** The quote underline and the hover / flash ring (the page is always white). */
 const NEUTRAL = "#7b7b7b";
 const RING = "#8f8f8f";
+/** The dashed "click to erase" ring with the highlighter on. */
+const ERASE_RING = "#404040";
 
 const pct = (v: number) => `${Math.round(v * 100000) / 1000}%`;
 
@@ -287,17 +289,26 @@ export function PdfMarksPage({
             const dim = ctx.focusIds !== null && !ctx.focusIds.has(d.id);
             const hot = ctx.hot === d.id;
             const ring = ctx.flashId === d.id ? `0 0 0 3px ${RING}` : hot && !ctx.pen ? `0 0 0 1px ${RING}` : undefined;
-            // With the pen on, a hovered mark is what a click erases.
-            const erase = hot && ctx.pen ? { outline: "1.5px dashed #404040", outlineOffset: 1 } : undefined;
+            // With the pen on, a hovered mark is what a click erases: a
+            // dashed ring fades in (and out) round it.
+            const passage = d.kind === "highlight" || d.kind === "quote";
+            const erasing = hot && ctx.pen !== null;
+            const erase = !ctx.pen
+              ? undefined
+              : passage
+                ? { outline: `1.5px dashed ${erasing ? ERASE_RING : "transparent"}`, outlineOffset: 1 }
+                : erasing
+                  ? { outlineStyle: "dashed" as const, outlineColor: ERASE_RING }
+                  : undefined;
             return (
               <div
                 key={`${d.id}:${i}`}
                 data-mark={d.id}
                 data-kind={d.kind}
-                data-erase={erase ? "true" : undefined}
+                data-erase={erasing ? "true" : undefined}
                 data-leaving={d.leaving ? "" : undefined}
                 style={{ ...markStyle(d, b), ...erase, boxShadow: ring, opacity: d.leaving ? 0 : dim ? 0.25 : undefined }}
-                className="absolute rounded-[2px] transition-[opacity,box-shadow] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none"
+                className="absolute rounded-[2px] transition-[opacity,box-shadow,outline-color] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none"
               />
             );
           }),

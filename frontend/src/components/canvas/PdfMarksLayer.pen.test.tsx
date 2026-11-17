@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BLOCKS, layOut, pdfMark, resetStores, stubRangeGeometry, type CreateMock } from "@/components/canvas/__fixtures__/pdfMarks";
 import { Reader } from "@/components/canvas/__fixtures__/pdfMarksReader";
-import { listPaperBlocks } from "@/lib/api";
-import { useMarksStore } from "@/store/marks";
+import { listPaperBlocks, locateText } from "@/lib/api";
+import { resetMarkOps, useMarksStore } from "@/store/marks";
 import type { Mark, MarkIn, PaperPageBlock } from "@/types/notes";
 
-vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listPaperBlocks: vi.fn() }));
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  listPaperBlocks: vi.fn(),
+  locateText: vi.fn(),
+}));
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
 vi.mock("sonner", () => ({
   toast: Object.assign(toastFn, { error: vi.fn(), message: vi.fn(), success: vi.fn() }),
@@ -44,6 +48,9 @@ let create: CreateMock;
 let erase: ReturnType<typeof vi.fn<(id: string, index: number) => Promise<void>>>;
 
 beforeEach(() => {
+  resetMarkOps();
+  vi.mocked(locateText).mockReset();
+  vi.mocked(locateText).mockResolvedValue({ match: null, _meta: {} });
   toastFn.mockReset();
   create = resetStores();
   // The server: a new mark per call, or the joined one with the piece added.
@@ -113,6 +120,12 @@ describe("the highlighter on a PDF page", () => {
     act(() => useMarksStore.getState().setPen(true));
     // Two boxes: the words between them are not marked.
     expect(document.querySelectorAll('[data-mark="mk_1"]')).toHaveLength(2);
+    // Hovered, the piece shows the dashed ring, faded in.
+    fireEvent.pointerMove(screen.getByTestId("s2"), { clientX: 240, clientY: 48 });
+    const box = document.querySelectorAll<HTMLElement>('[data-mark="mk_1"]')[1]!;
+    expect(box.dataset.erase).toBe("true");
+    expect(box.style.outline).toContain("dashed");
+    expect(box.className).toContain("outline-color");
     clickAt(240, 48, "s2");
     expect(erase).toHaveBeenCalledWith("mk_1", 1);
   });
@@ -159,5 +172,51 @@ describe("the highlighter on a PDF page", () => {
     stroke("s1", 0, "s1", "Robots".length);
     expect(await screen.findByRole("toolbar", { name: "Mark the selection" })).toBeTruthy();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("on a page without Marker blocks, strokes join when they locate into the same paragraph", async () => {
+    vi.mocked(listPaperBlocks).mockResolvedValue([]);
+    // Where each stroke's text is in the paper's reading text.
+    const where: Record<string, { paragraph: number; start: number } | null> = {
+      Robots: { paragraph: 5, start: 10 },
+      "from demos.": { paragraph: 5, start: 24 },
+      Next: { paragraph: 6, start: 60 },
+      "line here.": null,
+    };
+    vi.mocked(locateText).mockImplementation((_id, text) => {
+      const at = where[text.trim()];
+      return Promise.resolve({
+        match: at
+          ? {
+              chunk_start: 101,
+              chunk_end: 101,
+              chunk_ids: [101],
+              section: "1 Introduction",
+              text_start: at.start,
+              text_end: at.start + text.length,
+              paragraph: at.paragraph,
+            }
+          : null,
+        _meta: {},
+      });
+    });
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke("s1", 0, "s1", "Robots".length);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].pieces[0]).toMatchObject({ quote: "Robots", text_start: 10 });
+    stroke("s2", 0, "s2", "from demos.".length);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]![0].join_to).toBe("mk_1");
+    // Another paragraph: its own mark.
+    stroke("s3", 0, "s3", "Next".length);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    expect(create.mock.calls[2]![0].join_to).toBeUndefined();
+    // Not located: never joins (not even the mark just above).
+    stroke("s3", "Next ".length, "s3", "Next line here.".length);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
+    expect(create.mock.calls[3]![0].join_to).toBeUndefined();
   });
 });
