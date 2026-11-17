@@ -374,3 +374,98 @@ async def test_review_model_input_stays_capped(
     [material] = seen
     texts = re.findall(r"<private_item [^>]*>(.*?)</private_item>", material, re.S)
     assert sum(len(html.unescape(t)) for t in texts) == 12_000
+
+
+async def _log_reason(conn: aiosqlite.Connection, log_id: int | None) -> str:
+    async with conn.execute(
+        "SELECT reason FROM outbound_log WHERE id = ?", (log_id,)) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    return str(row[0])
+
+
+def _para(text: str) -> dict[str, Any]:
+    return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+
+
+async def test_unknown_block_id_never_reaches_the_log_reason(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """An op naming a block the note lacks is rejected; its payload still
+    counts, under ``op-<index>``, not under the id the model emitted."""
+    nid = await _note(migrated_db)
+    await _fill(migrated_db, nid, [_p("a block")])
+    begin_turn()
+    out = await _run(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                     base_revision=1, ops=[
+                         {"op": "update", "block_id": "b_MODEL-chosen", "block": _para(_SECRET)}])
+    assert out.record["rejected"] and not out.record["applied"]
+    d = await _check(migrated_db, _SECRET)
+    assert _is_span(d)
+    reason = await _log_reason(migrated_db, d.log_id)
+    assert reason == f"{_SPAN_REASON} (note {nid}: block op-0)"
+    assert "MODEL" not in reason
+
+
+async def _edit_error(ctx: ToolContext, **args: Any) -> ToolOutcome:
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    out = await reg.run(ctx, ToolCall(id="c1", name="edit_note", arguments=args))
+    assert out.record.get("error"), out.content
+    return out
+
+
+async def test_payload_counts_when_base_revision_is_ahead(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _note(migrated_db)
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=9,
+                      ops=[{"op": "insert", "block": _para(_SECRET)}])
+    d = await _check(migrated_db, _SECRET)
+    assert _is_span(d)
+    assert await _log_reason(migrated_db, d.log_id) == (
+        f"{_SPAN_REASON} (note {nid}: block op-0)")
+
+
+async def test_payload_counts_when_the_change_set_fails(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from paperhub.agents.core import note_tools
+
+    async def broken(*_a: Any, **_k: Any) -> Any:
+        raise ValueError("base_revision moved")
+
+    monkeypatch.setattr(note_tools, "apply_ops", broken)
+    await _note(migrated_db)
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=0,
+                      ops=[{"op": "insert", "block": _para(_SECRET)}])
+    assert _is_span(await _check(migrated_db, _SECRET))
+
+
+async def test_payload_counts_when_an_op_fails_validation(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _note(migrated_db)
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=0,
+                      ops=[{"op": "explode", "block": _para(_SECRET)}])
+    d = await _check(migrated_db, _SECRET)
+    assert _is_span(d)
+    assert await _log_reason(migrated_db, d.log_id) == (
+        f"{_SPAN_REASON} (note {nid}: block op-0)")
+
+
+async def test_payload_counts_when_the_note_is_not_found(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    begin_turn()
+    await _edit_error(_ctx(migrated_db, fake_tracer), note="note:999", base_revision=0,
+                      ops=[{"op": "insert", "block": _para(_SECRET)}])
+    d = await _check(migrated_db, _SECRET)
+    assert _is_span(d)
+    # The note could not be resolved: note 0 stands for "unknown note".
+    assert await _log_reason(migrated_db, d.log_id) == (
+        f"{_SPAN_REASON} (note 0: block op-0)")

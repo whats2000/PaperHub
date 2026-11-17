@@ -469,15 +469,39 @@ def _invalid(label: str | None, hint: str) -> dict[str, Any]:
             "hint": hint}
 
 
+def _strings(value: Any) -> list[str]:
+    """Every string inside ``value`` (dict values, list items), in order."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _strings(v)]
+    if isinstance(value, list):
+        return [t for v in value for t in _strings(v)]
+    return []
+
+
+def _collect_raw(note_id: int, note_title: str, raw_ops: Any) -> None:
+    """Add the text of ``edit_note`` ops that never parsed (or whose note
+    could not be resolved: note id 0). The model wrote it this turn, so it
+    is in the agent's context either way."""
+    if not isinstance(raw_ops, list):
+        raw_ops = [raw_ops]
+    collect_note_blocks(note_id, [
+        (f"op-{index}", " ".join(_strings(op.get("block") if isinstance(op, dict) else op)))
+        for index, op in enumerate(raw_ops)], note_title)
+
+
 async def _collect_written(
-    conn: aiosqlite.Connection, note: Note, ops: list[Op], applied: list[str],
-    shown: list[Block],
+    conn: aiosqlite.Connection, note: Note, ops: list[tuple[int, Op]],
+    applied: list[str], shown: list[Block], known: set[str],
 ) -> None:
     """Add what this edit wrote to the turn's private material: it ends up
     in the user's private note. Applied blocks count with their stored id
     and text; an op that did not land (a suggestion, a rejection, a failed
-    change set) counts with its payload. The current text of blocks shown
-    back to the agent (rejections) counts as read."""
+    change set) counts with its payload, under its block id when the note
+    had that block (``known``) and ``op-<index>`` otherwise, so an id the
+    model made up never reaches the outbound log. The current text of
+    blocks shown back to the agent (rejections) counts as read."""
     written: list[tuple[str, str]] = []
     if applied:
         marks = ",".join("?" for _ in applied)
@@ -488,13 +512,13 @@ async def _collect_written(
             written = [(str(r[0]), str(r[1] or "")) for r in await cur.fetchall()]
     landed = {bid for bid, _ in written}
     landed_text = {text for _, text in written}
-    for index, op in enumerate(ops):
+    for index, op in ops:
         if op.block is None:
             continue
         text = block_text(op.block.type, op.block.props, op.block.content)
         if op.block_id in landed or (op.block_id is None and text in landed_text):
             continue
-        written.append((op.block_id or f"new-{index}", text))
+        written.append((op.block_id if op.block_id in known else f"op-{index}", text))
     written += [(b.id, _text(b)) for b in shown]
     collect_note_blocks(note.id, written, note.title)
 
@@ -508,21 +532,31 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         return error_outcome("base_revision must be a non-negative integer.")
     raw_ops = args["ops"]
     if not isinstance(raw_ops, list) or not raw_ops:
+        _collect_raw(0, "", raw_ops)
         return error_outcome("ops must be a non-empty list.")
     try:
         note = await note_ref(ctx.conn, str(args["note"]), ctx.session_id)
-        ops = [Op.model_validate(o) for o in raw_ops]
-    except (ValueError, LookupError, ValidationError) as exc:
+    except (ValueError, LookupError) as exc:
+        _collect_raw(0, "", raw_ops)
         return error_outcome(str(exc))
+    try:
+        ops = [Op.model_validate(o) for o in raw_ops]
+    except ValidationError as exc:
+        _collect_raw(note.id, note.title, raw_ops)
+        return error_outcome(str(exc))
+    blocks = await list_blocks(ctx.conn, note.id)
+    known = {b.id for b in blocks}
     if base > note.revision:
-        await _collect_written(ctx.conn, note, ops, [], [])
+        await _collect_written(ctx.conn, note, list(enumerate(ops)), [], [], known)
         return error_outcome(
             f"base_revision {base} is ahead of the note (revision "
             f"{note.revision}); read the note again.")
-    blocks = await list_blocks(ctx.conn, note.id)
     rejected: list[dict[str, Any]] = []
     valid: list[Op] = []
-    refused: list[Op] = []  # ops rejected here, before the change set
+    # (agent op index, op) of the ops that go to the change set / are
+    # rejected here, for _collect_written.
+    sent: list[tuple[int, Op]] = []
+    refused: list[tuple[int, Op]] = []
     section: str | None = None
     new_sections: dict[str, str] = {}  # section name -> block id to create
     placed: list[tuple[int, str, str]] = []  # (op index, section, block id)
@@ -538,7 +572,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 and not (op.after or op.before or op.under_heading)):
             rejected.append(_invalid(
                 label, "an insert must name after, before or under_heading"))
-            refused.append(op)
+            refused.append((index, op))
             continue
         if op.under_heading is not None:
             bid, name, is_new = await _resolve_heading(
@@ -550,7 +584,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                     op.under_heading,
                     "under_heading must be a heading or section block id "
                     "(or a section name of a paper note)"))
-                refused.append(op)
+                refused.append((index, op))
                 continue
             op = op.model_copy(update={"under_heading": bid})
             section = section or name
@@ -560,6 +594,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             op = op.model_copy(update={"block": _check_citations(
                 op.block, ctx.evidence, removed_cites, snapped_cites)})
         valid.append(op)
+        sent.append((index, op))
     if new_sections:
         order = await _section_order(ctx.conn, int(note.target_id))
         valid = [*_section_ops(new_sections, order, blocks), *valid]
@@ -576,7 +611,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 ctx.conn, note.id, base_revision=base, ops=valid,
                 actor="agent", run_id=ctx.run_id)
         except ValueError as exc:
-            await _collect_written(ctx.conn, note, [*valid, *refused], [], [])
+            await _collect_written(ctx.conn, note, [*sent, *refused], [], [], known)
             return error_outcome(str(exc))
         revision = res.revision
         record.update(
@@ -591,7 +626,8 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                             revision)
         shown = [r["current"] for r in res.rejected
                  if isinstance(r.get("current"), Block)]
-    await _collect_written(ctx.conn, note, [*valid, *refused], record["applied"], shown)
+    await _collect_written(ctx.conn, note, [*sent, *refused], record["applied"],
+                           shown, known)
     record["rejected"] = rejected
     result: dict[str, Any] = {
         "revision": revision, "applied": record["applied"],
