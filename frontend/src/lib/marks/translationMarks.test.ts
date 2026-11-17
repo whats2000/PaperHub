@@ -114,7 +114,7 @@ describe("translationSelection", () => {
   it("records the language, the translation block and the paragraph it translates", () => {
     const doc = makeDoc(paper());
     const box = doc.querySelector(".ph-tr")!;
-    const placed = translationSelection(doc, rangeOver(doc, box, "預測代理的姿態"), CHUNKS)!;
+    const placed = translationSelection(doc, rangeOver(doc, box, "預測代理的姿態"), CHUNKS);
     expect(placed).toHaveLength(1);
     const { piece, block, section } = placed[0]!;
     expect(piece).toMatchObject({
