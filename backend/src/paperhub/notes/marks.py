@@ -209,10 +209,12 @@ def block_props(m: dict[str, Any]) -> dict[str, Any]:
         "quote": joined_quote(live),
         "pieces": live, "source": source,
     }
+    lost = sum(1 for p in live if p.get("lost"))
     if m["status"] == "lost":
         props["anchorLost"] = True
-    elif m["status"] == "partly_lost":
-        props["piecesLost"] = sum(1 for p in live if p.get("lost"))
+    elif lost:
+        # Also on a translation mark whose words changed as well.
+        props["piecesLost"] = lost
     if m["lang"]:
         props["lang"] = m["lang"]
     if m["source_ref"]:

@@ -87,7 +87,8 @@ async def test_reanchor_after_chunk_ids_move(conn):
         conn, [("Intro", "New preamble. "), ("Intro", TEXT_A),
                ("Method", TEXT_B)])
     stats = await reanchor_paper(conn, 1)
-    assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0}
+    assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0,
+        "translation_changed": 0}
     lm, blk = await _block(conn, m)
     p = lm["pieces"][0]
     assert (p["chunk_start"], p["chunk_end"]) == (b2, b2)  # chunk IDS
@@ -99,7 +100,8 @@ async def test_reanchor_after_chunk_ids_move(conn):
     assert blk.props["pieces"][0]["chunk_start"] == b2
     assert "anchorLost" not in blk.props
     assert await reanchor_paper(conn, 1) == {
-        "ok": 1, "moved": 0, "lost": 0, "partly_lost": 0}  # idempotent
+        "ok": 1, "moved": 0, "lost": 0, "partly_lost": 0,
+        "translation_changed": 0}  # idempotent
     assert a != a2 and pre
 
 
@@ -161,7 +163,8 @@ async def test_reanchor_leaves_pdf_marks_untouched(conn):
     m = await _mark(conn, [pdf], view="pdf")
     await _set_chunks(conn, [("Intro", "nothing alike")])
     assert await reanchor_paper(conn, 1) == {
-        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0,
+        "translation_changed": 0}
     lm, blk = await _block(conn, m)
     assert lm["pieces"] == [{**pdf, "stroke": 0}] and lm["status"] == "ok"
     assert "anchorLost" not in blk.props
@@ -181,7 +184,8 @@ async def test_reanchor_finds_rendered_quote_with_percent_ref_and_math(conn):
         conn, [("Intro", "Preamble."), ("Intro", latex)],
         _html(["Preamble.", rendered]))
     stats = await reanchor_paper(conn, 1)
-    assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0}
+    assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0,
+        "translation_changed": 0}
     lm, blk = await _block(conn, m)
     p = lm["pieces"][0]
     assert (p["chunk_start"], p["chunk_end"]) == (c2, c2)
@@ -197,7 +201,8 @@ async def test_reanchor_waits_for_the_html_render(conn):
     await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)],
                       rendered=False)
     assert await reanchor_paper(conn, 1) == {
-        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0,
+        "translation_changed": 0}
     lm, _ = await _block(conn, m)
     assert lm["status"] == "ok" and lm["pieces"][0]["chunk_start"] == b
     a2, b2 = await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
@@ -323,3 +328,38 @@ async def test_reanchor_relocates_a_pdf_translation_piece_by_its_original(conn):
     p = lm["pieces"][0]
     assert (p["chunk_start"], p["chunk_end"]) == (b2, b2)
     assert lm["status"] == "ok"
+
+
+async def test_reanchor_dry_run_counts_changed_translations(conn):
+    [a] = await _paper(conn, [("Intro", TEXT_A)])
+    await _translation(conn, "h:0", "貓坐在墊子上。")
+    m = await _tr_mark(conn, _tr_piece("貓坐在墊子上", TEXT_A, a, a))
+    await _translation(conn, "h:0", "一隻貓待在地毯上。")
+    stats = await reanchor_paper(conn, 1, dry_run=True)
+    assert stats["translation_changed"] == 1
+    assert (await _block(conn, m))[0]["status"] == "ok"  # nothing written
+    assert (await reanchor_paper(conn, 1))["translation_changed"] == 1
+    assert (await _block(conn, m))[0]["status"] == "translation_changed"
+
+
+async def test_reanchor_checks_a_partly_lost_translation_mark(conn):
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, title, "
+        "sections_json, source_path, source_dir_path, html_path, sha256) "
+        "VALUES (1, 'pdf:1', 'pdf_upload', 'A Paper', '[]', 's', 'd', '', "
+        "'abc')")
+    await conn.commit()
+    await _translation(conn, "p:b1", "貓坐在墊子上。")
+    piece = {"quote": "貓坐在墊子上", "orig": "The cat sat.", "lang": LANG,
+             "source_ref": "p:b1", "page": 0, "block_id": "b1"}
+    m = await _tr_mark(conn, piece, view="pdf")
+    pieces = [{**piece, "stroke": 0}, {**piece, "quote": "x", "lost": True, "stroke": 1}]
+    await conn.execute(
+        "UPDATE note_marks SET status = 'partly_lost', pieces_json = ? WHERE id = ?",
+        (json.dumps(pieces), m["id"]))
+    await conn.commit()
+    await _translation(conn, "p:b1", "完全不同。")
+    await reanchor_paper(conn, 1)
+    lm, blk = await _block(conn, m)
+    assert lm["status"] == "translation_changed"
+    assert blk.props["translationChanged"] is True and blk.props["piecesLost"] == 1

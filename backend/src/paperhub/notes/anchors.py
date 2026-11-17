@@ -21,7 +21,6 @@ actor ``system`` inside one transaction per paper.
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +40,7 @@ from paperhub.notes.marks import (
 from paperhub.notes.ops import BlockIn, Op, _apply_in_tx
 from paperhub.notes.papers import tx
 from paperhub.notes.store import get_note, list_blocks
-from paperhub.translation.placeholders import normalize_language
+from paperhub.notes.translated import CHANGED, TranslationCheck, save_status
 
 _Piece = dict[str, Any]
 _Norm = tuple[str, list[int]]
@@ -227,8 +226,7 @@ def _anchor(m: dict[str, Any], index: TextIndex, ids: dict[str, int],
         return pieces, "lost", moved
     if lost:
         return pieces, "partly_lost", moved
-    keep = "translation_changed" if m["status"] == "translation_changed" else "ok"
-    return pieces, keep, moved
+    return pieces, "ok", moved
 
 
 async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
@@ -237,25 +235,33 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
 
     Counts are per mark: ``ok`` (nothing moved), ``moved`` (all pieces found,
     some at new offsets), ``lost`` (no piece found), ``partly_lost``. PDF
-    marks keep their geometry and are not counted. Idempotent.
+    marks keep their geometry and are not counted there. Every mark made on
+    a translation (any view) is also checked against its cached translation
+    (``notes/translated.py``); ``translation_changed`` counts those whose
+    words are gone (dry run too). Idempotent.
     """
-    stats = {"ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+    stats = {"ok": 0, "moved": 0, "lost": 0, "partly_lost": 0, "translation_changed": 0}
     note_id = await _find_note(conn, paper_content_id)
     marks = await _mark_rows(conn, paper_content_id, html_only=True)
     if not marks and note_id is None:
         return stats
     # Not rendered for these chunks yet: the marks wait for the re-render.
     reading = await _reading_text(conn, paper_content_id)
+    check = TranslationCheck(conn, paper_content_id)
+    seen: set[str] = set()
     async with tx(conn):
         for m in marks if reading is not None else []:
             assert reading is not None
             index, ids = reading
             if not any("chunk_start" in p for p in live_pieces(m["pieces"])):
                 continue
+            seen.add(m["id"])
             pieces, status, moved = _anchor(m, index, ids)
             key = status if status in ("lost", "partly_lost") else (
                 "moved" if moved else "ok")
             stats[key] += 1
+            status = await check.status({**m, "pieces": pieces}, status)
+            stats["translation_changed"] += status == CHANGED
             if dry_run or (pieces == m["pieces"] and status == m["status"]):
                 continue
             m["pieces"], m["status"] = pieces, status
@@ -269,8 +275,19 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
                             props=block_props(m)), "Re-anchor mark")
         if not dry_run and reading is not None:
             await _relocate_pdf_marks(conn, paper_content_id, *reading, note_id)
-        if not dry_run:
-            await _check_translations(conn, paper_content_id, note_id)
+        # Marks on translations not placed above (PDF marks, or the HTML
+        # not rendered for these chunks yet).
+        for m in await _mark_rows(conn, paper_content_id, html_only=False):
+            if m["id"] in seen or not m["lang"] or m["status"] == "lost":
+                continue
+            base = ("partly_lost" if any(p.get("lost") for p in live_pieces(m["pieces"]))
+                    else "ok")
+            status = await check.status(m, base)
+            stats["translation_changed"] += status == CHANGED
+            if not dry_run and status != m["status"]:
+                await save_status(conn, m, status, note_id,
+                                  "Translation found" if status != CHANGED
+                                  else "Translation changed")
         if not dry_run and note_id is not None:
             await flag_lost_sections(conn, paper_content_id, note_id)
     return stats
@@ -312,88 +329,6 @@ async def _relocate_pdf_marks(conn: aiosqlite.Connection, pcid: int,
                 conn, note_id, m["block_id"],
                 BlockIn(type=BLOCK_TYPE[m["kind"]], props=block_props(m)),
                 "Re-anchor mark")
-
-
-_PLACEHOLDER = re.compile(r"⟦(\w+)⟧")
-
-
-def _translation_pattern(text: str) -> list[str | None]:
-    """A cached translation as the reader shows it, blind to whitespace:
-    its characters, with None for each protected item (``⟦n⟧``: math, a
-    reference, code) whose shown text the cache does not hold. ``⟦BR⟧`` (a
-    page or column break in a PDF paragraph) shows as nothing."""
-    out: list[str | None] = []
-    last = 0
-    for m in _PLACEHOLDER.finditer(text):
-        out.extend(c for c in text[last:m.start()] if not c.isspace())
-        if m.group(1) != "BR":
-            out.append(None)
-        last = m.end()
-    out.extend(c for c in text[last:] if not c.isspace())
-    return out
-
-
-def in_translation(quote: str, text: str) -> bool:
-    """Whether a quote the reader marked is still in the translation: blind
-    to whitespace, each protected item standing for any text."""
-    q = [c for c in quote if not c.isspace()]
-    if not q:
-        return True
-    pattern = _translation_pattern(text)
-    # reach[i]: q[:i] matches text ending at the current pattern position,
-    # starting anywhere (a quote may begin inside a protected item).
-    reach = [True] + [False] * len(q)
-    for item in pattern:
-        nxt = [True] + [False] * len(q)
-        if item is None:
-            seen = False
-            for i in range(len(q) + 1):
-                seen = seen or reach[i]
-                nxt[i] = nxt[i] or seen
-        else:
-            for i in range(len(q)):
-                if reach[i] and q[i] == item:
-                    nxt[i + 1] = True
-        reach = nxt
-        if reach[-1]:
-            return True
-    return reach[-1]
-
-
-async def _check_translations(conn: aiosqlite.Connection, pcid: int,
-                              note_id: int | None) -> None:
-    """A mark on a translation whose words the translation no longer holds
-    (the paragraph was translated again) is ``translation_changed``: its
-    quote is kept and the reader shows it as the 文 marker. Found again, it
-    is ``ok``. A lost anchor stays lost; a translation not in the cache is
-    not judged."""
-    for m in await _mark_rows(conn, pcid, html_only=False):
-        if not m["lang"] or not m["source_ref"]:
-            continue
-        if m["status"] not in ("ok", "translation_changed"):
-            continue
-        async with conn.execute(
-            "SELECT text FROM translations WHERE paper_content_id = ? "
-            "AND block_key = ? AND language = ?",
-            (pcid, m["source_ref"], normalize_language(m["lang"])),
-        ) as cur:
-            row = await cur.fetchone()
-        if row is None:
-            continue
-        live = [p for p in live_pieces(m["pieces"]) if not p.get("lost")]
-        found = all(in_translation(str(p.get("quote") or ""), str(row[0]))
-                    for p in live)
-        status = "ok" if found else "translation_changed"
-        if status == m["status"]:
-            continue
-        m["status"] = status
-        await write_row(conn, "UPDATE note_marks SET status = ? WHERE id = ?",
-                        (status, m["id"]))
-        if m["deleted_at"] is None and note_id is not None:
-            await _system_update(
-                conn, note_id, m["block_id"],
-                BlockIn(type=BLOCK_TYPE[m["kind"]], props=block_props(m)),
-                "Translation changed" if not found else "Translation found")
 
 
 async def flag_lost_sections(conn: aiosqlite.Connection, paper_content_id: int,
