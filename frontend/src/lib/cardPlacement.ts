@@ -302,3 +302,45 @@ export function describeBreak(current: Fragment, next: Fragment): BreakKind {
   if (nextX0 >= x1 || nextX0 > (x0 + x1) / 2) return { kind: "column" };
   return { kind: "none" };
 }
+
+export interface SelectionPopoverPlacement {
+  /** `below` the selection (the default), or `above` it when below has no room. */
+  side: "below" | "above";
+  /** The popover's top-left corner, in the coordinates of `bounds`. */
+  top: number;
+  left: number;
+}
+
+/** Gap between a selection and its popover, and the popover's least margin
+ *  from the reader's edges. */
+const SELECTION_GAP = 8;
+const SELECTION_EDGE = 6;
+
+/**
+ * Where the mark popover goes: centred under the selection, kept inside the
+ * reader; over the selection only when there is no room under it (and there
+ * is above). Coordinates are the reader's (the selection rect, the popover's
+ * size and `bounds` share them).
+ */
+export function placeSelectionPopover(input: {
+  selection: Pick<Rect, "top" | "bottom" | "left" | "right">;
+  size: { width: number; height: number };
+  bounds: { width: number; height: number };
+}): SelectionPopoverPlacement {
+  const { selection: sel, size, bounds } = input;
+  const centre = (sel.left + sel.right) / 2;
+  const left = clamp(
+    centre - size.width / 2,
+    SELECTION_EDGE,
+    Math.max(SELECTION_EDGE, bounds.width - size.width - SELECTION_EDGE),
+  );
+  const below = sel.bottom + SELECTION_GAP;
+  const above = sel.top - SELECTION_GAP - size.height;
+  const fitsBelow = below + size.height <= bounds.height - SELECTION_EDGE;
+  if (!fitsBelow && above >= SELECTION_EDGE) return { side: "above", top: above, left };
+  return {
+    side: "below",
+    top: clamp(below, SELECTION_EDGE, Math.max(SELECTION_EDGE, bounds.height - size.height - SELECTION_EDGE)),
+    left,
+  };
+}

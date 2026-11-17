@@ -280,5 +280,25 @@
   "cite": {
     "gone": "這一行已不在你的筆記裡。",
     "failed": "無法開啟那則筆記，請再試一次。"
+  },
+  "marks": {
+    "popover": "標記選取的文字",
+    "highlightAs": "畫重點：{{name}}",
+    "quote": "引用到筆記",
+    "addNote": "加筆記",
+    "savedTo": "已存到 {{paper}} › {{section}}",
+    "savedToPart": "已存到 {{paper}} › {{section}} · 第 {{index}} 則筆記（共 {{count}} 則）",
+    "savedToPaper": "已存到 {{paper}}",
+    "show": "顯示",
+    "saveFailed": "無法儲存這個標記。",
+    "deleted": "已刪除標記",
+    "undo": "復原",
+    "restored": "已復原標記",
+    "deleteAgain": "再次刪除",
+    "deleteFailed": "無法刪除這個標記。",
+    "restoreFailed": "無法復原這個標記。",
+    "showMarks": "顯示我的標記",
+    "showMarksHint": "在論文上顯示你的標記",
+    "hideMarksHint": "隱藏論文上的標記（不會刪除）"
   }
 }

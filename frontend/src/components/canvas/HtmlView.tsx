@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PaperLoading } from "@/components/canvas/PaperLoading";
+import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
 import { usePresence } from "@/hooks/usePresence";
 import { applyIframeTheme, withDarkStyle } from "@/lib/applyIframeTheme";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,9 @@ interface Props {
   /** The heading of the section being read, reported after each scroll
    * settles (Follow in the notes). */
   onReadingHeading?: (heading: string | null, within: string[]) => void;
+  /** Plan H5b.1 marks: the paper's marks drawn over it, and a selection
+   *  turned into a mark. Omitted keeps the reader without marks. */
+  marks?: { paperId: number };
 }
 
 /** How long the reader rests before the section being read is reported. */
@@ -122,6 +126,7 @@ export function HtmlView({
   onImageActivate,
   translation,
   onReadingHeading,
+  marks,
 }: Props) {
   const { t } = useTranslation("canvas");
   const ref = useRef<HTMLIFrameElement>(null);
@@ -348,6 +353,13 @@ export function HtmlView({
     };
   }, [following, loaded, html]);
 
+  // Marks (overlay only, like the translations), on the current document.
+  const markPopover = useHtmlMarks({
+    paperId: marks?.paperId ?? null,
+    doc: loaded && loaded.html === html ? loaded.doc : null,
+    isDark,
+  });
+
   // A bump (never the initial value) re-translates the stale visible blocks.
   const seenRetranslate = useRef(trRetranslate);
   useEffect(() => {
@@ -373,6 +385,7 @@ export function HtmlView({
         sandbox="allow-scripts allow-same-origin"
         className="h-full w-full flex-1 bg-white dark:bg-[#0f1115]"
       />
+      {markPopover}
       {skeleton.mounted && (
         <PaperLoading
           className={cn(

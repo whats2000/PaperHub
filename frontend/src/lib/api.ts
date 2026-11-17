@@ -1391,6 +1391,14 @@ export async function splitMark(markId: string): Promise<Mark> {
   return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST" });
 }
 
+/** The chunks with a `phchunk-N` span in the paper's HTML: a selection's
+ * chunk ids and section come from the nearest span. */
+export async function getChunkAnchors(
+  paperContentId: number,
+): Promise<{ id: number; dom_id: string; section: string | null }[]> {
+  return apiFetch(`/papers/content/${paperContentId}/chunk-anchors`);
+}
+
 export async function listMarkColors(): Promise<MarkColorInfo[]> {
   return apiFetch<MarkColorInfo[]>("/marks/colors");
 }

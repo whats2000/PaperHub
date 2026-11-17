@@ -280,5 +280,25 @@
   "cite": {
     "gone": "その行はもうノートにありません。",
     "failed": "そのノートを開けませんでした。もう一度お試しください。"
+  },
+  "marks": {
+    "popover": "選択箇所に印をつける",
+    "highlightAs": "ハイライト：{{name}}",
+    "quote": "ノートに引用",
+    "addNote": "ノートを書く",
+    "savedTo": "{{paper}} › {{section}} に保存しました",
+    "savedToPart": "{{paper}} › {{section}} · ノート {{index}} / {{count}} に保存しました",
+    "savedToPaper": "{{paper}} に保存しました",
+    "show": "表示",
+    "saveFailed": "印を保存できませんでした。",
+    "deleted": "印を削除しました",
+    "undo": "元に戻す",
+    "restored": "印を元に戻しました",
+    "deleteAgain": "もう一度削除",
+    "deleteFailed": "印を削除できませんでした。",
+    "restoreFailed": "印を元に戻せませんでした。",
+    "showMarks": "自分の印を表示",
+    "showMarksHint": "論文上に自分の印を表示します",
+    "hideMarksHint": "論文上の印を隠します（削除はしません）"
   }
 }

@@ -88,12 +88,13 @@ function scheduleClear(doc: Document, fn: () => void): void {
   setTimeoutFn(fn, HIGHLIGHT_MS);
 }
 
-/** Plan H1's translation overlay (`div.ph-tr`) is not paper text: citation
- *  highlight and text-search walk past it as if it weren't there. */
+/** Plan H1's translation overlay (`div.ph-tr`) and the marks overlay
+ *  (`[data-ph-overlay]`) are not paper text: citation highlight and
+ *  text-search walk past them as if they weren't there. */
 function textWalker(doc: Document, root: Node): TreeWalker {
   return doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) =>
-      n.parentElement?.closest(".ph-tr")
+      n.parentElement?.closest(".ph-tr, [data-ph-overlay]")
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_ACCEPT,
   });

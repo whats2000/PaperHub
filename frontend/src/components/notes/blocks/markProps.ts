@@ -108,6 +108,14 @@ const DEFAULT_COLOR_NAMES: Record<string, [string, string]> = {
   purple: ["notes:color.purple", "Disagree"],
 };
 
+/** A colour's name as shown: the user's own, or the default name in the UI
+ * language (the server seeds the English defaults). */
+export function colorLabel(color: string, name: string | undefined, t: TFunction): string {
+  const d = DEFAULT_COLOR_NAMES[color];
+  if (name && (!d || name !== d[1])) return name;
+  return d ? t(d[0], d[1]) : (name ?? "");
+}
+
 /** The user's name for a mark colour, else its default name. */
 export function useColorName(color: string): string {
   const { t } = useTranslation();

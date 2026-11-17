@@ -40,6 +40,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { PaperLoading } from "@/components/canvas/PaperLoading";
+import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
@@ -719,6 +720,9 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // side by side on a track that slides toward the chosen one.
   const activeHasPagePdf =
     activeDoc?.mode === "html" && activeDoc.status === "ready" && activeDoc.pagePdf === true;
+  // Marks are drawn on HTML papers (PDF marks come with the PDF layer).
+  const marksToggleShown = !standalone && activeDoc?.mode === "html" && activeDoc.status === "ready";
+  const readerBarOpen = activeHasPagePdf || marksToggleShown;
   const readerTab: ReaderTab =
     effectivePaperId != null && activeHasPagePdf
       ? (readerTabByPaper[effectivePaperId] ?? "html")
@@ -831,54 +835,64 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         </Button>
       </header>
 
-      {/* HTML | PDF tabs for an HTML paper with a page PDF: always mounted,
-          the bar's height opens and closes so the reader below glides. */}
+      {/* The reader bar: HTML | PDF tabs for an HTML paper with a page PDF,
+          and "Show my marks" for an HTML paper. Always mounted: the bar's
+          height opens and closes so the reader below glides. */}
       <div
         data-reader-tabs
-        data-open={activeHasPagePdf ? "true" : "false"}
-        aria-hidden={!activeHasPagePdf}
-        inert={!activeHasPagePdf ? true : undefined}
+        data-open={readerBarOpen ? "true" : "false"}
+        aria-hidden={!readerBarOpen}
+        inert={!readerBarOpen ? true : undefined}
         className={cn(
           "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-          activeHasPagePdf ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+          readerBarOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
         <div className="overflow-hidden">
-          <div
-            role="tablist"
-            aria-label={t("tabs.label")}
-            className="flex gap-1 border-b border-border px-2 py-1"
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-              e.preventDefault();
-              const next: ReaderTab = readerTab === "html" ? "pdf" : "html";
-              switchReaderTab(next);
-              e.currentTarget
-                .querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)
-                ?.focus();
-            }}
-          >
-            {(["html", "pdf"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                data-tab={tab}
-                id={`reader-tab-${tab}`}
-                aria-selected={readerTab === tab}
-                aria-controls={`reader-panel-${tab}`}
-                tabIndex={readerTab === tab ? 0 : -1}
-                onClick={() => switchReaderTab(tab)}
-                className={cn(
-                  "rounded px-2 py-0.5 text-xs font-medium transition-colors duration-150 motion-reduce:transition-none",
-                  readerTab === tab
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
-                {t(`tabs.${tab}`)}
-              </button>
-            ))}
+          <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+            <div
+              role="tablist"
+              aria-label={t("tabs.label")}
+              aria-hidden={!activeHasPagePdf}
+              inert={!activeHasPagePdf ? true : undefined}
+              className={cn(
+                "flex gap-1 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+                !activeHasPagePdf && "opacity-0",
+              )}
+              onKeyDown={(e) => {
+                if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                e.preventDefault();
+                const next: ReaderTab = readerTab === "html" ? "pdf" : "html";
+                switchReaderTab(next);
+                e.currentTarget
+                  .querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)
+                  ?.focus();
+              }}
+            >
+              {(["html", "pdf"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  data-tab={tab}
+                  id={`reader-tab-${tab}`}
+                  aria-selected={readerTab === tab}
+                  aria-controls={`reader-panel-${tab}`}
+                  tabIndex={readerTab === tab ? 0 : -1}
+                  onClick={() => switchReaderTab(tab)}
+                  className={cn(
+                    "rounded px-2 py-0.5 text-xs font-medium transition-colors duration-150 motion-reduce:transition-none",
+                    readerTab === tab
+                      ? "bg-foreground/10 text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {t(`tabs.${tab}`)}
+                </button>
+              ))}
+            </div>
+            <span className="flex-1" />
+            {!standalone && <ShowMarksToggle shown={marksToggleShown} />}
           </div>
         </div>
       </div>
@@ -982,6 +996,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
                 }
                 onImageActivate={(src, alt) => setLightbox({ src, alt })}
                 translation={translationFor(pid)}
+                marks={standalone ? undefined : { paperId: pid }}
               />
             </div>
           );
