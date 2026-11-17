@@ -469,3 +469,15 @@ async def test_payload_counts_when_the_note_is_not_found(
     # The note could not be resolved: note 0 stands for "unknown note".
     assert await _log_reason(migrated_db, d.log_id) == (
         f"{_SPAN_REASON} (note 0: block op-0)")
+
+
+async def test_a_title_renamed_mid_turn_guards_both_titles() -> None:
+    from paperhub.agents.core.private_material import collect_note_titles
+    old = "field notes on wafer cracks at the scribe edge"
+    new = "lab log for reflow warpage on the thin dies today"
+    begin_turn()
+    collect_note_titles([(5, old)])
+    collect_note_titles([(5, new)])
+    titles = [i for i in current_private() if ":title:" in i.ref]
+    assert {i.text for i in titles} == {old, new}
+    assert all(i.ref.startswith("note:5:title:#") for i in titles)

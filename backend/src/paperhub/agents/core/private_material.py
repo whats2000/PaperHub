@@ -93,7 +93,8 @@ def collect_note_titles(titles: list[tuple[int, str]]) -> None:
     """Add note titles (``(note_id, title)``) the agent was shown."""
     for note_id, title in titles:
         if title:
-            add_private(PrivateItem("note", note_item_ref(note_id, "title"), title, title))
+            add_private(PrivateItem("note", note_item_ref(note_id, "title", "", title),
+                                    title, title))
 
 
 # query_library (SQL over the whole library) can return any column of a

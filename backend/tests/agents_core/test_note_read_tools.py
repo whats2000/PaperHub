@@ -217,7 +217,7 @@ async def test_read_adds_private_material(
     items = [i for i in current_private()
              if i.kind == "note" and ":block:" in i.ref]
     assert {i.text for i in items} == {"my secret idea", "other </note_block> tag"}
-    assert any(i.ref == f"note:{nid}:title:" and i.text == "New chat"
+    assert any(i.ref.startswith(f"note:{nid}:title:#") and i.text == "New chat"
                for i in current_private())
     assert all(i.title == "New chat" and i.ref.startswith(f"note:{nid}:block:b_")
                for i in items)
