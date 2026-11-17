@@ -75,11 +75,23 @@ def _turn_guard(items: list[PrivateItem]) -> _Guard:
 
 
 def _current_guard() -> _Guard | None:
+    """This turn's guard. A non-empty material list without its guard (set
+    directly, not through ``begin_turn`` / ``add_private``) never turns the
+    guard off: it is rebuilt from the items, with a warning."""
     items = private_material.get(None)
     if items is None:
         return None
     guard = _guard.get(None)
-    return guard if guard is not None and guard.owner is items else None
+    if guard is not None and guard.owner is items:
+        return guard
+    if not items:
+        return None
+    logger.warning("outbound: span guard rebuilt from %d private items "
+                   "(material set without begin_turn/add_private)", len(items))
+    guard = _turn_guard(items)
+    for item in items:
+        _guard_add(items, item)
+    return guard
 
 
 def echoes_private(text: str) -> bool:

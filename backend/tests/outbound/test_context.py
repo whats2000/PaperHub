@@ -188,3 +188,17 @@ def test_guard_add_never_copies_the_turn_digest_set() -> None:
 
     assert _run(body)
 
+
+def test_material_without_a_guard_is_still_guarded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A material list set without its guard (not through begin_turn /
+    add_private) never turns the span guard off: it is rebuilt."""
+    def body() -> tuple[bool, list[tuple[str, str]]]:
+        private_material.set([PrivateItem("chunk", "chunk:1", "R", _SECRET)])
+        return echoes_private(_SECRET), guard_sources(_SECRET)
+
+    with caplog.at_level(logging.WARNING, logger="paperhub.outbound.context"):
+        hit, sources = contextvars.Context().run(body)
+    assert hit and sources == [("chunk", "chunk:1")]
+    assert "rebuilt" in caplog.text
