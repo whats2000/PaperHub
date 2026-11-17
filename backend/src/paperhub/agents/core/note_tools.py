@@ -42,7 +42,7 @@ from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
-from paperhub.notes.store import list_blocks, new_block_id
+from paperhub.notes.store import block_text, list_blocks, new_block_id
 
 PAGE_BLOCKS = 40
 PAGE_CHARS = 6_000
@@ -154,7 +154,7 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         blocks = await list_blocks(ctx.conn, n.id)
         heads, outline_cut = _outline(blocks)
         collect_note_titles([(n.id, n.title)])
-        collect_note_blocks([(i, t) for i, t, _ in heads], n.title)
+        collect_note_blocks(n.id, [(i, t) for i, t, _ in heads], n.title)
         rows.append({
             "ref": ref_of(n, ctx.session_id), "title": _title_xml(n.title),
             "target": f"{n.target_kind}:{n.target_id}", "revision": n.revision,
@@ -232,7 +232,7 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             paths[note_id] = _heading_paths(await list_blocks(ctx.conn, note_id))
         note = by_id[note_id]
         path = paths[note_id].get(bid, [])
-        collect_note_blocks(path, note.title)
+        collect_note_blocks(note_id, path, note.title)
         snippet = html.escape(str(text)[:SNIPPET_CHARS], quote=False)
         hits.append({
             "note": ref_of(note, ctx.session_id), "block_id": bid,
@@ -244,7 +244,7 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         })
         private.setdefault(note_id, []).append((bid, str(text)))
     for note_id, blocks in private.items():
-        collect_note_blocks(blocks, by_id[note_id].title)
+        collect_note_blocks(note_id, blocks, by_id[note_id].title)
     # Hits whose snippet is the whole block: seen in full, citable.
     whole = [str(r[0]) for r in rows if len(str(r[2])) <= SNIPPET_CHARS]
     await record_contact(ctx.conn, ctx.session_id,
@@ -329,11 +329,12 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     content = "\n".join([head, *(_block_xml(b) for b in window), *remark,
                          *(_comment_xml(c) for c in comments), "</note>"])
     collect_note_titles([(note.id, note.title)])
-    collect_note_blocks([(b.id, _text(b)) for b in window], note.title)
+    collect_note_blocks(note.id, [(b.id, _text(b)) for b in window], note.title)
     # The user's comment text is note material too (private for the checkpoint).
     collect_note_blocks(
+        note.id,
         [(c["id"], " ".join([c["quote"], *(i["text"] for i in c["items"])]))
-         for c in comments], note.title)
+         for c in comments], note.title, part="comment")
     await record_contact(ctx.conn, ctx.session_id, {note.id: note.revision})
     await record_blocks(ctx.conn, ctx.session_id, note.id,
                         [b.id for b in window], note.revision)
@@ -468,6 +469,36 @@ def _invalid(label: str | None, hint: str) -> dict[str, Any]:
             "hint": hint}
 
 
+async def _collect_written(
+    conn: aiosqlite.Connection, note: Note, ops: list[Op], applied: list[str],
+    shown: list[Block],
+) -> None:
+    """Add what this edit wrote to the turn's private material: it ends up
+    in the user's private note. Applied blocks count with their stored id
+    and text; an op that did not land (a suggestion, a rejection, a failed
+    change set) counts with its payload. The current text of blocks shown
+    back to the agent (rejections) counts as read."""
+    written: list[tuple[str, str]] = []
+    if applied:
+        marks = ",".join("?" for _ in applied)
+        async with conn.execute(
+            "SELECT id, text FROM note_blocks WHERE note_id = ? "  # noqa: S608
+            f"AND deleted_at IS NULL AND id IN ({marks})", (note.id, *applied),
+        ) as cur:
+            written = [(str(r[0]), str(r[1] or "")) for r in await cur.fetchall()]
+    landed = {bid for bid, _ in written}
+    landed_text = {text for _, text in written}
+    for index, op in enumerate(ops):
+        if op.block is None:
+            continue
+        text = block_text(op.block.type, op.block.props, op.block.content)
+        if op.block_id in landed or (op.block_id is None and text in landed_text):
+            continue
+        written.append((op.block_id or f"new-{index}", text))
+    written += [(b.id, _text(b)) for b in shown]
+    collect_note_blocks(note.id, written, note.title)
+
+
 async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     for key in ("note", "base_revision", "ops"):
         if key not in args:
@@ -484,12 +515,14 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     except (ValueError, LookupError, ValidationError) as exc:
         return error_outcome(str(exc))
     if base > note.revision:
+        await _collect_written(ctx.conn, note, ops, [], [])
         return error_outcome(
             f"base_revision {base} is ahead of the note (revision "
             f"{note.revision}); read the note again.")
     blocks = await list_blocks(ctx.conn, note.id)
     rejected: list[dict[str, Any]] = []
     valid: list[Op] = []
+    refused: list[Op] = []  # ops rejected here, before the change set
     section: str | None = None
     new_sections: dict[str, str] = {}  # section name -> block id to create
     placed: list[tuple[int, str, str]] = []  # (op index, section, block id)
@@ -505,6 +538,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 and not (op.after or op.before or op.under_heading)):
             rejected.append(_invalid(
                 label, "an insert must name after, before or under_heading"))
+            refused.append(op)
             continue
         if op.under_heading is not None:
             bid, name, is_new = await _resolve_heading(
@@ -516,6 +550,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                     op.under_heading,
                     "under_heading must be a heading or section block id "
                     "(or a section name of a paper note)"))
+                refused.append(op)
                 continue
             op = op.model_copy(update={"under_heading": bid})
             section = section or name
@@ -534,12 +569,14 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         "ops": [o.model_dump(exclude_none=True) for o in ops],
         "applied": [], "suggested": [], "rejected": []}
     revision = note.revision
+    shown: list[Block] = []
     if valid:
         try:
             res = await apply_ops(
                 ctx.conn, note.id, base_revision=base, ops=valid,
                 actor="agent", run_id=ctx.run_id)
         except ValueError as exc:
+            await _collect_written(ctx.conn, note, [*valid, *refused], [], [])
             return error_outcome(str(exc))
         revision = res.revision
         record.update(
@@ -552,6 +589,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         await record_contact(ctx.conn, ctx.session_id, {note.id: revision})
         await record_blocks(ctx.conn, ctx.session_id, note.id, res.applied,
                             revision)
+        shown = [r["current"] for r in res.rejected
+                 if isinstance(r.get("current"), Block)]
+    await _collect_written(ctx.conn, note, [*valid, *refused], record["applied"], shown)
     record["rejected"] = rejected
     result: dict[str, Any] = {
         "revision": revision, "applied": record["applied"],

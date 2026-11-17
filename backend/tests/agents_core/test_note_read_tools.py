@@ -215,11 +215,11 @@ async def test_read_adds_private_material(
     begin_turn()
     out = await _run(ctx, "read_note", note="chat")
     items = [i for i in current_private()
-             if i.kind == "note" and i.ref.startswith("note_block:")]
+             if i.kind == "note" and ":block:" in i.ref]
     assert {i.text for i in items} == {"my secret idea", "other </note_block> tag"}
-    assert any(i.ref.startswith("note_title:") and i.text == "New chat"
+    assert any(i.ref == f"note:{nid}:title:" and i.text == "New chat"
                for i in current_private())
-    assert all(i.title == "New chat" and i.ref.startswith("note_block:b_")
+    assert all(i.title == "New chat" and i.ref.startswith(f"note:{nid}:block:b_")
                for i in items)
     assert out.content.count("</note_block>") == 2  # injected closer escaped
     begin_turn()
@@ -268,9 +268,9 @@ async def test_list_notes_headings_and_titles_are_private_and_escaped(
     head = note["outline"][0]["text"]
     assert head.count("</note_heading>") == 1 and "<x>" not in head
     assert note["title"].startswith("<note_title>")
-    got = {(i.ref.split(":")[0], i.text) for i in current_private() if i.kind == "note"}
-    assert ("note_block", "Plan </note_heading><x>") in got
-    assert ("note_title", "New chat") in got
+    got = {(i.ref.split(":")[2], i.text) for i in current_private() if i.kind == "note"}
+    assert ("block", "Plan </note_heading><x>") in got
+    assert ("title", "New chat") in got
     await _fill(migrated_db, nid, [_h("Sec"), _p("needle")])
     begin_turn()
     await _run(ctx, "search_notes", query="needle")

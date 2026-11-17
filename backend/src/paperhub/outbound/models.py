@@ -1,6 +1,8 @@
 """Data shapes of the outbound checkpoint (Plan H5a)."""
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -24,6 +26,27 @@ class PrivateItem:
     ref: str
     title: str
     text: str
+
+
+#: What part of a note a ``note`` item holds.
+NotePart = Literal["block", "comment", "title"]
+_NOTE_REF = re.compile(r"^note:(\d+):(block|comment|title):([^#]*)(?:#[0-9a-f]+)?$")
+
+
+def note_item_ref(note_id: int, part: NotePart, item_id: str = "", text: str = "") -> str:
+    """The ``ref`` of a ``note`` item: ``note:<note id>:<part>:<id>``, plus
+    ``#<hash>`` of ``text`` when given, so a block read and then rewritten in
+    the same turn keeps both texts (items dedup by ref)."""
+    ref = f"note:{note_id}:{part}:{item_id}"
+    return f"{ref}#{hashlib.sha256(text.encode()).hexdigest()[:8]}" if text else ref
+
+
+def parse_note_ref(ref: str) -> tuple[int, NotePart, str] | None:
+    """``(note id, part, id)`` of a ``note_item_ref``, or None."""
+    m = _NOTE_REF.match(ref)
+    if m is None:
+        return None
+    return int(m.group(1)), m.group(2), m.group(3)  # type: ignore[return-value]
 
 
 @dataclass

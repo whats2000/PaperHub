@@ -14,6 +14,7 @@ from typing import Any
 import aiosqlite
 
 from paperhub.outbound.context import PrivateItem, add_private, mark_incomplete
+from paperhub.outbound.models import NotePart, note_item_ref
 from paperhub.outbound.spans import contains_title, guarded_title
 
 DIGEST_CHARS = 1_500
@@ -74,19 +75,25 @@ async def collect_chunks(conn: aiosqlite.Connection, chunk_ids: list[int]) -> No
                                 str(text or "")))
 
 
-def collect_note_blocks(blocks: list[tuple[str, str]], note_title: str) -> None:
-    """Add the note text the agent read this turn: ``(block_id, text)`` pairs.
-    Notes are the user's own words, so every block read counts as private."""
-    for block_id, text in blocks:
+def collect_note_blocks(
+    note_id: int, blocks: list[tuple[str, str]], note_title: str,
+    *, part: NotePart = "block",
+) -> None:
+    """Add note text the agent read (or wrote) this turn: ``(id, text)``
+    pairs of one note's blocks, or of its comments with ``part="comment"``.
+    Every note text counts as private, whoever wrote it and whatever it
+    quotes: the user keeps it in a private note."""
+    for item_id, text in blocks:
         if text:
-            add_private(PrivateItem("note", f"note_block:{block_id}", note_title, text))
+            add_private(PrivateItem("note", note_item_ref(note_id, part, item_id, text),
+                                    note_title, text))
 
 
 def collect_note_titles(titles: list[tuple[int, str]]) -> None:
     """Add note titles (``(note_id, title)``) the agent was shown."""
     for note_id, title in titles:
         if title:
-            add_private(PrivateItem("note", f"note_title:{note_id}", title, title))
+            add_private(PrivateItem("note", note_item_ref(note_id, "title"), title, title))
 
 
 # query_library (SQL over the whole library) can return any column of a

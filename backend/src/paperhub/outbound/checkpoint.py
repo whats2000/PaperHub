@@ -40,6 +40,7 @@ from paperhub.outbound.models import (
     PrivateItem,
     ReviewVerdict,
     Stage,
+    parse_note_ref,
 )
 from paperhub.outbound.policy import OutboundPolicy, load_policy
 from paperhub.outbound.spans import contains_title, guarded_title, windows
@@ -163,6 +164,8 @@ class _Outcome:
     stage: Stage
     reason: str
     term: str | None = None
+    #: The private items a span-stage hit copies (ids only, see ``_span_sources``).
+    sources: list[dict[str, Any]] | None = None
 
 
 _SPAN_REASON = "contains a passage from private material"
@@ -209,6 +212,54 @@ def _span_leak(
     if _echoes(text, items):
         return _SPAN_REASON
     return None
+
+
+def _span_sources(text: str, items: list[PrivateItem]) -> list[dict[str, Any]]:
+    """Which items ``text`` copies a passage of, by id only (never the text):
+    a note as ``{kind, note_id, block_ids, comment_ids}`` (empty lists left
+    out), any other item as ``{kind, ref}``."""
+    mine = set(windows(text))
+    out: list[dict[str, Any]] = []
+    notes: dict[int, dict[str, Any]] = {}
+    for item in items:
+        if mine.isdisjoint(windows(item.text)):
+            continue
+        parsed = parse_note_ref(item.ref) if item.kind == "note" else None
+        if parsed is None:
+            src = {"kind": item.kind, "ref": item.ref}
+            if src not in out:
+                out.append(src)
+            continue
+        note_id, part, item_id = parsed
+        if note_id not in notes:
+            notes[note_id] = {"kind": "note", "note_id": note_id}
+            out.append(notes[note_id])
+        ids = notes[note_id].setdefault(f"{part}_ids", [])
+        if item_id and item_id not in ids:
+            ids.append(item_id)
+    return out
+
+
+def _sources_text(sources: list[dict[str, Any]]) -> str:
+    """``sources`` for the log's reason: ``note 3: block b_x, comment c_y``."""
+    parts: list[str] = []
+    for src in sources:
+        if src["kind"] != "note":
+            parts.append(f"{src['kind']} {src['ref']}")
+            continue
+        ids = [f"{part} {i}" for part in ("block", "comment", "title")
+               for i in src.get(f"{part}_ids", [])]
+        parts.append(f"note {src['note_id']}" + (f": {', '.join(ids)}" if ids else ""))
+    return "; ".join(parts)
+
+
+def _span_outcome(policy: OutboundPolicy, req: OutboundRequest, text: str,
+                  reason: str, items: list[PrivateItem]) -> _Outcome:
+    """The unsure policy at stage ``span``; a passage hit names its sources."""
+    out = _unsure(policy, req, "span", reason)
+    if reason == _SPAN_REASON:
+        out.sources = _span_sources(text, items)
+    return out
 
 
 _WITHHELD_REASON = "reason withheld: it repeated private material"
@@ -319,12 +370,17 @@ async def check(
             stage=outcome.stage,
             sent_text=outcome.sent_text,
             original_text=req.text if (rewritten or outcome.action != "send") else None,
-            reason=outcome.reason,
+            # The log names a span hit's sources (ids only); the held row and
+            # the chat card keep the plain reason.
+            reason=(f"{outcome.reason} ({_sources_text(outcome.sources)})"
+                    if outcome.sources else outcome.reason),
             run_id=req.run_id, session_id=req.session_id,
         )
         decision = Decision(outcome.action, outcome.sent_text, req.text, outcome.stage,
                             outcome.reason, log_id, held_id, outcome.term)
-        step.record_result(_trace_result(decision, refs, verdict))
+        step.record_result({**_trace_result(decision, refs, verdict),
+                            **({"span_sources": outcome.sources}
+                               if outcome.sources is not None else {})})
         return decision
 
 
@@ -397,7 +453,7 @@ async def _decide(
                                 f"cached rewrite contains the sensitive term {hit!r}", hit), None
             leak = _span_leak(sent, titled)
             if leak is not None:
-                return _unsure(policy, req, "span", leak), None
+                return _span_outcome(policy, req, sent, leak, items), None
             return _Outcome("send", sent, "cache", _safe_reason(
                 str(cached.get("reason", "")), titled, policy.terms)), None
         if cached["action"] == "block":
@@ -407,16 +463,16 @@ async def _decide(
     outcome, verdict = await _review(req, adapter, policy, items)
     # Any-order title matching only for a rewrite: the user's own query (an
     # allow sends it unchanged) and cached sends need the title as a phrase.
-    leak = (_span_leak(outcome.sent_text, titled,
-                       any_order=outcome.sent_text != req.text)
-            if outcome.action == "send" and outcome.sent_text is not None else None)
-    if leak is not None:
+    sent = outcome.sent_text if outcome.action == "send" else None
+    leak = (_span_leak(sent, titled, any_order=sent != req.text)
+            if sent is not None else None)
+    if sent is not None and leak is not None:
         # Deterministic backstop: a model-only review cannot guarantee that a
         # passage or a title of the private material never leaves (run 912:
         # a rewrite swapped the figures for the document's title). Not cached.
         # The trace's `verdict` keeps the raw rewrite (local record principle,
         # R50); the log reason and the held row never carry it.
-        return _unsure(policy, req, "span", leak), verdict
+        return _span_outcome(policy, req, sent, leak, items), verdict
     if outcome.stage == "review" and outcome.action in ("send", "block"):
         try:
             await _cache_put(conn, key, {"action": outcome.action,
