@@ -182,5 +182,10 @@ describe("the corner mark button in the HTML reader", () => {
       view: "html",
       pieces: [{ quote: "$E = mc^2$", latex: "E = mc^2", latex_from: "source", chunk_start: 101 }],
     });
+    // The paper's own LaTeX: no page crop to check it against, and the note
+    // does not call it transcribed by the model (RefViews.test).
+    const piece = create.mock.calls[0]![0].pieces[0]!;
+    expect(piece).not.toHaveProperty("box");
+    expect(piece).not.toHaveProperty("page");
   });
 });
