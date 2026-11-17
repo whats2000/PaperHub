@@ -71,7 +71,7 @@ def test_user_text_never_forms_an_image() -> None:
     md, images, _bib = note_to_markdown(NOTE, blocks, {})
     assert images == {}
     assert not _UNESCAPED_IMAGE.search(md), md
-    assert r"\!\[x\](C:/secret.png)" in md
+    assert r"\!\[x\](C\:/secret.png)" in md
     assert r"look\![pic](<C:/secret.png>)" in md
 
 
@@ -320,7 +320,7 @@ def test_math_cannot_close_early_or_form_markup() -> None:
     body = md.split("\n", 1)[1]
     # Each math span opens and closes exactly once.
     for line in (ln for ln in body.split("\n") if ln.startswith("$$")):
-        assert line.count("$$") == 2 and "\$" in line
+        assert line.count("$$") == 2 and r"\$" in line
 
 
 def test_version_check_is_cached_briefly(monkeypatch: pytest.MonkeyPatch) -> None:

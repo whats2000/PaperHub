@@ -10,11 +10,15 @@ paper) become ``[@key]`` with one ``references.bib`` entry per paper cited.
 Comment threads are never note text: a commented range exports as plain
 text and the thread stays out. Hidden text exports as plain text.
 
-Note text is untrusted Markdown input: everything Markdown gives a meaning
-is escaped (``!`` included, so text never forms an image; ``$`` included,
-since the editor has no inline math), line starts are escaped against
-block syntax, link targets are percent-encoded and a code block's language
-must be a plain name. Only the exporter's own references are images.
+Note text is untrusted Markdown input. Every user string first passes
+``_user_text`` (one normalisation point: line ends unified, parser-steering
+and private-use characters dropped). Then everything Markdown gives a
+meaning is escaped (``!`` included, so text never forms an image; ``$``,
+since the editor has no inline math; a scheme's ``:`` and the ``.`` of
+``www.``, so a GFM viewer links nothing on its own), line starts are
+escaped against block syntax, link targets are percent-encoded and a code
+block's language must be a plain name. Only the exporter's own references
+are images, links and headings.
 """
 from __future__ import annotations
 
@@ -210,9 +214,15 @@ _CODE_LANG = re.compile(r"^[A-Za-z0-9_+#.-]{1,32}$")
 _URL_SAFE = ":/?#@&=+,;%~-._*'"
 
 
+# What a GFM viewer turns into a link on its own: a scheme's ``:``
+# (``http://``, ``mailto:``) and the ``.`` of ``www.`` (also at a run's
+# start, where the ``www`` may sit in the run before).
+_AUTOLINK = re.compile(r":|(?:(?<=[wW])|^)\.")
+
+
 def _escape(text: str) -> str:
     """Markdown-escape ``text`` (inline text of one block)."""
-    return _SPECIAL.sub(r"\\\1", text)
+    return _AUTOLINK.sub(lambda m: "\\" + m[0], _SPECIAL.sub(r"\\\1", text))
 
 
 _LEAD = re.compile(r"^[ \t]+", re.M)
@@ -246,9 +256,10 @@ _BARE_DOLLAR = re.compile(r"(?<!\\)((?:\\\\)*)\$")
 
 def _math(latex: str) -> str:
     """LaTeX for ``$$…$$``: a ``$`` becomes ``\\$`` (so nothing closes the
-    math early) and ``![`` / ``<`` get an empty group ``{}`` after them, so
-    the LaTeX never reads as an image, an autolink or HTML in a Markdown
-    viewer. Blank lines are dropped (they would end the math)."""
+    math early) and ``![`` / ``](`` / ``<`` get an empty group ``{}``
+    inside them, so the LaTeX never reads as an image, a link, an autolink
+    or HTML in a Markdown viewer. Blank lines are dropped (they would end
+    the math)."""
     # Continuation lines are indented 4 spaces: inside a paragraph that
     # starts no fence, heading, quote or list in any reader (LaTeX ignores
     # the spaces), so a GFM viewer keeps the whole math between its $$.
@@ -256,7 +267,8 @@ def _math(latex: str) -> str:
     # Every $ ends up after an odd run of backslashes (a bare one gets one
     # more; an escaped \$ is kept), so no reader takes it as a delimiter.
     out = _BARE_DOLLAR.sub(r"\1\\$", out)
-    out = out.replace("![", "!{}[").replace("<", "<{}")
+    out = (out.replace("![", "!{}[").replace("](", "]{}(")
+           .replace("<", "<{}"))
     # A trailing backslash would escape the closing $$ in some viewers.
     return out + " " if out.endswith("\\") else out
 
@@ -399,7 +411,15 @@ class _Writer:
         styles = run.get("styles") or {}
         if styles.get("code"):
             # A code span cannot hold a line break: it reads as a space.
-            return self._hold(_code_span(" ".join(run["text"].split("\n"))))
+            code = " ".join(run["text"].split("\n"))
+            core = code.strip()
+            if not core:
+                return code
+            # Only the span is held: its edge whitespace stays in the text,
+            # where the line-start escaping sees it.
+            lead = code[: len(code) - len(code.lstrip())]
+            trail = code[len(code.rstrip()):]
+            return lead + self._hold(_code_span(core)) + trail
         # ``hidden`` and ``comment`` add nothing: plain text.
         text = self.text(run["text"])
         if styles.get("strike"):
@@ -432,10 +452,10 @@ class _Writer:
         parts: list[str] = []
         paper = self.papers.get(pid) if pid is not None else None
         if paper is not None:
-            parts.append(_escape(paper.title))
+            parts.append(_escape(_one_line(paper.title)))
         section = source.get("section") or b.section_key
         if isinstance(section, str) and section.strip():
-            parts.append(_escape(section_label(section)))
+            parts.append(_escape(section_label(_one_line(section))))
         page = source.get("page")
         if isinstance(page, int) and not isinstance(page, bool):
             parts.append(f"p. {page + 1}")
@@ -580,7 +600,8 @@ def _paper_quote(w: _Writer, b: Block) -> str:
     lang = b.props.get("lang")
     if isinstance(lang, str) and lang.strip():
         label = canonical_language(lang)
-        lines += ["", f"*Translated · {_escape(_LANG_SHORT.get(label, label))}*"]
+        short = _one_line(_LANG_SHORT.get(label, label))
+        lines += ["", f"*Translated · {_escape(short)}*"]
         orig = b.props.get("orig")
         if isinstance(orig, str) and orig.strip():
             lines += ["", f"Original: {w.text(' '.join(orig.split()))}"]
