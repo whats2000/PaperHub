@@ -473,7 +473,10 @@ export function usePdfMarks({
         return;
       }
       // In the card, outside the reader: placed under it in the window.
-      setTarget({ type: "translation", piece: sel.piece, keyboard: sel.keyboard, box: { ...sel.rect } });
+      // Copied field by field: a DOMRect's sides are prototype getters, which
+      // a spread drops.
+      const { top, bottom, left, right } = sel.rect;
+      setTarget({ type: "translation", piece: sel.piece, keyboard: sel.keyboard, box: { top, bottom, left, right } });
     },
     [penSave, cardSection],
   );

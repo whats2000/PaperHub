@@ -75,7 +75,7 @@ function Reader() {
 function CardSelect() {
   const ctx = useContext(PdfMarksContext);
   return (
-    <button type="button" onClick={() => ctx?.openCard({ piece: PIECE, rect: { top: 40, bottom: 56, left: 300, right: 500 }, keyboard: false })}>
+    <button type="button" onClick={() => ctx?.openCard({ piece: PIECE, rect: new DOMRect(300, 40, 200, 16), keyboard: false })}>
       select in card
     </button>
   );
