@@ -525,6 +525,8 @@ class LocateMatch(BaseModel):
     section: str | None
     text_start: int        # span in the reading text (the HTML reader's)
     text_end: int
+    #: The reading-text paragraph it sits in (None: it crosses a break).
+    paragraph: int | None = None
 
 
 class LocateOut(BaseModel):

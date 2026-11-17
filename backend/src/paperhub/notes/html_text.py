@@ -16,6 +16,7 @@ sides test against ``frontend/src/lib/__fixtures__/mark_text/``:
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -73,6 +74,18 @@ class TextIndex:
     text: str = ""
     #: (dom id, index in ``text`` of the next character)
     spans: list[tuple[str, int]] = field(default_factory=list)
+    #: (index in ``text`` where a run of one block element starts, that
+    #: element's id): which paragraph a character sits in
+    paragraphs: list[tuple[int, int]] = field(default_factory=list)
+
+
+def paragraph_at(index: TextIndex, at: int) -> int | None:
+    """The id of the block element (paragraph) the character at ``at`` is
+    in (None outside the text)."""
+    if not 0 <= at < len(index.text) or not index.paragraphs:
+        return None
+    i = bisect_right(index.paragraphs, at, key=lambda p: p[0]) - 1
+    return index.paragraphs[i][1] if i >= 0 else None
 
 
 @dataclass
@@ -90,6 +103,7 @@ class _Builder(HTMLParser):
         self.stack: list[_El] = []
         self.chars: list[str] = []
         self.spans: list[tuple[str, int]] = []
+        self.paragraphs: list[tuple[int, int]] = []
         self.prev_space = True
         self.prev_block: int | None = None
         self.uids = 0
@@ -113,6 +127,8 @@ class _Builder(HTMLParser):
         if self.prev_block is not None and block != self.prev_block and not self.prev_space:
             self.chars.append(" ")
             self.prev_space = True
+        if block != self.prev_block:
+            self.paragraphs.append((len(self.chars), block))
         self.prev_block = block
 
     def _emit(self, data: str) -> None:
@@ -220,4 +236,4 @@ def build_text_index(html: str) -> TextIndex:
     b.close()
     if b.math_depth is not None:
         b._close_math()
-    return TextIndex(text="".join(b.chars), spans=b.spans)
+    return TextIndex(text="".join(b.chars), spans=b.spans, paragraphs=b.paragraphs)

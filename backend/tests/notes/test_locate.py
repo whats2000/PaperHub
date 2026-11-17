@@ -84,10 +84,27 @@ async def test_locate_gives_chunks_section_and_offsets(conn, tmp_path: Path) -> 
         "chunk_start": ids[0], "chunk_end": ids[1], "chunk_ids": ids,
         "section": "1 Introduction",
         "text_start": found["text_start"], "text_end": found["text_end"],
+        # It crosses a paragraph break: no one paragraph.
+        "paragraph": None,
     }
     assert meta["source"] == "html_text" and meta["matched"] is True
     missing, meta = await locate_text(conn, 1, "Nothing like this is in the paper at all")
     assert missing is None and meta["matched"] is False
+
+
+async def test_locate_names_the_reading_text_paragraph(conn, tmp_path: Path) -> None:
+    """The highlighter joins strokes on a page without Marker blocks by the
+    paragraph they locate into (a chunk is not a paragraph)."""
+    await _paper(conn, tmp_path, [
+        ("1 Introduction", "Robots learn from demonstrations every single day."),
+        ("2 Method", "We predict the agent pose ahead of time."),
+    ])
+    a, _ = await locate_text(conn, 1, "Robots learn from")
+    b, _ = await locate_text(conn, 1, "every single day.")
+    c, _ = await locate_text(conn, 1, "We predict the agent")
+    assert a is not None and b is not None and c is not None
+    assert isinstance(a["paragraph"], int)
+    assert a["paragraph"] == b["paragraph"] != c["paragraph"]
 
 
 async def test_locate_without_rendered_html_is_a_miss(conn) -> None:

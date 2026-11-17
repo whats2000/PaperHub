@@ -26,7 +26,7 @@ from typing import Any
 
 import aiosqlite
 
-from paperhub.notes.html_text import TextIndex, build_text_index, normalise
+from paperhub.notes.html_text import TextIndex, build_text_index, normalise, paragraph_at
 
 _HYPHEN_EOL = re.compile(r"(\w)-[ \t]*\n\s*(\w)")
 _MATH = re.compile(r"\$[^$]*\$")
@@ -282,4 +282,7 @@ async def locate_text(conn: aiosqlite.Connection, pcid: int, text: str,
         "chunk_start": covered[0], "chunk_end": covered[-1], "chunk_ids": covered,
         "section": str(row[0]) if row and row[0] else None,
         "text_start": s, "text_end": e,
+        # The paragraph it sits in (None when it crosses a paragraph break):
+        # highlighter strokes on a page without Marker blocks join by it.
+        "paragraph": pa if (pa := paragraph_at(index, s)) == paragraph_at(index, e - 1) else None,
     }, meta

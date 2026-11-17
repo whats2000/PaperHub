@@ -41,6 +41,8 @@ async def test_locate_returns_the_match_and_why(
     assert body["match"]["section"] == "2 Method"
     assert (body["match"]["chunk_start"], body["match"]["chunk_end"]) == (402, 402)
     assert body["match"]["chunk_ids"] == [402]
+    # The one reading-text paragraph it sits in (the highlighter joins by it).
+    assert isinstance(body["match"]["paragraph"], int)
     assert body["_meta"]["matched"] is True and body["_meta"]["source"] == "html_text"
     assert miss.json()["match"] is None
     assert miss.json()["_meta"]["reason"] == "no_start"
