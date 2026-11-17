@@ -136,9 +136,12 @@ def _top_left(p: dict[str, Any]) -> tuple[float, float]:
 
 
 def _reading_key(p: dict[str, Any], pdf: bool) -> tuple[float, ...]:
+    # Pieces of one translated paragraph share their source's place: they
+    # read by where they sit in the translation (``tr_start``).
+    tr = _num(p.get("tr_start"), 0.0)
     if pdf:
-        return (_num(p.get("page")), *_top_left(p))
-    return (_num(p.get("chunk_start")), _num(p.get("text_start"), 0.0))
+        return (_num(p.get("page")), *_top_left(p), tr)
+    return (_num(p.get("chunk_start")), _num(p.get("text_start"), 0.0), tr)
 
 
 def reading_order(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -212,6 +215,10 @@ def block_props(m: dict[str, Any]) -> dict[str, Any]:
         props["piecesLost"] = sum(1 for p in live if p.get("lost"))
     if m["lang"]:
         props["lang"] = m["lang"]
+    if m["source_ref"]:
+        props["sourceRef"] = m["source_ref"]
+    if m["status"] == "translation_changed":
+        props["translationChanged"] = True
     if first.get("orig"):
         props["orig"] = first["orig"]
     return props

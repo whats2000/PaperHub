@@ -204,3 +204,122 @@ async def test_reanchor_waits_for_the_html_render(conn):
     assert (await reanchor_paper(conn, 1))["moved"] == 1
     lm, _ = await _block(conn, m)
     assert lm["pieces"][0]["chunk_start"] == b2 and a != a2
+
+
+# ---- Marks on a translation (H1 bilingual reading) ----------------------
+
+LANG = "繁體中文"
+
+
+async def _translation(conn, key, text, lang=LANG):
+    await conn.execute(
+        "INSERT INTO translations (paper_content_id, block_key, language, "
+        "source_hash, memory_hash, text, model) VALUES (1, ?, ?, 'h', 'm', ?, "
+        "'x') ON CONFLICT(paper_content_id, block_key, language) DO UPDATE "
+        "SET text = excluded.text", (key, lang, text))
+    await conn.commit()
+
+
+async def _tr_mark(conn, piece, *, view="html", section="Intro"):
+    m, _ = await create_mark(conn, MarkIn(
+        paper_content_id=1, kind="highlight", color="purple", view=view,
+        pieces=[piece], lang=LANG, source_ref=piece["source_ref"],
+        section_key=section))
+    return m
+
+
+def _tr_piece(quote, orig, first, last, key="h:0"):
+    return {**_piece(orig, first, last), "quote": quote, "orig": orig,
+            "lang": LANG, "source_ref": key}
+
+
+async def test_reanchor_translation_piece_follows_its_source_paragraph(conn):
+    a, _b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    await _translation(conn, "h:0", "介紹文字。貓 坐在墊子上。更多文字。")
+    m = await _tr_mark(conn, _tr_piece("貓坐在墊子上", TEXT_A, a, a))
+    _pre, a2, _b2 = await _set_chunks(
+        conn, [("Intro", "New preamble. "), ("Intro", TEXT_A),
+               ("Method", TEXT_B)])
+    await reanchor_paper(conn, 1)
+    lm, blk = await _block(conn, m)
+    p = lm["pieces"][0]
+    # Anchored by the source paragraph; the translated words are kept.
+    assert (p["chunk_start"], p["chunk_end"]) == (a2, a2)
+    assert p["quote"] == "貓坐在墊子上" and p["orig"] == TEXT_A
+    assert lm["status"] == "ok"
+    assert blk.props["lang"] == LANG and blk.props["orig"] == TEXT_A
+    assert blk.props["sourceRef"] == "h:0"
+    assert "translationChanged" not in blk.props
+
+
+async def test_reanchor_flags_a_changed_translation_and_keeps_the_quote(conn):
+    [a] = await _paper(conn, [("Intro", TEXT_A)])
+    await _translation(conn, "h:0", "貓坐在墊子上。")
+    m = await _tr_mark(conn, _tr_piece("貓坐在墊子上", TEXT_A, a, a))
+    await _translation(conn, "h:0", "一隻貓待在地毯上。")
+    await reanchor_paper(conn, 1)
+    lm, blk = await _block(conn, m)
+    assert lm["status"] == "translation_changed"
+    assert blk.props["translationChanged"] is True
+    assert blk.props["quote"] == "貓坐在墊子上"
+    # Idempotent, and back to ok once the words are there again.
+    await reanchor_paper(conn, 1)
+    assert (await _block(conn, m))[0]["status"] == "translation_changed"
+    await _translation(conn, "h:0", "貓坐在墊子上。")
+    await reanchor_paper(conn, 1)
+    lm, blk = await _block(conn, m)
+    assert lm["status"] == "ok" and "translationChanged" not in blk.props
+
+
+async def test_reanchor_translation_check_reads_placeholders_as_any_text(conn):
+    [a] = await _paper(conn, [("Intro", TEXT_A)])
+    # The quote holds the math the reader showed where the cache has ⟦0⟧.
+    await _translation(conn, "h:0", "損失 ⟦0⟧ 隨⟦BR⟧時間下降。")
+    m = await _tr_mark(conn, _tr_piece("損失 $L$ 隨時間下降", TEXT_A, a, a))
+    await reanchor_paper(conn, 1)
+    assert (await _block(conn, m))[0]["status"] == "ok"
+
+
+async def test_reanchor_translation_never_checked_without_a_cached_text(conn):
+    [a] = await _paper(conn, [("Intro", TEXT_A)])
+    m = await _tr_mark(conn, _tr_piece("貓坐在墊子上", TEXT_A, a, a))
+    await reanchor_paper(conn, 1)
+    assert (await _block(conn, m))[0]["status"] == "ok"
+
+
+async def test_reanchor_checks_pdf_translation_marks_without_html(conn):
+    """A PDF-only paper has no reading text; its translation marks are
+    still checked against the translation cache."""
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, title, "
+        "sections_json, source_path, source_dir_path, html_path, sha256) "
+        "VALUES (1, 'pdf:1', 'pdf_upload', 'A Paper', '[]', 's', 'd', '', "
+        "'abc')")
+    await conn.commit()
+    await _translation(conn, "p:b1", "貓坐在墊子上。")
+    piece = {"quote": "貓坐在墊子上", "orig": "The cat sat on the mat.",
+             "lang": LANG, "source_ref": "p:b1", "page": 0, "block_id": "b1",
+             "box": [0.1, 0.1, 0.9, 0.2]}
+    m = await _tr_mark(conn, piece, view="pdf")
+    await _translation(conn, "p:b1", "完全不同的句子。")
+    await reanchor_paper(conn, 1)
+    lm, blk = await _block(conn, m)
+    assert lm["status"] == "translation_changed"
+    assert blk.props["translationChanged"] is True
+    assert lm["pieces"][0]["block_id"] == "b1"
+
+
+async def test_reanchor_relocates_a_pdf_translation_piece_by_its_original(conn):
+    a, _b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    await _translation(conn, "p:b1", "梯度下降與損失。")
+    piece = {"quote": "梯度下降與損失", "orig": "gradient descent and loss",
+             "lang": LANG, "source_ref": "p:b1", "page": 0, "block_id": "b1",
+             "box": [0.1, 0.1, 0.9, 0.2], "chunk_start": a, "chunk_end": a}
+    m = await _tr_mark(conn, piece, view="pdf")
+    _pre, _a2, b2 = await _set_chunks(
+        conn, [("Intro", "Pre. "), ("Intro", TEXT_A), ("Method", TEXT_B)])
+    await reanchor_paper(conn, 1)
+    lm, _ = await _block(conn, m)
+    p = lm["pieces"][0]
+    assert (p["chunk_start"], p["chunk_end"]) == (b2, b2)
+    assert lm["status"] == "ok"
