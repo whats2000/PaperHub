@@ -89,38 +89,63 @@ def _blk(bid: str, type: str, *, props: dict[str, Any] | None = None,
                  section_key=None, changed_rev=1)
 
 
-def _fixture(p: str, tag: str = "") -> tuple[list[Block], ExportPaper]:
-    """A note with ``p`` in every user field (block ids get ``tag``)."""
-    runs = [_txt(p), _txt(p, bold=True), _txt(p, italic=True),
-            _txt(p, strike=True), _txt(p, underline=True), _txt(p, code=True),
-            _txt(p, hidden=True), _txt(p, comment=True),
-            {"type": "link", "href": p, "content": [_txt(p)]},
-            {"type": "mention", "props": {"label": p, "paperId": 5}}]
-    piece = {"quote": p, "page": 0, "rects": [[0.1, 0.1, 0.5, 0.2]]}
+FIELDS = (
+    "title", "section", "heading", "text", "bold", "italic", "strike",
+    "underline", "code", "hidden", "comment", "link_text", "href", "mention",
+    "bullet", "numbered", "check", "quote", "callout", "code_block", "language",
+    "math", "pq_quote", "pq_lang", "pq_orig", "pq_section", "fig_caption",
+    "eq_caption", "eq_latex", "region_caption", "paper_title", "author",
+    "arxiv")
+
+
+def _fixture(v: dict[str, str], tag: str = "") -> tuple[list[Block], ExportPaper]:
+    """A note whose user fields hold ``v[field]`` ("x" when unset), in the
+    editor's shape: a reference block's pieces and source as JSON strings.
+    Block ids get ``tag``."""
+    f = {k: v.get(k, "x") for k in FIELDS}
+    runs = [_txt(f["text"]), _txt(f["bold"], bold=True),
+            _txt(f["italic"], italic=True), _txt(f["strike"], strike=True),
+            _txt(f["underline"], underline=True), _txt(f["code"], code=True),
+            _txt(f["hidden"], hidden=True), _txt(f["comment"], comment=True),
+            {"type": "link", "href": f["href"], "content": [_txt(f["link_text"])]},
+            {"type": "mention", "props": {"label": f["mention"], "paperId": 5}}]
+    rects = [[0.1, 0.1, 0.5, 0.2]]
     blocks = [
-        _blk(f"s{tag}", "section", props={"title": p}),
-        _blk(f"h{tag}", "heading", props={"level": 1}, content=[_txt(p)]),
+        _blk(f"s{tag}", "section", props={"title": f["section"]}),
+        _blk(f"h{tag}", "heading", props={"level": 1}, content=[_txt(f["heading"])]),
         _blk(f"p{tag}", "paragraph", content=runs),
-        _blk(f"b{tag}", "bulletListItem", content=[_txt(p)]),
-        _blk(f"n{tag}", "numberedListItem", content=[_txt(p)]),
+        _blk(f"b{tag}", "bulletListItem", content=[_txt(f["bullet"])]),
+        _blk(f"n{tag}", "numberedListItem", content=[_txt(f["numbered"])]),
         _blk(f"c{tag}", "checkListItem", props={"checked": True},
-             content=[_txt(p)]),
-        _blk(f"q{tag}", "quote", content=[_txt(p)]),
-        _blk(f"o{tag}", "callout", content=[_txt(p, code=True)]),
-        _blk(f"k{tag}", "codeBlock", props={"language": p}, content=[_txt(p)]),
-        _blk(f"m{tag}", "math", props={"latex": p}),
+             content=[_txt(f["check"])]),
+        _blk(f"q{tag}", "quote", content=[_txt(f["quote"])]),
+        _blk(f"o{tag}", "callout", content=[_txt(f["callout"], code=True)]),
+        _blk(f"k{tag}", "codeBlock", props={"language": f["language"]},
+             content=[_txt(f["code_block"])]),
+        _blk(f"m{tag}", "math", props={"latex": f["math"]}),
         _blk(f"pq{tag}", "paperQuote", props={
-            "paperContentId": 5, "quote": p, "pieces": [piece], "lang": p,
-            "orig": p, "source": {"section": p, "page": 0}}),
+            "paperContentId": 5, "quote": "q", "lang": f["pq_lang"],
+            "orig": f["pq_orig"],
+            "pieces": json.dumps([{"quote": f["pq_quote"], "page": 0,
+                                   "rects": rects}]),
+            "source": json.dumps({"section": f["pq_section"], "page": 0})}),
         _blk(f"pf{tag}", "paperFigure", props={
-            "paperContentId": 5, "quote": p, "pieces": [piece]}),
+            "paperContentId": 5, "quote": f["fig_caption"],
+            "pieces": json.dumps([{"page": 0, "rects": rects}])}),
         _blk(f"pe{tag}", "paperEquation", props={
-            "paperContentId": 5, "quote": p, "pieces": [{**piece, "latex": p}]}),
-        _blk(f"pr{tag}", "paperRegion", props={"paperContentId": 5, "quote": p}),
+            "paperContentId": 5, "quote": f["eq_caption"],
+            "pieces": json.dumps([{"latex": f["eq_latex"], "page": 0}])}),
+        _blk(f"pr{tag}", "paperRegion", props={
+            "paperContentId": 5, "quote": f["region_caption"]}),
     ]
-    paper = ExportPaper(id=5, title=p or "x", authors=[p, "Ann Lee"], year=2017,
-                        arxiv_id=p)
+    paper = ExportPaper(id=5, title=f["paper_title"] or "x",
+                        authors=[f["author"], "Ann Lee"], year=2017,
+                        arxiv_id=f["arxiv"])
     return blocks, paper
+
+
+def _everywhere(p: str) -> dict[str, str]:
+    return dict.fromkeys(FIELDS, p)
 
 
 @pytest.fixture
@@ -134,10 +159,10 @@ def own_images(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
 
 
-def _export(p: str) -> tuple[str, dict[str, bytes], str]:
-    blocks, paper = _fixture(p)
-    note = Note(id=1, target_kind="paper", target_id="5", title=p,
-                revision=1, updated_at="")
+def _export(v: dict[str, str]) -> tuple[str, dict[str, bytes], str]:
+    blocks, paper = _fixture(v)
+    note = Note(id=1, target_kind="paper", target_id="5",
+                title=v.get("title", "x"), revision=1, updated_at="")
     return note_to_markdown(note, blocks, {5: paper})
 
 
@@ -148,9 +173,25 @@ def _flat(tokens: list[Token]) -> Iterator[Token]:
             yield from _flat(t.children)
 
 
-def _check_markdown_it(md: str) -> None:
-    tokens = list(_flat(MarkdownIt("commonmark").parse(md)))
+# Blocks the exporter writes itself, which note text must never add to
+# (bounded by a plain "x" note).
+MD_BLOCKS = ("blockquote_open", "bullet_list_open", "ordered_list_open", "hr",
+             "table_open")
+PANDOC_BLOCKS = ("BlockQuote", "BulletList", "OrderedList", "HorizontalRule",
+                 "Table", "DefinitionList", "LineBlock", "Div", "Note", "Span")
+# linkify on, as in VS Code's preview: a bare domain would count as a link.
+_LINKIFY = MarkdownIt("commonmark", {"linkify": True}).enable("linkify")
+
+
+def _md_kinds(md: str) -> list[str]:
+    return [t.type for t in _flat(_LINKIFY.parse(md))]
+
+
+def _check_markdown_it(md: str, base: list[str]) -> None:
+    tokens = list(_flat(_LINKIFY.parse(md)))
     kinds = [t.type for t in tokens]
+    for k in MD_BLOCKS:
+        assert kinds.count(k) <= base.count(k), (k, md)
     assert kinds.count("heading_open") == HEADINGS, md
     assert kinds.count("link_open") == LINKS, md
     assert kinds.count("fence") == CODE_BLOCKS and "code_block" not in kinds, md
@@ -188,9 +229,20 @@ def _task_marker(link: dict[str, Any], nodes: list[dict[str, Any]]) -> bool:
     return link["c"][2][0] in ids and text.strip() in ("", "x", "X")
 
 
-def _check_pandoc(md: str, bib: str, reader: str) -> None:
+def _attrs(nodes: list[dict[str, Any]]) -> set[str]:
+    return {json.dumps(n["c"][0]) for n in nodes if n["t"] in ("Span", "Div")}
+
+
+def _check_pandoc(md: str, bib: str, reader: str,
+                  base: list[dict[str, Any]]) -> None:
     nodes = _pandoc_nodes(md, reader)
     kinds = [n["t"] for n in nodes]
+    base_kinds = [n["t"] for n in base]
+    for k in PANDOC_BLOCKS:
+        # No footnote, styled span or div, quote, list or rule beyond the
+        # exporter's own (its underline span is the only Span).
+        assert kinds.count(k) <= base_kinds.count(k), (reader, k, md)
+    assert _attrs(nodes) <= _attrs(base), (reader, md)
     assert kinds.count("Header") == HEADINGS, (reader, md)
     links = [n for n in nodes if n["t"] == "Link" and not _task_marker(n, nodes)]
     assert len(links) == LINKS, (reader, md)
@@ -225,21 +277,66 @@ def _cases() -> list[str]:
     return _payloads(PORT, Path("C:/probe/secret.png"))
 
 
+_BASE: dict[str, Any] = {}
+
+
+def _base_md() -> list[str]:
+    if "md" not in _BASE:
+        _BASE["md"] = _md_kinds(_export({})[0])
+    return list(_BASE["md"])
+
+
+def _base_pandoc(reader: str) -> list[dict[str, Any]]:
+    if reader not in _BASE:
+        _BASE[reader] = _pandoc_nodes(_export({})[0], reader)
+    return list(_BASE[reader])
+
+
+def _per_field_cases(n: int | None = None) -> list[tuple[str, str]]:
+    """Every fixed fragment in each field alone (or a seeded sample)."""
+    frags = _fragments(PORT, Path("C:/probe/secret.png"))
+    cases = [(f, p) for p in frags for f in FIELDS]
+    return cases if n is None else random.Random(7).sample(cases, n)
+
+
 @pytest.mark.usefixtures("own_images")
 @pytest.mark.parametrize("payload", _cases(), ids=lambda p: repr(p)[:40])
 def test_markdown_renders_only_own_structure(payload: str) -> None:
-    md, images, _bib = _export(payload)
+    md, images, _bib = _export(_everywhere(payload))
     assert set(images) == OWN_IMAGES
-    _check_markdown_it(md)
+    _check_markdown_it(md, _base_md())
+
+
+@pytest.mark.usefixtures("own_images")
+def test_markdown_per_field_renders_only_own_structure() -> None:
+    """Each fixed fragment in one field at a time, the others plain."""
+    base = _base_md()
+    for field, payload in _per_field_cases():
+        md, _images, _bib = _export({field: payload})
+        try:
+            _check_markdown_it(md, base)
+        except AssertionError as exc:
+            raise AssertionError((field, payload)) from exc
 
 
 @needs_pandoc
 @pytest.mark.usefixtures("own_images")
 @pytest.mark.parametrize("payload", _cases(), ids=lambda p: repr(p)[:40])
 def test_pandoc_readers_see_only_own_structure(payload: str) -> None:
-    md, _images, bib = _export(payload)
+    md, _images, bib = _export(_everywhere(payload))
     for reader in PANDOC_READERS:
-        _check_pandoc(md, bib, reader)
+        _check_pandoc(md, bib, reader, _base_pandoc(reader))
+
+
+@needs_pandoc
+@pytest.mark.usefixtures("own_images")
+@pytest.mark.parametrize(("field", "payload"), _per_field_cases(40),
+                         ids=lambda v: repr(v)[:30])
+def test_pandoc_per_field_sees_only_own_structure(field: str, payload: str) -> None:
+    """A seeded sample of the per-field cases through pandoc's readers."""
+    md, _images, bib = _export({field: payload})
+    for reader in PANDOC_READERS:
+        _check_pandoc(md, bib, reader, _base_pandoc(reader))
 
 
 class _Listener:
@@ -279,7 +376,7 @@ def test_docx_fetches_nothing_and_reads_no_local_file(secret: Path) -> None:
         blocks: list[Block] = []
         papers: dict[int, ExportPaper] = {}
         for i, p in enumerate(_payloads(srv.port, secret)):
-            more, paper = _fixture(p, tag=f"x{i}")
+            more, paper = _fixture(_everywhere(p), tag=f"x{i}")
             blocks += more
             papers[5] = paper
         note = Note(id=1, target_kind="paper", target_id="5",

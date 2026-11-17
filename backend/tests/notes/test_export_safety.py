@@ -71,7 +71,7 @@ def test_user_text_never_forms_an_image() -> None:
     md, images, _bib = note_to_markdown(NOTE, blocks, {})
     assert images == {}
     assert not _UNESCAPED_IMAGE.search(md), md
-    assert r"\!\[x\](C\:/secret.png)" in md
+    assert r"\!\[x\](C\:/secret\.png)" in md
     assert r"look\![pic](<C:/secret.png>)" in md
 
 
@@ -361,3 +361,17 @@ def test_temp_dir_failure_is_a_pandoc_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(note_pandoc.tempfile, "TemporaryDirectory", no_dir)
     with pytest.raises(PandocError):
         markdown_to_docx("# x", {})
+
+
+@pytest.mark.parametrize("runs", [
+    ["see e.", "com/x"], ["www", ".example.org"], ["a /", "/b.org/x"],
+    ["e.com", " and x.org"],
+])
+def test_no_bare_link_across_or_within_runs(runs: list[str]) -> None:
+    from markdown_it import MarkdownIt
+    content = [{"type": "text", "text": runs[0], "styles": {}},
+               {"type": "text", "text": runs[1], "styles": {"comment": True}}]
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=content)], {})
+    html = MarkdownIt("commonmark", {"linkify": True}).enable("linkify").render(md)
+    assert "<a " not in html, (md, html)
+    assert "".join(runs) in html, html  # renders as typed

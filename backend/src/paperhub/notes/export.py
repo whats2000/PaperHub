@@ -214,10 +214,29 @@ _CODE_LANG = re.compile(r"^[A-Za-z0-9_+#.-]{1,32}$")
 _URL_SAFE = ":/?#@&=+,;%~-._*'"
 
 
-# What a GFM viewer turns into a link on its own: a scheme's ``:``
-# (``http://``, ``mailto:``) and the ``.`` of ``www.`` (also at a run's
-# start, where the ``www`` may sit in the run before).
-_AUTOLINK = re.compile(r":|(?:(?<=[wW])|^)\.")
+# What a viewer turns into a link on its own: a scheme's ``:``
+# (``http://``, ``mailto:``, GFM), the first ``/`` of ``//`` (linkify reads
+# ``//host``) and a domain's ``.``: after ``w``/``W`` (``www.``) or between
+# a letter or digit and a letter (``e.com``; linkify viewers such as VS
+# Code's preview). Prose keeps its ``. `` and ``3.14`` as written. Where a
+# run ends, ``_join_runs`` checks the same rules across the boundary.
+_AUTOLINK = re.compile(r":|/(?=/)|(?<=[wW])[.]|(?<=[^\W_])[.](?=[^\W\d_])")
+
+
+def _join_runs(prev: str, piece: str) -> tuple[str, str]:
+    """``prev`` and ``piece`` (two escaped runs written side by side) with
+    the ``_AUTOLINK`` rules applied across their boundary, where neither
+    run alone could see the domain or the ``//``."""
+    if not prev or not piece:
+        return prev, piece
+    if (prev.endswith(".") and not prev.endswith("\\.") and prev[-2:-1].isalnum()
+            and piece[0].isalpha()):
+        prev = prev[:-1] + "\\."
+    elif piece[0] == "." and prev[-1].isalnum() and piece[1:2].isalpha():
+        piece = "\\" + piece
+    elif prev.endswith("/") and not prev.endswith("\\/") and piece[0] == "/":
+        prev = prev[:-1] + "\\/"
+    return prev, piece
 
 
 def _escape(text: str) -> str:
@@ -254,11 +273,15 @@ def _one_line(text: str) -> str:
 _BARE_DOLLAR = re.compile(r"(?<!\\)((?:\\\\)*)\$")
 
 
+_MATH_LINKIFY = re.compile(r"/(?=/)|(?<=[^\W_])[.](?=[^\W\d_])")
+
+
 def _math(latex: str) -> str:
     """LaTeX for ``$$…$$``: a ``$`` becomes ``\\$`` (so nothing closes the
     math early) and ``![`` / ``](`` / ``<`` get an empty group ``{}``
     inside them, so the LaTeX never reads as an image, a link, an autolink
-    or HTML in a Markdown viewer. Blank lines are dropped (they would end
+    or HTML in a Markdown viewer; so do ``//`` and a domain-like ``.``,
+    which a linkify viewer would link. Blank lines are dropped (they would end
     the math)."""
     # Continuation lines are indented 4 spaces: inside a paragraph that
     # starts no fence, heading, quote or list in any reader (LaTeX ignores
@@ -269,6 +292,9 @@ def _math(latex: str) -> str:
     out = _BARE_DOLLAR.sub(r"\1\\$", out)
     out = (out.replace("![", "!{}[").replace("](", "]{}(")
            .replace("<", "<{}"))
+    # Nor as a bare link to a linkify viewer: ``//`` and a domain's ``.``
+    # get an empty group too (``e.{}com``, ``/{}/``).
+    out = _MATH_LINKIFY.sub(lambda m: m[0][0] + "{}" + m[0][1:], out)
     # A trailing backslash would escape the closing $$ in some viewers.
     return out + " " if out.endswith("\\") else out
 
@@ -408,7 +434,10 @@ class _Writer:
                 key = self.cite(pid if isinstance(pid, int) else None)
                 out.append(f"{label} [{key}]" if key else label)
             elif isinstance(run.get("text"), str):
-                out.append(self._styled(run))
+                piece = self._styled(run)
+                if out:
+                    out[-1], piece = _join_runs(out[-1], piece)
+                out.append(piece)
         return "".join(out)
 
     def _styled(self, run: dict[str, Any]) -> str:

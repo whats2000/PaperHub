@@ -69,7 +69,7 @@ def test_multiline_math_is_one_math_node_in_every_reader() -> None:
         assert len(maths) == 2, (reader, md)
         for m in maths:
             assert m["c"][0]["t"] == "DisplayMath"
-            assert "heading" in m["c"][1] and "i.png" in m["c"][1], (reader, m)
+            assert "heading" in m["c"][1] and "i.{}png" in m["c"][1], (reader, m)
         assert not set(kinds) & STRUCTURE, (reader, set(kinds) & STRUCTURE, md)
         assert kinds.count("Header") == 1, (reader, md)  # the note title
         assert kinds.count("Para") == 3, (reader, md)
