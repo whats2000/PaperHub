@@ -25,6 +25,15 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+// jsdom has no Element.scrollIntoView. Code that reveals content calls it,
+// often from a timer (Collapsible's onExpanded fallback after 250 ms), so a
+// slow test hits it mid-run: "el.scrollIntoView is not a function" as an
+// unhandled error. A no-op stands in; tests that check the call install their
+// own spy over it.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => undefined;
+}
+
 // jsdom has no ResizeObserver — react-zoom-pan-pinch (the Citation Canvas image
 // lightbox) constructs one on mount. A no-op stub lets it render in tests.
 class ResizeObserverStub {

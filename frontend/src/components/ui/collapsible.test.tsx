@@ -109,6 +109,32 @@ describe("Collapsible", () => {
     }
   });
 
+  it("the fallback's reveal (scrollIntoView) runs in the test DOM without throwing", () => {
+    // A slow test outlives the fallback, so a caller's
+    // el.scrollIntoView(...) runs mid-test; jsdom has none of its own (the
+    // shared setup provides a no-op). A throw here was an unhandled error.
+    vi.useFakeTimers();
+    try {
+      const reveal = vi.fn((el: HTMLElement) => el.scrollIntoView({ block: "nearest" }));
+      const { rerender } = render(
+        <Collapsible open={false} onExpanded={reveal}>
+          <p>body</p>
+        </Collapsible>,
+      );
+      rerender(
+        <Collapsible open onExpanded={reveal}>
+          <p>body</p>
+        </Collapsible>,
+      );
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(reveal).toHaveReturned();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fires only once when transitionend precedes the fallback timer", () => {
     vi.useFakeTimers();
     try {
