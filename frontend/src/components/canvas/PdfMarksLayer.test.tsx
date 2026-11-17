@@ -17,11 +17,12 @@ import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useCanvasStore } from "@/store/canvas";
 import { useMarkNavStore } from "@/store/markNav";
+import { REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listPaperBlocks: vi.fn() }));
-const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
+const { toastFn, toastMessage } = vi.hoisted(() => ({ toastFn: vi.fn(), toastMessage: vi.fn() }));
 vi.mock("sonner", () => ({
-  toast: Object.assign(toastFn, { error: vi.fn(), message: vi.fn(), success: vi.fn() }),
+  toast: Object.assign(toastFn, { error: vi.fn(), message: toastMessage, success: vi.fn() }),
 }));
 
 function selectSpans(from: string, fromAt: number, to: string, toAt: number): Range {
@@ -38,6 +39,7 @@ let create: CreateMock;
 
 beforeEach(() => {
   toastFn.mockReset();
+  toastMessage.mockReset();
   create = resetStores();
   vi.mocked(listPaperBlocks).mockReset();
   vi.mocked(listPaperBlocks).mockResolvedValue(BLOCKS);
@@ -236,5 +238,75 @@ describe("marks made in the HTML view", () => {
     layOut();
     await waitFor(() => expect(document.querySelector('[data-mark="mh"]')).not.toBeNull());
     expect(document.querySelector('[data-mark="mx"]')).toBeNull();
+  });
+});
+
+describe("showing a mark asked for (a source chip, My marks)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    useTranslationStore.setState({ reveal: null });
+  });
+
+  function ask(markId: string) {
+    act(() => useTranslationStore.getState().requestReveal(3, markId, { fallback: true }));
+  }
+
+  it("flashes a mark the page draws", () => {
+    resetStores([pdfMark({ pieces: [{ quote: "Robots", page: 0, rects: [[0.05, 0.05, 0.25, 0.07]] }] })]);
+    render(<Reader />);
+    layOut();
+    ask("mk_1");
+    expect(useTranslationStore.getState().reveal).toBeNull();
+    expect(document.querySelector<HTMLElement>('[data-mark="mk_1"]')!.style.boxShadow).toContain("3px");
+  });
+
+  it("waits for the mark's page to render before trying the HTML view", () => {
+    vi.useFakeTimers();
+    // On page 2, which hasn't rendered.
+    resetStores([pdfMark({ pieces: [{ quote: "Later words", page: 1, rects: [[0.1, 0.1, 0.4, 0.12]] }] })]);
+    useCanvasStore.setState({ readerTabRequest: null });
+    render(<Reader />);
+    ask("mk_1");
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(useCanvasStore.getState().readerTabRequest).toBeNull();
+    expect(useTranslationStore.getState().reveal).not.toBeNull();
+    // Never rendered, within reason: it says so, and stays on the PDF.
+    act(() => {
+      vi.advanceTimersByTime(REVEAL_WAIT_MS);
+    });
+    expect(useTranslationStore.getState().reveal).toBeNull();
+    expect(useCanvasStore.getState().readerTabRequest).toBeNull();
+    expect(toastMessage).toHaveBeenCalledWith("This mark isn't drawn in the paper here.");
+  });
+
+  it("tries the HTML view for a passage its rendered page doesn't draw", () => {
+    vi.useFakeTimers();
+    resetStores([pdfMark({ pieces: [{ quote: "Robots", page: 0 }] })]);
+    useCanvasStore.setState({ readerTabRequest: null });
+    render(<Reader />);
+    ask("mk_1");
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(useCanvasStore.getState().readerTabRequest).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(useCanvasStore.getState().readerTabRequest).toMatchObject({ paperId: 3, tab: "html" });
+  });
+
+  it("never sends a box, figure or region to the HTML view", () => {
+    vi.useFakeTimers();
+    resetStores([pdfMark({ kind: "region", pieces: [{ quote: "a region", page: 0 }] })]);
+    useCanvasStore.setState({ readerTabRequest: null });
+    render(<Reader />);
+    ask("mk_1");
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(useCanvasStore.getState().readerTabRequest).toBeNull();
+    expect(toastMessage).toHaveBeenCalledWith("This mark isn't drawn in the paper here.");
   });
 });

@@ -339,7 +339,10 @@
     "trTimeout": "譯文沒有及時送達，無法顯示這個標記",
     "trShowOriginal": "顯示原文",
     "trOriginal": "原文",
-    "notFound": "這個標記沒有畫在這裡的論文上。"
+    "notFound": "這個標記沒有畫在這裡的論文上。",
+    "showingHidden": "正在顯示已隱藏的顏色",
+    "hideAgain": "再次隱藏",
+    "noteMissing": "無法取得這個標記的筆記。"
   },
   "langShort": {
     "en": "英文",
@@ -367,7 +370,9 @@
     "showNamed": "在論文中顯示這段文字：{{where}}",
     "trMarkedIn": "標記在{{lang}}上；論文目前顯示{{shown}}",
     "trOriginal": "原文",
-    "trSwitch": "切換到{{lang}}"
+    "trSwitch": "切換到{{lang}}",
+    "offScreen": "標記不在畫面上",
+    "trTurnOn": "開啟翻譯"
   },
   "backPill": "回到筆記",
   "myMarks": {
@@ -380,6 +385,16 @@
     "empty": "這篇論文還沒有標記。",
     "noSection": "第一節之前",
     "note": "筆記 {{index}}",
-    "saveFailed": "無法儲存顏色。"
+    "saveFailed": "無法儲存顏色。",
+    "kinds": "要列出的類型",
+    "kind": {
+      "highlight": "螢光標記",
+      "quote": "引用",
+      "figure": "圖",
+      "equation": "公式",
+      "region": "區域"
+    },
+    "listed": "{{shown}} / {{count}}",
+    "noneOfKind": "沒有這些類型的標記。"
   }
 }

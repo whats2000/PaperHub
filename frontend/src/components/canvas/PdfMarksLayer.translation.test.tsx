@@ -168,7 +168,7 @@ describe("marks on the PDF translation card", () => {
     showMark.mockRestore();
   });
 
-  it("with the notes pane hidden, the marker opens the mark's note card", async () => {
+  it("with the notes pane hidden, the marker shows the mark in the translation, then opens its note card", async () => {
     resetStores([trMark()]);
     useNotesPaneStore.setState({ open: false });
     useMarkNavStore.setState({ card: null });
@@ -178,7 +178,10 @@ describe("marks on the PDF translation card", () => {
     const marker = await screen.findByRole("button", { name: "A mark on the 繁中 translation. Show it" });
     place(marker, 362, 40, 18, 18);
     fireEvent.click(screen.getByTestId("s1"), { clientX: 370, clientY: 48, detail: 1 });
-    expect(showMark).not.toHaveBeenCalled();
+    expect(showMark).toHaveBeenCalledWith("mt");
+    expect(useMarkNavStore.getState().card).toBeNull();
+    // The reader is done showing it: the card opens on it.
+    act(() => useTranslationStore.getState().revealed(useTranslationStore.getState().reveal!.n));
     expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mt" });
     showMark.mockRestore();
   });

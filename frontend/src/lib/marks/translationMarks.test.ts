@@ -522,17 +522,19 @@ describe("useHtmlMarks on a translation", () => {
     expect(toastFn).toHaveBeenCalledWith("Translation turned on (繁中) to show this mark", expect.anything());
   });
 
-  it("with the notes pane hidden, a click on the 文 marker opens the mark's note card", () => {
+  it("with the notes pane hidden, a click on the 文 marker shows the mark, then opens its note card", () => {
     useTranslationStore.setState({ language: "English", enabledByPaper: {} });
     useMarksStore.setState({ marksByPaper: { 3: [trMark()] }, chunksByPaper: { 3: CHUNKS } });
     const doc = frameDoc(paper(false));
     render(createElement(Host, { doc }));
     const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
     act(() => doc.querySelector<HTMLButtonElement>('.ph-mk-tr[data-mark="mt"]')!.click());
-    expect(showMark).not.toHaveBeenCalled();
+    expect(showMark).toHaveBeenCalledTimes(1);
     showMark.mockRestore();
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+    expect(useMarkNavStore.getState().card).toBeNull();
+    act(() => useTranslationStore.getState().revealed(useTranslationStore.getState().reveal!.n));
     expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mt" });
-    expect(useTranslationStore.getState().enabledByPaper[3]).toBeFalsy();
   });
 });
 

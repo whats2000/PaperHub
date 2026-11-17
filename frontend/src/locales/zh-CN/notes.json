@@ -339,7 +339,10 @@
     "trTimeout": "译文没有及时送达，无法显示这个标记",
     "trShowOriginal": "显示原文",
     "trOriginal": "原文",
-    "notFound": "这个标记没有画在这里的论文上。"
+    "notFound": "这个标记没有画在这里的论文上。",
+    "showingHidden": "正在显示已隐藏的颜色",
+    "hideAgain": "再次隐藏",
+    "noteMissing": "无法获取这个标记的笔记。"
   },
   "langShort": {
     "en": "英文",
@@ -367,7 +370,9 @@
     "showNamed": "在论文中显示这段文字：{{where}}",
     "trMarkedIn": "标记在{{lang}}上；论文目前显示{{shown}}",
     "trOriginal": "原文",
-    "trSwitch": "切换到{{lang}}"
+    "trSwitch": "切换到{{lang}}",
+    "offScreen": "标记不在屏幕上",
+    "trTurnOn": "开启翻译"
   },
   "backPill": "回到笔记",
   "myMarks": {
@@ -380,6 +385,16 @@
     "empty": "这篇论文还没有标记。",
     "noSection": "第一节之前",
     "note": "笔记 {{index}}",
-    "saveFailed": "无法保存颜色。"
+    "saveFailed": "无法保存颜色。",
+    "kinds": "要列出的类型",
+    "kind": {
+      "highlight": "高亮",
+      "quote": "引用",
+      "figure": "图",
+      "equation": "公式",
+      "region": "区域"
+    },
+    "listed": "{{shown}} / {{count}}",
+    "noneOfKind": "没有这些类型的标记。"
   }
 }

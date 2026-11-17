@@ -300,6 +300,8 @@ export function useHtmlMarks({
     const win = doc.defaultView;
     const frame = win?.frameElement ?? null;
     const off = registerMarkAnchors(paperId, {
+      kind: "html",
+      viewport: () => frame?.getBoundingClientRect() ?? null,
       find: (markId) => {
         const handle = handleRef.current;
         if (!handle || !frame) return null;
@@ -315,8 +317,15 @@ export function useHtmlMarks({
         return { rects, viewport: at };
       },
       subscribe: (onMove) => {
+        // Scrolling the paper, and the reader's box resizing (a divider
+        // drag, the notes pane opening).
         win?.addEventListener("scroll", onMove, { passive: true });
-        return () => win?.removeEventListener("scroll", onMove);
+        const ro = frame && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onMove) : null;
+        if (frame) ro?.observe(frame);
+        return () => {
+          win?.removeEventListener("scroll", onMove);
+          ro?.disconnect();
+        };
       },
     });
     const ours = () => useMarkNavStore.getState().card?.paperId === paperId;

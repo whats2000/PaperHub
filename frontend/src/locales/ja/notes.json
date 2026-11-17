@@ -339,7 +339,10 @@
     "trTimeout": "訳文が間に合わず、このマークを表示できませんでした",
     "trShowOriginal": "原文を表示",
     "trOriginal": "原文",
-    "notFound": "このマークはここでは論文上に描かれていません。"
+    "notFound": "このマークはここでは論文上に描かれていません。",
+    "showingHidden": "非表示の色を表示しています",
+    "hideAgain": "再び隠す",
+    "noteMissing": "このマークのノートを取得できません。"
   },
   "langShort": {
     "en": "英語",
@@ -367,7 +370,9 @@
     "showNamed": "論文でこの箇所を表示：{{where}}",
     "trMarkedIn": "{{lang}}でマーク済み。論文は{{shown}}を表示中",
     "trOriginal": "原文",
-    "trSwitch": "{{lang}}に切り替え"
+    "trSwitch": "{{lang}}に切り替え",
+    "offScreen": "マークは画面外です",
+    "trTurnOn": "翻訳をオンにする"
   },
   "backPill": "ノートに戻る",
   "myMarks": {
@@ -380,6 +385,16 @@
     "empty": "この論文にはまだマークがありません。",
     "noSection": "最初の節より前",
     "note": "ノート {{index}}",
-    "saveFailed": "色を保存できませんでした。"
+    "saveFailed": "色を保存できませんでした。",
+    "kinds": "一覧に出す種類",
+    "kind": {
+      "highlight": "ハイライト",
+      "quote": "引用",
+      "figure": "図",
+      "equation": "数式",
+      "region": "領域"
+    },
+    "listed": "{{shown}} / {{count}}",
+    "noneOfKind": "この種類のマークはありません。"
   }
 }

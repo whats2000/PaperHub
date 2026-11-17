@@ -12,7 +12,7 @@
  * a click (hit-tested) or Enter on it turns translation on to show it (the
  * notes pane visible), else opens its note card. A click that opens a mark
  * goes no further (the note card would take it for a click outside). */
-import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DraftBox } from "@/components/canvas/BoxTool";
@@ -211,11 +211,19 @@ export function PdfMarksPage({
     if (el && ctx) ctx.openBox(page, box, el, scanned);
   });
 
-  // Hit-testing on the page: the layer itself takes no pointer events.
+  // Hit-testing on the page: the layer itself takes no pointer events. The
+  // lists are current before the browser paints (a pointer move right
+  // after a corner button appears is tested against them).
   const latest = useRef({ drawn, objects, ctx, boxTool });
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = { drawn, objects, ctx, boxTool };
   }, [drawn, objects, ctx, boxTool]);
+
+  // The page drew its marks (again): a note card pointing at one follows.
+  const marksMoved = ctx?.marksMoved;
+  useLayoutEffect(() => {
+    marksMoved?.();
+  }, [marksMoved, shown, markers, textVersion]);
   useEffect(() => {
     const el = rootRef.current?.parentElement;
     if (!el || !ctx) return;

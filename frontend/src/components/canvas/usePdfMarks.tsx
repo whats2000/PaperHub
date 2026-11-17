@@ -58,16 +58,15 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { useCanvasStore } from "@/store/canvas";
 import { activateMark, hoverMark, registerMarkAnchors } from "@/store/markNav";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
-import { useTranslationStore } from "@/store/translation";
+import { REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type { Mark, MarkColor, MarkColorInfo, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
 const FLASH_MS = 1600;
-/** How long the reader looks for a mark it was asked to show before it tries
- * the HTML view, and before it says it can't. */
+/** How long the reader looks for a mark it was asked to show, once its page
+ * has rendered, before it tries the HTML view (or says it can't). */
 const NOT_HERE_MS = 1500;
-const GIVE_UP_MS = 6000;
 
 /** Pieces as stored, grouped by section: a mark files under one. */
 function groupPieces(pieces: readonly { piece: PdfPiece; at?: Located }[]): MarkGroup[] {
@@ -122,6 +121,8 @@ export interface PdfMarksApi {
   pen: MarkColor | null;
   /** A click on a mark. */
   openMark: (markId: string) => void;
+  /** A page drew its marks (again): a card pointing at one re-places. */
+  marksMoved: () => void;
   /** A pen click on a mark: erases the piece under it. */
   erasePiece: (markId: string, piece: number) => void;
   /** A pen click on a figure or equation: marks it whole at once. */
@@ -501,9 +502,13 @@ export function usePdfMarks({
   );
 
   // Where each mark is on screen, for the note card's arrow.
+  const movedListeners = useRef(new Set<() => void>());
+  const marksMoved = useCallback(() => movedListeners.current.forEach((f) => f()), []);
   useEffect(() => {
     if (paperId === null) return;
     return registerMarkAnchors(paperId, {
+      kind: "pdf",
+      viewport: () => readerRef.current?.getBoundingClientRect() ?? null,
       find: (markId) => {
         const root = readerRef.current;
         if (!root) return null;
@@ -514,9 +519,18 @@ export function usePdfMarks({
         return { rects: Array.from(els, (el) => el.getBoundingClientRect()), viewport: root.getBoundingClientRect() };
       },
       subscribe: (onMove) => {
+        // Scrolling, the reader's box resizing, and a page drawing its marks
+        // again (a re-render on zoom or width change).
         const root = readerRef.current;
         root?.addEventListener("scroll", onMove, { passive: true });
-        return () => root?.removeEventListener("scroll", onMove);
+        const ro = root && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onMove) : null;
+        if (root) ro?.observe(root);
+        movedListeners.current.add(onMove);
+        return () => {
+          root?.removeEventListener("scroll", onMove);
+          ro?.disconnect();
+          movedListeners.current.delete(onMove);
+        };
       },
     });
   }, [paperId, readerRef]);
@@ -535,6 +549,9 @@ export function usePdfMarks({
     if (known?.lang) return;
     useTranslationStore.getState().claimReveal(reveal.n);
     const started = Date.now();
+    // When the page that should draw it has rendered (its text layer and
+    // marks layer are there): only then does "not drawn" mean anything.
+    let renderedAt: number | null = null;
     let toPage = false;
     const done = (): true => {
       useTranslationStore.getState().revealed(reveal.n);
@@ -564,17 +581,26 @@ export function usePdfMarks({
           toPage = true;
         }
       }
-      const waited = Date.now() - started;
-      if (mark && reveal.fallback && waited >= NOT_HERE_MS) {
+      const host = mark?.view === "pdf" && typeof page === "number" ? pageEl(page) : root;
+      if (renderedAt === null && mark && host?.querySelector("[data-pdf-marks]") && host.querySelector(".textLayer")) {
+        renderedAt = Date.now();
+      }
+      if (renderedAt === null) {
+        // Still rendering (or its marks still loading): within reason.
+        if (Date.now() - started < REVEAL_WAIT_MS) return false;
+        if (mark) toast.message(tRef.current("marks.notFound", "This mark isn't drawn in the paper here."));
+        return done();
+      }
+      if (Date.now() - renderedAt < NOT_HERE_MS) return false;
+      // Drawn here it isn't. A passage may be found in the HTML; a box,
+      // figure or equation made on a page is drawn on the page only.
+      if (mark && reveal.fallback && (mark.kind === "highlight" || mark.kind === "quote")) {
         useCanvasStore.getState().requestReaderTab(paperId, "html");
         useTranslationStore.getState().requestReveal(paperId, reveal.markId);
         return done();
       }
-      if (waited >= GIVE_UP_MS) {
-        if (mark) toast.message(tRef.current("marks.notFound", "This mark isn't drawn in the paper here."));
-        return done();
-      }
-      return false;
+      if (mark) toast.message(tRef.current("marks.notFound", "This mark isn't drawn in the paper here."));
+      return done();
     };
     if (tick()) return;
     const timer = setInterval(() => {
@@ -674,6 +700,7 @@ export function usePdfMarks({
             flashId,
             pen,
             openMark,
+            marksMoved,
             erasePiece: penTools.erase,
             penObject: penTools.object,
             openObject,
@@ -698,6 +725,7 @@ export function usePdfMarks({
       flashId,
       pen,
       openMark,
+      marksMoved,
       penTools.erase,
       penTools.object,
       openObject,

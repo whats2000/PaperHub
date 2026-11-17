@@ -34,6 +34,12 @@ import {
 } from "@/lib/translationQueue";
 import { cn } from "@/lib/utils";
 import { useMarkNavStore } from "@/store/markNav";
+
+/** The bottom of the open note card when it sits in the gutter. */
+function stackBelowNoteCard(): number | null {
+  const box = useMarkNavStore.getState().cardBox;
+  return box?.side === "left" ? box.bottom : null;
+}
 import { explainUnshown, REVEAL_EVERY_MS, REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
 import type {
   ParagraphsResponse,
@@ -365,7 +371,8 @@ export function PdfTranslationLayer({
             reader: { left: box.left, right: box.right },
             pinned: isPinned,
             // An open note card sits above it: the two stack.
-            stackBelow: useMarkNavStore.getState().cardBox?.bottom ?? null,
+            // (only when both sit in the gutter: one column).
+            stackBelow: stackBelowNoteCard(),
           })
         : null;
       if (!next) {

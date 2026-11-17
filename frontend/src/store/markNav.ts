@@ -7,7 +7,11 @@
  * The readers register where each drawn mark is on screen
  * (`registerMarkAnchors`), so the card can point at it and the pill can tell
  * when the user has scrolled away from it. */
+import type { TFunction } from "i18next";
+import { toast } from "sonner";
 import { create } from "zustand";
+
+import i18n from "@/lib/i18n";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useMarksStore } from "@/store/marks";
@@ -52,9 +56,21 @@ export interface MarkAnchor {
 
 /** A reader's view of its drawn marks. */
 export interface MarkAnchorSource {
+  /** Which view of the paper it is (an HTML paper has both, one on screen). */
+  kind: "html" | "pdf";
   find: (markId: string) => MarkAnchor | null;
-  /** Calls back when the marks may have moved (the reader scrolled). */
+  /** The reader's visible area (where an unplaced card docks). */
+  viewport: () => ClientRect | null;
+  /** Calls back when the marks may have moved: the reader scrolled, its box
+   * moved or resized, a page drew its marks again. */
   subscribe?: (onMove: () => void) => () => void;
+}
+
+/** The open card's place: where it is and which side of the paragraph. */
+export interface CardBox {
+  top: number;
+  bottom: number;
+  side: "left" | "below" | "above";
 }
 
 interface MarkNavState {
@@ -65,8 +81,8 @@ interface MarkNavState {
   showPart: (partId: string) => void;
   closeCard: () => void;
   /** The open card's place on screen, so the translation card stacks under it. */
-  cardBox: { top: number; bottom: number } | null;
-  setCardBox: (box: { top: number; bottom: number } | null) => void;
+  cardBox: CardBox | null;
+  setCardBox: (box: CardBox | null) => void;
   /** The mark under the pointer while the notes pane is visible. */
   hovered: string | null;
   setHovered: (markId: string | null) => void;
@@ -85,7 +101,9 @@ export const useMarkNavStore = create<MarkNavState>()((set) => ({
   cardBox: null,
   setCardBox: (box) =>
     set((s) =>
-      s.cardBox?.top === box?.top && s.cardBox?.bottom === box?.bottom ? {} : { cardBox: box },
+      s.cardBox?.top === box?.top && s.cardBox?.bottom === box?.bottom && s.cardBox?.side === box?.side
+        ? {}
+        : { cardBox: box },
     ),
   hovered: null,
   setHovered: (markId) => set((s) => (s.hovered === markId ? {} : { hovered: markId })),
@@ -112,11 +130,30 @@ export function registerMarkAnchors(paperId: number, source: MarkAnchorSource): 
   };
 }
 
-/** Where a mark is drawn now (the first reader of its paper that draws it). */
+/** The readers of `paperId` on screen: the view the reader shows (an HTML
+ * paper keeps its other view mounted off screen). With no view published
+ * (a reader outside the chat), every reader of the paper. */
+function onScreen(paperId: number): MarkAnchorSource[] {
+  const view = useCanvasStore.getState().readerView;
+  const all = [...(sources.get(paperId) ?? [])];
+  if (!view) return all;
+  return view.paperId === paperId ? all.filter((s) => s.kind === view.kind) : [];
+}
+
+/** Where a mark is drawn now, in the view on screen (null: not drawn there). */
 export function markAnchor(paperId: number, markId: string): MarkAnchor | null {
-  for (const s of sources.get(paperId) ?? []) {
+  for (const s of onScreen(paperId)) {
     const a = s.find(markId);
     if (a && a.rects.length) return a;
+  }
+  return null;
+}
+
+/** The visible area of the reader on screen showing `paperId`. */
+export function readerViewport(paperId: number): ClientRect | null {
+  for (const s of onScreen(paperId)) {
+    const v = s.viewport();
+    if (v) return v;
   }
   return null;
 }
@@ -153,30 +190,73 @@ function findMark(markId: string): Mark | null {
 }
 
 /** A click on a mark on the paper: with the notes pane visible, its block
- * there (scrolled to and flashed); otherwise the note card. */
+ * there (scrolled to and flashed; the paper's marks are loaded first when
+ * they aren't yet); otherwise the note card. */
 export function activateMark(paperId: number, markId: string): void {
-  const mark = findMark(markId);
-  if (notesPaneVisible()) {
-    if (mark?.note_id !== undefined) {
-      useNotesPaneStore
-        .getState()
-        .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: mark.block_id });
-    }
+  if (!notesPaneVisible()) {
+    useMarkNavStore.getState().openCard(paperId, markId);
     return;
   }
-  useMarkNavStore.getState().openCard(paperId, markId);
+  const open = (mark: Mark | null) => {
+    if (mark?.note_id === undefined) return false;
+    useNotesPaneStore
+      .getState()
+      .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: mark.block_id });
+    return true;
+  };
+  if (open(findMark(markId))) return;
+  void useMarksStore
+    .getState()
+    .loadPaper(paperId)
+    .then(() => {
+      if (!open(findMark(markId))) toast.message(t()("notes:marks.noteMissing", "This mark's note isn't available."));
+    })
+    .catch(() => toast.error(t()("notes:marks.noteMissing", "This mark's note isn't available.")));
 }
 
-/** A click on a 文 marker (a mark on a translation not on screen): with the
- * notes pane visible, translation turns on to show it; otherwise its note
- * card, which offers to switch. */
+/** A click on a 文 marker (a mark on a translation not on screen):
+ * translation turns on to show it. With the notes pane visible its block
+ * opens there too; otherwise its note card opens once the reader has shown
+ * the mark (or has said why it can't: the card then opens unplaced). */
 export function activateMarker(paperId: number, markId: string): void {
+  const tr = useTranslationStore;
+  tr.getState().showMark(markId);
   if (notesPaneVisible()) {
-    useTranslationStore.getState().showMark(markId);
     activateMark(paperId, markId);
     return;
   }
-  useMarkNavStore.getState().openCard(paperId, markId);
+  const reveal = tr.getState().reveal;
+  if (!reveal || reveal.markId !== markId) {
+    useMarkNavStore.getState().openCard(paperId, markId);
+    return;
+  }
+  const off = tr.subscribe((s) => {
+    if (s.reveal?.n === reveal.n) return;
+    off();
+    useMarkNavStore.getState().openCard(paperId, markId);
+  });
+}
+
+const t = () => i18n.t.bind(i18n) as TFunction;
+
+/** Jumping to a mark whose colour is hidden (or with "Show my marks" off):
+ * it shows for now, with a toast to hide it again. Nothing is saved. */
+function showHiddenFor(mark: Mark): void {
+  const marks = useMarksStore.getState();
+  const hiddenColor =
+    mark.color !== null && marks.colors.some((c) => c.color === mark.color && !c.visible) ? mark.color : null;
+  const marksOff = !marks.showMarks;
+  if (!hiddenColor && !marksOff) return;
+  const setVisible = (on: boolean) =>
+    useMarksStore.setState((s) => ({
+      colors: hiddenColor ? s.colors.map((c) => (c.color === hiddenColor ? { ...c, visible: on } : c)) : s.colors,
+      ...(marksOff ? { showMarks: on } : {}),
+    }));
+  setVisible(true);
+  toast(t()("notes:marks.showingHidden", "Showing a hidden colour"), {
+    id: "marks-showing-hidden",
+    action: { label: t()("notes:marks.hideAgain", "Hide again"), onClick: () => setVisible(false) },
+  });
 }
 
 /** The pointer is over a mark (null: off it): its block is tinted in the
@@ -213,11 +293,22 @@ export async function openMarkInReader(markId: string, opts: OpenInReaderOptions
   // As tabs, the reader comes to the front (side by side, both show).
   const pane = useNotesPaneStore.getState();
   if (pane.activeTab !== "reader") pane.setActiveTab("reader");
+  showHiddenFor(mark);
   if (mark.lang) useTranslationStore.getState().showMark(markId);
   else useTranslationStore.getState().requestReveal(paperId, markId, { fallback: true });
   if (opts.back) useMarkNavStore.getState().showBack({ paperId, markId, ...opts.back });
   return true;
 }
+
+// The card belongs to the paper in the reader: closing the reader, or
+// showing another paper there, closes it (with its exit).
+useCanvasStore.subscribe((s) => {
+  const card = useMarkNavStore.getState().card;
+  if (!card) return;
+  if (!s.open || (s.activePaperId !== null && s.activePaperId !== card.paperId)) {
+    useMarkNavStore.getState().closeCard();
+  }
+});
 
 /** A Show ↗ jumper in the note card: the paper scrolls to that mark, it
  * flashes, and the card points at it. */

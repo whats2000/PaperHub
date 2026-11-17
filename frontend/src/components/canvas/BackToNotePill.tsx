@@ -10,11 +10,16 @@ import { useTranslation } from "react-i18next";
 import { usePresence } from "@/hooks/usePresence";
 import { cn } from "@/lib/utils";
 import { markAnchor, onMarksMoved, useMarkNavStore, type BackToNote } from "@/store/markNav";
+import { useCanvasStore } from "@/store/canvas";
 import { useNotesPaneStore } from "@/store/notesPane";
+import { useTranslationStore } from "@/store/translation";
 
 /** How far from the mark (in screens) the user may scroll before the pill
  * goes. */
 const AWAY_SCREENS = 1;
+/** After a reader stops trying to show the mark, how long it may take to
+ * draw it before the pill counts the mark as not shown. */
+const GAVE_UP_MS = 2000;
 
 /** Whether the mark is still within about a screen of the reader's view;
  * null while it isn't drawn (yet). */
@@ -37,6 +42,8 @@ export function BackToNotePill({ paperId }: { paperId: number | null }) {
   const [last, setLast] = useState<BackToNote | null>(back);
   if (back && back !== last) setLast(back);
   const { mounted, state } = usePresence(ours, 200);
+  // The view on screen: its marks are the ones measured.
+  const readerView = useCanvasStore((s) => s.readerView);
 
   // Gone once the user scrolls about a screen away from the mark: armed
   // only after the reader has reached it (it scrolls there first).
@@ -61,13 +68,26 @@ export function BackToNotePill({ paperId }: { paperId: number | null }) {
       if (!reached) schedule();
       else clearInterval(timer);
     }, 250);
+    // The reader gave up showing the mark (not drawn, or the request was
+    // never taken up): with nothing reached, the way back goes too.
+    let gaveUp: ReturnType<typeof setTimeout> | undefined;
+    const offReveal = useTranslationStore.subscribe((s, prev) => {
+      const was = prev.reveal;
+      if (!was || was.markId !== back.markId || s.reveal?.markId === back.markId) return;
+      clearTimeout(gaveUp);
+      gaveUp = setTimeout(() => {
+        if (!reached && nearMark(back) !== true) clearBack();
+      }, GAVE_UP_MS);
+    });
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("scroll", schedule, { capture: true });
       off();
+      offReveal();
+      clearTimeout(gaveUp);
       clearInterval(timer);
     };
-  }, [back, paperId, clearBack]);
+  }, [back, paperId, clearBack, readerView]);
 
   // The reader left the mark's paper for another: the way back is gone.
   const prevPaper = useRef(paperId);

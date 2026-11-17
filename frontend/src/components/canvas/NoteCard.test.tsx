@@ -5,7 +5,13 @@ import { NoteCard } from "@/components/canvas/NoteCard";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { deleteMark, restoreMark } from "@/lib/api";
 import { CANVAS_DEFAULT_WIDTH, useCanvasStore } from "@/store/canvas";
-import { registerMarkAnchors, useMarkNavStore, type ClientRect } from "@/store/markNav";
+import {
+  activateMark,
+  activateMarker,
+  registerMarkAnchors,
+  useMarkNavStore,
+  type ClientRect,
+} from "@/store/markNav";
 import { resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
@@ -107,7 +113,12 @@ const rect = (top: number, left: number, width: number, height: number): ClientR
 });
 
 let unregister: (() => void) | null = null;
-let markTop = 200;
+/** Where each mark is drawn (its top; null: not drawn) in the HTML view. */
+let anchorTop: Record<string, number | null> = {};
+/** The reader's visible area: the gutter left of it holds the card. */
+const VIEWPORT = rect(40, 800, 600, 700);
+/** The reader's "marks moved" callback, as the card subscribed to it. */
+let moved: (() => void) | null = null;
 
 function seed(marks: Mark[] = [mark("mk_1", "q1"), mark("mk_2", "q2"), mark("mk_3", "q3")]) {
   useMarksStore.setState({ marksByPaper: { 3: marks }, colors: [] });
@@ -139,17 +150,29 @@ function seed(marks: Mark[] = [mark("mk_1", "q1"), mark("mk_2", "q2"), mark("mk_
   // The reader draws the marks: the reader's area starts 800px in, so the
   // gutter left of it holds the card.
   unregister = registerMarkAnchors(3, {
-    find: () => ({ rects: [rect(markTop, 820, 300, 18)], viewport: rect(40, 800, 600, 700) }),
+    kind: "html",
+    viewport: () => VIEWPORT,
+    find: (id) => {
+      const top = anchorTop[id];
+      return top == null ? null : { rects: [rect(top, 820, 300, 18)], viewport: VIEWPORT };
+    },
+    subscribe: (cb) => {
+      moved = cb;
+      return () => {
+        moved = null;
+      };
+    },
   });
 }
 
 beforeEach(() => {
   toastFn.mockReset();
   resetMarkOps();
-  markTop = 200;
+  anchorTop = { mk_1: 200, mk_2: 120, mk_3: 230 };
+  moved = null;
   useMarkNavStore.setState({ card: null, hovered: null, back: null, cardBox: null });
   useNotesPaneStore.setState({ open: false, activeTab: "reader" });
-  useCanvasStore.setState({ open: true, width: CANVAS_DEFAULT_WIDTH });
+  useCanvasStore.setState({ open: true, width: CANVAS_DEFAULT_WIDTH, readerView: null, activePaperId: 3 });
 });
 afterEach(() => {
   unregister?.();
@@ -261,7 +284,7 @@ describe("the note card", () => {
   it("stays on screen when its mark scrolls away", async () => {
     seed();
     const card = await openCard();
-    markTop = -900;
+    anchorTop.mk_1 = -900;
     act(() => {
       window.dispatchEvent(new Event("resize"));
     });
@@ -315,5 +338,170 @@ describe("the notes pane beside the paper", () => {
     act(() => useMarkNavStore.getState().setHovered(null));
     expect(q1).not.toHaveAttribute("data-target");
     expect(d1).not.toHaveAttribute("data-edge");
+  });
+});
+
+describe("the note card, fix round 1", () => {
+  it("offers to turn translation on when it is off, and to switch when another language shows", async () => {
+    seed([mark("mk_1", "q1", { lang: "繁體中文" }), mark("mk_3", "q3")]);
+    useTranslationStore.setState({ enabledByPaper: { 3: false }, language: "日本語" });
+    await openCard();
+    expect(screen.getByRole("button", { name: "Turn on translation" })).toBeInTheDocument();
+    act(() => {
+      useTranslationStore.setState({ enabledByPaper: { 3: true } });
+    });
+    expect(screen.getByRole("button", { name: "Switch to 繁中" })).toBeInTheDocument();
+  });
+
+  it("points at the view on screen, never at the paper's other view kept off screen", async () => {
+    seed();
+    // The PDF view, off to the right of the reader, also draws mk_1.
+    const pdfView = rect(40, 1600, 600, 700);
+    const offPdf = registerMarkAnchors(3, {
+      kind: "pdf",
+      viewport: () => pdfView,
+      find: () => ({ rects: [rect(500, 1620, 300, 18)], viewport: pdfView }),
+    });
+    useCanvasStore.setState({ readerView: { paperId: 3, kind: "html" } });
+    const card = await openCard();
+    expect(parseFloat(card.style.top)).toBe(200);
+    expect(parseFloat(card.style.left) + parseFloat(card.style.width)).toBeLessThanOrEqual(800);
+    // The PDF tab in front: the card follows that view.
+    act(() => {
+      useCanvasStore.setState({ readerView: { paperId: 3, kind: "pdf" } });
+    });
+    await waitFor(() => expect(parseFloat(card.style.top)).toBe(500));
+    offPdf();
+  });
+
+  it("re-points to a mark not on screen: docked at the top of the gutter, no arrow, and it says so", async () => {
+    seed();
+    const card = await openCard();
+    expect(screen.getByTestId("note-card-arrow")).not.toHaveAttribute("data-unplaced");
+    anchorTop.mk_3 = null;
+    act(() => useMarkNavStore.getState().openCard(3, "mk_3"));
+    await waitFor(() => expect(screen.getByTestId("note-card-arrow")).toHaveAttribute("data-unplaced", "true"));
+    expect(parseFloat(card.style.top)).toBe(40 + 8);
+    expect(screen.getByTestId("note-card-offscreen").parentElement!.parentElement).toHaveAttribute("data-state", "open");
+    expect(screen.getByTestId("note-card-offscreen")).toHaveTextContent("The mark is off screen");
+    // It stays open (no silent close).
+    await new Promise((r) => setTimeout(r, 1400));
+    expect(useMarkNavStore.getState().card?.markId).toBe("mk_3");
+    const reveal = vi.spyOn(useTranslationStore.getState(), "requestReveal");
+    fireEvent.click(within(screen.getByTestId("note-card-offscreen")).getByRole("button", { name: /Show/ }));
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(3, "mk_3", { fallback: true }));
+    // Drawn now: it points at it.
+    anchorTop.mk_3 = 230;
+    act(() => moved?.());
+    await waitFor(() => expect(screen.getByTestId("note-card-arrow")).not.toHaveAttribute("data-unplaced"));
+    expect(parseFloat(card.style.top)).toBe(230);
+    reveal.mockRestore();
+  });
+
+  it("re-places when the reader says its marks moved (a resize, a page drawn again)", async () => {
+    seed();
+    const card = await openCard();
+    expect(parseFloat(card.style.top)).toBe(200);
+    anchorTop.mk_1 = 340;
+    act(() => moved?.());
+    await waitFor(() => expect(parseFloat(card.style.top)).toBe(340));
+  });
+
+  it("keeps its place while the mark is briefly gone (a page re-rendering)", async () => {
+    seed();
+    const card = await openCard();
+    anchorTop.mk_1 = null;
+    act(() => moved?.());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(parseFloat(card.style.top)).toBe(200);
+    expect(screen.getByTestId("note-card-arrow")).not.toHaveAttribute("data-unplaced");
+  });
+
+  it("closes when the reader closes or shows another paper", async () => {
+    seed();
+    await openCard();
+    act(() => {
+      useCanvasStore.setState({ activePaperId: 4 });
+    });
+    expect(useMarkNavStore.getState().card).toBeNull();
+    act(() => {
+      useCanvasStore.setState({ activePaperId: 3 });
+      useMarkNavStore.getState().openCard(3, "mk_1");
+    });
+    act(() => {
+      useCanvasStore.setState({ open: false });
+    });
+    expect(useMarkNavStore.getState().card).toBeNull();
+  });
+
+  it("does not reload the note on close: the card's edits already show in the pane, nothing lost", async () => {
+    seed([mark("mk_1", "q1"), mark("mk_3", "q3")]);
+    const loadNote = useNotesStore.getState().loadNote;
+    render(<NoteEditor noteId={7} variant="pane" />);
+    await screen.findByTestId("paper-ref-q1");
+    await openCard();
+    const card = screen.getByTestId("note-card");
+    type Pm = HTMLElement & {
+      editor: {
+        commands: { insertContentAt: (pos: number, text: string) => boolean };
+        state: { doc: { descendants: (f: (n: { textContent: string; isText: boolean }, pos: number) => void) => void } };
+      };
+    };
+    const endOf = (pm: Pm, text: string) => {
+      let at = -1;
+      pm.editor.state.doc.descendants((n, pos) => {
+        if (n.isText && n.textContent === text) at = pos + text.length;
+      });
+      return at;
+    };
+    await waitFor(() => expect(within(card).getByText("My thoughts")).toBeInTheDocument());
+    const cardPm = card.querySelector(".ProseMirror") as Pm;
+    act(() => {
+      cardPm.editor.commands.insertContentAt(endOf(cardPm, "My thoughts"), "!");
+    });
+    // The pane shows it at once, from the shared store.
+    const pane = screen.getAllByTestId("note-editor").find((e) => !card.contains(e))!;
+    await waitFor(() => expect(within(pane).getByText("My thoughts!")).toBeInTheDocument());
+    expect(useNotesStore.getState().notes[7]!.blocks.find((b) => b.id === "p2")!.text).toBe("My thoughts!");
+    // Then typed in the pane: built on the card's text, not an older copy.
+    const panePm = pane.querySelector(".ProseMirror") as Pm;
+    act(() => {
+      panePm.editor.commands.insertContentAt(endOf(panePm, "My thoughts!"), "?");
+    });
+    expect(useNotesStore.getState().notes[7]!.blocks.find((b) => b.id === "p2")!.text).toBe("My thoughts!?");
+    await waitFor(() => expect(within(card).getByText("My thoughts!?")).toBeInTheDocument());
+    fireEvent.click(within(card).getByRole("button", { name: "Close" }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(loadNote).not.toHaveBeenCalled();
+  });
+});
+
+describe("a click on the paper", () => {
+  it("with the pane visible, waits for the paper's marks to load, then opens the block", async () => {
+    seed([]);
+    const openAt = vi.fn();
+    useNotesPaneStore.setState({ open: true, openAt });
+    useCanvasStore.setState({ width: 900 });
+    const loadPaper = vi.fn(() => {
+      useMarksStore.setState({ marksByPaper: { 3: [mark("mk_1", "q1")] } });
+      return Promise.resolve();
+    });
+    useMarksStore.setState({ marksByPaper: {}, loadPaper });
+    activateMark(3, "mk_1");
+    await waitFor(() => expect(openAt).toHaveBeenCalledWith({ kind: "paper", id: 3, noteId: 7, blockId: "q1" }));
+    expect(loadPaper).toHaveBeenCalledWith(3);
+  });
+
+  it("on a 文 marker with the pane hidden, shows the mark in the translation first, then opens its card", () => {
+    seed([mark("mk_1", "q1", { lang: "繁體中文" })]);
+    useTranslationStore.setState({ enabledByPaper: { 3: false }, language: "日本語", reveal: null });
+    activateMarker(3, "mk_1");
+    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+    const reveal = useTranslationStore.getState().reveal!;
+    expect(reveal.markId).toBe("mk_1");
+    expect(useMarkNavStore.getState().card).toBeNull();
+    // The reader has shown it (or said why it can't): the card opens.
+    act(() => useTranslationStore.getState().revealed(reveal.n));
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
   });
 });

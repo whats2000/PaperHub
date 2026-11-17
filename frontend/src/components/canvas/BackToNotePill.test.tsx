@@ -95,10 +95,14 @@ beforeEach(() => {
     colorNames: {},
   });
   // The reader shows its view 100–700; the mark starts in it.
+  useCanvasStore.setState({ readerView: null });
   unregister = registerMarkAnchors(3, {
-    find: () => ({ rects: [rect(markTop, 18)], viewport: { ...rect(100, 600), left: 500 } }),
+    kind: "html",
+    viewport: () => VIEW,
+    find: () => ({ rects: [rect(markTop, 18)], viewport: VIEW }),
   });
 });
+const VIEW = { ...rect(100, 600), left: 500 };
 afterEach(() => {
   unregister?.();
   clearPendingNoteOps();
@@ -174,5 +178,59 @@ describe("back to note", () => {
     render(<BackToNotePill paperId={4} />);
     showBack();
     expect(screen.queryByTestId("back-to-note")).toBeNull();
+  });
+});
+
+describe("back to note, fix round 1", () => {
+  function showBack() {
+    act(() => useMarkNavStore.getState().showBack({ paperId: 3, markId: "mk_1", noteId: 7, blockId: "q1" }));
+  }
+
+  it("measures the view on screen, not the other view kept off screen", async () => {
+    // The PDF view (registered first) is kept off screen with the mark far
+    // away in it; the HTML view on screen has the mark in view.
+    unregister?.();
+    const offPdf = registerMarkAnchors(3, {
+      kind: "pdf",
+      viewport: () => VIEW,
+      find: () => ({ rects: [rect(-5000, 18)], viewport: VIEW }),
+    });
+    unregister = registerMarkAnchors(3, {
+      kind: "html",
+      viewport: () => VIEW,
+      find: () => ({ rects: [rect(markTop, 18)], viewport: VIEW }),
+    });
+    useCanvasStore.setState({ readerView: { paperId: 3, kind: "html" } });
+    render(<BackToNotePill paperId={3} />);
+    showBack();
+    // Reached in the view on screen ...
+    await new Promise((r) => setTimeout(r, 350));
+    // ... then scrolled a screen away from it there: the pill goes.
+    markTop = -1200;
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    await waitFor(() => expect(useMarkNavStore.getState().back).toBeNull());
+    offPdf();
+  });
+
+  it("goes when the reader gives up showing the mark", async () => {
+    markTop = -5000; // never drawn near the view
+    render(<BackToNotePill paperId={3} />);
+    act(() => useTranslationStore.getState().requestReveal(3, "mk_1", { fallback: true }));
+    showBack();
+    const n = useTranslationStore.getState().reveal!.n;
+    act(() => useTranslationStore.getState().revealed(n));
+    await waitFor(() => expect(useMarkNavStore.getState().back).toBeNull(), { timeout: 3500 });
+  });
+
+  it("stays when the reader shows the mark", async () => {
+    render(<BackToNotePill paperId={3} />);
+    act(() => useTranslationStore.getState().requestReveal(3, "mk_1", { fallback: true }));
+    showBack();
+    const n = useTranslationStore.getState().reveal!.n;
+    act(() => useTranslationStore.getState().revealed(n));
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(useMarkNavStore.getState().back).not.toBeNull();
   });
 });

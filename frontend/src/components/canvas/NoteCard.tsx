@@ -11,19 +11,28 @@
  * outside or the close button closes it: it shrinks back toward the mark. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, Languages, NotebookPen, PanelRightOpen, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { langShort, sectionLabel } from "@/components/notes/blocks/markProps";
 import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
-import { placeCard, type CardPlacement } from "@/lib/cardPlacement";
+import { CARD_EDGE, NARROW_GUTTER_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { sameLanguage } from "@/lib/language";
 import { prefersReducedMotion } from "@/lib/motion";
 import { truncatedTitle } from "@/lib/truncatedTitle";
 import { cn } from "@/lib/utils";
-import { jumpToMark, markAnchor, onMarksMoved, useMarkNavStore, type NoteCardTarget } from "@/store/markNav";
+import { useCanvasStore } from "@/store/canvas";
+import {
+  jumpToMark,
+  markAnchor,
+  onMarksMoved,
+  readerViewport,
+  useMarkNavStore,
+  type ClientRect,
+  type NoteCardTarget,
+} from "@/store/markNav";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
@@ -89,6 +98,35 @@ function sectionNotes(blocks: NoteBlock[], blockId: string): SectionNotes | null
   };
 }
 
+/** Widest the card gets. */
+const CARD_MAX_WIDTH = 460;
+
+/** A card with no mark to point at: at the top of the gutter left of the
+ * reader (inside the reader's top when the gutter is too narrow), with no
+ * arrow; with no reader at all, at the window's top left. */
+function dockedPlacement(v: ClientRect | null, cardHeight: number): CardPlacement {
+  const base = { arrowX: 0, arrowY: 0, activeFragment: 0, scrollFraction: 0 };
+  if (!v) {
+    const width = Math.min(CARD_MAX_WIDTH, window.innerWidth - 2 * CARD_GAP);
+    return { ...base, side: "left", top: CARD_GAP, left: CARD_GAP, width, maxHeight: window.innerHeight - 2 * CARD_GAP };
+  }
+  const gutter = v.left - 2 * CARD_GAP;
+  const maxHeight = Math.max(0, v.bottom - v.top - 2 * CARD_EDGE);
+  if (gutter >= NARROW_GUTTER_PX) {
+    const width = Math.min(CARD_MAX_WIDTH, gutter);
+    return { ...base, side: "left", top: v.top + CARD_EDGE, left: v.left - CARD_GAP - width, width, maxHeight };
+  }
+  const width = Math.min(CARD_MAX_WIDTH, v.right - v.left - 2 * CARD_GAP);
+  return {
+    ...base,
+    side: "below",
+    top: v.top + CARD_EDGE,
+    left: v.left + CARD_GAP,
+    width,
+    maxHeight: Math.min(maxHeight, Math.max(cardHeight, Math.floor((v.bottom - v.top) * 0.45))),
+  };
+}
+
 /** A folded note's first words. */
 function firstWords(part: Part<NoteBlock>): string {
   const b = part.blocks.find((x) => x.type !== "section" && x.text.trim());
@@ -119,24 +157,6 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
     if (open && marksLoaded && !mark) closeCard();
   }, [open, marksLoaded, mark, closeCard]);
 
-  // Closed: what was typed here is sent, and the note is read again so the
-  // notes pane shows it (its editor didn't see these edits).
-  const openNoteRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (open) {
-      openNoteRef.current = noteId;
-      return;
-    }
-    const id = openNoteRef.current;
-    if (id === undefined) return;
-    openNoteRef.current = undefined;
-    // `loadNote` sends the queued edits first.
-    void useNotesStore
-      .getState()
-      .loadNote(id)
-      .catch(() => undefined);
-  }, [open, noteId]);
-
   const section = useMemo(
     () => (note && mark ? sectionNotes(note.blocks, mark.block_id) : null),
     [note, mark],
@@ -147,11 +167,23 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
   // ---- placement ------------------------------------------------------
   const cardRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<CardPlacement | null>(null);
-  const placedRef = useRef(false);
+  // Not pointing at its mark: it isn't drawn on screen (not loaded yet,
+  // shown only in the translation card, a page still rendering). The card
+  // then docks at the top of the gutter with no arrow and says so.
+  const [unplaced, setUnplaced] = useState(false);
+  // The opening the card last pointed for: while a page re-renders and its
+  // mark is briefly gone, the card keeps its place instead of docking.
+  const anchoredN = useRef<number | null>(null);
   const setCardBox = useMarkNavStore((s) => s.setCardBox);
+  const n = target.n;
   const place = useCallback(() => {
     const anchor = markAnchor(paperId, markId);
-    if (!anchor) return;
+    if (!anchor) {
+      if (anchoredN.current === n) return;
+      setUnplaced(true);
+      setPlacement(dockedPlacement(readerViewport(paperId), cardRef.current?.offsetHeight ?? 0));
+      return;
+    }
     const v = anchor.viewport;
     const next = placeCard({
       paraRects: anchor.rects,
@@ -163,10 +195,11 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       pinned: true,
     });
     if (next) {
-      placedRef.current = true;
+      anchoredN.current = n;
+      setUnplaced(false);
       setPlacement(next);
     }
-  }, [paperId, markId]);
+  }, [paperId, markId, n]);
 
   // Follows the mark: frame by frame while the reader scrolls to it, then on
   // every scroll and resize.
@@ -193,16 +226,11 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       if (performance.now() < until) frame = requestAnimationFrame(follow);
     };
     frame = requestAnimationFrame(follow);
-    // Never placed (the mark isn't drawn where the card could point at it):
-    // an unseen card would only hold Escape and clicks, so it goes.
-    const giveUp = setTimeout(() => {
-      if (!placedRef.current) closeCard();
-    }, FOLLOW_MS);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(giveUp);
-    };
-  }, [open, target.n, place, closeCard]);
+    return () => cancelAnimationFrame(frame);
+  }, [open, place]);
+  // The reader switching view (the HTML | PDF tabs) moves what it shows.
+  const readerView = useCanvasStore((s) => s.readerView);
+  const shown = placement !== null;
   useEffect(() => {
     if (!open) return;
     let frame = 0;
@@ -213,8 +241,10 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
         place();
       });
     };
+    schedule();
     window.addEventListener("scroll", schedule, { capture: true, passive: true });
     window.addEventListener("resize", schedule);
+    // The reader's scroll, its box moving or resizing, a page drawing again.
     const off = onMarksMoved(paperId, schedule);
     const el = cardRef.current;
     const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
@@ -226,7 +256,7 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       off();
       ro?.disconnect();
     };
-  }, [open, paperId, place]);
+  }, [open, paperId, place, readerView, shown]);
 
   // The translation card stacks under this one.
   useLayoutEffect(() => {
@@ -235,7 +265,7 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       return;
     }
     const h = cardRef.current?.offsetHeight ?? 0;
-    setCardBox({ top: placement.top, bottom: placement.top + Math.min(h, placement.maxHeight) });
+    setCardBox({ top: placement.top, bottom: placement.top + Math.min(h, placement.maxHeight), side: placement.side });
   }, [open, placement, setCardBox]);
   useEffect(() => () => setCardBox(null), [setCardBox]);
 
@@ -382,8 +412,13 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
     >
       <span
         aria-hidden="true"
+        data-testid="note-card-arrow"
+        data-unplaced={unplaced ? "true" : undefined}
         className={cn(
           "absolute size-2.5 rotate-45 border border-foreground/15 bg-secondary dark:border-foreground/20",
+          // No mark to point at: no arrow (it fades).
+          "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+          unplaced && "opacity-0",
           side === "below"
             ? "-top-[6px] border-r-0 border-b-0"
             : side === "above"
@@ -422,6 +457,29 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
         </button>
       </div>
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto py-1.5">
+        <div
+          data-state={unplaced ? "open" : "closed"}
+          className="grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=closed]:opacity-0 motion-reduce:transition-none"
+        >
+          <div className="min-h-0 overflow-hidden">
+            <p
+              data-testid="note-card-offscreen"
+              className="mx-2.5 mb-1.5 flex items-center gap-2 rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground"
+            >
+              <span>{t("noteCard.offScreen", "The mark is off screen")}</span>
+              <span aria-hidden>·</span>
+              <button
+                type="button"
+                tabIndex={unplaced ? 0 : -1}
+                onClick={() => jumpToMark(paperId, markId)}
+                className="inline-flex items-center gap-0.5 rounded px-1 text-foreground transition-colors hover:bg-accent"
+              >
+                {t("noteCard.show", "Show")}
+                <ArrowUpRight className="size-3" aria-hidden />
+              </button>
+            </p>
+          </div>
+        </div>
         {mark?.lang && (
           <div
             data-state={trOff ? "open" : "closed"}
@@ -446,7 +504,9 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
                   className="inline-flex items-center gap-1 rounded border border-border bg-background px-1.5 py-px text-foreground transition-colors hover:bg-accent"
                 >
                   <Languages className="size-3" aria-hidden />
-                  {t("noteCard.trSwitch", { defaultValue: "Switch to {{lang}}", lang: langShort(mark.lang) })}
+                  {trEnabled
+                    ? t("noteCard.trSwitch", { defaultValue: "Switch to {{lang}}", lang: langShort(mark.lang) })
+                    : t("noteCard.trTurnOn", "Turn on translation")}
                 </button>
               </p>
             </div>

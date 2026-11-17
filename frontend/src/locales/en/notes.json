@@ -339,7 +339,10 @@
     "trTimeout": "The translation didn't arrive in time to show this mark",
     "trShowOriginal": "Show original",
     "trOriginal": "Original text",
-    "notFound": "This mark isn't drawn in the paper here."
+    "notFound": "This mark isn't drawn in the paper here.",
+    "showingHidden": "Showing a hidden colour",
+    "hideAgain": "Hide again",
+    "noteMissing": "This mark's note isn't available."
   },
   "langShort": {
     "en": "English",
@@ -367,7 +370,9 @@
     "showNamed": "Show this passage in the paper: {{where}}",
     "trMarkedIn": "Marked in {{lang}}; the paper is showing {{shown}}",
     "trOriginal": "the original",
-    "trSwitch": "Switch to {{lang}}"
+    "trSwitch": "Switch to {{lang}}",
+    "offScreen": "The mark is off screen",
+    "trTurnOn": "Turn on translation"
   },
   "backPill": "Back to note",
   "myMarks": {
@@ -380,6 +385,16 @@
     "empty": "No marks on this paper yet.",
     "noSection": "Before the first section",
     "note": "note {{index}}",
-    "saveFailed": "Couldn't save the colour."
+    "saveFailed": "Couldn't save the colour.",
+    "kinds": "Kinds to list",
+    "kind": {
+      "highlight": "Highlight",
+      "quote": "Quote",
+      "figure": "Figure",
+      "equation": "Equation",
+      "region": "Region"
+    },
+    "listed": "{{shown}} of {{count}}",
+    "noneOfKind": "No marks of these kinds."
   }
 }
