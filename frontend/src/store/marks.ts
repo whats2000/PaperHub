@@ -466,7 +466,7 @@ export const useMarksStore = create<MarksState>()(
               [paperId]: [
                 ...marks,
                 // Created here after the request went out: not in its snapshot.
-                ...(s.marksByPaper[paperId] ?? []).filter((m) => !ids.has(m.id) && (createdAt.get(m.id) ?? -1) >= since),
+                ...(s.marksByPaper[paperId] ?? []).filter((m) => !ids.has(m.id) && (createdAt.get(m.id) ?? -1) > since),
               ],
             },
           }));

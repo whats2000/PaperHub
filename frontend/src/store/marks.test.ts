@@ -492,3 +492,55 @@ describe("the refetch after a timeout", () => {
   });
 });
 
+
+describe("the refetch merge", () => {
+  const created = (mark: Mark): MarkCreated => ({
+    mark,
+    block: null,
+    saved_to: { note_id: 7, paper_title: "Duo", section: "2 Method", part_index: 0, part_count: 1 },
+  });
+  const body = {
+    paper_content_id: 3,
+    kind: "highlight" as const,
+    color: "green" as const,
+    view: "html" as const,
+    pieces: MARK.pieces,
+    section_key: "2 Method",
+  };
+
+  it("a deleted mark whose delete landed but timed out does not come back", async () => {
+    resetMarkOps(40);
+    let onServer: Mark[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => {
+        onServer = [MARK];
+        return HttpResponse.json(created(MARK));
+      }),
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => {
+        onServer = [];
+        return new Promise<never>(() => undefined);
+      }),
+      http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json(onServer)),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    // M is the latest create before the refetch goes out.
+    await useMarksStore.getState().create(body, { quiet: true });
+    await useMarksStore.getState().remove("mk_1");
+    await queueMarkOp(() => Promise.resolve());
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+  });
+
+  it("a mark made before the refetch and gone from the server (another tab) is dropped", async () => {
+    resetMarkOps(40);
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(created(MARK))),
+      // Deleted elsewhere: the server no longer has it.
+      http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([])),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    await useMarksStore.getState().create(body, { quiet: true });
+    await queueMarkOp(() => new Promise<never>(() => undefined), { paperId: 3 }).catch(() => undefined);
+    await queueMarkOp(() => Promise.resolve());
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+  });
+});
