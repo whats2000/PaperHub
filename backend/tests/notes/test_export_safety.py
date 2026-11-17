@@ -2,9 +2,11 @@
 export or inject raw markup, and the edge cases of text escaping."""
 from __future__ import annotations
 
+import http.server
 import io
 import re
 import shutil
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -199,7 +201,113 @@ def test_oversized_figure_image_is_unavailable(
     assert "Big\n\n[image unavailable]" in md
 
 
-# --- fix round 2 ---
+# --- fix round 2 -------------------------------------------------------------
+
+class _Listener:
+    """A local HTTP server counting the requests pandoc makes to it."""
+
+    def __init__(self) -> None:
+        hits: list[str] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"<style/>")
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.hits = hits
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self) -> _Listener:
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _cited_paragraph() -> Block:
+    return _blk("c1", "paragraph", content=[_txt("As shown [fig:7/f].")])
+
+
+def _docx_text(md: str, images: dict[str, bytes], bib: str) -> str:
+    docx = markdown_to_docx(md, {**images, "references.bib": bib.encode()})
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        return z.read("word/document.xml").decode("utf-8")
+
+
+@needs_pandoc
+def test_yaml_metadata_in_titles_fetches_nothing() -> None:
+    with _Listener() as srv:
+        evil = f"x\n\n---\ncsl: http://127.0.0.1:{srv.port}/evil.csl\n---\n"
+        note = Note(id=3, target_kind="session", target_id="1", title=evil,
+                    revision=1, updated_at="")
+        blocks = [_blk("s1", "section", props={"title": evil}), _cited_paragraph()]
+        md, images, bib = note_to_markdown(
+            note, blocks, {7: _paper(7, "Deep Residual Learning")})
+        assert "\n---\ncsl" not in md  # the titles are folded onto one line
+        xml = _docx_text(md, images, bib)
+        # Even raw document text with a metadata block sets nothing.
+        _docx_text(f"---\ncsl: http://127.0.0.1:{srv.port}/raw.csl\n---\n\n"
+                   "# T\n\nAs shown [@he2016deep].\n", {}, bib)
+    assert srv.hits == []
+    assert "He" in xml  # citeproc still rendered the citation
+
+
+@needs_pandoc
+def test_csl_local_path_reads_nothing(tmp_path: Path,
+                                      caplog: pytest.LogCaptureFixture) -> None:
+    csl = tmp_path / "local.csl"
+    csl.write_text("LOCALCSL-SECRET", encoding="utf-8")
+    md = (f"---\ncsl: {csl.as_posix()}\nbibliography: {csl.as_posix()}\n---\n\n"
+          "# T\n\nAs shown [@he2016deep].\n")
+    bib = "@misc{he2016deep,\n  title = {{Deep}},\n  year = {2016},\n}\n"
+    try:
+        xml = _docx_text(md, {}, bib)
+    except PandocError as exc:
+        pytest.fail(f"pandoc failed: {exc}")
+    assert "LOCALCSL-SECRET" not in xml
+    assert "LOCALCSL-SECRET" not in caplog.text
+
+
+@needs_pandoc
+def test_device_name_block_id_exports(tmp_path: Path) -> None:
+    src = tmp_path / "cache"
+    write_paper_asset(PaperAsset(figures=[FigureAsset(
+        id="fig-1", caption="Cap", page=0, section=None,
+        image_path="figures/fig-1.png")]), src)
+    (src / "asset" / "figures").mkdir(parents=True, exist_ok=True)
+    (src / "asset" / "figures" / "fig-1.png").write_bytes(_png())
+    blocks = [_blk(bid, "paperFigure", props={
+        "kind": "figure", "quote": "Cap", "pieces": [{"figure_id": "fig-1"}]})
+        for bid in ("CON", "NUL", "AUX", "COM1")]
+    md, images, bib = note_to_markdown(
+        NOTE, blocks, {5: _paper(5, "P", source_dir=src)})
+    assert sorted(images) == [f"images/{i:04d}.png" for i in range(1, 5)]
+    assert "CON" not in md
+    docx = markdown_to_docx(md, {**images, "references.bib": bib.encode()})
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        assert len([n for n in z.namelist() if n.startswith("word/media/")]) == 4
+    # A caller's own device-name resource is written under a safe name too.
+    docx = markdown_to_docx("![x](images/CON.png)\n", {"images/CON.png": _png()})
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        assert len([n for n in z.namelist() if n.startswith("word/media/")]) == 1
+
+
+def test_temp_write_failure_is_a_pandoc_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(self: Path, data: bytes) -> int:
+        raise OSError("disk full")
+    monkeypatch.setattr(Path, "write_bytes", boom)
+    with pytest.raises(PandocError):
+        markdown_to_docx("# x", {"images/0001.png": b"x"})
+
 
 def test_math_cannot_close_early_or_form_markup() -> None:
     blocks = [
@@ -215,6 +323,25 @@ def test_math_cannot_close_early_or_form_markup() -> None:
         assert line.count("$$") == 2 and "\$" in line
 
 
+def test_version_check_is_cached_briefly(monkeypatch: pytest.MonkeyPatch) -> None:
+    from paperhub.notes import pandoc as note_pandoc
+    calls: list[str] = []
+    now = [1000.0]
+    monkeypatch.setattr(note_pandoc.shutil, "which", lambda _n: "/bin/pandoc")
+    monkeypatch.setattr(note_pandoc, "_read_version",
+                        lambda exe: calls.append(exe) or (3, 1))
+    monkeypatch.setattr(note_pandoc, "_clock", lambda: now[0])
+    note_pandoc.reset_version_cache()
+    assert note_pandoc.pandoc_version() == (3, 1)
+    now[0] += 30
+    assert note_pandoc.pandoc_version() == (3, 1)
+    assert len(calls) == 1
+    now[0] += 31
+    note_pandoc.pandoc_version()
+    assert len(calls) == 2
+    note_pandoc.reset_version_cache()
+
+
 def test_leading_spaces_never_make_a_code_block() -> None:
     md, _i, _b = note_to_markdown(NOTE, [
         _blk("p1", "paragraph", content=[_txt("    indented start\n\tand a tab")]),
@@ -224,4 +351,3 @@ def test_leading_spaces_never_make_a_code_block() -> None:
     assert not re.search(r"^(?: {4}|\t)", body, re.M), body
     assert "\u00a0\u00a0\u00a0\u00a0indented start" in md
     assert "- \u00a0\u00a0\u00a0\u00a0\u00a0\u00a0item" in md
-
