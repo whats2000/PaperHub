@@ -74,6 +74,7 @@ import type {
   NoteOpsBody,
   NoteTargetKind,
   PaperPageBlock,
+  SplitResult,
 } from "@/types/notes";
 
 export const API_BASE_URL: string =
@@ -1386,9 +1387,10 @@ export async function restorePiece(markId: string, index: number): Promise<Mark>
   });
 }
 
-/** The newest piece becomes its own mark; returns the new mark. */
-export async function splitMark(markId: string): Promise<Mark> {
-  return apiFetch<Mark>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST" });
+/** The newest piece becomes its own mark; returns the new mark with the
+ * original as it now is. */
+export async function splitMark(markId: string): Promise<SplitResult> {
+  return apiFetch<SplitResult>(`/marks/${encodeURIComponent(markId)}/split`, { method: "POST" });
 }
 
 /** The chunks with a `phchunk-N` span in the paper's HTML: a selection's
@@ -1449,6 +1451,8 @@ export interface LocateResult {
     /** The span in the reading text (the HTML reader's). */
     text_start: number;
     text_end: number;
+    /** The reading-text paragraph it sits in (null: it crosses a break). */
+    paragraph?: number | null;
   } | null;
   _meta: Record<string, unknown>;
 }

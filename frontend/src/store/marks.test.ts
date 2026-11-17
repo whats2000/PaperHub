@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { waitFor } from "@testing-library/react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { markHint, useMarksStore } from "@/store/marks";
+import { markHint, queueMarkOp, resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, NoteBlock } from "@/types/notes";
 
@@ -62,6 +62,7 @@ beforeEach(() => {
   toastFn.mockReset();
   toastError.mockReset();
   noteLoads = 0;
+  resetMarkOps();
   useMarksStore.setState({ marksByPaper: {}, chunksByPaper: {} });
   useNotesStore.setState({
     notes: {
@@ -224,19 +225,70 @@ describe("useMarksStore.erase", () => {
     await waitFor(() => expect(calls).toEqual(["erase", "restore", "erase"]));
   });
 
-  it("erasing a mark's last piece deletes the mark (Undo, then Delete again)", async () => {
+  it("the server decides a mark left empty is deleted: Undo, then Delete again", async () => {
     const calls: string[] = [];
     server.use(
-      http.delete(`${API_BASE_URL}/marks/mk_1`, () => {
-        calls.push("delete");
-        return HttpResponse.json({ revision: 5, applied: ["b_q"], rejected: [], change_set_id: null });
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/0`, () => {
+        calls.push("erase");
+        return HttpResponse.json({ ...MARK, pieces: [{ ...MARK.pieces[0], erased: true }], deleted_at: "2026-11-17T01:00:00Z" });
+      }),
+      http.post(`${API_BASE_URL}/marks/mk_1/pieces/0/restore`, () => {
+        calls.push("restore");
+        return HttpResponse.json(MARK);
       }),
     );
     useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
     await useMarksStore.getState().erase("mk_1", 0);
-    expect(calls).toEqual(["delete"]);
+    expect(calls).toEqual(["erase"]);
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
     expect(toastFn.mock.lastCall?.[0]).toBe("Mark deleted");
+    const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    undo.onClick();
+    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything()));
+    expect(useMarksStore.getState().marksByPaper[3]).toMatchObject([{ id: "mk_1", note_id: 7 }]);
+    const again = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
+    expect(again.label).toBe("Delete again");
+    again.onClick();
+    await waitFor(() => expect(calls).toEqual(["erase", "restore", "erase"]));
+  });
+
+  it("waits for a pending stroke: the erase sees the joined mark, not the copy from before", async () => {
+    let finishJoin!: () => void;
+    const joined: Mark = {
+      ...MARK,
+      note_id: 7,
+      pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+    };
+    const calls: string[] = [];
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/0`, () => {
+        calls.push("erase");
+        return HttpResponse.json({ ...joined, pieces: [{ ...joined.pieces[0], erased: true }, joined.pieces[1]] });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    // A stroke joining a second piece is still saving.
+    const join = queueMarkOp(
+      () =>
+        new Promise<void>((resolve) => {
+          finishJoin = () => {
+            useMarksStore.setState({ marksByPaper: { 3: [joined] } });
+            calls.push("join");
+            resolve();
+          };
+        }),
+    );
+    const erase = useMarksStore.getState().erase("mk_1", 0);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls).toEqual([]);
+    finishJoin();
+    await Promise.all([join, erase]);
+    expect(calls).toEqual(["join", "erase"]);
+    // The joined piece stays: only the first was erased.
+    const after = useMarksStore.getState().marksByPaper[3]!;
+    expect(after).toHaveLength(1);
+    expect(after[0]!.pieces[1]!.erased).toBeUndefined();
+    expect(toastFn.mock.lastCall?.[0]).toBe("Piece erased");
   });
 });
 
@@ -248,12 +300,19 @@ describe("useMarksStore.split", () => {
       pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
     };
     const split: Mark = { ...MARK, id: "mk_2", block_id: "b_2", pieces: [two.pieces[1]!] };
-    server.use(http.post(`${API_BASE_URL}/marks/mk_1/split`, () => HttpResponse.json(split)));
-    useMarksStore.setState({ marksByPaper: { 3: [two] } });
+    // The server's original, as it now is: the piece it moved is flagged.
+    const original: Mark = { ...two, note_id: undefined, pieces: [two.pieces[0]!, { ...two.pieces[1]!, removed: true }] };
+    server.use(http.post(`${API_BASE_URL}/marks/mk_1/split`, () => HttpResponse.json({ ...split, original })));
+    // The client's copy is stale (a third piece it never heard of is not
+    // guessed at): the store takes the server's.
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...two, pieces: [two.pieces[0]!] }] } });
     await useMarksStore.getState().split("mk_1");
     const list = useMarksStore.getState().marksByPaper[3]!;
     expect(list.map((m) => m.id)).toEqual(["mk_1", "mk_2"]);
+    expect(list[0]!.pieces).toHaveLength(2);
     expect(list[0]!.pieces[1]!.removed).toBe(true);
+    expect(list[0]!.note_id).toBe(7);
+    expect(list[1]).not.toHaveProperty("original");
     expect(list[1]).toMatchObject({ id: "mk_2", note_id: 7 });
   });
 });

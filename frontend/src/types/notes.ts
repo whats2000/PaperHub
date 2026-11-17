@@ -191,6 +191,9 @@ export interface Mark {
   part_label?: string;
 }
 
+/** `POST /marks/{id}/split`: the new mark, and the original as it now is. */
+export type SplitResult = Mark & { original: Mark };
+
 export interface MarkIn {
   paper_content_id: number;
   kind: MarkKind;
