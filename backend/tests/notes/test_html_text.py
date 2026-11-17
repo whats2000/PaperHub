@@ -1,0 +1,38 @@
+"""The reader's text rule, server side (``notes/html_text.py``).
+
+``tests/fixtures/mark_text/rule.*`` is shared with the frontend
+(``frontend/src/lib/marks/anchor.test.ts``): both sides must read the same
+text from the same HTML, or a quote made in the reader is not found again.
+"""
+import json
+from pathlib import Path
+
+from paperhub.notes.html_text import build_text_index, tex_text
+
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "mark_text"
+
+
+def test_shared_fixture_reads_as_the_reader_does() -> None:
+    html = (FIXTURE / "rule.html").read_text(encoding="utf-8")
+    want = json.loads((FIXTURE / "rule.expected.json").read_text(encoding="utf-8"))
+    got = build_text_index(html)
+    assert got.text == want["text"]
+    assert [list(s) for s in got.spans] == want["spans"]
+
+
+def test_math_reads_as_its_tex() -> None:
+    assert tex_text("\(h_{t}\)") == "$h_{t}$"
+    assert tex_text("\[\n  a +  b\n\]") == "$a + b$"
+    assert tex_text("  ") == ""
+    idx = build_text_index(
+        '<p>x <span class="math inline"><mjx-container><math><semantics><mi>h</mi>'
+        '<annotation encoding="application/x-tex">h_t</annotation></semantics>'
+        "</math></mjx-container></span> y</p>")
+    assert idx.text == "x $h_t$ y"
+
+
+def test_blocks_and_skipped_parts() -> None:
+    idx = build_text_index(
+        "<body><p>one</p><p>two</p><div class='ph-tr'>nope</div>"
+        "<script>nope</script><p>th<b>ree</b></p></body>")
+    assert idx.text == "one two three"

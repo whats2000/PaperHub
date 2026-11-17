@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+import pytest
 
 from paperhub.notes.anchors import reanchor_paper
 from paperhub.notes.marks import MarkIn, create_mark, list_marks
@@ -7,29 +10,53 @@ from paperhub.notes.store import list_blocks
 TEXT_A = "Intro words here. The cat sat on the mat. More text follows."
 TEXT_B = "Second chunk talks about gradient descent and loss."
 
+# Re-anchoring reads the rendered HTML (the text the reader quoted), not the
+# LaTeX in chunks.text: each chunk is a <p> opening with its phchunk span.
+_HTML: dict[str, Path] = {}
 
-async def _paper(conn, chunks):
+
+def _html(paras):
+    body = "".join(f'<p><span id="phchunk-{i}"></span>{t}</p>\n'
+                   for i, t in enumerate(paras))
+    return ("<!DOCTYPE html><html><head><title>t</title></head><body>\n"
+            f"{body}</body></html>")
+
+
+async def _paper(conn, chunks, html=None):
+    path = _HTML["dir"] / "source.html"
     await conn.execute(
         "INSERT INTO paper_content (id, content_key, kind, arxiv_id, title, "
         "sections_json, source_path, source_dir_path, html_path) "
-        "VALUES (1, 'arxiv:1', 'arxiv', '1', 'A Paper', ?, 's', 'd', 'h')",
-        (json.dumps([{"name": "Intro"}, {"name": "Method"}]),))
-    return await _set_chunks(conn, chunks)
+        "VALUES (1, 'arxiv:1', 'arxiv', '1', 'A Paper', ?, 's', 'd', ?)",
+        (json.dumps([{"name": "Intro"}, {"name": "Method"}]), str(path)))
+    return await _set_chunks(conn, chunks, html)
 
 
-async def _set_chunks(conn, chunks):
-    """Replace the paper's chunks; return their new ids in order."""
+async def _set_chunks(conn, chunks, html=None, *, rendered=True):
+    """Replace the paper's chunks (and its rendered HTML); return the new
+    chunk ids in order. `rendered=False`: the HTML is not re-rendered yet
+    (the chunks have no dom_id)."""
     await conn.execute("DELETE FROM chunks WHERE paper_content_id = 1")
     pos, ids = 0, []
-    for section, text in chunks:
+    for i, (section, text) in enumerate(chunks):
         cur = await conn.execute(
             "INSERT INTO chunks (paper_content_id, section, char_start, "
-            "char_end, text) VALUES (1, ?, ?, ?, ?)",
-            (section, pos, pos + len(text), text))
+            "char_end, text, dom_id) VALUES (1, ?, ?, ?, ?, ?)",
+            (section, pos, pos + len(text), text,
+             f"phchunk-{i}" if rendered else None))
         ids.append(cur.lastrowid)
         pos += len(text)
     await conn.commit()
+    if rendered:
+        (_HTML["dir"] / "source.html").write_text(
+            html if html is not None else _html([t for _, t in chunks]),
+            encoding="utf-8")
     return ids
+
+
+@pytest.fixture(autouse=True)
+def _html_dir(tmp_path):
+    _HTML["dir"] = tmp_path
 
 
 def _piece(quote, first, last, prefix="", suffix=""):
@@ -64,7 +91,8 @@ async def test_reanchor_after_chunk_ids_move(conn):
     lm, blk = await _block(conn, m)
     p = lm["pieces"][0]
     assert (p["chunk_start"], p["chunk_end"]) == (b2, b2)  # chunk IDS
-    joined = "\n".join(["New preamble. ", TEXT_A, TEXT_B])
+    # The reading text: one space between paragraphs.
+    joined = " ".join(["New preamble.", TEXT_A, TEXT_B])
     assert p["text_start"] == joined.index("gradient descent")
     assert p["text_end"] == p["text_start"] + len("gradient descent")
     assert p["quote"] == "gradient descent" and lm["status"] == "ok"
@@ -137,3 +165,42 @@ async def test_reanchor_leaves_pdf_marks_untouched(conn):
     lm, blk = await _block(conn, m)
     assert lm["pieces"] == [pdf] and lm["status"] == "ok"
     assert "anchorLost" not in blk.props
+
+
+async def test_reanchor_finds_rendered_quote_with_percent_ref_and_math(conn):
+    """The reader quotes rendered text ("89%", a ref's label, math as $TeX$);
+    chunks.text is LaTeX (\%, \ref, \(...\)). Found after a re-render."""
+    latex = r"The latency drops by 89\% (Table~\ref{tab:2}) for \(h_t\)."
+    rendered = ('The latency drops by 89% (<a href="#tab2">Table 2</a>) for '
+                '<span class="math inline">\(h_t\)</span>.')
+    [c] = await _paper(conn, [("Intro", latex)], _html([rendered]))
+    quote = "drops by 89% (Table 2) for $h_t$."
+    m = await _mark(conn, [_piece(quote, c, c, "The latency ", "")])
+    # Re-ingest + re-render: a new chunk before it, new ids.
+    pre, c2 = await _set_chunks(
+        conn, [("Intro", "Preamble."), ("Intro", latex)],
+        _html(["Preamble.", rendered]))
+    stats = await reanchor_paper(conn, 1)
+    assert stats == {"ok": 0, "moved": 1, "lost": 0, "partly_lost": 0}
+    lm, blk = await _block(conn, m)
+    p = lm["pieces"][0]
+    assert (p["chunk_start"], p["chunk_end"]) == (c2, c2)
+    assert lm["status"] == "ok" and "anchorLost" not in blk.props
+    assert pre
+
+
+async def test_reanchor_waits_for_the_html_render(conn):
+    """Right after a re-chunk the chunks have no spans yet: nothing is
+    marked lost; the re-anchor after the re-render places the marks."""
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    m = await _mark(conn, [_piece("gradient descent", b, b)])
+    await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)],
+                      rendered=False)
+    assert await reanchor_paper(conn, 1) == {
+        "ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+    lm, _ = await _block(conn, m)
+    assert lm["status"] == "ok" and lm["pieces"][0]["chunk_start"] == b
+    a2, b2 = await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)])
+    assert (await reanchor_paper(conn, 1))["moved"] == 1
+    lm, _ = await _block(conn, m)
+    assert lm["pieces"][0]["chunk_start"] == b2 and a != a2

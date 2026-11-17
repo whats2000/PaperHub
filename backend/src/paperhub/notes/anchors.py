@@ -5,20 +5,28 @@ changes a heading's key. The user's marks and note headings must follow, and
 never silently vanish: a quote that cannot be found again stays in the note,
 flagged (``anchorLost`` / ``piecesLost``), so the user can still read it.
 
+Where a quote is looked for: the paper's rendered HTML (``source.html``),
+read with the reader's own text rule (``notes/html_text.py``: math as
+``$TeX$``, translations and overlays left out). The reader quoted that text;
+``chunks.text`` is LaTeX source (``\%``, ``\ref``, macros) and would not match.
+
 Coordinates: an HTML piece's ``chunk_start`` / ``chunk_end`` are CHUNK IDS (the
-first and last chunk holding the quote; the reader maps them to ``phchunk-N``
-spans). ``text_start`` / ``text_end`` are the quote's span in the paper's chunk
-texts joined with a newline in chunk-id order, used as the proximity hint when
-the same quote repeats. All block writes are ops with actor ``system`` inside
-one transaction per paper.
+chunks whose ``phchunk-N`` spans open last before the quote's first and last
+character). ``text_start`` / ``text_end`` are the quote's span in that text,
+used as the proximity hint when the same quote repeats. A paper whose chunks
+have no spans yet (re-chunked, HTML not re-rendered) is left as it is: the
+re-anchor after the re-render places its marks. All block writes are ops with
+actor ``system`` inside one transaction per paper.
 """
 from __future__ import annotations
 
-import bisect
+import asyncio
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
+from paperhub.notes.html_text import TextIndex, build_text_index
 from paperhub.notes.marks import (
     BLOCK_TYPE,
     MARK_COLS,
@@ -34,7 +42,6 @@ from paperhub.notes.store import get_note, list_blocks
 
 _Piece = dict[str, Any]
 _Norm = tuple[str, list[int]]
-_Span = tuple[int, int, int]
 
 
 def _normalise(text: str) -> _Norm:
@@ -95,48 +102,68 @@ def _pick(text: str, starts: list[int], length: int, piece: _Piece,
     return min(starts, key=score)
 
 
-def _find(norm: _Norm, piece: _Piece, spans: list[_Span],
+def _find(index: TextIndex, piece: _Piece, hint: int,
           ) -> tuple[int, int] | None:
-    """Span of the piece's quote in the chunk text, blind to whitespace runs."""
+    """Span of the piece's quote in the reading text: exact, then blind to
+    whitespace; among repeats the best context, then the nearest."""
     quote = str(piece.get("orig") or piece.get("quote") or "")
     if not quote.strip():
         return None
-    ntext, idx = norm  # a superset of the exact matches
-    nquote = _normalise(quote.strip())[0]
-    starts = _occurrences(ntext, nquote)
-    if not starts:
-        return None
-    hint = piece.get("text_start")
-    if hint is None:  # a reader-made piece: where its old chunk sits now
-        hint = next((s0 for cid, s0, _e in spans
-                     if cid == piece.get("chunk_start")), 0)
-    s = _pick(ntext, starts, len(nquote), piece,
-              bisect.bisect_left(idx, int(hint)))
-    return idx[s], idx[s + len(nquote) - 1] + 1
+    text = index.text
+    for needle in (quote.strip(), _normalise(quote.strip())[0]):
+        starts = _occurrences(text, needle)
+        if starts:
+            s = _pick(text, starts, len(needle), piece, hint)
+            return s, s + len(needle)
+    return None
 
 
-async def _chunk_spans(conn: aiosqlite.Connection, pcid: int,
-                       ) -> tuple[str, list[_Span]]:
+async def _reading_text(conn: aiosqlite.Connection, pcid: int,
+                        ) -> tuple[TextIndex, dict[str, int]] | None:
+    """The rendered paper's reading text and its spans' chunk ids; None when
+    the HTML is missing or its spans don't name the current chunks yet."""
     async with conn.execute(
-        "SELECT id, text FROM chunks WHERE paper_content_id = ? ORDER BY id",
-        (pcid,),
+        "SELECT html_path FROM paper_content WHERE id = ?", (pcid,),
     ) as cur:
-        rows = await cur.fetchall()
-    parts: list[str] = []
-    spans: list[_Span] = []
-    pos = 0
-    for cid, text in rows:
-        t = str(text or "")
-        spans.append((int(cid), pos, pos + len(t)))
-        parts.append(t)
-        pos += len(t) + 1
-    return "\n".join(parts), spans
+        row = await cur.fetchone()
+    async with conn.execute(
+        "SELECT dom_id, id FROM chunks WHERE paper_content_id = ? "
+        "AND dom_id IS NOT NULL", (pcid,),
+    ) as cur:
+        ids = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
+    if row is None or not row[0] or not ids:
+        return None
+    try:
+        html = await asyncio.to_thread(Path(str(row[0])).read_text, encoding="utf-8")
+    except OSError:
+        return None
+    index = build_text_index(html)
+    if not any(d in ids for d, _ in index.spans):
+        return None
+    return index, ids
 
 
-def _chunk_ids(spans: list[_Span], start: int, end: int) -> tuple[int, int]:
-    """Ids of the first and last chunk the span touches."""
-    hit = [cid for cid, s, e in spans if s < end and e > start]
-    return (hit[0], hit[-1]) if hit else (spans[0][0], spans[-1][0])
+def _chunk_at(index: TextIndex, ids: dict[str, int], at: int) -> int | None:
+    """The chunk whose span opens last at or before ``at`` (else the first)."""
+    first: int | None = None
+    found: int | None = None
+    for dom_id, pos in index.spans:
+        cid = ids.get(dom_id)
+        if cid is None:
+            continue
+        first = cid if first is None else first
+        if pos > at:
+            break
+        found = cid
+    return found if found is not None else first
+
+
+def _hint(index: TextIndex, ids: dict[str, int], piece: _Piece) -> int:
+    """Where the quote was: its last offset, else its chunk's span."""
+    if isinstance(piece.get("text_start"), int):
+        return int(piece["text_start"])
+    dom = next((d for d, cid in ids.items() if cid == piece.get("chunk_start")), None)
+    return next((pos for d, pos in index.spans if d == dom), 0)
 
 
 async def _mark_rows(conn: aiosqlite.Connection, pcid: int, *,
@@ -168,7 +195,7 @@ async def _find_note(conn: aiosqlite.Connection, pcid: int) -> int | None:
     return int(row[0]) if row else None
 
 
-def _anchor(m: dict[str, Any], text: str, norm: _Norm, spans: list[_Span],
+def _anchor(m: dict[str, Any], index: TextIndex, ids: dict[str, int],
             ) -> tuple[list[_Piece], str, bool]:
     """New pieces, the status they imply and whether any offset moved."""
     pieces: list[_Piece] = []
@@ -179,13 +206,13 @@ def _anchor(m: dict[str, Any], text: str, norm: _Norm, spans: list[_Span],
             pieces.append(p)
             continue
         seen += 1
-        span = _find(norm, p, spans)
+        span = _find(index, p, _hint(index, ids, p))
         if span is None:
             lost += 1
             pieces.append({**p, "lost": True})
             continue
         s, e = span
-        first, last = _chunk_ids(spans, s, e)
+        first, last = _chunk_at(index, ids, s), _chunk_at(index, ids, e - 1)
         moved = moved or (first, last) != (p.get("chunk_start"),
                                            p.get("chunk_end"))
         pieces.append({**{k: v for k, v in p.items() if k != "lost"},
@@ -203,7 +230,7 @@ def _anchor(m: dict[str, Any], text: str, norm: _Norm, spans: list[_Span],
 
 async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
                          *, dry_run: bool = False) -> dict[str, int]:
-    """Re-find every HTML mark's quote in the paper's current chunks.
+    """Re-find every HTML mark's quote in the paper's rendered text.
 
     Counts are per mark: ``ok`` (nothing moved), ``moved`` (all pieces found,
     some at new offsets), ``lost`` (no piece found), ``partly_lost``. PDF
@@ -214,13 +241,15 @@ async def reanchor_paper(conn: aiosqlite.Connection, paper_content_id: int,
     marks = await _mark_rows(conn, paper_content_id, html_only=True)
     if not marks and note_id is None:
         return stats
-    text, spans = await _chunk_spans(conn, paper_content_id)
-    norm = _normalise(text)
+    # Not rendered for these chunks yet: the marks wait for the re-render.
+    reading = await _reading_text(conn, paper_content_id)
     async with tx(conn):
-        for m in marks:
+        for m in marks if reading is not None else []:
+            assert reading is not None
+            index, ids = reading
             if not any("chunk_start" in p for p in live_pieces(m["pieces"])):
                 continue
-            pieces, status, moved = _anchor(m, text, norm, spans)
+            pieces, status, moved = _anchor(m, index, ids)
             key = status if status in ("lost", "partly_lost") else (
                 "moved" if moved else "ok")
             stats[key] += 1

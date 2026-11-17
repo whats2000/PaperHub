@@ -1,0 +1,17 @@
+{
+  "text": "2 Method We keep the hidden state $h_{t}$ as a function of the previous one, as in Fig. 1. The latency drops by 89% (see Table 2) & stays low. $L = \\sum_i \\ell(x_i)$ First item Second item with code a b Last words. ",
+  "spans": [
+    [
+      "phchunk-0",
+      9
+    ],
+    [
+      "phchunk-1",
+      91
+    ],
+    [
+      "phchunk-2",
+      203
+    ]
+  ]
+}
