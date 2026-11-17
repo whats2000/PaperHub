@@ -299,6 +299,10 @@
     "restoreFailed": "無法復原這個標記。",
     "showMarks": "顯示我的標記",
     "showMarksHint": "在論文上顯示你的標記",
-    "hideMarksHint": "隱藏論文上的標記（不會刪除）"
+    "hideMarksHint": "隱藏論文上的標記（不會刪除）",
+    "savedToSections": "已存到 {{paper}} › {{sections}}",
+    "tooLong": "一個標記最多 {{count}} 段。請選少一點再標記。",
+    "anchorsFailed": "無法載入這段文字在論文中的位置，請再試一次。",
+    "noAnchor": "這段文字沒有對應到論文內文，無法標記。"
   }
 }

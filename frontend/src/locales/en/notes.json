@@ -299,6 +299,10 @@
     "restoreFailed": "Couldn't restore the mark.",
     "showMarks": "Show my marks",
     "showMarksHint": "Show your marks on the paper",
-    "hideMarksHint": "Hide your marks on the paper (nothing is deleted)"
+    "hideMarksHint": "Hide your marks on the paper (nothing is deleted)",
+    "savedToSections": "Saved to {{paper}} › {{sections}}",
+    "tooLong": "A mark holds up to {{count}} paragraphs. Select less to mark it.",
+    "anchorsFailed": "Couldn't load where this passage sits in the paper. Try again.",
+    "noAnchor": "This passage isn't tied to the paper's text, so it can't be marked."
   }
 }

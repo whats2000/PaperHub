@@ -2,16 +2,20 @@
  * loaded document and turns a selection into a mark through the popover
  * under it. Returns the popover to render over the iframe. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 import { MarkPopover, type SelectionBox } from "@/components/canvas/MarkPopover";
 import { groupBySection, selectionToPieces, type HtmlPiece } from "@/lib/marks/anchor";
 import { attachHtmlMarks, type HtmlMarksHandle } from "@/lib/marks/htmlMarks";
-import { markHint, useMarkFocusIds, useMarksStore } from "@/store/marks";
+import { markHint, toastSaved, useMarkFocusIds, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
+/** The most paragraphs one mark takes (a select-all is not a quote). */
+export const MAX_MARK_PARAGRAPHS = 12;
 
 interface Selected {
   /** The document it was made in (a new document drops it). */
@@ -19,12 +23,24 @@ interface Selected {
   range: Range;
   box: SelectionBox;
   pieces: HtmlPiece[];
+  /** Made from the keyboard: the popover takes focus. */
+  keyboard: boolean;
+}
+
+/** What one selection has saved so far: a retry after a failure saves only
+ * the sections still missing. */
+interface Progress {
+  range: Range;
+  saved: Map<string, MarkCreated>;
 }
 
 function boxOf(range: Range): SelectionBox {
   const r = range.getBoundingClientRect();
   return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
 }
+
+const groupKey = (g: { section: string | null; pieces: HtmlPiece[] }) =>
+  `${g.section ?? ""}\u0000${g.pieces.map((p) => p.quote).join("\u0001")}`;
 
 export function useHtmlMarks({
   paperId,
@@ -37,12 +53,14 @@ export function useHtmlMarks({
   doc: Document | null;
   isDark: boolean;
 }): ReactNode {
+  const { t } = useTranslation("notes");
   const marks = useMarksStore((s) => (paperId === null ? NO_MARKS : (s.marksByPaper[paperId] ?? NO_MARKS)));
   const chunks = useMarksStore((s) => (paperId === null ? null : (s.chunksByPaper[paperId] ?? null)));
   const colors = useMarksStore((s) => s.colors);
   const visible = useMarksStore((s) => s.showMarks);
   const loadPaper = useMarksStore((s) => s.loadPaper);
   const loadColors = useMarksStore((s) => s.loadColors);
+  const ensureChunks = useMarksStore((s) => s.ensureChunks);
   const create = useMarksStore((s) => s.create);
   const focusIds = useMarkFocusIds(paperId);
 
@@ -93,11 +111,16 @@ export function useHtmlMarks({
   const [selectedIn, setSelected] = useState<Selected | null>(null);
   const selected = selectedIn && selectedIn.doc === doc && paperId !== null ? selectedIn : null;
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   useEffect(() => {
     if (paperId === null || !doc?.body) return;
     const win = doc.defaultView;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = () => {
+    let capped = "";
+    const read = (keyboard: boolean) => {
       clearTimeout(timer);
       // After the browser has settled the selection for this mouseup / key.
       timer = setTimeout(() => {
@@ -108,16 +131,32 @@ export function useHtmlMarks({
           setSelected(null);
           return;
         }
+        if (pieces.length > MAX_MARK_PARAGRAPHS) {
+          setSelected(null);
+          const key = `${pieces.length}:${pieces[0]!.quote}`;
+          if (key !== capped) {
+            capped = key;
+            toast.message(
+              tRef.current("marks.tooLong", {
+                defaultValue: "A mark holds up to {{count}} paragraphs. Select less to mark it.",
+                count: MAX_MARK_PARAGRAPHS,
+              }),
+            );
+          }
+          return;
+        }
+        capped = "";
         setBounds({ width: win?.innerWidth ?? 0, height: win?.innerHeight ?? 0 });
-        setSelected({ doc, range: range.cloneRange(), box: boxOf(range), pieces });
+        setSelected({ doc, range: range.cloneRange(), box: boxOf(range), pieces, keyboard });
       }, 0);
     };
+    const onMouseUp = () => read(false);
     const onDown = () => setSelected(null);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelected(null);
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") read();
+      if (e.key !== "Escape") read(true);
     };
     // The popover follows its selection; scrolled out of view, it closes.
     const onScroll = () =>
@@ -127,14 +166,14 @@ export function useHtmlMarks({
         const height = win?.innerHeight ?? 0;
         return box.bottom < 0 || box.top > height ? null : { ...cur, box };
       });
-    doc.addEventListener("mouseup", read);
+    doc.addEventListener("mouseup", onMouseUp);
     doc.addEventListener("mousedown", onDown);
     doc.addEventListener("keydown", onKeyDown);
     doc.addEventListener("keyup", onKeyUp);
     win?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       clearTimeout(timer);
-      doc.removeEventListener("mouseup", read);
+      doc.removeEventListener("mouseup", onMouseUp);
       doc.removeEventListener("mousedown", onDown);
       doc.removeEventListener("keydown", onKeyDown);
       doc.removeEventListener("keyup", onKeyUp);
@@ -142,41 +181,68 @@ export function useHtmlMarks({
     };
   }, [doc, paperId]);
 
+  const progress = useRef<Progress | null>(null);
   const [busy, setBusy] = useState(false);
   const save = useCallback(
     async (kind: "highlight" | "quote", color: MarkColor | null, addNote: boolean) => {
-      if (!selected || paperId === null || busy) return;
+      if (!selected || paperId === null || !doc || busy) return;
       setBusy(true);
-      const hint = markHint(paperId);
-      let last: MarkCreated | null = null;
       try {
+        // A mark needs its chunk ids and section: wait for them (or load
+        // them again) rather than save it unanchored.
+        let map;
+        try {
+          map = await ensureChunks(paperId);
+        } catch {
+          toast.error(t("marks.anchorsFailed", "Couldn't load where this passage sits in the paper. Try again."));
+          return;
+        }
+        const pieces = selectionToPieces(doc, selected.range, map);
+        if (!pieces.length || pieces.some((p) => p.chunk_start === null)) {
+          toast.error(t("marks.noAnchor", "This passage isn't tied to the paper's text, so it can't be marked."));
+          return;
+        }
+        if (progress.current?.range !== selected.range) progress.current = { range: selected.range, saved: new Map() };
+        const done = progress.current.saved;
+        const hint = markHint(paperId);
         // A mark files under one section: a selection across a section
-        // break becomes one mark per section.
-        for (const group of groupBySection(selected.pieces, chunks)) {
-          last = await create({
-            paper_content_id: paperId,
-            kind,
-            color,
-            view: "html",
-            pieces: group.pieces,
-            section_key: group.section,
-            hint_block_id: hint,
-          });
+        // break becomes one mark per section. A retry after a failure saves
+        // only the sections still missing.
+        for (const group of groupBySection(pieces, map)) {
+          const key = groupKey(group);
+          if (done.has(key)) continue;
+          const res = await create(
+            {
+              paper_content_id: paperId,
+              kind,
+              color,
+              view: "html",
+              pieces: group.pieces,
+              section_key: group.section,
+              hint_block_id: hint,
+            },
+            { quiet: true },
+          );
+          done.set(key, res);
+        }
+        const results = [...done.values()];
+        progress.current = null;
+        toastSaved(paperId, results);
+        doc.getSelection()?.removeAllRanges();
+        setSelected(null);
+        const last = results[results.length - 1];
+        if (addNote && last) {
+          const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
+          useNotesStore.getState().setCaretAfter(target);
+          useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
         }
       } catch {
-        return; // the store said so; the selection stays to try again
+        // The store said so; the selection stays to try again.
       } finally {
         setBusy(false);
       }
-      doc?.getSelection()?.removeAllRanges();
-      setSelected(null);
-      if (addNote && last) {
-        const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
-        useNotesStore.getState().setCaretAfter(target);
-        useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
-      }
     },
-    [selected, paperId, busy, chunks, create, doc],
+    [selected, paperId, doc, busy, ensureChunks, create, t],
   );
 
   if (paperId === null) return null;
@@ -187,10 +253,15 @@ export function useHtmlMarks({
       bounds={bounds}
       colors={colors}
       busy={busy}
-      onHighlight={(color) => void save("highlight", color, false)}
+      autoFocus={selected?.keyboard ?? false}
+      onHighlight={(c) => void save("highlight", c, false)}
       onQuote={() => void save("quote", null, false)}
       onAddNote={() => void save("quote", null, true)}
-      onClose={() => setSelected(null)}
+      onClose={(opts) => {
+        setSelected(null);
+        // Escape from the popover: back to the reader, selection kept.
+        if (opts?.returnFocus) doc?.defaultView?.focus();
+      }}
     />
   );
 }

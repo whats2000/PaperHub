@@ -299,6 +299,10 @@
     "restoreFailed": "无法恢复这个标记。",
     "showMarks": "显示我的标记",
     "showMarksHint": "在论文上显示你的标记",
-    "hideMarksHint": "隐藏论文上的标记（不会删除）"
+    "hideMarksHint": "隐藏论文上的标记（不会删除）",
+    "savedToSections": "已存到 {{paper}} › {{sections}}",
+    "tooLong": "一个标记最多 {{count}} 段。请少选一些再标记。",
+    "anchorsFailed": "无法加载这段文字在论文中的位置，请再试一次。",
+    "noAnchor": "这段文字没有对应到论文正文，无法标记。"
   }
 }

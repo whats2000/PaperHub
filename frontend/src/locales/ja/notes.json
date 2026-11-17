@@ -299,6 +299,10 @@
     "restoreFailed": "印を元に戻せませんでした。",
     "showMarks": "自分の印を表示",
     "showMarksHint": "論文上に自分の印を表示します",
-    "hideMarksHint": "論文上の印を隠します（削除はしません）"
+    "hideMarksHint": "論文上の印を隠します（削除はしません）",
+    "savedToSections": "{{paper}} › {{sections}} に保存しました",
+    "tooLong": "印は {{count}} 段落までです。選択を減らしてから印をつけてください。",
+    "anchorsFailed": "この箇所が論文のどこにあるか読み込めませんでした。もう一度お試しください。",
+    "noAnchor": "この箇所は論文本文に対応していないため、印をつけられません。"
   }
 }

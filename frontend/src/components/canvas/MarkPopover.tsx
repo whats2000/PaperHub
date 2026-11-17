@@ -27,10 +27,14 @@ export interface MarkPopoverProps {
   colors: readonly MarkColorInfo[];
   /** A save is under way: the actions wait. */
   busy?: boolean;
+  /** The selection was made from the keyboard: focus moves into the popover. */
+  autoFocus?: boolean;
   onHighlight: (color: MarkColor) => void;
   onQuote: () => void;
   onAddNote: () => void;
-  onClose: () => void;
+  /** `returnFocus`: Escape from inside the popover — focus goes back to
+   * the reader. */
+  onClose: (opts?: { returnFocus: boolean }) => void;
 }
 
 /** Before the first measure (a popover with four swatches and two actions). */
@@ -42,6 +46,7 @@ export function MarkPopover({
   bounds,
   colors,
   busy = false,
+  autoFocus = false,
   onHighlight,
   onQuote,
   onAddNote,
@@ -70,7 +75,9 @@ export function MarkPopover({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key !== "Escape") return;
+      const inside = ref.current?.contains(document.activeElement) ?? false;
+      onCloseRef.current(inside ? { returnFocus: true } : undefined);
     };
     const onDown = (e: PointerEvent) => {
       if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return;
@@ -83,6 +90,26 @@ export function MarkPopover({
       document.removeEventListener("pointerdown", onDown);
     };
   }, [open]);
+
+  // From the keyboard, focus moves to the first action.
+  useEffect(() => {
+    if (open && autoFocus) ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [open, autoFocus, shown]);
+
+  /** ← / → (and Home / End) move between the actions. */
+  const onToolbarKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const to =
+      e.key === "ArrowRight" ? (at + 1) % buttons.length
+      : e.key === "ArrowLeft" ? (at - 1 + buttons.length) % buttons.length
+      : e.key === "Home" ? 0
+      : e.key === "End" ? buttons.length - 1
+      : null;
+    if (to === null || !buttons.length) return;
+    e.preventDefault();
+    buttons[to]!.focus();
+  };
 
   if (!presence.mounted || !shown) return null;
   const place = placeSelectionPopover({ selection: shown, size, bounds });
@@ -105,6 +132,7 @@ export function MarkPopover({
       )}
       // Keep the reader's selection: a press here must not clear it.
       onMouseDown={(e) => e.preventDefault()}
+      onKeyDown={onToolbarKey}
     >
       {MARK_COLORS.map((color) => {
         const name = colorLabel(color, names.get(color), t);

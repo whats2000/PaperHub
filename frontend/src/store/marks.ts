@@ -20,8 +20,9 @@ const UNDO_MS = 5000;
 
 interface MarksState {
   marksByPaper: Record<number, Mark[]>;
-  /** Each paper's chunk spans (null: the paper has none, or they failed). */
-  chunksByPaper: Record<number, ChunkMap | null>;
+  /** Each paper's chunk spans, once loaded (absent: not loaded, or the
+   * request failed — `ensureChunks` tries again). */
+  chunksByPaper: Record<number, ChunkMap>;
   colors: MarkColorInfo[];
   /** "Show my marks": off hides every mark on the paper (kept, not deleted). */
   showMarks: boolean;
@@ -29,8 +30,12 @@ interface MarksState {
   /** Loads a paper's marks and chunk spans. */
   loadPaper: (paperId: number) => Promise<void>;
   loadColors: () => Promise<void>;
-  /** Saves a mark (its block lands in the paper's note) and confirms where. */
-  create: (body: MarkIn) => Promise<MarkCreated>;
+  /** The paper's chunk spans, loading them (again) when they aren't here
+   * yet. Throws when they can't be had. */
+  ensureChunks: (paperId: number) => Promise<ChunkMap>;
+  /** Saves a mark (its block lands in the paper's note) and, unless
+   * `quiet`, confirms where (`toastSaved`). */
+  create: (body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
 }
@@ -77,6 +82,37 @@ export function savedToText(saved: SavedTo, t: TFunction): string {
   return t("notes:marks.savedTo", { defaultValue: "Saved to {{paper}} › {{section}}", paper, section });
 }
 
+/** "Saved to <paper> › §2, §3": where one selection's marks went (one per
+ * section it crossed). */
+export function savedToManyText(saved: readonly SavedTo[], t: TFunction): string {
+  if (saved.length === 1) return savedToText(saved[0]!, t);
+  const sections = saved.map((s) => (s.section ? sectionLabel(s.section) : null)).filter((s): s is string => !!s);
+  return t("notes:marks.savedToSections", {
+    defaultValue: "Saved to {{paper}} › {{sections}}",
+    paper: saved[0]?.paper_title ?? "",
+    sections: sections.join(", "),
+  });
+}
+
+/** One confirmation for one selection's marks, with Show (the first). */
+export function toastSaved(paperId: number, results: readonly MarkCreated[]): void {
+  const first = results[0];
+  if (!first) return;
+  const t = i18n.t.bind(i18n) as TFunction;
+  toast(savedToManyText(results.map((r) => r.saved_to), t), {
+    action: {
+      label: t("notes:marks.show", "Show"),
+      onClick: () =>
+        useNotesPaneStore.getState().openAt({
+          kind: "paper",
+          id: paperId,
+          noteId: first.saved_to.note_id,
+          blockId: first.mark.block_id,
+        }),
+    },
+  });
+}
+
 /** Shows a note's new state in an open editor (the server changed it). */
 function refreshNote(noteId: number | undefined): void {
   if (noteId === undefined) return;
@@ -119,6 +155,7 @@ export function useMarkFocusIds(paperId: number | null): ReadonlySet<string> | n
 }
 
 let colorsRequest: Promise<void> | null = null;
+const chunkRequests = new Map<number, Promise<ChunkMap>>();
 
 export const useMarksStore = create<MarksState>()(
   persist(
@@ -174,14 +211,27 @@ export const useMarksStore = create<MarksState>()(
         setShowMarks: (on) => set({ showMarks: on }),
 
         loadPaper: async (paperId) => {
-          const [marks, anchors] = await Promise.all([
-            listMarks(paperId),
-            getChunkAnchors(paperId).catch(() => null),
-          ]);
-          set((s) => ({
-            marksByPaper: { ...s.marksByPaper, [paperId]: marks },
-            chunksByPaper: { ...s.chunksByPaper, [paperId]: anchors ? chunkMap(anchors) : null },
-          }));
+          const chunks = get().ensureChunks(paperId).catch(() => undefined);
+          const marks = await listMarks(paperId);
+          set((s) => ({ marksByPaper: { ...s.marksByPaper, [paperId]: marks } }));
+          await chunks;
+        },
+
+        ensureChunks: (paperId) => {
+          const have = get().chunksByPaper[paperId];
+          if (have) return Promise.resolve(have);
+          let request = chunkRequests.get(paperId);
+          if (!request) {
+            request = getChunkAnchors(paperId)
+              .then((anchors) => {
+                const map = chunkMap(anchors);
+                set((s) => ({ chunksByPaper: { ...s.chunksByPaper, [paperId]: map } }));
+                return map;
+              })
+              .finally(() => chunkRequests.delete(paperId));
+            chunkRequests.set(paperId, request);
+          }
+          return request;
         },
 
         loadColors: () => {
@@ -196,7 +246,7 @@ export const useMarksStore = create<MarksState>()(
           return colorsRequest;
         },
 
-        create: async (body) => {
+        create: async (body, opts) => {
           let res: MarkCreated;
           try {
             res = await createMark(body);
@@ -210,18 +260,7 @@ export const useMarksStore = create<MarksState>()(
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);
           refreshNote(saved.note_id);
-          toast(savedToText(saved, t), {
-            action: {
-              label: t("notes:marks.show", "Show"),
-              onClick: () =>
-                useNotesPaneStore.getState().openAt({
-                  kind: "paper",
-                  id: body.paper_content_id,
-                  noteId: saved.note_id,
-                  blockId: mark.block_id,
-                }),
-            },
-          });
+          if (!opts?.quiet) toastSaved(body.paper_content_id, [res]);
           return res;
         },
 
