@@ -53,6 +53,11 @@ interface MarksState {
   notePenMark: (mark: PenMark) => void;
   /** Loads a paper's marks and chunk spans. */
   loadPaper: (paperId: number) => Promise<void>;
+  /** The paper's marks again, as the server has them (the reconcile after a
+   * timed-out op): merged so a mark created while the request was out
+   * stays, and dropped when aborted or overtaken by a newer refetch. Marks
+   * only: the chunk anchors are not fetched. */
+  refetchMarks: (paperId: number, signal?: AbortSignal) => Promise<void>;
   loadColors: () => Promise<void>;
   /** The paper's chunk spans, loading them (again) when they aren't here
    * yet. Throws when they can't be had. */
@@ -226,7 +231,7 @@ function within<T>(ms: number, op: (signal: AbortSignal) => Promise<T>, onTimeou
  * may have landed there (the answer just came too late), so the client's
  * copy can't be trusted; the next queued op sees the refetched marks. */
 async function reconcile(paperId: number): Promise<void> {
-  await within(opTimeoutMs, () => useMarksStore.getState().loadPaper(paperId)).catch(() => undefined);
+  await within(opTimeoutMs, (signal) => useMarksStore.getState().refetchMarks(paperId, signal)).catch(() => undefined);
 }
 
 /** Runs `op` after every operation queued before it. Each gets at most
@@ -251,6 +256,12 @@ export function resetMarkOps(timeoutMs = MARK_OP_TIMEOUT_MS): void {
 }
 
 let colorsRequest: Promise<void> | null = null;
+/** Per paper, the latest refetch: an older one's answer is dropped. */
+const refetchGen = new Map<number, number>();
+/** When each mark was created here (a sequence), so a refetch sent before
+ * it doesn't drop it. */
+let createSeq = 0;
+const createdAt = new Map<string, number>();
 const chunkRequests = new Map<number, Promise<ChunkMap>>();
 
 export const useMarksStore = create<MarksState>()(
@@ -441,6 +452,26 @@ export const useMarksStore = create<MarksState>()(
         notePenMark: (mark) =>
           set((s) => (s.penOn ? { penSession: [...s.penSession.filter((m) => m.id !== mark.id), mark] } : {})),
 
+        refetchMarks: async (paperId, signal) => {
+          const gen = (refetchGen.get(paperId) ?? 0) + 1;
+          refetchGen.set(paperId, gen);
+          const since = createSeq;
+          const marks = await listMarks(paperId, signal);
+          // Aborted (its op timed out) or overtaken: a late snapshot.
+          if (signal?.aborted || refetchGen.get(paperId) !== gen) return;
+          const ids = new Set(marks.map((m) => m.id));
+          set((s) => ({
+            marksByPaper: {
+              ...s.marksByPaper,
+              [paperId]: [
+                ...marks,
+                // Created here after the request went out: not in its snapshot.
+                ...(s.marksByPaper[paperId] ?? []).filter((m) => !ids.has(m.id) && (createdAt.get(m.id) ?? -1) >= since),
+              ],
+            },
+          }));
+        },
+
         loadPaper: async (paperId) => {
           const chunks = get().ensureChunks(paperId).catch(() => undefined);
           const marks = await listMarks(paperId);
@@ -488,6 +519,8 @@ export const useMarksStore = create<MarksState>()(
           }
           const saved = res.saved_to;
           const mark: Mark = { ...res.mark, note_id: saved.note_id };
+          createSeq += 1;
+          createdAt.set(mark.id, createSeq);
           put(body.paper_content_id, (list) => [...list.filter((m) => m.id !== mark.id), mark]);
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);

@@ -424,3 +424,71 @@ describe("an op that reached the server but timed out", () => {
     expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[0]!.erased).toBe(true);
   });
 });
+
+describe("the refetch after a timeout", () => {
+  /** A queued op that never answers on paper 3: its timeout starts a refetch. */
+  const hangOnPaper3 = () =>
+    queueMarkOp(() => new Promise<never>(() => undefined), { paperId: 3 }).catch(() => undefined);
+
+  it("a refetch that itself timed out never writes its late snapshot", async () => {
+    resetMarkOps(40);
+    const stale: Mark = { ...MARK, id: "mk_stale" };
+    server.use(
+      http.get(`${API_BASE_URL}/marks`, async () => {
+        await new Promise((r) => setTimeout(r, 150));
+        return HttpResponse.json([stale]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await hangOnPaper3();
+    // The refetch times out too; the queue moves on.
+    await queueMarkOp(() => Promise.resolve());
+    // A later op's result, after the refetch was given up.
+    const later: Mark = { ...MARK, id: "mk_later", note_id: 7 };
+    useMarksStore.setState({ marksByPaper: { 3: [later] } });
+    await new Promise((r) => setTimeout(r, 250));
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_later"]);
+  });
+
+  it("refetches marks only (not the chunk anchors) and keeps a mark created meanwhile", async () => {
+    resetMarkOps(400);
+    let anchors = 0;
+    const made: Mark = { ...MARK, id: "mk_new", block_id: "b_new" };
+    server.use(
+      http.get(`${API_BASE_URL}/papers/content/3/chunk-anchors`, () => {
+        anchors += 1;
+        return new Promise<never>(() => undefined);
+      }),
+      http.post(`${API_BASE_URL}/marks`, () =>
+        HttpResponse.json({
+          mark: made,
+          block: null,
+          saved_to: { note_id: 7, paper_title: "Duo", section: "2 Method", part_index: 0, part_count: 1 },
+        }),
+      ),
+      http.get(`${API_BASE_URL}/marks`, async () => {
+        // A selection's mark (not queued) lands while the refetch is out.
+        await useMarksStore.getState().create({
+          paper_content_id: 3,
+          kind: "highlight",
+          color: "green",
+          view: "html",
+          pieces: MARK.pieces,
+          section_key: "2 Method",
+        });
+        // The snapshot was taken before it.
+        return HttpResponse.json([MARK]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    resetMarkOps(40);
+    await hangOnPaper3();
+    const started = Date.now();
+    await queueMarkOp(() => Promise.resolve());
+    // The queue was not held by the chunk-anchor fetch (it never answers).
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(anchors).toBe(0);
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id).sort()).toEqual(["mk_1", "mk_new"]);
+  });
+});
+

@@ -1363,8 +1363,8 @@ export async function createMark(body: MarkIn, signal?: AbortSignal): Promise<Ma
   return apiFetch<MarkCreated>("/marks", { method: "POST", body: JSON.stringify(body), signal });
 }
 
-export async function listMarks(paperContentId: number): Promise<Mark[]> {
-  return apiFetch<Mark[]>(`/marks?paper_content_id=${paperContentId}`);
+export async function listMarks(paperContentId: number, signal?: AbortSignal): Promise<Mark[]> {
+  return apiFetch<Mark[]>(`/marks?paper_content_id=${paperContentId}`, { signal });
 }
 
 export async function deleteMark(markId: string, signal?: AbortSignal): Promise<ApplyResult> {
