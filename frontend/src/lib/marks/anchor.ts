@@ -382,3 +382,16 @@ export function findPiece(index: TextIndex, piece: MarkPiece, chunks: ChunkMap |
   range.setEnd(...pointAfter(index, best + quote.length - 1));
   return range;
 }
+
+/** The range of characters `[start, end)` of the reading text (a span the
+ * backend found there for a mark made on the PDF); null when the text is
+ * shorter (a different render). */
+export function rangeAt(index: TextIndex, start: number, end: number): Range | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > index.text.length) {
+    return null;
+  }
+  const range = index.doc.createRange();
+  range.setStart(...pointBefore(index, start));
+  range.setEnd(...pointAfter(index, end - 1));
+  return range;
+}

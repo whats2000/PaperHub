@@ -180,3 +180,35 @@ describe("Follow on a PDF", () => {
     await waitFor(() => expect(onReading).toHaveBeenLastCalledWith("2 Method"));
   });
 });
+
+describe("marks made in the HTML view", () => {
+  const htmlMark = (id: string, quote: string) =>
+    pdfMark({
+      id,
+      view: "html",
+      kind: "highlight",
+      color: "green",
+      pieces: [{ quote, chunk_start: 101, chunk_end: 101, prefix: "", suffix: "" }],
+    });
+
+  it("show on the PDF wherever their quote is found in the text layer, math or not", async () => {
+    resetStores([htmlMark("mh", "learn from demos."), htmlMark("mm", "Robots $x$ from demos. Next")]);
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(document.querySelector('[data-mark="mh"]')).not.toBeNull());
+    const box = document.querySelector<HTMLElement>('[data-mark="mh"]')!;
+    // "Robots " is 7 of the first span's 13 characters.
+    expect(Number.parseFloat(box.style.left)).toBeCloseTo(((30 + (120 * 7) / 13) / 600) * 100, 1);
+    expect(Number.parseFloat(box.style.width)).toBeCloseTo(((300 - (30 + (120 * 7) / 13)) / 600) * 100, 1);
+    // Math in the quote is a gap; the match runs over two lines.
+    expect(document.querySelectorAll('[data-mark="mm"]')).toHaveLength(2);
+  });
+
+  it("are not drawn where the quote is not on the page", async () => {
+    resetStores([htmlMark("mh", "learn from demos."), htmlMark("mx", "words that are not on this page")]);
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(document.querySelector('[data-mark="mh"]')).not.toBeNull());
+    expect(document.querySelector('[data-mark="mx"]')).toBeNull();
+  });
+});

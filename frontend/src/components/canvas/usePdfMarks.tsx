@@ -156,7 +156,13 @@ export function usePdfMarks({
   const marks = useMemo(() => {
     const hidden = new Set(colors.filter((c) => !c.visible).map((c) => c.color));
     return allMarks.filter(
-      (m) => m.view === "pdf" && m.deleted_at === null && !m.lang && !(m.color !== null && hidden.has(m.color)),
+      (m) =>
+        // Marks made in the HTML view of the paper show on its PDF too
+        // (passages only; the page finds them by their quote).
+        (m.view === "pdf" || m.kind === "highlight" || m.kind === "quote") &&
+        m.deleted_at === null &&
+        !m.lang &&
+        !(m.color !== null && hidden.has(m.color)),
     );
   }, [allMarks, colors]);
 

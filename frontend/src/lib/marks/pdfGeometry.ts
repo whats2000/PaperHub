@@ -404,3 +404,97 @@ export function linesBelow(page: Element, clientY: number, lines = 2): string {
     .filter(Boolean)
     .join("\n");
 }
+
+/** A page's text-layer text, normalised the way the paper's reading text
+ * is matched (ligatures unfolded, a word broken across lines by a hyphen
+ * joined, whitespace collapsed), with each character's source. */
+export interface PageText {
+  page: Element;
+  text: string;
+  /** Per character: the text node and offset it came from (null: a space
+   * between lines). */
+  at: ({ node: Text; offset: number } | null)[];
+}
+
+export function pageText(page: Element): PageText {
+  const out: PageText = { page, text: "", at: [] };
+  const push = (ch: string, src: { node: Text; offset: number } | null) => {
+    if (/\s/.test(ch)) {
+      if (!out.text || out.text.endsWith(" ")) return;
+      out.text += " ";
+      out.at.push(src);
+      return;
+    }
+    out.text += ch;
+    out.at.push(src);
+  };
+  let lastBottom: number | null = null;
+  for (const s of layerSpans(page)) {
+    if (lastBottom !== null && s.box[1] >= lastBottom - 0.002) {
+      // A new line: a hyphen at the end of the last one joins the word.
+      const trimmed = out.text.replace(/ $/, "");
+      if (/\w-$/.test(trimmed)) {
+        out.text = trimmed.slice(0, -1);
+        out.at.length = out.text.length;
+      } else {
+        push(" ", null);
+      }
+    }
+    for (let i = 0; i < s.node.data.length; i++) {
+      for (const ch of s.node.data[i]!.normalize("NFKC")) push(ch, { node: s.node, offset: i });
+    }
+    lastBottom = s.box[3];
+  }
+  return out;
+}
+
+/** How far apart (characters) two math-free runs of a quote may be on the
+ * page: the glyphs of the formula between them. */
+const MATH_GAP = 160;
+
+/** The line boxes of a quote from the paper's reading text on a page, or
+ * null when it is not there. Math (`$…$`) in the quote is a gap: the runs
+ * between formulas are found in order, close together. */
+export function findInPage(pt: PageText, quote: string): Frac[] | null {
+  const runs = quote
+    .normalize("NFKC")
+    .split(/\$[^$]*\$/)
+    .map((r) => r.replace(/\s+/g, " ").trim())
+    .filter((r) => r.length >= 2);
+  if (!runs.length) return null;
+  for (let first = pt.text.indexOf(runs[0]!); first >= 0; first = pt.text.indexOf(runs[0]!, first + 1)) {
+    let end = first + runs[0]!.length;
+    let ok = true;
+    for (const run of runs.slice(1)) {
+      const at = pt.text.indexOf(run, end);
+      if (at < 0 || at - end > MATH_GAP) {
+        ok = false;
+        break;
+      }
+      end = at + run.length;
+    }
+    if (ok) return rectsOfSpan(pt, first, end);
+  }
+  return null;
+}
+
+function rectsOfSpan(pt: PageText, start: number, end: number): Frac[] {
+  const pageBox = pt.page.getBoundingClientRect();
+  const boxes: Frac[] = [];
+  let run: { node: Text; from: number; to: number } | null = null;
+  const flush = () => {
+    if (run) boxes.push(...nodeRects(run.node, run.from, run.to + 1).map((r) => toFrac(r, pageBox)));
+    run = null;
+  };
+  for (let i = start; i < end; i++) {
+    const src = pt.at[i];
+    if (!src) continue;
+    if (run && run.node === src.node) run.to = Math.max(run.to, src.offset);
+    else {
+      flush();
+      run = { node: src.node, from: src.offset, to: src.offset };
+    }
+  }
+  flush();
+  return lineBoxes(boxes);
+}

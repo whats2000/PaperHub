@@ -131,6 +131,9 @@ export function PdfView({
   // Pages whose text layer holds no text (a scan) by 1-based page number:
   // a drag there draws a box.
   const [scannedPages, setScannedPages] = useState<Record<number, boolean>>({});
+  // Bumped per page each time its text layer renders (a resize renders it
+  // again): marks made in the HTML view are found in it.
+  const [textVersions, setTextVersions] = useState<Record<number, number>>({});
   const pdfMarks = usePdfMarks({
     paperId: marks?.paperId ?? null,
     readerRef: containerRef,
@@ -311,6 +314,9 @@ export function PdfView({
                   : { ...prev, [i + 1]: page.originalWidth },
               )
             }
+            onRenderTextLayerSuccess={() =>
+              setTextVersions((prev) => ({ ...prev, [i + 1]: (prev[i + 1] ?? 0) + 1 }))
+            }
             onGetTextSuccess={({ items }) => {
               const scanned = !items.some((it) => "str" in it && it.str.trim() !== "");
               setScannedPages((prev) =>
@@ -323,7 +329,11 @@ export function PdfView({
               renderedWidth={width}
               originalWidth={pageWidths[i + 1] ?? 0}
             />
-            <PdfMarksPage pageNumber={i + 1} hasTextLayer={!scannedPages[i + 1]} />
+            <PdfMarksPage
+              pageNumber={i + 1}
+              hasTextLayer={!scannedPages[i + 1]}
+              textVersion={textVersions[i + 1] ?? 0}
+            />
             {isTarget && highlight && (
               <div
                 key={`${highlight.key}:${nonce}`}

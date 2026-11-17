@@ -13,8 +13,8 @@
  * layer out.
  */
 import { prefersReducedMotion } from "@/lib/motion";
-import { buildTextIndex, findPiece, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
-import type { Mark, MarkColor, MarkColorInfo } from "@/types/notes";
+import { buildTextIndex, findPiece, rangeAt, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
+import type { Mark, MarkColor, MarkColorInfo, MarkPiece } from "@/types/notes";
 
 export const MK_STYLE_ID = "ph-mk-style";
 const LAYER_CLASS = "ph-mk-layer";
@@ -226,10 +226,16 @@ function livePieces(m: Mark) {
 
 const hasQuote = (m: Mark) => livePieces(m).some((p) => typeof p.quote === "string" && p.quote.trim() !== "");
 
-/** Whether the HTML reader draws this mark (translation marks come later). */
+/** A piece of a mark made on the PDF tab, where the reading text holds it
+ * (located when it was saved). */
+const located = (p: MarkPiece) => typeof p.text_start === "number" && typeof p.text_end === "number";
+
+/** Whether the HTML reader draws this mark (translation marks come later).
+ * A mark made on the PDF tab shows here where its text was found. */
 function drawable(m: Mark, hidden: ReadonlySet<string>): boolean {
   if (m.deleted_at !== null || m.lang) return false;
   if (m.color !== null && hidden.has(m.color)) return false;
+  if (m.view === "pdf") return (m.kind === "quote" || m.kind === "highlight") && livePieces(m).some(located);
   return m.kind === "quote" || m.kind === "highlight" || m.kind === "figure" || m.kind === "equation";
 }
 
@@ -478,7 +484,13 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       let targets: Element[] = [];
       const whole = m.kind === "figure" || m.kind === "equation";
       const figureId = livePieces(m).find((p) => typeof p.figure_id === "string")?.figure_id;
-      if (m.kind === "figure" && typeof figureId === "string") {
+      if (m.view === "pdf") {
+        index ??= buildTextIndex(doc);
+        ranges = livePieces(m)
+          .filter(located)
+          .map((p) => rangeAt(index!, p.text_start as number, p.text_end as number))
+          .filter((r): r is Range => r !== null);
+      } else if (m.kind === "figure" && typeof figureId === "string") {
         const el = figureById(doc, figureId);
         targets = el ? [el] : [];
       } else if (hasQuote(m)) {

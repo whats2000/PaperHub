@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { chunkMap } from "@/lib/marks/anchor";
+import { buildTextIndex, chunkMap } from "@/lib/marks/anchor";
 import {
   MK_STYLE_ID,
   attachHtmlMarks,
@@ -288,5 +288,32 @@ describe("figures and display equations", () => {
     expect(boxes[0]!.dataset.color).toBe("pink");
     expect(boxes[0]!.style.width).toBe("300px");
     expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain('.ph-mk[data-kind="figure"]');
+  });
+});
+
+describe("marks made on the PDF tab", () => {
+  it("are drawn from their span in the reading text; without one, not at all", () => {
+    const doc = makeDoc(PAPER);
+    const text = buildTextIndex(doc).text;
+    const at = text.indexOf("agent pose");
+    const pdf = mark("mp", "agent pose", 102, {
+      view: "pdf",
+      color: "blue",
+      pieces: [
+        { quote: "agent pose", page: 0, rects: [[0.1, 0.1, 0.3, 0.12]], chunk_start: 102, chunk_end: 102, text_start: at, text_end: at + 10 },
+      ],
+    });
+    const lost = mark("mq", "latency drops", 103, {
+      view: "pdf",
+      pieces: [{ quote: "latency drops", page: 0, rects: [[0.1, 0.2, 0.3, 0.22]] }], // never located
+    });
+    attachHtmlMarks(doc, opts({ marks: [pdf, lost] }));
+    const boxes = doc.querySelectorAll<HTMLElement>('.ph-mk[data-mark="mp"]');
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0]!.dataset.color).toBe("blue");
+    // The range drawn is the stored span (left = offset in its text node).
+    const node = doc.getElementById("p1")!.lastChild as Text;
+    expect(boxes[0]!.style.left).toBe(`${node.data.indexOf("agent pose") * 6}px`);
+    expect(doc.querySelector('.ph-mk[data-mark="mq"]')).toBeNull();
   });
 });

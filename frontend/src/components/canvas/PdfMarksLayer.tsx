@@ -11,7 +11,7 @@ import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
 import { useBoxDrag } from "@/components/canvas/useBoxDrag";
 import { PdfMarksContext } from "@/components/canvas/usePdfMarks";
 import { MARK_PALETTE } from "@/lib/marks/htmlMarks";
-import { EQUATION_TYPE, FIGURE_TYPES, type Frac } from "@/lib/marks/pdfGeometry";
+import { EQUATION_TYPE, FIGURE_TYPES, findInPage, pageText, type Frac } from "@/lib/marks/pdfGeometry";
 import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { Mark, MarkColor, PaperPageBlock } from "@/types/notes";
@@ -81,7 +81,17 @@ const within = (b: Frac, x: number, y: number) =>
 
 /** One page's marks layer: the marks, the corner mark buttons, the Box
  * tool's drag surface. Rendered inside react-pdf's `<Page>`. */
-export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: number; hasTextLayer?: boolean }) {
+export function PdfMarksPage({
+  pageNumber,
+  hasTextLayer = true,
+  textVersion = 1,
+}: {
+  pageNumber: number;
+  hasTextLayer?: boolean;
+  /** Bumped each time react-pdf renders the page's text layer (0: not yet):
+   * marks made in the HTML view are found in it again. */
+  textVersion?: number;
+}) {
   const ctx = useContext(PdfMarksContext);
   const page = pageNumber - 1;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -112,12 +122,39 @@ export function PdfMarksPage({ pageNumber, hasTextLayer = true }: { pageNumber: 
     return () => io.disconnect();
   }, [loadBlocks, page]);
 
+  // Marks made in the HTML view of the paper show here wherever their
+  // quote is in the page's text layer (not found: not drawn).
+  const htmlMarks = useMemo(() => (ctx?.marks ?? NO_MARKS).filter((m) => m.view === "html"), [ctx?.marks]);
+  const [found, setFound] = useState<Readonly<Record<string, Frac[]>>>({});
+  useEffect(() => {
+    const el = rootRef.current?.parentElement;
+    if (!el || !htmlMarks.length || !textVersion) return;
+    // After the text layer has laid out.
+    const frame = requestAnimationFrame(() => {
+      const text = pageText(el);
+      const next: Record<string, Frac[]> = {};
+      for (const m of htmlMarks) {
+        const boxes = m.pieces
+          .filter((p) => !p.erased && !p.removed && !p.lost)
+          .flatMap((p) => findInPage(text, String(p.quote ?? "")) ?? []);
+        if (boxes.length) next[m.id] = boxes;
+      }
+      setFound(next);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [htmlMarks, textVersion]);
+
   const drawn = useMemo<Drawn[]>(
     () =>
       (ctx?.marks ?? NO_MARKS)
-        .map((m) => ({ id: m.id, kind: m.kind, color: m.color, boxes: boxesOn(m, page) }))
+        .map((m) => ({
+          id: m.id,
+          kind: m.kind,
+          color: m.color,
+          boxes: m.view === "html" ? (found[m.id] ?? []) : boxesOn(m, page),
+        }))
         .filter((d) => d.boxes.length > 0),
-    [ctx?.marks, page],
+    [ctx?.marks, page, found],
   );
   const shown = useLeaving(drawn);
   const objects = useMemo(
