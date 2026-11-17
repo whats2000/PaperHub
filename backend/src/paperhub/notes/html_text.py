@@ -53,6 +53,7 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
          "meta", "param", "source", "track", "wbr"}
 _DELIMS = (("\\(", "\\)"), ("\\[", "\\]"), ("$$", "$$"), ("$", "$"))
 CHUNK_PREFIX = "phchunk-"
+FIGURE_PREFIX = "phfig-"
 
 
 def normalise(text: str) -> str:
@@ -77,6 +78,9 @@ class TextIndex:
     #: (index in ``text`` where a run of one block element starts, that
     #: element's id): which paragraph a character sits in
     paragraphs: list[tuple[int, int]] = field(default_factory=list)
+    #: figure anchor id (``phfig-001``) -> how many ``spans`` come before it
+    #: in the document: a figure mark, which quotes no text, is found by it
+    figures: dict[str, int] = field(default_factory=dict)
 
 
 def paragraph_at(index: TextIndex, at: int) -> int | None:
@@ -105,6 +109,7 @@ class _Builder(HTMLParser):
         self.stack: list[_El] = []
         self.chars: list[str] = []
         self.spans: list[tuple[str, int]] = []
+        self.figures: dict[str, int] = {}
         self.paragraphs: list[tuple[int, int]] = []
         self.prev_space = True
         self.prev_block: int | None = None
@@ -164,6 +169,8 @@ class _Builder(HTMLParser):
         dom_id = a.get("id") or ""
         if not skip and not self._skipped() and dom_id.startswith(CHUNK_PREFIX):
             self.spans.append((dom_id, len(self.chars)))
+        if not skip and not self._skipped() and dom_id.startswith(FIGURE_PREFIX):
+            self.figures[dom_id] = len(self.spans)
         if tag in _VOID:
             return
         self.stack.append(el)
@@ -238,4 +245,5 @@ def build_text_index(html: str) -> TextIndex:
     b.close()
     if b.math_depth is not None:
         b._close_math()
-    return TextIndex(text="".join(b.chars), spans=b.spans, paragraphs=b.paragraphs)
+    return TextIndex(text="".join(b.chars), spans=b.spans, paragraphs=b.paragraphs,
+                     figures=b.figures)

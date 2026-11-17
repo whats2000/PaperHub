@@ -276,3 +276,22 @@ async def test_context_found_away_from_the_selection_does_not_place_it() -> None
         before="Figure 4: (a) Varying the capacity factor in our expert choice method: Decreasing the",
         after="from two to one degrades")
     assert span is None and meta["reason"] == "ambiguous"
+
+
+async def test_reanchor_keeps_a_short_pdf_piece_at_its_own_occurrence(conn, tmp_path: Path) -> None:
+    """Re-anchoring finds a PDF piece of a few common words again near where
+    it was, not at their first occurrence in the paper."""
+    chunks = [("2 Related Work", "Prior work tunes the capacity factor by hand."),
+              ("5 Ablation", "Decreasing the capacity factor from two to one degrades it.")]
+    ids = await _paper(conn, tmp_path, chunks)
+    reading = " ".join(t for _, t in chunks)
+    at = reading.index("capacity factor", 30)
+    piece = {"quote": "capacity factor", "page": 7, "rects": [[0.1, 0.8, 0.3, 0.82]],
+             "chunk_start": ids[1], "chunk_end": ids[1], "text_start": at, "text_end": at + 15}
+    await create_mark(conn, MarkIn(paper_content_id=1, kind="highlight", color="blue",
+                                   view="pdf", pieces=[piece], section_key="5 Ablation"))
+    new = await _paper(conn, tmp_path, chunks)
+    await reanchor_paper(conn, 1)
+    [lm] = await list_marks(conn, 1)
+    [p] = lm["pieces"]
+    assert (p["chunk_start"], p["text_start"]) == (new[1], at)

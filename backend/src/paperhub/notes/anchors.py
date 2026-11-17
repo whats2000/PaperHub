@@ -145,6 +145,14 @@ async def _reading_text(conn: aiosqlite.Connection, pcid: int,
     return index, ids
 
 
+def _chunk_before(index: TextIndex, ids: dict[str, int], n: int) -> int | None:
+    """The chunk of the last of the first ``n`` spans that names one (the
+    chunk a figure anchor follows in the document); else the first chunk."""
+    named = [ids[d] for d, _ in index.spans if d in ids]
+    before = [ids[d] for d, _ in index.spans[:n] if d in ids]
+    return before[-1] if before else (named[0] if named else None)
+
+
 def _chunk_at(index: TextIndex, ids: dict[str, int], at: int) -> int | None:
     """The chunk whose span opens last at or before ``at`` (else the first)."""
     first: int | None = None
@@ -208,6 +216,18 @@ def _anchor(m: dict[str, Any], index: TextIndex, ids: dict[str, int],
             pieces.append(p)
             continue
         seen += 1
+        if p.get("figure_id") and not str(p.get("quote") or "").strip():
+            # A figure quotes no text: it is where its phfig anchor is.
+            before = index.figures.get(f"ph{p['figure_id']}")
+            if before is None:
+                lost += 1
+                pieces.append({**p, "lost": True})
+                continue
+            cid = _chunk_before(index, ids, before)
+            moved = moved or (cid, cid) != (p.get("chunk_start"), p.get("chunk_end"))
+            pieces.append({**{k: v for k, v in p.items() if k != "lost"},
+                           "chunk_start": cid, "chunk_end": cid})
+            continue
         span = _find(index, p, _hint(index, ids, p))
         if span is None:
             lost += 1
@@ -298,7 +318,9 @@ def _relocate(p: _Piece, index: TextIndex, ids: dict[str, int], words: Prepared)
     geometry, and without a match it keeps no stale chunk ids."""
     # A piece marked on a translation is placed by the paragraph it translates.
     text = str(p.get("orig") or p.get("quote") or "")
-    span, _meta = match_text(index.text, text, words=words)
+    old = p.get("text_start")
+    span, _meta = match_text(index.text, text, words=words,
+                             near=old if isinstance(old, int) else None)
     covered = chunks_in(index, ids, *span) if span else []
     if span is None or not covered:
         return {k: v for k, v in p.items()

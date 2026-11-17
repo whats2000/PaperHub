@@ -139,7 +139,7 @@ def prepare(reading: str) -> Prepared:
 
 
 def match_text(reading: str, query: str, *, words: Prepared | None = None,
-               before: str = "", after: str = "",
+               before: str = "", after: str = "", near: int | None = None,
                ) -> tuple[tuple[int, int] | None, dict[str, Any]]:
     """The span in ``reading`` of text read off a PDF page, or None; and how
     it was decided (for the response's ``_meta``). ``words``: the reading
@@ -155,7 +155,10 @@ def match_text(reading: str, query: str, *, words: Prepared | None = None,
 
     A query longer than ``MAX_QUERY_CHARS`` is matched by its head and its
     tail, which must line up in order; the span runs from the head's start to
-    the tail's end, so it still covers the whole selection."""
+    the tail's end, so it still covers the whole selection.
+
+    ``near``: where the text was last found (re-anchoring): among equally
+    good places, the nearest wins, and context-free ambiguity is no miss."""
     prep = words if words is not None else prepare(reading)
     if len(query) <= MAX_QUERY_CHARS:
         within: tuple[int, int] | None = None
@@ -163,10 +166,10 @@ def match_text(reading: str, query: str, *, words: Prepared | None = None,
         if before.strip() or after.strip():
             within = _context_span(prep, before, query, after)
             context = "matched" if within is not None else "missed"
-        span, whole = _match(prep, query, within=within)
+        span, whole = _match(prep, query, within=within, near=near)
         whole["split"] = False
         whole["context"] = context
-        if span is not None and context == "missed" and whole.get("ambiguous"):
+        if span is not None and context == "missed" and whole.get("ambiguous") and near is None:
             whole.update(matched=False, reason="ambiguous")
             return None, whole
         return span, whole
@@ -213,9 +216,11 @@ def _context_span(prep: Prepared, before: str, query: str, after: str,
 
 
 def _match(prep: Prepared, query: str, *, within: tuple[int, int] | None = None,
+           near: int | None = None,
            ) -> tuple[tuple[int, int] | None, dict[str, Any]]:
     """``within``: a span of the reading text the match should start in;
-    used when one does (else any place)."""
+    used when one does (else any place). ``near``: a position in the reading
+    text; among equally good places the nearest is taken."""
     q = [w for w, _, _ in _tokens(pdf_normalise(query), math=False) if w]
     meta: dict[str, Any] = {"query_words": len(q), "matched": False}
     if len(q) < MIN_WORDS:
@@ -242,7 +247,10 @@ def _match(prep: Prepared, query: str, *, within: tuple[int, int] | None = None,
     if within is not None:
         inside = [pr for pr in pairs if within[0] <= toks[pr[1]][1] < within[1]]
         pairs = inside or pairs
-    pairs.sort()
+    if near is not None:
+        pairs.sort(key=lambda pr: (pr[0], abs(toks[pr[1]][1] - near)))
+    else:
+        pairs.sort()
     _, a, b = pairs[0]
     # The runs grow outward over the query's remaining words and math.
     first = _extend(words, q, i - 1, a - 1, -1)

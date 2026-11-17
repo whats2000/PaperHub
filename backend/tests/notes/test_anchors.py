@@ -363,3 +363,28 @@ async def test_reanchor_checks_a_partly_lost_translation_mark(conn):
     lm, blk = await _block(conn, m)
     assert lm["status"] == "translation_changed"
     assert blk.props["translationChanged"] is True and blk.props["piecesLost"] == 1
+
+
+async def test_reanchor_finds_a_figure_mark_by_its_figure_anchor(conn):
+    """A figure mark quotes no text: it is placed by the figure's phfig
+    anchor in the rendered HTML, never flagged lost for an empty quote."""
+    def html(fig: bool) -> str:
+        figure = '<span id="phfig-001"></span><figure><img src="f.png"></figure>' if fig else ""
+        return ("<!DOCTYPE html><html><body>\n"
+                f'<p><span id="phchunk-0"></span>{TEXT_A}</p>\n{figure}\n'
+                f'<p><span id="phchunk-1"></span>{TEXT_B}</p>\n</body></html>')
+    a, b = await _paper(conn, [("Intro", TEXT_A), ("Method", TEXT_B)], html(True))
+    m, _ = await create_mark(conn, MarkIn(
+        paper_content_id=1, kind="figure", color="blue", view="html",
+        pieces=[{"quote": "", "chunk_start": a, "chunk_end": a, "prefix": "",
+                 "suffix": "", "figure_id": "fig-001"}], section_key="Intro"))
+    a2, b2 = await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)], html(True))
+    stats = await reanchor_paper(conn, 1)
+    assert stats["lost"] == 0 and stats["moved"] == 1
+    [lm] = await list_marks(conn, 1)
+    assert lm["status"] == "ok"
+    assert (lm["pieces"][0]["chunk_start"], lm["pieces"][0]["chunk_end"]) == (a2, a2)
+    # The figure is gone from the paper: now it is lost.
+    await _set_chunks(conn, [("Intro", TEXT_A), ("Method", TEXT_B)], html(False))
+    assert (await reanchor_paper(conn, 1))["lost"] == 1
+    assert m["id"] == lm["id"] and b and b2
