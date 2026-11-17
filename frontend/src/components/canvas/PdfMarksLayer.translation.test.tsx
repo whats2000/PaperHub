@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useContext, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -112,25 +113,36 @@ describe("marks on the PDF translation card", () => {
     expect(useMarksStore.getState().penSession[0]!.places).toEqual([`t:${LANG}:${KEY}`]);
   });
 
-  it("a mark whose words the card isn't showing is a 文 marker on its block; a click or Enter shows it", async () => {
+  it("a mark whose words the card isn't showing is a 文 marker on its block; Enter shows it once", async () => {
     resetStores([trMark()]);
+    const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
     render(<Reader />);
     layOut();
-    const marker = await screen.findByRole("button", { name: `A mark on the ${LANG} translation. Show it` });
+    const marker = await screen.findByRole("button", { name: "A mark on the 繁中 translation. Show it" });
     expect(marker.textContent).toBe("文");
     expect(marker.tabIndex).toBe(0);
-    // Enter on the focused marker.
-    fireEvent.click(marker);
-    expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+    // A real Enter on the focused marker: one request, not one from the
+    // button and another from the page's hit-test.
+    marker.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(showMark).toHaveBeenCalledTimes(1);
+    expect(showMark).toHaveBeenCalledWith("mt");
     expect(useTranslationStore.getState().language).toBe(LANG);
     expect(useTranslationStore.getState().reveal).toMatchObject({ markId: "mt" });
-    // A pointer click on the page is hit-tested against the marker.
-    act(() => {
-      useTranslationStore.setState({ language: "English", enabledByPaper: {} });
-    });
+    showMark.mockRestore();
+  });
+
+  it("a pointer click over the marker is hit-tested on the page, once", async () => {
+    resetStores([trMark()]);
+    const showMark = vi.spyOn(useTranslationStore.getState(), "showMark");
+    render(<Reader />);
+    layOut();
+    const marker = await screen.findByRole("button", { name: "A mark on the 繁中 translation. Show it" });
     place(marker, 362, 40, 18, 18);
-    fireEvent.click(screen.getByTestId("s1"), { clientX: 370, clientY: 48 });
+    fireEvent.click(screen.getByTestId("s1"), { clientX: 370, clientY: 48, detail: 1 });
+    expect(showMark).toHaveBeenCalledTimes(1);
     expect(useTranslationStore.getState().enabledByPaper[3]).toBe(true);
+    showMark.mockRestore();
   });
 
   it("no marker while the open card shows the mark's words", async () => {

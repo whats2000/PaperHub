@@ -271,6 +271,8 @@ export function PdfMarksPage({
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP_PX) return;
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return; // the end of a drag that selected text
+      // A marker pressed from the keyboard handles itself (its own click).
+      if (e.target instanceof Element && e.target.closest("[data-tr-marker]")) return;
       const marker = markerAt(e);
       if (marker) {
         useTranslationStore.getState().showMark(marker);
