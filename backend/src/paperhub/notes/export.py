@@ -220,6 +220,20 @@ def _wrap(text: str, mark: str, end: str | None = None) -> str:
     return f"{lead}{mark}{core}{end if end is not None else mark}{trail}"
 
 
+def _code_span(code: str) -> str:
+    """An inline code span that holds ``code`` whole (CommonMark): fenced by
+    one backtick more than its longest backtick run, padded with a space
+    when it starts or ends with a backtick. Edge whitespace stays outside,
+    where every reader keeps it."""
+    core = code.strip()
+    if not core:
+        return code
+    longest = max((len(r) for r in re.findall(r"`+", core)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if core[0] == "`" or core[-1] == "`" else ""
+    return _wrap(code, fence + pad, pad + fence)
+
+
 class _Writer:
     def __init__(self, note: Note, papers: Mapping[int, ExportPaper],
                  chunk_papers: Mapping[int, int],
@@ -303,10 +317,7 @@ class _Writer:
     def _styled(self, run: dict[str, Any]) -> str:
         styles = run.get("styles") or {}
         if styles.get("code"):
-            code = run["text"]
-            fence = "``" if "`" in code else "`"
-            return _wrap(code, fence + (" " if fence == "``" else ""),
-                         (" " if fence == "``" else "") + fence)
+            return _code_span(run["text"])
         # ``hidden`` and ``comment`` add nothing: plain text.
         text = self.text(run["text"])
         if styles.get("strike"):
