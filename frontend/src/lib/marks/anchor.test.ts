@@ -8,6 +8,9 @@ import {
   normaliseText,
   selectionToPieces,
 } from "@/lib/marks/anchor";
+// Shared with the backend's re-anchor (notes/html_text.py reads the same file).
+import ruleHtml from "@/lib/__fixtures__/mark_text/rule.html?raw";
+import ruleExpected from "@/lib/__fixtures__/mark_text/rule.expected.json?raw";
 
 function makeDoc(body: string): Document {
   const doc = document.implementation.createHTMLDocument("paper");
@@ -145,5 +148,55 @@ describe("findPiece", () => {
       CHUNKS,
     );
     expect(found && normaliseText(found.toString())).toBe("They often fail when the scene");
+  });
+});
+
+describe("the reading text (shared with the backend's re-anchor)", () => {
+  // src/lib/__fixtures__/mark_text: the backend's notes/html_text.py reads
+  // the same file to the same text, or a quote is not found again.
+  it("reads the shared fixture exactly as the backend does", () => {
+    const html = ruleHtml;
+    const want = JSON.parse(ruleExpected) as {
+      text: string;
+      spans: [string, number][];
+    };
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const index = buildTextIndex(doc);
+    expect(index.text).toBe(want.text);
+    expect(index.spans.map((s) => [s.domId, s.at])).toEqual(want.spans);
+  });
+
+  it("keeps inline math in a quote, as its TeX, and finds it again", () => {
+    const doc = makeDoc(
+      `<p><span id="phchunk-0"></span>They generate hidden states <span class="math inline">\\(h_t\\)</span>,` +
+        ` as a function of <span class="math inline">\\(h_{t-1}\\)</span> and the input.</p>`,
+    );
+    const chunks = chunkMap([{ id: 9, dom_id: "phchunk-0", section: "2 Background" }]);
+    const range = rangeOver(doc, "hidden states", "function of");
+    const [piece] = selectionToPieces(doc, range, chunks);
+    expect(piece!.quote).toBe("hidden states $h_t$, as a function of");
+    const found = findPiece(buildTextIndex(doc), piece!, chunks)!;
+    expect(found.toString()).toContain("\\(h_t\\)");
+    // A selection that starts inside the math takes it whole.
+    const math = doc.querySelectorAll(".math")[1]!.firstChild as Text;
+    const inner = doc.createRange();
+    inner.setStart(math, 3);
+    inner.setEnd(math.parentElement!.nextSibling!, 4);
+    expect(selectionToPieces(doc, inner, chunks)[0]!.quote).toBe("$h_{t-1}$ and");
+  });
+
+  it("reads typeset math by its TeX annotation", () => {
+    const doc = makeDoc(
+      `<p>x <span class="math inline"><mjx-container><math><semantics><mi>h</mi>` +
+        `<annotation encoding="application/x-tex">h_t</annotation></semantics></math></mjx-container></span> y</p>`,
+    );
+    expect(buildTextIndex(doc).text).toBe("x $h_t$ y");
+  });
+
+  it("files a heading selected alone under its own section", () => {
+    const doc = makeDoc(PAPER);
+    const [piece] = selectionToPieces(doc, rangeOver(doc, "2 Method", "2 Method"), CHUNKS);
+    expect(piece).toMatchObject({ quote: "2 Method", chunk_start: 102, chunk_end: 102 });
+    expect(groupBySection([piece!], CHUNKS)[0]!.section).toBe("2 Method");
   });
 });

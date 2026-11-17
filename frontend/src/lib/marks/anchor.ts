@@ -2,10 +2,11 @@
  *
  * A piece stores its quoted text, the chunks it sits in (chunk ids, from the
  * nearest `phchunk-N` spans) and up to 32 characters of text on each side.
- * Everything here reads the document through one text index: the paper's
- * text with whitespace runs collapsed, translations, math and PaperHub's
- * own overlays left out, so a quote taken from a selection is found again
- * the same way. The document itself is never changed.
+ * Everything here reads the document through one text index, the paper's
+ * reading text: whitespace runs collapsed, math as its TeX (`$…$`),
+ * translations and PaperHub's own overlays left out. The backend re-anchors
+ * with the same rule (`notes/html_text.py`; shared fixture
+ * `frontend/src/lib/__fixtures__/mark_text`). The document itself is never changed.
  */
 import type { MarkPiece } from "@/types/notes";
 
@@ -39,13 +40,22 @@ export interface HtmlPiece extends MarkPiece {
 
 const CONTEXT = 32;
 const CHUNK_PREFIX = "phchunk-";
-/** Not the paper's own reading text: translations (H1), math (its glyphs
- * are drawn, not text), PaperHub overlays, scripts. */
-const SKIPPED = "script, style, noscript, template, .ph-tr, .math, mjx-container, math, [data-ph-overlay]";
+/** Not the paper's own reading text: translations (H1), PaperHub overlays,
+ * scripts. */
+const SKIPPED = "script, style, noscript, template, .ph-tr, [data-ph-overlay]";
+/** Math reads as its TeX source, `$…$`, one unit that is never split. */
+const MATH = ".math, mjx-container, math";
 /** A piece never crosses one of these. */
 const BLOCK =
   "p, li, figcaption, h1, h2, h3, h4, h5, h6, td, th, dt, dd, pre, blockquote, caption, " +
   "div, section, article, header, footer, figure, table, ul, ol, body";
+/** Source delimiters around a math element's TeX. */
+const DELIMS: [string, string][] = [
+  ["\\(", "\\)"],
+  ["\\[", "\\]"],
+  ["$$", "$$"],
+  ["$", "$"],
+];
 
 const HEADING = /^H[1-6]$/;
 
@@ -53,81 +63,155 @@ export function normaliseText(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-/** The paper's text, whitespace-collapsed, with a map back to the DOM. */
+/** `$TeX$` for a math element's source ("" when it has none). Mirrors the
+ * backend's `notes/html_text.tex_text`. */
+export function texText(source: string): string {
+  let tex = normaliseText(source);
+  for (const [a, b] of DELIMS) {
+    if (tex.startsWith(a) && tex.endsWith(b) && tex.length >= a.length + b.length) {
+      tex = normaliseText(tex.slice(a.length, tex.length - b.length));
+      break;
+    }
+  }
+  return tex ? `$${tex}$` : "";
+}
+
+interface MathJaxLike {
+  startup?: { document?: { getMathItemsWithin?: (el: Element) => { math?: unknown }[] } };
+}
+
+/** A math element's TeX source: its TeX annotation, else the source MathJax
+ * typeset it from, else (not typeset yet) its text. */
+function mathSource(el: Element): string {
+  const annotation = el.querySelector('annotation[encoding="application/x-tex"]');
+  if (annotation) return annotation.textContent ?? "";
+  const mj = (el.ownerDocument.defaultView as (Window & { MathJax?: MathJaxLike }) | null)?.MathJax;
+  try {
+    const item = mj?.startup?.document?.getMathItemsWithin?.(el)?.[0];
+    if (typeof item?.math === "string") return item.math;
+  } catch {
+    /* MathJax not ready: fall through */
+  }
+  if (el.matches("mjx-container") || el.querySelector("mjx-container")) return "";
+  return el.textContent ?? "";
+}
+
+/** A run of the index: a text node, or a math element read as one unit. */
+type Unit = { node: Text; math: null; block: Element } | { node: null; math: Element; block: Element };
+
+/** The paper's reading text, with a map back to the DOM. */
 export interface TextIndex {
   doc: Document;
   text: string;
-  nodes: Text[];
-  /** Per character of `text`: its node (index into `nodes`) and offset; a
-   * paragraph break is a space at the end of the node before it (offset -1). */
-  nodeOf: number[];
+  units: Unit[];
+  /** Per character of `text`: its unit and offset in it; a paragraph break
+   * is a space at the end of the unit before it (offset -1). */
+  unitOf: number[];
   offsetOf: number[];
-  /** The block element each node sits in. */
-  blockOf: Element[];
   /** Where each chunk span sits in `text` (the index of the next character). */
   spans: { domId: string; at: number }[];
 }
 
 export function buildTextIndex(doc: Document): TextIndex {
-  const index: TextIndex = { doc, text: "", nodes: [], nodeOf: [], offsetOf: [], blockOf: [], spans: [] };
+  const index: TextIndex = { doc, text: "", units: [], unitOf: [], offsetOf: [], spans: [] };
   const root = doc.body ?? doc.documentElement;
   const chars: string[] = [];
   let prevSpace = true; // no leading space
   let prevBlock: Element | null = null;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) =>
-      n.nodeType === 1 && (n as Element).matches(SKIPPED) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
-  });
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (n.nodeType === 1) {
-      const id = (n as Element).id;
-      if (id.startsWith(CHUNK_PREFIX)) index.spans.push({ domId: id, at: chars.length });
-      continue;
-    }
-    const node = n as Text;
-    const block = node.parentElement?.closest(BLOCK) ?? root;
+
+  const enterBlock = (block: Element) => {
     if (prevBlock !== null && block !== prevBlock && !prevSpace) {
       // A paragraph break reads as a space.
       chars.push(" ");
-      index.nodeOf.push(index.nodes.length - 1);
+      index.unitOf.push(index.units.length - 1);
       index.offsetOf.push(-1);
       prevSpace = true;
     }
     prevBlock = block;
-    const ni = index.nodes.length;
-    index.nodes.push(node);
-    index.blockOf.push(block);
-    const data = node.data;
-    for (let i = 0; i < data.length; i++) {
-      const c = data[i]!;
-      if (/\s/.test(c)) {
-        if (prevSpace) continue;
-        chars.push(" ");
-        prevSpace = true;
-      } else {
-        chars.push(c);
-        prevSpace = false;
+  };
+
+  const visit = (el: Element) => {
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType === 3) {
+        const node = n as Text;
+        if (!node.data) continue;
+        const block = node.parentElement?.closest(BLOCK) ?? root;
+        enterBlock(block);
+        const ui = index.units.length;
+        index.units.push({ node, math: null, block });
+        const data = node.data;
+        for (let i = 0; i < data.length; i++) {
+          const c = data[i]!;
+          if (/\s/.test(c)) {
+            if (prevSpace) continue;
+            chars.push(" ");
+            prevSpace = true;
+          } else {
+            chars.push(c);
+            prevSpace = false;
+          }
+          index.unitOf.push(ui);
+          index.offsetOf.push(i);
+        }
+        continue;
       }
-      index.nodeOf.push(ni);
-      index.offsetOf.push(i);
+      if (n.nodeType !== 1) continue;
+      const child = n as Element;
+      if (child.matches(SKIPPED)) continue;
+      if (child.matches(MATH)) {
+        const tex = texText(mathSource(child));
+        if (!tex) continue;
+        const block = child.closest(BLOCK) ?? root;
+        enterBlock(block);
+        const ui = index.units.length;
+        index.units.push({ node: null, math: child, block });
+        for (let i = 0; i < tex.length; i++) {
+          chars.push(tex[i]!);
+          index.unitOf.push(ui);
+          index.offsetOf.push(i);
+        }
+        prevSpace = false;
+        continue;
+      }
+      if (child.id.startsWith(CHUNK_PREFIX)) index.spans.push({ domId: child.id, at: chars.length });
+      visit(child);
     }
-  }
+  };
+  visit(root);
   index.text = chars.join("");
   return index;
 }
 
-/** The DOM point just before character `i`. */
-function pointBefore(index: TextIndex, i: number): [Node, number] {
-  const node = index.nodes[index.nodeOf[i]!]!;
-  const off = index.offsetOf[i]!;
-  return off < 0 ? [node, node.length] : [node, off];
+type Point = [Node, number];
+
+/** The DOM points before and after a math element. */
+function aroundMath(el: Element): [Point, Point] {
+  const parent = el.parentNode!;
+  const at = Array.prototype.indexOf.call(parent.childNodes, el);
+  return [
+    [parent, at],
+    [parent, at + 1],
+  ];
 }
 
-/** The DOM point just after character `i`. */
-function pointAfter(index: TextIndex, i: number): [Node, number] {
-  const node = index.nodes[index.nodeOf[i]!]!;
+function mathOf(index: TextIndex, i: number): Element | null {
+  return index.offsetOf[i]! >= 0 ? index.units[index.unitOf[i]!]!.math : null;
+}
+
+/** The DOM point just before character `i` (a math unit: before it). */
+function pointBefore(index: TextIndex, i: number): Point {
+  const unit = index.units[index.unitOf[i]!]!;
   const off = index.offsetOf[i]!;
-  return off < 0 ? [node, node.length] : [node, off + 1];
+  if (unit.math) return aroundMath(unit.math)[off < 0 ? 1 : 0];
+  return off < 0 ? [unit.node, unit.node.length] : [unit.node, off];
+}
+
+/** The DOM point just after character `i` (a math unit: after it). */
+function pointAfter(index: TextIndex, i: number): Point {
+  const unit = index.units[index.unitOf[i]!]!;
+  const off = index.offsetOf[i]!;
+  if (unit.math) return aroundMath(unit.math)[1];
+  return off < 0 ? [unit.node, unit.node.length] : [unit.node, off + 1];
 }
 
 /** First index in [0, n) where `pred` holds, for a predicate that is false
@@ -143,11 +227,26 @@ function firstTrue(n: number, pred: (i: number) => boolean): number {
   return lo;
 }
 
-/** The characters of `index` inside `range`, as [start, end). */
+const same = (p: Point, node: Node, off: number) => p[0] === node && p[1] === off;
+
+/** The characters of `index` inside `range`, as [start, end). A math unit
+ * the range overlaps at all is taken whole. */
 function rangeSpan(index: TextIndex, range: Range): [number, number] {
   const n = index.text.length;
-  const start = firstTrue(n, (i) => range.comparePoint(...pointBefore(index, i)) >= 0);
-  const end = firstTrue(n, (i) => range.comparePoint(...pointAfter(index, i)) > 0);
+  const start = firstTrue(n, (i) => {
+    const math = mathOf(index, i);
+    if (!math) return range.comparePoint(...pointBefore(index, i)) >= 0;
+    // In unless the math ends where the range starts (or before).
+    const after = aroundMath(math)[1];
+    return range.comparePoint(...after) >= 0 && !same(after, range.startContainer, range.startOffset);
+  });
+  const end = firstTrue(n, (i) => {
+    const math = mathOf(index, i);
+    if (!math) return range.comparePoint(...pointAfter(index, i)) > 0;
+    // Out once the math starts where the range ends (or after).
+    const before = aroundMath(math)[0];
+    return range.comparePoint(...before) > 0 || same(before, range.endContainer, range.endOffset);
+  });
   return [start, Math.max(start, end)];
 }
 
@@ -163,8 +262,20 @@ function chunkAt(index: TextIndex, at: number, chunks: ChunkMap | null): number 
   return found;
 }
 
+/** The first chunk span opened at or after character `at` (a heading's
+ * section starts after it). */
+function chunkAfter(index: TextIndex, at: number, chunks: ChunkMap | null): number | null {
+  if (!chunks) return null;
+  for (const s of index.spans) {
+    if (s.at < at) continue;
+    const anchor = chunks.byDom.get(s.domId);
+    if (anchor) return anchor.id;
+  }
+  return null;
+}
+
 function blockAt(index: TextIndex, i: number): Element | null {
-  return index.offsetOf[i]! < 0 ? null : index.blockOf[index.nodeOf[i]!]!;
+  return index.offsetOf[i]! < 0 ? null : index.units[index.unitOf[i]!]!.block;
 }
 
 /** One piece per paragraph the selection touches (a stroke never crosses a
@@ -190,19 +301,22 @@ export function piecesIn(index: TextIndex, range: Range, chunks: ChunkMap | null
     while (s < e && index.text[s] === " ") s++;
     while (e > s && index.text[e - 1] === " ") e--;
     if (e > s) {
+      const heading = HEADING.test(block.tagName);
+      // A heading files under its own section: the chunk after it.
+      const first = heading ? (chunkAfter(index, e, chunks) ?? chunkAt(index, s, chunks)) : chunkAt(index, s, chunks);
       pieces.push({
         quote: index.text.slice(s, e),
-        chunk_start: chunkAt(index, s, chunks),
-        chunk_end: chunkAt(index, e - 1, chunks),
+        chunk_start: first,
+        chunk_end: heading ? first : chunkAt(index, e - 1, chunks),
         prefix: index.text.slice(Math.max(0, s - CONTEXT), s),
         suffix: index.text.slice(e, e + CONTEXT),
-        heading: HEADING.test(block.tagName),
+        heading,
       });
     }
     a = b;
   }
-  // A heading caught between paragraphs is not what was marked (and it sits
-  // before its section's first chunk span); a heading alone is kept.
+  // A heading caught between paragraphs is not what was marked; a heading
+  // alone is kept.
   const text = pieces.filter((p) => !p.heading);
   return (text.length ? text : pieces).map(({ heading: _heading, ...p }) => p);
 }
@@ -238,7 +352,7 @@ function commonPrefix(a: string, b: string): number {
  * whitespace), the repeat whose context matches best, then the one nearest
  * its chunk. Null when the quote is not in the paper. */
 export function findPiece(index: TextIndex, piece: MarkPiece, chunks: ChunkMap | null): Range | null {
-  const quote = normaliseText(String(piece.quote ?? ""));
+  const quote = normaliseText(typeof piece.quote === "string" ? piece.quote : "");
   if (!quote) return null;
   const starts: number[] = [];
   for (let s = index.text.indexOf(quote); s >= 0; s = index.text.indexOf(quote, s + 1)) starts.push(s);

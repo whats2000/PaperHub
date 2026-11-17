@@ -1,7 +1,7 @@
 """The reader's text rule, server side (``notes/html_text.py``).
 
-``tests/fixtures/mark_text/rule.*`` is shared with the frontend
-(``frontend/src/lib/marks/anchor.test.ts``): both sides must read the same
+``frontend/src/lib/__fixtures__/mark_text/rule.*`` is shared with the
+frontend (``frontend/src/lib/marks/anchor.test.ts``): both sides must read the same
 text from the same HTML, or a quote made in the reader is not found again.
 """
 import json
@@ -9,7 +9,8 @@ from pathlib import Path
 
 from paperhub.notes.html_text import build_text_index, tex_text
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "mark_text"
+FIXTURE = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "lib"
+           / "__fixtures__" / "mark_text")
 
 
 def test_shared_fixture_reads_as_the_reader_does() -> None:

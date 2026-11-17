@@ -3,7 +3,7 @@
 A mark made in the HTML reader stores its quote in this text, so re-anchoring
 searches the same text, never the LaTeX in ``chunks.text``. The rule mirrors
 the reader's text index (``frontend/src/lib/marks/anchor.ts``) exactly; both
-sides test against ``tests/fixtures/mark_text/``:
+sides test against ``frontend/src/lib/__fixtures__/mark_text/``:
 
 * the text of ``<body>`` in document order; ``script``, ``style``,
   ``noscript``, ``template``, ``.ph-tr`` and ``[data-ph-overlay]`` are left out;
