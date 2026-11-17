@@ -26,6 +26,7 @@ from pathlib import Path
 import aiosqlite
 
 from paperhub.config import load_settings
+from paperhub.notes.anchors import reanchor_paper
 from paperhub.pipelines.chunker import map_stripped_offsets_to_original
 from paperhub.pipelines.extract import extract_latex
 from paperhub.pipelines.figure_numbers import renumber_from_source
@@ -189,6 +190,11 @@ async def _rerender_one(
             (dom_id, cid),
         )
     await conn.commit()
+
+    # The reader's marks are anchored in this rendered text: re-find them.
+    marks = await reanchor_paper(conn, pcid)
+    if any(marks.values()):
+        _LOG.info("pcid=%d: re-anchored note marks: %s", pcid, marks)
 
     anchored = len(dom_map)
     _LOG.info(

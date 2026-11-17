@@ -1,7 +1,8 @@
 """Re-anchor reading marks to each paper's current chunks (Plan H5b.1).
 
 A re-ingest gives a paper new chunk ids and offsets. This re-finds every HTML
-mark's quote in the current chunk text and rewrites its offsets; a quote that
+mark's quote in the paper's rendered HTML (the text the reader quoted; run it
+after ``paperhub-rerender-html``) and rewrites its chunk ids and offsets; a quote that
 cannot be found stays in the note, flagged lost (nothing is dropped). Section
 headings whose section no longer exists are flagged too. Idempotent: a second
 run changes nothing.

@@ -8,37 +8,38 @@
 #   1. paperhub-reingest                      re-chunk with the current chunker
 #                                             (spans unchanged: names updated in
 #                                             place, chunk ids kept)
-#   2. paperhub-reanchor-marks                Plan H5b.1: re-find every reading mark's
-#                                             quote in the new chunks, follow
-#                                             renamed sections; lost ones stay flagged
-#   3. paperhub-repair-layout                 re-point figure/table index entries
+#   2. paperhub-repair-layout                 re-point figure/table index entries
 #                                             at the paper's current chunks
-#   4. paperhub-repair-section-names          rename non-heading section names
+#   3. paperhub-repair-section-names          rename non-heading section names
 #                                             (raw LaTeX macros, PDF fragments) in
 #                                             place + in digests / cards / ideas /
 #                                             slide grounding
-#   5. paperhub-repair-titles                 re-derive auto-picked PDF titles in
+#   4. paperhub-repair-titles                 re-derive auto-picked PDF titles in
 #                                             place (journal wordmarks, drop caps),
 #                                             carried to FTS / digest / card hash
-#   6. paperhub-backfill-assets               build a missing PaperAsset
+#   5. paperhub-backfill-assets               build a missing PaperAsset
 #                                             (figures / equations / sections)
-#   7. paperhub-backfill-assets --blocks-only Plan H1: Marker paragraph layout
+#   6. paperhub-backfill-assets --blocks-only Plan H1: Marker paragraph layout
 #                                             (asset/blocks.json) for PDF papers,
 #                                             needed by PDF bilingual reading
-#   8. paperhub-backfill-figure-locations     where each figure sits in the reader
+#   7. paperhub-backfill-figure-locations     where each figure sits in the reader
 #                                             (LaTeX figure environment, PDF bbox),
 #                                             commented-out figures dropped, multi-
 #                                             panel figures composed, figures Marker
-#                                             split joined; needs step 7's blocks
-#   9. paperhub-backfill-page-pdfs            a page PDF for every paper (LaTeX:
+#                                             split joined; needs step 6's blocks
+#   8. paperhub-backfill-page-pdfs            a page PDF for every paper (LaTeX:
 #                                             local pdflatex into asset/paper.pdf,
 #                                             arXiv once on failure) and LaTeX
 #                                             figures placed on it afresh
 #                                             (--replace-places; writes only on change)
-# 10. paperhub-rerender-html                 re-render Citation Canvas HTML for
+#   9. paperhub-rerender-html                 re-render Citation Canvas HTML for
 #                                             LaTeX papers with figure anchors and
 #                                             the paper's figure numbers (chunks
 #                                             untouched; skipped on -DryRun)
+# 10. paperhub-reanchor-marks                Plan H5b.1: re-find every reading mark's
+#                                             quote in the rendered HTML (after
+#                                             step 9), follow renamed sections;
+#                                             lost ones stay flagged
 # 11. paperhub-backfill-figure-locations     --verify: every figure a [fig:]
 #      --verify                               citation can open on (skipped on
 #                                             -DryRun; fails on any that cannot)
@@ -57,7 +58,7 @@
 #                                             label aliases into one cache key
 # 17. paperhub-migrate-idea-notes            Plan H5b.1: each idea's ideas.note
 #                                             becomes an idea note (column kept)
-# Steps 6-7 need the Marker service (`docker compose up -d marker`) for PDF
+# Steps 5-6 need the Marker service (`docker compose up -d marker`) for PDF
 # papers; they are sequential and skip papers that already have the output.
 #
 # Usage:
@@ -113,15 +114,15 @@ function Invoke-Step([string]$label, [string[]]$cmd) {
 if (-not $SkipRechunk) {
     Invoke-Step "1/17 re-chunk" (@("paperhub-reingest") + $dry)
 }
-Invoke-Step "2/17 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
-Invoke-Step "3/17 figure/table index" (@("paperhub-repair-layout") + $dry)
-Invoke-Step "4/17 section names" (@("paperhub-repair-section-names") + $dry)
-Invoke-Step "5/17 PDF titles" (@("paperhub-repair-titles") + $dry)
-Invoke-Step "6/17 missing assets" (@("paperhub-backfill-assets") + $dry)
-Invoke-Step "7/17 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
-Invoke-Step "8/17 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
-Invoke-Step "9/17 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
-if (-not $DryRun) { Invoke-Step "10/17 Citation Canvas HTML" @("paperhub-rerender-html") }
+Invoke-Step "2/17 figure/table index" (@("paperhub-repair-layout") + $dry)
+Invoke-Step "3/17 section names" (@("paperhub-repair-section-names") + $dry)
+Invoke-Step "4/17 PDF titles" (@("paperhub-repair-titles") + $dry)
+Invoke-Step "5/17 missing assets" (@("paperhub-backfill-assets") + $dry)
+Invoke-Step "6/17 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
+Invoke-Step "7/17 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
+Invoke-Step "8/17 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
+if (-not $DryRun) { Invoke-Step "9/17 Citation Canvas HTML" @("paperhub-rerender-html") }
+Invoke-Step "10/17 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
 if (-not $DryRun) { Invoke-Step "11/17 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
 if (-not $DryRun) { Invoke-Step "12/17 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
 Invoke-Step "13/17 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)

@@ -137,6 +137,13 @@ async def test_rerender_sets_dom_ids_and_writes_html(
         return out_path
 
     monkeypatch.setattr(rr_mod, "render_html", _fake_render_html)
+    reanchored: list[tuple[int, list[str | None]]] = []
+
+    async def _spy_reanchor(conn: aiosqlite.Connection, pcid: int) -> dict[str, int]:
+        reanchored.append((pcid, await _get_dom_ids(conn, pcid)))
+        return {"ok": 0, "moved": 0, "lost": 0, "partly_lost": 0}
+
+    monkeypatch.setattr(rr_mod, "reanchor_paper", _spy_reanchor)
 
     # Set up a fake paper cache dir with a flattened .tex and the source .tex
     # (source_path).  Two subdirs mirror the real layout:
@@ -189,6 +196,8 @@ async def test_rerender_sets_dom_ids_and_writes_html(
 
     # Return value agrees with dom_ids found.
     assert n_anchored == 2
+    # The reader's marks are re-found in the new render, after the dom ids.
+    assert reanchored == [(pcid, ["phchunk-0", "phchunk-1"])]
 
 
 @pytest.mark.asyncio
