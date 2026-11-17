@@ -79,3 +79,19 @@ describe("reading order (shown only; stored pieces keep stroke order)", () => {
     expect(joinedQuote([next, lower, upper])).toBe("upper … lower … page one");
   });
 });
+
+describe("what joins the quote", () => {
+  it("one stroke across paragraphs: a paragraph break; strokes joined later: …", () => {
+    const pieces = [
+      { quote: "end of one", chunk_start: 1, stroke: 0 },
+      { quote: "start of two", chunk_start: 2, stroke: 0 },
+      { quote: "later words", chunk_start: 3, stroke: 1 },
+    ];
+    expect(joinedQuote(pieces)).toBe("end of one\nstart of two … later words");
+  });
+
+  it("a piece with no stroke is a stroke of its own", () => {
+    expect(joinedQuote([{ quote: "a", chunk_start: 1 }, { quote: "b", chunk_start: 2 }])).toBe("a … b");
+  });
+});
+

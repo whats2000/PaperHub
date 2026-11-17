@@ -80,3 +80,26 @@ describe("a highlight of several pieces", () => {
     expect(screen.getByText(/2 pieces/)).toBeTruthy();
   });
 });
+
+describe("a highlight of one selection across paragraphs", () => {
+  it("shows the paragraphs on their own lines, with no …", () => {
+    inNote(
+      <PaperQuoteView
+        id="b2"
+        props={props({
+          kind: "highlight",
+          color: "green",
+          quote: "end of one start of two",
+          pieces: JSON.stringify([
+            { quote: "end of one", chunk_start: 1, stroke: 0 },
+            { quote: "start of two", chunk_start: 2, stroke: 0 },
+          ]),
+        })}
+      />,
+    );
+    const quote = screen.getByText((_, el) => el?.tagName === "BLOCKQUOTE");
+    expect(quote.textContent).toBe("end of one\nstart of two");
+    expect(quote.className).toContain("whitespace-pre-line");
+  });
+});
+

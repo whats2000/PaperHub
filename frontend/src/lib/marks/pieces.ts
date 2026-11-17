@@ -94,13 +94,23 @@ export function readingOrder<P extends MarkPiece>(pieces: readonly P[]): P[] {
   return keyed.map((x) => x.p);
 }
 
-/** One quote for a mark of several pieces, in reading order: "…" between
- * them. */
+/** One quote for a mark of several pieces, in reading order. Pieces of one
+ * stroke (a selection across paragraphs; the server's `stroke` id) are
+ * joined by a paragraph break; pieces of strokes joined later by "…", which
+ * stands for skipped words only. A piece with no `stroke` is a stroke of
+ * its own. Mirrors the backend's `joined_quote`. */
 export function joinedQuote(pieces: readonly MarkPiece[]): string {
-  return readingOrder(pieces.filter(isLive))
-    .map((p) => String(p.quote ?? "").trim())
-    .filter(Boolean)
-    .join(" … ");
+  let out = "";
+  let prev: unknown = undefined;
+  readingOrder(pieces.filter(isLive)).forEach((p, i) => {
+    const q = String(p.quote ?? "").trim();
+    if (!q) return;
+    const stroke = typeof p.stroke === "number" ? p.stroke : `own:${i}`;
+    if (out) out += stroke === prev ? "\n" : " … ";
+    out += q;
+    prev = stroke;
+  });
+  return out;
 }
 
 /** Clears the selection if it is still `range` (a stroke just saved; a new

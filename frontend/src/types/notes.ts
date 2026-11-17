@@ -170,6 +170,9 @@ export interface MarkPiece {
   lang?: string;
   orig?: string;
   lost?: boolean;
+  /** Which save it came from (set by the server): pieces of one stroke read
+   * as paragraphs, pieces of strokes joined later with “…”. */
+  stroke?: number;
   [key: string]: unknown;
 }
 

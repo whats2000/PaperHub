@@ -19,7 +19,8 @@ interface ViewProps {
 
 export function PaperQuoteView({ id, props }: ViewProps) {
   const { t } = useTranslation();
-  // Highlighter strokes joined into one mark: "…" stands for the skipped words.
+  // Several pieces: "…" for words skipped between strokes, a paragraph
+  // break within one stroke.
   const pieces = markPieces(props);
   const quote = pieces.length > 1 ? joinedQuote(pieces) || props.quote : props.quote;
   return (
@@ -29,7 +30,8 @@ export function PaperQuoteView({ id, props }: ViewProps) {
       icon={<TextQuote className="size-3 shrink-0" aria-hidden />}
       label={t("notes:ref.fromPaper", "From the paper")}
     >
-      <blockquote className="m-0 font-paper text-[14px] leading-normal text-muted-foreground">
+      {/* A stroke across paragraphs keeps its paragraph breaks. */}
+      <blockquote className="m-0 whitespace-pre-line font-paper text-[14px] leading-normal text-muted-foreground">
         {quote}
       </blockquote>
     </PaperRefFrame>
