@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,8 @@ _EDGE = re.compile(r"^\W+|\W+$")
 _CORE = re.compile(r"\w(?:.*\w)?", re.S)
 #: Words in the run matched at each end.
 ANCHOR_WORDS = 4
+#: Longer text is matched by its head and its tail (characters).
+MAX_QUERY_CHARS = 4000
 #: Fewer words than this are too little to place.
 MIN_WORDS = 2
 #: How far the end run may sit from where the word counts put it (words).
@@ -115,20 +118,65 @@ def _extend(words: list[str | None], q: list[str], qi: int, ri: int, step: int) 
     return last
 
 
-def match_text(reading: str, query: str) -> tuple[tuple[int, int] | None, dict[str, Any]]:
-    """The span in ``reading`` of text read off a PDF page, or None; and how
-    it was decided (for the response's ``_meta``)."""
-    q = [w for w, _, _ in _tokens(pdf_normalise(query), math=False) if w]
-    meta: dict[str, Any] = {"query_words": len(q), "matched": False}
-    if len(q) < MIN_WORDS:
-        meta["reason"] = "too_short"
-        return None, meta
+@dataclass(frozen=True)
+class Prepared:
+    """The reading text's words, ready to match against (math as gaps)."""
+
+    toks: list[_Token]
+    words: list[str | None]
+    #: word -> the positions it occurs at
+    at: dict[str, list[int]]
+
+
+def prepare(reading: str) -> Prepared:
     toks = _tokens(reading, math=True)
     words = [w for w, _, _ in toks]
     at: dict[str, list[int]] = {}
     for i, w in enumerate(words):
         if w is not None:
             at.setdefault(w, []).append(i)
+    return Prepared(toks, words, at)
+
+
+def match_text(reading: str, query: str, *, words: Prepared | None = None,
+               ) -> tuple[tuple[int, int] | None, dict[str, Any]]:
+    """The span in ``reading`` of text read off a PDF page, or None; and how
+    it was decided (for the response's ``_meta``). ``words``: the reading
+    text already prepared (cached per file version).
+
+    A query longer than ``MAX_QUERY_CHARS`` is matched by its head and its
+    tail, which must line up in order; the span runs from the head's start to
+    the tail's end, so it still covers the whole selection."""
+    prep = words if words is not None else prepare(reading)
+    if len(query) <= MAX_QUERY_CHARS:
+        span, whole = _match(prep, query)
+        whole["split"] = False
+        return span, whole
+    half = MAX_QUERY_CHARS // 2
+    head = query[:half].rsplit(None, 1)[0]
+    tail = query[-half:].split(None, 1)[-1]
+    first, head_meta = _match(prep, head)
+    last, tail_meta = _match(prep, tail)
+    meta: dict[str, Any] = {"split": True, "query_chars": len(query), "matched": False,
+                            "head": head_meta, "tail": tail_meta}
+    if first is None or last is None:
+        meta["reason"] = "no_head" if first is None else "no_tail"
+        return None, meta
+    # The tail must come after the head, about as far on as the query is long.
+    if last[1] <= first[0] or last[1] - first[0] > 2 * len(query) + 200:
+        meta["reason"] = "ends_apart"
+        return None, meta
+    meta["matched"] = True
+    return (first[0], last[1]), meta
+
+
+def _match(prep: Prepared, query: str) -> tuple[tuple[int, int] | None, dict[str, Any]]:
+    q = [w for w, _, _ in _tokens(pdf_normalise(query), math=False) if w]
+    meta: dict[str, Any] = {"query_words": len(q), "matched": False}
+    if len(q) < MIN_WORDS:
+        meta["reason"] = "too_short"
+        return None, meta
+    toks, words, at = prep.toks, prep.words, prep.at
     k = min(ANCHOR_WORDS, len(q))
     lead = next(((i, occ) for i in range(len(q) - k + 1)
                  if (occ := _occurrences(words, at, q[i:i + k]))), None)
@@ -162,8 +210,14 @@ def _index(path: str, mtime_ns: int) -> TextIndex:
     return build_text_index(Path(path).read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=8)
+def prepared(path: str, mtime_ns: int) -> Prepared:
+    """The reading text's words, cached like the index (same key)."""
+    return prepare(_index(path, mtime_ns).text)
+
+
 async def reading_index(conn: aiosqlite.Connection, pcid: int,
-                        ) -> tuple[TextIndex, dict[str, int]] | None:
+                        ) -> tuple[TextIndex, dict[str, int], Prepared] | None:
     """The paper's reading text (cached per file version) and its spans'
     chunk ids; None without a rendered HTML whose spans name the chunks."""
     async with conn.execute(
@@ -185,7 +239,7 @@ async def reading_index(conn: aiosqlite.Connection, pcid: int,
         return None
     if not ids or not any(d in ids for d, _ in index.spans):
         return None
-    return index, ids
+    return index, ids, await asyncio.to_thread(prepared, path, mtime)
 
 
 def chunks_in(index: TextIndex, ids: dict[str, int], s: int, e: int) -> list[int]:
@@ -212,8 +266,8 @@ async def locate_text(conn: aiosqlite.Connection, pcid: int, text: str,
     reading = await reading_index(conn, pcid)
     if reading is None:
         return None, {"source": "html_text", "matched": False, "reason": "no_reading_text"}
-    index, ids = reading
-    span, meta = match_text(index.text, text)
+    index, ids, words = reading
+    span, meta = match_text(index.text, text, words=words)
     meta["source"] = "html_text"
     if span is None:
         return None, meta

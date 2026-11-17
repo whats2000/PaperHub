@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from paperhub.notes.anchors import reanchor_paper
-from paperhub.notes.locate import locate_text, match_text, pdf_normalise
+from paperhub.notes.locate import MAX_QUERY_CHARS, locate_text, match_text, pdf_normalise, prepared
 from paperhub.notes.marks import MarkIn, create_mark, list_marks
 
 pytestmark = pytest.mark.asyncio
@@ -115,3 +115,47 @@ async def test_reanchor_moves_a_pdf_piece_s_chunk_ids(conn, tmp_path: Path) -> N
     assert (p["chunk_start"], p["chunk_end"]) == (new[1], new[1])
     assert p["rects"] == piece["rects"]  # the geometry is the page's own
     assert lm["status"] == "ok"
+
+
+# ---- Fix round 2 ---------------------------------------------------------
+
+def _long_reading(n: int) -> str:
+    return " ".join(f"Sentence number {i} says thing {i * 7} about item {i * 13}." for i in range(n))
+
+
+async def test_an_oversized_query_matches_head_and_tail_and_covers_it_all() -> None:
+    reading = _long_reading(400)
+    s0 = reading.index("Sentence number 10 ")
+    e0 = reading.index("Sentence number 160 ") - 1  # ends "...item 2067."
+    query = reading[s0:e0]
+    assert len(query) > MAX_QUERY_CHARS
+    span, meta = match_text(reading, query)
+    assert span == (s0, e0 - 1)  # the closing "." is edge punctuation
+    assert meta["matched"] is True and meta["split"] is True
+
+
+async def test_an_oversized_query_whose_ends_do_not_line_up_is_a_miss() -> None:
+    reading = _long_reading(400)
+    head = reading[reading.index("Sentence number 300 "):reading.index("Sentence number 390 ")]
+    tail = reading[reading.index("Sentence number 10 "):reading.index("Sentence number 100 ")]
+    span, meta = match_text(reading, head + " " + tail)
+    assert span is None and meta["reason"] == "ends_apart"
+
+
+async def test_an_empty_or_all_math_query_is_too_short() -> None:
+    assert match_text("The cat sat on the mat.", "")[1]["reason"] == "too_short"
+    assert match_text("The cat sat on the mat.", "   \n ")[1]["reason"] == "too_short"
+    span, meta = match_text("Let $x$ be $y$ here.", "∑ ∫ ≤ = + −")
+    assert span is None and meta["reason"] == "too_short"
+
+
+async def test_the_reading_words_are_prepared_once_per_file_version(tmp_path: Path) -> None:
+    html = tmp_path / "p.html"
+    html.write_text(_html(["Robots learn from demonstrations."]), encoding="utf-8")
+    mtime = html.stat().st_mtime_ns
+    a = prepared(str(html), mtime)
+    assert prepared(str(html), mtime) is a  # cached with the index
+    assert prepared(str(html), mtime + 1) is not a  # a re-render reads it again
+    span, _ = match_text("", "Robots learn from demonstrations", words=a)
+    assert span is not None
+
