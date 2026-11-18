@@ -872,9 +872,9 @@ describe("the mark undo / redo history", () => {
       http.post(`${API_BASE_URL}/marks/:id/restore`, ({ params }) => ok(`restore ${String(params.id)}`)()),
     );
     useMarksStore.setState({ marksByPaper: { 3: [] } });
-    await groupMarkActions(async () => {
-      await useMarksStore.getState().create(body);
-      await useMarksStore.getState().create(body);
+    await groupMarkActions(async (group) => {
+      await useMarksStore.getState().create(body, { group });
+      await useMarksStore.getState().create(body, { group });
     });
     calls = [];
     ctrl("z");
@@ -889,6 +889,29 @@ describe("the mark undo / redo history", () => {
     ctrl("z");
     await new Promise((r) => setTimeout(r, 30));
     expect(calls).toHaveLength(6);
+  });
+
+  it("a create from another path while a group is saving is its own entry", async () => {
+    let n = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => {
+        n += 1;
+        return HttpResponse.json(created({ ...NEW, id: `mk_s${n}`, block_id: `b_s${n}` }));
+      }),
+      http.delete(`${API_BASE_URL}/marks/:id`, ({ params }) => ok(`delete ${String(params.id)}`)()),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    await groupMarkActions(async (group) => {
+      await useMarksStore.getState().create(body, { group }); // mk_s1
+      await useMarksStore.getState().create(body); // mk_s2: another path, no group
+      await useMarksStore.getState().create(body, { group }); // mk_s3
+    });
+    calls = [];
+    // The group ended last, so it is the newest entry; the stray one is next.
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["delete mk_s3", "delete mk_s1"]));
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["delete mk_s3", "delete mk_s1", "delete mk_s2"]));
   });
 
   it("ignores the keys inside an input or a contenteditable", async () => {

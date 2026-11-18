@@ -79,28 +79,30 @@ let redoStack: MarkAction[] = [];
 /** Applies an action's inverse (`undo`) or the action again (set by the store). */
 let applyHandler: ((action: MarkAction, undo: boolean) => void) | null = null;
 
-/** The actions of the user action in progress (`groupMarkActions`). */
-let openGroup: MarkAction[] | null = null;
+/** One user action that makes several mark actions (a stroke across
+ * sections): only the creates handed this group join its history entry. */
+export interface MarkActionGroup {
+  readonly actions: MarkAction[];
+}
 
-/** Runs one user action that may make several mark actions (a stroke
- * across sections): they become one history entry, one Ctrl+Z. */
-export async function groupMarkActions<T>(run: () => Promise<T>): Promise<T> {
-  if (openGroup) return run();
-  const group: MarkAction[] = [];
-  openGroup = group;
+/** Runs one user action whose creates (given the group) become one
+ * history entry, one Ctrl+Z. A create without the group is its own entry. */
+export async function groupMarkActions<T>(run: (group: MarkActionGroup) => Promise<T>): Promise<T> {
+  const group: MarkActionGroup = { actions: [] };
   try {
-    return await run();
+    return await run(group);
   } finally {
-    openGroup = null;
-    if (group.length === 1) record(group[0]!);
-    else if (group.length > 1) record({ kind: "group", actions: group });
+    const [first, ...rest] = group.actions;
+    if (first && !rest.length) record(first);
+    else if (first) record({ kind: "group", actions: group.actions });
   }
 }
 
-/** A new action: undoable, and what was undone can no longer be redone. */
-function record(action: MarkAction): void {
-  if (openGroup) {
-    openGroup.push(action);
+/** A new action: undoable, and what was undone can no longer be redone.
+ * In a group: held there until the group ends. */
+function record(action: MarkAction, group?: MarkActionGroup): void {
+  if (group) {
+    group.actions.push(action);
     return;
   }
   undoStack.push(action);
@@ -139,7 +141,6 @@ function announceDeleted(action: MarkAction): void {
 
 /** Test isolation: forget the undo / redo history. */
 export function resetMarkHistory(): void {
-  openGroup = null;
   undoStack = [];
   redoStack = [];
 }
@@ -222,8 +223,8 @@ interface MarksState {
   ensureChunks: (paperId: number) => Promise<ChunkMap>;
   /** Saves a mark (its block lands in the paper's note), with no toast:
    * the card or the pane opens at it; unless `silent`, a failure is said
-   * in a toast. */
-  create: (body: MarkIn, opts?: { silent?: boolean; signal?: AbortSignal }) => Promise<MarkCreated>;
+   * in a toast. With `group`, its undo joins that user action's entry. */
+  create: (body: MarkIn, opts?: { silent?: boolean; signal?: AbortSignal; group?: MarkActionGroup }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
   /** Erases one piece of a mark and keeps the rest, with Undo (then Erase
@@ -814,9 +815,9 @@ export const useMarksStore = create<MarksState>()(
             // The stroke's pieces were appended: indexes past the old ones.
             const live = livePieceIndexes(mark.pieces);
             const added = before ? live.filter((i) => i >= before.pieces.length) : live.slice(-1);
-            if (added.length) record({ kind: "join", paperId: body.paper_content_id, markId: mark.id, indexes: added });
+            if (added.length) record({ kind: "join", paperId: body.paper_content_id, markId: mark.id, indexes: added }, opts?.group);
           } else {
-            record({ kind: "create", paperId: body.paper_content_id, mark });
+            record({ kind: "create", paperId: body.paper_content_id, mark }, opts?.group);
           }
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);

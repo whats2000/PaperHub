@@ -6,7 +6,7 @@ import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { useCanvasStore } from "@/store/canvas";
 import { useMarkNavStore } from "@/store/markNav";
-import { useMarksStore } from "@/store/marks";
+import { type MarkActionGroup, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useTranslationStore } from "@/store/translation";
 import { useNotesStore } from "@/store/notes";
@@ -90,7 +90,7 @@ function created(section: string, block: string): MarkCreated {
   };
 }
 
-let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { silent?: boolean }) => Promise<MarkCreated>>>;
+let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { silent?: boolean; group?: MarkActionGroup }) => Promise<MarkCreated>>>;
 let ensureChunks: ReturnType<typeof vi.fn<(paperId: number) => Promise<ChunkMap>>>;
 
 const realOpenAt = useNotesPaneStore.getState().openAt;
@@ -137,7 +137,7 @@ describe("useHtmlMarks", () => {
       section_key: "2 Method",
       pieces: [{ quote: "agent pose ahead of time", chunk_start: 102, chunk_end: 102 }],
     });
-    expect(create.mock.calls[0]![1]).toEqual({});
+    expect(create.mock.calls[0]![1]?.group?.actions).toEqual([]);
     // No toast on a normal save: the note card opens beside the mark, the
     // caret on a new line under its quote.
     await waitFor(() => expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_b2 Method" }));

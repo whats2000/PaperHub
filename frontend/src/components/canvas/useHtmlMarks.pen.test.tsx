@@ -4,17 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HighlighterControl } from "@/components/canvas/HighlighterControl";
 import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
 import { usePenSave, type PenPiece } from "@/components/canvas/useMarkSave";
-import { ApiError, erasePiece } from "@/lib/api";
+import { ApiError, createMark, deleteMark, erasePiece, restoreMark } from "@/lib/api";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { useMarkNavStore } from "@/store/markNav";
-import { resetMarkOps, useMarksStore } from "@/store/marks";
+import { resetMarkHistory, resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, MarkIn } from "@/types/notes";
 
-vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), erasePiece: vi.fn() }));
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  erasePiece: vi.fn(),
+  createMark: vi.fn(),
+  deleteMark: vi.fn(),
+  restoreMark: vi.fn(),
+}));
 
 /** The store's own erase (the tests' default stands in a mock). */
 const realErase = useMarksStore.getState().erase;
+/** The store's own create (records the undo history). */
+const realCreate = useMarksStore.getState().create;
 
 const { toastFn, toastError, toastMessage } = vi.hoisted(() => ({
   toastFn: vi.fn(),
@@ -110,6 +118,7 @@ let erase: ReturnType<typeof vi.fn<(id: string, index: number) => Promise<void>>
 
 beforeEach(() => {
   resetMarkOps();
+  resetMarkHistory();
   vi.mocked(erasePiece).mockReset();
   toastFn.mockReset();
   toastError.mockReset();
@@ -244,6 +253,64 @@ describe("the highlighter in the HTML reader", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method"]);
     expect(create.mock.calls[0]![0].pieces).toHaveLength(1);
+  });
+
+  it("one stroke across two sections is one undo: Ctrl+Z removes both marks, Ctrl+Y restores both", async () => {
+    const doc = frameDoc(`
+      <h2>1 Intro</h2>
+      <p><span id="phchunk-1"></span>We predict the agent pose ahead of time.</p>
+      <h2>2 Method</h2>
+      <p><span id="phchunk-2"></span>The latency drops by 89% on all trajectories.</p>
+    `);
+    const calls: string[] = [];
+    vi.mocked(createMark).mockImplementation((body) => {
+      const m = mark(`mk_${++created}`, { pieces: body.pieces, section_key: body.section_key ?? null });
+      return Promise.resolve({
+        mark: m,
+        block: null,
+        saved_to: { note_id: 7, paper_title: "Duo", section: body.section_key ?? null, part_index: 0, part_count: 1 },
+      });
+    });
+    vi.mocked(deleteMark).mockImplementation((id) => {
+      calls.push(`delete ${id}`);
+      return Promise.resolve({ revision: 1, applied: [], rejected: [] } as never);
+    });
+    vi.mocked(restoreMark).mockImplementation((id) => {
+      calls.push(`restore ${id}`);
+      return Promise.resolve({ revision: 1, applied: [], rejected: [] } as never);
+    });
+    useMarksStore.setState({
+      create: realCreate,
+      ensureChunks: vi.fn(() =>
+        Promise.resolve(
+          chunkMap([
+            { id: 102, dom_id: "phchunk-1", section: "1 Intro" },
+            { id: 103, dom_id: "phchunk-2", section: "2 Method" },
+          ]),
+        ),
+      ),
+    });
+    render(<Reader doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    const [a, b] = Array.from(doc.querySelectorAll("p")).map((p) => p.lastChild as Text);
+    const range = doc.createRange();
+    range.setStart(a!, 3);
+    range.setEnd(b!, 11);
+    doc.getSelection()!.addRange(range);
+    act(() => {
+      doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2));
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    });
+    await waitFor(() => expect(calls).toEqual(["delete mk_2", "delete mk_1"]));
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, bubbles: true }));
+    });
+    await waitFor(() => expect(calls).toEqual(["delete mk_2", "delete mk_1", "restore mk_1", "restore mk_2"]));
+    expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2);
   });
 
   it("a pen click on a mark erases the piece under it", async () => {

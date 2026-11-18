@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { joinTarget } from "@/lib/marks/pieces";
 import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
-import { groupMarkActions, markHint, queueMarkOp, useMarksStore } from "@/store/marks";
+import { groupMarkActions, markHint, queueMarkOp, type MarkActionGroup, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece, MarkStyle } from "@/types/notes";
@@ -65,31 +65,31 @@ const progressKey = (
   groups: readonly MarkGroup[],
 ) => JSON.stringify([kind, style, color, view, groups.map(groupKey)]);
 
-type Create = (body: MarkIn, opts?: { silent?: boolean }) => Promise<MarkCreated>;
+type Create = (body: MarkIn, opts?: { silent?: boolean; group?: MarkActionGroup }) => Promise<MarkCreated>;
 
 /** Saves each group not yet in `done` (one mark per section), in order;
  * throws at the first failure, keeping what was saved. `each` sees every
  * mark as it is saved. One user action: one undo (`groupMarkActions`). */
-function saveMissing(...args: Parameters<typeof saveEach>): Promise<MarkCreated[]> {
-  return groupMarkActions(() => saveEach(...args));
-}
-
-async function saveEach(
+function saveMissing(
   create: Create,
   body: Omit<MarkIn, "pieces" | "section_key">,
   groups: readonly MarkGroup[],
   done: Map<string, MarkCreated>,
-  opts: { silent?: boolean; each?: (res: MarkCreated, index: number) => void; save?: (body: MarkIn) => Promise<MarkCreated> } = {},
+  opts: { silent?: boolean; each?: (res: MarkCreated, index: number) => void; save?: (body: MarkIn, group: MarkActionGroup) => Promise<MarkCreated> } = {},
 ): Promise<MarkCreated[]> {
-  for (const [i, group] of groups.entries()) {
-    const k = groupKey(group);
-    if (done.has(k)) continue;
-    const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section, ...translationOf(group) };
-    const res = opts.save ? await opts.save(full) : await create(full, { silent: opts.silent });
-    done.set(k, res);
-    opts.each?.(res, i);
-  }
-  return groups.map((g) => done.get(groupKey(g))!);
+  return groupMarkActions(async (markGroup) => {
+    for (const [i, group] of groups.entries()) {
+      const k = groupKey(group);
+      if (done.has(k)) continue;
+      const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section, ...translationOf(group) };
+      const res = opts.save
+        ? await opts.save(full, markGroup)
+        : await create(full, { silent: opts.silent, group: markGroup });
+      done.set(k, res);
+      opts.each?.(res, i);
+    }
+    return groups.map((g) => done.get(groupKey(g))!);
+  });
 }
 
 /** Opens a mark's block in the notes pane (until the note card). */
@@ -331,20 +331,20 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
             done,
             {
               silent: true,
-              save: async (body) => {
+              save: async (body, group) => {
                 const there = alreadyOnServer(paperId, body);
                 // The server already has it (an earlier attempt landed but
                 // timed out; the queue refetched the marks since).
                 if (there) return there;
                 const res = await (async () => {
-                  if (!target) return create(body, opts);
+                  if (!target) return create(body, { ...opts, group });
                   try {
-                    const joined = await create({ ...body, join_to: target }, opts);
+                    const joined = await create({ ...body, join_to: target }, { ...opts, group });
                     joinedNow = target;
                     return joined;
                   } catch (err) {
                     if (!refusedJoin(err)) throw err;
-                    return create(body, opts);
+                    return create(body, { ...opts, group });
                   }
                 })();
                 savedNow.push(res);
