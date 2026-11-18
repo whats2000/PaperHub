@@ -163,6 +163,9 @@
     --hl-blue: #3b7dd8;
     --hl-pink: #d6457e;
     --hl-purple: #8b5cd6;
+    /* The note card is a sticky note: a tint of its mark's colour on warm paper. */
+    --sticky-base: #fffdf8;
+    --sticky-tint: 12%;
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -212,6 +215,8 @@
     --note-code-bg: oklch(0.24 0 0);
     --note-code-fg: oklch(0.9 0 0);
     --note-code-border: oklch(1 0 0 / 12%);
+    --sticky-base: #262421;
+    --sticky-tint: 22%;
     --hl-green: #36a067;
     --hl-blue: #4b86dc;
     --hl-pink: #d9578a;
@@ -421,6 +426,43 @@
 }
 .note-card {
     --note-card-pad: 26px;
+}
+/* A sticky note (H5b, user 2026-11-19): a solid tint of the mark's colour
+   (--sticky-mc, set by the card), square corners, a soft shadow and a
+   folded bottom-right corner; its pointer has the same tint. */
+.note-card-sticky,
+.note-card-sticky-arrow {
+    --sticky-bg: color-mix(in srgb, var(--sticky-mc, var(--sticky-base)) var(--sticky-tint), var(--sticky-base));
+    background: var(--sticky-bg);
+}
+.note-card-sticky {
+    border-radius: 2px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.12);
+}
+.dark .note-card-sticky {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 22px rgb(0 0 0 / 0.45);
+}
+.note-card-sticky::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+    /* The page shows through the turned corner; the fold is a darker tint. */
+    background: linear-gradient(to top left, var(--background) 50%,
+        color-mix(in srgb, var(--sticky-mc, var(--sticky-base)) calc(var(--sticky-tint) + 18%), var(--sticky-base)) 50%);
+    box-shadow: -1px -1px 2px rgb(0 0 0 / 0.08);
+}
+/* One scroll area in the card, its body: the editor and its blocks grow
+   with what is typed, never scroll on their own (user 2026-11-19). */
+.note-card .paperhub-notes[data-variant="card"] .bn-container,
+.note-card .paperhub-notes[data-variant="card"] .bn-editor,
+.note-card .paperhub-notes[data-variant="card"] .bn-block-content,
+.note-card .paperhub-notes[data-variant="card"] pre {
+    max-height: none;
+    overflow-y: visible;
 }
 .note-card .paperhub-notes[data-variant="card"] .bn-editor {
     padding-inline: var(--note-card-pad) 10px;

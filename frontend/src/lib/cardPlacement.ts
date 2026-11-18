@@ -46,6 +46,10 @@ export interface PlaceCardInput {
   /** The bottom of a card already open above this one (the note card over the
    *  translation card): this one stacks under it, never over it. */
   stackBelow?: number | null;
+  /** The side card's width (default 460px, never wider than the gutter). */
+  sideWidth?: number;
+  /** Distance kept from the reader's top and bottom (default `CARD_EDGE`). */
+  edge?: number;
 }
 
 export interface CardPlacement {
@@ -114,6 +118,8 @@ function placeAlone({
   cardHeight,
   reader,
   pinned = false,
+  sideWidth = CARD_MAX_WIDTH,
+  edge = CARD_EDGE,
 }: PlaceCardInput): CardPlacement | null {
   let active = -1;
   let best = 0;
@@ -125,7 +131,7 @@ function placeAlone({
     }
   });
   if (active < 0) {
-    return pinned ? dockPinned({ paraRects, viewport, gutter, cardHeight, reader }) : null;
+    return pinned ? dockPinned({ paraRects, viewport, gutter, cardHeight, reader, sideWidth, edge }) : null;
   }
 
   const r = paraRects[active]!;
@@ -136,10 +142,10 @@ function placeAlone({
 
   const gutterWidth = gutter.right - gutter.left;
   if (gutterWidth >= NARROW_GUTTER_PX) {
-    const maxHeight = Math.max(0, viewHeight - 2 * CARD_EDGE);
+    const maxHeight = Math.max(0, viewHeight - 2 * edge);
     const h = Math.min(cardHeight, maxHeight);
-    const top = clamp(r.top, viewport.top + CARD_EDGE, viewport.bottom - CARD_EDGE - h);
-    const width = Math.min(CARD_MAX_WIDTH, gutterWidth);
+    const top = clamp(r.top, viewport.top + edge, viewport.bottom - edge - h);
+    const width = Math.min(sideWidth, gutterWidth);
     const arrowY = clamp(
       (visTop + visBottom) / 2 - top - ARROW / 2,
       ARROW_INSET,
@@ -219,6 +225,8 @@ function dockPinned({
   gutter,
   cardHeight,
   reader,
+  sideWidth = CARD_MAX_WIDTH,
+  edge = CARD_EDGE,
 }: Omit<PlaceCardInput, "pinned">): CardPlacement | null {
   if (!paraRects.length) return null;
   // The fragment nearest the viewport.
@@ -234,10 +242,10 @@ function dockPinned({
   const scrollFraction = above ? 1 : 0;
   const gutterWidth = gutter.right - gutter.left;
   if (gutterWidth >= NARROW_GUTTER_PX) {
-    const maxHeight = Math.max(0, viewHeight - 2 * CARD_EDGE);
+    const maxHeight = Math.max(0, viewHeight - 2 * edge);
     const h = Math.min(cardHeight, maxHeight);
-    const top = above ? viewport.top + CARD_EDGE : viewport.bottom - CARD_EDGE - h;
-    const width = Math.min(CARD_MAX_WIDTH, gutterWidth);
+    const top = above ? viewport.top + edge : viewport.bottom - edge - h;
+    const width = Math.min(sideWidth, gutterWidth);
     return {
       side: "left",
       top,

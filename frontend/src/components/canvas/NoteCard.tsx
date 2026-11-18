@@ -193,6 +193,10 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       reader: { left: v.left, right: v.right },
       // Always on screen: docked to the edge the mark left by.
       pinned: true,
+      // Room to read and write: 30% of the window (260–400px), as tall as
+      // the reader less a margin [user, 2026-11-19].
+      sideWidth: Math.min(400, Math.max(260, window.innerWidth * 0.3)),
+      edge: 20,
     });
     if (next) {
       anchoredN.current = n;
@@ -408,9 +412,11 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
         maxHeight: placement.maxHeight,
         transformOrigin: origin,
         transition: glide && !prefersReducedMotion() ? "top 200ms ease-out, left 200ms ease-out" : undefined,
+        // A sticky note in the mark's colour (a plain quote: warm paper).
+        ["--sticky-mc" as string]: mark?.color ? `var(--hl-${mark.color})` : "var(--sticky-base)",
       }}
       className={cn(
-        "note-card fixed z-50 flex flex-col rounded-md border border-foreground/15 bg-secondary text-[13px] text-secondary-foreground shadow-md outline-none dark:border-foreground/20",
+        "note-card note-card-sticky fixed z-50 flex flex-col text-[13px] text-foreground outline-none",
         "duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-90",
         "motion-reduce:animate-none",
@@ -421,7 +427,7 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
         data-testid="note-card-arrow"
         data-unplaced={unplaced ? "true" : undefined}
         className={cn(
-          "absolute size-2.5 rotate-45 border border-foreground/15 bg-secondary dark:border-foreground/20",
+          "note-card-sticky-arrow absolute size-2.5 rotate-45",
           // No mark to point at: no arrow (it fades).
           "transition-opacity duration-150 ease-out motion-reduce:transition-none",
           unplaced && "opacity-0",

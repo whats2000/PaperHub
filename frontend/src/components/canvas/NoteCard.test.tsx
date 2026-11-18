@@ -223,6 +223,56 @@ describe("the note card", () => {
     expect(text).not.toContain("§");
   });
 
+  it("is a sticky note tinted with the mark's colour; a plain quote gets warm paper", async () => {
+    seed([mark("mk_1", "q1"), mark("mk_2", "q2", { color: null, kind: "quote" }), mark("mk_3", "q3")]);
+    const card = await openCard();
+    expect(card.className).toMatch(/note-card-sticky/);
+    expect(card.style.getPropertyValue("--sticky-mc")).toBe("var(--hl-green)");
+    act(() => useMarkNavStore.getState().openCard(3, "mk_2"));
+    await waitFor(() => expect(card.style.getPropertyValue("--sticky-mc")).toBe("var(--sticky-base)"));
+  });
+
+  it("opened after a highlight, the caret is on a new empty line under the quote; left empty, nothing is saved", async () => {
+    seed();
+    useNotesStore.getState().setCaretAfter({ noteId: 7, blockId: "q3", in: "card" });
+    await openCard();
+    await waitFor(() => {
+      const sel = window.getSelection();
+      const line = sel?.anchorNode?.parentElement?.closest(".bn-block-outer");
+      expect(line?.previousElementSibling?.getAttribute("data-id")).toBe("q3");
+    });
+    expect(useNotesStore.getState().caretAfter).toBeNull();
+    act(() => useMarkNavStore.getState().closeCard());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(pendingNoteOps(7)).toEqual([]);
+  });
+
+  it("has one scroll area, its body: a long paragraph grows the card, never an inner scrollbar", async () => {
+    const long = "word ".repeat(600);
+    seed();
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, blocks: s.notes[7]!.blocks.map((b) => (b.id === "p2" ? para("p2", long) : b)) } },
+    }));
+    const card = await openCard();
+    await waitFor(() => expect(outer("p2")).not.toBeNull());
+    const scrollers = Array.from(card.querySelectorAll<HTMLElement>("*")).filter(
+      (el) =>
+        /(^|\s)overflow(-y)?-(auto|scroll)(\s|$)/.test(el.getAttribute("class") ?? "") ||
+        /overflow(-y)?:\s*(auto|scroll)/.test(el.getAttribute("style") ?? ""),
+    );
+    expect(scrollers).toHaveLength(1);
+    expect(scrollers[0]!.contains(outer("p2"))).toBe(true);
+  });
+
+  it("sizes to the gutter: 30% of the window (260–400px), as tall as the reader less 20px each side", async () => {
+    seed();
+    const card = await openCard();
+    const want = Math.min(400, Math.max(260, window.innerWidth * 0.3));
+    expect(parseFloat(card.style.width)).toBeCloseTo(want, 0);
+    expect(parseFloat(card.style.maxHeight)).toBe(VIEWPORT.height - 40);
+    expect(parseFloat(card.style.left) + parseFloat(card.style.width)).toBeLessThanOrEqual(VIEWPORT.left);
+  });
+
   it("folds the section's other notes to one line each and shows the current one editable", async () => {
     seed();
     await openCard();
