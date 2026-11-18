@@ -128,15 +128,29 @@ export function suggestionDecorations(
   return DecorationSet.create(doc, decos);
 }
 
+/** When each suggestion was first drawn (its words fade in for ENTER_MS).
+ * `keep` forgets the ones no longer open, so the map never grows past the
+ * suggestions on screen. */
+export function enterTracker(now: () => number = Date.now) {
+  const firstSeen = new Map<string, number>();
+  return {
+    entering: (id: string) => {
+      const t = now();
+      if (!firstSeen.has(id)) firstSeen.set(id, t);
+      return t - firstSeen.get(id)! < ENTER_MS;
+    },
+    keep: (open: Iterable<string>) => {
+      const ids = new Set(open);
+      for (const id of firstSeen.keys()) if (!ids.has(id)) firstSeen.delete(id);
+    },
+    size: () => firstSeen.size,
+  };
+}
+
 /** The extension; `get` returns the current suggestions and bar hosts. */
 export function noteSuggestionMarks(get: () => SuggestionsView) {
   let cache: { doc: PMNode; version: number; set: DecorationSet } | null = null;
-  const firstSeen = new Map<string, number>();
-  const entering = (id: string) => {
-    const now = Date.now();
-    if (!firstSeen.has(id)) firstSeen.set(id, now);
-    return now - firstSeen.get(id)! < ENTER_MS;
-  };
+  const seen = enterTracker();
   return createExtension({
     key: "paperhubSuggestions",
     prosemirrorPlugins: [
@@ -150,7 +164,9 @@ export function noteSuggestionMarks(get: () => SuggestionsView) {
           decorations(state) {
             const version = key.getState(state) ?? 0;
             if (cache?.doc !== state.doc || cache.version !== version) {
-              cache = { doc: state.doc, version, set: suggestionDecorations(state.doc, get(), entering) };
+              const view = get();
+              seen.keep(view.suggestions.map((s) => s.id));
+              cache = { doc: state.doc, version, set: suggestionDecorations(state.doc, view, seen.entering) };
             }
             return cache.set;
           },
