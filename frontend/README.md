@@ -8,6 +8,9 @@
     npm test
     npm run test:watch
 
+Tests run in 2 forked workers; set `VITEST_MAX_WORKERS` for more (see
+`.env.example`).
+
 ## Lint + typecheck
     npm run lint
     npm run typecheck

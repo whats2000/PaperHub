@@ -32,5 +32,9 @@ export default defineConfig({
     // Many jsdom workers in parallel (often beside the dev servers) push a few
     // multi-step tests past the 5 s default; a real hang still fails.
     testTimeout: 15_000,
+    // Forked workers, two by default: one jsdom + BlockNote worker per core
+    // ran the machine out of memory (workers exited mid-run).
+    pool: "forks",
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 2,
   },
 });
