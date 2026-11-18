@@ -122,6 +122,9 @@ export function foldedRanges(doc: PMNode, view: PartsView): [number, number][] {
 /** A selection moved out of a folded part: past it when it was moving down,
  * else back to the block before it (its divider). Null when it is not in one. */
 export function skipFolded(state: EditorState, oldHead: number, view: PartsView): Transaction | null {
+  // Nothing folded or hidden: nothing to skip, and no layout to work out
+  // (this runs on every selection change and keystroke).
+  if (!view.folded.size && view.only == null) return null;
   const head = state.selection.head;
   const range = foldedRanges(state.doc, view).find(([from, to]) => head > from && head < to);
   if (!range) return null;
