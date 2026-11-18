@@ -246,14 +246,25 @@ describe("useHtmlMarks", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("caps a select-all, naming the limit", async () => {
+  it("a select-all (to copy) opens no popover and says nothing", async () => {
     const many = Array.from({ length: MAX_MARK_PARAGRAPHS + 1 }, (_, i) => `<p>Paragraph number ${i}.</p>`).join("");
     const doc = frameDoc(`<p><span id="phchunk-0"></span>Start.</p>${many}`);
     render(<Host doc={doc} />);
     select(doc, "Start", `number ${MAX_MARK_PARAGRAPHS}.`);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(toastMessage).not.toHaveBeenCalled();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("a highlighter drag over too many paragraphs says the limit (an attempt to mark)", async () => {
+    const many = Array.from({ length: MAX_MARK_PARAGRAPHS + 1 }, (_, i) => `<p>Paragraph number ${i}.</p>`).join("");
+    const doc = frameDoc(`<p><span id="phchunk-0"></span>Start.</p>${many}`);
+    render(<Host doc={doc} />);
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    select(doc, "Start", `number ${MAX_MARK_PARAGRAPHS}.`);
     await waitFor(() => expect(toastMessage).toHaveBeenCalledTimes(1));
     expect(toastMessage.mock.calls[0]![0]).toContain(String(MAX_MARK_PARAGRAPHS));
-    expect(screen.queryByRole("toolbar")).toBeNull();
+    act(() => useMarksStore.getState().setPen(false, "green"));
   });
 
   it("from the keyboard, focus moves into the popover; Escape gives it back", async () => {

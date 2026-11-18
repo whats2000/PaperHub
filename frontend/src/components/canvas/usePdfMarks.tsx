@@ -289,7 +289,9 @@ export function usePdfMarks({
         if (pieces.length > MAX_MARK_PARAGRAPHS) {
           setTarget(null);
           const key = `${pieces.length}:${pieces[0]!.quote}`;
-          if (key !== capped) {
+          // Only an attempt to mark (the highlighter) hears why; a select-all
+          // to copy opens nothing and says nothing [user, 2026-11-19].
+          if (penRef.current && key !== capped) {
             capped = key;
             toast.message(
               tRef.current("marks.tooLong", {
