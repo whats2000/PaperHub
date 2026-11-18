@@ -18,7 +18,7 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
-import { useNotesStore } from "@/store/notes";
+import { noteMarksChanged, useNotesStore } from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -802,6 +802,7 @@ export const useChatStore = create<ChatState>()(
         } else if (name === "notes_changed") {
           // The agent changed a note: an open editor shows it at once.
           const noteId = (data as { note_id?: number }).note_id;
+          if (typeof noteId === "number") noteMarksChanged(noteId);
           const notes = useNotesStore.getState();
           if (typeof noteId === "number" && notes.notes[noteId]) {
             void notes.loadNote(noteId).catch(() => undefined);

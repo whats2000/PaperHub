@@ -31,6 +31,7 @@ import {
 } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { applyOpsLocally, blockText } from "@/lib/notes/ops";
+import { MARK_TYPES } from "@/lib/marks/blockTypes";
 import type {
   ApplyResult,
   Note,
@@ -190,6 +191,36 @@ interface Burst {
 }
 const inRetry = new Map<number, Burst>();
 let colorsRequest: Promise<void> | null = null;
+
+/** Who keeps the reader's marks in step with notes (the marks store). */
+type MarkBlocksListener = (noteId: number, change: { deleted: string[]; revived: boolean } | null) => void;
+const markBlockListeners = new Set<MarkBlocksListener>();
+
+/** Registers `fn` to hear of note changes that may delete or revive marks. */
+export function onMarkBlocksChanged(fn: MarkBlocksListener): () => void {
+  markBlockListeners.add(fn);
+  return () => markBlockListeners.delete(fn);
+}
+
+/** The server changed a note in ways the client didn't see op by op (an
+ * agent edit, a change set undone or applied again): the reader's marks of
+ * that note's paper are fetched again. */
+export function noteMarksChanged(noteId: number): void {
+  markBlockListeners.forEach((fn) => fn(noteId, null));
+}
+
+/** After a saved burst: blocks it deleted, and whether it put a mark block
+ * back (the editor's undo of a delete revives the mark on the server). */
+function tellMarkBlocks(noteId: number, ops: readonly NoteOp[], applied: ReadonlySet<string>): void {
+  const deleted = ops
+    .filter((o) => o.op === "delete" && o.block_id && applied.has(o.block_id))
+    .map((o) => o.block_id!);
+  const revived = ops.some(
+    (o) => o.op === "insert" && o.block_id && applied.has(o.block_id) && !!o.block && MARK_TYPES.has(o.block.type),
+  );
+  if (!deleted.length && !revived) return;
+  markBlockListeners.forEach((fn) => fn(noteId, { deleted, revived }));
+}
 let caretTimer: ReturnType<typeof setTimeout> | undefined;
 /** How long a caret request waits for its block (as "Open in notes" does). */
 export const CARET_GIVE_UP_MS = 5000;
@@ -745,6 +776,7 @@ export const useNotesStore = create<NotesStore>()(
         if (res.renamed?.length) rekey(noteId, res.renamed);
         const applied = new Set(res.applied);
         for (const id of applied) rebuilds.delete(id);
+        tellMarkBlocks(noteId, burst.ops, applied);
         set((s) => {
           const cur = s.notes[noteId];
           if (!cur) return {};

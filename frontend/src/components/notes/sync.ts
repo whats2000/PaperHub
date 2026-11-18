@@ -7,6 +7,7 @@
  * `parent_id`.
  */
 import type { NoteBlock, NoteBlockIn, NoteBlockType, NoteContent, NoteOp } from "@/types/notes";
+import { MARK_TYPES } from "@/lib/marks/blockTypes";
 
 /** The parts of a BlockNote block the sync reads (any schema). */
 export interface EditorBlock {
@@ -22,7 +23,6 @@ export type Block = EditorBlock;
 
 /** Props BlockNote can only hold as strings (its props are primitives). */
 const JSON_PROPS = new Set(["pieces", "source"]);
-const MARK_TYPES = new Set(["paperQuote", "paperFigure", "paperEquation", "paperRegion"]);
 /** Optional mark props whose editor default means "absent" (a quote with no
  * colour, a mark not made on a translation or its words still there, an anchor not lost). */
 const MARK_OPTIONAL_DEFAULTS: Record<string, unknown> = {

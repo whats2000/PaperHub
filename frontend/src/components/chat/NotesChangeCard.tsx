@@ -20,7 +20,7 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { diffText } from "@/lib/notes/textDiff";
 import { truncatedTitle } from "@/lib/truncatedTitle";
 import { useNotesPaneStore } from "@/store/notesPane";
-import { useNotesStore } from "@/store/notes";
+import { noteMarksChanged, useNotesStore } from "@/store/notes";
 import type { NotesChangedData } from "@/types/domain";
 import type { ChangeSetChange, ChangeSetStatus } from "@/types/notes";
 
@@ -28,6 +28,8 @@ type Live = { id: string; status: "applied" | "undone" };
 
 /** Reload the note if it is open somewhere, so the editor shows the change. */
 function refreshNote(noteId: number) {
+  // Its mark blocks may have gone or come back: the reader follows.
+  noteMarksChanged(noteId);
   if (useNotesStore.getState().notes[noteId]) {
     void useNotesStore
       .getState()

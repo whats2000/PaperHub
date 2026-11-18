@@ -135,7 +135,7 @@ describe("useMarksStore.remove", () => {
     useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
     await useMarksStore.getState().remove("mk_1");
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
-    expect(toastFn.mock.lastCall?.[0]).toBe("Mark deleted");
+    expect(toastFn.mock.lastCall?.[0]).toBe("Removed from the paper and the note");
 
     const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
     expect(undo.label).toBe("Undo");
@@ -241,7 +241,7 @@ describe("useMarksStore.erase", () => {
     await useMarksStore.getState().erase("mk_1", 0);
     expect(calls).toEqual(["erase"]);
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
-    expect(toastFn.mock.lastCall?.[0]).toBe("Mark deleted");
+    expect(toastFn.mock.lastCall?.[0]).toBe("Removed from the paper and the note");
     const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
     undo.onClick();
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything()));
@@ -652,5 +652,121 @@ describe("the refetch merge", () => {
     await useMarksStore.getState().refetchMarks(3);
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_4"]);
     expect(trackedMarkChanges()).toBe(0);
+  });
+});
+
+type Action = { label: string; onClick: () => void };
+const lastAction = () => (toastFn.mock.lastCall![1] as { action: Action }).action;
+
+describe("a mark's block deleted in the note (live bug A)", () => {
+  it("leaves the reader at once, with a notice to undo; the editor's undo shows it again", async () => {
+    let serverMarks: Mark[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json({ note_id: 7, revision: 5, applied: ["b_q"], rejected: [], suggested: [], reparented: [], change_set_id: "cs" }),
+      ),
+      http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json(serverMarks)),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    const notes = useNotesStore.getState();
+    notes.applyLocal(7, [{ op: "delete", block_id: "b_q" }]);
+    await notes.flush(7);
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toEqual([]));
+    expect(toastFn).toHaveBeenCalledWith(
+      "Removed from the paper and the note",
+      expect.objectContaining({ id: "mark-deleted", description: "Ctrl+Z to undo" }),
+    );
+
+    serverMarks = [{ ...MARK, note_id: 7 }];
+    notes.applyLocal(7, [
+      { op: "insert", block_id: "b_q", block: { type: "paperQuote", props: { markId: "mk_1" } } as never, after: "p1" },
+    ]);
+    await notes.flush(7);
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
+  });
+
+  it("an agent or change-set change to the note resyncs the paper's marks", async () => {
+    server.use(http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([])));
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    const { noteMarksChanged } = await import("@/store/notes");
+    noteMarksChanged(7);
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toEqual([]));
+  });
+});
+
+describe("a mark action on stale state (409/404) resyncs quietly", () => {
+  const stale = (status: number) => () => new HttpResponse("gone", { status });
+
+  it.each([409, 404])("delete answered %i is a success: no error, the notice with Undo", async (status) => {
+    server.use(http.delete(`${API_BASE_URL}/marks/mk_1`, stale(status)), http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([])));
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().remove("mk_1");
+    expect(toastError).not.toHaveBeenCalled();
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    expect(toastFn.mock.lastCall?.[0]).toBe("Removed from the paper and the note");
+  });
+
+  it("restore answered 409 is a success: the mark is back from the server", async () => {
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => HttpResponse.json({ revision: 5, applied: [], rejected: [] })),
+      http.post(`${API_BASE_URL}/marks/mk_1/restore`, stale(409)),
+      http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([{ ...MARK, note_id: 7 }])),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().remove("mk_1");
+    lastAction().onClick();
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["erase", (s: ReturnType<typeof useMarksStore.getState>) => s.erase("mk_1", 0), "delete", "/marks/mk_1/pieces/0"],
+    ["split", (s: ReturnType<typeof useMarksStore.getState>) => s.split("mk_1"), "post", "/marks/mk_1/split"],
+  ] as const)("%s answered 409 refetches the marks, no error", async (_n, act, method, path) => {
+    let lists = 0;
+    server.use(
+      http[method](`${API_BASE_URL}${path}`, stale(409)),
+      http.get(`${API_BASE_URL}/marks`, () => {
+        lists += 1;
+        return HttpResponse.json([]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await act(useMarksStore.getState());
+    await waitFor(() => expect(lists).toBe(1));
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("a 500 still says so", async () => {
+    server.use(http.delete(`${API_BASE_URL}/marks/mk_1`, stale(500)));
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().remove("mk_1");
+    expect(toastError).toHaveBeenCalled();
+  });
+});
+
+describe("Ctrl+Z in the reader", () => {
+  it("undoes the delete while its notice shows, not while typing in an input", async () => {
+    let restores = 0;
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => HttpResponse.json({ revision: 5, applied: [], rejected: [] })),
+      http.post(`${API_BASE_URL}/marks/mk_1/restore`, () => {
+        restores += 1;
+        return HttpResponse.json({ revision: 6, applied: [], rejected: [] });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().remove("mk_1");
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
+    expect(restores).toBe(1);
+    // The notice is gone: a second Ctrl+Z does nothing more.
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    expect(restores).toBe(1);
+    input.remove();
   });
 });

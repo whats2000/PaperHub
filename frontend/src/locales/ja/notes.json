@@ -302,7 +302,6 @@
     "savedToPaper": "{{paper}} に保存しました",
     "show": "表示",
     "saveFailed": "印を保存できませんでした。",
-    "deleted": "印を削除しました",
     "undo": "元に戻す",
     "restored": "印を元に戻しました",
     "deleteAgain": "もう一度削除",
@@ -353,7 +352,9 @@
     "notFound": "このマークはここでは論文上に描かれていません。",
     "showingHidden": "非表示の色を表示しています",
     "hideAgain": "再び隠す",
-    "noteMissing": "このマークのノートを取得できません。"
+    "noteMissing": "このマークのノートを取得できません。",
+    "removedBoth": "論文とノートから削除しました",
+    "undoHint": "Ctrl+Z で元に戻す"
   },
   "langShort": {
     "en": "英語",

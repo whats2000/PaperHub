@@ -302,7 +302,6 @@
     "savedToPaper": "已存到 {{paper}}",
     "show": "顯示",
     "saveFailed": "無法儲存這個標記。",
-    "deleted": "已刪除標記",
     "undo": "復原",
     "restored": "已復原標記",
     "deleteAgain": "再次刪除",
@@ -353,7 +352,9 @@
     "notFound": "這個標記沒有畫在這裡的論文上。",
     "showingHidden": "正在顯示已隱藏的顏色",
     "hideAgain": "再次隱藏",
-    "noteMissing": "無法取得這個標記的筆記。"
+    "noteMissing": "無法取得這個標記的筆記。",
+    "removedBoth": "已從論文和筆記中移除",
+    "undoHint": "按 Ctrl+Z 復原"
   },
   "langShort": {
     "en": "英文",

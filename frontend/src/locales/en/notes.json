@@ -302,7 +302,6 @@
     "savedToPaper": "Saved to {{paper}}",
     "show": "Show",
     "saveFailed": "Couldn't save the mark.",
-    "deleted": "Mark deleted",
     "undo": "Undo",
     "restored": "Mark restored",
     "deleteAgain": "Delete again",
@@ -353,7 +352,9 @@
     "notFound": "This mark isn't drawn in the paper here.",
     "showingHidden": "Showing a hidden colour",
     "hideAgain": "Hide again",
-    "noteMissing": "This mark's note isn't available."
+    "noteMissing": "This mark's note isn't available.",
+    "removedBoth": "Removed from the paper and the note",
+    "undoHint": "Ctrl+Z to undo"
   },
   "langShort": {
     "en": "English",
