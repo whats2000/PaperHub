@@ -217,3 +217,34 @@ def test_docx_roundtrip_when_pandoc_present(tmp_path: Path) -> None:
     assert "Vaswani" in xml  # the citation, rendered by citeproc
     assert "<m:oMath" in xml  # the equation is Word math
     assert len(media) == 1
+
+
+BS = "\\"
+
+
+def _quote_md(quote: str) -> str:
+    md, _i, _b = note_to_markdown(NOTE, [_quote("q1", quote)], {5: _paper()})
+    return md
+
+
+def test_quote_inline_math_stays_math_and_text_stays_escaped() -> None:
+    md = _quote_md("with x_i and $x_i^2$ here")
+    assert f"> with x{BS}_i and $x_i^2$ here" in md
+
+
+def test_quote_aligned_environment_is_display_math_without_label() -> None:
+    md = _quote_md(r"see $\begin{aligned} a &= b \label{eq:a} \end{aligned}$ ok")
+    assert "label" not in md
+    assert (f"> see\n>\n> $${BS}begin{{aligned}} a &= b {BS}end{{aligned}}$$"
+            "\n>\n> ok") in md
+
+
+def test_quote_escaped_dollar_is_a_literal() -> None:
+    md = _quote_md(r"costs \$5 and \$6")
+    assert f"> costs {BS * 3}$5 and {BS * 3}$6" in md
+    assert "$$" not in md
+
+
+def test_quote_without_math_is_unchanged() -> None:
+    md = _quote_md("plain a_b\n1. next [x]")
+    assert f"> plain a{BS}_b\n>\n> 1{BS}. next {BS}[x{BS}]" in md

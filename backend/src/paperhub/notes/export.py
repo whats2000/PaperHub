@@ -632,6 +632,52 @@ def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     return _hard_breaks(w.inline(b.content))
 
 
+# Same rules as the frontend's ``lib/quoteMath.ts``: ``$…$`` in a quote from
+# the paper's reading text is math (an escaped ``\$`` is a dollar sign).
+_QUOTE_MATH = re.compile(r"(?<!\\)\$((?:\\\$|[^$])+?)\$")
+_DISPLAY_ENV = re.compile(
+    r"\\begin\s*\{(?:aligned|align\*?|equation\*?|gather\*?|multline\*?"
+    r"|array|cases|split)\}")
+_LABEL = re.compile(r"\\label\s*\{[^{}]*\}")
+
+
+def _quote_paragraphs(w: _Writer, raw: str, prefix: str = "") -> list[str]:
+    """One quote line as Markdown paragraphs: its ``$…$`` kept as math, the
+    text around it escaped. A multi-line environment is display math in a
+    paragraph of its own. A line without math is ``w.text`` as before."""
+    paras: list[str] = []
+    cur: list[str] = [prefix]
+
+    split = False  # a display block was written: trim the text beside it
+
+    def flush(trim: bool) -> None:
+        text = "".join(cur)
+        cur.clear()
+        if trim:
+            text = text.strip(" \t")
+        if text.strip():
+            paras.append(_line_starts(text))
+
+    pos = 0
+    for m in _QUOTE_MATH.finditer(raw):
+        latex = " ".join(_LABEL.sub("", m[1]).split())
+        if not latex or latex.endswith("\\"):
+            continue  # not writable as math: stays escaped text
+        cur.append(w.text(raw[pos:m.start()]))
+        if _DISPLAY_ENV.search(latex):
+            flush(True)
+            paras.append(f"$${_math(latex)}$$")
+            split = True
+        else:
+            cur.append(f"${_math(latex)}$")
+        pos = m.end()
+    cur.append(w.text(raw[pos:]))
+    flush(split)
+    if not paras:
+        paras = [""]
+    return paras
+
+
 def _paper_quote(w: _Writer, b: Block) -> str:
     pid = w.block_paper(b)
     live = live_pieces(_json(b.props.get("pieces"), []))
@@ -640,7 +686,8 @@ def _paper_quote(w: _Writer, b: Block) -> str:
     # Each paragraph of the quote is its own paragraph in the block quote.
     lines: list[str] = []
     for ln in quote.split("\n"):
-        lines += ["", _line_starts(w.text(ln))] if lines else [_line_starts(w.text(ln))]
+        for para in _quote_paragraphs(w, ln):
+            lines += ["", para] if lines else [para]
     lang = b.props.get("lang")
     if isinstance(lang, str) and lang.strip():
         label = canonical_language(lang)
@@ -648,7 +695,8 @@ def _paper_quote(w: _Writer, b: Block) -> str:
         lines += ["", f"*Translated · {_escape(short)}*"]
         orig = b.props.get("orig")
         if isinstance(orig, str) and orig.strip():
-            lines += ["", f"Original: {w.text(' '.join(orig.split()))}"]
+            first, *rest = _quote_paragraphs(w, " ".join(orig.split()), "Original: ")
+            lines += ["", first, *[x for p in rest for x in ("", p)]]
     source = w.source_line(b, pid)
     if source:
         lines += ["", source]
