@@ -285,7 +285,12 @@
   },
   "cite": {
     "gone": "这一行已不在你的笔记里。",
-    "failed": "无法打开那条笔记，请再试一次。"
+    "failed": "无法打开那条笔记，请再试一次。",
+    "chunkTitle": "打开引用的段落",
+    "noteTitle": "打开引用的笔记行",
+    "figTitle": "打开引用的图",
+    "viewTitle": "打开引用的页面区域",
+    "unsourcedTitle": "没有经过确认的来源：{{reason}}"
   },
   "marks": {
     "popover": "标记选中的文字",

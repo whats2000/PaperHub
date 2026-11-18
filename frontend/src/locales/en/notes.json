@@ -285,7 +285,12 @@
   },
   "cite": {
     "gone": "That line is no longer in your notes.",
-    "failed": "Couldn't open that note. Try again."
+    "failed": "Couldn't open that note. Try again.",
+    "chunkTitle": "Open the cited passage",
+    "noteTitle": "Open the cited line of your notes",
+    "figTitle": "Open the cited figure",
+    "viewTitle": "Open the cited page region",
+    "unsourcedTitle": "No checked source: {{reason}}"
   },
   "marks": {
     "popover": "Mark the selection",

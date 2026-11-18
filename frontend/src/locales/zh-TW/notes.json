@@ -285,7 +285,12 @@
   },
   "cite": {
     "gone": "這一行已不在你的筆記裡。",
-    "failed": "無法開啟那則筆記，請再試一次。"
+    "failed": "無法開啟那則筆記，請再試一次。",
+    "chunkTitle": "開啟引用的段落",
+    "noteTitle": "開啟引用的筆記行",
+    "figTitle": "開啟引用的圖",
+    "viewTitle": "開啟引用的頁面區域",
+    "unsourcedTitle": "沒有經過確認的來源：{{reason}}"
   },
   "marks": {
     "popover": "標記選取的文字",

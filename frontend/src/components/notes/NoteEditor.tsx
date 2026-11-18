@@ -31,6 +31,7 @@ import { useCanvasStore } from "@/store/canvas";
 import { useNotesStore } from "@/store/notes";
 
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
+import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
 import { NoteFormattingBar } from "./FormattingBar";
@@ -200,6 +201,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           host: suggestionHost,
         })),
         lostCommentBadges(lostBadges.badgeView),
+        citationChips(),
       ],
     },
     [noteId],

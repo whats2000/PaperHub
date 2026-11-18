@@ -11,6 +11,7 @@ import { noteSchema } from "@/components/notes/schema";
 import { diffDocuments, opBlock, toEditorBlocks, treeIds, type EditorBlock } from "@/components/notes/sync";
 import { API_BASE_URL } from "@/lib/api";
 import i18n from "@/lib/i18n";
+import { useCanvasStore } from "@/store/canvas";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
@@ -606,6 +607,59 @@ describe("NoteEditor", () => {
     );
     expect(screen.getAllByText("pasted!")).toHaveLength(1);
     expect(posted).toHaveLength(2);
+  });
+});
+
+describe("citation chips", () => {
+  it("draws markers as chips over their literal text, which is what is stored and sent", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        return HttpResponse.json({
+          note_id: 7,
+          revision: 5,
+          change_set_id: "cs",
+          applied: ["p1"],
+          suggested: [],
+          rejected: [],
+          reparented: [],
+        } satisfies ApplyResult);
+      }),
+    );
+    const openCitation = vi.fn();
+    const before = useCanvasStore.getState().openCitation;
+    useCanvasStore.setState({ openCitation });
+    onTestFinished(() => {
+      useCanvasStore.setState({ openCitation: before });
+    });
+    seed([mine]);
+    mount();
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { commands: { insertContentAt: (pos: number, text: string) => boolean } };
+    };
+    await screen.findByText("Mine");
+    act(() => {
+      pm.editor.commands.insertContentAt(7, " [chunk:12] [unsourced:not_read]");
+    });
+    const chip = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('.ph-cite[data-cite="chunk"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(chip.textContent).toBe("[chunk:12]");
+    expect(chip.title).toBe("Open the cited passage");
+    expect(document.querySelector('.ph-cite[data-cite="unsourced"]')?.className).toContain("outline-dashed");
+    // The block's text is the literal marker, byte for byte.
+    const text = "Mine [chunk:12] [unsourced:not_read]";
+    expect(useNotesStore.getState().notes[7]?.blocks[0]?.text).toBe(text);
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    expect(posted[0]?.ops[0]?.block?.content).toEqual([{ type: "text", text, styles: {} }]);
+    // A click opens the Citation Canvas on the cited chunk.
+    fireEvent.click(chip);
+    await waitFor(() => expect(openCitation).toHaveBeenCalledWith(12));
   });
 });
 
