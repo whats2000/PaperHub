@@ -41,10 +41,10 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
   const colorName = useColorName(props.color);
   const src = markSource(props);
   const pieces = markPieces(props);
-  const where = whereLabel(src, t);
+  const { card, paperTitle } = useNoteEditorContext();
+  const where = whereLabel(src, t, paperTitle);
   const tag = [label, colorName, where].filter(Boolean).join(" · ");
   const bar = props.color ? `var(--hl-${props.color})` : "var(--muted-foreground)";
-  const { card } = useNoteEditorContext();
   const hovered = useMarkNavStore((s) => !card && !!props.markId && s.hovered === props.markId);
   // The card's clicked reference, or (the pane) the mark under the pointer.
   const target = card ? !!props.markId && card.markId === props.markId : hovered;

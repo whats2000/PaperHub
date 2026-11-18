@@ -141,3 +141,25 @@ describe("a quote marked on a translation", () => {
     expect(screen.getByText("預測代理的姿態")).toBeTruthy();
   });
 });
+
+describe("the quote caption", () => {
+  it("does not repeat a section named like the paper", () => {
+    inNote(
+      <PaperQuoteView
+        id="b1"
+        props={props({ kind: "highlight", quote: "q", source: JSON.stringify({ section: "duo ", page: 0 }) })}
+      />,
+    );
+    expect(screen.getByText(/From the paper/).textContent).toBe("From the paper · p. 1");
+  });
+
+  it("keeps a section named otherwise", () => {
+    inNote(
+      <PaperQuoteView
+        id="b1"
+        props={props({ kind: "highlight", quote: "q", source: JSON.stringify({ section: "2 Method", page: 0 }) })}
+      />,
+    );
+    expect(screen.getByText(/From the paper/).textContent).toBe("From the paper · §2 · p. 1");
+  });
+});

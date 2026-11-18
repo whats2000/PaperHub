@@ -374,7 +374,8 @@
     "trOriginal": "the original",
     "trSwitch": "Switch to {{lang}}",
     "offScreen": "The mark is off screen",
-    "trTurnOn": "Turn on translation"
+    "trTurnOn": "Turn on translation",
+    "partOnly": "· note {{index}} of {{count}}"
   },
   "backPill": "Back to note",
   "myMarks": {

@@ -374,7 +374,8 @@
     "trOriginal": "原文",
     "trSwitch": "{{lang}}に切り替え",
     "offScreen": "マークは画面外です",
-    "trTurnOn": "翻訳をオンにする"
+    "trTurnOn": "翻訳をオンにする",
+    "partOnly": "· ノート {{index}} / {{count}}"
   },
   "backPill": "ノートに戻る",
   "myMarks": {

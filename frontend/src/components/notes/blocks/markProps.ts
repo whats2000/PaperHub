@@ -91,10 +91,19 @@ export function sectionLabel(key: string): string {
   return m ? `§${m[1]}` : `§ ${key.trim()}`;
 }
 
-/** "§2 · p. 3" (pages are 0-based in the data). */
-export function whereLabel(src: MarkSource, t: TFunction): string {
+/** Two names that read the same (case, spacing and edge punctuation aside):
+ * a PDF's one "section" is often its title. */
+export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (x: string) =>
+    x.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "");
+  return !!a && !!b && norm(a) === norm(b);
+}
+
+/** "§2 · p. 3" (pages are 0-based in the data); a section named like the
+ * paper (`paperTitle`) is left out. */
+export function whereLabel(src: MarkSource, t: TFunction, paperTitle?: string | null): string {
   const parts: string[] = [];
-  if (src.section) parts.push(sectionLabel(src.section));
+  if (src.section && !sameName(src.section, paperTitle)) parts.push(sectionLabel(src.section));
   if (typeof src.page === "number") parts.push(t("notes:ref.page", "p. {{page}}", { page: src.page + 1 }));
   return parts.join(" · ");
 }

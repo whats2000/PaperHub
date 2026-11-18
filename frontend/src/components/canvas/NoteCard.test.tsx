@@ -198,6 +198,31 @@ describe("the note card", () => {
     expect(useMarkNavStore.getState().cardBox).not.toBeNull();
   });
 
+  it("a long section name truncates with the title, never under the buttons", async () => {
+    seed();
+    await openCard();
+    const bar = screen.getByTestId("note-card-title");
+    const [title, where] = Array.from(bar.children) as HTMLElement[];
+    // Both parts shrink; the title keeps a share (it is never pushed to zero).
+    expect(title!.className).toMatch(/truncate/);
+    expect(where!.className).toMatch(/truncate/);
+    expect(where!.className).not.toMatch(/shrink-0/);
+    expect(title!.className).toMatch(/min-w-\[/);
+    expect(bar.className).toMatch(/overflow-hidden/);
+    expect(bar.getAttribute("title") ?? bar.getAttribute("aria-label") ?? "").toBeDefined();
+  });
+
+  it("a section named like the paper shows the name once", async () => {
+    seed();
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, note: { ...s.notes[7]!.note, title: " 2  method" } } },
+    }));
+    await openCard();
+    const text = screen.getByTestId("note-card-title").textContent ?? "";
+    expect(text).toBe(" 2  method· note 2 of 3"); // the parts sit a gap apart
+    expect(text).not.toContain("§");
+  });
+
   it("folds the section's other notes to one line each and shows the current one editable", async () => {
     seed();
     await openCard();

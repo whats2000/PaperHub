@@ -15,7 +15,7 @@ import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Tra
 import { useTranslation } from "react-i18next";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { langShort, sectionLabel } from "@/components/notes/blocks/markProps";
+import { langShort, sameName, sectionLabel } from "@/components/notes/blocks/markProps";
 import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
 import { CARD_EDGE, NARROW_GUTTER_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
@@ -354,16 +354,22 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
 
   const paperTitle = note?.note.title ?? "";
   const count = section?.parts.length ?? 0;
-  const where = section?.sectionKey
-    ? count > 1
-      ? t("noteCard.where", {
-          defaultValue: "› {{section}} · note {{index}} of {{count}}",
-          section: sectionLabel(section.sectionKey),
-          index: currentIndex + 1,
-          count,
-        })
-      : t("noteCard.whereOne", { defaultValue: "› {{section}}", section: sectionLabel(section.sectionKey) })
-    : "";
+  // A section named like the paper (a PDF's one section) is not said twice.
+  const sameAsTitle = !!section?.sectionKey && sameName(section.sectionKey, paperTitle);
+  const where = !section?.sectionKey
+    ? ""
+    : sameAsTitle
+      ? count > 1
+        ? t("noteCard.partOnly", { defaultValue: "· note {{index}} of {{count}}", index: currentIndex + 1, count })
+        : ""
+      : count > 1
+        ? t("noteCard.where", {
+            defaultValue: "› {{section}} · note {{index}} of {{count}}",
+            section: sectionLabel(section.sectionKey),
+            index: currentIndex + 1,
+            count,
+          })
+        : t("noteCard.whereOne", { defaultValue: "› {{section}}", section: sectionLabel(section.sectionKey) });
   const fullTitle = [paperTitle, where].filter(Boolean).join(" ");
 
   const folded = (part: Part<NoteBlock>, i: number) => {
@@ -429,11 +435,17 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       />
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border py-1.5 pr-1.5 pl-2.5 font-medium">
         <NotebookPen className="size-3.5 shrink-0" aria-hidden />
-        <span data-testid="note-card-title" className="flex min-w-0 flex-1 items-baseline gap-1" {...truncatedTitle(fullTitle)}>
-          <span data-truncate className="min-w-0 truncate">
+        <span
+          data-testid="note-card-title"
+          className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden"
+          {...truncatedTitle(fullTitle)}
+        >
+          {/* Both parts truncate; the section gives way first and the paper
+              title keeps a share, so neither runs under the buttons. */}
+          <span data-truncate className="min-w-[4rem] shrink truncate">
             {paperTitle}
           </span>
-          {where && <span className="shrink-0">{where}</span>}
+          {where && <span className="min-w-0 shrink-[4] truncate">{where}</span>}
         </span>
         <button
           type="button"

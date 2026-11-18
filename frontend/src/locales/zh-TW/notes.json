@@ -374,7 +374,8 @@
     "trOriginal": "原文",
     "trSwitch": "切換到{{lang}}",
     "offScreen": "標記不在畫面上",
-    "trTurnOn": "開啟翻譯"
+    "trTurnOn": "開啟翻譯",
+    "partOnly": "· 第 {{index}} 則，共 {{count}} 則"
   },
   "backPill": "回到筆記",
   "myMarks": {
