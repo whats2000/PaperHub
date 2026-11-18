@@ -168,6 +168,29 @@ async def test_restore_of_a_live_mark_is_a_quiet_success(conn):
     assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
 
 
+async def test_editor_undo_reinserting_a_deleted_mark_block_revives_the_mark(conn):
+    """Backspace on a mark block, then Ctrl+Z in the editor: the editor
+    re-sends the block as an insert under its own id; the server brings
+    back both the block and its mark."""
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("hello")]))
+    note = await get_note(conn, saved.note_id)
+    [sec, blk] = await list_blocks(conn, note.id)
+    res = await apply_ops(conn, note.id, base_revision=note.revision,
+                          actor="user",
+                          ops=[Op(op="delete", block_id=blk.id)])
+    assert await list_marks(conn, 1) == []
+    res = await apply_ops(
+        conn, note.id, base_revision=res.revision, actor="user",
+        ops=[Op(op="insert", block_id=blk.id, after=sec.id,
+                block=BlockIn(type=blk.type, props=blk.props,
+                              content=blk.content))])
+    assert res.applied == [blk.id] and not res.renamed
+    [back] = await list_marks(conn, 1)
+    assert back["id"] == m["id"] and back["block_id"] == blk.id
+    assert [b.id for b in await list_blocks(conn, note.id)] == [sec.id, blk.id]
+
+
 async def test_failed_mark_insert_leaves_no_orphan_block(conn, monkeypatch):
     await _paper(conn)
     note = await paper_note(conn, 1)
