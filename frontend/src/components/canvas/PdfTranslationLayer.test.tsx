@@ -6,6 +6,8 @@ import { PdfTranslationLayer, PdfTranslationPage } from "@/components/canvas/Pdf
 import { PdfMarksProvider, type PdfMarksApi } from "@/components/canvas/usePdfMarks";
 import { getPdfParagraphs, translateBlocks } from "@/lib/api";
 import { mathToKatexHtml } from "@/lib/pdfTranslation";
+import { useCanvasStore } from "@/store/canvas";
+import { markAnchor } from "@/store/markNav";
 import { useTranslationStore } from "@/store/translation";
 import type { ParagraphsResponse, PdfFragment, TranslateRequest } from "@/types/translation";
 
@@ -808,6 +810,10 @@ describe("PdfTranslationLayer — a mark on the card asked to be shown", () => {
       expect((card().querySelector('[data-card-mark="mt"]') as HTMLElement).style.boxShadow).not.toBe(""),
     );
     expect(setCardShown).toHaveBeenLastCalledWith(new Set(["mt"]));
+    // The card is a place the note card can point at (its 文 marker on the
+    // page is hidden while the card shows the mark): never "off screen".
+    useCanvasStore.setState({ readerView: null });
+    expect(markAnchor(7, "mt")?.rects.length).toBeGreaterThan(0);
     // Done: a reader opened later does not show it again.
     expect(useTranslationStore.getState().reveal).toBeNull();
     rects.mockRestore();

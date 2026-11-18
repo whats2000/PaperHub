@@ -740,6 +740,7 @@ ${next.side}`;
     <ActionsCtx.Provider value={actions}>
       <StateCtx.Provider value={state}>{children}</StateCtx.Provider>
       <TranslationCard
+        paperId={paperId}
         open={open && !outOfView}
         contentKey={shown?.key ?? null}
         language={language}

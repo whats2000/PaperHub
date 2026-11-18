@@ -10,6 +10,7 @@ import { contentScrollTop, type CardPlacement } from "@/lib/cardPlacement";
 import { cardIndex, findInTranslation } from "@/lib/marks/translationMarks";
 import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { registerMarkAnchors } from "@/store/markNav";
 import type { Mark } from "@/types/notes";
 
 export type TranslationCardStatus = "loading" | "ok" | "unavailable";
@@ -41,6 +42,9 @@ const NO_BOXES: CardMarkBox[] = [];
 const RESUME_SYNC_DELTA = 0.02;
 
 interface Props {
+  /** The paper whose translation it shows: its marks drawn here are a
+   * place the note card can point at. */
+  paperId?: number;
   open: boolean;
   /** Identifies the paragraph shown, so switching paragraphs cross-fades. */
   contentKey: string | null;
@@ -86,6 +90,7 @@ interface Props {
  * card in step with the reader's progress through the paragraph.
  */
 export function TranslationCard({
+  paperId,
   open,
   contentKey,
   language,
@@ -224,6 +229,38 @@ export function TranslationCard({
   useEffect(() => () => onShownRef.current?.(new Set()), []);
   const drawn = useLeaving(boxes);
 
+  // The marks drawn here are where the note card points (the 文 marker on
+  // the page is hidden while the card shows a mark): a mark source for it.
+  const moved = useRef(new Set<() => void>());
+  useEffect(() => {
+    moved.current.forEach((f) => f());
+  }, [boxes]);
+  useEffect(() => {
+    if (paperId === undefined || !mounted) return;
+    return registerMarkAnchors(paperId, {
+      kind: "pdf",
+      viewport: () => contentRef.current?.getBoundingClientRect() ?? null,
+      find: (markId) => {
+        const content = contentRef.current;
+        if (!content) return null;
+        const els = content.querySelectorAll(`[data-card-mark="${CSS.escape(markId)}"]:not([data-leaving])`);
+        return { rects: Array.from(els, (el) => el.getBoundingClientRect()), viewport: content.getBoundingClientRect() };
+      },
+      subscribe: (onMove) => {
+        const content = contentRef.current;
+        content?.addEventListener("scroll", onMove, { passive: true });
+        const ro = content && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onMove) : null;
+        if (content) ro?.observe(content);
+        moved.current.add(onMove);
+        return () => {
+          content?.removeEventListener("scroll", onMove);
+          ro?.disconnect();
+          moved.current.delete(onMove);
+        };
+      },
+    });
+  }, [paperId, mounted]);
+
   // A selection in the card: after the browser has settled it.
   const readSelection = (keyboard: boolean) => {
     if (!onSelectText) return;
@@ -328,6 +365,7 @@ export function TranslationCard({
             key={b.id}
             aria-hidden="true"
             data-card-mark={b.mark}
+            data-leaving={b.leaving ? "" : undefined}
             className={cn(
               "pointer-events-none absolute rounded-[2px] transition-[opacity,box-shadow] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none",
               b.leaving && "opacity-0",
