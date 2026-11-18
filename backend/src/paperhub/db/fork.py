@@ -18,11 +18,14 @@ than aborting it.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import secrets
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -61,10 +64,29 @@ async def _forked_message(
     return int(row[0]), str(row[1])
 
 
+def _restyle(v: Any, threads: dict[str, str]) -> Any:
+    """``v`` (block content) with each ``comment`` style pointed at the
+    copied thread, or dropped when its thread was not copied."""
+    if isinstance(v, list):
+        return [_restyle(x, threads) for x in v]
+    if not isinstance(v, dict):
+        return v
+    out = {k: _restyle(x, threads) for k, x in v.items() if k != "styles"}
+    if isinstance(v.get("styles"), dict):
+        styles = dict(v["styles"])
+        cid = styles.pop("comment", None)
+        if isinstance(cid, str) and cid in threads:
+            styles["comment"] = threads[cid]
+        out["styles"] = styles
+    return out
+
+
 async def _copy_session_note(
     conn: aiosqlite.Connection, source_sid: int, new_sid: int, title: str,
 ) -> None:
-    """Give the fork its own copy of the source chat's live note, if any."""
+    """Give the fork its own copy of the source chat's live note, if any:
+    its blocks (each with an ``insert`` history row by ``system``) and the
+    comment threads on them, open and resolved, under new ids."""
     async with conn.execute(
         "SELECT id FROM notes WHERE owner_id = 1 AND target_kind = 'session' "
         "AND target_id = ? AND deleted_at IS NULL", (str(source_sid),),
@@ -79,6 +101,7 @@ async def _copy_session_note(
         (str(new_sid), new_sid, title, now, now),
     )
     note_id = cur.lastrowid
+    assert note_id is not None
     async with conn.execute(
         "SELECT id, parent_id, order_key, type, payload_json, text, author, "
         "section_key FROM note_blocks WHERE note_id = ? AND deleted_at IS NULL",
@@ -86,19 +109,61 @@ async def _copy_session_note(
     ) as bcur:
         rows = await bcur.fetchall()
     new_ids = {r[0]: new_block_id() for r in rows}
+    threads = await _copy_threads(conn, int(src[0]), note_id, new_ids, now)
     for r in rows:
+        payload = _restyle(json.loads(r[4]), threads)
+        bid, parent = new_ids[r[0]], new_ids.get(r[1])
         await conn.execute(
             "INSERT INTO note_blocks (id, note_id, parent_id, order_key, type, "
             "payload_json, text, author, section_key, changed_rev, changed_by, "
             "created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'system', ?, ?)",
-            (new_ids[r[0]], note_id, new_ids.get(r[1]), r[2], r[3], r[4], r[5],
+            (bid, note_id, parent, r[2], r[3], json.dumps(payload), r[5],
              r[6], r[7], now, now),
+        )
+        state = {"type": r[3], "props": payload.get("props") or {},
+                 "content": payload.get("content"), "author": r[6],
+                 "parent_id": parent, "order_key": r[2], "deleted_at": None,
+                 "section_key": r[7]}
+        await conn.execute(
+            "INSERT INTO note_block_history (note_id, block_id, revision, actor, "
+            "op, before_json, after_json, created_at) "
+            "VALUES (?, ?, 1, 'system', 'insert', NULL, ?, ?)",
+            (note_id, bid, json.dumps(state), now),
         )
     await conn.execute(
         "INSERT INTO note_revisions (note_id, revision, actor, summary, "
         "created_at) VALUES (?, 1, 'system', 'forked', ?)", (note_id, now),
     )
+
+
+async def _copy_threads(
+    conn: aiosqlite.Connection, src_note: int, note_id: int,
+    new_ids: dict[str, str], now: str,
+) -> dict[str, str]:
+    """Copy the source note's open and resolved threads on copied blocks;
+    old thread id -> new."""
+    async with conn.execute(
+        "SELECT id, block_id, quote, status, created_at FROM note_comments "
+        "WHERE note_id = ? AND status != 'deleted' ORDER BY created_at, id",
+        (src_note,),
+    ) as cur:
+        rows = [r for r in await cur.fetchall() if r[1] in new_ids]
+    out: dict[str, str] = {}
+    for cid, block_id, quote, status, created in rows:
+        new = "c_" + secrets.token_hex(5)
+        out[cid] = new
+        await conn.execute(
+            "INSERT INTO note_comments (id, note_id, block_id, quote, status, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (new, note_id, new_ids[block_id], quote, status, created),
+        )
+        await conn.execute(
+            "INSERT INTO note_comment_items (comment_id, owner_id, text, created_at) "
+            "SELECT ?, owner_id, text, created_at FROM note_comment_items "
+            "WHERE comment_id = ? ORDER BY id", (new, cid),
+        )
+    return out
 
 
 async def fork_session(

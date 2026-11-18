@@ -88,6 +88,20 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
             Op(op="insert", block=_p("gone"))])
         await apply_ops(conn, note.id, base_revision=2, actor="user", ops=[
             Op(op="delete", block_id=res.applied[1])])
+        # A comment thread on the child's words, and a style whose thread
+        # was deleted.
+        from paperhub.notes.comments import create_comment, set_status
+        thread = await create_comment(conn, note.id, block_id=res.applied[0],
+                                      quote="child", text="why?")
+        gone = await create_comment(conn, note.id, block_id=res.applied[0],
+                                    quote="child", text="old")
+        await set_status(conn, gone["id"], "deleted")
+        await apply_ops(conn, note.id, base_revision=3, actor="user", ops=[Op(
+            op="update", block_id=res.applied[0], block=BlockIn(
+                type="paragraph", content=[
+                    {"type": "text", "text": "chi", "styles": {"comment": thread["id"]}},
+                    {"type": "text", "text": "ld", "styles": {"comment": gone["id"],
+                                                              "bold": True}}]))])
 
         fk = await fork_session(conn, source_session_id=1, fork_run_id=run_id,
                                 workspace_dir=tmp_path)
@@ -99,15 +113,33 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
         src = await list_blocks(conn, note.id)
         dst = await list_blocks(conn, new[0])
         assert [b.text for b in dst] == [b.text for b in src] == ["H", "child"]
-        assert [b.author for b in dst] == [b.author for b in src] == ["user", "ai"]
+        # (the user edited the child, so it is theirs now)
+        assert [b.author for b in dst] == [b.author for b in src] == ["user", "user"]
         assert {b.id for b in dst}.isdisjoint({b.id for b in src})
         assert dst[1].parent_id == dst[0].id
         async with conn.execute(
             "SELECT actor, summary FROM note_revisions WHERE note_id = ?",
             (new[0],)) as cur:
             assert await cur.fetchall() == [("system", "forked")]
+        # The open thread comes with its block, under a new id written into
+        # the copied style; a style whose thread was not copied is dropped.
+        async with conn.execute(
+            "SELECT c.id, c.block_id, c.quote, c.status, i.text FROM note_comments c "
+            "JOIN note_comment_items i ON i.comment_id = c.id WHERE c.note_id = ?",
+            (new[0],)) as cur:
+            [(cid, cblock, quote, status, text)] = await cur.fetchall()
+        assert cid != thread["id"] and cblock == dst[1].id
+        assert (quote, status, text) == ("child", "open", "why?")
+        runs = dst[1].content
+        assert runs[0]["styles"] == {"comment": cid}
+        assert runs[1]["styles"] == {"bold": True}
+        # One insert history row per copied block, by the system.
+        async with conn.execute(
+            "SELECT block_id, actor, op FROM note_block_history WHERE note_id = ? "
+            "ORDER BY id", (new[0],)) as cur:
+            assert await cur.fetchall() == [(b.id, "system", "insert") for b in dst]
         # The source note is untouched.
-        assert (await get_note(conn, note.id)).revision == 3  # type: ignore[union-attr]
+        assert (await get_note(conn, note.id)).revision == 4  # type: ignore[union-attr]
 
 
 async def test_restore_keeps_an_independently_deleted_note(
