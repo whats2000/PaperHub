@@ -8,6 +8,9 @@ export const CARD_EDGE = 8;
  * the in-reader card's minimum width.
  */
 export const NARROW_GUTTER_PX = 360;
+/** The note card's narrowest side card (px): it stays beside the reader down
+ * to this gutter, since inside the reader it would sit on the text being read. */
+export const NOTE_MIN_SIDE_PX = 280;
 
 const CARD_MAX_WIDTH = 460;
 /** In the below fallback, the card takes at most this share of the viewport. */
@@ -50,6 +53,11 @@ export interface PlaceCardInput {
   sideWidth?: number;
   /** Distance kept from the reader's top and bottom (default `CARD_EDGE`). */
   edge?: number;
+  /** The narrowest gutter the side card takes (default `NARROW_GUTTER_PX`). */
+  minSideWidth?: number;
+  /** Inside the reader, take the roomier of above / below the paragraph
+   *  (default: below whenever the card fits there). */
+  roomierSide?: boolean;
 }
 
 export interface CardPlacement {
@@ -120,6 +128,8 @@ function placeAlone({
   pinned = false,
   sideWidth = CARD_MAX_WIDTH,
   edge = CARD_EDGE,
+  minSideWidth = NARROW_GUTTER_PX,
+  roomierSide = false,
 }: PlaceCardInput): CardPlacement | null {
   let active = -1;
   let best = 0;
@@ -131,7 +141,7 @@ function placeAlone({
     }
   });
   if (active < 0) {
-    return pinned ? dockPinned({ paraRects, viewport, gutter, cardHeight, reader, sideWidth, edge }) : null;
+    return pinned ? dockPinned({ paraRects, viewport, gutter, cardHeight, reader, sideWidth, edge, minSideWidth }) : null;
   }
 
   const r = paraRects[active]!;
@@ -141,7 +151,7 @@ function placeAlone({
   const scrollFraction = r.height > 0 ? clamp((viewport.top - r.top) / r.height, 0, 1) : 0;
 
   const gutterWidth = gutter.right - gutter.left;
-  if (gutterWidth >= NARROW_GUTTER_PX) {
+  if (gutterWidth >= minSideWidth) {
     const maxHeight = Math.max(0, viewHeight - 2 * edge);
     const h = Math.min(cardHeight, maxHeight);
     const top = clamp(r.top, viewport.top + edge, viewport.bottom - edge - h);
@@ -181,7 +191,12 @@ function placeAlone({
   let side: "below" | "above" = "below";
   let top: number;
   let cap = maxHeight;
-  if (h <= roomBelow) {
+  if (roomierSide && roomAbove > roomBelow && roomAbove >= Math.min(h, MIN_CARD_ROOM)) {
+    // More room over the paragraph: there, shortened to fit if need be.
+    side = "above";
+    cap = Math.min(maxHeight, Math.floor(roomAbove));
+    top = visTop - BELOW_GAP - Math.min(h, cap);
+  } else if (h <= roomBelow) {
     top = visBottom + BELOW_GAP;
   } else if (h <= roomAbove) {
     side = "above";
@@ -227,6 +242,7 @@ function dockPinned({
   reader,
   sideWidth = CARD_MAX_WIDTH,
   edge = CARD_EDGE,
+  minSideWidth = NARROW_GUTTER_PX,
 }: Omit<PlaceCardInput, "pinned">): CardPlacement | null {
   if (!paraRects.length) return null;
   // The fragment nearest the viewport.
@@ -241,7 +257,7 @@ function dockPinned({
   const viewHeight = viewport.bottom - viewport.top;
   const scrollFraction = above ? 1 : 0;
   const gutterWidth = gutter.right - gutter.left;
-  if (gutterWidth >= NARROW_GUTTER_PX) {
+  if (gutterWidth >= minSideWidth) {
     const maxHeight = Math.max(0, viewHeight - 2 * edge);
     const h = Math.min(cardHeight, maxHeight);
     const top = above ? viewport.top + edge : viewport.bottom - edge - h;

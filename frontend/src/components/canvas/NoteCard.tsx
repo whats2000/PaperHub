@@ -18,7 +18,7 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
 import { colorLabel, langShort, sameName, sectionLabel } from "@/components/notes/blocks/markProps";
 import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
-import { CARD_EDGE, NARROW_GUTTER_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
+import { CARD_EDGE, NOTE_MIN_SIDE_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { sameLanguage } from "@/lib/language";
 import { prefersReducedMotion } from "@/lib/motion";
 import { readerTrackSliding } from "@/lib/readerTrack";
@@ -113,7 +113,7 @@ function dockedPlacement(v: ClientRect | null, cardHeight: number): CardPlacemen
   }
   const gutter = v.left - 2 * CARD_GAP;
   const maxHeight = Math.max(0, v.bottom - v.top - 2 * CARD_EDGE);
-  if (gutter >= NARROW_GUTTER_PX) {
+  if (gutter >= NOTE_MIN_SIDE_PX) {
     const width = Math.min(CARD_MAX_WIDTH, gutter);
     return { ...base, side: "left", top: v.top + CARD_EDGE, left: v.left - CARD_GAP - width, width, maxHeight };
   }
@@ -205,10 +205,15 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       reader: { left: v.left, right: v.right },
       // Always on screen: docked to the edge the mark left by.
       pinned: true,
-      // Room to read and write: 30% of the window (260–400px), as tall as
-      // the reader less a margin [user, 2026-11-19].
-      sideWidth: Math.min(400, Math.max(260, window.innerWidth * 0.3)),
+      // Room to read and write: 30% of the window (280–400px), as tall as
+      // the reader less a margin; never under 280px [user, 2026-11-19].
+      sideWidth: Math.min(400, Math.max(NOTE_MIN_SIDE_PX, window.innerWidth * 0.3)),
       edge: 20,
+      // Never on the text being read: beside the reader down to a 280px
+      // gutter, else over or under the mark, whichever has more room
+      // [user, 2026-11-19].
+      minSideWidth: NOTE_MIN_SIDE_PX,
+      roomierSide: true,
     });
     if (next) {
       anchoredN.current = n;

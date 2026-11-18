@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_EDGE,
   NARROW_GUTTER_PX,
+  NOTE_MIN_SIDE_PX,
   STACK_GAP,
   contentScrollTop,
   describeBreak,
@@ -399,5 +400,54 @@ describe("placeCard — stacking needs one column", () => {
     })!;
     expect(p.side).not.toBe("left");
     expect(p).toEqual(alone);
+  });
+});
+
+describe("placeCard — the note card on a narrow screen", () => {
+  const NOTE = { minSideWidth: NOTE_MIN_SIDE_PX, roomierSide: true } as const;
+  const overlaps = (p: { top: number; maxHeight: number }, h: number, r: DOMRect) =>
+    p.top < r.bottom && p.top + Math.min(h, p.maxHeight) > r.top;
+
+  it("stays beside the reader in a 300px gutter, as wide as the gutter", () => {
+    const p = placeCard({
+      paraRects: [rect(640, 300, 500, 80)],
+      viewport: VIEWPORT,
+      gutter: { left: 8, right: 308 },
+      cardHeight: 200,
+      reader: READER,
+      sideWidth: 400,
+      ...NOTE,
+    })!;
+    expect(p.side).toBe("left");
+    expect(p.width).toBe(300);
+    expect(p.left).toBe(8);
+  });
+
+  it("goes above a mark low in the view, off its rects", () => {
+    const mark = rect(640, 550, 500, 40);
+    const p = placeCard({
+      paraRects: [mark],
+      viewport: VIEWPORT,
+      gutter: { left: 8, right: 208 },
+      cardHeight: 200,
+      reader: READER,
+      ...NOTE,
+    })!;
+    expect(p.side).toBe("above");
+    expect(overlaps(p, 200, mark)).toBe(false);
+  });
+
+  it("goes below a mark high in the view, off its rects", () => {
+    const mark = rect(640, 200, 500, 40);
+    const p = placeCard({
+      paraRects: [mark],
+      viewport: VIEWPORT,
+      gutter: { left: 8, right: 208 },
+      cardHeight: 200,
+      reader: READER,
+      ...NOTE,
+    })!;
+    expect(p.side).toBe("below");
+    expect(overlaps(p, 200, mark)).toBe(false);
   });
 });
