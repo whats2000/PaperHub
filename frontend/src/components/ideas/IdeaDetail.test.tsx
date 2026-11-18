@@ -297,6 +297,32 @@ describe("IdeaDetail", () => {
     expect(screen.queryByTestId("idea-note-status")).not.toBeInTheDocument();
   });
 
+  it("cross-fades \"Couldn't load\" into \"Loading\" on retry, and ends only on its own fade", async () => {
+    noteFails = true;
+    setup();
+    await screen.findByText("Couldn't load the note.");
+    noteFails = false;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, async () => {
+        await held;
+        return HttpResponse.json({ detail: "later" }, { status: 500 });
+      }),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    // The failed line fades out over the loading line fading in.
+    const failed = screen.getByText("Couldn't load the note.").closest("[data-leaving]");
+    expect(failed).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading the note…");
+    await waitFor(() => expect(screen.queryByText("Couldn't load the note.")).toBeNull());
+    // A child's transition bubbling up does not end the line's own fade.
+    const status = screen.getByTestId("idea-note-status");
+    fireEvent.transitionEnd(screen.getByRole("status"), { propertyName: "opacity" });
+    expect(screen.getByTestId("idea-note-status")).toBe(status);
+    release();
+  });
+
   it("says so, with a retry, when the note cannot be loaded", async () => {
     noteFails = true;
     setup();

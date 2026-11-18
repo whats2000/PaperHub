@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   CircleCheck,
@@ -14,6 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
+import { useLeaving } from "@/components/canvas/useLeaving";
 import { DismissForm } from "@/components/ideas/DismissForm";
 import { Button } from "@/components/ui/button";
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -123,7 +124,12 @@ export function IdeaDetail({
   const noteFailed = noteLoad?.id === ideaId && noteLoad.failed;
   // The status line fades out over the editor fading in, then goes (at once under reduced motion).
   const [statusGone, setStatusGone] = useState<number | null>(null);
+  // Loading again (another idea, then back): the line fades out again too.
+  if (noteId === null && statusGone !== null) setStatusGone(null);
   const showStatus = noteId === null || (statusGone !== noteId && !prefersReducedMotion());
+  // "Couldn't load" and "Loading" cross-fade: the one replaced fades out.
+  const lineId = showStatus ? (noteFailed ? "failed" : "loading") : null;
+  const statusLines = useLeaving(useMemo(() => (lineId ? [{ id: lineId }] : []), [lineId]));
   // The kanban card and the drawer excerpt read `idea.note`: keep it the note's
   // plain text, by the backend's rule (`text or block_text`, joined by blank
   // lines), also when a graph refetch brings an older copy back.
@@ -330,29 +336,49 @@ export function IdeaDetail({
               "transition-opacity duration-200 ease-out data-closed:opacity-0 motion-reduce:transition-none",
               noteId !== null && "pointer-events-none absolute inset-x-0 top-0",
             )}
-            onTransitionEnd={() => {
-              if (noteId !== null) setStatusGone(noteId);
+            onTransitionEnd={(e) => {
+              // Its own fade only: a child's transition bubbling up is not it.
+              if (e.target === e.currentTarget && noteId !== null) setStatusGone(noteId);
             }}
           >
-            {noteFailed ? (
-              <div key="failed" role="alert" className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground animate-in fade-in-0 motion-reduce:animate-none">
-                <span className="min-w-0 flex-1">{t("detail.noteLoadFailed", "Couldn't load the note.")}</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setNoteLoad(null);
-                    setLoadTry((n) => n + 1);
-                  }}
+            {statusLines.map((line) => {
+              const motion = line.leaving
+                ? "pointer-events-none absolute inset-x-0 top-0 animate-out fade-out-0 fill-mode-forwards duration-200 motion-reduce:animate-none"
+                : "animate-in fade-in-0 motion-reduce:animate-none";
+              const shared = {
+                "aria-hidden": line.leaving || undefined,
+                "data-leaving": line.leaving ? "" : undefined,
+              };
+              return line.id === "failed" ? (
+                <div
+                  key="failed"
+                  role={line.leaving ? undefined : "alert"}
+                  {...shared}
+                  className={cn("flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground", motion)}
                 >
-                  {t("detail.noteRetry", "Try again")}
-                </Button>
-              </div>
-            ) : (
-              <div key="loading" role="status" className="px-3 py-2 text-sm text-muted-foreground animate-in fade-in-0 motion-reduce:animate-none">
-                {t("detail.noteLoading", "Loading the note…")}
-              </div>
-            )}
+                  <span className="min-w-0 flex-1">{t("detail.noteLoadFailed", "Couldn't load the note.")}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setNoteLoad(null);
+                      setLoadTry((n) => n + 1);
+                    }}
+                  >
+                    {t("detail.noteRetry", "Try again")}
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  key="loading"
+                  role={line.leaving ? undefined : "status"}
+                  {...shared}
+                  className={cn("px-3 py-2 text-sm text-muted-foreground", motion)}
+                >
+                  {t("detail.noteLoading", "Loading the note…")}
+                </div>
+              );
+            })}
           </div>
         )}
         {noteId !== null && <NoteEditor noteId={noteId} variant="pane" />}
