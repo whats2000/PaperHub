@@ -458,3 +458,45 @@ async def test_search_matches_word_prefixes(
     for q in ['drop"*', "drop OR NOT", "drop) AND (x", "NEAR(drop"]:
         out = await _run(ctx, "search_notes", query=q)
         assert not out.record.get("error"), q
+
+
+async def _marked_paper(conn: aiosqlite.Connection) -> tuple[int, str]:
+    from paperhub.notes.marks import MarkIn, add_color, create_mark
+
+    pid = await _paper(conn)
+    c = await add_color(conn, hex="#1f8a8a", name="To verify in the B2 table of run 3")
+    piece = [{"quote": "the bound is tight", "chunk_start": 0, "chunk_end": 18}]
+    await create_mark(conn, MarkIn(
+        paper_content_id=pid, kind="text", style="wavy", color=c["color"],
+        view="html", pieces=piece, section_key=None))
+    return pid, c["name"]
+
+
+async def test_read_note_shows_a_mark_by_style_and_label(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    pid, label = await _marked_paper(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer, enabled=[(pid, "Paper A")])
+    begin_turn()
+    out = await _run(ctx, "read_note", note=f"paper:{pid}")
+    assert (f'<mark kind="text" style="wavy" label="{label}">the bound is tight</mark>'
+            in out.content)
+    assert "c_" not in out.content and "#1f8a8a" not in out.content
+    begin_turn()
+    hits = _load(await _run(ctx, "search_notes", query="bound", scope="all"))["hits"]
+    assert 'style="wavy"' in hits[0]["snippet"] and label in hits[0]["snippet"]
+
+
+async def test_a_mark_label_read_this_turn_is_private_material(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.outbound.context import echoes_private
+
+    pid, label = await _marked_paper(migrated_db)
+    ctx = _ctx(migrated_db, fake_tracer, enabled=[(pid, "Paper A")])
+    begin_turn()
+    assert not echoes_private(f"search for {label}")
+    await _run(ctx, "read_note", note=f"paper:{pid}")
+    assert label in {i.text for i in current_private() if i.kind == "note"}
+    # The outbound checkpoint's span guard now holds a query that repeats it.
+    assert echoes_private(f"search for {label}")

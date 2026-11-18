@@ -16,7 +16,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from paperhub.agents.core.citations import check_written_citations
-from paperhub.agents.core.note_xml import esc, title_xml
+from paperhub.agents.core.note_xml import MARK_BLOCKS, esc, mark_xml, title_xml
 from paperhub.agents.core.private_material import (
     collect_note_blocks,
     collect_note_titles,
@@ -39,6 +39,7 @@ from paperhub.notes.agent_reads import (
     unseen_user_changes,
 )
 from paperhub.notes.comments import list_comments
+from paperhub.notes.marks import color_labels
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
@@ -70,8 +71,11 @@ def _level(b: Block) -> int | None:
     return None
 
 
-def _block_xml(b: Block, text: str | None = None) -> str:
+def _block_xml(b: Block, labels: dict[str, str] | None = None,
+               text: str | None = None) -> str:
     body = html.escape(_text(b) if text is None else text, quote=False)
+    if b.type in MARK_BLOCKS and b.props.get("markId"):
+        body = mark_xml(b.props, labels or {}, body)
     return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}" '
             f'author="{esc(b.author)}">{body}</note_block>')
 
@@ -79,6 +83,15 @@ def _block_xml(b: Block, text: str | None = None) -> str:
 _COMMENTS_NOTE = ("The user_comment elements below are the user's remarks on "
                   "this note: read-only context for you; never write or "
                   "resolve them.")
+
+
+def _collect_labels(note_id: int, note_title: str, blocks: list[Block],
+                    labels: dict[str, str]) -> None:
+    """A mark's colour label is the user's own words: private like note text."""
+    collect_note_blocks(note_id, [
+        (f"{b.id}:label", labels[str(b.props.get("color"))]) for b in blocks
+        if b.type in MARK_BLOCKS and str(b.props.get("color")) in labels],
+        note_title)
 
 
 def _comment_xml(c: dict[str, Any]) -> str:
@@ -218,15 +231,24 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         ) as cur:
             rows = list(await cur.fetchall())
     paths: dict[int, dict[str, list[tuple[str, str]]]] = {}
+    found: dict[int, dict[str, Block]] = {}
+    labels = await color_labels(ctx.conn)
     hits: list[dict[str, Any]] = []
     private: dict[int, list[tuple[str, str]]] = {}
     for bid, note_id, text, author in rows:
         if note_id not in paths:
-            paths[note_id] = _heading_paths(await list_blocks(ctx.conn, note_id))
+            all_blocks = await list_blocks(ctx.conn, note_id)
+            paths[note_id] = _heading_paths(all_blocks)
+            found[note_id] = {b.id: b for b in all_blocks}
         note = by_id[note_id]
         path = paths[note_id].get(bid, [])
         collect_note_blocks(note_id, path, note.title)
         snippet = html.escape(str(text)[:SNIPPET_CHARS], quote=False)
+        hit_block = found[note_id].get(bid)
+        if hit_block is not None and hit_block.type in MARK_BLOCKS \
+                and hit_block.props.get("markId"):
+            snippet = mark_xml(hit_block.props, labels, snippet)
+            _collect_labels(note_id, note.title, [hit_block], labels)
         hits.append({
             "note": ref_of(note, ctx.session_id), "block_id": bid,
             "heading_path": [_heading_xml(i, t) for i, t in path],
@@ -319,10 +341,12 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     comments = [c for c in await list_comments(ctx.conn, note.id, open_only=True)
                 if c["block_id"] in shown]
     remark = [_COMMENTS_NOTE] if comments else []
-    content = "\n".join([head, *(_block_xml(b) for b in window), *remark,
+    labels = await color_labels(ctx.conn)
+    content = "\n".join([head, *(_block_xml(b, labels) for b in window), *remark,
                          *(_comment_xml(c) for c in comments), "</note>"])
     collect_note_titles([(note.id, note.title)])
     collect_note_blocks(note.id, [(b.id, _text(b)) for b in window], note.title)
+    _collect_labels(note.id, note.title, window, labels)
     # The user's comment text is note material too (private for the checkpoint).
     collect_note_blocks(
         note.id,
