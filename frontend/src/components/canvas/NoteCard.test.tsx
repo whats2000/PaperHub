@@ -8,6 +8,7 @@ import { CANVAS_DEFAULT_WIDTH, useCanvasStore } from "@/store/canvas";
 import {
   activateMark,
   activateMarker,
+  jumpToMark,
   registerMarkAnchors,
   useMarkNavStore,
   type ClientRect,
@@ -170,6 +171,8 @@ beforeEach(() => {
   resetMarkOps();
   anchorTop = { mk_1: 200, mk_2: 120, mk_3: 230 };
   moved = null;
+  // First: a reveal left waiting by the last test settles before the reset.
+  useTranslationStore.setState({ reveal: null });
   useMarkNavStore.setState({ card: null, hovered: null, back: null, cardBox: null });
   useNotesPaneStore.setState({ open: false, activeTab: "reader" });
   useCanvasStore.setState({ open: true, width: CANVAS_DEFAULT_WIDTH, readerView: null, activePaperId: 3 });
@@ -305,6 +308,9 @@ describe("the note card", () => {
     expect(within(clicked).queryByRole("button", { name: /Open in the paper/ })).toBeNull();
     const reveal = vi.spyOn(useTranslationStore.getState(), "requestReveal");
     fireEvent.click(within(other).getByRole("button", { name: /Show this passage in the paper/ }));
+    // The reader shows the passage, then the card re-points.
+    await waitFor(() => expect(useTranslationStore.getState().reveal?.markId).toBe("mk_3"));
+    act(() => useTranslationStore.getState().revealed(useTranslationStore.getState().reveal!.n));
     await waitFor(() => expect(useMarkNavStore.getState().card?.markId).toBe("mk_3"));
     expect(reveal).toHaveBeenCalledWith(3, "mk_3", { fallback: true });
     await waitFor(() => expect(screen.getByTestId("paper-ref-q3")).toHaveAttribute("data-target", "true"));
@@ -576,6 +582,21 @@ describe("a click on the paper", () => {
     expect(useMarkNavStore.getState().card).toBeNull();
     // The reader has shown it (or said why it can't): the card opens.
     act(() => useTranslationStore.getState().revealed(reveal.n));
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
+  });
+});
+
+describe("Show ↗ (jumpToMark)", () => {
+  it("opens the card only after the reader has revealed the mark", async () => {
+    seed([mark("mk_1", "q1", { view: "pdf" })]);
+    useTranslationStore.setState({ reveal: null });
+    jumpToMark(3, "mk_1");
+    await waitFor(() => expect(useTranslationStore.getState().reveal?.markId).toBe("mk_1"));
+    // Still sliding to the PDF and scrolling: no card yet (it would fall
+    // back to a place over the chat).
+    expect(useMarkNavStore.getState().card).toBeNull();
+    const n = useTranslationStore.getState().reveal!.n;
+    act(() => useTranslationStore.getState().revealed(n));
     expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
   });
 });

@@ -225,6 +225,14 @@ export function activateMarker(paperId: number, markId: string): void {
     activateMark(paperId, markId);
     return;
   }
+  openCardAfterReveal(paperId, markId);
+}
+
+/** Opens the mark's card once the reader has shown the mark (or said why it
+ * can't): opened earlier, while the reader still slides to the other view,
+ * the card finds no anchor and falls back to a place over the chat. */
+function openCardAfterReveal(paperId: number, markId: string): void {
+  const tr = useTranslationStore;
   const reveal = tr.getState().reveal;
   if (!reveal || reveal.markId !== markId) {
     useMarkNavStore.getState().openCard(paperId, markId);
@@ -325,6 +333,6 @@ useCanvasStore.subscribe((s) => {
  * flashes, and the card points at it. */
 export function jumpToMark(paperId: number, markId: string): void {
   void openMarkInReader(markId, { paperId }).then((ok) => {
-    if (ok) useMarkNavStore.getState().openCard(paperId, markId);
+    if (ok) openCardAfterReveal(paperId, markId);
   });
 }
