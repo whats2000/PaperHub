@@ -784,3 +784,44 @@ async def test_resent_insert_into_the_same_note_is_idempotent(conn):
                           ops=[Op(op="insert", block_id="x1", block=_para("edited"))])
     assert res.renamed == [] and res.applied == ["x1"]
     assert await _texts(conn, a.id) == ["edited"]
+
+
+async def test_resent_insert_is_refused_when_stale_and_keeps_newer_text(conn):
+    a = await _note(conn)
+    await _seed(conn, a.id, [("x1", _para("first"))])
+    base = (await get_note(conn, a.id)).revision
+    await apply_ops(conn, a.id, base_revision=base, actor="user",
+                    ops=[Op(op="update", block_id="x1", block=_para("newer"))])
+    res = await apply_ops(conn, a.id, base_revision=base, actor="user",
+                          ops=[Op(op="insert", block_id="x1", block=_para("stale"))])
+    assert res.applied == [] and res.renamed == []
+    assert [r["reason"] for r in res.rejected] == ["changed_since_base"]
+    assert await _texts(conn, a.id) == ["newer"]
+
+
+async def test_resent_insert_of_another_type_is_rejected(conn):
+    a = await _note(conn)
+    await _seed(conn, a.id, [("x1", _para("first"))])
+    base = (await get_note(conn, a.id)).revision
+    res = await apply_ops(conn, a.id, base_revision=base, actor="user",
+                          ops=[Op(op="insert", block_id="x1", block=_heading("h", 1))])
+    assert res.applied == [] and [r["reason"] for r in res.rejected] == ["invalid"]
+    assert await _texts(conn, a.id) == ["first"]
+
+
+async def test_agent_insert_reusing_a_live_id_is_rejected(conn):
+    a = await _note(conn)
+    await _seed(conn, a.id, [("x1", _para("first"))])
+    base = (await get_note(conn, a.id)).revision
+    res = await apply_ops(conn, a.id, base_revision=base, actor="agent",
+                          ops=[Op(op="insert", block_id="x1", block=_para("agent"))])
+    assert res.applied == [] and [r["reason"] for r in res.rejected] == ["invalid"]
+    assert await _texts(conn, a.id) == ["first"]
+
+
+async def test_stale_resend_of_equal_content_is_still_a_noop_applied(conn):
+    a = await _note(conn)
+    await _seed(conn, a.id, [("x1", _para("first"))])
+    res = await apply_ops(conn, a.id, base_revision=0, actor="user",
+                          ops=[Op(op="insert", block_id="x1", block=_para("first"))])
+    assert res.applied == ["x1"] and res.rejected == [] and res.renamed == []

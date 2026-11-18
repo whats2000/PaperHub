@@ -447,18 +447,19 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             return
         if old is not None and not revivable:
             # A re-sent insert (a draft kept after an ambiguous failure):
-            # the block is already here, so it is not duplicated or renamed.
-            # The user's re-send carries their latest words, so it updates
-            # the block when they differ; the agent's changes nothing.
-            if (ctx.actor == "user" and op.block.type == old.type
-                    and (op.block.content != old.content
-                         or op.block.props != old.props)):
-                before = old.state()
-                after = {**before, "props": op.block.props,
-                         "content": op.block.content, "author": "user"}
-                await ctx.write_state(old.id, after)
-                await ctx.history(old.id, "update", before, after)
-            ctx.applied.append(old.id)
+            # the block is already here, so it is neither duplicated nor
+            # renamed. The same words are a no-op; others are an ordinary
+            # update (so a stale re-send is refused like any stale update).
+            # A different type, or the agent reusing a live id, is invalid.
+            if ctx.actor != "user" or op.block.type != old.type:
+                ctx.reject(old.id, "invalid", old)
+                return
+            if (op.block.content == old.content
+                    and op.block.props == old.props):
+                ctx.applied.append(old.id)
+                return
+            await _apply_one(ctx, op.model_copy(update={"op": "update"}),
+                             base_revision)
             return
         if bid is None or await _id_in_use(ctx, bid):
             new = new_block_id()
