@@ -145,6 +145,8 @@ async def test_chat_to_mcp_loopback_session_header_threaded(
         port=port,
         log_level="warning",
         lifespan="on",
+        # HTTP only: no websockets stack (its legacy module is deprecated).
+        ws="none",
     )
     uv_server = uvicorn.Server(config)
     serve_task = asyncio.create_task(uv_server.serve())
@@ -258,7 +260,7 @@ async def test_loopback_call_without_contextvar_is_rejected_cleanly(
     port = await _find_free_port()
     config = uvicorn.Config(
         app, host="127.0.0.1", port=port,
-        log_level="warning", lifespan="on",
+        log_level="warning", lifespan="on", ws="none",
     )
     uv_server = uvicorn.Server(config)
     serve_task = asyncio.create_task(uv_server.serve())

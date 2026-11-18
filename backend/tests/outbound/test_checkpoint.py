@@ -20,7 +20,8 @@ from paperhub.outbound.destinations import pending_log_writes
 from paperhub.outbound.models import OutboundRequest, ReviewVerdict
 from paperhub.tracing.tracer import Tracer
 
-pytestmark = pytest.mark.asyncio
+# asyncio_mode = auto (pyproject) runs the async tests; no module mark,
+# which would also land on the sync ones.
 
 _ENV = ("PAPERHUB_PROFILE", "PAPERHUB_OUTBOUND_REVIEW", "PAPERHUB_OUTBOUND_UNSURE",
         "PAPERHUB_SENSITIVE_TERMS", "PAPERHUB_OUTBOUND_ALLOWLIST",

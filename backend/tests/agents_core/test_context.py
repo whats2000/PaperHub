@@ -17,7 +17,8 @@ from paperhub.agents.core.context import (
 
 from .test_read_tools import _paper
 
-pytestmark = pytest.mark.asyncio
+# asyncio_mode = auto (pyproject) runs the async tests; no module mark,
+# which would also land on the sync ones.
 
 
 async def _session(conn: aiosqlite.Connection) -> int:
