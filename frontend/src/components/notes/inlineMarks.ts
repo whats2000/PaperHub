@@ -12,9 +12,6 @@ import { createExtension } from "@blocknote/core";
 import { Extension, InputRule } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, type Transaction } from "@tiptap/pm/state";
-import { toast } from "sonner";
-
-import i18n from "@/lib/i18n";
 
 export type InlineStyle = "bold" | "italic" | "underline" | "strike" | "code" | "hidden";
 
@@ -166,15 +163,6 @@ export const codeFence = createExtension({
 
 // ---- divider --------------------------------------------------------------
 
-const UNDO_MS = 5000;
-
-interface LineBlock {
-  id: string;
-  type: string;
-  props: Record<string, unknown>;
-  children: LineBlock[];
-}
-
 type DividerEditor = {
   getBlock: (id: string) => unknown;
   getNextBlock: (id: string) => unknown;
@@ -184,30 +172,6 @@ type DividerEditor = {
   insertBlocks: (blocks: never[], ref: string, placement: "before" | "after") => unknown;
   setTextCursorPosition: (id: string, placement: "start" | "end") => void;
 };
-
-/** Where a `---` line was, to put it back there: its type and props, and,
- * for a nested line (whose divider moved to the top level), its parent and
- * neighbours. */
-export interface DashLineOrigin {
-  type: string;
-  props: Record<string, unknown>;
-  parentId: string | null;
-  prevId: string | null;
-  nextId: string | null;
-}
-
-export function dashLineOrigin(editor: DividerEditor, block: LineBlock): DashLineOrigin {
-  const parent = editor.getParentBlock(block.id) as LineBlock | undefined;
-  const sibs = parent?.children ?? [];
-  const i = sibs.findIndex((b) => b.id === block.id);
-  return {
-    type: block.type,
-    props: block.props,
-    parentId: parent?.id ?? null,
-    prevId: i > 0 ? sibs[i - 1]!.id : null,
-    nextId: i >= 0 && i + 1 < sibs.length ? sibs[i + 1]!.id : null,
-  };
-}
 
 interface LineContent {
   content?: unknown[];
@@ -229,56 +193,6 @@ export function caretBelowDivider(editor: DividerEditor, dividerId: string): str
   const [fresh] = editor.insertBlocks([{ type: "paragraph" } as never], dividerId, "after") as { id: string }[];
   editor.setTextCursorPosition(fresh!.id, "start");
   return fresh!.id;
-}
-
-/** "Divider added" with Undo, which turns the divider back into the three
- * dashes where they were typed (the same as Ctrl+Z) and offers "Make a
- * divider again" (and so on). Undo also takes away `addedLine`, the line the
- * caret was put on, while nothing has been written on it. */
-export function announceDivider(
-  editor: DividerEditor,
-  blockId: string,
-  origin?: DashLineOrigin,
-  addedLine?: string | null,
-): void {
-  const added = () =>
-    toast(i18n.t("notes:divider.added", "Divider added"), {
-      duration: UNDO_MS,
-      action: { label: i18n.t("notes:divider.undo", "Undo"), onClick: back },
-    });
-  const back = () => {
-    if (!editor.getBlock(blockId)) return;
-    if (addedLine && isEmptyLine(editor.getBlock(addedLine) as LineContent | undefined)) {
-      editor.removeBlocks([addedLine]);
-    }
-    const line = {
-      id: blockId,
-      type: origin?.type ?? "paragraph",
-      props: origin?.props ?? {},
-      content: "---",
-    };
-    const at = origin?.parentId ? origin : null;
-    if (at && editor.getBlock(at.parentId!)) {
-      // A nested line: its divider moved to the top level; put the line back.
-      editor.removeBlocks([blockId]);
-      if (at.prevId && editor.getBlock(at.prevId)) editor.insertBlocks([line as never], at.prevId, "after");
-      else if (at.nextId && editor.getBlock(at.nextId)) editor.insertBlocks([line as never], at.nextId, "before");
-      else editor.updateBlock(at.parentId!, { children: [line] } as never);
-    } else {
-      editor.updateBlock(blockId, { type: line.type, props: line.props, content: "---" } as never);
-    }
-    editor.setTextCursorPosition(blockId, "end");
-    toast(i18n.t("notes:divider.back", "Back to ---"), {
-      duration: UNDO_MS,
-      action: { label: i18n.t("notes:divider.again", "Make a divider again"), onClick: again },
-    });
-  };
-  const again = () => {
-    if (!editor.getBlock(blockId)) return;
-    editor.updateBlock(blockId, { type: "divider", props: {}, content: undefined } as never);
-    added();
-  };
-  added();
 }
 
 /** Block types a `---` line can be typed in. */
@@ -314,7 +228,7 @@ export function liftNestedDivider(doc: PMNode, tr: Transaction): Transaction | n
 }
 
 /** `---` on an empty line turns it into a divider at once (BlockNote's own
- * rule goes with its divider, replaced by PaperHub's), with an Undo toast.
+ * rule goes with its divider, replaced by PaperHub's); Ctrl+Z undoes it.
  * Dividers are always top level, as the parts of a section are: one typed,
  * made or moved inside a nested block lands right after its top-level block. */
 export const dividerRule = createExtension({
@@ -335,13 +249,10 @@ export const dividerRule = createExtension({
         if (!DASH_LINE_TYPES.has(String(block.type)) || !sel.empty || sel.$from.parentOffset !== sel.$from.parent.content.size) {
           return undefined;
         }
-        // The caret and the toast follow the change (the rule applies after
-        // this returns); the caret goes on below the divider.
-        const origin = dashLineOrigin(editor, block);
+        // The caret follows the change (the rule applies after this
+        // returns): it goes on below the divider. Ctrl+Z puts the dashes back.
         queueMicrotask(() => {
-          if (!editor.getBlock(block.id)) return;
-          const added = caretBelowDivider(editor, block.id);
-          announceDivider(editor, block.id, origin, added);
+          if (editor.getBlock(block.id)) caretBelowDivider(editor, block.id);
         });
         return { type: "divider", props: {} };
       },

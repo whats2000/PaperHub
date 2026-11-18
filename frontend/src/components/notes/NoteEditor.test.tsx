@@ -925,30 +925,26 @@ describe("dividers, Focus and folding", () => {
     useNotesStore.setState({ activePart: {}, focusOn: false, folded: {} });
   });
 
-  it("typing --- makes a divider at once; Undo turns it back into ---, then offers Make a divider again", async () => {
+  it("typing --- makes a divider at once, with no toast; Ctrl+Z turns it back into ---", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");
     const editor = makeEditor([dividerRule]);
     type(editor, "---");
     expect(editor.document[0]!.type).toBe("divider");
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
-    const [msg, opts] = toastFn.mock.calls[0] as [string, { action: { label: string; onClick: () => void } }];
-    expect(msg).toBe("Divider added");
-    expect(opts.action.label).toBe("Undo");
-    act(() => opts.action.onClick());
+    await waitFor(() => expect(editor.document).toHaveLength(2)); // the caret's new line
+    expect(toastFn).not.toHaveBeenCalled();
+    act(() => {
+      while (editor.document[0]!.type === "divider" && editor.undo()) {
+        /* undo the caret's line, then the divider */
+      }
+    });
     const back = editor.document[0] as unknown as { type: string; content: { text: string }[] };
     expect(back.type).toBe("paragraph");
     expect(back.content.map((c) => c.text).join("")).toBe("---");
-    const [msg2, opts2] = toastFn.mock.calls[1] as [string, { action: { label: string; onClick: () => void } }];
-    expect(msg2).toBe("Back to ---");
-    expect(opts2.action.label).toBe("Make a divider again");
-    act(() => opts2.action.onClick());
-    expect(editor.document[0]!.type).toBe("divider");
-    expect((toastFn.mock.calls[2] as [string])[0]).toBe("Divider added");
     cleanupEditors();
   });
 
-  it("--- puts the caret on a new line below the divider; Undo takes that line away again", async () => {
+  it("--- puts the caret on a new line below the divider", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");
     const editor = makeEditor(
@@ -960,7 +956,7 @@ describe("dividers, Focus and folding", () => {
     );
     editor.setTextCursorPosition("x", "start");
     type(editor, "---");
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(editor.document).toHaveLength(3));
     const lines = () =>
       (editor.document as unknown as { type: string; content?: { text: string }[] }[]).map((b) => [
         b.type,
@@ -970,14 +966,6 @@ describe("dividers, Focus and folding", () => {
     expect(lines().slice(0, 3)).toEqual([
       ["divider", ""],
       ["paragraph", "z"],
-      ["paragraph", "after"],
-    ]);
-    // A new line left empty goes with Undo.
-    editor.updateBlock(editor.document[1]!, { content: [] });
-    const undo = (toastFn.mock.calls[0] as [string, { action: { onClick: () => void } }])[1];
-    act(() => undo.action.onClick());
-    expect(lines().slice(0, 2)).toEqual([
-      ["paragraph", "---"],
       ["paragraph", "after"],
     ]);
     cleanupEditors();
@@ -996,7 +984,7 @@ describe("dividers, Focus and folding", () => {
     );
     editor.setTextCursorPosition("x", "start");
     type(editor, "---");
-    await waitFor(() => expect(toastFn).toHaveBeenCalled());
+    await waitFor(() => expect(editor.getTextCursorPosition().block.id).toBe("e"));
     expect(editor.document.map((b) => b.id).slice(0, 3)).toEqual(["x", "e", "y"]);
     expect(editor.getTextCursorPosition().block.id).toBe("e");
     cleanupEditors();
@@ -1038,7 +1026,7 @@ describe("dividers, Focus and folding", () => {
     cleanupEditors();
   });
 
-  it("Undo after a lifted --- puts the list item back where it was; Make a divider again lifts it again", async () => {
+  it("Ctrl+Z after a lifted --- puts the list item back where it was", async () => {
     const { cleanupEditors, makeEditor, type } = await import("./testEditor");
     const { dividerRule } = await import("./inlineMarks");
     const editor = makeEditor(
@@ -1060,9 +1048,12 @@ describe("dividers, Focus and folding", () => {
     editor.setTextCursorPosition("li3", "start");
     type(editor, "---");
     expect(editor.document.map((b) => b.type)).toEqual(["bulletListItem", "divider"]);
-    await waitFor(() => expect(toastFn).toHaveBeenCalled());
-    const undo = (toastFn.mock.calls.at(-1) as [string, { action: { onClick: () => void } }])[1];
-    act(() => undo.action.onClick());
+    await waitFor(() => expect(editor.document).toHaveLength(3)); // the caret's new line
+    act(() => {
+      while (editor.document.some((b) => b.type === "divider") && editor.undo()) {
+        /* the caret's line, then the divider */
+      }
+    });
     // The same document as before the last dash: the to-do back in its place, with ---.
     const restored = tree() as { children: { id: string; type: string; props: { checked: boolean }; content: { text: string }[] }[] }[];
     expect(restored.map((b) => (b as never as { type: string }).type)).toEqual(["bulletListItem"]);
@@ -1071,10 +1062,6 @@ describe("dividers, Focus and folding", () => {
       "li3", "checkListItem", true, "---",
     ]);
     expect(restored[0]!.children.map((c) => c.id)).toEqual(["li2", "li3", "li4"]);
-    const again = (toastFn.mock.calls.at(-1) as [string, { action: { label: string; onClick: () => void } }])[1];
-    expect(again.action.label).toBe("Make a divider again");
-    act(() => again.action.onClick());
-    expect(editor.document.map((b) => b.type)).toEqual(["bulletListItem", "divider"]);
     cleanupEditors();
   });
 

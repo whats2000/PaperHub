@@ -212,12 +212,6 @@
     "marks_one": "{{count}} 個標記",
     "marks_other": "{{count}} 個標記"
   },
-  "divider": {
-    "added": "已加入分隔線",
-    "undo": "復原",
-    "back": "已改回 ---",
-    "again": "再次設為分隔線"
-  },
   "toolbar": {
     "label": "筆記工具",
     "following": "跟隨 {{section}}",

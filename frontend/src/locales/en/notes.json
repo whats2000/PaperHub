@@ -212,12 +212,6 @@
     "marks_one": "{{count}} mark",
     "marks_other": "{{count}} marks"
   },
-  "divider": {
-    "added": "Divider added",
-    "undo": "Undo",
-    "back": "Back to ---",
-    "again": "Make a divider again"
-  },
   "toolbar": {
     "label": "Note tools",
     "following": "Following {{section}}",

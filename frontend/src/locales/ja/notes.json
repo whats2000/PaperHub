@@ -212,12 +212,6 @@
     "marks_one": "{{count}} マーク",
     "marks_other": "{{count}} マーク"
   },
-  "divider": {
-    "added": "区切り線を追加しました",
-    "undo": "元に戻す",
-    "back": "--- に戻しました",
-    "again": "もう一度区切り線にする"
-  },
   "toolbar": {
     "label": "ノートのツール",
     "following": "{{section}} に追従中",
