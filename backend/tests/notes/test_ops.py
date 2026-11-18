@@ -745,3 +745,26 @@ def test_block_ids_take_one_shape(bad: str) -> None:
         Op(op="delete", block_id=bad)
     for good in ["b_AbC123xYz9", "5a070443-97b8-40ae-bbcc-ff555ee02d52", "x" * 64]:
         assert Op(op="delete", block_id=good).block_id == good
+
+
+async def test_insert_with_an_id_live_in_another_note_is_renamed(conn):
+    """Block ids are global: a block pasted from another note keeps its
+    id in the editor. The server gives it a new one and says so, and later
+    ops of the same burst that name the old id follow it."""
+    a = await _note(conn)
+    b = await get_or_create_note(conn, target_kind="session", target_id="9",
+                                 title="")
+    await _seed(conn, a.id, [("shared", _para("in a"))])
+    res = await apply_ops(conn, b.id, base_revision=0, actor="user", ops=[
+        Op(op="insert", block_id="shared", block=_para("pasted")),
+        Op(op="insert", block_id="kid", block=_para("child"),
+           after="shared")])
+    assert len(res.renamed) == 1 and res.renamed[0]["from"] == "shared"
+    new = res.renamed[0]["to"]
+    assert new != "shared" and res.applied == [new, "kid"]
+    assert await _texts(conn, b.id) == ["pasted", "child"]
+    assert await _texts(conn, a.id) == ["in a"]
+    async with conn.execute(
+        "SELECT outcome_json FROM note_change_sets WHERE id = ?",
+        (res.change_set_id,)) as cur:
+        assert json.loads((await cur.fetchone())[0])["renamed"] == res.renamed

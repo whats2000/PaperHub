@@ -68,6 +68,10 @@ class ApplyResult(BaseModel):
     # Open suggestions this call withdrew (a newer one on the same block,
     # an undo of their set, or an accept that could not apply).
     withdrawn: list[str] = []
+    # Inserts whose client id was already used (block ids are global, and a
+    # block pasted from another note keeps its id): {from, to}, the id the
+    # client sent and the one the block got. The client re-keys the block.
+    renamed: list[dict[str, str]] = []
 
 
 def _now() -> str:
@@ -146,6 +150,7 @@ class _Ctx:
         self.rejected: list[dict[str, Any]] = []
         self.reparented: list[dict[str, str | None]] = []
         self.withdrawn: list[str] = []
+        self.renamed: dict[str, str] = {}
 
     def reject(self, block_id: str | None, reason: RejectReason,
                current: _Row | None = None) -> None:
@@ -160,7 +165,21 @@ class _Ctx:
             change_set_id=self.change_set_id, applied=self.applied,
             suggested=self.suggested, rejected=self.rejected,
             reparented=self.reparented, withdrawn=self.withdrawn,
+            renamed=self.renamed_list(),
         )
+
+    def renamed_list(self) -> list[dict[str, str]]:
+        return [{"from": a, "to": b} for a, b in self.renamed.items()]
+
+    def follow(self, op: Op) -> Op:
+        """``op`` with every id an earlier insert of this call renamed
+        replaced by the block's new id."""
+        if not self.renamed:
+            return op
+        upd = {f: self.renamed[v] for f in
+               ("block_id", "parent_id", "after", "before", "under_heading")
+               if isinstance(v := getattr(op, f), str) and v in self.renamed}
+        return op.model_copy(update=upd) if upd else op
 
     async def get(self, block_id: str) -> _Row | None:
         async with self.conn.execute(
@@ -427,7 +446,10 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             ctx.applied.append(old.id)
             return
         if bid is None or await _id_in_use(ctx, bid):
-            bid = new_block_id()
+            new = new_block_id()
+            if bid is not None:
+                ctx.renamed[bid] = new
+            bid = new
         key = await _place_with_divider(ctx, op, *place)
         await _insert_row(ctx, bid, op.block, place[0], key)
         return
@@ -519,7 +541,7 @@ async def _begin(
 def _outcome(ctx: _Ctx) -> str:
     return json.dumps({
         "applied": ctx.applied, "suggested": ctx.suggested,
-        "withdrawn": ctx.withdrawn,
+        "withdrawn": ctx.withdrawn, "renamed": ctx.renamed_list(),
         "rejected": [{"block_id": r["block_id"], "reason": r["reason"]}
                      for r in ctx.rejected],
     })
@@ -552,6 +574,7 @@ async def _apply_in_tx(
     recorded: list[dict[str, Any]] = []
     for op in ops:
         before_applied = len(ctx.applied)
+        op = ctx.follow(op)
         await _apply_one(ctx, op, base_revision)
         stored = op.model_dump()
         if op.op == "insert" and len(ctx.applied) > before_applied:
