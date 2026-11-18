@@ -105,7 +105,7 @@ function lastAction() {
 }
 
 describe("Resolve and Delete with Undo", () => {
-  it("Resolve → Undo → Resolve again", async () => {
+  it("Resolve → Undo → a plain Comment restored", async () => {
     const strip = vi.fn();
     const restore = vi.fn();
     const setStatus = vi.fn().mockResolvedValue(undefined);
@@ -118,12 +118,7 @@ describe("Resolve and Delete with Undo", () => {
     act(() => lastAction().onClick());
     expect(restore).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("open"));
-    expect(lastAction()).toMatchObject({ text: "Comment restored", label: "Resolve again" });
-
-    act(() => lastAction().onClick());
-    expect(strip).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("resolved"));
-    expect(lastAction()).toMatchObject({ text: "Comment resolved", label: "Undo" });
+    expect(toasts().at(-1)).toEqual(["Comment restored"]);
   });
 
   it("Delete goes to the server at once; Undo reopens it and puts the words back", async () => {
@@ -137,11 +132,7 @@ describe("Resolve and Delete with Undo", () => {
     act(() => lastAction().onClick());
     await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("open"));
     expect(restore).toHaveBeenCalledTimes(1);
-    expect(lastAction()).toMatchObject({ text: "Comment restored", label: "Delete again" });
-
-    act(() => lastAction().onClick());
-    expect(strip).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(setStatus).toHaveBeenLastCalledWith("deleted"));
+    expect(toasts().at(-1)).toEqual(["Comment restored"]);
   });
 
   it("sends Undo only after the status call before it has finished", async () => {

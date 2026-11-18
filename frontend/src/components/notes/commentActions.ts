@@ -19,17 +19,14 @@ export interface ThreadActionDeps {
   t: Translate;
 }
 
-/** Resolve or delete, with a toast whose Undo reopens the thread and whose
- * next button reads "Resolve again" / "Delete again". */
+/** Resolve or delete, with a toast whose Undo reopens the thread (then a
+ * plain "Comment restored", no "… again"). */
 export function runThreadAction(deps: ThreadActionDeps): void {
   const { kind, strip, restore, setStatus, t } = deps;
   const resolve = kind === "resolve";
   const done = resolve
     ? t("notes:comment.resolved", "Comment resolved")
     : t("notes:comment.deleted", "Comment deleted");
-  const again = resolve
-    ? t("notes:comment.resolveAgain", "Resolve again")
-    : t("notes:comment.deleteAgain", "Delete again");
   const fail = () => void toast.error(t("notes:comment.failed", "Couldn't save the comment."));
   // Status calls go one after another, so a quick Undo cannot overtake the
   // Delete / Resolve before it and leave the server on the wrong side.
@@ -38,26 +35,20 @@ export function runThreadAction(deps: ThreadActionDeps): void {
     sending = sending.then(() => setStatus(status)).catch(fail);
   };
 
-  const apply = () => {
-    strip();
-    send(resolve ? "resolved" : "deleted");
-    let undone = false;
-    toast(done, {
-      duration: UNDO_MS,
-      action: {
-        label: t("notes:comment.undo", "Undo"),
-        onClick: () => {
-          if (undone) return;
-          undone = true;
-          send("open");
-          restore();
-          toast(t("notes:comment.restored", "Comment restored"), {
-            duration: UNDO_MS,
-            action: { label: again, onClick: apply },
-          });
-        },
+  strip();
+  send(resolve ? "resolved" : "deleted");
+  let undone = false;
+  toast(done, {
+    duration: UNDO_MS,
+    action: {
+      label: t("notes:comment.undo", "Undo"),
+      onClick: () => {
+        if (undone) return;
+        undone = true;
+        send("open");
+        restore();
+        toast(t("notes:comment.restored", "Comment restored"));
       },
-    });
-  };
-  apply();
+    },
+  });
 }

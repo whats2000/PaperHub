@@ -422,11 +422,7 @@ export const useMarksStore = create<MarksState>()(
           }
           put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
           refreshNote(mark.note_id);
-          toast(t("notes:marks.restored", "Mark restored"), {
-            id: DELETE_TOAST,
-            duration: UNDO_MS,
-            action: { label: t("notes:marks.deleteAgain", "Delete again"), onClick: () => void remove(markId) },
-          });
+          toast(t("notes:marks.restored", "Mark restored"), { id: DELETE_TOAST });
         }, { onTimeout: failed, paperId }).catch(() => undefined);
       };
 
@@ -530,11 +526,7 @@ export const useMarksStore = create<MarksState>()(
                 if (back.deleted_at === null) upsert(paperId, find(markId)?.[1] ?? mark, back);
                 refreshNote(mark.note_id);
                 toast(deleted ? t("notes:marks.restored", "Mark restored") : t("notes:marks.pieceRestored", "Piece restored"), {
-                  duration: UNDO_MS,
-                  action: {
-                    label: deleted ? t("notes:marks.deleteAgain", "Delete again") : t("notes:marks.eraseAgain", "Erase again"),
-                    onClick: () => void erase(markId, index),
-                  },
+                  id: DELETE_TOAST,
                 });
               }, { onTimeout: failed, paperId }).catch(() => undefined);
             },

@@ -120,7 +120,7 @@ describe("useMarksStore.create", () => {
 });
 
 describe("useMarksStore.remove", () => {
-  it("deletes with Undo, and Undo offers Delete again", async () => {
+  it("deletes with Undo, then a plain Mark restored", async () => {
     const calls: string[] = [];
     server.use(
       http.delete(`${API_BASE_URL}/marks/mk_1`, () => {
@@ -143,11 +143,8 @@ describe("useMarksStore.remove", () => {
     await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
     expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything());
 
-    const again = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
-    expect(again.label).toBe("Delete again");
-    again.onClick();
-    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toEqual([]));
-    expect(calls).toEqual(["delete", "restore", "delete"]);
+    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
+    expect(calls).toEqual(["delete", "restore"]);
   });
 });
 
@@ -192,7 +189,7 @@ describe("useMarksStore.erase", () => {
     ],
   };
 
-  it("erases one piece and keeps the rest, with Undo, then Erase again", async () => {
+  it("erases one piece and keeps the rest, with Undo, then a plain Piece restored", async () => {
     const calls: string[] = [];
     const erased = { ...TWO, pieces: [TWO.pieces[0], { ...TWO.pieces[1], erased: true }] };
     server.use(
@@ -219,13 +216,11 @@ describe("useMarksStore.erase", () => {
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece restored", expect.anything()));
     expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[1]!.erased).toBeUndefined();
 
-    const again = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
-    expect(again.label).toBe("Erase again");
-    again.onClick();
-    await waitFor(() => expect(calls).toEqual(["erase", "restore", "erase"]));
+    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
+    expect(calls).toEqual(["erase", "restore"]);
   });
 
-  it("the server decides a mark left empty is deleted: Undo, then Delete again", async () => {
+  it("the server decides a mark left empty is deleted: Undo, then a plain Mark restored", async () => {
     const calls: string[] = [];
     server.use(
       http.delete(`${API_BASE_URL}/marks/mk_1/pieces/0`, () => {
@@ -246,10 +241,8 @@ describe("useMarksStore.erase", () => {
     undo.onClick();
     await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything()));
     expect(useMarksStore.getState().marksByPaper[3]).toMatchObject([{ id: "mk_1", note_id: 7 }]);
-    const again = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
-    expect(again.label).toBe("Delete again");
-    again.onClick();
-    await waitFor(() => expect(calls).toEqual(["erase", "restore", "erase"]));
+    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
+    expect(calls).toEqual(["erase", "restore"]);
   });
 
   it("waits for a pending stroke: the erase sees the joined mark, not the copy from before", async () => {

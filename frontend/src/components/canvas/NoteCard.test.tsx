@@ -237,21 +237,20 @@ describe("the note card", () => {
     reveal.mockRestore();
   });
 
-  it("deletes the mark from its trash, with Undo that turns into Delete again", async () => {
+  it("deletes the mark from its trash, with Undo (then a plain confirmation)", async () => {
     seed();
     await openCard();
     fireEvent.click(screen.getByRole("button", { name: "Delete this mark" }));
     expect(useMarkNavStore.getState().card).toBeNull();
     await waitFor(() => expect(deleteMark).toHaveBeenCalledWith("mk_1", expect.anything()));
-    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Mark deleted", expect.anything()));
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Removed from the paper and the note", expect.anything()));
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).not.toContain("mk_1");
     const undo = (toastFn.mock.calls.at(-1)![1] as { action: { label: string; onClick: () => void } }).action;
     expect(undo.label).toBe("Undo");
     act(() => undo.onClick());
     await waitFor(() => expect(restoreMark).toHaveBeenCalledWith("mk_1", expect.anything()));
     await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Mark restored", expect.anything()));
-    const again = (toastFn.mock.calls.at(-1)![1] as { action: { label: string } }).action;
-    expect(again.label).toBe("Delete again");
+    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toContain("mk_1");
   });
 
