@@ -8,6 +8,7 @@ import {
   MarkOpTimeout,
   markHint,
   queueMarkOp,
+  resetMarkHistory,
   resetMarkOps,
   toastSaved,
   trackedMarkChanges,
@@ -71,6 +72,7 @@ beforeEach(() => {
   toastError.mockReset();
   noteLoads = 0;
   resetMarkOps();
+  resetMarkHistory();
   useMarksStore.setState({ marksByPaper: {}, chunksByPaper: {} });
   useNotesStore.setState({
     notes: {
@@ -166,10 +168,9 @@ describe("useMarksStore.remove", () => {
     expect(undo.label).toBe("Undo");
     undo.onClick();
     await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(1));
-    expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything());
-
-    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
-    expect(calls).toEqual(["delete", "restore"]);
+    // The mark is back on screen: no toast says so.
+    await waitFor(() => expect(calls).toEqual(["delete", "restore"]));
+    expect(toastFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -214,7 +215,7 @@ describe("useMarksStore.erase", () => {
     ],
   };
 
-  it("erases one piece and keeps the rest, with Undo, then a plain Piece restored", async () => {
+  it("erases one piece and keeps the rest, with no toast; Ctrl+Z puts it back", async () => {
     const calls: string[] = [];
     const erased = { ...TWO, pieces: [TWO.pieces[0], { ...TWO.pieces[1], erased: true }] };
     server.use(
@@ -233,15 +234,11 @@ describe("useMarksStore.erase", () => {
     expect(after.pieces[0]!.erased).toBeUndefined();
     expect(after.pieces[1]!.erased).toBe(true);
     expect(after.note_id).toBe(7);
-    expect(toastFn.mock.lastCall?.[0]).toBe("Piece erased");
+    expect(toastFn).not.toHaveBeenCalled();
 
-    const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
-    expect(undo.label).toBe("Undo");
-    undo.onClick();
-    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece restored", expect.anything()));
-    expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[1]!.erased).toBeUndefined();
-
-    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
+    ctrl("z");
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[1]!.erased).toBeUndefined());
+    expect(toastFn).not.toHaveBeenCalled();
     expect(calls).toEqual(["erase", "restore"]);
   });
 
@@ -264,9 +261,7 @@ describe("useMarksStore.erase", () => {
     expect(toastFn.mock.lastCall?.[0]).toBe("Removed from the paper and the note");
     const undo = (toastFn.mock.lastCall![1] as { action: { label: string; onClick: () => void } }).action;
     undo.onClick();
-    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Mark restored", expect.anything()));
-    expect(useMarksStore.getState().marksByPaper[3]).toMatchObject([{ id: "mk_1", note_id: 7 }]);
-    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toMatchObject([{ id: "mk_1", note_id: 7 }]));
     expect(calls).toEqual(["erase", "restore"]);
   });
 
@@ -306,7 +301,6 @@ describe("useMarksStore.erase", () => {
     const after = useMarksStore.getState().marksByPaper[3]!;
     expect(after).toHaveLength(1);
     expect(after[0]!.pieces[1]!.erased).toBeUndefined();
-    expect(toastFn.mock.lastCall?.[0]).toBe("Piece erased");
   });
 });
 
@@ -787,4 +781,160 @@ describe("Ctrl+Z in the reader", () => {
     expect(restores).toBe(1);
     input.remove();
   });
+
+
+  it("keeps no time limit: Ctrl+Z long after the notice closed still undoes", async () => {
+    let restores = 0;
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, () => HttpResponse.json({ revision: 5, applied: [], rejected: [] })),
+      http.post(`${API_BASE_URL}/marks/mk_1/restore`, () => {
+        restores += 1;
+        return HttpResponse.json({ revision: 6, applied: [], rejected: [] });
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await useMarksStore.getState().remove("mk_1");
+      expect(toastFn).toHaveBeenLastCalledWith(
+        "Removed from the paper and the note",
+        expect.objectContaining({ duration: 2000, description: "Ctrl+Z to undo" }),
+      );
+      vi.advanceTimersByTime(60 * 60 * 1000);
+      ctrl("z");
+      await waitFor(() => expect(restores).toBe(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
+describe("the mark undo / redo history", () => {
+  const TWO: Mark = {
+    ...MARK,
+    note_id: 7,
+    pieces: [MARK.pieces[0]!, { quote: "of time", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
+  };
+  const NEW: Mark = { ...MARK, id: "mk_2", block_id: "b_2", note_id: 7 };
+  const created = (mark: Mark): MarkCreated => ({
+    mark,
+    block: null,
+    saved_to: { note_id: 7, paper_title: "", section: "2 Method", part_index: 0, part_count: 1 },
+  });
+  let calls: string[] = [];
+  const ok = (name: string, body: unknown = { revision: 1, applied: [], rejected: [] }) => () => {
+    calls.push(name);
+    return HttpResponse.json(body as never);
+  };
+
+  beforeEach(() => {
+    calls = [];
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, ok("create", created(NEW))),
+      http.delete(`${API_BASE_URL}/marks/mk_2`, ok("delete mk_2")),
+      http.post(`${API_BASE_URL}/marks/mk_2/restore`, ok("restore mk_2")),
+      http.delete(`${API_BASE_URL}/marks/mk_1/pieces/1`, ok("erase 1", { ...TWO, pieces: [TWO.pieces[0], { ...TWO.pieces[1], erased: true }] })),
+      http.post(`${API_BASE_URL}/marks/mk_1/pieces/1/restore`, ok("restore 1", TWO)),
+    );
+  });
+
+  const body = { paper_content_id: 3, kind: "text", style: "highlight", color: "green", view: "html", pieces: [] } as never;
+
+  it("undoes mixed actions newest first, redoes them in order, and a new action clears redo", async () => {
+    useMarksStore.setState({ marksByPaper: { 3: [TWO] } });
+    await useMarksStore.getState().create(body);
+    await useMarksStore.getState().erase("mk_1", 1);
+    calls = [];
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["restore 1"]));
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["restore 1", "delete mk_2"]));
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_1"]);
+    ctrl("z", { shiftKey: true });
+    await waitFor(() => expect(calls).toEqual(["restore 1", "delete mk_2", "restore mk_2"]));
+    ctrl("y");
+    await waitFor(() => expect(calls).toEqual(["restore 1", "delete mk_2", "restore mk_2", "erase 1"]));
+    // Undo once, then a new action: nothing is left to redo.
+    ctrl("z");
+    await waitFor(() => expect(calls).toHaveLength(5));
+    await useMarksStore.getState().erase("mk_1", 1);
+    const before = calls.length;
+    ctrl("y");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toHaveLength(before);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("undoes a join by erasing the piece the stroke added, and redo puts it back", async () => {
+    server.use(http.post(`${API_BASE_URL}/marks`, ok("join", created(TWO))));
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().create({ ...(body as object), join_to: "mk_1" } as never);
+    calls = [];
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["erase 1"]));
+    ctrl("y");
+    await waitFor(() => expect(calls).toEqual(["erase 1", "restore 1"]));
+  });
+
+  it("ignores the keys inside an input or a contenteditable", async () => {
+    useMarksStore.setState({ marksByPaper: { 3: [TWO] } });
+    await useMarksStore.getState().erase("mk_1", 1);
+    calls = [];
+    const input = document.createElement("input");
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    document.body.append(input, editable);
+    for (const el of [input, editable]) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    }
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([]);
+    input.remove();
+    editable.remove();
+  });
+
+  it("an undo answered 409 resyncs quietly, no error toast", async () => {
+    let lists = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/marks/mk_1/pieces/1/restore`, () => new HttpResponse("gone", { status: 409 })),
+      http.get(`${API_BASE_URL}/marks`, () => {
+        lists += 1;
+        return HttpResponse.json([TWO]);
+      }),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [TWO] } });
+    await useMarksStore.getState().erase("mk_1", 1);
+    ctrl("z");
+    await waitFor(() => expect(lists).toBe(1));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("an undo answered 500 says so", async () => {
+    server.use(http.post(`${API_BASE_URL}/marks/mk_1/pieces/1/restore`, () => new HttpResponse("boom", { status: 500 })));
+    useMarksStore.setState({ marksByPaper: { 3: [TWO] } });
+    await useMarksStore.getState().erase("mk_1", 1);
+    ctrl("z");
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't change the mark."));
+  });
+
+  it("the delete notice's Undo undoes that delete, not a newer action", async () => {
+    server.use(
+      http.delete(`${API_BASE_URL}/marks/mk_1`, ok("delete mk_1")),
+      http.post(`${API_BASE_URL}/marks/mk_1/restore`, ok("restore mk_1")),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }] } });
+    await useMarksStore.getState().remove("mk_1");
+    const notice = toastFn.mock.lastCall![1] as { action: { onClick: () => void } };
+    await useMarksStore.getState().create(body);
+    calls = [];
+    notice.action.onClick();
+    await waitFor(() => expect(calls).toEqual(["restore mk_1"]));
+    // Ctrl+Z now undoes the create.
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["restore mk_1", "delete mk_2"]));
+  });
+});
+
+function ctrl(key: string, extra: KeyboardEventInit = {}): void {
+  document.body.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, ...extra }));
+}

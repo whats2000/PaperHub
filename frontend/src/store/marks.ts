@@ -41,7 +41,9 @@ import type {
   SplitResult,
 } from "@/types/notes";
 
-const UNDO_MS = 5000;
+/** The delete notice is short: Ctrl+Z undoes the delete any time later
+ * [user, 2026-11-19]. */
+const DELETE_NOTICE_MS = 2000;
 /** One notice for a mark's delete (and its undo): a new one replaces it. */
 const DELETE_TOAST = "mark-deleted";
 
@@ -51,42 +53,95 @@ function isStale(err: unknown): boolean {
   return err instanceof ApiError && (err.status === 409 || err.status === 404);
 }
 
-/** The Undo of the delete notice on screen: Ctrl+Z in the reader runs it. */
-let deleteUndo: (() => void) | null = null;
+/** One undoable mark action in the reader. A split is not one: the server
+ * has no way to join two marks back (see the SRS). */
+export type MarkAction =
+  /** Marks deleted (one, or a note edit's several). */
+  | { kind: "delete"; marks: [paperId: number, mark: Mark][] }
+  /** A new mark. */
+  | { kind: "create"; paperId: number; mark: Mark }
+  /** A highlighter stroke joined to an existing mark: its new pieces. */
+  | { kind: "join"; paperId: number; markId: string; indexes: number[] }
+  /** One piece erased (`deleted`: that left the mark empty, so it went). */
+  | { kind: "erase"; paperId: number; mark: Mark; index: number; deleted: boolean };
 
-/** "Removed from the paper and the note", with Undo and the Ctrl+Z hint. */
-function announceDeleted(undo: () => void): void {
+/** The history keeps this many actions (the oldest go first). */
+const HISTORY_MAX = 100;
+
+/** The reader's mark actions, newest last: Ctrl+Z undoes the newest, then
+ * the one before; Ctrl+Shift+Z / Ctrl+Y redo. No time limit, like any
+ * app's undo; kept in memory while the page is open [user, 2026-11-19]. */
+let undoStack: MarkAction[] = [];
+let redoStack: MarkAction[] = [];
+
+/** Applies an action's inverse (`undo`) or the action again (set by the store). */
+let applyHandler: ((action: MarkAction, undo: boolean) => void) | null = null;
+
+/** A new action: undoable, and what was undone can no longer be redone. */
+function record(action: MarkAction): void {
+  undoStack.push(action);
+  if (undoStack.length > HISTORY_MAX) undoStack.splice(0, undoStack.length - HISTORY_MAX);
+  redoStack = [];
+}
+
+/** Undoes one action of the history (already undone: nothing). */
+function undoAction(action: MarkAction): void {
+  const i = undoStack.indexOf(action);
+  if (i < 0) return;
+  undoStack.splice(i, 1);
+  redoStack.push(action);
+  applyHandler?.(action, true);
+}
+
+/** Does the newest undone action again. */
+function redoLast(): void {
+  const action = redoStack.pop();
+  if (!action) return;
+  undoStack.push(action);
+  applyHandler?.(action, false);
+}
+
+/** "Removed from the paper and the note", with Undo (of this action) and
+ * the Ctrl+Z hint. */
+function announceDeleted(action: MarkAction): void {
   const t = i18n.t.bind(i18n) as TFunction;
-  let done = false;
-  const run = () => {
-    if (done) return;
-    done = true;
-    if (deleteUndo === run) deleteUndo = null;
-    undo();
-  };
-  const clear = () => {
-    if (deleteUndo === run) deleteUndo = null;
-  };
-  deleteUndo = run;
   toast(t("notes:marks.removedBoth", "Removed from the paper and the note"), {
     id: DELETE_TOAST,
-    duration: UNDO_MS,
+    duration: DELETE_NOTICE_MS,
     description: t("notes:marks.undoHint", "Ctrl+Z to undo"),
-    action: { label: t("notes:marks.undo", "Undo"), onClick: run },
-    onDismiss: clear,
-    onAutoClose: clear,
+    action: { label: t("notes:marks.undo", "Undo"), onClick: () => undoAction(action) },
   });
 }
 
-/** Ctrl+Z (Cmd+Z) outside a text field undoes the mark delete on screen. */
+/** Test isolation: forget the undo / redo history. */
+export function resetMarkHistory(): void {
+  undoStack = [];
+  redoStack = [];
+}
+
+/** Ctrl+Z (Cmd+Z) outside a text field undoes the newest mark action;
+ * Ctrl+Shift+Z and Ctrl+Y redo. A text field (the note editor) keeps its
+ * own undo. */
 function undoKey(e: KeyboardEvent): void {
-  if (!deleteUndo || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const key = e.key.toLowerCase();
+  const redo = (key === "z" && e.shiftKey) || (key === "y" && !e.shiftKey);
+  const undo = key === "z" && !e.shiftKey;
+  if (!redo && !undo) return;
   const el = e.target;
   if (el instanceof HTMLElement && (el.isContentEditable || el.closest("input, textarea, select, [contenteditable]"))) {
     return;
   }
-  e.preventDefault();
-  deleteUndo();
+  if (undo) {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    e.preventDefault();
+    undoAction(last);
+  } else {
+    if (!redoStack.length) return;
+    e.preventDefault();
+    redoLast();
+  }
 }
 if (typeof window !== "undefined") window.addEventListener("keydown", undoKey);
 
@@ -393,32 +448,96 @@ export const useMarksStore = create<MarksState>()(
           }
         }
         refreshNote(mark.note_id);
-        announceDeleted(() => restore(paperId, mark));
+        const action: MarkAction = { kind: "delete", marks: [[paperId, mark]] };
+        record(action);
+        announceDeleted(action);
       };
 
       /** The server's marks for a paper, quietly (stale state resolved). */
       const resync = (paperId: number) => void get().refetchMarks(paperId).catch(() => undefined);
 
-      /** Undo of a delete: the mark and its block back, then Delete again. */
-      const restore = (paperId: number, mark: Mark) => {
-        const markId = mark.id;
-        const failed = () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark."));
+      /** One step of an undo or redo, in the mark-op queue. Stale state
+       * (409/404: the editor's undo, another tab got there first) resyncs
+       * quietly; only a real failure says so. */
+      const historyStep = (paperId: number, step: (signal: AbortSignal) => Promise<void>) => {
+        const failed = () => toast.error(t("notes:marks.historyFailed", "Couldn't change the mark."));
         void queueMarkOp(async (signal) => {
           try {
-            await restoreMark(markId, signal);
+            await step(signal);
           } catch (err) {
             if (signal.aborted) return;
+            if (isStale(err)) resync(paperId);
+            else failed();
+          }
+        }, { onTimeout: failed, paperId }).catch(() => undefined);
+      };
+
+      /** A deleted mark and its block back (no toast: it shows). */
+      const restoreStep = (paperId: number, mark: Mark) =>
+        historyStep(paperId, async (signal) => {
+          try {
+            await restoreMark(mark.id, signal);
+          } catch (err) {
             // Already back (the editor's undo, another tab): the server's copy.
-            if (!isStale(err)) {
-              failed();
-              return;
-            }
+            if (signal.aborted || !isStale(err)) throw err;
             resync(paperId);
           }
-          put(paperId, (list) => (list.some((m) => m.id === markId) ? list : [...list, mark]));
+          put(paperId, (list) => (list.some((m) => m.id === mark.id) ? list : [...list, mark]));
           refreshNote(mark.note_id);
-          toast(t("notes:marks.restored", "Mark restored"), { id: DELETE_TOAST });
-        }, { onTimeout: failed, paperId }).catch(() => undefined);
+        });
+
+      /** A mark and its block deleted again, with no notice. */
+      const deleteStep = (paperId: number, mark: Mark) =>
+        historyStep(paperId, async (signal) => {
+          put(paperId, (list) => list.filter((m) => m.id !== mark.id));
+          try {
+            await deleteMark(mark.id, signal);
+          } finally {
+            refreshNote(mark.note_id);
+          }
+        });
+
+      /** One piece erased (`erase`) or put back, as the server then has the mark. */
+      const pieceStep = (paperId: number, markId: string, index: number, erase: boolean, fallback?: Mark) =>
+        historyStep(paperId, async (signal) => {
+          const here = find(markId)?.[1];
+          // Erasing a piece that is no longer live here (split off since):
+          // nothing to take back; the server's copy decides.
+          if (erase && here && !livePieceIndexes(here.pieces).includes(index)) {
+            resync(paperId);
+            return;
+          }
+          const res = await (erase ? erasePiece : restorePiece)(markId, index, signal);
+          const prev = here ?? fallback;
+          if (res.deleted_at !== null) put(paperId, (list) => list.filter((m) => m.id !== markId));
+          else if (prev) upsert(paperId, prev, res);
+          else resync(paperId);
+          refreshNote(prev?.note_id);
+        });
+
+      /** An action's inverse (`undo`), or the action again. */
+      const applyAction = (action: MarkAction, undo: boolean) => {
+        switch (action.kind) {
+          case "delete":
+            for (const [pid, m] of action.marks) {
+              if (undo) restoreStep(pid, m);
+              else deleteStep(pid, m);
+            }
+            return;
+          case "create":
+            if (undo) deleteStep(action.paperId, action.mark);
+            else restoreStep(action.paperId, action.mark);
+            return;
+          case "join":
+            // Undo takes the stroke's pieces off again (newest first).
+            for (const i of undo ? [...action.indexes].reverse() : action.indexes) {
+              pieceStep(action.paperId, action.markId, i, undo);
+            }
+            return;
+          case "erase":
+            pieceStep(action.paperId, action.mark.id, action.index, !undo, action.mark);
+            return;
+        }
       };
 
       /** A note change deleted mark blocks or put one back (or the server
@@ -441,8 +560,15 @@ export const useMarksStore = create<MarksState>()(
         if (change && !gone.length && !change.revived) return;
         for (const [pid, m] of gone) put(pid, (list) => list.filter((x) => x.id !== m.id));
         papers.forEach(resync);
-        if (gone.length) announceDeleted(() => gone.forEach(([pid, m]) => restore(pid, m)));
+        if (gone.length) {
+          const action: MarkAction = { kind: "delete", marks: gone };
+          record(action);
+          announceDeleted(action);
+        }
       });
+
+      // Ctrl+Z and the notice's Undo bring marks back through it.
+      applyHandler = applyAction;
 
       const remove = (markId: string): Promise<void> =>
         queueMarkOp((signal) => removeNow(markId, signal), {
@@ -500,33 +626,11 @@ export const useMarksStore = create<MarksState>()(
         if (deleted) put(paperId, (list) => list.filter((m) => m.id !== markId));
         else replace(paperId, mark, res);
         refreshNote(mark.note_id);
-        let undone = false;
-        toast(deleted ? t("notes:marks.removedBoth", "Removed from the paper and the note") : t("notes:marks.erased", "Piece erased"), {
-          duration: UNDO_MS,
-          action: {
-            label: t("notes:marks.undo", "Undo"),
-            onClick: () => {
-              if (undone) return;
-              undone = true;
-              const failed = () => toast.error(t("notes:marks.restoreFailed", "Couldn't restore the mark."));
-              void queueMarkOp(async (signal) => {
-                let back: Mark;
-                try {
-                  back = await restorePiece(markId, index, signal);
-                } catch (err) {
-                  if (isStale(err)) resync(paperId);
-                  else if (!signal.aborted) failed();
-                  return;
-                }
-                if (back.deleted_at === null) upsert(paperId, find(markId)?.[1] ?? mark, back);
-                refreshNote(mark.note_id);
-                toast(deleted ? t("notes:marks.restored", "Mark restored") : t("notes:marks.pieceRestored", "Piece restored"), {
-                  id: DELETE_TOAST,
-                });
-              }, { onTimeout: failed, paperId }).catch(() => undefined);
-            },
-          },
-        });
+        // Undone with Ctrl+Z; a piece erased shows on the paper (no toast),
+        // a mark the erase emptied gets the delete notice.
+        const action: MarkAction = { kind: "erase", paperId, mark, index, deleted };
+        record(action);
+        if (deleted) announceDeleted(action);
       };
       const erase = (markId: string, index: number): Promise<void> =>
         queueMarkOp((signal) => eraseNow(markId, index, signal), {
@@ -706,7 +810,16 @@ export const useMarksStore = create<MarksState>()(
           const saved = res.saved_to;
           const mark: Mark = { ...res.mark, note_id: saved.note_id };
           noteLocalChange(mark.id);
+          const before = (get().marksByPaper[body.paper_content_id] ?? []).find((m) => m.id === mark.id);
           put(body.paper_content_id, (list) => [...list.filter((m) => m.id !== mark.id), mark]);
+          if (body.join_to && body.join_to === mark.id) {
+            // The stroke's pieces were appended: indexes past the old ones.
+            const live = livePieceIndexes(mark.pieces);
+            const added = before ? live.filter((i) => i >= before.pieces.length) : live.slice(-1);
+            if (added.length) record({ kind: "join", paperId: body.paper_content_id, markId: mark.id, indexes: added });
+          } else {
+            record({ kind: "create", paperId: body.paper_content_id, mark });
+          }
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);
           refreshNote(saved.note_id);

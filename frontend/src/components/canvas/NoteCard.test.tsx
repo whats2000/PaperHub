@@ -334,7 +334,7 @@ describe("the note card", () => {
     reveal.mockRestore();
   });
 
-  it("deletes the mark from its trash, with Undo (then a plain confirmation)", async () => {
+  it("deletes the mark from its trash, with Undo (no confirmation after)", async () => {
     seed();
     await openCard();
     fireEvent.click(screen.getByRole("button", { name: "Delete this mark" }));
@@ -346,9 +346,8 @@ describe("the note card", () => {
     expect(undo.label).toBe("Undo");
     act(() => undo.onClick());
     await waitFor(() => expect(restoreMark).toHaveBeenCalledWith("mk_1", expect.anything()));
-    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Mark restored", expect.anything()));
-    expect((toastFn.mock.lastCall![1] as { action?: unknown } | undefined)?.action).toBeUndefined();
-    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toContain("mk_1");
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toContain("mk_1"));
+    expect(toastFn).not.toHaveBeenCalledWith("Mark restored", expect.anything());
   });
 
   it("closes on Escape, on a click outside and from its close button, shrinking toward the mark", async () => {

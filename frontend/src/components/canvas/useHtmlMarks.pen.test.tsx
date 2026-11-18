@@ -375,7 +375,7 @@ describe("strokes, erases and splits keep the user's order", () => {
     await answer();
     await waitFor(() => expect(erasePiece).toHaveBeenCalledWith("mk_1", 0, expect.any(AbortSignal)));
     // The mark was not deleted: the joined piece is still on it.
-    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Piece erased", expect.anything()));
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]![0]!.pieces[0]!.erased).toBe(true));
     const m = useMarksStore.getState().marksByPaper[3]![0]!;
     expect(m.deleted_at).toBeNull();
     expect(m.pieces.map((p) => [p.quote, !!p.erased])).toEqual([
