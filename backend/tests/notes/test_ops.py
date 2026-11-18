@@ -86,9 +86,9 @@ async def test_client_block_id_kept_when_unused(conn):
     n = await _note(conn)
     await _seed(conn, n.id, [("a", _para("a"))])
     res = await apply_ops(conn, n.id, base_revision=1, actor="user", ops=[
-        Op(op="insert", block_id="a", block=_para("b"), after="a"),
+        Op(op="insert", block_id="c", block=_para("b"), after="a"),
     ])
-    assert res.applied and res.applied[0] != "a"
+    assert res.applied == ["c"] and res.renamed == []
     assert await _texts(conn, n.id) == ["a", "b"]
 
 
@@ -768,3 +768,19 @@ async def test_insert_with_an_id_live_in_another_note_is_renamed(conn):
         "SELECT outcome_json FROM note_change_sets WHERE id = ?",
         (res.change_set_id,)) as cur:
         assert json.loads((await cur.fetchone())[0])["renamed"] == res.renamed
+
+
+async def test_resent_insert_into_the_same_note_is_idempotent(conn):
+    """A draft re-sent after an ambiguous failure names an id already live
+    here: one block, no `renamed`, and the user's latest words win."""
+    a = await _note(conn)
+    await _seed(conn, a.id, [("x1", _para("first"))])
+    note = await get_note(conn, a.id)
+    same = await apply_ops(conn, a.id, base_revision=note.revision, actor="user",
+                           ops=[Op(op="insert", block_id="x1", block=_para("first"))])
+    assert same.renamed == [] and same.applied == ["x1"]
+    note = await get_note(conn, a.id)
+    res = await apply_ops(conn, a.id, base_revision=note.revision, actor="user",
+                          ops=[Op(op="insert", block_id="x1", block=_para("edited"))])
+    assert res.renamed == [] and res.applied == ["x1"]
+    assert await _texts(conn, a.id) == ["edited"]
