@@ -132,23 +132,40 @@ async def _note_rev(conn, note_id):
     return (await get_note(conn, note_id)).revision
 
 
-async def test_delete_rejected_when_block_already_deleted(conn):
+async def test_delete_of_a_mark_already_gone_is_a_quiet_success(conn):
+    """The block's delete in the editor took the mark; the reader's Delete
+    on the same mark (sent before it heard) succeeds and writes nothing."""
     await _paper(conn)
     m, saved = await create_mark(conn, _in([_piece("x")]))
     note = await get_note(conn, saved.note_id)
     await apply_ops(conn, note.id, base_revision=note.revision, actor="user",
                     ops=[Op(op="delete", block_id=m["block_id"])])
-    # The block's delete took the mark with it; deleting the mark again is
-    # rejected and changes nothing.
     async with conn.execute("SELECT deleted_at FROM note_marks WHERE id = ?",
                             (m["id"],)) as cur:
         gone_at = (await cur.fetchone())[0]
     assert gone_at is not None
-    with pytest.raises(RuntimeError):
-        await delete_mark(conn, m["id"])
+    before = await get_note(conn, note.id)
+    async with conn.execute("SELECT COUNT(*) FROM note_change_sets") as cur:
+        sets = (await cur.fetchone())[0]
+    res = await delete_mark(conn, m["id"])
+    assert res.applied == [m["block_id"]] and res.rejected == []
+    assert res.change_set_id is None and res.revision == before.revision
     async with conn.execute("SELECT deleted_at FROM note_marks WHERE id = ?",
                             (m["id"],)) as cur:
         assert (await cur.fetchone())[0] == gone_at
+    async with conn.execute("SELECT COUNT(*) FROM note_change_sets") as cur:
+        assert (await cur.fetchone())[0] == sets
+    assert (await get_note(conn, note.id)).revision == before.revision
+
+
+async def test_restore_of_a_live_mark_is_a_quiet_success(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("x")]))
+    before = await get_note(conn, saved.note_id)
+    res = await restore_mark(conn, m["id"])
+    assert res.applied == [m["block_id"]] and res.change_set_id is None
+    assert (await get_note(conn, saved.note_id)).revision == before.revision
+    assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
 
 
 async def test_failed_mark_insert_leaves_no_orphan_block(conn, monkeypatch):

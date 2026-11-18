@@ -70,6 +70,16 @@ async def test_mark_delete_restore_via_api(client: AsyncClient) -> None:
     assert (await client.delete("/marks/mk_nope")).status_code == 404
 
 
+async def test_deleting_a_deleted_mark_is_a_200_not_a_409(client: AsyncClient) -> None:
+    mark = (await client.post("/marks", json=_body())).json()["mark"]
+    first = await client.delete(f"/marks/{mark['id']}")
+    again = await client.delete(f"/marks/{mark['id']}")
+    assert again.status_code == 200
+    assert again.json()["applied"] == [mark["block_id"]]
+    assert again.json()["revision"] == first.json()["revision"]
+    assert again.json()["change_set_id"] is None
+
+
 async def test_pieces_erase_restore_split(client: AsyncClient) -> None:
     mid = (await client.post("/marks", json=_body())).json()["mark"]["id"]
     joined = await client.post("/marks", json=_body(

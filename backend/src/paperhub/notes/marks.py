@@ -413,16 +413,37 @@ async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
     return res
 
 
+async def _unchanged(conn: aiosqlite.Connection,
+                     m: dict[str, Any]) -> ApplyResult:
+    """The answer to a delete / restore that finds the mark already so:
+    what a delete / restore that just landed says, with nothing written."""
+    note = await paper_note(conn, m["paper_content_id"])
+    return ApplyResult(note_id=note.id, revision=note.revision,
+                       change_set_id=None, applied=[m["block_id"]],
+                       suggested=[], rejected=[])
+
+
 async def delete_mark(conn: aiosqlite.Connection, mark_id: str) -> ApplyResult:
-    """Soft-delete the mark and its block; the user's other blocks stay."""
+    """Soft-delete the mark and its block; the user's other blocks stay.
+
+    A mark already deleted (its block deleted in the note first) is a quiet
+    success: the reader's Delete may cross the editor's on the way."""
     async with tx(conn):
-        return await _delete(conn, await _get(conn, mark_id))
+        m = await _get(conn, mark_id)
+        if m["deleted_at"] is not None:
+            return await _unchanged(conn, m)
+        return await _delete(conn, m)
 
 
 async def restore_mark(conn: aiosqlite.Connection, mark_id: str,
                        ) -> ApplyResult:
+    """Bring the mark and its block back; one already live (the editor's
+    undo got there first) is a quiet success."""
     async with tx(conn):
-        return await _restore(conn, await _get(conn, mark_id))
+        m = await _get(conn, mark_id)
+        if m["deleted_at"] is None:
+            return await _unchanged(conn, m)
+        return await _restore(conn, m)
 
 
 async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
