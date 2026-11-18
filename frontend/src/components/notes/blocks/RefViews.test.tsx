@@ -9,6 +9,7 @@ function props(over: Partial<MarkProps>): MarkProps {
     markId: "mk_1",
     color: "",
     kind: "figure",
+    style: "",
     quote: "",
     pieces: "[]",
     source: "{}",

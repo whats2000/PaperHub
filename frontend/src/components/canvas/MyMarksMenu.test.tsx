@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MyMarksMenu } from "@/components/canvas/MyMarksMenu";
-import { patchMarkColor } from "@/lib/api";
+import { addMarkColor, deleteMarkColor, patchMarkColor, reorderMarkColors } from "@/lib/api";
 import { chunkMap } from "@/lib/marks/anchor";
 import { markPositions } from "@/lib/marks/pieces";
 import { useCanvasStore } from "@/store/canvas";
@@ -14,6 +14,9 @@ import type { Mark, MarkColorInfo } from "@/types/notes";
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   patchMarkColor: vi.fn(),
+  addMarkColor: vi.fn(),
+  deleteMarkColor: vi.fn(),
+  reorderMarkColors: vi.fn(),
 }));
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
 vi.mock("sonner", () => ({
@@ -32,7 +35,7 @@ function mark(id: string, section: string, chunk: number, over: Partial<Mark> = 
     id,
     paper_content_id: 3,
     block_id: `b_${id}`,
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "green",
     view: "html",
     pieces: [{ quote: `quote ${id}`, chunk_start: chunk, chunk_end: chunk }],
@@ -61,7 +64,7 @@ beforeEach(() => {
       3: [
         mark("m3", "3 Results", 30, { color: "blue" }),
         mark("m1", "2 Method", 12, { part_label: "2 Method · 2" }),
-        mark("m2", "2 Method", 10, { kind: "quote", color: null }),
+        mark("m2", "2 Method", 10, { kind: "text", style: "underline", color: null }),
       ],
     },
   });
@@ -248,7 +251,9 @@ describe("My marks, fix round 1", () => {
     });
     const menu = await openMenu(2);
     const fig = within(menu).getByTestId("my-mark-f1");
-    expect(within(fig).getByRole("img", { name: "Figure" })).toBeInTheDocument();
+    expect(within(fig).getByRole("img", { name: "Figure · Key result" })).toBeInTheDocument();
+    // A text mark names its style and what its colour means.
+    expect(within(within(menu).getByTestId("my-mark-h1")).getByRole("img", { name: "Text · Highlight · Key result" })).toBeInTheDocument();
     expect(fig).toHaveTextContent("quote f1");
     expect(fig).toHaveTextContent("note 2");
     expect(within(menu).getByTestId("my-mark-h1")).toHaveTextContent("note 1");
@@ -326,5 +331,71 @@ describe("My marks, fix round 2", () => {
     await waitFor(() => expect(reveal).toHaveBeenCalledTimes(3));
     expect(hideCalls()).toHaveLength(2);
     reveal.mockRestore();
+  });
+});
+
+describe("My marks: the user's colours", () => {
+  const teal: MarkColorInfo = { color: "c_teal", name: "To verify", visible: true, hex: "#1f8a8a", dark: "#2a9a9a", builtin: false };
+
+  it("adds a colour only with a label", async () => {
+    vi.mocked(addMarkColor).mockImplementation((body) =>
+      Promise.resolve([...useMarksStore.getState().colors, { ...teal, name: body.name, hex: body.hex }]),
+    );
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole("button", { name: "Add a colour" }));
+    const save = await within(menu).findByRole("button", { name: "Add" });
+    expect(save).toBeDisabled();
+    fireEvent.change(within(menu).getByPlaceholderText(/What does this colour mean/), { target: { value: "To verify" } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(addMarkColor).toHaveBeenCalledWith({ hex: "#1f8a8a", name: "To verify" }));
+    await waitFor(() => expect(within(menu).getByTestId("color-row-c_teal")).toBeInTheDocument());
+  });
+
+  it("recolours and renames from the swatch; a yellow is refused with the reason", async () => {
+    vi.mocked(patchMarkColor).mockImplementation((color, body) =>
+      Promise.resolve(useMarksStore.getState().colors.map((c) => (c.color === color ? { ...c, ...body } : c))),
+    );
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole("button", { name: "Change colour of Method" }));
+    const picker = await within(menu).findByLabelText("Colour");
+    fireEvent.change(picker, { target: { value: "#facc15" } });
+    expect(within(menu).getByRole("alert")).toHaveTextContent("yellow is reserved for citations");
+    expect(within(menu).getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(picker, { target: { value: "#2a6fb0" } });
+    fireEvent.change(within(menu).getByPlaceholderText(/What does this colour mean/), { target: { value: "Approach" } });
+    fireEvent.click(within(menu).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patchMarkColor).toHaveBeenCalledWith("blue", { hex: "#2a6fb0", name: "Approach" }));
+  });
+
+  it("an empty or taken label puts the old one back", async () => {
+    const menu = await openMenu();
+    const field = within(menu).getAllByRole("textbox", { name: "Label for this colour" })[0]!;
+    fireEvent.change(field, { target: { value: "  " } });
+    fireEvent.blur(field);
+    fireEvent.change(field, { target: { value: "method" } });
+    fireEvent.blur(field);
+    expect(patchMarkColor).not.toHaveBeenCalled();
+    expect(field).toHaveValue("Key result");
+  });
+
+  it("reorders, and deletes a custom colour no mark uses", async () => {
+    useMarksStore.setState({ colors: [...useMarksStore.getState().colors, teal] });
+    vi.mocked(reorderMarkColors).mockImplementation((order) =>
+      Promise.resolve(order.map((k) => useMarksStore.getState().colors.find((c) => c.color === k)!)),
+    );
+    vi.mocked(deleteMarkColor).mockImplementation((key) =>
+      Promise.resolve(useMarksStore.getState().colors.filter((c) => c.color !== key)),
+    );
+    const menu = await openMenu();
+    // A default can't be deleted; a used custom one neither.
+    expect(within(menu).queryByRole("button", { name: "Delete Key result" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("button", { name: "Move To verify up" }));
+    await waitFor(() =>
+      expect(reorderMarkColors).toHaveBeenCalledWith(["green", "blue", "pink", "c_teal", "purple"]),
+    );
+    fireEvent.click(within(menu).getByRole("button", { name: "Delete To verify" }));
+    await waitFor(() => expect(deleteMarkColor).toHaveBeenCalledWith("c_teal"));
+    await waitFor(() => expect(within(menu).queryByTestId("color-row-c_teal")).toBeNull());
   });
 });

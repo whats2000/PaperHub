@@ -163,8 +163,13 @@ export interface ChangeSetStatus {
 
 // ---- Reading marks ------------------------------------------------------
 
-export type MarkKind = "highlight" | "quote" | "figure" | "equation" | "region";
-export type MarkColor = "green" | "blue" | "pink" | "purple";
+/** WHAT was marked. (Marks saved before 2026-11-19 said "highlight" /
+ * "quote"; `markStyleOf` reads those as text in a style.) */
+export type MarkKind = "text" | "figure" | "equation" | "region";
+/** HOW a text mark is drawn. Figure / equation / region marks have none. */
+export type MarkStyle = "highlight" | "underline" | "wavy" | "bar";
+/** A palette key: the four defaults, or a custom colour's `c_…` key. */
+export type MarkColor = string;
 
 /** One anchored piece of a mark; shape depends on the view (see the plan). */
 export interface MarkPiece {
@@ -187,6 +192,7 @@ export interface Mark {
   paper_content_id: number;
   block_id: string;
   kind: MarkKind;
+  style?: MarkStyle | null;
   color: MarkColor | null;
   view: "html" | "pdf";
   pieces: MarkPiece[];
@@ -206,6 +212,7 @@ export type SplitResult = Mark & { original: Mark };
 export interface MarkIn {
   paper_content_id: number;
   kind: MarkKind;
+  style?: MarkStyle | null;
   color: MarkColor | null;
   view: "html" | "pdf";
   pieces: MarkPiece[];
@@ -232,13 +239,20 @@ export interface MarkCreated {
 
 export interface MarkColorInfo {
   color: MarkColor;
+  /** The user's label: what the colour MEANS ("Method", "To verify"). */
   name: string;
   visible: boolean;
+  /** Light-mode colour; `dark` is derived from it by the server. */
+  hex?: string;
+  dark?: string;
+  /** The four defaults: hidden, renamed or recoloured, never deleted. */
+  builtin?: boolean;
 }
 
 export interface MarkColorPatch {
   name?: string;
   visible?: boolean;
+  hex?: string;
 }
 
 export interface PaperPageBlock {

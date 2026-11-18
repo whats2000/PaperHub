@@ -67,7 +67,8 @@ import { useCanvasStore } from "@/store/canvas";
 import { activateMark, hoverMark, registerMarkAnchors } from "@/store/markNav";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
 import { REVEAL_WAIT_MS, useTranslationStore } from "@/store/translation";
-import type { Mark, MarkColor, MarkColorInfo, PaperPageBlock } from "@/types/notes";
+import type { Mark, MarkColor, MarkColorInfo, MarkStyle, PaperPageBlock } from "@/types/notes";
+import { isTextMark } from "@/lib/marks/palette";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
@@ -203,7 +204,7 @@ export function usePdfMarks({
       (m) =>
         // Marks made in the HTML view of the paper show on its PDF too
         // (passages only; the page finds them by their quote).
-        (m.view === "pdf" || m.kind === "highlight" || m.kind === "quote") &&
+        (m.view === "pdf" || isTextMark(m)) &&
         m.deleted_at === null &&
         !m.lang &&
         !(m.color !== null && hidden.has(m.color)),
@@ -606,7 +607,7 @@ export function usePdfMarks({
       if (Date.now() - renderedAt < NOT_HERE_MS) return false;
       // Drawn here it isn't. A passage may be found in the HTML; a box,
       // figure or equation made on a page is drawn on the page only.
-      if (mark && reveal.fallback && (mark.kind === "highlight" || mark.kind === "quote")) {
+      if (mark && reveal.fallback && isTextMark(mark)) {
         useCanvasStore.getState().requestReaderTab(paperId, "html");
         useTranslationStore.getState().requestReveal(paperId, reveal.markId);
         return done();
@@ -623,7 +624,7 @@ export function usePdfMarks({
 
   const { busy, save: saveMarks } = useMarkSave(paperId);
   const save = useCallback(
-    async (color: MarkColor | null, addNote: boolean) => {
+    async (style: MarkStyle | null, color: MarkColor | null) => {
       const cur = target;
       const root = readerRef.current;
       if (!cur || !root) return;
@@ -631,10 +632,10 @@ export function usePdfMarks({
       if (cur.type === "text") {
         let missed = false;
         ok = await saveMarks({
-          kind: color ? "highlight" : "quote",
+          kind: "text",
+          style: style ?? "highlight",
           color,
           view: "pdf",
-          addNote,
           groups: async () => {
             const r = await placeText(cur.fragments);
             if (!r) return null;
@@ -647,10 +648,10 @@ export function usePdfMarks({
       } else if (cur.type === "translation") {
         const piece = cur.piece;
         ok = await saveMarks({
-          kind: color ? "highlight" : "quote",
+          kind: "text",
+          style: style ?? "highlight",
           color,
           view: "pdf",
-          addNote,
           groups: async () => {
             const at = await cardSection(piece);
             if (!at) return null;
@@ -665,7 +666,6 @@ export function usePdfMarks({
           kind: cur.kind,
           color,
           view: "pdf",
-          addNote,
           groups: () => [{ section: b.section, pieces: [piece] }],
         });
       } else {
@@ -692,7 +692,6 @@ export function usePdfMarks({
           openCard: false, // Box is a rapid tool
           color,
           view: "pdf",
-          addNote,
           groups: async () => {
             // On a page without Marker blocks the box's words find its section.
             const placed = await locateBox(paperId, base, pageBlocks);
@@ -782,9 +781,7 @@ export function usePdfMarks({
         busy={busy}
         target={popoverTarget}
         autoFocus={target?.type === "text" || target?.type === "translation" ? target.keyboard : false}
-        onHighlight={(c) => void save(c, false)}
-        onQuote={() => void save(null, false)}
-        onAddNote={() => void save(null, true)}
+        onMark={(style, c) => void save(style, c)}
         onClose={(opts) => {
           setTarget(null);
           if (opts?.returnFocus) readerRef.current?.focus();

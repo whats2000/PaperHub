@@ -189,7 +189,7 @@
       "focus": "淡化其他筆記與其標記",
       "fold": "收合其下的筆記",
       "trash": "刪除，可復原",
-      "selectPaper": "引用到筆記，或選一個螢光色",
+      "selectPaper": "選樣式和顏色，就會存進筆記",
       "highlighter": "拖過文字，或點一張圖",
       "box": "拖過圖或公式",
       "clickMark": "開啟它的筆記",
@@ -286,9 +286,6 @@
   },
   "marks": {
     "popover": "標記選取的文字",
-    "highlightAs": "畫重點：{{name}}",
-    "quote": "引用到筆記",
-    "addNote": "加筆記",
     "show": "顯示",
     "saveFailed": "無法儲存這個標記。",
     "undo": "復原",
@@ -304,7 +301,6 @@
     "popoverFigure": "標記這張圖",
     "popoverEquation": "標記這條公式",
     "popoverBox": "標記這個框",
-    "addToNote": "加入筆記",
     "markFigure": "標記圖",
     "markEquation": "標記公式",
     "box": "框選",
@@ -342,7 +338,19 @@
     "removedBoth": "已從論文和筆記中移除",
     "undoHint": "按 Ctrl+Z 復原",
     "savedNoSection": "已存到筆記末尾（找不到章節）",
-    "savedOtherNote": "已存到另一則筆記"
+    "savedOtherNote": "已存到另一則筆記",
+    "styleGroup": "樣式",
+    "style": {
+      "highlight": "螢光",
+      "underline": "底線",
+      "wavy": "波浪線",
+      "bar": "側線"
+    },
+    "markAs": "{{style}}：{{name}}",
+    "objectAs": "標記：{{name}}",
+    "noColorHighlight": "螢光需要顏色",
+    "markAsNoColor": "{{style}}：不上色",
+    "objectNoColor": "標記：不上色"
   },
   "langShort": {
     "en": "英文",
@@ -373,13 +381,14 @@
     "trSwitch": "切換到{{lang}}",
     "offScreen": "標記不在畫面上",
     "trTurnOn": "開啟翻譯",
-    "partOnly": "· 第 {{index}} 則，共 {{count}} 則"
+    "partOnly": "· 第 {{index}} 則，共 {{count}} 則",
+    "colorChip": "顏色：{{name}}"
   },
   "backPill": "回到筆記",
   "myMarks": {
     "button": "我的標記",
     "label": "我的標記",
-    "colours": "顏色 — 點名稱即可重新命名",
+    "colours": "顏色 — 點名稱可重新命名",
     "show": "顯示",
     "rename": "這個顏色的名稱",
     "showColor": "顯示「{{name}}」",
@@ -389,13 +398,39 @@
     "saveFailed": "無法儲存顏色。",
     "kinds": "要列出的類型",
     "kind": {
-      "highlight": "螢光標記",
-      "quote": "引用",
       "figure": "圖",
       "equation": "公式",
-      "region": "區域"
+      "region": "區域",
+      "text": "文字"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "沒有這些類型的標記。"
+    "noneOfKind": "沒有這些類型的標記。",
+    "recolour": "變更 {{name}} 的顏色",
+    "moveUp": "將 {{name}} 上移",
+    "moveDown": "將 {{name}} 下移",
+    "deleteColor": "刪除 {{name}}",
+    "inUse": "有標記使用這個顏色",
+    "deleteColorFailed": "無法刪除顏色：仍有標記使用它。"
+  },
+  "colors": {
+    "pick": "顏色",
+    "label": "這個顏色代表什麼？",
+    "labelPlaceholder": "這個顏色代表什麼？例如：待查證",
+    "cancel": "取消",
+    "add": "新增顏色",
+    "addAndMark": "新增並標記",
+    "save": "新增",
+    "saveEdit": "儲存",
+    "addFailed": "無法新增顏色。",
+    "problem": {
+      "yellow": "太接近黃色：黃色保留給引用。",
+      "grey": "太灰：會看起來像沒有顏色的標記。",
+      "dark": "太深，看不清底下的文字。",
+      "pale": "太淡，在頁面上看不見。",
+      "invalid": "請選一個顏色。",
+      "long": "最多 {{n}} 個字元。",
+      "taken": "已有其他顏色使用這個名稱。",
+      "empty": "顏色需要一個名稱。"
+    }
   }
 }

@@ -103,7 +103,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     id: "paper",
     title: "On the paper",
     rows: [
-      { id: "selectPaper", plainLeft: "Select text", right: "Quote to note, or a highlight colour" },
+      { id: "selectPaper", plainLeft: "Select text", right: "Pick a style and a colour: it goes to the note" },
       { id: "highlighter", plainLeft: "Highlighter", right: "Drag over words, or click a figure" },
       { id: "box", plainLeft: "Box", right: "Drag over a figure or equation" },
       { id: "clickMark", plainLeft: "Click a mark", right: "Opens its note" },

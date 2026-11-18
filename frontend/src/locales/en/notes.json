@@ -189,7 +189,7 @@
       "focus": "Fade the other notes and their marks",
       "fold": "Fold the note below it",
       "trash": "Delete, with Undo",
-      "selectPaper": "Quote to note, or a highlight colour",
+      "selectPaper": "Pick a style and a colour: it goes to the note",
       "highlighter": "Drag over words, or click a figure",
       "box": "Drag over a figure or equation",
       "clickMark": "Opens its note",
@@ -286,9 +286,6 @@
   },
   "marks": {
     "popover": "Mark the selection",
-    "highlightAs": "Highlight: {{name}}",
-    "quote": "Quote to note",
-    "addNote": "Add note",
     "show": "Show",
     "saveFailed": "Couldn't save the mark.",
     "undo": "Undo",
@@ -304,7 +301,6 @@
     "popoverFigure": "Mark the figure",
     "popoverEquation": "Mark the equation",
     "popoverBox": "Mark the box",
-    "addToNote": "Add to note",
     "markFigure": "Mark figure",
     "markEquation": "Mark equation",
     "box": "Box",
@@ -342,7 +338,19 @@
     "removedBoth": "Removed from the paper and the note",
     "undoHint": "Ctrl+Z to undo",
     "savedNoSection": "Saved at the end of the note (no section found)",
-    "savedOtherNote": "Saved to another note"
+    "savedOtherNote": "Saved to another note",
+    "styleGroup": "Style",
+    "style": {
+      "highlight": "Highlight",
+      "underline": "Underline",
+      "wavy": "Wavy",
+      "bar": "Bar"
+    },
+    "markAs": "{{style}}: {{name}}",
+    "objectAs": "Mark: {{name}}",
+    "noColorHighlight": "A highlight needs a colour",
+    "markAsNoColor": "{{style}}: no colour",
+    "objectNoColor": "Mark: no colour"
   },
   "langShort": {
     "en": "English",
@@ -373,15 +381,16 @@
     "trSwitch": "Switch to {{lang}}",
     "offScreen": "The mark is off screen",
     "trTurnOn": "Turn on translation",
-    "partOnly": "· note {{index}} of {{count}}"
+    "partOnly": "· note {{index}} of {{count}}",
+    "colorChip": "Colour: {{name}}"
   },
   "backPill": "Back to note",
   "myMarks": {
     "button": "My marks",
     "label": "My marks",
-    "colours": "Colours — click a name to rename",
+    "colours": "Colours — click a label to rename",
     "show": "Show",
-    "rename": "Name for this colour",
+    "rename": "Label for this colour",
     "showColor": "Show {{name}}",
     "empty": "No marks on this paper yet.",
     "noSection": "Before the first section",
@@ -389,13 +398,39 @@
     "saveFailed": "Couldn't save the colour.",
     "kinds": "Kinds to list",
     "kind": {
-      "highlight": "Highlight",
-      "quote": "Quote",
       "figure": "Figure",
       "equation": "Equation",
-      "region": "Region"
+      "region": "Region",
+      "text": "Text"
     },
     "listed": "{{shown}} of {{count}}",
-    "noneOfKind": "No marks of these kinds."
+    "noneOfKind": "No marks of these kinds.",
+    "recolour": "Change colour of {{name}}",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "deleteColor": "Delete {{name}}",
+    "inUse": "Marks use this colour",
+    "deleteColorFailed": "Couldn't delete the colour: marks still use it."
+  },
+  "colors": {
+    "pick": "Colour",
+    "label": "What does this colour mean?",
+    "labelPlaceholder": "What does this colour mean? e.g. To verify",
+    "cancel": "Cancel",
+    "add": "Add a colour",
+    "addAndMark": "Add and mark",
+    "save": "Add",
+    "saveEdit": "Save",
+    "addFailed": "Couldn't add the colour.",
+    "problem": {
+      "yellow": "Too close to yellow: yellow is reserved for citations.",
+      "grey": "Too grey: it would look like a mark with no colour.",
+      "dark": "Too dark to read the text under it.",
+      "pale": "Too pale to see on the page.",
+      "invalid": "Pick a colour.",
+      "long": "At most {{n}} characters.",
+      "taken": "Another colour already has this label.",
+      "empty": "A colour needs a label."
+    }
   }
 }

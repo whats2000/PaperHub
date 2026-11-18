@@ -159,7 +159,7 @@ describe("drawing a box", () => {
     drag(24, 32, 312, 64); // around the first line
     await screen.findByRole("toolbar", { name: "Mark the box" });
     expect(document.querySelector("[data-draft-box]")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: no colour" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       kind: "region",
@@ -178,7 +178,7 @@ describe("drawing a box", () => {
     expect(surface.className).toContain("cursor-crosshair");
     drag(24, 32, 372, 90);
     await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].pieces[0]).toMatchObject({ quote: "Robots learn from demos.", ocr: true });
   });
@@ -191,7 +191,7 @@ describe("drawing a box", () => {
       act(() => useMarksStore.getState().setBoxOn(true));
       drag(24, 32, 312, 64);
       await screen.findByRole("toolbar", { name: "Mark the box" });
-      fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark: no colour" }));
       await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
       return create.mock.calls[0]![0];
     };
@@ -237,7 +237,7 @@ describe("drawing a box", () => {
         await Promise.resolve();
       });
       vi.mocked(listPaperBlocks).mockRejectedValue(new Error("down"));
-      fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark: Key result" }));
       await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
       expect(create.mock.calls[0]![0]).toMatchObject({ kind: "region", view: "pdf" });
     });
@@ -245,7 +245,7 @@ describe("drawing a box", () => {
     it("saves nothing and says so when no result was worked out", async () => {
       vi.mocked(listPaperBlocks).mockRejectedValue(new Error("down"));
       await open();
-      fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark: Key result" }));
       await waitFor(() => expect(toastError).toHaveBeenCalled());
       expect(create).not.toHaveBeenCalled();
     });

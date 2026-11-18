@@ -97,7 +97,7 @@ export function pdfMark(over: Partial<Mark>): Mark {
     id: "mk_1",
     paper_content_id: 3,
     block_id: "nb1",
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "blue",
     view: "pdf",
     pieces: [],

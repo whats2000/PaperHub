@@ -35,6 +35,7 @@ export const markPropSchema = {
   markId: { default: "" },
   color: { default: "" },
   kind: { default: "" },
+  style: { default: "" },
   quote: { default: "" },
   pieces: { default: "[]" },
   source: { default: "{}" },
@@ -50,6 +51,8 @@ export interface MarkProps {
   markId: string;
   color: string;
   kind: string;
+  /** How a text mark is drawn (highlight / underline / wavy / bar). */
+  style: string;
   quote: string;
   pieces: string;
   source: string;

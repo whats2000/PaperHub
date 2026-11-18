@@ -104,7 +104,8 @@ describe("marks on the PDF translation card", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       view: "pdf",
-      kind: "highlight",
+      kind: "text",
+      style: "highlight",
       lang: LANG,
       source_ref: KEY,
       section_key: "1 Introduction",
@@ -121,7 +122,7 @@ describe("marks on the PDF translation card", () => {
     const bar = await screen.findByRole("toolbar", { name: "Mark the selection" });
     expect(bar.className).toContain("fixed");
     // Centred under the selection (300 to 500), in window coordinates.
-    expect(bar.style.left).toBe("230px");
+    expect(bar.style.left).toBe("200px");
   });
 
   it("with the highlighter on, a selection in the card marks at once in the pen colour", async () => {

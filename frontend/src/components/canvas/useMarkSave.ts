@@ -1,6 +1,6 @@
 /** Saving marks from a reader (Plan H5b.1), shared by the HTML and PDF
  * readers: one mark per section the selection crosses, one confirmation for
- * all of them, a retry that saves only what is still missing, and Add note's
+ * all of them, a retry that saves only what is still missing, and the note
  * caret after the new block. Highlighter strokes (`usePenSave`) save the
  * same way, one after another with erase and split (`queueMarkOp`). */
 import type { TFunction } from "i18next";
@@ -14,7 +14,7 @@ import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
 import { markHint, queueMarkOp, toastSaved, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
-import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece } from "@/types/notes";
+import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece, MarkStyle } from "@/types/notes";
 
 /** The pieces of one mark and the section it files under. A mark made on
  * a translation also names its language and translation block. */
@@ -32,10 +32,10 @@ function translationOf(g: MarkGroup): Pick<MarkIn, "lang" | "source_ref"> {
 
 export interface MarkSaveRequest {
   kind: MarkKind;
+  /** How a text mark is drawn (null for a figure, an equation, a box). */
+  style?: MarkStyle | null;
   color: MarkColor | null;
   view: "html" | "pdf";
-  /** Add note: the notes pane opens with the caret after the new block. */
-  addNote: boolean;
   /** Open the note card beside the new mark, the caret under its quote
    * (default true; Box is a rapid tool and opens nothing). */
   openCard?: boolean;
@@ -57,8 +57,13 @@ interface Progress {
 const groupKey = (g: MarkGroup) => JSON.stringify([g.section, g.pieces]);
 
 /** The progress key of an action over these groups. */
-const progressKey = (kind: MarkKind, color: MarkColor | null, view: string, groups: readonly MarkGroup[]) =>
-  JSON.stringify([kind, color, view, groups.map(groupKey)]);
+const progressKey = (
+  kind: MarkKind,
+  style: MarkStyle | null,
+  color: MarkColor | null,
+  view: string,
+  groups: readonly MarkGroup[],
+) => JSON.stringify([kind, style, color, view, groups.map(groupKey)]);
 
 type Create = (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean }) => Promise<MarkCreated>;
 
@@ -100,30 +105,26 @@ export function useMarkSave(paperId: number | null): {
   const [busy, setBusy] = useState(false);
 
   const save = useCallback(
-    async ({ kind, color, view, addNote, openCard = true, groups: getGroups }: MarkSaveRequest): Promise<boolean> => {
+    async ({ kind, style = null, color, view, openCard = true, groups: getGroups }: MarkSaveRequest): Promise<boolean> => {
       if (paperId === null || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
       try {
         const groups = await getGroups();
         if (!groups?.length) return false;
-        const key = progressKey(kind, color, view, groups);
+        const key = progressKey(kind, style, color, view, groups);
         if (progress.current?.key !== key) progress.current = { key, saved: new Map() };
         // A retry after a failure saves only the sections still missing.
         const results = await saveMissing(
           create,
-          { paper_content_id: paperId, kind, color, view, hint_block_id: markHint(paperId) },
+          { paper_content_id: paperId, kind, style: kind === "text" ? style : null, color, view, hint_block_id: markHint(paperId) },
           groups,
           progress.current.saved,
         );
         progress.current = null;
         toastSaved(paperId, results);
         const last = results[results.length - 1];
-        if (addNote && last) {
-          const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
-          useNotesStore.getState().setCaretAfter(target);
-          useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
-        } else if (last && openCard) {
+        if (last && openCard) {
           const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
           if (notesPaneVisible()) {
             // The pane on screen: the new block scrolls into view there
@@ -191,7 +192,15 @@ function pieceKey(p: MarkPiece): string {
 function alreadyOnServer(paperId: number, body: MarkIn): MarkCreated | null {
   const want = body.pieces.map(pieceKey);
   const mark = (useMarksStore.getState().marksByPaper[paperId] ?? []).find((m) => {
-    if (m.deleted_at !== null || m.kind !== body.kind || m.color !== body.color || m.view !== body.view) return false;
+    if (
+      m.deleted_at !== null ||
+      m.kind !== body.kind ||
+      (m.style ?? null) !== (body.style ?? null) ||
+      m.color !== body.color ||
+      m.view !== body.view
+    ) {
+      return false;
+    }
     // A piece the server lost (after a re-ingest) is not held.
     const have = new Set(m.pieces.filter((x) => !x.erased && !x.removed && !x.lost).map(pieceKey));
     return want.every((k) => have.has(k));
@@ -275,9 +284,11 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         const { penSession, marksByPaper, notePenMark } = useMarksStore.getState();
         const liveIds = new Set((marksByPaper[paperId] ?? []).filter((m) => m.deleted_at === null).map((m) => m.id));
         const session = penSession.filter((m) => liveIds.has(m.id));
-        const kind = placed[0]!.kind ?? stroke.kind ?? "highlight";
+        // The pen draws highlights (a figure or an equation is taken whole).
+        const kind = placed[0]!.kind ?? stroke.kind ?? "text";
+        const style: MarkStyle | null = kind === "text" ? "highlight" : null;
         const one = placed.length === 1 ? placed[0]! : null;
-        const target = kind === "highlight" && one ? joinTarget(session, { color, place: one.place }) : null;
+        const target = kind === "text" && one ? joinTarget(session, { color, place: one.place }) : null;
         // Consecutive pieces under one section make one mark; a mark made
         // on a translation holds one translated paragraph.
         const groups: (MarkGroup & { places: string[] })[] = [];
@@ -298,7 +309,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
           }
         }
         const plain = groups.map(({ places: _places, ...group }) => group);
-        const key = progressKey(kind, color, stroke.view, plain);
+        const key = progressKey(kind, style, color, stroke.view, plain);
         const done = savedOnce ?? progress.current.get(key) ?? new Map<string, MarkCreated>();
         savedOnce = done;
         progress.current.set(key, done);
@@ -310,7 +321,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         try {
           await saveMissing(
             create,
-            { paper_content_id: paperId, kind, color, view: stroke.view, hint_block_id: markHint(paperId) },
+            { paper_content_id: paperId, kind, style, color, view: stroke.view, hint_block_id: markHint(paperId) },
             plain,
             done,
             {
@@ -337,7 +348,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
               // In the session as soon as it is saved: a stroke that fails
               // later still lets the next stroke join what did save.
               each: (res, i) => {
-                if (kind !== "highlight") return;
+                if (kind !== "text") return;
                 const prev = session.find((m) => m.id === res.mark.id);
                 notePenMark({ id: res.mark.id, color, places: [...(prev?.places ?? []), ...groups[i]!.places] });
               },

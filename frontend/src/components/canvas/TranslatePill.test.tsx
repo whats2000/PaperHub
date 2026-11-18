@@ -297,7 +297,7 @@ describe("TranslatePill and a mark on a translation", () => {
     id: "mt",
     paper_content_id: PAPER,
     block_id: "b",
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "purple",
     view: "html",
     pieces: [{ quote: "預測", lang: "繁體中文", source_ref: "h:3", orig: "We predict." }],

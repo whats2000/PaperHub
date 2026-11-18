@@ -35,7 +35,7 @@ import { hasOpenLayer } from "@/lib/openLayer";
 import { useCanvasStore } from "@/store/canvas";
 import { activateMark, activateMarker, hoverMark, registerMarkAnchors, useMarkNavStore } from "@/store/markNav";
 import { useMarkFocusIds, useMarksStore } from "@/store/marks";
-import type { Mark, MarkColor } from "@/types/notes";
+import type { Mark, MarkColor, MarkStyle } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 
@@ -558,14 +558,14 @@ export function useHtmlMarks({
 
   const { busy, save: saveMarks } = useMarkSave(paperId);
   const save = useCallback(
-    async (kind: "highlight" | "quote", color: MarkColor | null, addNote: boolean) => {
+    async (style: MarkStyle | null, color: MarkColor | null) => {
       if (!selected || paperId === null || !doc) return;
       const obj = selected.object;
       const ok = await saveMarks({
-        kind: obj ? obj.kind : kind,
+        kind: obj ? obj.kind : "text",
+        style: obj ? null : style,
         color,
         view: "html",
-        addNote,
         groups: async () => {
           // A mark needs its chunk ids and section: wait for them (or load
           // them again) rather than save it unanchored.
@@ -690,9 +690,7 @@ export function useHtmlMarks({
         busy={busy}
         target={selected?.object?.kind ?? "selection"}
         autoFocus={selected?.keyboard ?? false}
-        onHighlight={(c) => void save("highlight", c, false)}
-        onQuote={() => void save("quote", null, false)}
-        onAddNote={() => void save("quote", null, true)}
+        onMark={(style, c) => void save(style, c)}
         onClose={(opts) => {
           setSelected(null);
           // Escape from the popover: back to the reader, selection kept.

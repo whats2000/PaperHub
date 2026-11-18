@@ -57,7 +57,7 @@ function ref(id: string, markId: string, quote: string, color = "green"): NoteBl
     props: {
       markId,
       color,
-      kind: "highlight",
+      kind: "text", style: "highlight",
       quote,
       pieces: [{ quote, page: 1 }],
       source: { page: 1, section: "2 Method" },
@@ -89,7 +89,7 @@ function mark(id: string, blockId: string, over: Partial<Mark> = {}): Mark {
     id,
     paper_content_id: 3,
     block_id: blockId,
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "green",
     view: "html",
     pieces: [{ quote: "q", chunk_start: 1, chunk_end: 1 }],
@@ -227,12 +227,28 @@ describe("the note card", () => {
   });
 
   it("is a sticky note tinted with the mark's colour; a plain quote gets warm paper", async () => {
-    seed([mark("mk_1", "q1"), mark("mk_2", "q2", { color: null, kind: "quote" }), mark("mk_3", "q3")]);
+    seed([mark("mk_1", "q1"), mark("mk_2", "q2", { color: null, kind: "text", style: "underline" }), mark("mk_3", "q3")]);
     const card = await openCard();
     expect(card.className).toMatch(/note-card-sticky/);
     expect(card.style.getPropertyValue("--sticky-mc")).toBe("var(--hl-green)");
     act(() => useMarkNavStore.getState().openCard(3, "mk_2"));
     await waitFor(() => expect(card.style.getPropertyValue("--sticky-mc")).toBe("var(--sticky-base)"));
+  });
+
+  it("shows what the mark's colour means as a chip; a custom colour tints it too", async () => {
+    seed([mark("mk_1", "q1", { color: "c_teal" }), mark("mk_2", "q2", { color: null, kind: "text", style: "wavy" })]);
+    useMarksStore.setState({
+      colors: [
+        { color: "green", name: "Key result", visible: true },
+        { color: "c_teal", name: "To verify", visible: true, hex: "#1f8a8a", dark: "#2a9a9a" },
+      ],
+    });
+    const card = await openCard();
+    expect(card.style.getPropertyValue("--sticky-mc")).toBe("var(--hl-c_teal)");
+    expect(within(card).getByTestId("note-card-color")).toHaveAccessibleName("Colour: To verify");
+    // No colour: neutral paper and no chip.
+    act(() => useMarkNavStore.getState().openCard(3, "mk_2"));
+    await waitFor(() => expect(within(card).queryByTestId("note-card-color")).toBeNull());
   });
 
   it("opened after a highlight, the caret is on a new empty line under the quote; left empty, nothing is saved", async () => {

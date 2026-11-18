@@ -54,6 +54,7 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
     <div
       data-testid={`paper-ref-${blockId}`}
       data-color={props.color || undefined}
+      data-style={props.style || undefined}
       data-target={target ? "true" : undefined}
       contentEditable={false}
       className={cn(

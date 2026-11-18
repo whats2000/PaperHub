@@ -20,12 +20,13 @@ import { ObjectMarkButton } from "@/components/canvas/ObjectMarkButton";
 import { useBoxDrag } from "@/components/canvas/useBoxDrag";
 import { useLeaving } from "@/components/canvas/useLeaving";
 import { PdfMarksContext } from "@/components/canvas/usePdfMarks";
-import { MARK_PALETTE } from "@/lib/marks/htmlMarks";
+import { colorHex, kindAndStyle } from "@/lib/marks/palette";
+import { useMarksStore } from "@/store/marks";
 import { EQUATION_TYPE, FIGURE_TYPES, findInPage, pageText, type Frac } from "@/lib/marks/pdfGeometry";
 import { cn } from "@/lib/utils";
 import { langShort } from "@/components/notes/blocks/markProps";
 import { activateMarker } from "@/store/markNav";
-import type { Mark, MarkColor, PaperPageBlock } from "@/types/notes";
+import type { Mark, MarkColor, MarkColorInfo, MarkStyle, PaperPageBlock } from "@/types/notes";
 
 const NO_MARKS: Mark[] = [];
 const NO_BLOCKS: PaperPageBlock[] = [];
@@ -33,8 +34,11 @@ const NO_BLOCKS: PaperPageBlock[] = [];
 const CLICK_SLOP_PX = 4;
 /** Slop around a mark's boxes for a click (page fractions). */
 const HIT_SLOP = 0.004;
-/** The quote underline and the hover / flash ring (the page is always white). */
+/** A mark with no colour and the hover / flash ring (the page is always white). */
 const NEUTRAL = "#7b7b7b";
+/** A bar sits this far left of the lines it covers (page fractions), this wide. */
+const BAR_GAP = 0.008;
+const BAR_WIDTH = 0.004;
 const RING = "#8f8f8f";
 /** The dashed "click to erase" ring with the highlighter on. */
 const ERASE_RING = "#404040";
@@ -44,6 +48,7 @@ const pct = (v: number) => `${Math.round(v * 100000) / 1000}%`;
 interface Drawn {
   id: string;
   kind: Mark["kind"];
+  style: MarkStyle | null;
   color: MarkColor | null;
   boxes: Frac[];
   /** The index in `mark.pieces` each box draws. */
@@ -55,12 +60,32 @@ interface Placed {
   boxPiece: number[];
 }
 
-function markStyle(d: Drawn, box: Frac): CSSProperties {
-  const c = d.color ? MARK_PALETTE.light[d.color] : null;
+/** How a mark's box is drawn on the (always white) page, in its style. */
+function markStyle(d: Pick<Drawn, "style" | "color" | "boxes">, box: Frac, colors: readonly MarkColorInfo[]): CSSProperties {
+  const c = colorHex(colors, d.color, false) ?? NEUTRAL;
   const base: CSSProperties = { left: pct(box[0]), top: pct(box[1]), width: pct(box[2] - box[0]), height: pct(box[3] - box[1]) };
-  if (d.kind === "highlight") return { ...base, background: `color-mix(in srgb, ${c ?? NEUTRAL} 22%, transparent)` };
-  if (d.kind === "quote") return { ...base, borderBottom: `1px solid ${NEUTRAL}` };
-  return { ...base, outline: `1.5px solid color-mix(in srgb, ${c ?? NEUTRAL} 70%, transparent)`, outlineOffset: 1 };
+  switch (d.style) {
+    case "highlight":
+      return { ...base, background: `color-mix(in srgb, ${c} 22%, transparent)` };
+    case "underline":
+      return { ...base, borderBottom: `2px solid ${c}`, borderRadius: 0 };
+    case "wavy":
+      return {
+        ...base,
+        borderRadius: 0,
+        background: [
+          `linear-gradient(135deg, transparent 40%, ${c} 40% 60%, transparent 60%) 0 100% / 6px 4px repeat-x`,
+          `linear-gradient(45deg, transparent 40%, ${c} 40% 60%, transparent 60%) 3px 100% / 6px 4px repeat-x`,
+        ].join(", "),
+      };
+    case "bar": {
+      // A vertical line in the margin left of the lines the mark covers.
+      const left = Math.max(0, Math.min(...d.boxes.map((b) => b[0])) - BAR_GAP - BAR_WIDTH);
+      return { ...base, left: pct(left), width: pct(BAR_WIDTH), background: c, borderRadius: 1.5 };
+    }
+    default:
+      return { ...base, outline: `1.5px solid color-mix(in srgb, ${c} 70%, transparent)`, outlineOffset: 1 };
+  }
 }
 
 function boxesOn(m: Mark, page: number): Placed {
@@ -107,6 +132,7 @@ export function PdfMarksPage({
   textVersion?: number;
 }) {
   const ctx = useContext(PdfMarksContext);
+  const colors = useMarksStore((s) => s.colors);
   const { t } = useTranslation("notes");
   const page = pageNumber - 1;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -169,7 +195,7 @@ export function PdfMarksPage({
       (ctx?.marks ?? NO_MARKS)
         .map((m) => ({
           id: m.id,
-          kind: m.kind,
+          ...kindAndStyle(m),
           color: m.color,
           ...(m.view === "html" ? (found[m.id] ?? { boxes: [], boxPiece: [] }) : boxesOn(m, page)),
         }))
@@ -349,7 +375,7 @@ export function PdfMarksPage({
             const ring = ctx.flashId === d.id ? `0 0 0 3px ${RING}` : hot && !ctx.pen ? `0 0 0 1px ${RING}` : undefined;
             // With the pen on, a hovered mark is what a click erases: a
             // dashed ring fades in (and out) round it.
-            const passage = d.kind === "highlight" || d.kind === "quote";
+            const passage = d.kind === "text";
             const erasing = hot && ctx.pen !== null;
             const erase = !ctx.pen
               ? undefined
@@ -363,9 +389,10 @@ export function PdfMarksPage({
                 key={`${d.id}:${i}`}
                 data-mark={d.id}
                 data-kind={d.kind}
+                data-style={d.style ?? undefined}
                 data-erase={erasing ? "true" : undefined}
                 data-leaving={d.leaving ? "" : undefined}
-                style={{ ...markStyle(d, b), ...erase, boxShadow: ring, opacity: d.leaving ? 0 : dim ? 0.25 : undefined }}
+                style={{ ...markStyle(d, b, colors), ...erase, boxShadow: ring, opacity: d.leaving ? 0 : dim ? 0.25 : undefined }}
                 className="absolute rounded-[2px] transition-[opacity,box-shadow,outline-color] duration-200 ease-out animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none"
               />
             );
@@ -381,7 +408,7 @@ export function PdfMarksPage({
         )}
       >
         {shownMarkers.map((m) => {
-          const c = m.color ? MARK_PALETTE.light[m.color] : NEUTRAL;
+          const c = colorHex(colors, m.color, false) ?? NEUTRAL;
           const label = t("marks.trMarker", {
             defaultValue: "A mark on the {{lang}} translation. Show it",
             lang: langShort(m.lang),
@@ -445,6 +472,7 @@ export function PdfMarksPage({
 /** The ring round the figure or equation a pen click would mark; it fades
  * in and out where it is. */
 function PenObjectRing({ box, color }: { box: Frac | null; color: MarkColor | null }) {
+  const colors = useMarksStore((s) => s.colors);
   const [last, setLast] = useState<{ box: Frac; color: MarkColor } | null>(null);
   if (box && color && (last?.box !== box || last.color !== color)) setLast({ box, color });
   const on = box !== null && color !== null;
@@ -459,7 +487,7 @@ function PenObjectRing({ box, color }: { box: Frac | null; color: MarkColor | nu
         top: pct(b[1]),
         width: pct(b[2] - b[0]),
         height: pct(b[3] - b[1]),
-        boxShadow: `0 0 0 2px ${MARK_PALETTE.light[last.color]}`,
+        boxShadow: `0 0 0 2px ${colorHex(colors, last.color, false) ?? NEUTRAL}`,
       }}
       className={cn(
         "pointer-events-none absolute rounded-[3px] transition-opacity duration-150 ease-out motion-reduce:transition-none",

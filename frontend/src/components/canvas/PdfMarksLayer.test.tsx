@@ -141,8 +141,8 @@ describe("PDF text marks", () => {
     fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     expect(create.mock.calls.map((c) => [c[0].view, c[0].kind, c[0].color, c[0].section_key])).toEqual([
-      ["pdf", "highlight", "green", "1 Introduction"],
-      ["pdf", "highlight", "green", "2 Method"],
+      ["pdf", "text", "green", "1 Introduction"],
+      ["pdf", "text", "green", "2 Method"],
     ]);
     const piece = create.mock.calls[0]![0].pieces[0]!;
     expect(piece).toMatchObject({ quote: "learn from demos.", page: 0, block_id: "/page/0/Text/1" });
@@ -165,12 +165,34 @@ describe("PDF text marks", () => {
     // A resize re-renders the text layer: the selected text nodes go.
     screen.getByTestId("s1").firstChild!.remove();
     screen.getByTestId("s2").firstChild!.remove();
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       section_key: "1 Introduction",
       pieces: [{ quote: "Robots learn from demos.", page: 0, block_id: "/page/0/Text/1", rects: [[0.05, 0.05, 0.5, 0.07]] }],
     });
+  });
+
+  it("draws every style: highlight, a 2px underline, a wave and a bar in the margin", () => {
+    const rect = [[0.3, 0.05, 0.5, 0.07]] as [number, number, number, number][];
+    resetStores([
+      pdfMark({ id: "hl", style: "highlight", color: "green", pieces: [{ quote: "Robots", page: 0, rects: rect }] }),
+      pdfMark({ id: "un", style: "underline", color: "blue", pieces: [{ quote: "Robots", page: 0, rects: rect }] }),
+      pdfMark({ id: "wv", style: "wavy", color: null, pieces: [{ quote: "Robots", page: 0, rects: rect }] }),
+      pdfMark({ id: "br", style: "bar", color: "pink", pieces: [{ quote: "Robots", page: 0, rects: rect }] }),
+    ]);
+    render(<Reader />);
+    layOut();
+    const box = (id: string) => document.querySelector<HTMLElement>(`[data-pdf-marks] [data-mark="${id}"]`)!;
+    expect(box("hl").dataset.style).toBe("highlight");
+    expect(box("hl").style.background).toContain("color-mix");
+    expect(box("un").style.borderBottom).toMatch(/^2px solid/);
+    expect(box("wv").dataset.style).toBe("wavy");
+    expect(box("wv").style.background).toContain("linear-gradient");
+    // The bar: a thin line left of the words, as tall as the line.
+    expect(box("br").style.width).toBe("0.4%");
+    expect(Number.parseFloat(box("br").style.left)).toBeLessThan(30);
+    expect(box("br").style.height).toBe("2%");
   });
 
   it("draws marks on a layer that takes no pointer events, hit-tested on click", () => {
@@ -225,7 +247,7 @@ describe("PDF text marks", () => {
   });
 
   it("hides the marks when Show my marks is off", () => {
-    resetStores([pdfMark({ kind: "quote", color: null, pieces: [{ quote: "Robots", page: 0, rects: [[0.05, 0.05, 0.25, 0.07]] }] })]);
+    resetStores([pdfMark({ kind: "text", style: "underline", color: null, pieces: [{ quote: "Robots", page: 0, rects: [[0.05, 0.05, 0.25, 0.07]] }] })]);
     render(<Reader />);
     const layer = document.querySelector<HTMLElement>("[data-pdf-marks]")!;
     expect(layer.dataset.hidden).toBeUndefined();
@@ -258,7 +280,7 @@ describe("marks made in the HTML view", () => {
     pdfMark({
       id,
       view: "html",
-      kind: "highlight",
+      kind: "text", style: "highlight",
       color: "green",
       pieces: [{ quote, chunk_start: 101, chunk_end: 101, prefix: "", suffix: "" }],
     });

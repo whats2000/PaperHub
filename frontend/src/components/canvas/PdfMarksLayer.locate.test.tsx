@@ -98,7 +98,7 @@ describe("marks on a PDF without Marker blocks", () => {
     await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
     select("s1", "s2");
     await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].section_key).toBeNull();
     expect(create.mock.calls[0]![0].pieces[0]).not.toHaveProperty("chunk_start");

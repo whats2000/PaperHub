@@ -1,15 +1,23 @@
-/** The popover under a selection in the reader: highlight in one of the four
- * named colours, Quote to note, or Add note (Plan H5b.1). */
-import { MessageSquarePlus, TextQuote } from "lucide-react";
+/** The popover under a selection in the reader (Plan H5b.1):
+ *
+ *   [ Highlight | Underline | Wavy | Bar ]  ● ● ● ●  ○ (no colour)  ＋
+ *
+ * The style is a choice (remembered); a swatch marks the selection in that
+ * style and colour, so every mark goes to the note at once (its note card
+ * opens for the writing). A figure, an equation or a box has no style: only
+ * the colours. ＋ adds a labelled colour (ColorEditor) and marks with it. */
+import { Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ColorEditor } from "@/components/canvas/ColorEditor";
 import { colorLabel } from "@/components/notes/blocks/markProps";
 import { usePresence } from "@/hooks/usePresence";
 import { placeSelectionPopover } from "@/lib/cardPlacement";
-import { MARK_COLORS } from "@/lib/marks/htmlMarks";
+import { DEFAULT_PALETTE, MARK_STYLES, STYLE_NAME } from "@/lib/marks/palette";
 import { cn } from "@/lib/utils";
-import type { MarkColor, MarkColorInfo } from "@/types/notes";
+import { useMarksStore } from "@/store/marks";
+import type { MarkColor, MarkColorInfo, MarkStyle } from "@/types/notes";
 
 export interface SelectionBox {
   top: number;
@@ -36,16 +44,23 @@ export interface MarkPopoverProps {
   /** Placed in the window (`anchor` and `bounds` in window coordinates):
    * a selection outside the reader, e.g. in the translation card. */
   fixed?: boolean;
-  onHighlight: (color: MarkColor) => void;
-  onQuote: () => void;
-  onAddNote: () => void;
+  /** Mark it: in `style` (null for a figure, an equation or a box) and
+   * `color` (null: no colour). */
+  onMark: (style: MarkStyle | null, color: MarkColor | null) => void;
   /** `returnFocus`: Escape from inside the popover — focus goes back to
    * the reader. */
   onClose: (opts?: { returnFocus: boolean }) => void;
 }
 
-/** Before the first measure (a popover with four swatches and two actions). */
-const ESTIMATE = { width: 340, height: 36 };
+/** Before the first measure (four styles, the swatches, ○ and ＋). */
+const ESTIMATE = { width: 400, height: 36 };
+
+const STYLE_ICON: Record<MarkStyle, React.ReactNode> = {
+  highlight: <span className="rounded-[2px] bg-current/25 px-0.5">ab</span>,
+  underline: <span className="underline decoration-2 underline-offset-2">ab</span>,
+  wavy: <span className="underline decoration-wavy decoration-[1.5px] underline-offset-2">ab</span>,
+  bar: <span className="border-l-[2.5px] border-current pl-1">ab</span>,
+};
 
 export function MarkPopover({
   open,
@@ -56,12 +71,19 @@ export function MarkPopover({
   autoFocus = false,
   target = "selection",
   fixed = false,
-  onHighlight,
-  onQuote,
-  onAddNote,
+  onMark,
   onClose,
 }: MarkPopoverProps) {
   const { t } = useTranslation("notes");
+  const style = useMarksStore((s) => s.markStyle);
+  const setStyle = useMarksStore((s) => s.setMarkStyle);
+  const addColor = useMarksStore((s) => s.addColor);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const picker = usePresence(adding && open, 200);
+  if (!open && adding) setAdding(false);
+  const styled = target === "selection";
   const presence = usePresence(open && anchor !== null, 150);
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(ESTIMATE);
@@ -84,7 +106,7 @@ export function MarkPopover({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       // Handled here: a mode the Escape would also stop (Box) waits for the next.
       e.preventDefault();
       const inside = ref.current?.contains(document.activeElement) ?? false;
@@ -109,6 +131,7 @@ export function MarkPopover({
 
   /** ← / → (and Home / End) move between the actions. */
   const onToolbarKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target instanceof HTMLInputElement) return;
     const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const to =
@@ -154,17 +177,40 @@ export function MarkPopover({
       onMouseDown={(e) => e.preventDefault()}
       onKeyDown={onToolbarKey}
     >
-      {MARK_COLORS.map((color) => {
+      {styled && (
+        <div role="group" aria-label={t("marks.styleGroup", "Style")} className="flex items-center gap-0.5">
+          {MARK_STYLES.map((st) => (
+            <button
+              key={st}
+              type="button"
+              aria-pressed={style === st}
+              aria-label={t(`marks.style.${st}`, STYLE_NAME[st])}
+              title={t(`marks.style.${st}`, STYLE_NAME[st])}
+              onClick={() => setStyle(st)}
+              className={cn(
+                "inline-flex h-[26px] items-center rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
+                style === st && "bg-accent text-foreground",
+              )}
+            >
+              {STYLE_ICON[st]}
+            </button>
+          ))}
+          <span aria-hidden className="mx-[3px] h-[18px] w-px bg-border" />
+        </div>
+      )}
+      {(colors.length ? colors.map((c) => c.color) : Object.keys(DEFAULT_PALETTE)).map((color) => {
         const name = colorLabel(color, names.get(color), t);
-        const label = t("marks.highlightAs", { defaultValue: "Highlight: {{name}}", name });
+        const label = styled
+          ? t("marks.markAs", { defaultValue: "{{style}}: {{name}}", style: t(`marks.style.${style}`, STYLE_NAME[style]), name })
+          : t("marks.objectAs", { defaultValue: "Mark: {{name}}", name });
         return (
           <button
             key={color}
             type="button"
             disabled={busy}
             aria-label={label}
-            title={label}
-            onClick={() => onHighlight(color)}
+            title={name}
+            onClick={() => onMark(styled ? style : null, color)}
             className="group inline-flex h-[26px] items-center gap-0 rounded-full px-[5px] text-xs transition-[gap,background-color] duration-150 ease-out hover:gap-[5px] hover:bg-accent focus-visible:gap-[5px] focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50 motion-reduce:transition-none"
           >
             <span aria-hidden className="block size-3.5 shrink-0 rounded-full" style={{ background: `var(--hl-${color})` }} />
@@ -177,25 +223,73 @@ export function MarkPopover({
           </button>
         );
       })}
-      <span aria-hidden className="mx-[3px] h-[18px] w-px bg-border" />
+      {(() => {
+        // A highlight needs a colour: with it chosen, ○ is off.
+        const off = busy || (styled && style === "highlight");
+        const label = off && !busy
+          ? t("marks.noColorHighlight", "A highlight needs a colour")
+          : styled
+            ? t("marks.markAsNoColor", { defaultValue: "{{style}}: no colour", style: t(`marks.style.${style}`, STYLE_NAME[style]) })
+            : t("marks.objectNoColor", "Mark: no colour");
+        return (
+          <button
+            type="button"
+            disabled={off}
+            aria-label={label}
+            title={label}
+            onClick={() => onMark(styled ? style : null, null)}
+            className="inline-flex h-[26px] items-center rounded-full px-[5px] transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-35"
+          >
+            <span aria-hidden className="block size-3.5 rounded-full border-[1.5px] border-muted-foreground" />
+          </button>
+        );
+      })()}
       <button
         type="button"
         disabled={busy}
-        onClick={onQuote}
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
+        aria-expanded={adding}
+        aria-label={t("colors.add", "Add a colour")}
+        title={t("colors.add", "Add a colour")}
+        onClick={() => {
+          setAddError(null);
+          setAdding((a) => !a);
+        }}
+        className="inline-flex h-[26px] items-center rounded-full px-[5px] text-muted-foreground transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
       >
-        <TextQuote aria-hidden className="size-3.5" />
-        {target === "selection" ? t("marks.quote", "Quote to note") : t("marks.addToNote", "Add to note")}
+        <Plus aria-hidden className="size-3.5" />
       </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onAddNote}
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] transition-colors duration-150 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
-      >
-        <MessageSquarePlus aria-hidden className="size-3.5" />
-        {t("marks.addNote", "Add note")}
-      </button>
+      {picker.mounted && (
+        <div
+          data-state={picker.state}
+          className={cn(
+            "absolute right-0 top-[calc(100%+4px)] origin-top-right rounded-[10px] border border-border bg-popover p-1 shadow-md",
+            "duration-200 ease-out data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+            "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+            "motion-reduce:animate-none",
+          )}
+          // Typing here must not clear the reader's selection either.
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <ColorEditor
+            colors={colors}
+            busy={saving}
+            error={addError}
+            saveLabel={t("colors.addAndMark", "Add and mark")}
+            onCancel={() => setAdding(false)}
+            onSave={(hex, name) => {
+              setSaving(true);
+              setAddError(null);
+              addColor(hex, name)
+                .then((key) => {
+                  setAdding(false);
+                  onMark(styled ? style : null, key);
+                })
+                .catch(() => setAddError(t("colors.addFailed", "Couldn't add the colour.")))
+                .finally(() => setSaving(false));
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

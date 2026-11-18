@@ -1,16 +1,20 @@
-/** "My marks" in the reader bar (Plan H5b.1): the paper's colours — their
- * names, editable in place, how many marks each holds, and whether its marks
- * show on the paper — and the paper's marks grouped by section in reading
+/** "My marks" in the reader bar (Plan H5b.1): the user's colours — their
+ * labels (what each colour means), editable in place, how many marks each
+ * holds, whether its marks show on the paper; recolour, reorder, add a
+ * labelled colour, delete a custom one no mark uses — and the paper's marks grouped by section in reading
  * order (each with its kind, a snippet and the note it is in), narrowed by
  * kind (the list only; the colours' Show is what changes the paper); a click
  * on one scrolls the reader to it and flashes it (in the view it was made
  * in). Opens as a dropdown that grows from its button. */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronDown, Highlighter, Image, Layers, Quote, Sigma, SquareDashed } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Highlighter, Image, Layers, Plus, Quote, Sigma, SquareDashed, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { colorLabel, sectionLabel } from "@/components/notes/blocks/markProps";
+import { ColorEditor } from "@/components/canvas/ColorEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { usePresence } from "@/hooks/usePresence";
+import { DEFAULT_PALETTE, kindAndStyle, labelProblem, STYLE_NAME } from "@/lib/marks/palette";
 import { joinedQuote, markPositions, type PaperChunk } from "@/lib/marks/pieces";
 import { cn } from "@/lib/utils";
 import { openMarkInReader } from "@/store/markNav";
@@ -20,22 +24,20 @@ import type { Mark, MarkColorInfo, MarkKind } from "@/types/notes";
 const NO_MARKS: Mark[] = [];
 
 const KIND_LABEL: Record<MarkKind, string> = {
-  highlight: "Highlight",
-  quote: "Quote",
+  text: "Text",
   figure: "Figure",
   equation: "Equation",
   region: "Region",
 };
 
 const KIND_ICON = {
-  highlight: Highlighter,
-  quote: Quote,
+  text: Highlighter,
   figure: Image,
   equation: Sigma,
   region: SquareDashed,
 } as const;
 
-const KINDS: MarkKind[] = ["highlight", "quote", "figure", "equation", "region"];
+const KINDS: MarkKind[] = ["text", "figure", "equation", "region"];
 const NO_CHUNKS: PaperChunk[] = [];
 
 interface MarkSection {
@@ -89,7 +91,7 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
   }, [open, paperId]);
   // The kinds listed (the list only).
   const [kinds, setKinds] = useState<ReadonlySet<MarkKind>>(() => new Set(KINDS));
-  const listed = useMemo(() => shownMarks.filter((m) => kinds.has(m.kind)), [shownMarks, kinds]);
+  const listed = useMemo(() => shownMarks.filter((m) => kinds.has(kindAndStyle(m).kind)), [shownMarks, kinds]);
   const sections = useMemo(() => marksBySection(listed, chunks), [listed, chunks]);
 
   return (
@@ -121,12 +123,21 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
         className="flex max-h-[min(70vh,520px)] w-80 origin-(--transform-origin) flex-col gap-0 p-2 text-[12.5px]"
       >
         <div className="flex justify-between px-0.5 pb-0.5 text-[11.5px] text-muted-foreground">
-          <span>{t("myMarks.colours", "Colours — click a name to rename")}</span>
+          <span>{t("myMarks.colours", "Colours — click a label to rename")}</span>
           <span>{t("myMarks.show", "Show")}</span>
         </div>
-        {colors.map((c) => (
-          <ColorRow key={c.color} info={c} count={shownMarks.filter((m) => m.color === c.color).length} />
-        ))}
+        <div className="max-h-[190px] shrink-0 overflow-y-auto">
+          {colors.map((c, i) => (
+            <ColorRow
+              key={c.color}
+              info={c}
+              colors={colors}
+              index={i}
+              count={shownMarks.filter((m) => m.color === c.color).length}
+            />
+          ))}
+          <AddColor colors={colors} />
+        </div>
         <div
           role="group"
           aria-label={t("myMarks.kinds", "Kinds to list")}
@@ -200,13 +211,83 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
   );
 }
 
-/** A colour: its dot, its name (rename in place: Enter or leaving the field
- * saves it, Escape puts it back), its count and whether its marks show. */
-function ColorRow({ info, count }: { info: MarkColorInfo; count: number }) {
+/** Height-animated inline expander (the colour editor under a row). */
+function Expander({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const p = usePresence(open, 200);
+  if (!p.mounted) return null;
+  return (
+    <div
+      data-state={p.state}
+      className="grid transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=closed]:opacity-0 data-[state=open]:grid-rows-[1fr] data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-reduce:transition-none motion-reduce:animate-none"
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+/** "+ Add a colour": a labelled colour at the end of the palette. */
+function AddColor({ colors }: { colors: readonly MarkColorInfo[] }) {
+  const { t } = useTranslation("notes");
+  const addColor = useMarksStore((s) => s.addColor);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setError(null);
+          setOpen((o) => !o);
+        }}
+        className="mt-0.5 inline-flex items-center gap-1 rounded-[5px] px-1 py-0.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
+      >
+        <Plus aria-hidden className="size-3.5" />
+        {t("colors.add", "Add a colour")}
+      </button>
+      <Expander open={open}>
+        <ColorEditor
+          colors={colors}
+          busy={busy}
+          error={error}
+          saveLabel={t("colors.save", "Add")}
+          onCancel={() => setOpen(false)}
+          onSave={(hex, name) => {
+            setBusy(true);
+            addColor(hex, name)
+              .then(() => setOpen(false))
+              .catch(() => setError(t("colors.addFailed", "Couldn't add the colour.")))
+              .finally(() => setBusy(false));
+          }}
+        />
+      </Expander>
+    </>
+  );
+}
+
+/** A colour: its swatch (click: recolour and rename), its label (rename in
+ * place: Enter or leaving the field saves it, Escape puts it back), its
+ * count, move up / down, delete (a custom colour no mark uses) and whether
+ * its marks show. */
+function ColorRow({
+  info,
+  colors,
+  index,
+  count,
+}: {
+  info: MarkColorInfo;
+  colors: readonly MarkColorInfo[];
+  index: number;
+  count: number;
+}) {
   const { t } = useTranslation("notes");
   const patchColor = useMarksStore((s) => s.patchColor);
+  const reorder = useMarksStore((s) => s.reorderColors);
+  const deleteColor = useMarksStore((s) => s.deleteColor);
   const name = colorLabel(info.color, info.name, t);
   const [draft, setDraft] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   // The edit being saved, read once: Enter leaves the field, and leaving it
   // saves, so a save never goes twice.
   const draftRef = useRef<string | null>(null);
@@ -218,8 +299,9 @@ function ColorRow({ info, count }: { info: MarkColorInfo; count: number }) {
     const d = draftRef.current;
     if (d === null) return;
     edit(null);
-    const next = d.trim();
-    if (next && next !== name) void patchColor(info.color, { name: next });
+    const next = d.trim().replace(/\s+/g, " ");
+    // A label is required and unique: anything else puts the old one back.
+    if (next !== name && !labelProblem(next, colors, info.color)) void patchColor(info.color, { name: next });
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -233,36 +315,101 @@ function ColorRow({ info, count }: { info: MarkColorInfo; count: number }) {
       edit(null);
     }
   };
+  const move = (by: number) => {
+    const order = colors.map((c) => c.color);
+    const [key] = order.splice(index, 1);
+    order.splice(index + by, 0, key!);
+    void reorder(order);
+  };
+  const problem = draft !== null ? labelProblem(draft, colors, info.color) : null;
+  const iconBtn =
+    "inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent";
   return (
-    <div className="flex items-center gap-2 px-0.5 py-[3px]">
-      <span aria-hidden className="size-3 shrink-0 rounded-full" style={{ background: `var(--hl-${info.color})` }} />
-      <input
-        value={draft ?? name}
-        aria-label={t("myMarks.rename", "Name for this colour")}
-        onChange={(e) => edit(e.target.value)}
-        onBlur={commit}
-        onKeyDown={onKey}
-        className="min-w-0 flex-1 rounded-[5px] border border-transparent bg-transparent px-1.5 py-px text-[12.5px] transition-colors hover:border-border focus:border-border focus:bg-background focus:outline-none"
-      />
-      <span className="text-[11.5px] text-muted-foreground tabular-nums">{count}</span>
-      <input
-        type="checkbox"
-        checked={info.visible}
-        aria-label={t("myMarks.showColor", { defaultValue: "Show {{name}}", name })}
-        onChange={(e) => void patchColor(info.color, { visible: e.target.checked })}
-        className="size-3.5 accent-foreground"
-      />
+    <div data-testid={`color-row-${info.color}`}>
+      <div className="flex items-center gap-1.5 px-0.5 py-[3px]">
+        <button
+          type="button"
+          aria-expanded={editing}
+          aria-label={t("myMarks.recolour", { defaultValue: "Change colour of {{name}}", name })}
+          onClick={() => setEditing((e) => !e)}
+          className="size-3.5 shrink-0 rounded-full ring-offset-1 transition-shadow hover:ring-2 hover:ring-border"
+          style={{ background: `var(--hl-${info.color})` }}
+        />
+        <input
+          value={draft ?? name}
+          aria-label={t("myMarks.rename", "Label for this colour")}
+          aria-invalid={problem !== null || undefined}
+          onChange={(e) => edit(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKey}
+          className="min-w-0 flex-1 rounded-[5px] border border-transparent bg-transparent px-1.5 py-px text-[12.5px] transition-colors hover:border-border focus:border-border focus:bg-background focus:outline-none aria-invalid:border-destructive"
+        />
+        <span className="text-[11.5px] text-muted-foreground tabular-nums">{count}</span>
+        <button type="button" disabled={index === 0} aria-label={t("myMarks.moveUp", { defaultValue: "Move {{name}} up", name })} onClick={() => move(-1)} className={iconBtn}>
+          <ArrowUp aria-hidden className="size-3" />
+        </button>
+        <button
+          type="button"
+          disabled={index === colors.length - 1}
+          aria-label={t("myMarks.moveDown", { defaultValue: "Move {{name}} down", name })}
+          onClick={() => move(1)}
+          className={iconBtn}
+        >
+          <ArrowDown aria-hidden className="size-3" />
+        </button>
+        {!(info.builtin ?? info.color in DEFAULT_PALETTE) && (
+          <button
+            type="button"
+            disabled={count > 0}
+            title={count > 0 ? t("myMarks.inUse", "Marks use this colour") : undefined}
+            aria-label={t("myMarks.deleteColor", { defaultValue: "Delete {{name}}", name })}
+            onClick={() => void deleteColor(info.color)}
+            className={iconBtn}
+          >
+            <Trash2 aria-hidden className="size-3" />
+          </button>
+        )}
+        <input
+          type="checkbox"
+          checked={info.visible}
+          aria-label={t("myMarks.showColor", { defaultValue: "Show {{name}}", name })}
+          onChange={(e) => void patchColor(info.color, { visible: e.target.checked })}
+          className="size-3.5 accent-foreground"
+        />
+      </div>
+      <Expander open={editing}>
+        <ColorEditor
+          colors={colors}
+          except={info.color}
+          initialHex={info.hex || "#3b7dd8"}
+          initialName={name}
+          saveLabel={t("colors.saveEdit", "Save")}
+          onCancel={() => setEditing(false)}
+          onSave={(hex, label) => {
+            setEditing(false);
+            void patchColor(info.color, { hex, ...(label !== name ? { name: label } : {}) });
+          }}
+        />
+      </Expander>
     </div>
   );
 }
 
 function MarkRow({ mark, colors, onPick }: { mark: Mark; colors: readonly MarkColorInfo[]; onPick: () => void }) {
   const { t } = useTranslation("notes");
-  const Icon = KIND_ICON[mark.kind] ?? Quote;
+  const { kind, style } = kindAndStyle(mark);
+  const Icon = KIND_ICON[kind] ?? Quote;
   const quote = joinedQuote(mark.pieces).replace(/\s+/g, " ").trim();
   const snippet = quote.length > 90 ? `${quote.slice(0, 90)}…` : quote;
   const color = mark.color;
-  const hidden = color !== null && colors.find((c) => c.color === color)?.visible === false;
+  const info = color !== null ? colors.find((c) => c.color === color) : undefined;
+  const hidden = info?.visible === false;
+  const label = info ? colorLabel(info.color, info.name, t) : null;
+  const what = [
+    t(`myMarks.kind.${kind}`, KIND_LABEL[kind]),
+    ...(style ? [t(`marks.style.${style}`, STYLE_NAME[style])] : []),
+    ...(label ? [label] : []),
+  ].join(" · ");
   const n = noteIndex(mark);
   return (
     <button
@@ -277,8 +424,9 @@ function MarkRow({ mark, colors, onPick }: { mark: Mark; colors: readonly MarkCo
     >
       <Icon
         role="img"
-        aria-label={t(`myMarks.kind.${mark.kind}`, KIND_LABEL[mark.kind])}
-        data-kind={mark.kind}
+        aria-label={what}
+        data-kind={kind}
+        data-style={style ?? undefined}
         className="mt-0.5 size-3.5 shrink-0"
         style={{ color: color ? `var(--hl-${color})` : "var(--muted-foreground)" }}
       />

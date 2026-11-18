@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { kindAndStyle, textMarkCss } from "@/lib/marks/palette";
 import { createPortal } from "react-dom";
 import { Info, Loader2, Pin, PinOff, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +12,7 @@ import { cardIndex, findInTranslation } from "@/lib/marks/translationMarks";
 import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { registerMarkAnchors } from "@/store/markNav";
-import type { Mark } from "@/types/notes";
+import type { Mark, MarkStyle } from "@/types/notes";
 
 export type TranslationCardStatus = "loading" | "ok" | "unavailable";
 
@@ -28,7 +29,7 @@ export interface CardScroll {
 interface CardMarkBox {
   id: string;
   mark: string;
-  kind: Mark["kind"];
+  style: MarkStyle | null;
   color: Mark["color"];
   left: number;
   top: number;
@@ -213,7 +214,7 @@ export function TranslationCard({
           next.push({
             id: `${m.id}:${ri}:${li}`,
             mark: m.id,
-            kind: m.kind,
+            style: kindAndStyle(m).style,
             color: m.color,
             left: rect.left - at.left,
             top: rect.top - at.top + content.scrollTop,
@@ -360,7 +361,10 @@ export function TranslationCard({
         }}
         className="relative min-h-0 flex-1 animate-in rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring overflow-y-auto text-[13.5px] leading-[1.75] duration-150 fade-in-0 motion-reduce:animate-none"
       >
-        {drawn.map((b) => (
+        {drawn.map((b) => {
+          // A bar: beside the mark's lines, left of the leftmost.
+          const barLeft = b.style === "bar" ? Math.min(...drawn.filter((o) => o.mark === b.mark).map((o) => o.left)) - 10 : 0;
+          return (
           <div
             key={b.id}
             aria-hidden="true"
@@ -371,17 +375,16 @@ export function TranslationCard({
               b.leaving && "opacity-0",
             )}
             style={{
-              left: b.left,
+              left: b.style === "bar" ? Math.max(0, barLeft) : b.left,
               top: b.top,
-              width: b.width,
+              width: b.style === "bar" ? 3 : b.width,
               height: b.height,
-              ...(b.kind === "quote" || !b.color
-                ? { borderBottom: "1px solid var(--muted-foreground)", borderRadius: 0 }
-                : { background: `color-mix(in srgb, var(--hl-${b.color}) 26%, transparent)` }),
+              ...textMarkCss(b.style, b.color),
               boxShadow: flashId === b.mark ? "0 0 0 3px var(--ring)" : undefined,
             }}
           />
-        ))}
+          );
+        })}
         {status === "ok" && html !== null ? (
           // Positioned, so the words paint over the marks behind them.
           <div ref={textRef} className="relative" dangerouslySetInnerHTML={{ __html: html }} />

@@ -15,7 +15,7 @@ import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Tra
 import { useTranslation } from "react-i18next";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
-import { langShort, sameName, sectionLabel } from "@/components/notes/blocks/markProps";
+import { colorLabel, langShort, sameName, sectionLabel } from "@/components/notes/blocks/markProps";
 import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
 import { CARD_EDGE, NARROW_GUTTER_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
@@ -139,6 +139,14 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
   const { paperId, markId } = target;
   const mark = useMarksStore((s) => s.marksByPaper[paperId]?.find((m) => m.id === markId));
   const marksLoaded = useMarksStore((s) => s.marksByPaper[paperId] !== undefined);
+  // What the mark's colour means to the user, shown as a chip on the card.
+  const liveColor = useMarksStore((s) => (mark?.color ? s.colors.find((c) => c.color === mark.color) : undefined));
+  // The chip fades out with the colour it showed (a re-point to a mark
+  // with no colour).
+  const chip = usePresence(liveColor !== undefined, 150);
+  const [lastColor, setLastColor] = useState(liveColor);
+  if (liveColor && liveColor !== lastColor) setLastColor(liveColor);
+  const colorInfo = chip.mounted ? (liveColor ?? lastColor) : undefined;
   const byTarget = useNotesStore((s) => s.byTarget[`paper:${paperId}`]);
   const noteId = mark?.note_id ?? byTarget;
   const note = useNotesStore((s) => (noteId === undefined ? undefined : s.notes[noteId]));
@@ -453,6 +461,17 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
           </span>
           {where && <span className="min-w-0 shrink-[4] truncate">{where}</span>}
         </span>
+        {colorInfo && (
+          <span
+            data-testid="note-card-color"
+            data-state={chip.state}
+            aria-label={t("noteCard.colorChip", { defaultValue: "Colour: {{name}}", name: colorLabel(colorInfo.color, colorInfo.name, t) })}
+            className="inline-flex max-w-[9rem] shrink-0 items-center gap-1 rounded-full bg-foreground/[0.06] px-1.5 py-px text-[11px] font-normal text-muted-foreground duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 motion-reduce:animate-none"
+          >
+            <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: `var(--hl-${colorInfo.color})` }} />
+            <span aria-hidden className="truncate">{colorLabel(colorInfo.color, colorInfo.name, t)}</span>
+          </span>
+        )}
         <button
           type="button"
           aria-label={t("noteCard.delete", "Delete this mark")}

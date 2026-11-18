@@ -189,7 +189,7 @@
       "focus": "ほかのノートとそのマークを薄くする",
       "fold": "その下のノートを折りたたむ",
       "trash": "削除（元に戻せる）",
-      "selectPaper": "ノートに引用、またはハイライト色を選ぶ",
+      "selectPaper": "スタイルと色を選ぶとノートに入ります",
       "highlighter": "単語をなぞる、または図をクリック",
       "box": "図や数式をドラッグで囲む",
       "clickMark": "そのノートを開く",
@@ -286,9 +286,6 @@
   },
   "marks": {
     "popover": "選択箇所に印をつける",
-    "highlightAs": "ハイライト：{{name}}",
-    "quote": "ノートに引用",
-    "addNote": "ノートを書く",
     "show": "表示",
     "saveFailed": "印を保存できませんでした。",
     "undo": "元に戻す",
@@ -304,7 +301,6 @@
     "popoverFigure": "この図をマーク",
     "popoverEquation": "この数式をマーク",
     "popoverBox": "この枠をマーク",
-    "addToNote": "ノートに追加",
     "markFigure": "図をマーク",
     "markEquation": "数式をマーク",
     "box": "ボックス",
@@ -342,7 +338,19 @@
     "removedBoth": "論文とノートから削除しました",
     "undoHint": "Ctrl+Z で元に戻す",
     "savedNoSection": "ノートの末尾に保存しました（章が見つかりません）",
-    "savedOtherNote": "別のノートに保存しました"
+    "savedOtherNote": "別のノートに保存しました",
+    "styleGroup": "スタイル",
+    "style": {
+      "highlight": "ハイライト",
+      "underline": "下線",
+      "wavy": "波線",
+      "bar": "傍線"
+    },
+    "markAs": "{{style}}：{{name}}",
+    "objectAs": "マーク：{{name}}",
+    "noColorHighlight": "ハイライトには色が必要です",
+    "markAsNoColor": "{{style}}：色なし",
+    "objectNoColor": "マーク：色なし"
   },
   "langShort": {
     "en": "英語",
@@ -373,7 +381,8 @@
     "trSwitch": "{{lang}}に切り替え",
     "offScreen": "マークは画面外です",
     "trTurnOn": "翻訳をオンにする",
-    "partOnly": "· ノート {{index}} / {{count}}"
+    "partOnly": "· ノート {{index}} / {{count}}",
+    "colorChip": "色：{{name}}"
   },
   "backPill": "ノートに戻る",
   "myMarks": {
@@ -389,13 +398,39 @@
     "saveFailed": "色を保存できませんでした。",
     "kinds": "一覧に出す種類",
     "kind": {
-      "highlight": "ハイライト",
-      "quote": "引用",
       "figure": "図",
       "equation": "数式",
-      "region": "領域"
+      "region": "領域",
+      "text": "テキスト"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "この種類のマークはありません。"
+    "noneOfKind": "この種類のマークはありません。",
+    "recolour": "{{name}} の色を変更",
+    "moveUp": "{{name}} を上へ",
+    "moveDown": "{{name}} を下へ",
+    "deleteColor": "{{name}} を削除",
+    "inUse": "この色を使うマークがあります",
+    "deleteColorFailed": "色を削除できませんでした：まだマークが使っています。"
+  },
+  "colors": {
+    "pick": "色",
+    "label": "この色の意味は？",
+    "labelPlaceholder": "この色の意味は？ 例：要確認",
+    "cancel": "キャンセル",
+    "add": "色を追加",
+    "addAndMark": "追加してマーク",
+    "save": "追加",
+    "saveEdit": "保存",
+    "addFailed": "色を追加できませんでした。",
+    "problem": {
+      "yellow": "黄色に近すぎます：黄色は引用用です。",
+      "grey": "灰色に近すぎます：色なしのマークに見えます。",
+      "dark": "暗すぎて下の文字が読めません。",
+      "pale": "淡すぎてページ上で見えません。",
+      "invalid": "色を選んでください。",
+      "long": "{{n}} 文字までです。",
+      "taken": "同じ名前の色がすでにあります。",
+      "empty": "色には名前が必要です。"
+    }
   }
 }

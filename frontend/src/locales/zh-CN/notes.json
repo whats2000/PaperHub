@@ -189,7 +189,7 @@
       "focus": "淡化其他笔记及其标记",
       "fold": "折叠其下的笔记",
       "trash": "删除，可撤销",
-      "selectPaper": "引用到笔记，或选一种高亮色",
+      "selectPaper": "选样式和颜色，即存入笔记",
       "highlighter": "拖过文字，或点一张图",
       "box": "拖过图或公式",
       "clickMark": "打开它的笔记",
@@ -286,9 +286,6 @@
   },
   "marks": {
     "popover": "标记选中的文字",
-    "highlightAs": "划重点：{{name}}",
-    "quote": "引用到笔记",
-    "addNote": "加笔记",
     "show": "显示",
     "saveFailed": "无法保存这个标记。",
     "undo": "撤销",
@@ -304,7 +301,6 @@
     "popoverFigure": "标记这张图",
     "popoverEquation": "标记这条公式",
     "popoverBox": "标记这个框",
-    "addToNote": "加入笔记",
     "markFigure": "标记图",
     "markEquation": "标记公式",
     "box": "框选",
@@ -342,7 +338,19 @@
     "removedBoth": "已从论文和笔记中移除",
     "undoHint": "按 Ctrl+Z 撤销",
     "savedNoSection": "已存到笔记末尾（找不到章节）",
-    "savedOtherNote": "已存到另一则笔记"
+    "savedOtherNote": "已存到另一则笔记",
+    "styleGroup": "样式",
+    "style": {
+      "highlight": "荧光",
+      "underline": "下划线",
+      "wavy": "波浪线",
+      "bar": "侧线"
+    },
+    "markAs": "{{style}}：{{name}}",
+    "objectAs": "标记：{{name}}",
+    "noColorHighlight": "荧光需要颜色",
+    "markAsNoColor": "{{style}}：不上色",
+    "objectNoColor": "标记：不上色"
   },
   "langShort": {
     "en": "英文",
@@ -373,13 +381,14 @@
     "trSwitch": "切换到{{lang}}",
     "offScreen": "标记不在屏幕上",
     "trTurnOn": "开启翻译",
-    "partOnly": "· 第 {{index}} 条，共 {{count}} 条"
+    "partOnly": "· 第 {{index}} 条，共 {{count}} 条",
+    "colorChip": "颜色：{{name}}"
   },
   "backPill": "回到笔记",
   "myMarks": {
     "button": "我的标记",
     "label": "我的标记",
-    "colours": "颜色 — 点击名称即可重命名",
+    "colours": "颜色 — 点击名称可重命名",
     "show": "显示",
     "rename": "这个颜色的名称",
     "showColor": "显示「{{name}}」",
@@ -389,13 +398,39 @@
     "saveFailed": "无法保存颜色。",
     "kinds": "要列出的类型",
     "kind": {
-      "highlight": "高亮",
-      "quote": "引用",
       "figure": "图",
       "equation": "公式",
-      "region": "区域"
+      "region": "区域",
+      "text": "文字"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "没有这些类型的标记。"
+    "noneOfKind": "没有这些类型的标记。",
+    "recolour": "更改 {{name}} 的颜色",
+    "moveUp": "将 {{name}} 上移",
+    "moveDown": "将 {{name}} 下移",
+    "deleteColor": "删除 {{name}}",
+    "inUse": "有标记使用这个颜色",
+    "deleteColorFailed": "无法删除颜色：仍有标记使用它。"
+  },
+  "colors": {
+    "pick": "颜色",
+    "label": "这个颜色代表什么？",
+    "labelPlaceholder": "这个颜色代表什么？例如：待核实",
+    "cancel": "取消",
+    "add": "添加颜色",
+    "addAndMark": "添加并标记",
+    "save": "添加",
+    "saveEdit": "保存",
+    "addFailed": "无法添加颜色。",
+    "problem": {
+      "yellow": "太接近黄色：黄色保留给引用。",
+      "grey": "太灰：会看起来像没有颜色的标记。",
+      "dark": "太深，看不清下面的文字。",
+      "pale": "太浅，在页面上看不见。",
+      "invalid": "请选择一个颜色。",
+      "long": "最多 {{n}} 个字符。",
+      "taken": "已有其他颜色使用这个名称。",
+      "empty": "颜色需要一个名称。"
+    }
   }
 }

@@ -88,7 +88,7 @@ function mark(id: string, over: Partial<Mark> = {}): Mark {
     id,
     paper_content_id: 3,
     block_id: `b_${id}`,
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "green",
     view: "html",
     pieces: [],
@@ -164,7 +164,7 @@ describe("the highlighter in the HTML reader", () => {
     stroke(doc, "agent pose");
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
-      kind: "highlight",
+      kind: "text", style: "highlight",
       color: "pink",
       section_key: "2 Method",
       pieces: [{ quote: "agent pose", chunk_start: 102 }],

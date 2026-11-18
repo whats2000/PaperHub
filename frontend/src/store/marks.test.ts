@@ -28,7 +28,7 @@ const MARK: Mark = {
   id: "mk_1",
   paper_content_id: 3,
   block_id: "b_q",
-  kind: "highlight",
+  kind: "text", style: "highlight",
   color: "green",
   view: "html",
   pieces: [{ quote: "agent pose", chunk_start: 11, chunk_end: 11, prefix: "", suffix: "" }],
@@ -111,7 +111,7 @@ describe("useMarksStore.create", () => {
     useNotesStore.setState({ quoteTarget: { noteId: 7, blockId: "p1" } });
     await useMarksStore.getState().create({
       paper_content_id: 3,
-      kind: "highlight",
+      kind: "text", style: "highlight",
       color: "green",
       view: "html",
       pieces: MARK.pieces,
@@ -488,7 +488,7 @@ describe("the refetch after a timeout", () => {
         // A selection's mark (not queued) lands while the refetch is out.
         await useMarksStore.getState().create({
           paper_content_id: 3,
-          kind: "highlight",
+          kind: "text", style: "highlight",
           color: "green",
           view: "html",
           pieces: MARK.pieces,
@@ -519,7 +519,7 @@ describe("the refetch merge", () => {
   });
   const body = {
     paper_content_id: 3,
-    kind: "highlight" as const,
+    kind: "text" as const, style: "highlight" as const,
     color: "green" as const,
     view: "html" as const,
     pieces: MARK.pieces,

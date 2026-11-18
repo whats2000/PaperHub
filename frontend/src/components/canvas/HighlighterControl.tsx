@@ -89,10 +89,10 @@ export function HighlighterControl({ shown }: { shown: boolean }) {
         inert={!on ? true : undefined}
         className={cn(
           "inline-flex gap-px overflow-hidden transition-[max-width,opacity] duration-200 ease-out motion-reduce:transition-none",
-          on ? "max-w-[120px] opacity-100" : "max-w-0 opacity-0",
+          on ? "max-w-[320px] opacity-100" : "max-w-0 opacity-0",
         )}
       >
-        {MARK_COLORS.map((c) => (
+        {(colors.length ? colors.map((x) => x.color) : MARK_COLORS).map((c) => (
           <button
             key={c}
             type="button"

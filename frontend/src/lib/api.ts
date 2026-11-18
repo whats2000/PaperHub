@@ -1407,11 +1407,23 @@ export async function listMarkColors(): Promise<MarkColorInfo[]> {
   return apiFetch<MarkColorInfo[]>("/marks/colors");
 }
 
+export async function addMarkColor(body: { hex: string; name: string }): Promise<MarkColorInfo[]> {
+  return apiFetch<MarkColorInfo[]>("/marks/colors", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function deleteMarkColor(color: MarkColor): Promise<MarkColorInfo[]> {
+  return apiFetch<MarkColorInfo[]>(`/marks/colors/${encodeURIComponent(color)}`, { method: "DELETE" });
+}
+
+export async function reorderMarkColors(order: MarkColor[]): Promise<MarkColorInfo[]> {
+  return apiFetch<MarkColorInfo[]>("/marks/colors/order", { method: "PUT", body: JSON.stringify({ order }) });
+}
+
 export async function patchMarkColor(
   color: MarkColor,
   body: MarkColorPatch,
 ): Promise<MarkColorInfo[]> {
-  return apiFetch<MarkColorInfo[]>(`/marks/colors/${color}`, {
+  return apiFetch<MarkColorInfo[]>(`/marks/colors/${encodeURIComponent(color)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });

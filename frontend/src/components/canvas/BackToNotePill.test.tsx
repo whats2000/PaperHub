@@ -28,7 +28,7 @@ const QUOTE: NoteBlock = {
   props: {
     markId: "mk_1",
     color: "green",
-    kind: "highlight",
+    kind: "text", style: "highlight",
     quote: "attention is all you need",
     pieces: [{ quote: "attention is all you need", page: 2 }],
     source: { page: 2, section: "2 Method" },
@@ -44,7 +44,7 @@ const MARK: Mark = {
   id: "mk_1",
   paper_content_id: 3,
   block_id: "q1",
-  kind: "highlight",
+  kind: "text", style: "highlight",
   color: "green",
   view: "pdf",
   pieces: [{ quote: "attention is all you need", page: 2 }],

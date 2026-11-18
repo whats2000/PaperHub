@@ -89,7 +89,8 @@ describe("the highlighter on a PDF page", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       view: "pdf",
-      kind: "highlight",
+      kind: "text",
+      style: "highlight",
       color: "purple",
       section_key: "1 Introduction",
       pieces: [{ quote: "Robots", block_id: "/page/0/Text/1" }],

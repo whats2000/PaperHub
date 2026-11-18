@@ -41,7 +41,7 @@ function mark(id: string, quote: string, chunk: number, over: Partial<Mark> = {}
     id,
     paper_content_id: 7,
     block_id: `b_${id}`,
-    kind: "highlight",
+    kind: "text", style: "highlight",
     color: "green",
     view: "html",
     pieces: [{ quote, chunk_start: chunk, chunk_end: chunk, prefix: "", suffix: "" }],
@@ -57,7 +57,7 @@ function mark(id: string, quote: string, chunk: number, over: Partial<Mark> = {}
 
 function opts(over: Partial<HtmlMarksOptions> = {}): HtmlMarksOptions {
   return {
-    marks: [mark("m1", "agent pose", 102), mark("m2", "latency drops", 103, { kind: "quote", color: null })],
+    marks: [mark("m1", "agent pose", 102), mark("m2", "latency drops", 103, { kind: "text", style: "underline", color: null })],
     colors: COLORS,
     chunks: CHUNKS,
     visible: true,
@@ -89,21 +89,75 @@ const rects = (doc: Document, id?: string) =>
   Array.from(doc.querySelectorAll<HTMLElement>(id ? `.ph-mk[data-mark="${id}"]` : ".ph-mk"));
 
 describe("attachHtmlMarks", () => {
-  it("draws a highlight as a coloured box and a quote as an underline", () => {
+  it("draws a highlight as a coloured box and an uncoloured underline in grey", () => {
     const doc = makeDoc(PAPER);
     attachHtmlMarks(doc, opts());
     expect(doc.getElementById(MK_STYLE_ID)).not.toBeNull();
     const [hl] = rects(doc, "m1");
     expect(hl).toBeDefined();
-    expect(hl!.dataset.kind).toBe("highlight");
+    expect(hl!.dataset.kind).toBe("text");
+    expect(hl!.dataset.style).toBe("highlight");
     expect(hl!.dataset.color).toBe("green");
     expect(hl!.style.top).toBe("20px");
     expect(hl!.style.width).toBe(`${"agent pose".length * 6}px`);
     const [q] = rects(doc, "m2");
-    expect(q!.dataset.kind).toBe("quote");
+    expect(q!.dataset.style).toBe("underline");
     expect(q!.dataset.color).toBeUndefined();
     // Quoted passages show as boxes only: margin icons are for notes with no quote.
     expect(doc.querySelectorAll(".ph-mk-icon")).toHaveLength(0);
+  });
+
+  it("draws every style: underline and wavy in the mark's colour, a bar in the margin", () => {
+    const doc = makeDoc(PAPER);
+    attachHtmlMarks(
+      doc,
+      opts({
+        marks: [
+          mark("u", "agent pose", 102, { style: "underline", color: "blue" }),
+          mark("w", "latency drops", 103, { style: "wavy", color: "pink" }),
+          mark("b", "We predict", 102, { style: "bar", color: null }),
+        ],
+      }),
+    );
+    const css = doc.getElementById(MK_STYLE_ID)?.textContent ?? "";
+    expect(css).toContain('.ph-mk[data-style="underline"] { border-bottom: 2px solid');
+    expect(css).toContain('.ph-mk[data-style="wavy"]');
+    expect(css).toContain('.ph-mk[data-style="bar"]');
+    const [u] = rects(doc, "u");
+    expect([u!.dataset.style, u!.dataset.color]).toEqual(["underline", "blue"]);
+    const [w] = rects(doc, "w");
+    expect([w!.dataset.style, w!.dataset.color]).toEqual(["wavy", "pink"]);
+    // The bar: a thin line left of the lines it covers, as tall as each.
+    const [bar] = rects(doc, "b");
+    expect(bar!.dataset.style).toBe("bar");
+    expect(bar!.style.width).toBe("3px");
+    expect(bar!.style.height).toBe("16px");
+    expect(bar!.style.top).toBe("20px");
+  });
+
+  it("draws a custom colour from its palette row", () => {
+    const doc = makeDoc(PAPER);
+    attachHtmlMarks(
+      doc,
+      opts({
+        colors: [...COLORS, { color: "c_teal", name: "To verify", visible: true, hex: "#1f8a8a", dark: "#2a9a9a" }],
+        marks: [mark("t", "agent pose", 102, { style: "underline", color: "c_teal" })],
+      }),
+    );
+    const [t] = rects(doc, "t");
+    expect(t!.dataset.color).toBe("c_teal");
+    expect(doc.getElementById(MK_STYLE_ID)!.textContent).toContain('.ph-mk[data-color="c_teal"]');
+    const layer = doc.querySelector<HTMLElement>(".ph-mk-layer")!;
+    expect(layer.style.getPropertyValue("--mk-c_teal")).toBe("#1f8a8a");
+  });
+
+  it("reads a mark saved before kind + style (highlight / quote) in its old look", () => {
+    const doc = makeDoc(PAPER);
+    attachHtmlMarks(
+      doc,
+      opts({ marks: [mark("old", "agent pose", 102, { kind: "quote" as Mark["kind"], style: undefined, color: null })] }),
+    );
+    expect(rects(doc, "old")[0]!.dataset.style).toBe("underline");
   });
 
   it("puts a note with no quote in the margin, one icon with a count per line", () => {
@@ -112,7 +166,7 @@ describe("attachHtmlMarks", () => {
       doc,
       opts({
         chunks: null,
-        marks: [mark("m1", "", 102, { kind: "quote", color: null }), mark("m3", "", 102, { kind: "quote", color: null })],
+        marks: [mark("m1", "", 102, { kind: "text", style: "underline", color: null }), mark("m3", "", 102, { kind: "text", style: "underline", color: null })],
       }),
     );
     // Its place is its chunk's span: none until the chunk map is there.

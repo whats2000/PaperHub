@@ -7,9 +7,11 @@
  * hit-tested against the drawn boxes, so the text under a mark stays
  * selectable.
  *
- * A highlight is a box in its colour, a quote a thin neutral underline, a
- * note on a passage with no quote a margin icon (with a count when several
- * share a line). Hidden colours are not drawn; "Show my marks" off fades the
+ * A text mark is drawn in its style (palette.ts): a highlight is a box in
+ * its colour, an underline a 2px line, a wavy underline a wave, a bar a
+ * vertical line in the margin beside the lines it covers; with no colour
+ * the line is a neutral grey. A note on a passage with no quote is a margin
+ * icon (with a count when several share a line). Hidden colours are not drawn; "Show my marks" off fades the
  * layer out. A mark of several pieces (highlighter strokes joined) draws
  * each piece, the skipped words between them unmarked; a click reports the
  * piece under it. With the highlighter on (`pen`), a selection shows in the
@@ -33,6 +35,7 @@ import {
   translationIndex,
   translationUnder,
 } from "@/lib/marks/translationMarks";
+import { colorHex, DEFAULT_PALETTE, kindAndStyle } from "@/lib/marks/palette";
 import type { Mark, MarkColor, MarkColorInfo, MarkPiece } from "@/types/notes";
 
 export const MK_STYLE_ID = "ph-mk-style";
@@ -47,7 +50,13 @@ const FLASH_MS = 1600;
 const ICON_SIZE = 16;
 const ICON_GAP = 6;
 
-export const MARK_COLORS: readonly MarkColor[] = ["green", "blue", "pink", "purple"];
+/** The four default colours (the palette may hold more: `MarkColorInfo`). */
+export const MARK_COLORS: readonly MarkColor[] = Object.keys(DEFAULT_PALETTE);
+/** A bar sits this far left of the lines it covers, this wide. */
+const BAR_GAP = 7;
+const BAR_WIDTH = 3;
+/** A palette key safe to put in a CSS selector / custom property name. */
+const SAFE_KEY = /^[\w-]+$/;
 
 /** What a figure citation opens on, after its `phfig-NNN` anchor. */
 const FIGURE_SEL = 'figure, div[class^="figure"], img';
@@ -101,8 +110,8 @@ export function markableObjects(doc: Document): HtmlObject[] {
 
 /** The palette (index.css `--hl-*`), used when the app's tokens can't be read. */
 export const MARK_PALETTE: Record<"light" | "dark", Record<MarkColor, string>> = {
-  light: { green: "#2f9e63", blue: "#3b7dd8", pink: "#d6457e", purple: "#8b5cd6" },
-  dark: { green: "#36a067", blue: "#4b86dc", pink: "#d9578a", purple: "#9670dc" },
+  light: Object.fromEntries(Object.entries(DEFAULT_PALETTE).map(([k, v]) => [k, v.light])),
+  dark: Object.fromEntries(Object.entries(DEFAULT_PALETTE).map(([k, v]) => [k, v.dark])),
 };
 
 /** The overlay's greys: the quote underline, the hover / flash ring, a
@@ -169,18 +178,24 @@ const STYLE = `
   transition: opacity 200ms ease-out, box-shadow 150ms ease-out, background-color 200ms ease-out, outline-color 150ms ease-out;
   animation: ph-mk-in 200ms ease-out;
 }
-.ph-mk[data-kind="highlight"] { background: color-mix(in srgb, var(--mk-c) var(--mk-alpha), transparent); }
-.ph-mk[data-kind="quote"] { border-bottom: 1px solid var(--mk-neutral); border-radius: 0; }
+.ph-mk[data-style="highlight"] { background: color-mix(in srgb, var(--mk-c, var(--mk-neutral)) var(--mk-alpha), transparent); }
+.ph-mk[data-style="underline"] { border-bottom: 2px solid var(--mk-c, var(--mk-neutral)); border-radius: 0; }
+.ph-mk[data-style="wavy"] {
+  border-radius: 0;
+  background:
+    linear-gradient(135deg, transparent 40%, var(--mk-c, var(--mk-neutral)) 40% 60%, transparent 60%) 0 100% / 6px 4px repeat-x,
+    linear-gradient(45deg, transparent 40%, var(--mk-c, var(--mk-neutral)) 40% 60%, transparent 60%) 3px 100% / 6px 4px repeat-x;
+}
+.ph-mk[data-style="bar"] { background: var(--mk-c, var(--mk-neutral)); border-radius: 1.5px; }
 .ph-mk[data-kind="figure"], .ph-mk[data-kind="equation"] {
   outline: 2px solid color-mix(in srgb, var(--mk-c, var(--mk-neutral)) 70%, transparent);
   outline-offset: 3px; border-radius: 4px;
 }
-${MARK_COLORS.map((c) => `.ph-mk[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
 .ph-mk[data-dim] { opacity: .25; }
 .ph-mk[data-hot] { box-shadow: 0 0 0 1px var(--mk-ring); }
 /* With the pen on, the hovered mark is what a click erases: a dashed ring
    fades in (and out) round it. */
-html[${PEN_ATTR}] .ph-mk:is([data-kind="highlight"], [data-kind="quote"]) { outline: 1.5px dashed transparent; outline-offset: 1px; }
+html[${PEN_ATTR}] .ph-mk[data-kind="text"] { outline: 1.5px dashed transparent; outline-offset: 1px; }
 html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline-style: dashed; outline-color: var(--mk-hot-fg); }
 .ph-mk[data-flash] { box-shadow: 0 0 0 3px var(--mk-ring); }
 .ph-mk-icon {
@@ -211,7 +226,6 @@ html[${PEN_ATTR}] .ph-mk[data-hot] { box-shadow: none; outline-style: dashed; ou
   transition: opacity 200ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, top 200ms ease-out;
   animation: ph-mk-in 200ms ease-out;
 }
-${MARK_COLORS.map((c) => `.${MARKER_CLASS}[data-color="${c}"] { --mk-c: var(--mk-${c}); }`).join("\n")}
 .${MARKER_CLASS}[data-hot] { background: color-mix(in srgb, var(--mk-c, var(--mk-neutral)) 34%, #fff); }
 .${MARKER_CLASS}[data-flash] { box-shadow: 0 0 0 3px var(--mk-ring); }
 .${MARKER_CLASS}[data-dim] { opacity: .3; }
@@ -327,9 +341,10 @@ const located = (p: MarkPiece) => typeof p.text_start === "number" && typeof p.t
 function drawable(m: Mark, hidden: ReadonlySet<string>): boolean {
   if (m.deleted_at !== null) return false;
   if (m.color !== null && hidden.has(m.color)) return false;
-  if (m.lang) return m.view === "html" && (m.kind === "quote" || m.kind === "highlight");
-  if (m.view === "pdf") return (m.kind === "quote" || m.kind === "highlight") && livePieces(m).some(located);
-  return m.kind === "quote" || m.kind === "highlight" || m.kind === "figure" || m.kind === "equation";
+  const { kind } = kindAndStyle(m);
+  if (m.lang) return m.view === "html" && kind === "text";
+  if (m.view === "pdf") return kind === "text" && livePieces(m).some(located);
+  return kind === "text" || kind === "figure" || kind === "equation";
 }
 
 /** One box per line: line boxes of the same line that touch are merged. */
@@ -366,17 +381,23 @@ function iconSvg(doc: Document): SVGElement {
   return svg;
 }
 
-/** The app's palette for the current theme (its `--hl-*` tokens). */
-function palette(dark: boolean): Record<MarkColor, string> {
-  const out = { ...MARK_PALETTE[dark ? "dark" : "light"] };
+/** Each palette colour for the current theme: the app's `--hl-<key>`
+ * token when set (the store writes one per colour), else the colour's own
+ * hex / derived dark. */
+function palette(colors: readonly MarkColorInfo[], dark: boolean): Record<MarkColor, string> {
+  const keys = new Set<MarkColor>([...MARK_COLORS, ...colors.map((c) => c.color)]);
+  const out: Record<MarkColor, string> = {};
+  let css: CSSStyleDeclaration | null = null;
   try {
-    const css = getComputedStyle(document.documentElement);
-    for (const c of MARK_COLORS) {
-      const v = css.getPropertyValue(`--hl-${c}`).trim();
-      if (parseHex(v)) out[c] = v;
-    }
+    css = getComputedStyle(document.documentElement);
   } catch {
-    /* no app document: the fallback */
+    /* no app document: the colours' own values */
+  }
+  for (const c of keys) {
+    if (!SAFE_KEY.test(c)) continue;
+    const v = css?.getPropertyValue(`--hl-${c}`).trim() ?? "";
+    const hex = parseHex(v) ? v : colorHex(colors, c, dark);
+    if (hex) out[c] = hex;
   }
   return out;
 }
@@ -471,10 +492,10 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
   const theme = () => {
     const mode = o.dark ? "dark" : "light";
     const draw = (hex: string) => (o.dark ? darkPreimage(hex) : hex);
-    const p = palette(o.dark);
+    const p = palette(o.colors, o.dark);
     for (const el of [layer, trLayer]) {
       el.style.setProperty("--mk-alpha", o.dark ? "32%" : "22%");
-      for (const c of MARK_COLORS) el.style.setProperty(`--mk-${c}`, draw(p[c]));
+      for (const [c, hex] of Object.entries(p)) el.style.setProperty(`--mk-${c}`, draw(hex));
       el.style.setProperty("--mk-neutral", draw(NEUTRAL[mode].neutral));
       el.style.setProperty("--mk-ring", draw(NEUTRAL[mode].ring));
       el.style.setProperty("--mk-hot-fg", draw(NEUTRAL[mode].hotFg));
@@ -488,9 +509,10 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       STYLE,
       `html[${PEN_ATTR}] :is(${PEN_OBJECTS}) { outline: 2px solid transparent; outline-offset: 3px; transition: outline-color 150ms ease-out; }`,
       `@media (prefers-reduced-motion: reduce) { html[${PEN_ATTR}] :is(${PEN_OBJECTS}) { transition: none; } }`,
-      ...MARK_COLORS.flatMap((c) => [
-        `html[${PEN_ATTR}="${c}"] ::selection { background: color-mix(in srgb, ${draw(p[c])} 45%, transparent); }`,
-        `html[${PEN_ATTR}="${c}"] :is(${PEN_OBJECTS}):hover { outline-color: ${draw(p[c])}; cursor: pointer; }`,
+      ...Object.entries(p).flatMap(([c, hex]) => [
+        `.ph-mk[data-color="${c}"], .${MARKER_CLASS}[data-color="${c}"] { --mk-c: var(--mk-${c}); }`,
+        `html[${PEN_ATTR}="${c}"] ::selection { background: color-mix(in srgb, ${draw(hex)} 45%, transparent); }`,
+        `html[${PEN_ATTR}="${c}"] :is(${PEN_OBJECTS}):hover { outline-color: ${draw(hex)}; cursor: pointer; }`,
       ]),
     ].join("\n");
   };
@@ -500,6 +522,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     if (detached) return;
     const at = origin();
     const lines = new Map<string, { box: Box; marks: string[] }>();
+    const styles = new Map(o.marks.map((m) => [m.id, kindAndStyle(m).style]));
     const viewRight = (doc.documentElement.clientWidth || win?.innerWidth || 0) - at.left;
     for (const [id, d] of drawn) {
       const boxes: Box[] = [];
@@ -546,7 +569,13 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
         layer.appendChild(el);
         d.els.push(el);
       }
-      boxes.forEach((b, i) => place(d.els[i]!, b));
+      // A bar: a vertical line in the margin beside the lines it covers (the
+      // lines stay its hit area, so a click on the words still finds it).
+      const bar = styles.get(id) === "bar";
+      const barLeft = bar ? Math.min(...boxes.map((b) => b.left)) - BAR_GAP - BAR_WIDTH : 0;
+      boxes.forEach((b, i) =>
+        place(d.els[i]!, bar ? { left: Math.max(0, barLeft), top: b.top, width: BAR_WIDTH, height: b.height } : b),
+      );
     }
     const next = new Map<string, Icon>();
     for (const [key, line] of lines) {
@@ -612,9 +641,12 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
     for (const [id, d] of drawn) {
       const m = byId.get(id);
       if (!m) continue;
+      const ks = kindAndStyle(m);
       for (const el of d.els) {
-        el.dataset.kind = m.kind;
-        if (m.kind !== "quote" && m.color) el.dataset.color = m.color;
+        el.dataset.kind = ks.kind;
+        if (ks.style) el.dataset.style = ks.style;
+        else delete el.dataset.style;
+        if (m.color) el.dataset.color = m.color;
         else delete el.dataset.color;
         setFlag(el, "data-dim", o.focusIds !== null && !o.focusIds.has(id));
         setFlag(el, "data-hot", hot === id);

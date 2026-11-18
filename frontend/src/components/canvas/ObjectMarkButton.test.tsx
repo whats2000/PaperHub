@@ -66,7 +66,7 @@ describe("the corner mark button on PDF pages", () => {
     expect(button.dataset.shown).toBe("false");
     fireEvent.click(button);
     await screen.findByRole("toolbar", { name: "Mark the figure" });
-    fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: no colour" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       kind: "figure",
@@ -82,7 +82,7 @@ describe("the corner mark button on PDF pages", () => {
     layOut();
     fireEvent.click(await screen.findByRole("button", { name: "Mark equation" }));
     await screen.findByRole("toolbar", { name: "Mark the equation" });
-    fireEvent.click(screen.getByRole("button", { name: "Highlight: Method" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: Method" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       kind: "equation",
@@ -100,7 +100,7 @@ describe("the corner mark button on PDF pages", () => {
     expect(button.dataset.shown).toBe("true");
     fireEvent.click(button);
     await screen.findByRole("toolbar", { name: "Mark the figure" });
-    fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: no colour" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].kind).toBe("figure");
   });
@@ -158,7 +158,7 @@ describe("the corner mark button in the HTML reader", () => {
     expect(button.dataset.shown).toBe("true");
     fireEvent.click(button);
     await screen.findByRole("toolbar", { name: "Mark the figure" });
-    fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: no colour" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       kind: "figure",
@@ -174,7 +174,7 @@ describe("the corner mark button in the HTML reader", () => {
     render(<Host doc={doc} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark equation" }));
     await screen.findByRole("toolbar", { name: "Mark the equation" });
-    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       kind: "equation",

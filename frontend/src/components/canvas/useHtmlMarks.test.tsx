@@ -74,7 +74,7 @@ function created(section: string, block: string): MarkCreated {
       id: `mk_${block}`,
       paper_content_id: 3,
       block_id: block,
-      kind: "highlight",
+      kind: "text", style: "highlight",
       color: "green",
       view: "html",
       pieces: [],
@@ -105,6 +105,7 @@ beforeEach(() => {
   create = vi.fn((body: MarkIn) => Promise.resolve(created(body.section_key ?? "", `b${body.section_key}`)));
   ensureChunks = vi.fn(() => Promise.resolve(CHUNKS));
   useMarksStore.setState({
+    markStyle: "highlight",
     marksByPaper: {},
     chunksByPaper: {},
     colors: [],
@@ -131,7 +132,7 @@ describe("useHtmlMarks", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
       paper_content_id: 3,
-      kind: "highlight",
+      kind: "text", style: "highlight",
       color: "green",
       section_key: "2 Method",
       pieces: [{ quote: "agent pose ahead of time", chunk_start: 102, chunk_end: 102 }],
@@ -168,11 +169,11 @@ describe("useHtmlMarks", () => {
     create.mockImplementationOnce(() => Promise.reject(new Error("offline")));
     select(doc, "Robots", "agent pose");
     await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     expect(toastFn).not.toHaveBeenCalled();
     // The selection stays; trying again saves only the missing section.
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(create.mock.calls[2]![0].section_key).toBe("2 Method");
     await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
@@ -186,12 +187,12 @@ describe("useHtmlMarks", () => {
     create.mockImplementationOnce(() => Promise.reject(new Error("offline")));
     select(doc, "Robots", "agent pose");
     await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     // A key press re-reads the selection: a new Range over the same text.
     select(doc, "Robots", "agent pose", "keyboard");
     await act(() => new Promise((r) => setTimeout(r, 10))); // the re-read settles
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Introduction", "2 Method", "2 Method"]);
     await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
@@ -207,11 +208,12 @@ describe("useHtmlMarks", () => {
     await screen.findByRole("toolbar");
     fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Underline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Underline: no colour" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(4));
-    expect(create.mock.calls.slice(2).map((c) => [c[0].kind, c[0].color, c[0].section_key])).toEqual([
-      ["quote", null, "1 Introduction"],
-      ["quote", null, "2 Method"],
+    expect(create.mock.calls.slice(2).map((c) => [c[0].kind, c[0].style, c[0].color, c[0].section_key])).toEqual([
+      ["text", "underline", null, "1 Introduction"],
+      ["text", "underline", null, "2 Method"],
     ]);
     await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
     expect(toastFn).not.toHaveBeenCalled();
@@ -237,25 +239,11 @@ describe("useHtmlMarks", () => {
     render(<Host doc={doc} />);
     select(doc, "Title words", "any chunk");
     await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith("This passage isn't tied to the paper's text, so it can't be marked."),
     );
     expect(create).not.toHaveBeenCalled();
-  });
-
-  it("Add note opens the notes pane with the caret after the new reference", async () => {
-    const doc = frameDoc(PAPER);
-    const openAt = vi.spyOn(useNotesPaneStore.getState(), "openAt").mockImplementation(() => undefined);
-    render(<Host doc={doc} />);
-    select(doc, "agent pose", "of time");
-    await screen.findByRole("toolbar");
-    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
-    await waitFor(() => expect(openAt).toHaveBeenCalled());
-    expect(create.mock.calls[0]![0]).toMatchObject({ kind: "quote", color: null });
-    expect(useNotesStore.getState().caretAfter).toEqual({ noteId: 7, blockId: "b2 Method" });
-    expect(openAt).toHaveBeenCalledWith({ kind: "paper", id: 3, noteId: 7, blockId: "b2 Method" });
-    openAt.mockRestore();
   });
 
   it("caps a select-all, naming the limit", async () => {
@@ -272,10 +260,10 @@ describe("useHtmlMarks", () => {
     const doc = frameDoc(PAPER);
     render(<Host doc={doc} />);
     select(doc, "agent pose", "of time", "keyboard");
-    const first = await screen.findByRole("button", { name: "Highlight: Key result" });
+    const first = await screen.findByRole("button", { name: "Highlight" });
     await waitFor(() => expect(first).toHaveFocus());
     fireEvent.keyDown(first, { key: "ArrowRight" });
-    expect(screen.getByRole("button", { name: "Highlight: Method" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Underline" })).toHaveFocus();
     const focus = vi.spyOn(doc.defaultView!, "focus");
     fireEvent.keyDown(document.activeElement!, { key: "Escape", bubbles: true });
     expect(focus).toHaveBeenCalled();
@@ -313,7 +301,7 @@ describe("the reader and the note card", () => {
             id: "mk_pdf",
             paper_content_id: 3,
             block_id: "b1",
-            kind: "highlight",
+            kind: "text", style: "highlight",
             color: "green",
             view: "pdf",
             pieces: [{ quote: "words drawn only on a page", page: 1 }],

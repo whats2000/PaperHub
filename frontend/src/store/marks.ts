@@ -14,9 +14,12 @@ import {
   deleteMark,
   erasePiece,
   getChunkAnchors,
+  addMarkColor,
+  deleteMarkColor,
   listMarkColors,
   listMarks,
   patchMarkColor,
+  reorderMarkColors,
   restoreMark,
   restorePiece,
   splitMark,
@@ -24,6 +27,7 @@ import {
 import i18n from "@/lib/i18n";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
+import { DEFAULT_PALETTE } from "@/lib/marks/palette";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { onMarkBlocksChanged, useNotesStore } from "@/store/notes";
 import type {
@@ -33,6 +37,7 @@ import type {
   MarkColorPatch,
   MarkCreated,
   MarkIn,
+  MarkStyle,
   SplitResult,
 } from "@/types/notes";
 
@@ -106,6 +111,16 @@ interface MarksState {
    * chosen last, remembered). Turning it on turns Box off. */
   penOn: boolean;
   penColor: MarkColor;
+  /** The style a selection is marked in (the popover's choice, remembered). */
+  markStyle: MarkStyle;
+  setMarkStyle: (style: MarkStyle) => void;
+  /** Adds a labelled colour (the label is required); resolves to its key,
+   * or rejects with the server's reason. */
+  addColor: (hex: string, name: string) => Promise<MarkColor>;
+  /** Deletes a custom colour no mark uses (the server refuses otherwise). */
+  deleteColor: (color: MarkColor) => Promise<void>;
+  /** The palette in this order (shown at once, put back on failure). */
+  reorderColors: (order: MarkColor[]) => Promise<void>;
   /** The marks the pen made since it was turned on: a stroke joins one of
    * them. Turning the pen off ends the session. */
   penSession: PenMark[];
@@ -555,6 +570,34 @@ export const useMarksStore = create<MarksState>()(
         setBoxOn: (on) => set(on ? { boxOn: true, penOn: false, penSession: [] } : { boxOn: false }),
         penOn: false,
         penColor: "green",
+        markStyle: "highlight",
+        setMarkStyle: (markStyle) => set({ markStyle }),
+        addColor: async (hex, name) => {
+          const before = new Set(get().colors.map((c) => c.color));
+          const colors = await addMarkColor({ hex, name: name.trim() });
+          set({ colors });
+          useNotesStore.setState({ colorNames: Object.fromEntries(colors.map((c) => [c.color, c.name])) });
+          return colors.find((c) => !before.has(c.color))?.color ?? colors[colors.length - 1]!.color;
+        },
+        deleteColor: async (color) => {
+          try {
+            const colors = await deleteMarkColor(color);
+            set({ colors });
+          } catch {
+            toast.error(t("notes:myMarks.deleteColorFailed", "Couldn't delete the colour: marks still use it."));
+          }
+        },
+        reorderColors: async (order) => {
+          const before = get().colors;
+          const byKey = new Map(before.map((c) => [c.color, c]));
+          set({ colors: order.map((k) => byKey.get(k)!).filter(Boolean) });
+          try {
+            set({ colors: await reorderMarkColors(order) });
+          } catch {
+            set({ colors: before });
+            toast.error(t("notes:myMarks.saveFailed", "Couldn't save the colour."));
+          }
+        },
         penSession: [],
         setPen: (on, color) =>
           set((s) =>
@@ -679,10 +722,34 @@ export const useMarksStore = create<MarksState>()(
     {
       name: "paperhub-marks-v1",
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ showMarks: s.showMarks, penColor: s.penColor }),
+      partialize: (s) => ({ showMarks: s.showMarks, penColor: s.penColor, markStyle: s.markStyle }),
     },
   ),
 );
+
+/** Every palette colour as `--hl-<key>` (light on :root, dark on .dark), so
+ * a custom colour or a recoloured default draws wherever `var(--hl-*)` is
+ * used. index.css keeps the defaults for before the palette loads. */
+function writePaletteVars(colors: readonly MarkColorInfo[]): void {
+  if (typeof document === "undefined") return;
+  const own = (c: MarkColorInfo, dark: boolean) =>
+    (dark ? c.dark : c.hex) || (dark ? DEFAULT_PALETTE[c.color]?.dark : DEFAULT_PALETTE[c.color]?.light);
+  const vars = (dark: boolean) =>
+    colors
+      .filter((c) => /^[\w-]+$/.test(c.color) && own(c, dark))
+      .map((c) => `--hl-${c.color}: ${own(c, dark)};`)
+      .join(" ");
+  let el = document.getElementById("ph-mark-palette");
+  if (!el) {
+    el = document.createElement("style");
+    el.id = "ph-mark-palette";
+    document.head.appendChild(el);
+  }
+  el.textContent = `:root { ${vars(false)} }\n.dark { ${vars(true)} }`;
+}
+useMarksStore.subscribe((s, prev) => {
+  if (s.colors !== prev.colors) writePaletteVars(s.colors);
+});
 
 /** Test isolation: forget the colours request. */
 export function resetMarksColorsRequest(): void {

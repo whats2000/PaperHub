@@ -27,6 +27,7 @@ const JSON_PROPS = new Set(["pieces", "source"]);
  * colour, a mark not made on a translation or its words still there, an anchor not lost). */
 const MARK_OPTIONAL_DEFAULTS: Record<string, unknown> = {
   color: "",
+  style: "",
   lang: "",
   orig: "",
   sourceRef: "",

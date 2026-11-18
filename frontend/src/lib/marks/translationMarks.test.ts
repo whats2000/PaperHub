@@ -97,7 +97,8 @@ function trMark(over: Partial<Mark> = {}): Mark {
     id: "mt",
     paper_content_id: 3,
     block_id: "b_mt",
-    kind: "highlight",
+    kind: "text",
+    style: "highlight",
     color: "purple",
     view: "html",
     pieces: [
@@ -432,7 +433,8 @@ describe("useHtmlMarks on a translation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Highlight: Disagree" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({
-      kind: "highlight",
+      kind: "text",
+      style: "highlight",
       color: "purple",
       view: "html",
       lang: LANG,
