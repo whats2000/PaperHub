@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { TranslatePill } from "./TranslatePill";
@@ -208,16 +208,17 @@ describe("TranslatePill", () => {
     expect(label).toHaveFocus();
   });
 
-  it("reopening during the exit reuses the same label node (no restart)", async () => {
-    const user = userEvent.setup();
+  it("reopening during the exit reuses the same label node (no restart)", () => {
     useTranslationStore.setState({ enabledByPaper: { [PAPER]: true } });
     renderPill();
     const icon = screen.getByRole("button", { name: toggleName });
     const label = screen.getByRole("button", { name: /translation language/i });
     const wrap = label.closest("[data-state]");
-    await user.click(icon); // off: exit starts
+    // Both clicks in one synchronous run: no timer (the 200 ms exit) can
+    // fire between them, however loaded the machine is.
+    fireEvent.click(icon); // off: exit starts
     expect(wrap).toHaveAttribute("data-state", "closed");
-    await user.click(icon); // on again within the exit window
+    fireEvent.click(icon); // on again within the exit window
     expect(wrap).toHaveAttribute("data-state", "open");
     expect(
       screen.getByRole("button", { name: /translation language/i }),

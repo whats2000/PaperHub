@@ -85,7 +85,8 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(notesButton());
     const pane = await screen.findByRole("region", { name: "Notes" });
     expect(pane).toHaveClass("@container");
-    const bar = within(pane).getByRole("toolbar", { name: "Note tools" });
+    // The toolbar is in the lazy NotesPane: it mounts after the region.
+    const bar = await within(pane).findByRole("toolbar", { name: "Note tools" });
     await screen.findByText("note 12");
     expect(within(bar).getByRole("button", { name: "Focus" })).toBeEnabled();
     // A chat's note has no paper to follow.

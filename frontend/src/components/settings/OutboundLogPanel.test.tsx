@@ -292,7 +292,8 @@ describe("OutboundLogPanel held tab", () => {
     await waitFor(() => expect(calls).toEqual(["send:h1"]));
     await waitFor(() => expect(screen.queryByText("wafer defect sparse")).toBeNull());
     expect(toastFn).toHaveBeenCalledWith("Sent.");
-    expect(useNavStore.getState().heldBadge).toBe(0);
+    // The badge follows the list in a passive effect: it lands after the row.
+    await waitFor(() => expect(useNavStore.getState().heldBadge).toBe(0));
   });
 
   it("discards a held row and removes every returned sibling", async () => {
@@ -316,7 +317,7 @@ describe("OutboundLogPanel held tab", () => {
     await waitFor(() => expect(calls).toEqual(["send:h3", "discard:h1"]));
     await waitFor(() => expect(screen.queryByText("sibling query")).toBeNull());
     await waitFor(() => expect(screen.queryByText("third query")).toBeNull());
-    expect(useNavStore.getState().heldBadge).toBe(0);
+    await waitFor(() => expect(useNavStore.getState().heldBadge).toBe(0)); // a passive effect
   });
 
   it("clears its leave timers on unmount", async () => {
