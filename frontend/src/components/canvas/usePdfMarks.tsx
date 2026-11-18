@@ -37,7 +37,14 @@ import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
 import { useMarkSave, usePenSave, type MarkGroup } from "@/components/canvas/useMarkSave";
 import { usePdfBlocks } from "@/components/canvas/usePdfBlocks";
 import { usePdfFollow } from "@/components/canvas/usePdfFollow";
-import { objectPiece, storedPiece, usePdfPen, type Located, type PlaceText } from "@/components/canvas/usePdfPen";
+import {
+  locateBox,
+  objectPiece,
+  storedPiece,
+  usePdfPen,
+  type Located,
+  type PlaceText,
+} from "@/components/canvas/usePdfPen";
 import { locateText } from "@/lib/api";
 import { MAX_MARK_PARAGRAPHS } from "@/lib/marks/limits";
 import {
@@ -662,28 +669,36 @@ export function usePdfMarks({
         });
       } else {
         // A box over most of an equation is that equation; else a region.
-        const blocks = cur.result ? null : await loadPages([cur.page]);
-        if (!cur.result && !blocks) return;
-        const result =
+        const blocks = await loadPages([cur.page]);
+        if (!blocks || paperId === null) return;
+        const pageBlocks = blocks[0]!;
+        const base =
           cur.result ??
           boxMark({
             page: cur.page,
             box: cur.frac,
-            blocks: blocks![0]!,
+            blocks: pageBlocks,
             spans: cur.scanned ? [] : layerSpans(pageEl(cur.page) ?? root),
             scanned: cur.scanned,
           });
+        let missed = false;
         ok = await saveMarks({
-          kind: result.kind,
+          kind: base.kind,
           color,
           view: "pdf",
           addNote,
-          groups: () => [{ section: result.section, pieces: [result.piece] }],
+          groups: async () => {
+            // On a page without Marker blocks the box's words find its section.
+            const placed = await locateBox(paperId, base, pageBlocks);
+            missed = placed.missed;
+            return [{ section: placed.result.section, pieces: [placed.result.piece] }];
+          },
         });
+        if (ok && missed) notLocated();
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated, cardSection],
+    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated, cardSection, paperId],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(

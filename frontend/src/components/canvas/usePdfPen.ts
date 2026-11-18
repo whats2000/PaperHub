@@ -9,8 +9,17 @@ import { useCallback, type RefObject } from "react";
 
 import type { MarkableObject } from "@/components/canvas/ObjectMarkButton";
 import { usePenSave, type PenPiece } from "@/components/canvas/useMarkSave";
-import type { LocateResult } from "@/lib/api";
-import { boxMark, captionFor, FIGURE_TYPES, type Frac, type LayerSpan, type PdfFragment, type PdfPiece } from "@/lib/marks/pdfGeometry";
+import { locateText, type LocateResult } from "@/lib/api";
+import {
+  boxMark,
+  captionFor,
+  FIGURE_TYPES,
+  type BoxResult,
+  type Frac,
+  type LayerSpan,
+  type PdfFragment,
+  type PdfPiece,
+} from "@/lib/marks/pdfGeometry";
 import { clearIfStill, locatedPlace, pdfPlace } from "@/lib/marks/pieces";
 import { useMarksStore } from "@/store/marks";
 import type { MarkPiece, PaperPageBlock } from "@/types/notes";
@@ -37,6 +46,35 @@ export function storedPiece(p: PdfPiece, at?: Located): MarkPiece {
     };
   }
   return piece;
+}
+
+/** A box on a page without Marker blocks (the LaTeX-compiled PDF of an
+ * HTML paper) has no section of its own: the words under it are found in
+ * the paper's reading text, as a selection's are. `missed`: no section
+ * came of it (no words, or not found), so the box is saved without one. */
+export async function locateBox(
+  paperId: number,
+  result: BoxResult,
+  pageBlocks: readonly PaperPageBlock[],
+): Promise<{ result: BoxResult; missed: boolean }> {
+  if (pageBlocks.length > 0 || result.section !== null) return { result, missed: false };
+  const text = String(result.piece.quote ?? "").trim();
+  const at = text ? ((await locateText(paperId, text).catch(() => null))?.match ?? null) : null;
+  if (!at) return { result, missed: true };
+  return {
+    result: {
+      ...result,
+      section: at.section,
+      piece: {
+        ...result.piece,
+        chunk_start: at.chunk_start,
+        chunk_end: at.chunk_end,
+        text_start: at.text_start,
+        text_end: at.text_end,
+      },
+    },
+    missed: at.section === null,
+  };
 }
 
 /** A figure (its caption) or an equation (its LaTeX) taken whole. */
@@ -129,6 +167,8 @@ export function usePdfPen({
 
   const box = useCallback(
     (page: number, frac: Frac, spans: LayerSpan[], scanned: boolean) => {
+      if (paperId === null) return;
+      let missed = false;
       penSave({
         view: "pdf",
         kind: "region",
@@ -136,12 +176,21 @@ export function usePdfPen({
           const loaded = await loadPages([page]);
           if (!loaded) return null;
           // A box over most of an equation is that equation.
-          const result = boxMark({ page, box: frac, blocks: loaded[0]!, spans, scanned });
+          const placed = await locateBox(
+            paperId,
+            boxMark({ page, box: frac, blocks: loaded[0]!, spans, scanned }),
+            loaded[0]!,
+          );
+          missed = placed.missed;
+          const result = placed.result;
           return [{ section: result.section, piece: result.piece, place: null, kind: result.kind }];
+        },
+        done: (ok) => {
+          if (ok && missed) notLocated();
         },
       });
     },
-    [penSave, loadPages],
+    [paperId, penSave, loadPages, notLocated],
   );
 
   const erase = useCallback((markId: string, piece: number) => {

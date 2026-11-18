@@ -35,7 +35,7 @@ H5b.1 is built (SRS H5b "As built (H5b.1)"). Where the shipped UI does not match
 
 - **Add note** makes a neutral quote mark with an empty paragraph after it, not a purple highlight (purple is "Disagree").
 - **Previous / next mark** is not built; it moved to H5b.2 with subtree / all-notes export and the print view.
-- **A box on the compiled PDF of an HTML paper** is saved without a section (no Marker blocks there); a text selection there finds its section by locating its words, and a few common words in text the paper's HTML lacks (a figure caption) are saved without a section, with a toast.
+- **A box on the compiled PDF of an HTML paper** finds its section by locating the words under it (no Marker blocks there); a box with no words under it (over a figure) or whose words are not found is saved without a section, with a toast. A text selection there finds its section the same way, and a few common words in text the paper's HTML lacks (a figure caption) are saved without a section, with a toast.
 - **Marks on PDF pages** use the light palette in both themes, because the page itself is never inverted.
 - **Show my marks** and **Box** sit in the reader bar beside the highlighter; the note card for a mark that is off screen stays open, pinned to the top of the gutter, with "The mark is off screen · Show".
 - **The Notes page** is not built (H5b.2); its sketch here stays a sketch.

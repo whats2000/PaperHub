@@ -10,14 +10,19 @@ import {
 } from "@/components/canvas/__fixtures__/pdfMarks";
 import { Reader } from "@/components/canvas/__fixtures__/pdfMarksReader";
 import { BoxToolButton } from "@/components/canvas/BoxTool";
-import { listPaperBlocks } from "@/lib/api";
+import { listPaperBlocks, locateText } from "@/lib/api";
 import { boxMark, textUnderBox, type LayerSpan } from "@/lib/marks/pdfGeometry";
 import { useMarksStore } from "@/store/marks";
 import type { PaperPageBlock } from "@/types/notes";
 
-vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listPaperBlocks: vi.fn() }));
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  listPaperBlocks: vi.fn(),
+  locateText: vi.fn(),
+}));
+const { toastMessage } = vi.hoisted(() => ({ toastMessage: vi.fn() }));
 vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), { error: vi.fn(), message: vi.fn(), success: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), message: toastMessage, success: vi.fn() }),
 }));
 
 const span = (text: string, box: [number, number, number, number]): LayerSpan => ({
@@ -49,6 +54,8 @@ beforeEach(() => {
   create = resetStores();
   vi.mocked(listPaperBlocks).mockReset();
   vi.mocked(listPaperBlocks).mockResolvedValue(BLOCKS);
+  vi.mocked(locateText).mockReset();
+  toastMessage.mockReset();
   stubRangeGeometry();
 });
 
@@ -173,6 +180,44 @@ describe("drawing a box", () => {
     fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].pieces[0]).toMatchObject({ quote: "Robots learn from demos.", ocr: true });
+  });
+
+  describe("on the compiled PDF of an HTML paper (no Marker blocks)", () => {
+    const boxAndSave = async () => {
+      render(<Reader />);
+      layOut();
+      await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+      act(() => useMarksStore.getState().setBoxOn(true));
+      drag(24, 32, 312, 64);
+      await screen.findByRole("toolbar", { name: "Mark the box" });
+      fireEvent.click(screen.getByRole("button", { name: "Add to note" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      return create.mock.calls[0]![0];
+    };
+
+    it("finds the box's words in the reading text for its section", async () => {
+      vi.mocked(listPaperBlocks).mockResolvedValue([]);
+      vi.mocked(locateText).mockResolvedValue({
+        match: { chunk_start: 5, chunk_end: 5, chunk_ids: [5], section: "2 Method", text_start: 10, text_end: 34 },
+        _meta: {},
+      });
+      const body = await boxAndSave();
+      expect(locateText).toHaveBeenCalledWith(3, "Robots learn from demos.");
+      expect(body).toMatchObject({ section_key: "2 Method", pieces: [{ chunk_start: 5, text_start: 10 }] });
+      expect(toastMessage).not.toHaveBeenCalled();
+    });
+
+    it("saves it without a section and says so when its words are not found", async () => {
+      vi.mocked(listPaperBlocks).mockResolvedValue([]);
+      vi.mocked(locateText).mockResolvedValue({ match: null, _meta: {} });
+      const body = await boxAndSave();
+      expect(body.section_key).toBeNull();
+      await waitFor(() =>
+        expect(toastMessage).toHaveBeenCalledWith(
+          "Saved without a section: this passage wasn't found in the paper's text.",
+        ),
+      );
+    });
   });
 
   it("a click without a drag draws nothing", async () => {
