@@ -544,6 +544,32 @@ describe("the refetch merge", () => {
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
   });
 
+  it("a refetch keeps a change made after it went out and drops one made before (the > boundary)", async () => {
+    const replies: ((marks: Mark[]) => void)[] = [];
+    let n = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(created({ ...MARK, id: `mk_${++n}` }))),
+      http.get(
+        `${API_BASE_URL}/marks`,
+        () => new Promise<Response>((res) => replies.push((m) => res(HttpResponse.json(m)))),
+      ),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    const first = useMarksStore.getState().refetchMarks(3);
+    await useMarksStore.getState().create(body, { quiet: true }); // mk_1, while the first is out
+    // The second refetch goes out with mk_1's change as its own `since`:
+    // its snapshot already decides mk_1 (not newer, so dropped when gone).
+    const second = useMarksStore.getState().refetchMarks(3);
+    await useMarksStore.getState().create(body, { quiet: true }); // mk_2, after it went out
+    await waitFor(() => expect(replies).toHaveLength(2));
+    replies[1]!([]); // the server has neither
+    await second;
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_2"]);
+    replies[0]!([]); // the first, overtaken, writes nothing
+    await first;
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_2"]);
+  });
+
   it("a timed-out delete is not undone locally: the refetch decides, and a refused one comes back", async () => {
     resetMarkOps(40);
     server.use(
