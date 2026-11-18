@@ -102,6 +102,21 @@ describe("code block behaviour", () => {
     expect(editor.getTextCursorPosition().block.type).toBe("paragraph");
   });
 
+  it("Ctrl+Enter moves to the next block when it holds text, adding no line", () => {
+    const editor = makeEditor();
+    type(editor, FENCE);
+    editor.insertBlocks(
+      [{ type: "paragraph", content: [{ type: "text", text: "after", styles: {} }] }] as never,
+      editor.document[0]!,
+      "after",
+    );
+    editor.setTextCursorPosition(editor.document[0]!, "end");
+    press(editor, { key: "Enter", ctrlKey: true });
+    expect(editor.document.map((b) => b.type)).toEqual(["codeBlock", "paragraph"]);
+    const at = editor.getTextCursorPosition().block;
+    expect(at.id).toBe(editor.document[1]!.id);
+  });
+
   it("a fence + Enter does not convert a ranged selection, and converts at the end of the line", () => {
     const ranged = makeEditor();
     type(ranged, "```python");
