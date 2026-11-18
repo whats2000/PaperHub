@@ -20,9 +20,9 @@ vi.mock("@/lib/api", async (orig) => ({
   listPaperBlocks: vi.fn(),
   locateText: vi.fn(),
 }));
-const { toastMessage } = vi.hoisted(() => ({ toastMessage: vi.fn() }));
+const { toastMessage, toastError } = vi.hoisted(() => ({ toastMessage: vi.fn(), toastError: vi.fn() }));
 vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), { error: vi.fn(), message: toastMessage, success: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: toastError, message: toastMessage, success: vi.fn() }),
 }));
 
 const span = (text: string, box: [number, number, number, number]): LayerSpan => ({
@@ -56,6 +56,7 @@ beforeEach(() => {
   vi.mocked(listPaperBlocks).mockResolvedValue(BLOCKS);
   vi.mocked(locateText).mockReset();
   toastMessage.mockReset();
+  toastError.mockReset();
   stubRangeGeometry();
 });
 
@@ -217,6 +218,36 @@ describe("drawing a box", () => {
           "Saved without a section: this passage wasn't found in the paper's text.",
         ),
       );
+    });
+  });
+
+  describe("when the page layout can't be fetched at save time", () => {
+    const open = async () => {
+      render(<Reader />);
+      layOut();
+      await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+      act(() => useMarksStore.getState().setBoxOn(true));
+      drag(24, 32, 312, 64);
+      await screen.findByRole("toolbar", { name: "Mark the box" });
+    };
+
+    it("still saves a box whose result is already in hand", async () => {
+      await open();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      vi.mocked(listPaperBlocks).mockRejectedValue(new Error("down"));
+      fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      expect(create.mock.calls[0]![0]).toMatchObject({ kind: "region", view: "pdf" });
+    });
+
+    it("saves nothing and says so when no result was worked out", async () => {
+      vi.mocked(listPaperBlocks).mockRejectedValue(new Error("down"));
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+      await waitFor(() => expect(toastError).toHaveBeenCalled());
+      expect(create).not.toHaveBeenCalled();
     });
   });
 

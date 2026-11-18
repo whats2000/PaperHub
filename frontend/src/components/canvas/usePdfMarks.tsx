@@ -669,7 +669,11 @@ export function usePdfMarks({
         });
       } else {
         // A box over most of an equation is that equation; else a region.
-        const blocks = await loadPages([cur.page]);
+        // A result already in hand needs no fetch: a failed one must not
+        // stop the colour click (the blocks cached with it are used).
+        const blocks = cur.result
+          ? [blocksRef.current[cur.page] ?? NO_BLOCKS]
+          : await loadPages([cur.page]);
         if (!blocks || paperId === null) return;
         const pageBlocks = blocks[0]!;
         const base =
