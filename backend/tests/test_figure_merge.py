@@ -85,7 +85,7 @@ def test_apply_crops_the_joined_region_and_drops_the_pieces(tmp_path: Path) -> N
     asset = apply_merges(PaperAsset(figures=figs), plan_merges(figs, VJEPA), pdf, tmp_path)
     [fig] = asset.figures
     assert fig.id == "fig-007" and fig.bbox == (50, 52, 560, 446)
-    im = Image.open(fig.abs_image_path(tmp_path))
-    assert abs(im.width / im.height - 510 / 394) < 0.02
+    with Image.open(fig.abs_image_path(tmp_path)) as im:
+        assert abs(im.width / im.height - 510 / 394) < 0.02
     again = plan_merges(asset.figures, VJEPA)
     assert again == []                       # idempotent: nothing left to join

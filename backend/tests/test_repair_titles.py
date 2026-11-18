@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -34,10 +35,10 @@ def _pdf(path: Path, *, meta_title: str = "") -> Path:
 
 
 @pytest_asyncio.fixture
-async def conn(tmp_path: Path) -> aiosqlite.Connection:
-    c = await aiosqlite.connect(tmp_path / "t.db")
-    await apply_schema(c)
-    return c
+async def conn(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
+    async with aiosqlite.connect(tmp_path / "t.db") as c:
+        await apply_schema(c)
+        yield c
 
 
 async def _seed(

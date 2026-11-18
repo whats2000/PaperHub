@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +38,12 @@ def _fixture_copy(tmp_path: Path) -> Path:
 
 
 @pytest_asyncio.fixture
-async def test_db(tmp_path: Path) -> aiosqlite.Connection:
+async def test_db(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
     db_path = tmp_path / "test.db"
-    conn = await aiosqlite.connect(db_path)
-    await conn.execute("PRAGMA foreign_keys = ON")
-    await apply_schema(conn)
-    return conn
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        yield conn
 
 
 _SEED_COUNTER = 0

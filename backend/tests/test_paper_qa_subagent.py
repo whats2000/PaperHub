@@ -14,9 +14,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import aiosqlite
-import pytest
 
-pytestmark = pytest.mark.asyncio
+# asyncio_mode = auto (pyproject) runs the async tests; no module mark,
+# which would also land on the sync ones.
 
 
 # ─────────────────────────── helpers ────────────────────────────────

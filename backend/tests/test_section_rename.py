@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -130,11 +131,11 @@ _TEX = (
 
 
 @pytest_asyncio.fixture
-async def conn(tmp_path: Path) -> aiosqlite.Connection:
-    c = await aiosqlite.connect(tmp_path / "t.db")
-    await c.execute("PRAGMA foreign_keys = ON")
-    await apply_schema(c)
-    return c
+async def conn(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
+    async with aiosqlite.connect(tmp_path / "t.db") as c:
+        await c.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(c)
+        yield c
 
 
 async def _seed_latex_paper(conn: aiosqlite.Connection, tmp_path: Path) -> tuple[int, Path]:

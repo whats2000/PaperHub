@@ -114,7 +114,8 @@ async def test_run_audit_writes_a_csv_and_the_rates(tmp_path: Path) -> None:
 
     rates = await run_audit(blocks, judge=judge, out_dir=tmp_path / "out")
     assert rates == {"n": 4, "match": 0.5, "minor": 0.25, "wrong": 0.25, "failed": 0}
-    rows = list(csv.DictReader((tmp_path / "out" / "audit.csv").open(encoding="utf-8")))
+    with (tmp_path / "out" / "audit.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
     assert [r["verdict"] for r in rows] == verdicts
     assert set(rows[0]) >= {"paper", "block_id", "page", "bbox", "latex", "verdict",
                             "error", "crop"}
