@@ -65,6 +65,9 @@ class ApplyResult(BaseModel):
     # Blocks an undo / restore brought back under their nearest live ancestor
     # because their own parent is deleted: {block_id, parent_id}.
     reparented: list[dict[str, str | None]] = []
+    # Open suggestions this call withdrew (a newer one on the same block,
+    # an undo of their set, or an accept that could not apply).
+    withdrawn: list[str] = []
 
 
 def _now() -> str:
@@ -142,6 +145,7 @@ class _Ctx:
         self.suggested: list[dict[str, str]] = []
         self.rejected: list[dict[str, Any]] = []
         self.reparented: list[dict[str, str | None]] = []
+        self.withdrawn: list[str] = []
 
     def reject(self, block_id: str | None, reason: RejectReason,
                current: _Row | None = None) -> None:
@@ -155,7 +159,7 @@ class _Ctx:
             note_id=self.note_id, revision=self.rev,
             change_set_id=self.change_set_id, applied=self.applied,
             suggested=self.suggested, rejected=self.rejected,
-            reparented=self.reparented,
+            reparented=self.reparented, withdrawn=self.withdrawn,
         )
 
     async def get(self, block_id: str) -> _Row | None:
@@ -353,11 +357,14 @@ async def _place_with_divider(
 
 
 async def _withdraw_open(ctx: _Ctx, block_id: str) -> None:
-    """One open suggestion per block: a newer one replaces the older."""
-    await ctx.conn.execute(
+    """One open suggestion per block: a newer one replaces the older (and
+    the result names it, so the trace shows why it went)."""
+    async with ctx.conn.execute(
         "UPDATE note_suggestions SET status = 'withdrawn' "
-        "WHERE note_id = ? AND block_id = ? AND status = 'open'",
-        (ctx.note_id, block_id))
+        "WHERE note_id = ? AND block_id = ? AND status = 'open' RETURNING id",
+        (ctx.note_id, block_id),
+    ) as cur:
+        ctx.withdrawn.extend(sorted(r[0] for r in await cur.fetchall()))
 
 
 async def _suggest(ctx: _Ctx, row: _Row, op: Op) -> None:
@@ -512,6 +519,7 @@ async def _begin(
 def _outcome(ctx: _Ctx) -> str:
     return json.dumps({
         "applied": ctx.applied, "suggested": ctx.suggested,
+        "withdrawn": ctx.withdrawn,
         "rejected": [{"block_id": r["block_id"], "reason": r["reason"]}
                      for r in ctx.rejected],
     })
@@ -722,6 +730,7 @@ async def undo_change_set(conn: aiosqlite.Connection,
             (change_set_id,),
         ) as cur:
             withdrawn = sorted(r[0] for r in await cur.fetchall())
+        ctx.withdrawn.extend(withdrawn)
         outcome = {**cs["outcome"], "undo": {
             "revision": ctx.rev, "reverted": reverted, "kept": kept,
             "withdrawn": withdrawn}}
@@ -873,7 +882,8 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
                 note_id=note_id, revision=note.revision, change_set_id=cs_id,
                 applied=[], suggested=[],
                 rejected=[{"block_id": block_id, "reason": "missing",
-                           "current": None}])
+                           "current": None}],
+                withdrawn=[suggestion_id])
         if accept:
             op = Op(op="update" if kind == "update" else "delete",
                     block_id=block_id,
@@ -884,6 +894,8 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
                 actor="user", run_id=None, summary="Accept suggestion")
             new_status = ("accepted" if block_id in result.applied
                           else "withdrawn")
+            if new_status == "withdrawn":
+                result.withdrawn = [*result.withdrawn, suggestion_id]
         else:
             result = ApplyResult(note_id=note_id, revision=note.revision,
                                  change_set_id=cs_id, applied=[],

@@ -699,15 +699,40 @@ async def test_a_new_suggestion_withdraws_the_older_one_on_its_block(conn):
     assert await _sug_rows(conn) == [
         ("u", "withdrawn", first.change_set_id),
         ("u", "open", second.change_set_id)]
-    # Undo the first set and apply it again: its suggestion reopens and
-    # the second set's one is withdrawn.
-    await undo_change_set(conn, first.change_set_id)
+    # The result and the change set's outcome name what was withdrawn.
+    assert first.withdrawn == []
+    assert second.withdrawn == [first.suggested[0]["suggestion_id"]]
+    async with conn.execute(
+        "SELECT outcome_json FROM note_change_sets WHERE id = ?",
+        (second.change_set_id,)) as cur:
+        assert json.loads((await cur.fetchone())[0])["withdrawn"] == second.withdrawn
+    # Undo the first set and apply it again: its suggestion was already
+    # withdrawn by the second, so only the second's stays open.
+    undone = await undo_change_set(conn, first.change_set_id)
+    assert undone.withdrawn == []
     again = await reapply_change_set(conn, first.change_set_id)
+    assert again.withdrawn == []
     async with conn.execute(
         "SELECT status FROM note_suggestions WHERE block_id = 'u' "
         "AND status = 'open'") as cur:
-        assert len(await cur.fetchall()) <= 1
+        assert len(await cur.fetchall()) == 1
     assert again.change_set_id
+    # Undoing the second set withdraws its open suggestion, and says so.
+    undone = await undo_change_set(conn, second.change_set_id)
+    assert undone.withdrawn == [second.suggested[0]["suggestion_id"]]
+
+
+async def test_resolve_reports_a_withdrawn_suggestion(conn):
+    n = await _note(conn)
+    await _seed(conn, n.id, [("u", _para("mine"))])
+    sg = await apply_ops(conn, n.id, base_revision=1, actor="agent", ops=[
+        Op(op="update", block_id="u", block=_para("theirs"))])
+    note = await get_note(conn, n.id)
+    await apply_ops(conn, n.id, base_revision=note.revision, actor="user",
+                    ops=[Op(op="delete", block_id="u")])
+    sid = sg.suggested[0]["suggestion_id"]
+    res = await resolve_suggestion(conn, sid, accept=True)
+    assert res.withdrawn == [sid]
 
 
 @pytest.mark.parametrize("bad", ["has space", "a:b", "x" * 65, "", "[note]"])

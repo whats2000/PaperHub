@@ -549,3 +549,23 @@ async def test_agent_rewrite_of_a_commented_block_is_a_suggestion(
     assert "comment" not in json.dumps(block.content)  # the editor re-applies it
     still = await list_comments(migrated_db, nid)
     assert [(c["id"], c["status"]) for c in still] == [(thread["id"], "open")]
+
+
+async def test_trace_records_withdrawn_suggestions(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """A newer suggestion on a block withdraws the older one; the step's
+    record names it, so the trace shows why it disappeared."""
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="user", ops=[
+        Op(op="insert", block=BlockIn(type="paragraph", content="mine"))])
+    bid = res.applied[0]
+    ctx = _ctx(migrated_db, fake_tracer)
+    upd = {"op": "update", "block_id": bid,
+           "block": {"type": "paragraph", "content": "theirs"}}
+    first = await _edit(ctx, note="chat", base_revision=res.revision, ops=[upd])
+    assert first.record["withdrawn"] == []
+    older = first.record["suggested"][0]["suggestion_id"]
+    second = await _edit(ctx, note="chat", base_revision=first.record["revision"],
+                         ops=[upd])
+    assert second.record["withdrawn"] == [older]

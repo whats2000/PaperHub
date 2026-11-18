@@ -614,7 +614,7 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         "tool": "notes:edit", "note": ref_of(note, ctx.session_id),
         "note_id": note.id, "base_revision": base, "revision": note.revision,
         "ops": [o.model_dump(exclude_none=True) for o in ops],
-        "applied": [], "suggested": [], "rejected": []}
+        "applied": [], "suggested": [], "withdrawn": [], "rejected": []}
     revision = note.revision
     shown: list[Block] = []
     if valid:
@@ -629,7 +629,8 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         revision = res.revision
         record.update(
             revision=revision, change_set_id=res.change_set_id,
-            applied=res.applied, suggested=res.suggested)
+            applied=res.applied, suggested=res.suggested,
+            withdrawn=res.withdrawn)
         rejected += [{**r, "current": _current(r.get("current"))}
                      for r in res.rejected]
         # The blocks it wrote are seen as written; the user's later edits
