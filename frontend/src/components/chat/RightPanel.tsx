@@ -52,6 +52,8 @@ export function RightPanel({ panel, reader, memory, slides, resizeLabel, memoryL
   const canvasPresence = usePresence(canvasOpen, PANE_EXIT_MS);
   const slidesPresence = usePresence(slidesOpen, PANE_EXIT_MS);
   const primaryPresence = usePresence(primaryOpen, PANE_EXIT_MS);
+  // Memory fades in over the reader and out again, like the other overlays.
+  const memoryPresence = usePresence(memoryOpen, PANE_EXIT_MS);
   // A swap shows the incoming pane at once; only a pane closing alone lingers.
   const canvasShown = canvasOpen || (canvasPresence.mounted && !slidesOpen && !memoryOpen);
   const slidesShown = slidesOpen || (slidesPresence.mounted && !canvasOpen && !memoryOpen);
@@ -188,8 +190,18 @@ export function RightPanel({ panel, reader, memory, slides, resizeLabel, memoryL
 
             {/* Memory Manager overlays the reader. With no backend session yet
                 (empty chat) it shows global (user) memories only. */}
-            {memoryOpen && (
-              <div className="absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden">
+            {memoryPresence.mounted && (
+              <div
+                data-state={memoryPresence.state}
+                data-testid="memory-overlay"
+                {...hideProps(!memoryOpen)}
+                className={cn(
+                  "absolute inset-0 flex flex-col bg-card border-l border-border overflow-hidden duration-200 ease-out",
+                  "data-[state=open]:animate-in data-[state=open]:fade-in-0",
+                  "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:fill-mode-forwards",
+                  "motion-reduce:animate-none",
+                )}
+              >
                 <div className="shrink-0 px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
                   {memoryLabel}
                 </div>
@@ -217,13 +229,22 @@ export function RightPanel({ panel, reader, memory, slides, resizeLabel, memoryL
 
           {/* Side by side: the divider trades width between the reader and
               Notes; the panel's left edge sizes only the reader. */}
-          {layout === "side" && !notesLeaving && (
+          {/* It fades in with Notes and stays through Notes' exit, fading
+              out, so it neither pops in nor vanishes before the pane. */}
+          {(layout === "side" || (notesLeaving && sharedLayout === "side" && primaryOpen)) && (
             <div
               role="separator"
               aria-orientation="vertical"
               aria-label={t("pane.resize", "Resize Reader and Notes")}
-              onPointerDown={panel.divider.onPointerDown}
-              className="relative z-10 w-1.5 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40"
+              data-state={notesLeaving ? "closed" : "open"}
+              {...hideProps(notesLeaving)}
+              onPointerDown={notesLeaving ? undefined : panel.divider.onPointerDown}
+              className={cn(
+                "relative z-10 w-1.5 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40 duration-200 ease-out",
+                "data-[state=open]:animate-in data-[state=open]:fade-in-0",
+                "data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:fill-mode-forwards",
+                "motion-reduce:animate-none",
+              )}
             />
           )}
 
