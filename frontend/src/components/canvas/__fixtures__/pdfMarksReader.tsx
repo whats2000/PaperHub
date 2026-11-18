@@ -10,10 +10,13 @@ export function Reader({
   hasText = true,
   onReading,
   thirdLine,
+  fourthLine,
 }: {
   hasText?: boolean;
   /** A third line of text on the page (the text below the top lines). */
   thirdLine?: string;
+  /** A fourth line, below the third. */
+  fourthLine?: string;
   onReading?: (heading: string | null) => void;
 }) {
   const readerRef = useRef<HTMLDivElement>(null);
@@ -39,6 +42,12 @@ export function Reader({
                     <>
                       <br />
                       <span data-testid="s4">{thirdLine}</span>
+                    </>
+                  )}
+                  {fourthLine && (
+                    <>
+                      <br />
+                      <span data-testid="s5">{fourthLine}</span>
                     </>
                   )}
                 </>

@@ -11,7 +11,7 @@ import {
   type CreateMock,
 } from "@/components/canvas/__fixtures__/pdfMarks";
 import { Reader } from "@/components/canvas/__fixtures__/pdfMarksReader";
-import { selectionToPdfPieces } from "@/lib/marks/pdfGeometry";
+import { piecesFromFragments, selectionToPdfPieces } from "@/lib/marks/pdfGeometry";
 import { listPaperBlocks } from "@/lib/api";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
@@ -85,6 +85,19 @@ describe("selectionToPdfPieces", () => {
     expect([pieces[0]!.before, pieces[0]!.after, pieces[1]!.before, pieces[1]!.after]).toEqual([
       "Robots ", undefined, undefined, " here.",
     ]);
+  });
+
+  it("keeps a line-end hyphen in the quote (the server decides the word) and the lines in raw", () => {
+    const line = (y: number): [number, number, number, number] => [0.05, y, 0.5, y + 0.02];
+    const [p] = piecesFromFragments(
+      [
+        { page: 0, text: "an effec-", rects: [line(0.1)] },
+        { page: 0, text: "tive model", rects: [line(0.13)] },
+      ],
+      {},
+    );
+    expect(p?.quote).toBe("an effec-tive model");
+    expect(p?.raw).toBe("an effec-\ntive model");
   });
 
   it("without Marker blocks a piece has no block and no section", () => {
@@ -237,6 +250,13 @@ describe("marks made in the HTML view", () => {
     expect(Number.parseFloat(box.style.width)).toBeCloseTo(((300 - (30 + (120 * 7) / 13)) / 600) * 100, 1);
     // Math in the quote is a gap; the match runs over two lines.
     expect(document.querySelectorAll('[data-mark="mm"]')).toHaveLength(2);
+  });
+
+  it("are drawn over a compound split at a line end, its hyphen joined on the page", async () => {
+    resetStores([htmlMark("mc", "a self-supervised model")]);
+    render(<Reader thirdLine="We train a self-" fourthLine="supervised model here." />);
+    layOut();
+    await waitFor(() => expect(document.querySelectorAll('[data-mark="mc"]')).toHaveLength(2));
   });
 
   it("are not drawn where the quote is not on the page", async () => {

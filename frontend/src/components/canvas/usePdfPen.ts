@@ -23,7 +23,9 @@ export type Located = NonNullable<LocateResult["match"]>;
 
 /** A text piece as stored (the section rides on the mark). */
 export function storedPiece(p: PdfPiece, at?: Located): MarkPiece {
-  let piece: MarkPiece = { quote: p.quote, page: p.page, rects: p.rects };
+  // `raw` (the lines as laid out) lets the server decide each line-end
+  // hyphen from the paper's words; it makes the stored quote from it.
+  let piece: MarkPiece = { quote: p.quote, raw: p.raw, page: p.page, rects: p.rects };
   if (p.block_id) piece.block_id = p.block_id;
   if (at) {
     piece = {

@@ -380,7 +380,32 @@ export function piecesFromFragments(
     }
     lastBottom = all[3];
   }
-  return out.map(({ all, ...p }) => ({ ...p, quote: tidy(p.raw), rects: lineBoxes(all) }));
+  return out.map(({ all, ...p }) => ({ ...p, quote: provisionalQuote(p.raw), rects: lineBoxes(all) }));
+}
+
+/** A quote to show until the server has it: a word broken across lines
+ * keeps its hyphen, without the line break. Whether it is one word
+ * (`effective`) or a compound (`self-supervised`) only the paper's own
+ * words tell, and the server reads those (`notes/dehyphen.py`). */
+export function provisionalQuote(raw: string): string {
+  return tidy(raw.replace(/(\w)-[ \t]*\n\s*(?=\w)/g, "$1-"));
+}
+
+const HYPHENS = new Set(["-", "‐", "‑"]);
+
+/** `s` without its inner hyphens (one between two word characters), and
+ * for each character kept its index in `s`. Text read off a page cannot
+ * tell a broken word's hyphen from a compound's, so matching ignores both. */
+export function withoutInnerHyphens(s: string): { text: string; at: number[] } {
+  let text = "";
+  const at: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    if (HYPHENS.has(ch) && i > 0 && /\w/.test(s[i - 1]!) && /\w/.test(s[i + 1] ?? "")) continue;
+    text += ch;
+    at.push(i);
+  }
+  return { text, at };
 }
 
 /** The pieces of a selection on the reader's PDF pages. */
@@ -509,21 +534,25 @@ export function findInPage(pt: PageText, quote: string): Frac[] | null {
   const runs = quote
     .normalize("NFKC")
     .split(/\$[^$]*\$/)
-    .map((r) => r.replace(/\s+/g, " ").trim())
+    .map((r) => withoutInnerHyphens(r.replace(/\s+/g, " ").trim()).text)
     .filter((r) => r.length >= 2);
   if (!runs.length) return null;
-  for (let first = pt.text.indexOf(runs[0]!); first >= 0; first = pt.text.indexOf(runs[0]!, first + 1)) {
+  // Both sides without inner hyphens: the page joins a line-end hyphen
+  // (`self-` / `supervised` reads `selfsupervised`), the quote may keep it.
+  const bare = withoutInnerHyphens(pt.text);
+  const text = bare.text;
+  for (let first = text.indexOf(runs[0]!); first >= 0; first = text.indexOf(runs[0]!, first + 1)) {
     let end = first + runs[0]!.length;
     let ok = true;
     for (const run of runs.slice(1)) {
-      const at = pt.text.indexOf(run, end);
+      const at = text.indexOf(run, end);
       if (at < 0 || at - end > MATH_GAP) {
         ok = false;
         break;
       }
       end = at + run.length;
     }
-    if (ok) return rectsOfSpan(pt, first, end);
+    if (ok) return rectsOfSpan(pt, bare.at[first]!, bare.at[end - 1]! + 1);
   }
   return null;
 }
