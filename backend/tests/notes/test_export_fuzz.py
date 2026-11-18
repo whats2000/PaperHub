@@ -66,6 +66,10 @@ def _fragments(port: int, secret: Path) -> list[str]:
         "www.example.com", "mailto:a@b.c", "a@b.com", "https://e.com/x",
         "*em*", "**b**", "_u_", "~~s~~", "^sup^", "|a|b|", "\\[", "!{}[",
         "<{}", "&amp;", "&#x21;[", "%21%5B",
+        # Click-only linkify paths: a citation that renders as nothing,
+        # and a combining mark or joiner right before a domain's dot.
+        "see e.[chunk:99999]com/x", "see e.[note:abc]com/x",
+        "x\u0301.com/x", "e\u200d.com/x",
     ]
 
 

@@ -375,3 +375,26 @@ def test_no_bare_link_across_or_within_runs(runs: list[str]) -> None:
     html = MarkdownIt("commonmark", {"linkify": True}).enable("linkify").render(md)
     assert "<a " not in html, (md, html)
     assert "".join(runs) in html, html  # renders as typed
+
+
+@pytest.mark.parametrize("content", [
+    # A text run, then a mention whose label carries the rest of a domain.
+    [_txt("see e."), {"type": "mention", "props": {"label": "com/x"}}],
+    # A citation that resolves to nothing joins the halves around it.
+    [_txt("see e.[chunk:99999]com/x")],
+    [_txt("see e.[note:abc]com/x")],
+    # A combining mark or a zero-width joiner right before the dot.
+    [_txt("see x\u0301.com/x")],
+    [_txt("see e\u200d.com/x")],
+], ids=["mention", "dropped-chunk", "dropped-note", "combining-mark", "zwj"])
+def test_no_bare_link_through_mentions_dropped_citations_or_marks(
+        content: list[dict[str, Any]]) -> None:
+    from markdown_it import MarkdownIt
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=content)], {})
+    html = MarkdownIt("commonmark", {"linkify": True}).enable("linkify").render(md)
+    assert "<a " not in html, (md, html)
+
+
+def test_download_name_drops_direction_marks() -> None:
+    name = note_export.display_name("a\u200fb.exe\u200e x\u061c")
+    assert not set(name) & {"\u200e", "\u200f", "\u061c"}, repr(name)

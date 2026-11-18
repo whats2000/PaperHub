@@ -217,10 +217,14 @@ _URL_SAFE = ":/?#@&=+,;%~-._*'"
 # What a viewer turns into a link on its own: a scheme's ``:``
 # (``http://``, ``mailto:``, GFM), the first ``/`` of ``//`` (linkify reads
 # ``//host``) and a domain's ``.``: after ``w``/``W`` (``www.``) or between
-# a letter or digit and a letter (``e.com``; linkify viewers such as VS
-# Code's preview). Prose keeps its ``. `` and ``3.14`` as written. Where a
-# run ends, ``_join_runs`` checks the same rules across the boundary.
-_AUTOLINK = re.compile(r":|/(?=/)|(?<=[wW])[.]|(?<=[^\W_])[.](?=[^\W\d_])")
+# a host character and a letter (``e.com``; linkify viewers such as VS
+# Code's preview). A host character is anything but a space or ASCII
+# punctuation, so a combining mark or a joiner before the dot counts.
+# Prose keeps its ``. `` and ``3.14`` as written. Where a run ends,
+# ``_join_runs`` checks the same rules across the boundary.
+_HOST = r"[^\s!-/:-@\[-`{-~]"
+_HOST_CHAR = re.compile(_HOST)
+_AUTOLINK = re.compile(rf":|/(?=/)|(?<=[wW])[.]|(?<={_HOST})[.](?=[^\W\d_])")
 
 
 def _join_runs(prev: str, piece: str) -> tuple[str, str]:
@@ -229,14 +233,26 @@ def _join_runs(prev: str, piece: str) -> tuple[str, str]:
     run alone could see the domain or the ``//``."""
     if not prev or not piece:
         return prev, piece
-    if (prev.endswith(".") and not prev.endswith("\\.") and prev[-2:-1].isalnum()
-            and piece[0].isalpha()):
+    if (prev.endswith(".") and not prev.endswith("\\.")
+            and _HOST_CHAR.fullmatch(prev[-2:-1]) and piece[0].isalpha()):
         prev = prev[:-1] + "\\."
-    elif piece[0] == "." and prev[-1].isalnum() and piece[1:2].isalpha():
+    elif (piece[0] == "." and _HOST_CHAR.fullmatch(prev[-1])
+            and piece[1:2].isalpha()):
         piece = "\\" + piece
     elif prev.endswith("/") and not prev.endswith("\\/") and piece[0] == "/":
         prev = prev[:-1] + "\\/"
     return prev, piece
+
+
+def _append(out: list[str], piece: str) -> None:
+    """Append ``piece`` to the escaped runs in ``out`` with the
+    ``_AUTOLINK`` rules applied across the join. An empty piece is skipped,
+    so the runs on either side of it still meet."""
+    if not piece:
+        return
+    if out:
+        out[-1], piece = _join_runs(out[-1], piece)
+    out.append(piece)
 
 
 def _escape(text: str) -> str:
@@ -404,14 +420,16 @@ class _Writer:
         return f"{lead}[{'; '.join(kept)}]" if kept else ""
 
     def text(self, raw: str) -> str:
-        """Escaped text with its citations as ``[@key]``."""
+        """Escaped text with its citations as ``[@key]``. The pieces are
+        joined through ``_append``, so a citation that renders as nothing
+        cannot glue ``e.`` and ``com`` into a bare domain."""
         out: list[str] = []
         pos = 0
         for m in _CITATION.finditer(raw):
-            out.append(_escape(raw[pos:m.start()]))
-            out.append(self._citation(m))
+            _append(out, _escape(raw[pos:m.start()]))
+            _append(out, self._citation(m))
             pos = m.end()
-        out.append(_escape(raw[pos:]))
+        _append(out, _escape(raw[pos:]))
         return "".join(out)
 
     def inline(self, content: Any) -> str:
@@ -421,18 +439,15 @@ class _Writer:
             if kind == "link":
                 href = quote(str(run.get("href") or ""), safe=_URL_SAFE)
                 label = self.inline(run.get("content")) or _escape(href)
-                out.append(f"[{label}](<{href}>)")
+                _append(out, f"[{label}](<{href}>)")
             elif kind == "mention":
                 props = run.get("props") or {}
                 label = _escape(str(props.get("label") or ""))
                 pid = props.get("paperId")
                 key = self.cite(pid if isinstance(pid, int) else None)
-                out.append(f"{label} [{key}]" if key else label)
+                _append(out, f"{label} [{key}]" if key else label)
             elif isinstance(run.get("text"), str):
-                piece = self._styled(run)
-                if out:
-                    out[-1], piece = _join_runs(out[-1], piece)
-                out.append(piece)
+                _append(out, self._styled(run))
         return "".join(out)
 
     def _styled(self, run: dict[str, Any]) -> str:
@@ -754,9 +769,11 @@ async def export_sources(
     return papers, chunk_papers, mark_papers
 
 
-# Bidi override and isolate controls: in a file name they only reorder
-# how the name reads, so names drop them (U+202A-U+202E, U+2066-U+2069).
-_BIDI = re.compile(f"[{chr(0x202A)}-{chr(0x202E)}{chr(0x2066)}-{chr(0x2069)}]")
+# Bidi marks, overrides and isolates: in a file name they only reorder
+# how the name reads, so names drop them (U+200E, U+200F, U+061C,
+# U+202A-U+202E, U+2066-U+2069).
+_BIDI = re.compile(f"[{chr(0x200E)}{chr(0x200F)}{chr(0x061C)}"
+                   f"{chr(0x202A)}-{chr(0x202E)}{chr(0x2066)}-{chr(0x2069)}]")
 
 
 def slug(title: str) -> str:
