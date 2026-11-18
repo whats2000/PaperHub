@@ -587,6 +587,8 @@ CREATE INDEX IF NOT EXISTS idx_note_suggestions_note_status
 
 -- Full-text index over live note_blocks.text (external content on the
 -- implicit rowid; soft-deleted blocks are kept out of the index).
+-- note_blocks has a TEXT primary key, so its rowid is implicit: a VACUUM
+-- may renumber it and desync this index (rebuild it after any VACUUM).
 CREATE VIRTUAL TABLE IF NOT EXISTS note_blocks_fts USING fts5(
     text, content='note_blocks', content_rowid='rowid'
 );
