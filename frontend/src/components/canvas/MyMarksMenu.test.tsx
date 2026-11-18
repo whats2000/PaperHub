@@ -266,6 +266,23 @@ describe("My marks, fix round 1", () => {
     // The trigger still counts every mark on the paper.
     expect(screen.getByTestId("my-marks-count")).toHaveTextContent("2");
   });
+
+  it("lists by colour (no colour included) without changing what the paper shows", async () => {
+    const menu = await openMenu();
+    const group = within(menu).getByRole("group", { name: "Colours to list" });
+    fireEvent.click(within(group).getByRole("button", { name: "Key result" }));
+    fireEvent.click(within(group).getByRole("button", { name: "No colour" }));
+    expect(within(group).getByRole("button", { name: "No colour" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(group).getByRole("button", { name: "Method" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(menu).getByTestId("my-mark-m3")).toBeInTheDocument();
+    expect(within(menu).queryByTestId("my-mark-m1")).toBeNull();
+    expect(within(menu).queryByTestId("my-mark-m2")).toBeNull();
+    expect(menu).toHaveTextContent("1 of 3");
+    // The paper's marks are untouched: no colour hidden, nothing saved.
+    expect(patchMarkColor).not.toHaveBeenCalled();
+    expect(useMarksStore.getState().colors.every((c) => c.visible)).toBe(true);
+    expect(within(menu).getByRole("checkbox", { name: "Show Key result" })).toBeChecked();
+  });
 });
 
 describe("My marks, fix round 2", () => {

@@ -3,7 +3,7 @@
  * holds, whether its marks show on the paper; recolour, reorder, add a
  * labelled colour, delete a custom one no mark uses — and the paper's marks grouped by section in reading
  * order (each with its kind, a snippet and the note it is in), narrowed by
- * kind (the list only; the colours' Show is what changes the paper); a click
+ * kind and colour (the list only; the colours' Show is what changes the paper); a click
  * on one scrolls the reader to it and flashes it (in the view it was made
  * in). Opens as a dropdown that grows from its button. */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -91,7 +91,12 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
   }, [open, paperId]);
   // The kinds listed (the list only).
   const [kinds, setKinds] = useState<ReadonlySet<MarkKind>>(() => new Set(KINDS));
-  const listed = useMemo(() => shownMarks.filter((m) => kinds.has(kindAndStyle(m).kind)), [shownMarks, kinds]);
+  // The colours left out of the list ("" = no colour); a new colour is listed.
+  const [unlisted, setUnlisted] = useState<ReadonlySet<string>>(() => new Set());
+  const listed = useMemo(
+    () => shownMarks.filter((m) => kinds.has(kindAndStyle(m).kind) && !unlisted.has(m.color ?? "")),
+    [shownMarks, kinds, unlisted],
+  );
   const sections = useMemo(() => marksBySection(listed, chunks), [listed, chunks]);
 
   return (
@@ -175,11 +180,48 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
             </span>
           )}
         </div>
+        <div
+          role="group"
+          aria-label={t("myMarks.colorsToList", "Colours to list")}
+          className="mt-1 flex flex-wrap items-center gap-1 px-0.5"
+        >
+          {[...colors.map((c) => ({ key: c.color, name: colorLabel(c.color, c.name, t) })), { key: "", name: t("myMarks.noColor", "No colour") }].map(
+            ({ key, name }) => {
+              const on = !unlisted.has(key);
+              return (
+                <button
+                  key={key || "none"}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() =>
+                    setUnlisted((cur) => {
+                      const next = new Set(cur);
+                      if (on) next.add(key);
+                      else next.delete(key);
+                      return next;
+                    })
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-px text-[11px] transition-colors duration-150 motion-reduce:transition-none",
+                    on ? "bg-foreground/10 text-foreground" : "text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn("size-2.5 shrink-0 rounded-full", !key && "border border-muted-foreground")}
+                    style={key ? { background: `var(--hl-${key})` } : undefined}
+                  />
+                  {name}
+                </button>
+              );
+            },
+          )}
+        </div>
         <div className="mt-1.5 min-h-0 flex-1 overflow-y-auto border-t border-border pt-1.5">
           {sections.length === 0 ? (
             <p className="px-1 py-1 text-muted-foreground">
               {shownMarks.length
-                ? t("myMarks.noneOfKind", "No marks of these kinds.")
+                ? t("myMarks.noneOfKind", "No marks of these kinds and colours.")
                 : t("myMarks.empty", "No marks on this paper yet.")}
             </p>
           ) : (

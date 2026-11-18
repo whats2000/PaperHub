@@ -396,13 +396,15 @@
       "text": "文字"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "没有这些类型的标记。",
+    "noneOfKind": "没有这些类型和颜色的标记。",
     "recolour": "更改 {{name}} 的颜色",
     "moveUp": "将 {{name}} 上移",
     "moveDown": "将 {{name}} 下移",
     "deleteColor": "删除 {{name}}",
     "inUse": "有标记使用这个颜色",
-    "deleteColorFailed": "无法删除颜色：仍有标记使用它。"
+    "deleteColorFailed": "无法删除颜色：仍有标记使用它。",
+    "colorsToList": "要列出的颜色",
+    "noColor": "无颜色"
   },
   "colors": {
     "pick": "颜色",

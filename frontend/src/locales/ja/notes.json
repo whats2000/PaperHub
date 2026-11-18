@@ -396,13 +396,15 @@
       "text": "テキスト"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "この種類のマークはありません。",
+    "noneOfKind": "この種類と色のマークはありません。",
     "recolour": "{{name}} の色を変更",
     "moveUp": "{{name}} を上へ",
     "moveDown": "{{name}} を下へ",
     "deleteColor": "{{name}} を削除",
     "inUse": "この色を使うマークがあります",
-    "deleteColorFailed": "色を削除できませんでした：まだマークが使っています。"
+    "deleteColorFailed": "色を削除できませんでした：まだマークが使っています。",
+    "colorsToList": "一覧に出す色",
+    "noColor": "色なし"
   },
   "colors": {
     "pick": "色",

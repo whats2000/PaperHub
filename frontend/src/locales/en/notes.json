@@ -396,13 +396,15 @@
       "text": "Text"
     },
     "listed": "{{shown}} of {{count}}",
-    "noneOfKind": "No marks of these kinds.",
+    "noneOfKind": "No marks of these kinds and colours.",
     "recolour": "Change colour of {{name}}",
     "moveUp": "Move {{name}} up",
     "moveDown": "Move {{name}} down",
     "deleteColor": "Delete {{name}}",
     "inUse": "Marks use this colour",
-    "deleteColorFailed": "Couldn't delete the colour: marks still use it."
+    "deleteColorFailed": "Couldn't delete the colour: marks still use it.",
+    "colorsToList": "Colours to list",
+    "noColor": "No colour"
   },
   "colors": {
     "pick": "Colour",

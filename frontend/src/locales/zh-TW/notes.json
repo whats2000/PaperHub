@@ -396,13 +396,15 @@
       "text": "文字"
     },
     "listed": "{{shown}} / {{count}}",
-    "noneOfKind": "沒有這些類型的標記。",
+    "noneOfKind": "沒有這些類型與顏色的標記。",
     "recolour": "變更 {{name}} 的顏色",
     "moveUp": "將 {{name}} 上移",
     "moveDown": "將 {{name}} 下移",
     "deleteColor": "刪除 {{name}}",
     "inUse": "有標記使用這個顏色",
-    "deleteColorFailed": "無法刪除顏色：仍有標記使用它。"
+    "deleteColorFailed": "無法刪除顏色：仍有標記使用它。",
+    "colorsToList": "要列出的顏色",
+    "noColor": "無顏色"
   },
   "colors": {
     "pick": "顏色",
