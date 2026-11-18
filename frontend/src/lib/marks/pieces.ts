@@ -116,7 +116,8 @@ export function joinedQuote(pieces: readonly MarkPiece[]): string {
   readingOrder(pieces.filter(isLive)).forEach((p, i) => {
     const q = String(p.quote ?? "").trim();
     if (!q) return;
-    const stroke = typeof p.stroke === "number" ? p.stroke : `own:${i}`;
+    // Only a whole number names a stroke (as the server reads it).
+    const stroke = Number.isInteger(p.stroke) ? p.stroke : `own:${i}`;
     if (out) out += stroke === prev ? "\n" : " … ";
     out += q;
     prev = stroke;

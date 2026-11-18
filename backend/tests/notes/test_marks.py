@@ -337,3 +337,15 @@ async def test_block_undo_of_an_erase_delete_revives_a_piece(conn):
     await restore_blocks(conn, saved.note_id, [m["block_id"]], actor="user")
     [back] = await list_marks(conn, 1)
     assert [bool(p.get("erased")) for p in back["pieces"]] == [True, False]
+
+
+def test_joined_quote_matches_the_frontend_on_the_shared_cases():
+    """``frontend/src/lib/__fixtures__/joined_quote/cases.json`` is read by
+    both sides (``pieces.test.ts`` too): the same pieces, the same quote."""
+    from pathlib import Path
+
+    from paperhub.notes.marks import joined_quote
+    cases = json.loads((Path(__file__).resolve().parents[3] / "frontend" / "src" / "lib"
+                        / "__fixtures__" / "joined_quote" / "cases.json").read_text(encoding="utf-8"))
+    for case in cases:
+        assert joined_quote(case["pieces"]) == case["quote"], case["name"]

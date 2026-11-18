@@ -164,7 +164,12 @@ def joined_quote(pieces: list[dict[str, Any]]) -> str:
         q = str(p.get("quote") or "").strip()
         if not q:
             continue
-        stroke = p.get("stroke", ("own", i))
+        s = p.get("stroke")
+        # Only a whole number names a stroke (as the frontend reads it);
+        # null, a string or a bool make the piece a stroke of its own.
+        whole = (isinstance(s, (int, float)) and not isinstance(s, bool)
+                 and float(s).is_integer())
+        stroke: object = s if whole else ("own", i)
         if out:
             out += "\n" if stroke == prev else " … "
         out += q

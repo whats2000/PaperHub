@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { htmlPlace, joinedQuote, joinTarget, livePieceIndexes, pdfPlace, readingOrder, type PenMark } from "@/lib/marks/pieces";
 import type { MarkPiece } from "@/types/notes";
 
+import cases from "../__fixtures__/joined_quote/cases.json";
+
 const session: PenMark[] = [
   { id: "mk_a", color: "green", places: ["h:1"] },
   { id: "mk_b", color: "blue", places: ["h:1"] },
@@ -95,3 +97,11 @@ describe("what joins the quote", () => {
   });
 });
 
+
+describe("joinedQuote on the cases shared with the server", () => {
+  // `__fixtures__/joined_quote/cases.json` is read by backend
+  // tests/notes/test_marks.py too: the same pieces, the same quote.
+  it.each(cases)("$name", ({ pieces, quote }) => {
+    expect(joinedQuote(pieces as MarkPiece[])).toBe(quote);
+  });
+});

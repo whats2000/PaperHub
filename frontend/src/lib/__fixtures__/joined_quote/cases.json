@@ -1,0 +1,42 @@
+[
+  {
+    "name": "one stroke across paragraphs reads as a paragraph break",
+    "pieces": [{ "quote": "a", "stroke": 0, "chunk_start": 1 }, { "quote": "b", "stroke": 0, "chunk_start": 2 }],
+    "quote": "a\nb"
+  },
+  {
+    "name": "strokes joined later read as skipped words",
+    "pieces": [{ "quote": "a", "stroke": 0, "chunk_start": 1 }, { "quote": "b", "stroke": 1, "chunk_start": 2 }],
+    "quote": "a … b"
+  },
+  {
+    "name": "a piece without a stroke is a stroke of its own",
+    "pieces": [{ "quote": "a", "chunk_start": 1 }, { "quote": "b", "chunk_start": 2 }],
+    "quote": "a … b"
+  },
+  {
+    "name": "an explicit null stroke is no stroke",
+    "pieces": [{ "quote": "a", "stroke": null, "chunk_start": 1 }, { "quote": "b", "stroke": null, "chunk_start": 2 }],
+    "quote": "a … b"
+  },
+  {
+    "name": "a string stroke is no stroke",
+    "pieces": [{ "quote": "a", "stroke": "x", "chunk_start": 1 }, { "quote": "b", "stroke": "x", "chunk_start": 2 }],
+    "quote": "a … b"
+  },
+  {
+    "name": "a boolean stroke is no stroke",
+    "pieces": [{ "quote": "a", "stroke": true, "chunk_start": 1 }, { "quote": "b", "stroke": true, "chunk_start": 2 }],
+    "quote": "a … b"
+  },
+  {
+    "name": "pieces read in reading order, not stroke order",
+    "pieces": [{ "quote": "late", "stroke": 0, "chunk_start": 9 }, { "quote": "early", "stroke": 1, "chunk_start": 3 }],
+    "quote": "early … late"
+  },
+  {
+    "name": "empty quotes are skipped",
+    "pieces": [{ "quote": " ", "stroke": 0, "chunk_start": 1 }, { "quote": "b", "stroke": 0, "chunk_start": 2 }],
+    "quote": "b"
+  }
+]
