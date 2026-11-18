@@ -56,7 +56,12 @@ const server = setupServer(
   ),
   http.get("*", () => HttpResponse.json([])),
 );
-beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeAll(async () => {
+  server.listen({ onUnhandledRequest: "bypass" });
+  // The Notes pane is a lazy chunk: load it once here, so the first test
+  // does not race its cold import (seconds under load) against findBy.
+  await import("@/components/notes/NotesPane");
+});
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
@@ -245,6 +250,31 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(notesButton());
     expect(useNotesPaneStore.getState().open).toBe(true);
     expect(screen.getByRole("button", { name: "Memory" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("Memory fades out over the reader instead of vanishing", async () => {
+    render(<ChatPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Memory" }));
+    expect(screen.getByTestId("memory-overlay")).toHaveAttribute("data-state", "open");
+    await userEvent.click(screen.getByRole("button", { name: "Memory" }));
+    // Still there for its exit, fading out and out of reach ...
+    const overlay = screen.getByTestId("memory-overlay");
+    expect(overlay).toHaveAttribute("data-state", "closed");
+    expect(overlay).toHaveAttribute("inert");
+    // ... then gone.
+    await waitFor(() => expect(screen.queryByTestId("memory-overlay")).toBeNull());
+  });
+
+  it("the side-by-side divider fades out with Notes instead of vanishing first", async () => {
+    useCanvasStore.setState({ open: true, width: 900, activePaperId: 7 });
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const divider = screen.getByRole("separator", { name: "Resize Reader and Notes" });
+    expect(divider).toHaveAttribute("data-state", "open");
+    act(() => useNotesPaneStore.getState().close());
+    expect(divider).toBeInTheDocument();
+    expect(divider).toHaveAttribute("data-state", "closed");
+    await waitFor(() => expect(divider).not.toBeInTheDocument());
   });
 
   it("Slides and Notes share the panel", async () => {
