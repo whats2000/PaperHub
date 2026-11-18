@@ -35,7 +35,9 @@ class ColorPatch(BaseModel):
 @asynccontextmanager
 async def _db() -> AsyncIterator[aiosqlite.Connection]:
     """A connection whose store errors map to HTTP statuses: unknown id 404,
-    invalid input 422, a rejected block op 409; anything else is a 500."""
+    invalid input 422, a mark not in the state the request expects (a
+    rejected block op, a mark deleted or changed elsewhere) 409; anything
+    else is a 500."""
     async with open_db(load_settings().db_path) as conn:
         try:
             yield conn

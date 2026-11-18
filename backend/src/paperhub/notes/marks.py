@@ -456,7 +456,10 @@ async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
         m = await _get(conn, mark_id)
         _check_index(m, index)
         if m["deleted_at"] is not None:
-            raise MarkInputError("cannot erase from a deleted mark")
+            # Deleted elsewhere (its block in the note): a stale view.
+            raise MarkConflict(f"mark {mark_id} is deleted")
+        if m["pieces"][index].get("erased"):
+            return m  # erased already: nothing to do
         m["pieces"][index] = erased(m["pieces"][index], m["pieces"])
         await save_pieces(conn, m)
         if live_pieces(m["pieces"]):
@@ -495,7 +498,9 @@ async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
         live = [i for i, p in enumerate(m["pieces"])
                 if not p.get("erased") and not p.get("removed")]
         if m["deleted_at"] is not None or len(live) < 2:
-            raise MarkInputError("only a live mark with two pieces can split")
+            # Split is offered for two live pieces: anything else is the
+            # mark changed elsewhere (a stale view), not bad input.
+            raise MarkConflict("only a live mark with two pieces can split")
         piece = m["pieces"][live[-1]]
         m["pieces"][live[-1]] = {**piece, "removed": True}
         await save_pieces(conn, m)

@@ -240,6 +240,49 @@ async def test_restore_piece_does_not_revive_user_deleted_mark(conn):
     assert blocks[1].text == "one\ntwo"  # one save: a paragraph break
 
 
+async def _sets(conn):
+    async with conn.execute("SELECT COUNT(*) FROM note_change_sets") as cur:
+        return (await cur.fetchone())[0]
+
+
+async def test_erasing_an_erased_piece_writes_nothing(conn):
+    """A second erase of the same piece (a stale view) changes nothing."""
+    await _paper(conn)
+    m, _ = await create_mark(conn, _in([_piece("a"), _piece("b", 5)]))
+    first = await erase_piece(conn, m["id"], 0)
+    sets = await _sets(conn)
+    again = await erase_piece(conn, m["id"], 0)
+    assert again["pieces"] == first["pieces"]
+    assert await _sets(conn) == sets
+
+
+async def test_erase_or_split_of_a_mark_deleted_elsewhere_is_a_conflict(conn):
+    """The mark is gone (its block deleted in the note): a stale erase or
+    split is a conflict (409: resync), not invalid input."""
+    from paperhub.notes.marks import MarkConflict
+
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("a"), _piece("b", 5)]))
+    note = await get_note(conn, saved.note_id)
+    await apply_ops(conn, note.id, base_revision=note.revision, actor="user",
+                    ops=[Op(op="delete", block_id=m["block_id"])])
+    with pytest.raises(MarkConflict):
+        await erase_piece(conn, m["id"], 0)
+    with pytest.raises(MarkConflict):
+        await split_last_piece(conn, m["id"])
+
+
+async def test_split_of_a_one_piece_mark_is_a_conflict(conn):
+    """Split is offered for two live pieces; one left (erased in another
+    view) is the mark's state, not bad input."""
+    from paperhub.notes.marks import MarkConflict
+
+    await _paper(conn)
+    m, _ = await create_mark(conn, _in([_piece("a")]))
+    with pytest.raises(MarkConflict):
+        await split_last_piece(conn, m["id"])
+
+
 async def test_split_keeps_piece_indexes_stable(conn):
     await _paper(conn)
     m, _ = await create_mark(conn, _in(

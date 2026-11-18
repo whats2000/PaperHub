@@ -95,7 +95,8 @@ async def test_pieces_erase_restore_split(client: AsyncClient) -> None:
     # The original as it now is, so the reader needn't guess what moved.
     orig = s.json()["original"]
     assert orig["id"] == mid and orig["pieces"][1]["removed"] is True
-    assert (await client.post(f"/marks/{mid}/split")).status_code == 422
+    # One live piece left: the mark's state (a stale view), a conflict.
+    assert (await client.post(f"/marks/{mid}/split")).status_code == 409
 
 
 async def test_colors_patch(client: AsyncClient) -> None:
