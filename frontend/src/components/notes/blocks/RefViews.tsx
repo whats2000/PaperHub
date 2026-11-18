@@ -7,6 +7,7 @@ import "katex/dist/katex.min.css";
 
 import { renderDisplayMath } from "@/lib/displayMath";
 import { joinedQuote } from "@/lib/marks/pieces";
+import { quoteToKatexHtml } from "@/lib/quoteMath";
 
 import { CropImage } from "./CropImage";
 import { markPieces, type MarkProps } from "./markProps";
@@ -23,6 +24,7 @@ export function PaperQuoteView({ id, props }: ViewProps) {
   // break within one stroke.
   const pieces = markPieces(props);
   const quote = pieces.length > 1 ? joinedQuote(pieces) || props.quote : props.quote;
+  const quoteHtml = useMemo(() => quoteToKatexHtml(quote), [quote]);
   return (
     <PaperRefFrame
       blockId={id}
@@ -30,10 +32,13 @@ export function PaperQuoteView({ id, props }: ViewProps) {
       icon={<TextQuote className="size-3 shrink-0" aria-hidden />}
       label={t("notes:ref.fromPaper", "From the paper")}
     >
-      {/* A stroke across paragraphs keeps its paragraph breaks. */}
-      <blockquote className="m-0 whitespace-pre-line font-paper text-[14px] leading-normal text-muted-foreground">
-        {quote}
-      </blockquote>
+      {/* A stroke across paragraphs keeps its paragraph breaks; its $…$
+          math (from the HTML view's reading text) is drawn, not shown raw.
+          quoteToKatexHtml escapes the text. */}
+      <blockquote
+        className="m-0 whitespace-pre-line font-paper text-[14px] leading-normal text-muted-foreground [&_.katex-display]:my-1"
+        dangerouslySetInnerHTML={{ __html: quoteHtml }}
+      />
     </PaperRefFrame>
   );
 }

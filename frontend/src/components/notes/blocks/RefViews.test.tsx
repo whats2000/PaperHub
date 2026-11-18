@@ -116,6 +116,26 @@ describe("a highlight of one selection across paragraphs", () => {
   });
 });
 
+describe("a quote with math, marked in the HTML reader", () => {
+  it("draws its $…$ formulas, not the raw LaTeX", () => {
+    const { container } = inNote(
+      <PaperQuoteView
+        id="b3"
+        props={props({
+          kind: "text",
+          style: "highlight",
+          quote: String.raw`optimizing over $\Theta$: $\begin{aligned} \max_{\Theta} x \label{eq:ft_add} \end{aligned}$`,
+        })}
+      />,
+    );
+    const quote = container.querySelector("blockquote")!;
+    expect(quote.querySelectorAll(".katex")).toHaveLength(2);
+    expect(quote.querySelector(".katex-display")).not.toBeNull();
+    expect(quote.textContent).not.toContain("$");
+    expect(quote.textContent).not.toContain("eq:ft_add");
+  });
+});
+
 
 describe("a quote marked on a translation", () => {
   const tr = {
