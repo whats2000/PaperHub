@@ -84,3 +84,20 @@ async def test_pdf_only_paper_uses_its_chunks(conn, tmp_path: Path) -> None:
     assert words["effective"] == 1 and words["self-supervised"] == 1
     m, _ = await create_mark(conn, _mark(2, "an effec-\ntive and self-\nsupervised"))
     assert m["pieces"][0]["quote"] == "an effective and self-supervised"
+
+
+async def test_word_cache_is_bounded_and_evicts_the_least_recently_used(conn) -> None:
+    dh.clear_cache()
+    for i in range(1, 10):
+        await conn.execute(
+            "INSERT INTO paper_content (id, content_key, kind, sha256, title, "
+            "sections_json, source_path, source_dir_path, html_path) "
+            "VALUES (?, ?, 'pdf_upload', ?, 't', '[]', 'p.pdf', 'd', '')",
+            (100 + i, f"pdf:{100 + i}", f"sha{i}"))
+    await conn.commit()
+    for i in range(1, 9):
+        await paper_words(conn, 100 + i)
+    await paper_words(conn, 101)  # touched again: now the newest
+    await paper_words(conn, 109)  # a ninth paper evicts 102, not 101
+    assert len(dh._cache) == 8
+    assert 101 in dh._cache and 102 not in dh._cache and 109 in dh._cache

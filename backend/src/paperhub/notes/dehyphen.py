@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
-from collections import Counter
+from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,8 @@ _EOL_HYPHEN = re.compile(r"(\w+)-[ \t]*\n\s*(\w+)")
 _WORD = re.compile(r"\S+")
 _EDGE = re.compile(r"^\W+|\W+$")
 
-_cache: dict[int, tuple[tuple[object, ...], Counter[str]]] = {}
+_CACHE_MAX = 8  # like locate's text-index cache
+_cache: OrderedDict[int, tuple[tuple[object, ...], Counter[str]]] = OrderedDict()
 
 
 def clear_cache() -> None:
@@ -79,6 +80,7 @@ async def paper_words(conn: aiosqlite.Connection, pcid: int) -> Counter[str]:
         key = ("chunks", *(n or (0, 0)))
     hit = _cache.get(pcid)
     if hit is not None and hit[0] == key:
+        _cache.move_to_end(pcid)
         return hit[1]
     if key[0] == "html":
         assert html is not None and mtime is not None
@@ -92,6 +94,9 @@ async def paper_words(conn: aiosqlite.Connection, pcid: int) -> Counter[str]:
             texts = [str(r[0] or "") for r in await cur.fetchall()]
         words = await asyncio.to_thread(count_words, "\n".join(texts))
     _cache[pcid] = (key, words)
+    _cache.move_to_end(pcid)
+    while len(_cache) > _CACHE_MAX:
+        _cache.popitem(last=False)
     return words
 
 
