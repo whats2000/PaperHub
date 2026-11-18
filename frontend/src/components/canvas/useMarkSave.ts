@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { joinTarget } from "@/lib/marks/pieces";
 import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
-import { markHint, queueMarkOp, useMarksStore } from "@/store/marks";
+import { groupMarkActions, markHint, queueMarkOp, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece, MarkStyle } from "@/types/notes";
@@ -65,12 +65,16 @@ const progressKey = (
   groups: readonly MarkGroup[],
 ) => JSON.stringify([kind, style, color, view, groups.map(groupKey)]);
 
-type Create = (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean }) => Promise<MarkCreated>;
+type Create = (body: MarkIn, opts?: { silent?: boolean }) => Promise<MarkCreated>;
 
 /** Saves each group not yet in `done` (one mark per section), in order;
  * throws at the first failure, keeping what was saved. `each` sees every
- * mark as it is saved. */
-async function saveMissing(
+ * mark as it is saved. One user action: one undo (`groupMarkActions`). */
+function saveMissing(...args: Parameters<typeof saveEach>): Promise<MarkCreated[]> {
+  return groupMarkActions(() => saveEach(...args));
+}
+
+async function saveEach(
   create: Create,
   body: Omit<MarkIn, "pieces" | "section_key">,
   groups: readonly MarkGroup[],
@@ -81,7 +85,7 @@ async function saveMissing(
     const k = groupKey(group);
     if (done.has(k)) continue;
     const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section, ...translationOf(group) };
-    const res = opts.save ? await opts.save(full) : await create(full, { quiet: true, silent: opts.silent });
+    const res = opts.save ? await opts.save(full) : await create(full, { silent: opts.silent });
     done.set(k, res);
     opts.each?.(res, i);
   }
@@ -318,7 +322,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         let joinedNow: string | null = null;
         // What this run itself saved (none: it was all there already).
         const savedNow: MarkCreated[] = [];
-        const opts = { quiet: true, silent: true, signal };
+        const opts = { silent: true, signal };
         try {
           await saveMissing(
             create,

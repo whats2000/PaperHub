@@ -62,7 +62,10 @@ export type MarkAction =
   /** A highlighter stroke joined to an existing mark: its new pieces. */
   | { kind: "join"; paperId: number; markId: string; indexes: number[] }
   /** One piece erased (`deleted`: that left the mark empty, so it went). */
-  | { kind: "erase"; paperId: number; mark: Mark; index: number; deleted: boolean };
+  | { kind: "erase"; paperId: number; mark: Mark; index: number; deleted: boolean }
+  /** One user action that made several (a stroke or a selection across
+   * sections): undone and redone together. */
+  | { kind: "group"; actions: MarkAction[] };
 
 /** The history keeps this many actions (the oldest go first). */
 const HISTORY_MAX = 100;
@@ -76,8 +79,30 @@ let redoStack: MarkAction[] = [];
 /** Applies an action's inverse (`undo`) or the action again (set by the store). */
 let applyHandler: ((action: MarkAction, undo: boolean) => void) | null = null;
 
+/** The actions of the user action in progress (`groupMarkActions`). */
+let openGroup: MarkAction[] | null = null;
+
+/** Runs one user action that may make several mark actions (a stroke
+ * across sections): they become one history entry, one Ctrl+Z. */
+export async function groupMarkActions<T>(run: () => Promise<T>): Promise<T> {
+  if (openGroup) return run();
+  const group: MarkAction[] = [];
+  openGroup = group;
+  try {
+    return await run();
+  } finally {
+    openGroup = null;
+    if (group.length === 1) record(group[0]!);
+    else if (group.length > 1) record({ kind: "group", actions: group });
+  }
+}
+
 /** A new action: undoable, and what was undone can no longer be redone. */
 function record(action: MarkAction): void {
+  if (openGroup) {
+    openGroup.push(action);
+    return;
+  }
   undoStack.push(action);
   if (undoStack.length > HISTORY_MAX) undoStack.splice(0, undoStack.length - HISTORY_MAX);
   redoStack = [];
@@ -114,6 +139,7 @@ function announceDeleted(action: MarkAction): void {
 
 /** Test isolation: forget the undo / redo history. */
 export function resetMarkHistory(): void {
+  openGroup = null;
   undoStack = [];
   redoStack = [];
 }
@@ -195,9 +221,9 @@ interface MarksState {
    * yet. Throws when they can't be had. */
   ensureChunks: (paperId: number) => Promise<ChunkMap>;
   /** Saves a mark (its block lands in the paper's note), with no toast:
-   * the card or the pane opens at it (`quiet` is kept for callers and does
-   * nothing more); unless `silent`, a failure is said in a toast. */
-  create: (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean; signal?: AbortSignal }) => Promise<MarkCreated>;
+   * the card or the pane opens at it; unless `silent`, a failure is said
+   * in a toast. */
+  create: (body: MarkIn, opts?: { silent?: boolean; signal?: AbortSignal }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
   /** Erases one piece of a mark and keeps the rest, with Undo (then Erase
@@ -487,6 +513,10 @@ export const useMarksStore = create<MarksState>()(
       /** An action's inverse (`undo`), or the action again. */
       const applyAction = (action: MarkAction, undo: boolean) => {
         switch (action.kind) {
+          case "group":
+            // Undo the newest first; redo in the order made.
+            for (const a of undo ? [...action.actions].reverse() : action.actions) applyAction(a, undo);
+            return;
           case "delete":
             for (const [pid, m] of action.marks) {
               if (undo) restoreStep(pid, m);

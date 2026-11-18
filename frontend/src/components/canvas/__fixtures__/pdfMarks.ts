@@ -60,7 +60,7 @@ function created(body: MarkIn): MarkCreated {
   };
 }
 
-export type CreateMock = ReturnType<typeof vi.fn<(body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>>>;
+export type CreateMock = ReturnType<typeof vi.fn<(body: MarkIn, opts?: { silent?: boolean }) => Promise<MarkCreated>>>;
 
 /** Fresh stores: the paper's marks, a `create` that succeeds. */
 export function resetStores(marks: Mark[] = []): CreateMock {

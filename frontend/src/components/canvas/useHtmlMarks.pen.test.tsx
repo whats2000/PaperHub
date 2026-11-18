@@ -104,7 +104,7 @@ function mark(id: string, over: Partial<Mark> = {}): Mark {
 }
 
 let created = 0;
-let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>>>;
+let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { silent?: boolean }) => Promise<MarkCreated>>>;
 let split: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
 let erase: ReturnType<typeof vi.fn<(id: string, index: number) => Promise<void>>>;
 
@@ -312,7 +312,7 @@ function heldCreates() {
   const pending: (() => Promise<void>)[] = [];
   const inner = create.getMockImplementation()!;
   create.mockImplementation(
-    (body: MarkIn, opts?: { quiet?: boolean }) =>
+    (body: MarkIn, opts?: { silent?: boolean }) =>
       new Promise<MarkCreated>((resolve, reject) => {
         pending.push(() => inner(body, opts).then(resolve, reject));
       }),

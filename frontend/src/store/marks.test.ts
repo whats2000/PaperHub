@@ -8,6 +8,7 @@ import {
   MarkOpTimeout,
   markHint,
   queueMarkOp,
+  groupMarkActions,
   resetMarkHistory,
   resetMarkOps,
   trackedMarkChanges,
@@ -519,7 +520,7 @@ describe("the refetch merge", () => {
     );
     useMarksStore.setState({ marksByPaper: { 3: [] } });
     // M is the latest create before the refetch goes out.
-    await useMarksStore.getState().create(body, { quiet: true });
+    await useMarksStore.getState().create(body);
     await useMarksStore.getState().remove("mk_1");
     await queueMarkOp(() => Promise.resolve());
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
@@ -533,7 +534,7 @@ describe("the refetch merge", () => {
       http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([])),
     );
     useMarksStore.setState({ marksByPaper: { 3: [] } });
-    await useMarksStore.getState().create(body, { quiet: true });
+    await useMarksStore.getState().create(body);
     await queueMarkOp(() => new Promise<never>(() => undefined), { paperId: 3 }).catch(() => undefined);
     await queueMarkOp(() => Promise.resolve());
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
@@ -551,11 +552,11 @@ describe("the refetch merge", () => {
     );
     useMarksStore.setState({ marksByPaper: { 3: [] } });
     const first = useMarksStore.getState().refetchMarks(3);
-    await useMarksStore.getState().create(body, { quiet: true }); // mk_1, while the first is out
+    await useMarksStore.getState().create(body); // mk_1, while the first is out
     // The second refetch goes out with mk_1's change as its own `since`:
     // its snapshot already decides mk_1 (not newer, so dropped when gone).
     const second = useMarksStore.getState().refetchMarks(3);
-    await useMarksStore.getState().create(body, { quiet: true }); // mk_2, after it went out
+    await useMarksStore.getState().create(body); // mk_2, after it went out
     await waitFor(() => expect(replies).toHaveLength(2));
     replies[1]!([]); // the server has neither
     await second;
@@ -617,7 +618,7 @@ describe("the refetch merge", () => {
       http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(created(joined))),
       http.get(`${API_BASE_URL}/marks`, async () => {
         // A join (not queued) lands while the refetch is out.
-        await useMarksStore.getState().create({ ...body, join_to: "mk_1" }, { quiet: true });
+        await useMarksStore.getState().create({ ...body, join_to: "mk_1" });
         // The snapshot was taken before it.
         return HttpResponse.json([MARK]);
       }),
@@ -635,14 +636,14 @@ describe("the refetch merge", () => {
     server.use(
       http.post(`${API_BASE_URL}/marks`, () => HttpResponse.json(make())),
       http.get(`${API_BASE_URL}/marks`, async () => {
-        await useMarksStore.getState().create(body, { quiet: true });
+        await useMarksStore.getState().create(body);
         expect(trackedMarkChanges()).toBe(1);
         return HttpResponse.json([]);
       }),
     );
     useMarksStore.setState({ marksByPaper: { 3: [] } });
     // No refetch out: nothing to remember.
-    for (let i = 0; i < 3; i += 1) await useMarksStore.getState().create(body, { quiet: true });
+    for (let i = 0; i < 3; i += 1) await useMarksStore.getState().create(body);
     expect(trackedMarkChanges()).toBe(0);
     await useMarksStore.getState().refetchMarks(3);
     expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_4"]);
@@ -857,6 +858,37 @@ describe("the mark undo / redo history", () => {
     await waitFor(() => expect(calls).toEqual(["erase 1"]));
     ctrl("y");
     await waitFor(() => expect(calls).toEqual(["erase 1", "restore 1"]));
+  });
+
+  it("one stroke across two sections is one entry: one Ctrl+Z removes both marks, one redo restores both", async () => {
+    let n = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () => {
+        n += 1;
+        calls.push("create");
+        return HttpResponse.json(created({ ...NEW, id: `mk_s${n}`, block_id: `b_s${n}` }));
+      }),
+      http.delete(`${API_BASE_URL}/marks/:id`, ({ params }) => ok(`delete ${String(params.id)}`)()),
+      http.post(`${API_BASE_URL}/marks/:id/restore`, ({ params }) => ok(`restore ${String(params.id)}`)()),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [] } });
+    await groupMarkActions(async () => {
+      await useMarksStore.getState().create(body);
+      await useMarksStore.getState().create(body);
+    });
+    calls = [];
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["delete mk_s2", "delete mk_s1"]));
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    ctrl("y");
+    await waitFor(() => expect(calls).toEqual(["delete mk_s2", "delete mk_s1", "restore mk_s1", "restore mk_s2"]));
+    expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2);
+    // Nothing older to undo: the group was one entry.
+    ctrl("z");
+    await waitFor(() => expect(calls).toHaveLength(6));
+    ctrl("z");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toHaveLength(6);
   });
 
   it("ignores the keys inside an input or a contenteditable", async () => {
