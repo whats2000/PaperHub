@@ -955,3 +955,18 @@ export const useNotesStore = create<NotesStore>()(
     },
   ),
 );
+
+// Unsaved drafts live only in this page: while any note holds one, leaving
+// or reloading the page asks first (the browser's own prompt).
+const askBeforeLeaving = (e: BeforeUnloadEvent) => {
+  e.preventDefault();
+  e.returnValue = "";
+};
+let leaveGuard = false;
+useNotesStore.subscribe((s) => {
+  const want = Object.values(s.drafts).some((d) => Object.keys(d).length > 0);
+  if (want === leaveGuard || typeof window === "undefined") return;
+  leaveGuard = want;
+  if (want) window.addEventListener("beforeunload", askBeforeLeaving);
+  else window.removeEventListener("beforeunload", askBeforeLeaving);
+});

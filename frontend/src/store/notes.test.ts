@@ -873,6 +873,22 @@ describe("useNotesStore", () => {
   });
 });
 
+describe("unsaved drafts and leaving the page", () => {
+  const leave = () => {
+    const e = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+
+  it("asks before the page is left while a note holds an unsaved draft", () => {
+    expect(leave()).toBe(false);
+    useNotesStore.setState({ drafts: { 7: { d1: { op: "insert", block_id: "d1" } } } });
+    expect(leave()).toBe(true);
+    useNotesStore.setState({ drafts: { 7: {} } });
+    expect(leave()).toBe(false);
+  });
+});
+
 describe("caretAfter", () => {
   it("is dropped when its block never shows", () => {
     vi.useFakeTimers();
