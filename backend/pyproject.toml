@@ -67,6 +67,18 @@ testpaths = ["tests"]
 markers = [
     "ask_first: keep the Ask-first search card (tests/conftest.py patches it out otherwise)",
 ]
+# New resource leaks and unraisable errors fail the run. Later entries win.
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+    # Third party: pytest-asyncio's _temporary_event_loop_policy makes a
+    # default loop with asyncio.get_event_loop() to restore afterwards and
+    # never closes it (traced to pytest_asyncio/plugin.py, not our tests).
+    "ignore:unclosed event loop:ResourceWarning",
+    # Third party: starlette.testclient on httpx (tests/mcp/test_server.py)
+    # asks for httpx2, which nothing else here uses.
+    "ignore:Using `httpx` with `starlette.testclient`:starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.mypy]
 strict = true
