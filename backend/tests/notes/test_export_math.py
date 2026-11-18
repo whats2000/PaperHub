@@ -69,7 +69,26 @@ def test_multiline_math_is_one_math_node_in_every_reader() -> None:
         assert len(maths) == 2, (reader, md)
         for m in maths:
             assert m["c"][0]["t"] == "DisplayMath"
-            assert "heading" in m["c"][1] and "i.{}png" in m["c"][1], (reader, m)
+            assert "heading" in m["c"][1] and "i.png" in m["c"][1], (reader, m)
         assert not set(kinds) & STRUCTURE, (reader, set(kinds) & STRUCTURE, md)
         assert kinds.count("Header") == 1, (reader, md)  # the note title
         assert kinds.count("Para") == 3, (reader, md)
+
+
+DOTTED = [r"x = 1 \label{eq.a}", r"y = 2 \tag{1.b}", r"a//b = c",
+          r"\operatorname{e.g} x"]
+
+
+@pytest.mark.parametrize("latex", DOTTED)
+def test_dotted_label_and_tag_stay_verbatim_and_convert_to_word_math(latex: str) -> None:
+    import io
+    import zipfile
+
+    from paperhub.notes.pandoc import markdown_to_docx
+    md, _i, _b = note_to_markdown(NOTE, [_blk("m1", "math", {"latex": latex})], {})
+    assert f"$${latex}$$" in md, md  # note.md keeps the LaTeX as written
+    with zipfile.ZipFile(io.BytesIO(markdown_to_docx(md, {}))) as z:
+        doc = z.read("word/document.xml").decode("utf-8")
+    assert "<m:oMath" in doc, doc[:3000]
+    # No raw TeX fallback: pandoc wrote Word math, not the source text.
+    assert "\\label" not in doc and "\\tag" not in doc and "{}" not in doc, doc[:3000]

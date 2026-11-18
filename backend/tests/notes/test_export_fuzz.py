@@ -187,8 +187,29 @@ def _md_kinds(md: str) -> list[str]:
     return [t.type for t in _flat(_LINKIFY.parse(md))]
 
 
+def _outside_math(tokens: list[Token]) -> Iterator[Token]:
+    """Every token, less the linkify links inside a ``$$…$$`` paragraph: a
+    math-unaware viewer may make a bare URL in LaTeX clickable, which
+    neither fetches nor adds structure, and escaping it would break the
+    LaTeX (``\\label{eq.a}``)."""
+    for t in tokens:
+        yield t
+        if not t.children:
+            continue
+        in_math = t.type == "inline" and t.content.startswith("$$")
+        skip = False
+        for c in t.children:
+            if in_math and c.type == "link_open" and c.markup == "linkify":
+                skip = True
+                continue
+            if skip:
+                skip = c.type != "link_close"
+                continue
+            yield c
+
+
 def _check_markdown_it(md: str, base: list[str]) -> None:
-    tokens = list(_flat(_LINKIFY.parse(md)))
+    tokens = list(_outside_math(_LINKIFY.parse(md)))
     kinds = [t.type for t in tokens]
     for k in MD_BLOCKS:
         assert kinds.count(k) <= base.count(k), (k, md)

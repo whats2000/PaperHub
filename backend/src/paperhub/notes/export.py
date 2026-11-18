@@ -273,16 +273,14 @@ def _one_line(text: str) -> str:
 _BARE_DOLLAR = re.compile(r"(?<!\\)((?:\\\\)*)\$")
 
 
-_MATH_LINKIFY = re.compile(r"/(?=/)|(?<=[^\W_])[.](?=[^\W\d_])")
-
-
 def _math(latex: str) -> str:
     """LaTeX for ``$$…$$``: a ``$`` becomes ``\\$`` (so nothing closes the
     math early) and ``![`` / ``](`` / ``<`` get an empty group ``{}``
     inside them, so the LaTeX never reads as an image, a link, an autolink
-    or HTML in a Markdown viewer; so do ``//`` and a domain-like ``.``,
-    which a linkify viewer would link. Blank lines are dropped (they would end
-    the math)."""
+    or HTML in a Markdown viewer. ``//`` and a dotted name stay as written:
+    an empty group there would break ``\\label{eq.a}`` / ``\\tag{1.b}`` and
+    pandoc would write raw TeX into the ``.docx``. Blank lines are dropped
+    (they would end the math)."""
     # Continuation lines are indented 4 spaces: inside a paragraph that
     # starts no fence, heading, quote or list in any reader (LaTeX ignores
     # the spaces), so a GFM viewer keeps the whole math between its $$.
@@ -292,9 +290,6 @@ def _math(latex: str) -> str:
     out = _BARE_DOLLAR.sub(r"\1\\$", out)
     out = (out.replace("![", "!{}[").replace("](", "]{}(")
            .replace("<", "<{}"))
-    # Nor as a bare link to a linkify viewer: ``//`` and a domain's ``.``
-    # get an empty group too (``e.{}com``, ``/{}/``).
-    out = _MATH_LINKIFY.sub(lambda m: m[0][0] + "{}" + m[0][1:], out)
     # A trailing backslash would escape the closing $$ in some viewers.
     return out + " " if out.endswith("\\") else out
 
