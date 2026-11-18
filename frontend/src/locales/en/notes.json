@@ -286,7 +286,6 @@
   },
   "marks": {
     "popover": "Mark the selection",
-    "show": "Show",
     "saveFailed": "Couldn't save the mark.",
     "undo": "Undo",
     "deleteFailed": "Couldn't delete the mark.",
@@ -312,7 +311,6 @@
     "highlighterColor": "Highlighter colour",
     "joined": "Joined to the same mark",
     "split": "Split",
-    "splitDone": "Split into its own mark",
     "splitFailed": "Couldn't split the mark.",
     "eraseFailed": "Couldn't erase that piece.",
     "retry": "Retry",
@@ -334,8 +332,6 @@
     "noteMissing": "This mark's note isn't available.",
     "removedBoth": "Removed from the paper and the note",
     "undoHint": "Ctrl+Z to undo",
-    "savedNoSection": "Saved at the end of the note (no section found)",
-    "savedOtherNote": "Saved to another note",
     "styleGroup": "Style",
     "style": {
       "highlight": "Highlight",

@@ -286,7 +286,6 @@
   },
   "marks": {
     "popover": "標記選取的文字",
-    "show": "顯示",
     "saveFailed": "無法儲存這個標記。",
     "undo": "復原",
     "deleteFailed": "無法刪除這個標記。",
@@ -312,7 +311,6 @@
     "highlighterColor": "螢光筆顏色",
     "joined": "已併入同一個標記",
     "split": "拆開",
-    "splitDone": "已拆成獨立的標記",
     "splitFailed": "無法拆開這個標記。",
     "eraseFailed": "無法擦掉這一段。",
     "retry": "重試",
@@ -334,8 +332,6 @@
     "noteMissing": "無法取得這個標記的筆記。",
     "removedBoth": "已從論文和筆記中移除",
     "undoHint": "按 Ctrl+Z 復原",
-    "savedNoSection": "已存到筆記末尾（找不到章節）",
-    "savedOtherNote": "已存到另一則筆記",
     "styleGroup": "樣式",
     "style": {
       "highlight": "螢光",

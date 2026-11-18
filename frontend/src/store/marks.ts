@@ -28,7 +28,6 @@ import i18n from "@/lib/i18n";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { DEFAULT_PALETTE } from "@/lib/marks/palette";
-import { useNotesPaneStore } from "@/store/notesPane";
 import { onMarkBlocksChanged, useNotesStore } from "@/store/notes";
 import type {
   Mark,
@@ -195,9 +194,9 @@ interface MarksState {
   /** The paper's chunk spans, loading them (again) when they aren't here
    * yet. Throws when they can't be had. */
   ensureChunks: (paperId: number) => Promise<ChunkMap>;
-  /** Saves a mark (its block lands in the paper's note) and, unless
-   * `quiet`, confirms where (`toastSaved`); unless `silent`, a failure is
-   * said in a toast. */
+  /** Saves a mark (its block lands in the paper's note), with no toast:
+   * the card or the pane opens at it (`quiet` is kept for callers and does
+   * nothing more); unless `silent`, a failure is said in a toast. */
   create: (body: MarkIn, opts?: { quiet?: boolean; silent?: boolean; signal?: AbortSignal }) => Promise<MarkCreated>;
   /** Deletes a mark and its block, with Undo (then Delete again). */
   remove: (markId: string) => Promise<void>;
@@ -233,36 +232,6 @@ const safeStorage: StateStorage = {
     }
   },
 };
-
-/** A save confirms itself on the paper (the mark, the quick-note field);
- * a toast speaks only when the save landed somewhere surprising: with no
- * section, or in another note than the one in view. One line, with Show,
- * no titles [user, 2026-11-19]. */
-export function toastSaved(paperId: number, results: readonly MarkCreated[]): void {
-  const first = results[0];
-  if (!first) return;
-  const t = i18n.t.bind(i18n) as TFunction;
-  const inView = useNotesStore.getState().byTarget[`paper:${paperId}`];
-  const odd =
-    results.find((r) => !r.saved_to.section) ??
-    results.find((r) => inView !== undefined && r.saved_to.note_id !== inView);
-  if (!odd) return;
-  const text = !odd.saved_to.section
-    ? t("notes:marks.savedNoSection", "Saved at the end of the note (no section found)")
-    : t("notes:marks.savedOtherNote", "Saved to another note");
-  toast(text, {
-    action: {
-      label: t("notes:marks.show", "Show"),
-      onClick: () =>
-        useNotesPaneStore.getState().openAt({
-          kind: "paper",
-          id: paperId,
-          noteId: odd.saved_to.note_id,
-          blockId: odd.mark.block_id,
-        }),
-    },
-  });
-}
 
 /** Marks the server re-judged (a paragraph translated again): the paper's
  * marks and their open notes as the server now has them. */
@@ -657,7 +626,6 @@ export const useMarksStore = create<MarksState>()(
           replace(paperId, mark, original);
           upsert(paperId, mark, fresh);
           refreshNote(mark.note_id);
-          toast(t("notes:marks.splitDone", "Split into its own mark"));
         }, {
           onTimeout: () => toast.error(t("notes:marks.splitFailed", "Couldn't split the mark.")),
           paperId: paperOf(markId),
@@ -823,7 +791,6 @@ export const useMarksStore = create<MarksState>()(
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);
           refreshNote(saved.note_id);
-          if (!opts?.quiet) toastSaved(body.paper_content_id, [res]);
           return res;
         },
 

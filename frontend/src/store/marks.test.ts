@@ -10,7 +10,6 @@ import {
   queueMarkOp,
   resetMarkHistory,
   resetMarkOps,
-  toastSaved,
   trackedMarkChanges,
   useMarksStore,
 } from "@/store/marks";
@@ -127,22 +126,6 @@ describe("useMarksStore.create", () => {
     // "Quote from the paper" points at one quote: the next goes to the section.
     expect(useNotesStore.getState().quoteTarget).toBeNull();
     await waitFor(() => expect(noteLoads).toBe(1));
-  });
-});
-
-describe("toastSaved", () => {
-  const res = (section: string | null, noteId = 7): MarkCreated => ({
-    mark: MARK,
-    block: null,
-    saved_to: { note_id: noteId, paper_title: "Duo", section, part_index: 0, part_count: 1 },
-  });
-  it("speaks only for a surprising place: no section, or another note than the one in view", () => {
-    toastSaved(3, [res("2 Method")]);
-    expect(toastFn).not.toHaveBeenCalled();
-    toastSaved(3, [res(null)]);
-    expect(toastFn).toHaveBeenLastCalledWith("Saved at the end of the note (no section found)", expect.anything());
-    toastSaved(3, [res("2 Method", 9)]);
-    expect(toastFn).toHaveBeenLastCalledWith("Saved to another note", expect.anything());
   });
 });
 

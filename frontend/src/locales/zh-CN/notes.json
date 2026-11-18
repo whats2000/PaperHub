@@ -286,7 +286,6 @@
   },
   "marks": {
     "popover": "标记选中的文字",
-    "show": "显示",
     "saveFailed": "无法保存这个标记。",
     "undo": "撤销",
     "deleteFailed": "无法删除这个标记。",
@@ -312,7 +311,6 @@
     "highlighterColor": "荧光笔颜色",
     "joined": "已并入同一个标记",
     "split": "拆开",
-    "splitDone": "已拆成独立的标记",
     "splitFailed": "无法拆开这个标记。",
     "eraseFailed": "无法擦掉这一段。",
     "retry": "重试",
@@ -334,8 +332,6 @@
     "noteMissing": "无法获取这个标记的笔记。",
     "removedBoth": "已从论文和笔记中移除",
     "undoHint": "按 Ctrl+Z 撤销",
-    "savedNoSection": "已存到笔记末尾（找不到章节）",
-    "savedOtherNote": "已存到另一则笔记",
     "styleGroup": "样式",
     "style": {
       "highlight": "荧光",

@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { joinTarget } from "@/lib/marks/pieces";
 import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
-import { markHint, queueMarkOp, toastSaved, useMarksStore } from "@/store/marks";
+import { markHint, queueMarkOp, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece, MarkStyle } from "@/types/notes";
@@ -122,7 +122,6 @@ export function useMarkSave(paperId: number | null): {
           progress.current.saved,
         );
         progress.current = null;
-        toastSaved(paperId, results);
         const last = results[results.length - 1];
         if (last && openCard) openAfterMark(paperId, last);
         return true;

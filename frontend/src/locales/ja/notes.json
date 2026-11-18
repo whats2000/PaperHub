@@ -286,7 +286,6 @@
   },
   "marks": {
     "popover": "選択箇所に印をつける",
-    "show": "表示",
     "saveFailed": "印を保存できませんでした。",
     "undo": "元に戻す",
     "deleteFailed": "印を削除できませんでした。",
@@ -312,7 +311,6 @@
     "highlighterColor": "蛍光ペンの色",
     "joined": "同じマークにまとめました",
     "split": "分ける",
-    "splitDone": "別のマークに分けました",
     "splitFailed": "マークを分けられませんでした。",
     "eraseFailed": "この部分を消せませんでした。",
     "retry": "再試行",
@@ -334,8 +332,6 @@
     "noteMissing": "このマークのノートを取得できません。",
     "removedBoth": "論文とノートから削除しました",
     "undoHint": "Ctrl+Z で元に戻す",
-    "savedNoSection": "ノートの末尾に保存しました（章が見つかりません）",
-    "savedOtherNote": "別のノートに保存しました",
     "styleGroup": "スタイル",
     "style": {
       "highlight": "ハイライト",
