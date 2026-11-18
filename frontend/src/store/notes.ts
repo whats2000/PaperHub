@@ -30,7 +30,7 @@ import {
   setNoteCommentStatus,
 } from "@/lib/api";
 import i18n from "@/lib/i18n";
-import { applyOpsLocally } from "@/lib/notes/ops";
+import { applyOpsLocally, blockText } from "@/lib/notes/ops";
 import type {
   ApplyResult,
   Note,
@@ -375,6 +375,40 @@ function freshInserts(
   return { ops, appended, drafted };
 }
 
+/** A new block id, the editor's shape (a UUID). */
+function newBlockId(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** For each block whose sent update the server refused while it kept (or
+ * deleted) its own version, the user's version as a new block right after
+ * it: `local` is the local blocks with those copies in place. */
+function keptVersions(
+  local: NoteBlock[],
+  rejected: RejectedOp[],
+  sent: NoteOp[],
+  lost: Set<string>,
+): { local: NoteBlock[]; drafts: NoteBlock[] } {
+  const drafts: NoteBlock[] = [];
+  let out = local;
+  for (const r of rejected) {
+    if (!r.block_id || lost.has(r.block_id)) continue;
+    if (!sent.some((o) => o.op === "update" && o.block_id === r.block_id)) continue;
+    const mine = out.find((b) => b.id === r.block_id);
+    if (!mine || !blockText(mine.type, mine.props, mine.content).trim()) continue;
+    if (r.current && JSON.stringify(r.current.content) === JSON.stringify(mine.content)
+        && JSON.stringify(r.current.props) === JSON.stringify(mine.props)) continue;
+    const copy: NoteBlock = { ...mine, id: newBlockId(), author: "user", changed_rev: 0 };
+    const at = out.indexOf(mine);
+    // Right after the server's version; in the place of a deleted block.
+    out = r.current ? [...out.slice(0, at + 1), copy, ...out.slice(at + 1)] : [...out.slice(0, at), copy, ...out.slice(at + 1)];
+    drafts.push(copy);
+  }
+  return { local: out, drafts };
+}
+
 /** The insert that would save a draft, placed where it stands locally. */
 function draftInsert(local: NoteBlock[], b: NoteBlock): NoteOp {
   const block: NoteBlockIn = { type: b.type, props: b.props, content: b.content };
@@ -518,6 +552,11 @@ export const useNotesStore = create<NotesStore>()(
         );
         const q = (pending.get(noteId) ?? []).filter((op) => !(op.block_id && ids.has(op.block_id)));
         pending.set(noteId, reanchor(q, cur.blocks, gone));
+        // The server's version wins (another view, or the agent, changed or
+        // deleted the block first), but what the user typed into it stays on
+        // screen: a copy of their version right after it, an unsaved draft.
+        const typed = keptVersions(cur.blocks, rejected, sent, lost);
+        if (typed.drafts.length) keepDrafts(noteId, typed.local, typed.drafts);
         let rebuilt = { ops: [] as NoteOp[], appended: false, drafted: [] as NoteBlock[] };
         const rebuild = (server: NoteBlock[]) => {
           rebuilt = freshInserts(cur.blocks, lost, server);
@@ -585,6 +624,13 @@ export const useNotesStore = create<NotesStore>()(
                 .filter((b) => b.id !== r.block_id)
                 .map((b) => (b.parent_id === r.block_id ? { ...b, parent_id: gonePlace.parent_id ?? null } : b));
             }
+          }
+          if (typed.drafts.length) {
+            blocks = applyOpsLocally(
+              noteId,
+              blocks,
+              typed.drafts.map((d) => draftInsert(typed.local, d)),
+            );
           }
           return {
             notes: { ...s.notes, [noteId]: { ...now, blocks } },

@@ -503,7 +503,9 @@ describe("NoteEditor", () => {
       expect.objectContaining({ op: "update", block_id: "p1" }),
     ]);
     await waitFor(() => expect(screen.getByText("Theirs")).toBeInTheDocument());
-    expect(screen.queryByText("Mine!")).not.toBeInTheDocument();
+    // The refused typing stays on screen as an unsaved draft below it.
+    expect(screen.getAllByText("Mine!").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not saved").length).toBeGreaterThan(0);
     expect(toastFn).toHaveBeenCalledWith("Updated from another view");
     // The reload itself is not sent back as an edit.
     await act(async () => {

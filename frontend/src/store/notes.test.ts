@@ -198,6 +198,49 @@ describe("useNotesStore", () => {
     expect(toastFn).toHaveBeenCalledWith("Updated from another view");
   });
 
+  it("keeps what the user typed into a block the server's version won as an unsaved draft", async () => {
+    // The agent rewrote the AI block "a" before the user's typing landed.
+    const theirs = { ...block("a", "Agent's rewrite", 5), author: "ai" as const };
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json(result(5, [], [{ block_id: "a", reason: "changed_since_base", current: theirs }])),
+      ),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { ...note, revision: 5 },
+          blocks: [theirs, block("b", "B")],
+          suggestions: [],
+          comments: [],
+        }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [upd("a", "My words")]);
+    await useNotesStore.getState().flush(7);
+    const s = useNotesStore.getState();
+    // The server's version stands, the user's words right after it.
+    expect(s.notes[7]?.blocks.map((b) => b.text)).toEqual(["Agent's rewrite", "My words", "B"]);
+    const kept = s.notes[7]!.blocks[1]!;
+    expect(kept.id).not.toBe("a");
+    expect(Object.keys(s.drafts[7] ?? {})).toEqual([kept.id]);
+    expect(toastFn).toHaveBeenCalledWith("Updated from another view");
+  });
+
+  it("drops no draft when the refused update matches the server's version", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json(result(5, [], [{ block_id: "a", reason: "changed_since_base", current: block("a", "Same", 5) }])),
+      ),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({ note: { ...note, revision: 5 }, blocks: [block("a", "Same", 5), block("b", "B")], suggestions: [], comments: [] }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [upd("a", "Same")]);
+    await useNotesStore.getState().flush(7);
+    expect(useNotesStore.getState().drafts[7] ?? {}).toEqual({});
+  });
+
   it("picks up a reorder by another view when a conflict comes back", async () => {
     server.use(
       http.post(`${API_BASE_URL}/notes/7/ops`, () =>
@@ -218,7 +261,10 @@ describe("useNotesStore", () => {
     await useNotesStore.getState().loadTarget("paper", 3);
     useNotesStore.getState().applyLocal(7, [upd("a", "Mine")]);
     await useNotesStore.getState().flush(7);
-    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["b", "a"]);
+    const blocks = useNotesStore.getState().notes[7]?.blocks ?? [];
+    expect(blocks.slice(0, 2).map((b) => b.id)).toEqual(["b", "a"]);
+    // "Mine" stays on screen, an unsaved draft after the server's "a".
+    expect(blocks.map((b) => b.text)).toEqual(["B", "A", "Mine"]);
   });
 
   it("retries a burst whose response was lost under the same key, then sends later typing", async () => {
@@ -696,7 +742,8 @@ describe("useNotesStore", () => {
     expect(pendingNoteOps(7).map((o) => o.block_id)).toEqual(["n"]);
     await useNotesStore.getState().flush(7);
     expect(posted[1]?.ops[0]).toMatchObject({ op: "insert", block_id: "n", after: "a" });
-    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["Theirs", "new", "B"]);
+    // "Mine", refused, stays as an unsaved draft right after "Theirs".
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.text)).toEqual(["Theirs", "Mine", "new", "B"]);
   });
 
   it("re-anchors a queued insert whose anchor the server no longer has", async () => {
@@ -723,7 +770,10 @@ describe("useNotesStore", () => {
     expect(pendingNoteOps(7)).toEqual([
       expect.objectContaining({ op: "insert", block_id: "n", parent_id: null, after: "a" }),
     ]);
-    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["a", "n"]);
+    // The typing into the deleted "b" stays, an unsaved draft in its place.
+    const blocks = useNotesStore.getState().notes[7]?.blocks ?? [];
+    expect(blocks.map((b) => b.text)).toEqual(["A", "B2", "new"]);
+    expect(blocks[2]?.id).toBe("n");
   });
 
   it("reloads the whole note when a conflicted block moved", async () => {
