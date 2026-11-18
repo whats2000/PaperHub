@@ -400,9 +400,9 @@ describe("strokes, erases and splits keep the user's order", () => {
     expect(create.mock.calls[2]![0].join_to).toBeUndefined();
     expect(create.mock.calls[2]![0].pieces[0]!.quote).toBe("ahead of time");
     await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2));
-    // A stroke is a rapid tool: no toast, no card.
+    // No toast; the newest mark's note card opens, as from the menu.
     expect(toastFn).not.toHaveBeenCalled();
-    expect(useMarkNavStore.getState().card).toBeNull();
+    await waitFor(() => expect(useMarkNavStore.getState().card).toMatchObject({ markId: "mk_2" }));
     expect(toastError).not.toHaveBeenCalled();
   });
 });

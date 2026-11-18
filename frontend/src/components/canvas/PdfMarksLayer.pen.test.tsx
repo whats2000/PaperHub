@@ -5,6 +5,8 @@ import { BLOCKS, layOut, pdfMark, resetStores, stubRangeGeometry, type CreateMoc
 import { Reader } from "@/components/canvas/__fixtures__/pdfMarksReader";
 import { listPaperBlocks, locateText } from "@/lib/api";
 import { resetMarkOps, useMarksStore } from "@/store/marks";
+import { useMarkNavStore } from "@/store/markNav";
+import { toast } from "sonner";
 import type { Mark, MarkIn, PaperPageBlock } from "@/types/notes";
 
 vi.mock("@/lib/api", async (orig) => ({
@@ -52,6 +54,8 @@ beforeEach(() => {
   vi.mocked(locateText).mockReset();
   vi.mocked(locateText).mockResolvedValue({ match: null, _meta: {} });
   toastFn.mockReset();
+  vi.mocked(toast.message).mockReset();
+  useMarkNavStore.setState({ card: null });
   create = resetStores();
   // The server: a new mark per call, or the joined one with the piece added.
   let n = 0;
@@ -173,6 +177,27 @@ describe("the highlighter on a PDF page", () => {
     stroke("s1", 0, "s1", "Robots".length);
     expect(await screen.findByRole("toolbar", { name: "Mark the selection" })).toBeTruthy();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("a stroke opens the note card at its mark (the notes pane hidden), with no toast", async () => {
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke("s1", 0, "s1", "Robots".length);
+    await waitFor(() => expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" }));
+    expect(toastFn).not.toHaveBeenCalled();
+  });
+
+  it("a stroke whose text isn't found in the paper saves without a toast and opens its card", async () => {
+    vi.mocked(listPaperBlocks).mockResolvedValue([]);
+    render(<Reader />);
+    layOut();
+    await waitFor(() => expect(listPaperBlocks).toHaveBeenCalled());
+    act(() => useMarksStore.getState().setPen(true, "green"));
+    stroke("s1", 0, "s1", "Robots".length);
+    await waitFor(() => expect(useMarkNavStore.getState().card).toMatchObject({ markId: "mk_1" }));
+    expect(toast.message).not.toHaveBeenCalled();
   });
 
   it("on a page without Marker blocks, strokes join when they locate into the same paragraph", async () => {

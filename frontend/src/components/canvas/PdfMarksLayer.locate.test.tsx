@@ -91,7 +91,7 @@ describe("marks on a PDF without Marker blocks", () => {
     expect(locateText).toHaveBeenCalledWith(3, "from demos.", { before: "Robots learn ", after: "\nNext line here." });
   });
 
-  it("not found: saved with no section, and the toast says so", async () => {
+  it("not found: saved with no section, with no toast", async () => {
     vi.mocked(locateText).mockResolvedValue(MISS);
     render(<Reader />);
     layOut();
@@ -102,7 +102,7 @@ describe("marks on a PDF without Marker blocks", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].section_key).toBeNull();
     expect(create.mock.calls[0]![0].pieces[0]).not.toHaveProperty("chunk_start");
-    await waitFor(() => expect(toastMessage).toHaveBeenCalledWith(expect.stringContaining("wasn't found")));
+    expect(toastMessage).not.toHaveBeenCalled();
   });
 });
 

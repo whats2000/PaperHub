@@ -208,16 +208,12 @@ describe("drawing a box", () => {
       expect(toastMessage).not.toHaveBeenCalled();
     });
 
-    it("saves it without a section and says so when its words are not found", async () => {
+    it("saves it without a section, quietly, when its words are not found", async () => {
       vi.mocked(listPaperBlocks).mockResolvedValue([]);
       vi.mocked(locateText).mockResolvedValue({ match: null, _meta: {} });
       const body = await boxAndSave();
       expect(body.section_key).toBeNull();
-      await waitFor(() =>
-        expect(toastMessage).toHaveBeenCalledWith(
-          "Saved without a section: this passage wasn't found in the paper's text.",
-        ),
-      );
+      expect(toastMessage).not.toHaveBeenCalled();
     });
   });
 

@@ -124,20 +124,7 @@ export function useMarkSave(paperId: number | null): {
         progress.current = null;
         toastSaved(paperId, results);
         const last = results[results.length - 1];
-        if (last && openCard) {
-          const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
-          if (notesPaneVisible()) {
-            // The pane on screen: the new block scrolls into view there
-            // (flashed), the caret on a new line under it; the reader stays.
-            useNotesStore.getState().setCaretAfter(target);
-            useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
-          } else {
-            // The pane hidden: the note card opens beside the mark, the
-            // caret on a new line under its quote [user, 2026-11-19].
-            useNotesStore.getState().setCaretAfter({ ...target, in: "card" });
-            useMarkNavStore.getState().openCard(paperId, last.mark.id);
-          }
-        }
+        if (last && openCard) openAfterMark(paperId, last);
         return true;
       } catch {
         // The store said so; the selection stays to try again.
@@ -151,6 +138,21 @@ export function useMarkSave(paperId: number | null): {
   );
 
   return { busy, save };
+}
+
+/** After a mark is made, where the user writes about it: with the notes
+ * pane on screen its new block scrolls into view there (flashed), the caret
+ * on a new line under it, the reader staying; with the pane hidden the note
+ * card opens beside the mark, the caret under its quote [user, 2026-11-19]. */
+export function openAfterMark(paperId: number, saved: MarkCreated): void {
+  const target = { noteId: saved.saved_to.note_id, blockId: saved.mark.block_id };
+  if (notesPaneVisible()) {
+    useNotesStore.getState().setCaretAfter(target);
+    useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
+  } else {
+    useNotesStore.getState().setCaretAfter({ ...target, in: "card" });
+    useMarkNavStore.getState().openCard(paperId, saved.mark.id);
+  }
 }
 
 /** One highlighter stroke's piece: where it files and the paragraph (HTML)
@@ -360,6 +362,9 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
           if (joinedNow) toastJoined(joinedNow);
           // A Retry that finds it all saved says so.
           else if (!savedNow.length) toast(t("notes:marks.alreadySaved", "Already saved"));
+          // Like a mark from the menu: its note opens to write in.
+          const last = savedNow[savedNow.length - 1];
+          if (last && kind === "text") openAfterMark(paperId, last);
           stroke.done?.(true);
         } catch {
           // What saved stays saved; Retry saves the rest. A timeout already

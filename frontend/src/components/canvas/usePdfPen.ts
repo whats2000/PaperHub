@@ -111,26 +111,21 @@ export function usePdfPen({
   placeText,
   loadPages,
   blocksRef,
-  notLocated,
 }: {
   paperId: number | null;
   placeText: PlaceText;
   loadPages: (pages: number[]) => Promise<PaperPageBlock[][] | null>;
   blocksRef: RefObject<Readonly<Record<number, PaperPageBlock[]>>>;
-  /** Says a saved passage wasn't found in the paper's text. */
-  notLocated: () => void;
 }): PdfPen {
   const penSave = usePenSave(paperId);
 
   const stroke = useCallback(
     (range: Range, fragments: PdfFragment[]) => {
-      let missed = false;
       penSave({
         view: "pdf",
         pieces: async () => {
           const r = await placeText(fragments);
           if (!r) return null;
-          missed = r.missed;
           return r.placed.map(
             ({ piece, at }): PenPiece => ({
               section: at ? at.section : piece.section,
@@ -144,11 +139,10 @@ export function usePdfPen({
         done: (ok) => {
           if (!ok) return;
           clearIfStill(document, range);
-          if (missed) notLocated();
         },
       });
     },
-    [penSave, placeText, notLocated],
+    [penSave, placeText],
   );
 
   const object = useCallback(
@@ -168,7 +162,6 @@ export function usePdfPen({
   const box = useCallback(
     (page: number, frac: Frac, spans: LayerSpan[], scanned: boolean) => {
       if (paperId === null) return;
-      let missed = false;
       penSave({
         view: "pdf",
         kind: "region",
@@ -181,16 +174,12 @@ export function usePdfPen({
             boxMark({ page, box: frac, blocks: loaded[0]!, spans, scanned }),
             loaded[0]!,
           );
-          missed = placed.missed;
           const result = placed.result;
           return [{ section: result.section, piece: result.piece, place: null, kind: result.kind }];
         },
-        done: (ok) => {
-          if (ok && missed) notLocated();
-        },
       });
     },
-    [paperId, penSave, loadPages, notLocated],
+    [paperId, penSave, loadPages],
   );
 
   const erase = useCallback((markId: string, piece: number) => {

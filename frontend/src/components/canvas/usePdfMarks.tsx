@@ -413,11 +413,7 @@ export function usePdfMarks({
     },
     [loadPages, paperId],
   );
-  const notLocated = useCallback(
-    () => toast.message(t("marks.notLocated", "Saved without a section: this passage wasn't found in the paper's text.")),
-    [t],
-  );
-  const penTools = usePdfPen({ paperId, placeText, loadPages, blocksRef, notLocated });
+  const penTools = usePdfPen({ paperId, placeText, loadPages, blocksRef });
   useEffect(() => {
     strokeRef.current = penTools.stroke;
   }, [penTools.stroke]);
@@ -630,7 +626,6 @@ export function usePdfMarks({
       if (!cur || !root) return;
       let ok: boolean;
       if (cur.type === "text") {
-        let missed = false;
         ok = await saveMarks({
           kind: "text",
           style: style ?? "highlight",
@@ -639,12 +634,10 @@ export function usePdfMarks({
           groups: async () => {
             const r = await placeText(cur.fragments);
             if (!r) return null;
-            missed = r.missed;
             return groupPieces(r.placed);
           },
         });
         if (ok) window.getSelection()?.removeAllRanges();
-        if (ok && missed) notLocated();
       } else if (cur.type === "translation") {
         const piece = cur.piece;
         ok = await saveMarks({
@@ -686,7 +679,6 @@ export function usePdfMarks({
             spans: cur.scanned ? [] : layerSpans(pageEl(cur.page) ?? root),
             scanned: cur.scanned,
           });
-        let missed = false;
         ok = await saveMarks({
           kind: base.kind,
           openCard: false, // Box is a rapid tool
@@ -695,15 +687,13 @@ export function usePdfMarks({
           groups: async () => {
             // On a page without Marker blocks the box's words find its section.
             const placed = await locateBox(paperId, base, pageBlocks);
-            missed = placed.missed;
             return [{ section: placed.result.section, pieces: [placed.result.piece] }];
           },
         });
-        if (ok && missed) notLocated();
       }
       if (ok) setTarget(null);
     },
-    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, notLocated, cardSection, paperId],
+    [target, readerRef, saveMarks, loadPages, pageEl, blocksRef, placeText, cardSection, paperId],
   );
 
   const ctx = useMemo<PdfMarksApi | null>(
