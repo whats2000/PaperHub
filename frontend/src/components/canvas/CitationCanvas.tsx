@@ -754,6 +754,14 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     return () => setReaderView(null);
   }, [standalone, setReaderView]);
 
+  // The HTML/PDF track slides by transform inside an overflow-hidden body.
+  // Anything that scrolls that body sideways (a scrollIntoView on content in
+  // the off-screen half) leaves the reader half HTML, half PDF: keep it at 0.
+  const trackRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    resetHorizontalScroll(trackRef.current);
+  }, [readerTabByPaper, effectivePaperId]);
+
   if (!open && refs.length === 0) return null;
 
   const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);
@@ -783,13 +791,6 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       : "html";
   const activePagePdf =
     effectivePaperId != null ? pagePdfByPaper[effectivePaperId] : undefined;
-  // The HTML/PDF track slides by transform inside an overflow-hidden body.
-  // Anything that scrolls that body sideways (a scrollIntoView on content in
-  // the off-screen half) leaves the reader half HTML, half PDF: keep it at 0.
-  const trackRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    resetHorizontalScroll(trackRef.current);
-  }, [readerTab, effectivePaperId]);
   // What a PDF view of `pid` highlights: a cited chunk, else a figure/region.
   const pdfTarget = (pid: number) =>
     activeChunk?.paper_content_id === pid
