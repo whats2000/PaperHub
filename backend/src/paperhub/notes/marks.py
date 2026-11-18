@@ -1,4 +1,8 @@
-"""Reading marks on papers: highlights, quotes, figures, equations, regions.
+"""Reading marks on papers: text, figures, equations, regions.
+
+A mark's ``kind`` says WHAT was marked; a text mark's ``style`` says how it
+is drawn (highlight / underline / wavy / bar). ``color`` is a palette key
+(``mark_colors``) or None (no colour: a neutral grey; a highlight needs one).
 
 ``note_marks`` is the source of truth; each mark owns one note block whose
 props carry what the editor needs to render it. Every block write goes
@@ -19,6 +23,12 @@ from pydantic import BaseModel
 
 from paperhub.db.connection import in_write_transaction, write_lock
 from paperhub.notes.dehyphen import settle_pieces
+from paperhub.notes.mark_colors import (
+    BUILTIN,
+    clean_name,
+    color_problem,
+    dark_variant,
+)
 from paperhub.notes.mark_pieces import erased, live_pieces, revive_latest, unerased
 from paperhub.notes.ops import (
     ApplyResult,
@@ -37,16 +47,20 @@ from paperhub.notes.papers import (
 from paperhub.notes.store import get_note, list_blocks, new_block_id
 
 BLOCK_TYPE: dict[str, Any] = {
-    "highlight": "paperQuote", "quote": "paperQuote", "figure": "paperFigure",
+    "text": "paperQuote", "figure": "paperFigure",
     "equation": "paperEquation", "region": "paperRegion",
 }
+STYLES = ("highlight", "underline", "wavy", "bar")
+# Before the kind + style split (2026-11-19): what an old kind meant.
+LEGACY_KINDS = {"highlight": ("text", "highlight"),
+                "quote": ("text", "underline")}
 _VIEWS = ("html", "pdf")
 MARK_COLS = ("id, paper_content_id, block_id, kind, color, view, pieces_json, "
-         "lang, source_ref, section_key, status, created_at, deleted_at")
+         "lang, source_ref, section_key, status, created_at, deleted_at, style")
 _INSERT = (
     "INSERT INTO note_marks (id, paper_content_id, block_id, kind, color, "
-    "view, pieces_json, lang, source_ref, section_key, status, created_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?)")
+    "view, pieces_json, lang, source_ref, section_key, status, created_at, "
+    "style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)")
 
 
 class MarkInputError(ValueError):
@@ -60,6 +74,7 @@ class MarkConflict(RuntimeError):
 class MarkIn(BaseModel):
     paper_content_id: int
     kind: str
+    style: str | None = None
     color: str | None
     view: str
     pieces: list[dict[str, Any]]
@@ -90,7 +105,7 @@ def mark_from_row(row: Any) -> dict[str, Any]:
         "kind": row[3], "color": row[4], "view": row[5],
         "pieces": json.loads(row[6]), "lang": row[7], "source_ref": row[8],
         "section_key": row[9], "status": row[10], "created_at": row[11],
-        "deleted_at": row[12],
+        "deleted_at": row[12], "style": row[13],
     }
 
 
@@ -189,6 +204,33 @@ def _check_index(m: dict[str, Any], index: int) -> None:
         raise MarkInputError(f"piece {index} belongs to another mark now")
 
 
+def normalized(kind: str, style: str | None) -> tuple[str, str | None]:
+    """(kind, style) as stored: an old kind becomes text in its style; a
+    figure / equation / region mark has no style."""
+    if kind in LEGACY_KINDS:
+        return LEGACY_KINDS[kind]
+    if kind not in BLOCK_TYPE:
+        raise MarkInputError(f"unknown mark kind {kind!r}")
+    if kind != "text":
+        return kind, None
+    if style not in STYLES:
+        raise MarkInputError(f"unknown mark style {style!r}")
+    return kind, style
+
+
+async def _check_color(conn: aiosqlite.Connection, style: str | None,
+                       color: str | None) -> None:
+    if color is None:
+        if style == "highlight":
+            raise MarkInputError("a highlight needs a colour")
+        return
+    async with conn.execute(
+        "SELECT 1 FROM mark_colors WHERE owner_id = 1 AND color = ?", (color,)
+    ) as cur:
+        if await cur.fetchone() is None:
+            raise MarkInputError(f"unknown colour {color!r}")
+
+
 def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
     if kind not in BLOCK_TYPE:
         raise MarkInputError(f"unknown mark kind {kind!r}")
@@ -211,6 +253,8 @@ def block_props(m: dict[str, Any]) -> dict[str, Any]:
         "quote": joined_quote(live),
         "pieces": live, "source": source,
     }
+    if m.get("style"):
+        props["style"] = m["style"]
     lost = sum(1 for p in live if p.get("lost"))
     if m["status"] == "lost":
         props["anchorLost"] = True
@@ -273,12 +317,16 @@ async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
     await write_row(conn, _INSERT, (
         rec["id"], rec["paper_content_id"], rec["block_id"], rec["kind"],
         rec["color"], rec["view"], json.dumps(rec["pieces"]), rec["lang"],
-        rec["source_ref"], rec["section_key"], rec["created_at"]))
+        rec["source_ref"], rec["section_key"], rec["created_at"],
+        rec.get("style")))
 
 
 async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                       ) -> tuple[dict[str, Any], SavedTo]:
+    kind, style = normalized(m.kind, m.style)
+    m = m.model_copy(update={"kind": kind, "style": style})
     _validate(m.kind, m.view, m.pieces)
+    await _check_color(conn, m.style, m.color)
     # A PDF piece's quote is made here from its raw lines: the paper's
     # words decide each line-end hyphen.
     m = m.model_copy(update={"pieces": await settle_pieces(
@@ -296,7 +344,8 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                 conn, note.id, sec, m.hint_block_id)
         rec: dict[str, Any] = {
             "id": _mark_id(), "paper_content_id": m.paper_content_id,
-            "block_id": new_block_id(), "kind": m.kind, "color": m.color,
+            "block_id": new_block_id(), "kind": m.kind, "style": m.style,
+            "color": m.color,
             "view": m.view, "pieces": _stroked(m.pieces, 0), "lang": m.lang,
             "source_ref": m.source_ref, "section_key": m.section_key,
             "status": "ok", "created_at": datetime.now(UTC).isoformat(),
@@ -338,10 +387,11 @@ async def _join(conn: aiosqlite.Connection, m: MarkIn,
     rec = await _get(conn, m.join_to)
     if rec["deleted_at"] is not None:
         raise MarkInputError("cannot join a deleted mark")
-    if (rec["paper_content_id"], rec["color"], rec["kind"], rec["view"]) != (
-            m.paper_content_id, m.color, m.kind, m.view):
+    if (rec["paper_content_id"], rec["color"], rec["kind"], rec["style"],
+            rec["view"]) != (m.paper_content_id, m.color, m.kind, m.style,
+                             m.view):
         raise MarkInputError("a piece can only join a mark of the same paper, "
-                         "colour, kind and view")
+                         "colour, kind, style and view")
     # A later stroke: the next stroke number (its pieces read after "…").
     nxt = 1 + max((int(p.get("stroke", 0)) for p in rec["pieces"]), default=-1)
     rec["pieces"] = [*rec["pieces"], *_stroked(m.pieces, nxt)]
@@ -515,27 +565,110 @@ async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
 
 
 async def colors(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
+    """The palette in the user's order: key, label, hex (light), dark,
+    visible, builtin (the four defaults cannot be deleted)."""
     async with conn.execute(
-        "SELECT color, name, visible FROM mark_colors WHERE owner_id = 1 "
-        "ORDER BY rowid"
+        "SELECT color, name, visible, hex FROM mark_colors WHERE owner_id = 1 "
+        "ORDER BY sort_order, rowid"
     ) as cur:
         rows = await cur.fetchall()
-    return [{"color": r[0], "name": r[1], "visible": bool(r[2])}
-            for r in rows]
+    return [{"color": r[0], "name": r[1], "visible": bool(r[2]), "hex": r[3],
+             "dark": dark_variant(r[0], r[3]) if r[3] else r[3],
+             "builtin": r[0] in BUILTIN} for r in rows]
 
 
-async def set_color(conn: aiosqlite.Connection, color: str, *,
-                    name: str | None = None,
-                    visible: bool | None = None) -> None:
+async def color_labels(conn: aiosqlite.Connection) -> dict[str, str]:
+    """Palette key -> the user's label for it."""
+    async with conn.execute(
+            "SELECT color, name FROM mark_colors WHERE owner_id = 1") as cur:
+        return {str(r[0]): str(r[1]) for r in await cur.fetchall()}
+
+
+async def _unique_name(conn: aiosqlite.Connection, name: str,
+                       except_key: str | None = None) -> str:
+    try:
+        n = clean_name(name)
+    except ValueError as exc:
+        raise MarkInputError(str(exc)) from exc
+    for c in await colors(conn):
+        if c["color"] != except_key and c["name"].casefold() == n.casefold():
+            raise MarkInputError(f"another colour is already called {n!r}")
+    return n
+
+
+def _good_hex(hex_: str) -> str:
+    problem = color_problem(hex_)
+    if problem:
+        raise MarkInputError(f"colour {hex_}: {problem}")
+    return hex_.lower()
+
+
+async def _known(conn: aiosqlite.Connection, color: str) -> None:
     async with conn.execute(
         "SELECT 1 FROM mark_colors WHERE owner_id = 1 AND color = ?", (color,)
     ) as cur:
         if await cur.fetchone() is None:
             raise LookupError(f"unknown colour {color}")
+
+
+async def add_color(conn: aiosqlite.Connection, *, hex: str,  # noqa: A002
+                    name: str) -> dict[str, Any]:
+    """A new palette row at the end; the label is required and unique."""
+    n = await _unique_name(conn, name)
+    h = _good_hex(hex)
+    key = "c_" + "".join(secrets.choice(string.ascii_lowercase + string.digits)
+                         for _ in range(8))
+    async with conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM mark_colors "
+        "WHERE owner_id = 1") as cur:
+        order = int((await cur.fetchone() or (0,))[0])
+    await write_row(conn, "INSERT INTO mark_colors (owner_id, color, name, "
+                    "visible, hex, sort_order) VALUES (1, ?, ?, 1, ?, ?)",
+                    (key, n, h, order))
+    return next(c for c in await colors(conn) if c["color"] == key)
+
+
+async def set_color(conn: aiosqlite.Connection, color: str, *,
+                    name: str | None = None,
+                    visible: bool | None = None,
+                    hex: str | None = None) -> None:  # noqa: A002
+    await _known(conn, color)
     if name is not None:
         await write_row(conn, "UPDATE mark_colors SET name = ? "
-                     "WHERE owner_id = 1 AND color = ?", (name, color))
+                     "WHERE owner_id = 1 AND color = ?",
+                     (await _unique_name(conn, name, color), color))
     if visible is not None:
         await write_row(conn, "UPDATE mark_colors SET visible = ? "
                      "WHERE owner_id = 1 AND color = ?",
                      (1 if visible else 0, color))
+    if hex is not None:
+        await write_row(conn, "UPDATE mark_colors SET hex = ? "
+                     "WHERE owner_id = 1 AND color = ?",
+                     (_good_hex(hex), color))
+
+
+async def delete_color(conn: aiosqlite.Connection, color: str) -> None:
+    """Remove a custom colour no mark uses (live or deleted: Undo may bring
+    a deleted mark back)."""
+    await _known(conn, color)
+    if color in BUILTIN:
+        raise MarkInputError("a default colour can be hidden, not deleted")
+    async with conn.execute(
+            "SELECT COUNT(*) FROM note_marks WHERE color = ?", (color,)) as cur:
+        used = int((await cur.fetchone() or (0,))[0])
+    if used:
+        raise MarkInputError(f"{used} mark(s) use this colour")
+    await write_row(conn, "DELETE FROM mark_colors WHERE owner_id = 1 "
+                    "AND color = ?", (color,))
+
+
+async def reorder_colors(conn: aiosqlite.Connection,
+                         order: list[str]) -> None:
+    """The palette in this order (every colour named exactly once)."""
+    have = [c["color"] for c in await colors(conn)]
+    if sorted(order) != sorted(have) or len(set(order)) != len(order):
+        raise MarkInputError("the order must name every colour once")
+    async with tx(conn):
+        for i, key in enumerate(order):
+            await write_row(conn, "UPDATE mark_colors SET sort_order = ? "
+                            "WHERE owner_id = 1 AND color = ?", (i, key))

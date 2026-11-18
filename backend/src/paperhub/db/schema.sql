@@ -616,7 +616,10 @@ CREATE TABLE IF NOT EXISTS note_marks (
     owner_id INTEGER NOT NULL DEFAULT 1,
     paper_content_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
     block_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('highlight', 'quote', 'figure', 'equation', 'region')),
+    kind TEXT NOT NULL CHECK (kind IN ('text', 'figure', 'equation', 'region')),
+    -- How a text mark is drawn; NULL for figure / equation / region marks
+    -- (they keep their outline / box drawing).
+    style TEXT CHECK (style IN ('highlight', 'underline', 'wavy', 'bar')),
     color TEXT,
     view TEXT NOT NULL CHECK (view IN ('html', 'pdf')),
     pieces_json TEXT NOT NULL,
@@ -635,6 +638,10 @@ CREATE TABLE IF NOT EXISTS mark_colors (
     color TEXT NOT NULL,
     name TEXT NOT NULL,
     visible INTEGER NOT NULL DEFAULT 1,
+    -- The user's light-mode colour (the dark one is derived); the defaults'
+    -- are filled by apply_schema / paperhub-migrate-mark-styles.
+    hex TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (owner_id, color)
 );
 INSERT OR IGNORE INTO mark_colors (owner_id, color, name) VALUES

@@ -106,9 +106,27 @@ async def test_colors_patch(client: AsyncClient) -> None:
     r = await client.patch("/marks/colors/green",
                            json={"name": "Result", "visible": False})
     assert r.status_code == 200
-    assert r.json()[0] == {"color": "green", "name": "Result", "visible": False}
+    assert (r.json()[0]["name"], r.json()[0]["visible"]) == ("Result", False)
     assert (await client.patch("/marks/colors/red", json={"name": "x"})
             ).status_code == 404
+
+
+async def test_custom_colour_lifecycle(client: AsyncClient) -> None:
+    r = await client.post("/marks/colors", json={"hex": "#1f8a8a", "name": ""})
+    assert r.status_code == 422  # a label is required
+    r = await client.post("/marks/colors", json={"hex": "#fde047", "name": "Y"})
+    assert r.status_code == 422 and "yellow" in r.json()["detail"]
+    r = await client.post("/marks/colors",
+                          json={"hex": "#1f8a8a", "name": "To verify"})
+    assert r.status_code == 200
+    new = r.json()[-1]
+    assert new["name"] == "To verify" and new["builtin"] is False
+    order = [new["color"], "green", "blue", "pink", "purple"]
+    r = await client.put("/marks/colors/order", json={"order": order})
+    assert [c["color"] for c in r.json()] == order
+    r = await client.delete(f"/marks/colors/{new['color']}")
+    assert r.status_code == 200 and len(r.json()) == 4
+    assert (await client.delete("/marks/colors/green")).status_code == 422
 
 
 async def test_unexpected_store_error_is_a_500(

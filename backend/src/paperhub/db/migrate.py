@@ -857,6 +857,19 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
     )
     await conn.commit()
 
+    # Plan H5b.1: marks as kind + style. A fresh table gets its default
+    # colours filled here; an older one is rebuilt only by the operator
+    # (paperhub-migrate-mark-styles, step 1 of reingest_all_papers.ps1),
+    # never by the backend starting up on the user's library.
+    if await note_marks_legacy(conn):
+        _LOG.warning("note_marks predates mark styles: run "
+                     "`uv run paperhub-migrate-mark-styles` (backend stopped)")
+    elif "hex" in await _columns(conn, "mark_colors"):
+        from paperhub.notes.mark_colors import DEFAULTS
+
+        await fill_default_colors(conn, DEFAULTS)
+        await conn.commit()
+
     # Plan H2: a pending reviewer item whose run was rated explicitly is
     # resolved (idempotent; a no-op once nothing is pending).
     from paperhub.feedback.repo import resolve_superseded
@@ -922,3 +935,123 @@ async def reconcile_claimed_actions(conn: aiosqlite.Connection) -> None:
         (json.dumps({"error": INTERRUPTED_ACTION_ERROR}),),
     )
     await conn.commit()
+
+
+# Plan H5b.1 (2026-11-19): a mark's kind says WHAT was marked, its style HOW
+# it is drawn. The shape note_marks is rebuilt into (schema.sql).
+NOTE_MARKS_DDL = """CREATE TABLE {name} (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL DEFAULT 1,
+    paper_content_id INTEGER NOT NULL REFERENCES paper_content(id) ON DELETE CASCADE,
+    block_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('text', 'figure', 'equation', 'region')),
+    style TEXT CHECK (style IN ('highlight', 'underline', 'wavy', 'bar')),
+    color TEXT,
+    view TEXT NOT NULL CHECK (view IN ('html', 'pdf')),
+    pieces_json TEXT NOT NULL,
+    lang TEXT,
+    source_ref TEXT,
+    section_key TEXT,
+    status TEXT NOT NULL DEFAULT 'ok'
+        CHECK (status IN ('ok', 'lost', 'partly_lost', 'translation_changed')),
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+)"""
+_MARK_KEEP = ("id, owner_id, paper_content_id, block_id, color, view, "
+              "pieces_json, lang, source_ref, section_key, status, created_at, "
+              "deleted_at")
+# highlight -> text/highlight (colour kept); quote -> text/underline, no colour.
+_KIND_SQL = "CASE WHEN kind IN ('highlight', 'quote') THEN 'text' ELSE kind END"
+_STYLE_SQL = ("CASE kind WHEN 'highlight' THEN 'highlight' "
+              "WHEN 'quote' THEN 'underline' END")
+_COLOR_SQL = "CASE WHEN kind = 'quote' THEN NULL ELSE color END"
+_BLOCKS_WHERE = (
+    "type = 'paperQuote' "
+    "AND json_extract(payload_json, '$.props.kind') IN ('highlight', 'quote')")
+
+
+async def _columns(conn: aiosqlite.Connection, table: str) -> set[str]:
+    async with conn.execute(f"PRAGMA table_info({table})") as cur:
+        return {row[1] for row in await cur.fetchall()}
+
+
+async def _count(conn: aiosqlite.Connection, sql: str) -> int:
+    async with conn.execute(sql) as cur:
+        return int((await cur.fetchone() or (0,))[0])
+
+
+async def note_marks_legacy(conn: aiosqlite.Connection) -> bool:
+    """Whether note_marks still has the highlight / quote kinds (no style)."""
+    return (await has_table(conn, "note_marks")
+            and "style" not in await _columns(conn, "note_marks"))
+
+
+async def migrate_mark_styles(conn: aiosqlite.Connection, *,
+                              dry_run: bool = False) -> dict[str, int]:
+    """Move marks to kind + style and give the palette hex + order.
+
+    Idempotent; a dry run counts what a real run would change. Returns
+    ``{"highlight": n, "quote": n, "blocks": n, "colors": n, "rebuilt": 0|1}``.
+    """
+    from paperhub.notes.mark_colors import DEFAULTS
+
+    out = {"highlight": 0, "quote": 0, "blocks": 0, "colors": 0, "rebuilt": 0}
+    if not await has_table(conn, "note_marks"):
+        return out
+    legacy = await note_marks_legacy(conn)
+    if legacy:
+        out["rebuilt"] = 1
+        for k in ("highlight", "quote"):
+            out[k] = await _count(
+                conn, f"SELECT COUNT(*) FROM note_marks WHERE kind = '{k}'")  # noqa: S608
+    out["blocks"] = await _count(
+        conn, f"SELECT COUNT(*) FROM note_blocks WHERE {_BLOCKS_WHERE}")  # noqa: S608
+    cols = await _columns(conn, "mark_colors")
+    if "hex" in cols:
+        out["colors"] = await _count(
+            conn, "SELECT COUNT(*) FROM mark_colors WHERE hex = ''")
+    else:
+        out["colors"] = await _count(conn, "SELECT COUNT(*) FROM mark_colors")
+    if dry_run:
+        return out
+    if legacy:
+        await _fk_safe_rebuild(
+            conn, old_table="note_marks", new_table="note_marks_new",
+            create_new_sql=NOTE_MARKS_DDL.format(name="note_marks_new"),
+            copy_sql=(
+                f"INSERT INTO note_marks_new ({_MARK_KEEP}, kind, style) "
+                f"SELECT {_MARK_KEEP.replace('color,', f'{_COLOR_SQL},')}, "
+                f"{_KIND_SQL}, {_STYLE_SQL} FROM note_marks"),
+            recreate_sql=(
+                "CREATE INDEX IF NOT EXISTS idx_note_marks_paper "
+                "ON note_marks(paper_content_id, deleted_at)",),
+        )
+    # The marks' note blocks say the same (their props drive the editor).
+    await conn.execute(
+        "UPDATE note_blocks SET payload_json = json_set(payload_json, "
+        "'$.props.style', CASE json_extract(payload_json, '$.props.kind') "
+        "WHEN 'highlight' THEN 'highlight' ELSE 'underline' END, "
+        "'$.props.color', CASE json_extract(payload_json, '$.props.kind') "
+        "WHEN 'quote' THEN NULL "
+        "ELSE json_extract(payload_json, '$.props.color') END, "
+        f"'$.props.kind', 'text') WHERE {_BLOCKS_WHERE}")  # noqa: S608
+    if "hex" not in cols:
+        await conn.execute(
+            "ALTER TABLE mark_colors ADD COLUMN hex TEXT NOT NULL DEFAULT ''")
+    if "sort_order" not in cols:
+        await conn.execute("ALTER TABLE mark_colors ADD COLUMN sort_order "
+                           "INTEGER NOT NULL DEFAULT 0")
+    await fill_default_colors(conn, DEFAULTS)
+    await conn.commit()
+    return out
+
+
+async def fill_default_colors(conn: aiosqlite.Connection,
+                              defaults: tuple[tuple[str, str, str, str], ...],
+                              ) -> None:
+    """The default colours' hex and order where not set yet (a no-op write
+    once filled)."""
+    for i, (key, _name, hex_, _dark) in enumerate(defaults):
+        await conn.execute(
+            "UPDATE mark_colors SET hex = ?, sort_order = ? "
+            "WHERE color = ? AND hex = ''", (hex_, i, key))

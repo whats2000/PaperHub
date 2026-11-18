@@ -30,6 +30,16 @@ class MarkCreated(BaseModel):
 class ColorPatch(BaseModel):
     name: str | None = None
     visible: bool | None = None
+    hex: str | None = None
+
+
+class ColorNew(BaseModel):
+    hex: str
+    name: str
+
+
+class ColorOrder(BaseModel):
+    order: list[str]
 
 
 @asynccontextmanager
@@ -71,7 +81,29 @@ async def list_colors() -> list[dict[str, Any]]:
 async def patch_color(color: str, body: ColorPatch) -> list[dict[str, Any]]:
     async with _db() as conn:
         await marks_store.set_color(conn, color, name=body.name,
-                                    visible=body.visible)
+                                    visible=body.visible, hex=body.hex)
+        return await marks_store.colors(conn)
+
+
+@router.post("/colors")
+async def add_color(body: ColorNew) -> list[dict[str, Any]]:
+    """A new labelled colour (422 with the reason when refused)."""
+    async with _db() as conn:
+        await marks_store.add_color(conn, hex=body.hex, name=body.name)
+        return await marks_store.colors(conn)
+
+
+@router.put("/colors/order")
+async def reorder_colors(body: ColorOrder) -> list[dict[str, Any]]:
+    async with _db() as conn:
+        await marks_store.reorder_colors(conn, body.order)
+        return await marks_store.colors(conn)
+
+
+@router.delete("/colors/{color}")
+async def delete_color(color: str) -> list[dict[str, Any]]:
+    async with _db() as conn:
+        await marks_store.delete_color(conn, color)
         return await marks_store.colors(conn)
 
 

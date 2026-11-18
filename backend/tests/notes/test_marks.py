@@ -36,7 +36,7 @@ async def _paper(conn):
 
 
 def _in(pieces, **kw):
-    base = dict(paper_content_id=1, kind="highlight", color="green",
+    base = dict(paper_content_id=1, kind="text", style="highlight", color="green",
                 view="html", pieces=pieces, section_key="Method")
     return MarkIn(**{**base, **kw})
 
@@ -125,7 +125,7 @@ async def test_colors_seeded_and_renamed(conn):
     assert all(c["visible"] for c in cs)
     await set_color(conn, "blue", name="Approach", visible=False)
     blue = [c for c in await colors(conn) if c["color"] == "blue"][0]
-    assert blue == {"color": "blue", "name": "Approach", "visible": False}
+    assert (blue["name"], blue["visible"]) == ("Approach", False)
 
 
 async def _note_rev(conn, note_id):

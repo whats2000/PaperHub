@@ -148,7 +148,7 @@ async def test_export_sources_loads_the_mark_paper(
         "'[\"Kaiming He\"]', 2016, 's', 'd', 'h')")
     await conn.execute(
         "INSERT INTO note_marks (id, paper_content_id, block_id, kind, view, "
-        "pieces_json, created_at) VALUES ('mk_1', 7, 'q1', 'quote', 'pdf', '[]', 'now')")
+        "pieces_json, created_at) VALUES ('mk_1', 7, 'q1', 'text', 'pdf', '[]', 'now')")
     await conn.commit()
     q = _blk("q1", "paperQuote", props={"markId": "mk_1", "quote": "x"})
     papers, chunk_papers, mark_papers = await export_sources(conn, CHAT, [q])
