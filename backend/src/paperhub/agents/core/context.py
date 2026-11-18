@@ -18,7 +18,7 @@ import aiosqlite
 import litellm
 
 from paperhub.agents.core.citations import cited_figures, cited_ids, cited_views
-from paperhub.agents.core.note_tools import _esc, _title_xml
+from paperhub.agents.core.note_xml import esc, title_xml
 from paperhub.agents.core.private_material import collect_note_titles
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_recall import active_memories
@@ -110,8 +110,8 @@ async def render_notes(
     ) as cur:
         counts = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
     lines = [
-        f'<note ref="{_esc(ref_of(n, session_id))}" revision="{n.revision}" '
-        f'blocks="{counts.get(n.id, 0)}">{_title_xml(n.title)}</note>'
+        f'<note ref="{esc(ref_of(n, session_id))}" revision="{n.revision}" '
+        f'blocks="{counts.get(n.id, 0)}">{title_xml(n.title)}</note>'
         for n in notes]
     index = "<notes>\n" + "\n".join(lines) + "\n</notes>"
     seen = await contacts(conn, session_id)
@@ -128,8 +128,8 @@ async def render_notes(
         return index, None
     changes.sort(key=lambda c: c[0], reverse=True)
     out = [
-        f'<note_change note="{_esc(ref)}" when="{_esc(when)}">'
-        + ",".join(_esc(b) for b in ids) + "</note_change>"
+        f'<note_change note="{esc(ref)}" when="{esc(when)}">'
+        + ",".join(esc(b) for b in ids) + "</note_change>"
         for when, ref, ids in changes[:NOTES_CHANGES_MAX_NOTES]]
     return index, "\n".join(out)
 

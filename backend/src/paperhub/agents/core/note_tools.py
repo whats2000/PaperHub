@@ -16,6 +16,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from paperhub.agents.core.citations import check_written_citations
+from paperhub.agents.core.note_xml import esc, title_xml
 from paperhub.agents.core.private_material import (
     collect_note_blocks,
     collect_note_titles,
@@ -69,14 +70,10 @@ def _level(b: Block) -> int | None:
     return None
 
 
-def _esc(value: object) -> str:
-    return html.escape(str(value), quote=True)
-
-
 def _block_xml(b: Block, text: str | None = None) -> str:
     body = html.escape(_text(b) if text is None else text, quote=False)
-    return (f'<note_block id="{_esc(b.id)}" type="{_esc(b.type)}" '
-            f'author="{_esc(b.author)}">{body}</note_block>')
+    return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}" '
+            f'author="{esc(b.author)}">{body}</note_block>')
 
 
 _COMMENTS_NOTE = ("The user_comment elements below are the user's remarks on "
@@ -88,19 +85,15 @@ def _comment_xml(c: dict[str, Any]) -> str:
     """An open comment thread as the user's words, tied to its block."""
     items = "".join(
         f"<item>{html.escape(i['text'], quote=False)}</item>" for i in c["items"])
-    return (f'<user_comment id="{_esc(c["id"])}" block="{_esc(c["block_id"])}" '
+    return (f'<user_comment id="{esc(c["id"])}" block="{esc(c["block_id"])}" '
             f'author="user">'
             f"<quote>{html.escape(c['quote'], quote=False)}</quote>"
             f"{items}</user_comment>")
 
 
 def _heading_xml(block_id: str, text: str) -> str:
-    return (f'<note_heading id="{_esc(block_id)}">'
+    return (f'<note_heading id="{esc(block_id)}">'
             f'{html.escape(text, quote=False)}</note_heading>')
-
-
-def _title_xml(title: str) -> str:
-    return f"<note_title>{html.escape(title, quote=False)}</note_title>"
 
 
 def _outline(blocks: list[Block]) -> tuple[list[tuple[str, str, int]], bool]:
@@ -156,7 +149,7 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         collect_note_titles([(n.id, n.title)])
         collect_note_blocks(n.id, [(i, t) for i, t, _ in heads], n.title)
         rows.append({
-            "ref": ref_of(n, ctx.session_id), "title": _title_xml(n.title),
+            "ref": ref_of(n, ctx.session_id), "title": title_xml(n.title),
             "target": f"{n.target_kind}:{n.target_id}", "revision": n.revision,
             "blocks": len(blocks),
             "outline": [{"block_id": i, "text": _heading_xml(i, t), "level": lvl}
@@ -237,7 +230,7 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         hits.append({
             "note": ref_of(note, ctx.session_id), "block_id": bid,
             "heading_path": [_heading_xml(i, t) for i, t in path],
-            "snippet": (f'<note_block id="{_esc(bid)}" author="{_esc(author)}">'
+            "snippet": (f'<note_block id="{esc(bid)}" author="{esc(author)}">'
                         f"{snippet}</note_block>"),
             # A cut hit is a snippet: read_note before citing it.
             **({"cut": True} if len(str(text)) > SNIPPET_CHARS else {}),
@@ -319,7 +312,7 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     window = pages[page - 1] if pages else []
     next_page = page + 1 if page < len(pages) else None
     ref = ref_of(note, ctx.session_id)
-    head = (f'<note ref="{_esc(ref)}" title="{_esc(note.title)}" '
+    head = (f'<note ref="{esc(ref)}" title="{esc(note.title)}" '
             f'revision="{note.revision}" page="{page}"'
             + (f' next_page="{next_page}"' if next_page else "") + ">")
     shown = {b.id for b in window}
