@@ -284,6 +284,10 @@ export interface PdfFragment {
   page: number;
   text: string;
   rects: Frac[];
+  /** Horizontal gap from the previous fragment on the same line, in units
+   * of the line's height (pdf.js may lay out words as separate spans with no
+   * space character between them, e.g. small caps). */
+  gap?: number;
   /** On the selection's first / last fragment: the page text around it. */
   before?: string;
   after?: string;
@@ -319,6 +323,19 @@ function textBeside(layer: Element, node: Node, offset: number, side: "before" |
   return side === "before" ? out.slice(-CONTEXT_CHARS) : out.slice(0, CONTEXT_CHARS);
 }
 
+/** A gap wider than this many line heights between two spans on one line
+ * is a space between words (letter spacing inside a word stays far below). */
+export const WORD_GAP = 0.15;
+
+/** The gap between two boxes on one line, in line heights (null: not on
+ * the same line). */
+export function lineGap(prev: Box, next: Box): number | null {
+  const h = Math.max(prev.bottom - prev.top, next.bottom - next.top, 1e-6);
+  const mid = (next.top + next.bottom) / 2;
+  if (mid < prev.top || mid > prev.bottom) return null;
+  return (next.left - prev.right) / h;
+}
+
 /** What a selection covers on the reader's PDF pages, node by node. */
 export function selectionFragments(range: Range, root: Element): PdfFragment[] {
   const out: PdfFragment[] = [];
@@ -327,6 +344,7 @@ export function selectionFragments(range: Range, root: Element): PdfFragment[] {
   const common = range.commonAncestorContainer;
   const scope = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
   const walker = doc.createTreeWalker(scope && root.contains(scope) ? scope : root, NodeFilter.SHOW_TEXT);
+  let prevBox: Box | null = null;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const node = n as Text;
     if (!range.intersectsNode(node)) continue;
@@ -337,9 +355,17 @@ export function selectionFragments(range: Range, root: Element): PdfFragment[] {
     const end = node === range.endContainer ? range.endOffset : node.data.length;
     if (end <= start || !node.data.slice(start, end).trim()) continue;
     const pageBox = pageEl.getBoundingClientRect();
-    const rects = nodeRects(node, start, end).map((r) => toFrac(r, pageBox));
+    const boxes = nodeRects(node, start, end);
+    const rects = boxes.map((r) => toFrac(r, pageBox));
     if (!rects.length) continue;
-    out.push({ page: Number(pageEl.getAttribute("data-page-number")) - 1, text: node.data.slice(start, end), rects });
+    const gap = prevBox ? lineGap(prevBox, boxes[0]!) : null;
+    prevBox = boxes[boxes.length - 1]!;
+    out.push({
+      page: Number(pageEl.getAttribute("data-page-number")) - 1,
+      text: node.data.slice(start, end),
+      rects,
+      ...(gap !== null ? { gap } : {}),
+    });
   }
   const layerOf = (n: Node) =>
     (n.nodeType === Node.TEXT_NODE ? n.parentElement : (n as Element))?.closest(TEXT_LAYER) ?? null;
@@ -366,8 +392,10 @@ export function piecesFromFragments(
     const blockId = block?.block_id ?? null;
     const last = out[out.length - 1];
     if (last && last.page === f.page && last.block_id === blockId) {
-      // A new line reads as a line break; spans on one line join as they are.
+      // A new line reads as a line break; spans on one line join as they
+      // are, or with a space where the page leaves a word's gap between them.
       if (lastBottom !== null && all[1] >= lastBottom - 0.002) last.raw += "\n";
+      else if ((f.gap ?? 0) > WORD_GAP && !/\s$/.test(last.raw) && !/^\s/.test(f.text)) last.raw += " ";
       last.raw += f.text;
       last.all.push(...f.rects);
       if (f.after !== undefined) last.after = f.after;

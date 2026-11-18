@@ -11,7 +11,7 @@ import {
   type CreateMock,
 } from "@/components/canvas/__fixtures__/pdfMarks";
 import { Reader } from "@/components/canvas/__fixtures__/pdfMarksReader";
-import { piecesFromFragments, selectionToPdfPieces } from "@/lib/marks/pdfGeometry";
+import { lineGap, piecesFromFragments, selectionToPdfPieces } from "@/lib/marks/pdfGeometry";
 import { listPaperBlocks } from "@/lib/api";
 import { useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
@@ -98,6 +98,28 @@ describe("selectionToPdfPieces", () => {
     );
     expect(p?.quote).toBe("an effec-tive model");
     expect(p?.raw).toBe("an effec-\ntive model");
+  });
+
+  it("puts a space between spans the page lays out a word apart (small caps, no space characters)", () => {
+    const at = (x0: number, x1: number): [number, number, number, number] => [x0, 0.1, x1, 0.12];
+    // LoRA's title from a LaTeX-compiled PDF: one span per word, no spaces.
+    const [p] = piecesFromFragments(
+      [
+        { page: 0, text: "LORA:", rects: [at(0.1, 0.18)] },
+        { page: 0, text: "LOW-RANK", rects: [at(0.19, 0.3)], gap: 0.4 },
+        { page: 0, text: "ADAPTA", rects: [at(0.32, 0.4)], gap: 0.4 },
+        { page: 0, text: "TION", rects: [at(0.4, 0.45)], gap: 0.01 },
+      ],
+      {},
+    );
+    expect(p?.raw).toBe("LORA: LOW-RANK ADAPTATION");
+  });
+
+  it("measures a span's gap in line heights, only on the same line", () => {
+    const box = (left: number, right: number, top = 100) => ({ left, right, top, bottom: top + 10 });
+    expect(lineGap(box(0, 50), box(54, 90))).toBeCloseTo(0.4);
+    expect(lineGap(box(0, 50), box(50.5, 90))).toBeCloseTo(0.05);
+    expect(lineGap(box(0, 50), box(0, 40, 120))).toBeNull();
   });
 
   it("without Marker blocks a piece has no block and no section", () => {
