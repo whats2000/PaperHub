@@ -293,3 +293,47 @@ async def test_one_stroke_across_paragraphs_reads_as_paragraphs(conn):
     assert [p["stroke"] for p in m2["pieces"]] == [0, 0, 1]
     [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
     assert b.text == "end of one\nstart of two … later words"
+
+
+async def test_restore_mark_brings_back_the_last_erased_piece(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in(
+        [_piece("a"), _piece("b", 5), _piece("c", 9)]))
+    await erase_piece(conn, m["id"], 0)
+    await erase_piece(conn, m["id"], 2)
+    await erase_piece(conn, m["id"], 1)  # the last live piece: the mark goes
+    assert await list_marks(conn, 1) == []
+    await restore_mark(conn, m["id"])
+    [back] = await list_marks(conn, 1)
+    assert [bool(p.get("erased")) for p in back["pieces"]] == [True, False, True]
+    assert "erased_seq" not in back["pieces"][1]
+    [b] = [x for x in await list_blocks(conn, saved.note_id) if x.id == m["block_id"]]
+    assert b.text == "b"
+
+
+async def test_restore_mark_with_legacy_erased_pieces_takes_the_last_by_index(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("a"), _piece("b", 5)]))
+    await erase_piece(conn, m["id"], 1)
+    await erase_piece(conn, m["id"], 0)
+    # Pieces erased before the erase order was recorded carry no sequence.
+    rec = await marks_mod._get(conn, m["id"])
+    rec["pieces"] = [{k: v for k, v in p.items() if k != "erased_seq"}
+                     for p in rec["pieces"]]
+    await marks_mod.save_pieces(conn, rec)
+    await conn.commit()
+    await restore_mark(conn, m["id"])
+    [back] = await list_marks(conn, 1)
+    assert [bool(p.get("erased")) for p in back["pieces"]] == [True, False]
+
+
+async def test_block_undo_of_an_erase_delete_revives_a_piece(conn):
+    from paperhub.notes.ops import restore_blocks
+
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("a"), _piece("b", 5)]))
+    await erase_piece(conn, m["id"], 0)
+    await erase_piece(conn, m["id"], 1)
+    await restore_blocks(conn, saved.note_id, [m["block_id"]], actor="user")
+    [back] = await list_marks(conn, 1)
+    assert [bool(p.get("erased")) for p in back["pieces"]] == [True, False]

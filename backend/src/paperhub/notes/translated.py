@@ -26,11 +26,11 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import (
     BLOCK_TYPE,
     MARK_COLS,
     block_props,
-    live_pieces,
     mark_from_row,
     write_row,
 )

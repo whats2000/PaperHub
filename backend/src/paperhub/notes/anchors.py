@@ -28,11 +28,11 @@ import aiosqlite
 
 from paperhub.notes.html_text import TextIndex, build_text_index
 from paperhub.notes.locate import Prepared, chunks_in, match_text, prepare
+from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import (
     BLOCK_TYPE,
     MARK_COLS,
     block_props,
-    live_pieces,
     mark_from_row,
     save_pieces,
     write_row,

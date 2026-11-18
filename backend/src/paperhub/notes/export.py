@@ -35,7 +35,8 @@ from urllib.parse import quote
 
 import aiosqlite
 
-from paperhub.notes.marks import joined_quote, live_pieces
+from paperhub.notes.mark_pieces import live_pieces
+from paperhub.notes.marks import joined_quote
 from paperhub.notes.models import Block, Note
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset

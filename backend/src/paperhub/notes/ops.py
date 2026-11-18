@@ -25,6 +25,7 @@ import aiosqlite
 from pydantic import BaseModel, Field
 
 from paperhub.db.connection import write_transaction
+from paperhub.notes.mark_pieces import revive_latest
 from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType
 from paperhub.notes.order import key_between
 from paperhub.notes.store import block_text, bump_revision, get_note, new_block_id
@@ -227,10 +228,24 @@ class _Ctx:
                     "WHERE block_id = ? AND deleted_at IS NULL",
                     (state["deleted_at"], block_id))
             else:
-                await self.conn.execute(
-                    "UPDATE note_marks SET deleted_at = NULL "
-                    "WHERE block_id = ? AND deleted_at IS NOT NULL",
-                    (block_id,))
+                await self._revive_marks(block_id)
+
+    async def _revive_marks(self, block_id: str) -> None:
+        """Bring back the deleted mark of ``block_id``. One that erasing
+        its last piece removed comes back with that piece, never with
+        nothing to draw."""
+        async with self.conn.execute(
+            "SELECT id, pieces_json FROM note_marks "
+            "WHERE block_id = ? AND deleted_at IS NOT NULL", (block_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        for mark_id, raw in rows:
+            pieces = json.loads(raw)
+            revived = revive_latest(pieces)
+            await self.conn.execute(
+                "UPDATE note_marks SET deleted_at = NULL, pieces_json = ? "
+                "WHERE id = ?",
+                (json.dumps(revived if revived is not None else pieces), mark_id))
 
 
 def _section_ends(anchor: _Row, candidate: _Row) -> bool:

@@ -18,6 +18,7 @@ import aiosqlite
 from pydantic import BaseModel
 
 from paperhub.db.connection import in_write_transaction, write_lock
+from paperhub.notes.mark_pieces import erased, live_pieces, revive_latest, unerased
 from paperhub.notes.ops import (
     ApplyResult,
     BlockIn,
@@ -113,11 +114,6 @@ async def write_row(conn: aiosqlite.Connection, sql: str,
         await conn.execute(sql, params)
         if not in_write_transaction():
             await conn.commit()
-
-
-def live_pieces(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Pieces still shown: neither erased nor moved to another mark."""
-    return [p for p in pieces if not p.get("erased") and not p.get("removed")]
 
 
 _FAR = float("inf")
@@ -387,6 +383,13 @@ async def _delete(conn: aiosqlite.Connection, m: dict[str, Any],
 
 async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
                    ) -> ApplyResult:
+    # A mark whose last piece was erased comes back with that piece.
+    pieces = revive_latest(m["pieces"])
+    if pieces is None:
+        raise MarkInputError(f"mark {m['id']} has no piece to bring back")
+    if pieces is not m["pieces"]:
+        m["pieces"] = pieces
+        await save_pieces(conn, m)
     res = await _restore_in_tx(conn, await _note_id(conn, m),
                                [m["block_id"]], actor="user")
     if m["block_id"] not in res.applied:
@@ -423,7 +426,7 @@ async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
         _check_index(m, index)
         if m["deleted_at"] is not None:
             raise MarkInputError("cannot erase from a deleted mark")
-        m["pieces"][index] = {**m["pieces"][index], "erased": True}
+        m["pieces"][index] = erased(m["pieces"][index], m["pieces"])
         await save_pieces(conn, m)
         if live_pieces(m["pieces"]):
             await _update_block(conn, m)
@@ -440,8 +443,7 @@ async def restore_piece(conn: aiosqlite.Connection, mark_id: str,
         m = await _get(conn, mark_id)
         _check_index(m, index)
         auto_deleted = m["deleted_at"] is not None and not live_pieces(m["pieces"])
-        m["pieces"][index] = {k: v for k, v in m["pieces"][index].items()
-                              if k != "erased"}
+        m["pieces"][index] = unerased(m["pieces"][index])
         await save_pieces(conn, m)
         if auto_deleted:
             await _restore(conn, m)
