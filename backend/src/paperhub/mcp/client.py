@@ -23,11 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
+import httpx
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import GetSessionIdCallback, streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared.message import SessionMessage
 
 from .client_context import current_client_headers_context
 from .config import MCPServerConfig
@@ -36,6 +41,23 @@ from .errors import MCPToolError, MCPUnavailableError
 __all__ = ["MCPClient"]
 
 _LOG = logging.getLogger(__name__)
+
+_Streams = tuple[MemoryObjectReceiveStream[SessionMessage | Exception],
+                 MemoryObjectSendStream[SessionMessage], GetSessionIdCallback]
+
+
+@asynccontextmanager
+async def streamablehttp_client(
+    url: str, headers: dict[str, str] | None = None,
+) -> AsyncIterator[_Streams]:
+    """The streamable-HTTP transport with ``headers`` on every request:
+    mcp's ``streamable_http_client`` over an httpx client this owns (the
+    timeouts of mcp's deprecated ``streamablehttp_client``, 30 s and a
+    5 min read for the event stream). Tests patch this name."""
+    client = create_mcp_http_client(
+        headers=headers, timeout=httpx.Timeout(30.0, read=300.0))
+    async with client, streamable_http_client(url, http_client=client) as streams:
+        yield streams
 
 # Exponential backoff schedule (seconds) for transport reconnect. Cap 4
 # attempts total → 3 sleeps between them. Kept small so a permanently
