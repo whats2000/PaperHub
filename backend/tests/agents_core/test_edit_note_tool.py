@@ -569,3 +569,36 @@ async def test_trace_records_withdrawn_suggestions(
     second = await _edit(ctx, note="chat", base_revision=first.record["revision"],
                          ops=[upd])
     assert second.record["withdrawn"] == [older]
+
+
+async def test_no_empty_section_when_every_insert_under_it_is_rejected(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """A section made only to hold the call's inserts is not left behind
+    empty when the engine rejects all of them."""
+    pid = await _paper(migrated_db)
+    note = await paper_note(migrated_db, pid)
+    from paperhub.notes.papers import ensure_section
+    sec = await ensure_section(migrated_db, note.id, pid, "Introduction")
+    n = await get_note(migrated_db, note.id)
+    assert n is not None
+    mine = await apply_ops(migrated_db, note.id, base_revision=n.revision,
+                           actor="user", ops=[Op(
+                               op="insert", block_id="gone1", under_heading=sec,
+                               block=BlockIn(type="paragraph", content="x"))])
+    await apply_ops(migrated_db, note.id, base_revision=mine.revision,
+                    actor="user", ops=[Op(op="delete", block_id="gone1")])
+    n = await get_note(migrated_db, note.id)
+    assert n is not None
+    ctx = _ctx(migrated_db, fake_tracer, [(pid, "Paper")])
+    # The agent may not bring back a block the user deleted: rejected.
+    out = await _edit(ctx, note=f"paper:{pid}", base_revision=n.revision,
+                      ops=[{**_ins("revive", under_heading="Method"),
+                            "block_id": "gone1"}])
+    data = json.loads(out.content)
+    assert data["applied"] == [] and len(data["rejected"]) == 1
+    secs = [b.section_key for b in await list_blocks(migrated_db, note.id)
+            if b.type == "section"]
+    assert secs == ["Introduction"]
+    after = await get_note(migrated_db, note.id)
+    assert after is not None and after.revision == n.revision

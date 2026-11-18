@@ -539,6 +539,7 @@ async def _record_change_set(ctx: _Ctx, *, base_revision: int,
 async def _apply_in_tx(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None, summary: str,
+    scaffold: frozenset[str] = frozenset(),
 ) -> ApplyResult:
     note = await get_note(conn, note_id)
     if note is not None and base_revision > note.revision:
@@ -556,6 +557,7 @@ async def _apply_in_tx(
         if op.op == "insert" and len(ctx.applied) > before_applied:
             stored["block_id"] = ctx.applied[-1]  # the id the block got
         recorded.append(stored)
+    await _drop_empty_scaffold(ctx, scaffold)
     if not ctx.applied and not ctx.suggested:
         # Every op was rejected: no change, so no revision and no change set.
         await conn.execute("ROLLBACK TO apply_ops")
@@ -570,16 +572,34 @@ async def _apply_in_tx(
     return ctx.result()
 
 
+async def _drop_empty_scaffold(ctx: _Ctx, scaffold: frozenset[str]) -> None:
+    """Undo the insert of each scaffold section this call made that holds
+    nothing (every op meant for it was rejected): it never happened."""
+    for sid in sorted(scaffold):
+        if sid not in ctx.applied:
+            continue
+        row = await ctx.get(sid)
+        if row is None or await _section_has_blocks(ctx, row):
+            continue
+        await ctx.conn.execute(
+            "DELETE FROM note_block_history WHERE block_id = ? AND revision = ?",
+            (sid, ctx.rev))
+        await ctx.conn.execute("DELETE FROM note_blocks WHERE id = ?", (sid,))
+        ctx.applied.remove(sid)
+
+
 async def apply_ops(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None = None, summary: str = "",
-    idempotency_key: str | None = None,
+    idempotency_key: str | None = None, scaffold: frozenset[str] = frozenset(),
 ) -> ApplyResult:
     """Apply ``ops`` as one revision; see the module docstring for the rules.
 
     ``idempotency_key`` names one burst across its retries: a key already
     stored for this note returns that burst's result and applies nothing (a
     retry after a lost response must not insert twice or revert later text).
+    ``scaffold`` names section blocks inserted only to hold the other ops:
+    one left empty (all its ops rejected) is not kept.
     """
     async with write_transaction(conn):
         if idempotency_key is not None:
@@ -593,7 +613,7 @@ async def apply_ops(
                 return ApplyResult.model_validate_json(row[0])
         res = await _apply_in_tx(
             conn, note_id, base_revision=base_revision, ops=ops, actor=actor,
-            run_id=run_id, summary=summary)
+            run_id=run_id, summary=summary, scaffold=scaffold)
         if idempotency_key is not None and res.change_set_id is not None:
             await conn.execute(
                 "UPDATE note_change_sets SET idempotency_key = ?, "

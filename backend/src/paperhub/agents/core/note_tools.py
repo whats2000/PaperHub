@@ -621,7 +621,8 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         try:
             res = await apply_ops(
                 ctx.conn, note.id, base_revision=base, ops=valid,
-                actor="agent", run_id=ctx.run_id)
+                actor="agent", run_id=ctx.run_id,
+                scaffold=frozenset(new_sections.values()))
         except ValueError as exc:
             await _collect_written(ctx.conn, note, [*sent, *refused], [], [], known)
             _collect_headings(note, ops, known)
