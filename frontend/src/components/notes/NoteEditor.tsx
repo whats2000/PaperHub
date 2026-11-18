@@ -46,6 +46,8 @@ import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
   diffDocuments,
   pruneUnsavedEmpty,
+  rekeyEditorBlocks,
+  rekeyTree,
   toEditorBlocks,
   treeIds,
   type EditorBlock,
@@ -258,6 +260,25 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         synced.current = pruneUnsavedEmpty(doc(), new Set([...treeIds(synced.current ?? []), ...treeIds(tree)]));
       }),
     [editor, noteId, origin, onChange, doc],
+  );
+
+  // Blocks the server saved under a new id (pasted from another note, they
+  // kept that note's id): re-keyed in place, so the next edit finds them.
+  useEffect(
+    () =>
+      useNotesStore.subscribe((s, prev) => {
+        const r = s.renames[noteId];
+        if (!r || r === prev.renames[noteId]) return;
+        const ids = new Map(r.pairs);
+        applyingRemote.current = true;
+        try {
+          rekeyEditorBlocks(editor._tiptapEditor.view as never, ids);
+        } finally {
+          applyingRemote.current = false;
+        }
+        synced.current = rekeyTree(synced.current ?? [], ids);
+      }),
+    [editor, noteId],
   );
 
   const comments = useNoteComments(editor, noteId);

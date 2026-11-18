@@ -66,6 +66,13 @@ export interface LocalEdit {
   blockIds: string[];
 }
 
+/** Blocks the server saved under another id than the one sent: open
+ * editors re-key them in place (`pairs`: [sent id, saved id]). */
+export interface NoteRenames {
+  seq: number;
+  pairs: [string, string][];
+}
+
 /** A bump tells open editors to reload `blockIds` (null = the whole note). */
 export interface NoteReload {
   seq: number;
@@ -83,6 +90,7 @@ interface NotesStore {
   /** `${kind}:${id}` -> note id. */
   byTarget: Record<string, number>;
   reloads: Record<number, NoteReload>;
+  renames: Record<number, NoteRenames>;
   /** The last edit an editor made to each note (`origin`: which editor),
    * so another editor open on the same note (the note card and the notes
    * pane) takes the changed blocks in place. */
@@ -231,6 +239,16 @@ function queue(noteId: number, ops: NoteOp[]) {
     else q.push(op);
   }
   pending.set(noteId, q);
+}
+
+/** `op` with every id in `ids` replaced by its new id. */
+function rekeyOp(op: NoteOp, ids: Map<string, string>): NoteOp {
+  let out = op;
+  for (const f of ["block_id", "parent_id", "after", "before", "under_heading"] as const) {
+    const v = op[f];
+    if (typeof v === "string" && ids.has(v)) out = { ...out, [f]: ids.get(v)! };
+  }
+  return out;
 }
 
 function bump(reloads: Record<number, NoteReload>, noteId: number, blockIds: string[] | null) {
@@ -575,6 +593,55 @@ export const useNotesStore = create<NotesStore>()(
         });
       };
 
+      /** Blocks the server saved under a new id (one pasted from another
+       * note kept its id there): re-key them here, in the edits queued
+       * since and in the open editors, so the next edit finds them. */
+      const rekey = (noteId: number, renamed: { from: string; to: string }[]) => {
+        const ids = new Map(renamed.map((r) => [r.from, r.to]));
+        const q = pending.get(noteId);
+        if (q) pending.set(noteId, q.map((o) => rekeyOp(o, ids)));
+        for (const [from, to] of ids) {
+          const n = rebuilds.get(from);
+          rebuilds.delete(from);
+          if (n !== undefined) rebuilds.set(to, n);
+        }
+        const re = (id: string | null) => (id !== null ? (ids.get(id) ?? id) : id);
+        set((s) => {
+          const cur = s.notes[noteId];
+          if (!cur) return {};
+          const drafts = s.drafts[noteId];
+          return {
+            notes: {
+              ...s.notes,
+              [noteId]: {
+                ...cur,
+                blocks: cur.blocks.map((b) =>
+                  ids.has(b.id) || (b.parent_id !== null && ids.has(b.parent_id))
+                    ? { ...b, id: re(b.id)!, parent_id: re(b.parent_id) }
+                    : b,
+                ),
+              },
+            },
+            drafts: drafts
+              ? {
+                  ...s.drafts,
+                  [noteId]: Object.fromEntries(
+                    Object.entries(drafts).map(([id, op]) => [re(id)!, rekeyOp(op, ids)]),
+                  ),
+                }
+              : s.drafts,
+            quoteTarget:
+              s.quoteTarget?.noteId === noteId && ids.has(s.quoteTarget.blockId)
+                ? { noteId, blockId: ids.get(s.quoteTarget.blockId)! }
+                : s.quoteTarget,
+            renames: {
+              ...s.renames,
+              [noteId]: { seq: (s.renames[noteId]?.seq ?? 0) + 1, pairs: [...ids] },
+            },
+          };
+        });
+      };
+
       const send = async (noteId: number) => {
         const state = get().notes[noteId];
         if (!state) return;
@@ -629,6 +696,7 @@ export const useNotesStore = create<NotesStore>()(
         inRetry.delete(noteId);
         attempts.delete(noteId);
         setRetrying(noteId, false);
+        if (res.renamed?.length) rekey(noteId, res.renamed);
         const applied = new Set(res.applied);
         for (const id of applied) rebuilds.delete(id);
         set((s) => {
@@ -655,6 +723,7 @@ export const useNotesStore = create<NotesStore>()(
         notes: {},
         byTarget: {},
         reloads: {},
+        renames: {},
         localEdits: {},
         retrying: {},
         drafts: {},

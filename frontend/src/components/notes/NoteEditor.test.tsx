@@ -510,6 +510,103 @@ describe("NoteEditor", () => {
     });
     expect(posted).toHaveLength(1);
   });
+
+  it("re-keys a block pasted from another note in place; typing in it saves, and a reload shows it once", async () => {
+    const saved = new Map<string, string>([["p1", "Mine"]]);
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        const applied: string[] = [];
+        const renamed: { from: string; to: string }[] = [];
+        const rejected: ApplyResult["rejected"] = [];
+        const textOf = (o: (typeof body.ops)[number]) =>
+          Array.isArray(o.block?.content) ? o.block.content.map((r) => (r as { text?: string }).text ?? "").join("") : "";
+        for (const o of body.ops) {
+          if (o.op === "insert" && o.block_id === "elsewhere") {
+            renamed.push({ from: "elsewhere", to: "srv1" });
+            saved.set("srv1", textOf(o));
+            applied.push("srv1");
+          } else if (o.block_id && saved.has(o.block_id)) {
+            saved.set(o.block_id, textOf(o));
+            applied.push(o.block_id);
+          } else {
+            rejected.push({ block_id: o.block_id ?? "", reason: "missing", current: null });
+          }
+        }
+        const res: ApplyResult = {
+          note_id: 7,
+          revision: body.base_revision + 1,
+          change_set_id: "cs",
+          applied,
+          suggested: [],
+          rejected,
+          reparented: [],
+          renamed,
+        };
+        return HttpResponse.json(res);
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { id: 7, target_kind: "paper", target_id: "3", title: "Attention", revision: 9, updated_at: "" },
+          blocks: [...saved].map(([id, text]) =>
+            blk(id, { content: [{ type: "text", text, styles: {} }], text, changed_rev: 9 }),
+          ),
+          suggestions: [],
+          comments: [],
+        }),
+      ),
+    );
+    seed([mine]);
+    mount();
+    type View = {
+      state: {
+        doc: { content: { size: number } };
+        schema: { nodes: Record<string, { create: (a: unknown, c?: unknown) => unknown }>; text: (t: string) => unknown };
+        tr: { insert: (pos: number, node: unknown) => unknown };
+      };
+      dispatch: (tr: unknown) => void;
+    };
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: View; commands: { insertContentAt: (pos: number, text: string) => boolean } };
+    };
+    await screen.findByText("Mine");
+    // A paste from another note: the block keeps that note's id.
+    act(() => {
+      const { state } = pm.editor.view;
+      const { nodes } = state.schema;
+      const node = nodes.blockContainer!.create({ id: "elsewhere" }, nodes.paragraph!.create({}, state.schema.text("pasted")));
+      pm.editor.view.dispatch(state.tr.insert(state.doc.content.size - 1, node));
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    expect(posted[0]?.ops).toEqual([expect.objectContaining({ op: "insert", block_id: "elsewhere" })]);
+    // The editor holds the block under the id the server gave it.
+    await waitFor(() => expect(document.querySelector('[data-id="srv1"]')).not.toBeNull());
+    expect(document.querySelector('[data-id="elsewhere"]')).toBeNull();
+    // Typing in it after the paste goes to that id and saves.
+    act(() => {
+      pm.editor.commands.insertContentAt(pm.editor.view.state.doc.content.size - 3, "!");
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    expect(posted[1]?.ops).toEqual([expect.objectContaining({ op: "update", block_id: "srv1" })]);
+    expect(saved.get("srv1")).toBe("pasted!");
+    expect(toastFn).not.toHaveBeenCalled();
+    // A reload shows the block once, with the typing.
+    await act(async () => {
+      await useNotesStore.getState().loadNote(7);
+    });
+    await waitFor(() => expect(screen.getByText("pasted!")).toBeInTheDocument());
+    // (BlockNote puts the id on a block's outer and inner element.)
+    expect(document.querySelectorAll('[data-id="srv1"]')).toHaveLength(
+      document.querySelectorAll('[data-id="p1"]').length,
+    );
+    expect(screen.getAllByText("pasted!")).toHaveLength(1);
+    expect(posted).toHaveLength(2);
+  });
 });
 
 describe("comments in the editor", () => {

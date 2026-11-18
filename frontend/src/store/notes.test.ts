@@ -258,6 +258,72 @@ describe("useNotesStore", () => {
     expect(s.notes[7]?.blocks.filter((b) => b.id === "n")).toHaveLength(1);
   });
 
+  it("re-keys a pasted block the server saved under a new id, so typing in it saves", async () => {
+    // The server's note: an insert whose id is live in another note gets a
+    // new id; an op naming the old id finds nothing.
+    const saved = new Map<string, string>([["a", "A"], ["b", "B"]]);
+    let reply: (() => void) | null = null;
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        const applied: string[] = [];
+        const renamed: { from: string; to: string }[] = [];
+        const rejected: ApplyResult["rejected"] = [];
+        for (const o of body.ops) {
+          const text = typeof o.block?.content === "string" ? o.block.content : "";
+          if (o.op === "insert" && o.block_id === "elsewhere") {
+            renamed.push({ from: "elsewhere", to: "srv1" });
+            saved.set("srv1", text);
+            applied.push("srv1");
+          } else if (saved.has(o.block_id ?? "")) {
+            saved.set(o.block_id!, text);
+            applied.push(o.block_id!);
+          } else {
+            rejected.push({ block_id: o.block_id ?? "", reason: "missing", current: null });
+          }
+        }
+        // The first response is held while the user keeps typing.
+        if (posted.length === 1) await new Promise<void>((r) => (reply = r));
+        return HttpResponse.json({ ...result(body.base_revision + 1, applied, rejected), renamed });
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note: { ...note, revision: 6 },
+          blocks: [...saved].map(([id, text]) => block(id, text, 6)),
+          suggestions: [],
+          comments: [],
+        }),
+      ),
+    );
+    await useNotesStore.getState().loadTarget("paper", 3);
+    const seq = useNotesStore.getState().reloads[7]?.seq ?? 0;
+    const para = (text: string) => ({ type: "paragraph" as const, props: {}, content: text });
+    useNotesStore
+      .getState()
+      .applyLocal(7, [{ op: "insert", block_id: "elsewhere", block: para("pasted"), parent_id: null, after: "b" }]);
+    const first = useNotesStore.getState().flush(7);
+    await waitFor(() => expect(reply).not.toBeNull());
+    // Typing after the paste, while its save is on the way.
+    useNotesStore.getState().applyLocal(7, [{ op: "update", block_id: "elsewhere", block: para("pasted!") }]);
+    reply!();
+    await first;
+    const s = useNotesStore.getState();
+    expect(s.notes[7]?.blocks.map((b) => b.id)).toEqual(["a", "b", "srv1"]);
+    expect(s.renames[7]?.pairs).toEqual([["elsewhere", "srv1"]]);
+    expect(pendingNoteOps(7)).toEqual([{ op: "update", block_id: "srv1", block: para("pasted!") }]);
+    await useNotesStore.getState().flush(7);
+    expect(posted[1]?.ops.map((o) => o.block_id)).toEqual(["srv1"]);
+    // Saved, with no conflict reload and no toast.
+    expect(saved.get("srv1")).toBe("pasted!");
+    expect(useNotesStore.getState().reloads[7]?.seq ?? 0).toBe(seq);
+    expect(toastFn).not.toHaveBeenCalled();
+    // A reload shows the block once, with the typing.
+    await useNotesStore.getState().loadNote(7);
+    const after = useNotesStore.getState().notes[7]?.blocks ?? [];
+    expect(after.map((b) => [b.id, b.text])).toEqual([["a", "A"], ["b", "B"], ["srv1", "pasted!"]]);
+  });
+
   it("re-sends a new block whose anchor vanished as a fresh insert with all its typing", async () => {
     server.use(
       http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {

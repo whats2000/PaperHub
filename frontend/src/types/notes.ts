@@ -128,6 +128,12 @@ export interface ApplyResult {
   suggested: { block_id: string; suggestion_id: string }[];
   rejected: RejectedOp[];
   reparented: { block_id: string; parent_id: string | null }[];
+  /** Open suggestions this call withdrew. */
+  withdrawn?: string[];
+  /** Inserts whose id was already used elsewhere (block ids are global; a
+   * block pasted from another note keeps its id): the id sent and the one
+   * the block got. The client re-keys the block. */
+  renamed?: { from: string; to: string }[];
 }
 
 /** One line of a change set's Details. */

@@ -249,3 +249,37 @@ export function diffDocuments(prev: EditorBlock[], next: EditorBlock[]): NoteOp[
   }
   return [...ops, ...deletes.reverse()];
 }
+
+/** `tree` with each block id in `ids` replaced by its new id. */
+export function rekeyTree(tree: EditorBlock[], ids: ReadonlyMap<string, string>): EditorBlock[] {
+  return tree.map((b) => ({ ...b, id: ids.get(b.id) ?? b.id, children: rekeyTree(b.children, ids) }));
+}
+
+interface RekeyNode {
+  type: { name: string };
+  attrs: Record<string, unknown>;
+}
+interface RekeyView {
+  state: {
+    doc: { descendants: (f: (node: RekeyNode, pos: number) => boolean | void) => void };
+    tr: {
+      setNodeMarkup: (pos: number, type: undefined, attrs: Record<string, unknown>) => RekeyView["state"]["tr"];
+      setMeta: (key: string, value: unknown) => RekeyView["state"]["tr"];
+      docChanged: boolean;
+    };
+  };
+  dispatch: (tr: RekeyView["state"]["tr"]) => void;
+}
+
+/** Gives the editor's blocks in `ids` their new ids in place: the content,
+ * the caret and the undo history stay (the change is not an undo step). */
+export function rekeyEditorBlocks(view: RekeyView, ids: ReadonlyMap<string, string>): void {
+  let tr = view.state.tr;
+  view.state.doc.descendants((node, pos) => {
+    const id = node.attrs.id;
+    if (node.type.name === "blockContainer" && typeof id === "string" && ids.has(id)) {
+      tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: ids.get(id) });
+    }
+  });
+  if (tr.docChanged) view.dispatch(tr.setMeta("addToHistory", false));
+}
