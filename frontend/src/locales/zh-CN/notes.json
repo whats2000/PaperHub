@@ -289,9 +289,6 @@
     "highlightAs": "划重点：{{name}}",
     "quote": "引用到笔记",
     "addNote": "加笔记",
-    "savedTo": "已存到 {{paper}} › {{section}}",
-    "savedToPart": "已存到 {{paper}} › {{section}} · 第 {{index}} 则笔记（共 {{count}} 则）",
-    "savedToPaper": "已存到 {{paper}}",
     "show": "显示",
     "saveFailed": "无法保存这个标记。",
     "undo": "撤销",
@@ -301,7 +298,6 @@
     "showMarks": "显示我的标记",
     "showMarksHint": "在论文上显示你的标记",
     "hideMarksHint": "隐藏论文上的标记（不会删除）",
-    "savedToSections": "已存到 {{paper}} › {{sections}}",
     "tooLong": "一个标记最多 {{count}} 段。请少选一些再标记。",
     "anchorsFailed": "无法加载这段文字在论文中的位置，请再试一次。",
     "noAnchor": "这段文字没有对应到论文正文，无法标记。",
@@ -344,7 +340,9 @@
     "hideAgain": "再次隐藏",
     "noteMissing": "无法获取这个标记的笔记。",
     "removedBoth": "已从论文和笔记中移除",
-    "undoHint": "按 Ctrl+Z 撤销"
+    "undoHint": "按 Ctrl+Z 撤销",
+    "savedNoSection": "已存到笔记末尾（找不到章节）",
+    "savedOtherNote": "已存到另一则笔记"
   },
   "langShort": {
     "en": "英文",

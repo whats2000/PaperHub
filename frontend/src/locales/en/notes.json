@@ -289,9 +289,6 @@
     "highlightAs": "Highlight: {{name}}",
     "quote": "Quote to note",
     "addNote": "Add note",
-    "savedTo": "Saved to {{paper}} › {{section}}",
-    "savedToPart": "Saved to {{paper}} › {{section}} · note {{index}} of {{count}}",
-    "savedToPaper": "Saved to {{paper}}",
     "show": "Show",
     "saveFailed": "Couldn't save the mark.",
     "undo": "Undo",
@@ -301,7 +298,6 @@
     "showMarks": "Show my marks",
     "showMarksHint": "Show your marks on the paper",
     "hideMarksHint": "Hide your marks on the paper (nothing is deleted)",
-    "savedToSections": "Saved to {{paper}} › {{sections}}",
     "tooLong": "A mark holds up to {{count}} paragraphs. Select less to mark it.",
     "anchorsFailed": "Couldn't load where this passage sits in the paper. Try again.",
     "noAnchor": "This passage isn't tied to the paper's text, so it can't be marked.",
@@ -344,7 +340,9 @@
     "hideAgain": "Hide again",
     "noteMissing": "This mark's note isn't available.",
     "removedBoth": "Removed from the paper and the note",
-    "undoHint": "Ctrl+Z to undo"
+    "undoHint": "Ctrl+Z to undo",
+    "savedNoSection": "Saved at the end of the note (no section found)",
+    "savedOtherNote": "Saved to another note"
   },
   "langShort": {
     "en": "English",

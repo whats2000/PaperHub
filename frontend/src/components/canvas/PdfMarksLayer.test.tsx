@@ -127,7 +127,9 @@ describe("PDF text marks", () => {
     expect(piece.rects).toHaveLength(1);
     // The section rides on the mark, not on the stored piece.
     expect(piece).not.toHaveProperty("section");
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    // No toast on a normal save: the note card opens at the new mark.
+    await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
+    expect(toastFn).not.toHaveBeenCalled();
     expect(window.getSelection()!.isCollapsed).toBe(true);
   });
 

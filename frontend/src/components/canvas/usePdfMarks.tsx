@@ -688,6 +688,7 @@ export function usePdfMarks({
         let missed = false;
         ok = await saveMarks({
           kind: base.kind,
+          openCard: false, // Box is a rapid tool
           color,
           view: "pdf",
           addNote,

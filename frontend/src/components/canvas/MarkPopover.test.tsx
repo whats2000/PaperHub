@@ -1,11 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TFunction } from "i18next";
 
 import { MarkPopover } from "@/components/canvas/MarkPopover";
 import { placeSelectionPopover } from "@/lib/cardPlacement";
-import i18n from "@/lib/i18n";
-import { savedToText } from "@/store/marks";
 import type { MarkColorInfo } from "@/types/notes";
 
 const COLORS: MarkColorInfo[] = [
@@ -96,21 +93,5 @@ describe("MarkPopover", () => {
       vi.advanceTimersByTime(300);
     });
     expect(screen.queryByRole("toolbar")).toBeNull();
-  });
-});
-
-describe("savedToText", () => {
-  const t = i18n.t.bind(i18n) as TFunction;
-
-  it("names the paper, the section and the note", () => {
-    expect(
-      savedToText({ note_id: 1, paper_title: "Duo-Virtual Spaces", section: "2 Method", part_index: 1, part_count: 3 }, t),
-    ).toBe("Saved to Duo-Virtual Spaces › §2 · note 2 of 3");
-    expect(
-      savedToText({ note_id: 1, paper_title: "Duo-Virtual Spaces", section: "Abstract", part_index: 0, part_count: 1 }, t),
-    ).toBe("Saved to Duo-Virtual Spaces › § Abstract");
-    expect(
-      savedToText({ note_id: 1, paper_title: "Duo-Virtual Spaces", section: null, part_index: 0, part_count: 1 }, t),
-    ).toBe("Saved to Duo-Virtual Spaces");
   });
 });

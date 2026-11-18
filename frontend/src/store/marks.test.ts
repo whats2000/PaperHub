@@ -4,7 +4,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { waitFor } from "@testing-library/react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { MarkOpTimeout, markHint, queueMarkOp, resetMarkOps, trackedMarkChanges, useMarksStore } from "@/store/marks";
+import {
+  MarkOpTimeout,
+  markHint,
+  queueMarkOp,
+  resetMarkOps,
+  toastSaved,
+  trackedMarkChanges,
+  useMarksStore,
+} from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, NoteBlock } from "@/types/notes";
 
@@ -87,7 +95,7 @@ beforeEach(() => {
 });
 
 describe("useMarksStore.create", () => {
-  it("adds the mark, refreshes the open note and says where it went", async () => {
+  it("adds the mark and refreshes the open note, with no toast", async () => {
     const created: MarkCreated = {
       mark: MARK,
       block: null,
@@ -112,10 +120,27 @@ describe("useMarksStore.create", () => {
     });
     expect(body).toMatchObject({ hint_block_id: "p1", section_key: "2 Method" });
     expect(useMarksStore.getState().marksByPaper[3]).toEqual([{ ...MARK, note_id: 7 }]);
-    expect(toastFn).toHaveBeenCalledWith("Saved to Duo-Virtual Spaces › §2 · note 2 of 2", expect.anything());
+    // A normal save (its section, the note in view) says nothing.
+    expect(toastFn).not.toHaveBeenCalled();
     // "Quote from the paper" points at one quote: the next goes to the section.
     expect(useNotesStore.getState().quoteTarget).toBeNull();
     await waitFor(() => expect(noteLoads).toBe(1));
+  });
+});
+
+describe("toastSaved", () => {
+  const res = (section: string | null, noteId = 7): MarkCreated => ({
+    mark: MARK,
+    block: null,
+    saved_to: { note_id: noteId, paper_title: "Duo", section, part_index: 0, part_count: 1 },
+  });
+  it("speaks only for a surprising place: no section, or another note than the one in view", () => {
+    toastSaved(3, [res("2 Method")]);
+    expect(toastFn).not.toHaveBeenCalled();
+    toastSaved(3, [res(null)]);
+    expect(toastFn).toHaveBeenLastCalledWith("Saved at the end of the note (no section found)", expect.anything());
+    toastSaved(3, [res("2 Method", 9)]);
+    expect(toastFn).toHaveBeenLastCalledWith("Saved to another note", expect.anything());
   });
 });
 

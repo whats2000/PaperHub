@@ -289,9 +289,6 @@
     "highlightAs": "畫重點：{{name}}",
     "quote": "引用到筆記",
     "addNote": "加筆記",
-    "savedTo": "已存到 {{paper}} › {{section}}",
-    "savedToPart": "已存到 {{paper}} › {{section}} · 第 {{index}} 則筆記（共 {{count}} 則）",
-    "savedToPaper": "已存到 {{paper}}",
     "show": "顯示",
     "saveFailed": "無法儲存這個標記。",
     "undo": "復原",
@@ -301,7 +298,6 @@
     "showMarks": "顯示我的標記",
     "showMarksHint": "在論文上顯示你的標記",
     "hideMarksHint": "隱藏論文上的標記（不會刪除）",
-    "savedToSections": "已存到 {{paper}} › {{sections}}",
     "tooLong": "一個標記最多 {{count}} 段。請選少一點再標記。",
     "anchorsFailed": "無法載入這段文字在論文中的位置，請再試一次。",
     "noAnchor": "這段文字沒有對應到論文內文，無法標記。",
@@ -344,7 +340,9 @@
     "hideAgain": "再次隱藏",
     "noteMissing": "無法取得這個標記的筆記。",
     "removedBoth": "已從論文和筆記中移除",
-    "undoHint": "按 Ctrl+Z 復原"
+    "undoHint": "按 Ctrl+Z 復原",
+    "savedNoSection": "已存到筆記末尾（找不到章節）",
+    "savedOtherNote": "已存到另一則筆記"
   },
   "langShort": {
     "en": "英文",

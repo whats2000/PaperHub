@@ -6,6 +6,7 @@ import { useHtmlMarks } from "@/components/canvas/useHtmlMarks";
 import { usePenSave, type PenPiece } from "@/components/canvas/useMarkSave";
 import { ApiError, erasePiece } from "@/lib/api";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
+import { useMarkNavStore } from "@/store/markNav";
 import { resetMarkOps, useMarksStore } from "@/store/marks";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkCreated, MarkIn } from "@/types/notes";
@@ -398,7 +399,10 @@ describe("strokes, erases and splits keep the user's order", () => {
     expect(create.mock.calls[1]![0].join_to).toBe("mk_1");
     expect(create.mock.calls[2]![0].join_to).toBeUndefined();
     expect(create.mock.calls[2]![0].pieces[0]!.quote).toBe("ahead of time");
-    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §2", expect.anything()));
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2));
+    // A stroke is a rapid tool: no toast, no card.
+    expect(toastFn).not.toHaveBeenCalled();
+    expect(useMarkNavStore.getState().card).toBeNull();
     expect(toastError).not.toHaveBeenCalled();
   });
 });
@@ -455,7 +459,8 @@ describe("a stroke that partly fails", () => {
     act(() => retry.onClick());
     await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Intro", "2 Method", "2 Method"]);
-    await waitFor(() => expect(toastFn).toHaveBeenLastCalledWith("Saved to Duo › §1, §2", expect.anything()));
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toHaveLength(2));
+    expect(toastFn).not.toHaveBeenCalled();
   });
 
   it("after the pen session ends, neither a re-stroke nor the old Retry marks the saved text twice", async () => {

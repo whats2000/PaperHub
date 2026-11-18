@@ -342,12 +342,14 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     }
   }, [reload, editor, noteId, doc, reanchor]);
 
-  // "Add note" on a reader selection: the caret goes on a line after the new
-  // reference, ready to type (once a reload has brought the block in).
+  // "Add note" on a reader selection (the pane) or a highlight (the note
+  // card): the caret goes on a line after the new reference, ready to type
+  // (once a reload has brought the block in). Left empty, the line is never
+  // sent (`pruneUnsavedEmpty`).
   const caretAfter = useNotesStore((s) => (s.caretAfter?.noteId === noteId ? s.caretAfter : null));
   const setCaretAfter = useNotesStore((s) => s.setCaretAfter);
   useEffect(() => {
-    if (!caretAfter || variant !== "pane") return;
+    if (!caretAfter || (caretAfter.in ?? "pane") !== variant) return;
     const block = editor.getBlock(caretAfter.blockId);
     if (!block) return;
     setCaretAfter(null);

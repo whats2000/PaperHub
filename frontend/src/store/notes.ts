@@ -86,6 +86,10 @@ export interface QuoteTarget {
   blockId: string;
 }
 
+export interface CaretTarget extends QuoteTarget {
+  in?: "pane" | "card";
+}
+
 interface NotesStore {
   notes: Record<number, NoteState>;
   /** `${kind}:${id}` -> note id. */
@@ -125,8 +129,10 @@ interface NotesStore {
   /** "Add note" on a reader selection: once the editor shows this block it
    * puts the caret on a line after it, then clears the request (dropped
    * after CARET_GIVE_UP_MS if the block never shows). */
-  caretAfter: QuoteTarget | null;
-  setCaretAfter: (target: QuoteTarget | null) => void;
+  /** Where the caret goes after a new mark: a line after its block, in the
+   * notes pane (Add note) or the note card (`in: "card"`, a highlight). */
+  caretAfter: CaretTarget | null;
+  setCaretAfter: (target: CaretTarget | null) => void;
 
   /** The user's names for the mark colours (empty until loaded). */
   colorNames: Record<string, string>;

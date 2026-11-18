@@ -93,7 +93,12 @@ function created(section: string, block: string): MarkCreated {
 let create: ReturnType<typeof vi.fn<(body: MarkIn, opts?: { quiet?: boolean }) => Promise<MarkCreated>>>;
 let ensureChunks: ReturnType<typeof vi.fn<(paperId: number) => Promise<ChunkMap>>>;
 
+const realOpenAt = useNotesPaneStore.getState().openAt;
+
 beforeEach(() => {
+  useMarkNavStore.setState({ card: null });
+  useNotesStore.setState({ caretAfter: null });
+  useNotesPaneStore.setState({ open: false, openAt: realOpenAt });
   toastFn.mockReset();
   toastError.mockReset();
   toastMessage.mockReset();
@@ -132,9 +137,28 @@ describe("useHtmlMarks", () => {
       pieces: [{ quote: "agent pose ahead of time", chunk_start: 102, chunk_end: 102 }],
     });
     expect(create.mock.calls[0]![1]).toEqual({ quiet: true });
-    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Saved to Duo › §2", expect.anything()));
+    // No toast on a normal save: the note card opens beside the mark, the
+    // caret on a new line under its quote.
+    await waitFor(() => expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_b2 Method" }));
+    expect(useNotesStore.getState().caretAfter).toMatchObject({ noteId: 7, blockId: "b2 Method", in: "card" });
+    expect(toastFn).not.toHaveBeenCalled();
     expect(doc.getSelection()!.isCollapsed).toBe(true);
     await waitFor(() => expect(bar.dataset.state).toBe("closed"));
+  });
+
+  it("with the notes pane beside the paper, no card: the pane shows the new block with the caret under it", async () => {
+    const openAt = vi.fn();
+    useNotesPaneStore.setState({ open: true, openAt });
+    useCanvasStore.setState({ open: true, width: 900 });
+    const doc = frameDoc(PAPER);
+    render(<Host doc={doc} />);
+    select(doc, "agent pose", "of time");
+    await screen.findByRole("toolbar", { name: "Mark the selection" });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight: Key result" }));
+    await waitFor(() => expect(openAt).toHaveBeenCalledWith({ kind: "paper", id: 3, noteId: 7, blockId: "b2 Method" }));
+    expect(useNotesStore.getState().caretAfter).toEqual({ noteId: 7, blockId: "b2 Method" });
+    expect(useMarkNavStore.getState().card).toBeNull();
+    expect(toastFn).not.toHaveBeenCalled();
   });
 
   it("saves a selection across two sections once per section, one toast; a retry skips what was saved", async () => {
@@ -151,8 +175,8 @@ describe("useHtmlMarks", () => {
     fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(create.mock.calls[2]![0].section_key).toBe("2 Method");
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
-    expect(toastFn.mock.calls[0]![0]).toBe("Saved to Duo › §1, §2");
+    await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
+    expect(toastFn).not.toHaveBeenCalled();
   });
 
   it("a retry over a new selection of the same text saves no section twice", async () => {
@@ -170,8 +194,8 @@ describe("useHtmlMarks", () => {
     fireEvent.click(screen.getByRole("button", { name: "Quote to note" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(create.mock.calls.map((c) => c[0].section_key)).toEqual(["1 Introduction", "2 Method", "2 Method"]);
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
-    expect(toastFn.mock.calls[0]![0]).toBe("Saved to Duo › §1, §2");
+    await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
+    expect(toastFn).not.toHaveBeenCalled();
   });
 
   it("a retry with another action starts fresh: every section saves with the new kind", async () => {
@@ -189,7 +213,8 @@ describe("useHtmlMarks", () => {
       ["quote", null, "1 Introduction"],
       ["quote", null, "2 Method"],
     ]);
-    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useMarkNavStore.getState().card).not.toBeNull());
+    expect(toastFn).not.toHaveBeenCalled();
   });
 
   it("waits for the chunk anchors, and never saves a mark without them", async () => {

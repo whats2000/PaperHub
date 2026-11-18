@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ApiError } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { joinTarget } from "@/lib/marks/pieces";
+import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
 import { markHint, queueMarkOp, toastSaved, useMarksStore } from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
@@ -35,6 +36,9 @@ export interface MarkSaveRequest {
   view: "html" | "pdf";
   /** Add note: the notes pane opens with the caret after the new block. */
   addNote: boolean;
+  /** Open the note card beside the new mark, the caret under its quote
+   * (default true; Box is a rapid tool and opens nothing). */
+  openCard?: boolean;
   /** The marks to save (one per section), or null when they can't be had
    * (the reader has already said why). */
   groups: () => Promise<MarkGroup[] | null> | MarkGroup[] | null;
@@ -96,7 +100,7 @@ export function useMarkSave(paperId: number | null): {
   const [busy, setBusy] = useState(false);
 
   const save = useCallback(
-    async ({ kind, color, view, addNote, groups: getGroups }: MarkSaveRequest): Promise<boolean> => {
+    async ({ kind, color, view, addNote, openCard = true, groups: getGroups }: MarkSaveRequest): Promise<boolean> => {
       if (paperId === null || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
@@ -119,6 +123,19 @@ export function useMarkSave(paperId: number | null): {
           const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
           useNotesStore.getState().setCaretAfter(target);
           useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
+        } else if (last && openCard) {
+          const target = { noteId: last.saved_to.note_id, blockId: last.mark.block_id };
+          if (notesPaneVisible()) {
+            // The pane on screen: the new block scrolls into view there
+            // (flashed), the caret on a new line under it; the reader stays.
+            useNotesStore.getState().setCaretAfter(target);
+            useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });
+          } else {
+            // The pane hidden: the note card opens beside the mark, the
+            // caret on a new line under its quote [user, 2026-11-19].
+            useNotesStore.getState().setCaretAfter({ ...target, in: "card" });
+            useMarkNavStore.getState().openCard(paperId, last.mark.id);
+          }
         }
         return true;
       } catch {
@@ -291,7 +308,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         const savedNow: MarkCreated[] = [];
         const opts = { quiet: true, silent: true, signal };
         try {
-          const results = await saveMissing(
+          await saveMissing(
             create,
             { paper_content_id: paperId, kind, color, view: stroke.view, hint_block_id: markHint(paperId) },
             plain,
@@ -327,10 +344,11 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
             },
           );
           progress.current.delete(key);
+          // A stroke is a rapid tool: no toast for a plain save (the mark
+          // shows on the paper); a join says so with its Split.
           if (joinedNow) toastJoined(joinedNow);
-          // The whole stroke, as one confirmation; nothing new: say so.
-          else if (savedNow.length) toastSaved(paperId, results);
-          else toast(t("notes:marks.alreadySaved", "Already saved"));
+          // A Retry that finds it all saved says so.
+          else if (!savedNow.length) toast(t("notes:marks.alreadySaved", "Already saved"));
           stroke.done?.(true);
         } catch {
           // What saved stays saved; Retry saves the rest. A timeout already

@@ -289,9 +289,6 @@
     "highlightAs": "ハイライト：{{name}}",
     "quote": "ノートに引用",
     "addNote": "ノートを書く",
-    "savedTo": "{{paper}} › {{section}} に保存しました",
-    "savedToPart": "{{paper}} › {{section}} · ノート {{index}} / {{count}} に保存しました",
-    "savedToPaper": "{{paper}} に保存しました",
     "show": "表示",
     "saveFailed": "印を保存できませんでした。",
     "undo": "元に戻す",
@@ -301,7 +298,6 @@
     "showMarks": "自分の印を表示",
     "showMarksHint": "論文上に自分の印を表示します",
     "hideMarksHint": "論文上の印を隠します（削除はしません）",
-    "savedToSections": "{{paper}} › {{sections}} に保存しました",
     "tooLong": "印は {{count}} 段落までです。選択を減らしてから印をつけてください。",
     "anchorsFailed": "この箇所が論文のどこにあるか読み込めませんでした。もう一度お試しください。",
     "noAnchor": "この箇所は論文本文に対応していないため、印をつけられません。",
@@ -344,7 +340,9 @@
     "hideAgain": "再び隠す",
     "noteMissing": "このマークのノートを取得できません。",
     "removedBoth": "論文とノートから削除しました",
-    "undoHint": "Ctrl+Z で元に戻す"
+    "undoHint": "Ctrl+Z で元に戻す",
+    "savedNoSection": "ノートの末尾に保存しました（章が見つかりません）",
+    "savedOtherNote": "別のノートに保存しました"
   },
   "langShort": {
     "en": "英語",

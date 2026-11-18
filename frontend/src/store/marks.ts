@@ -8,7 +8,6 @@ import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
 import { partsOfNote } from "@/components/notes/parts";
-import { sectionLabel } from "@/components/notes/blocks/markProps";
 import {
   ApiError,
   createMark,
@@ -34,7 +33,6 @@ import type {
   MarkColorPatch,
   MarkCreated,
   MarkIn,
-  SavedTo,
   SplitResult,
 } from "@/types/notes";
 
@@ -166,49 +164,31 @@ const safeStorage: StateStorage = {
   },
 };
 
-/** "Saved to <paper> › §2 · note 2 of 3": where a new mark went. */
-export function savedToText(saved: SavedTo, t: TFunction): string {
-  const paper = saved.paper_title;
-  if (!saved.section) return t("notes:marks.savedToPaper", { defaultValue: "Saved to {{paper}}", paper });
-  const section = sectionLabel(saved.section);
-  if (saved.part_count > 1) {
-    return t("notes:marks.savedToPart", {
-      defaultValue: "Saved to {{paper}} › {{section}} · note {{index}} of {{count}}",
-      paper,
-      section,
-      index: saved.part_index + 1,
-      count: saved.part_count,
-    });
-  }
-  return t("notes:marks.savedTo", { defaultValue: "Saved to {{paper}} › {{section}}", paper, section });
-}
-
-/** "Saved to <paper> › §2, §3": where one selection's marks went (one per
- * section it crossed). */
-export function savedToManyText(saved: readonly SavedTo[], t: TFunction): string {
-  if (saved.length === 1) return savedToText(saved[0]!, t);
-  const sections = saved.map((s) => (s.section ? sectionLabel(s.section) : null)).filter((s): s is string => !!s);
-  return t("notes:marks.savedToSections", {
-    defaultValue: "Saved to {{paper}} › {{sections}}",
-    paper: saved[0]?.paper_title ?? "",
-    sections: sections.join(", "),
-  });
-}
-
-/** One confirmation for one selection's marks, with Show (the first). */
+/** A save confirms itself on the paper (the mark, the quick-note field);
+ * a toast speaks only when the save landed somewhere surprising: with no
+ * section, or in another note than the one in view. One line, with Show,
+ * no titles [user, 2026-11-19]. */
 export function toastSaved(paperId: number, results: readonly MarkCreated[]): void {
   const first = results[0];
   if (!first) return;
   const t = i18n.t.bind(i18n) as TFunction;
-  toast(savedToManyText(results.map((r) => r.saved_to), t), {
+  const inView = useNotesStore.getState().byTarget[`paper:${paperId}`];
+  const odd =
+    results.find((r) => !r.saved_to.section) ??
+    results.find((r) => inView !== undefined && r.saved_to.note_id !== inView);
+  if (!odd) return;
+  const text = !odd.saved_to.section
+    ? t("notes:marks.savedNoSection", "Saved at the end of the note (no section found)")
+    : t("notes:marks.savedOtherNote", "Saved to another note");
+  toast(text, {
     action: {
       label: t("notes:marks.show", "Show"),
       onClick: () =>
         useNotesPaneStore.getState().openAt({
           kind: "paper",
           id: paperId,
-          noteId: first.saved_to.note_id,
-          blockId: first.mark.block_id,
+          noteId: odd.saved_to.note_id,
+          blockId: odd.mark.block_id,
         }),
     },
   });
