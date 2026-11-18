@@ -9,8 +9,8 @@ spans the HTML reader's marks and their re-anchoring use
 The two sides differ: the PDF text layer has ligatures (``ﬁ``), words broken
 across lines with a hyphen, and math as loose glyphs, where the reading text
 has ``$TeX$``. So the PDF side is normalised (NFKC, end-of-line hyphens
-joined, whitespace collapsed), both sides are compared word by word (case
-and edge punctuation ignored), and math is a gap: a run of words is matched
+joined, whitespace collapsed), both sides are compared word by word (case,
+edge punctuation and inner hyphens ignored), and math is a gap: a run of words is matched
 at the start and another at the end of the text, in order, with math (and
 the glyphs it read as) allowed in between.
 """
@@ -53,8 +53,15 @@ def pdf_normalise(text: str) -> str:
     return normalise(_HYPHEN_EOL.sub(r"\1\2", t))
 
 
+_INNER_HYPHEN = re.compile(r"(?<=\w)[-‐‑](?=\w)")
+
+
 def _word(raw: str) -> str:
-    return _EDGE.sub("", unicodedata.normalize("NFKC", raw)).casefold()
+    """A word as compared: NFKC, edge punctuation off, case folded, and its
+    inner hyphens dropped (a compound split at a line end, whose hyphen the
+    PDF side cannot tell from a broken word's, still matches)."""
+    w = _EDGE.sub("", unicodedata.normalize("NFKC", raw)).casefold()
+    return _INNER_HYPHEN.sub("", w)
 
 
 def _tokens(text: str, *, math: bool) -> list[_Token]:
@@ -261,7 +268,8 @@ def _match(prep: Prepared, query: str, *, within: tuple[int, int] | None = None,
 
 
 @lru_cache(maxsize=8)
-def _index(path: str, mtime_ns: int) -> TextIndex:
+def text_index(path: str, mtime_ns: int) -> TextIndex:
+    """The reading text of a rendered HTML file, cached per file version."""
     del mtime_ns  # part of the cache key: a re-render reads the file again
     return build_text_index(Path(path).read_text(encoding="utf-8"))
 
@@ -269,7 +277,7 @@ def _index(path: str, mtime_ns: int) -> TextIndex:
 @lru_cache(maxsize=8)
 def prepared(path: str, mtime_ns: int) -> Prepared:
     """The reading text's words, cached like the index (same key)."""
-    return prepare(_index(path, mtime_ns).text)
+    return prepare(text_index(path, mtime_ns).text)
 
 
 async def reading_index(conn: aiosqlite.Connection, pcid: int,
@@ -290,7 +298,7 @@ async def reading_index(conn: aiosqlite.Connection, pcid: int,
     path = str(row[0])
     try:
         mtime = (await asyncio.to_thread(Path(path).stat)).st_mtime_ns
-        index = await asyncio.to_thread(_index, path, mtime)
+        index = await asyncio.to_thread(text_index, path, mtime)
     except OSError:
         return None
     if not ids or not any(d in ids for d, _ in index.spans):

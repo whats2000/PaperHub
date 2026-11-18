@@ -18,6 +18,7 @@ import aiosqlite
 from pydantic import BaseModel
 
 from paperhub.db.connection import in_write_transaction, write_lock
+from paperhub.notes.dehyphen import settle_pieces
 from paperhub.notes.mark_pieces import erased, live_pieces, revive_latest, unerased
 from paperhub.notes.ops import (
     ApplyResult,
@@ -273,6 +274,10 @@ async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
 async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                       ) -> tuple[dict[str, Any], SavedTo]:
     _validate(m.kind, m.view, m.pieces)
+    # A PDF piece's quote is made here from its raw lines: the paper's
+    # words decide each line-end hyphen.
+    m = m.model_copy(update={"pieces": await settle_pieces(
+        conn, m.paper_content_id, m.pieces)})
     async with tx(conn):
         if m.join_to is not None:
             return await _join(conn, m)
