@@ -17,6 +17,7 @@ Note text is untrusted input to pandoc. What holds:
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -53,7 +54,12 @@ PandocStatus = Literal["ok", "pandoc_missing", "pandoc_too_old"]
 
 class PandocError(RuntimeError):
     """pandoc is absent, failed or did not finish in time, or was handed a
-    resource it must not read."""
+    resource it must not read. ``stderr`` holds pandoc's own messages,
+    which may quote note text: kept for a debugger, never logged."""
+
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
 def pandoc_available() -> bool:
@@ -179,8 +185,14 @@ def markdown_to_docx(md: str, resources: dict[str, bytes]) -> bytes:
             raise PandocError(f"pandoc did not run: {exc!r}") from exc
         out = root / "note.docx"
         if proc.returncode != 0 or not out.is_file():
+            # pandoc's messages quote the input (note text), so the error
+            # names only the exit code and the stderr's length and hash;
+            # the text itself stays on the exception, never in a log line.
+            err = proc.stderr or ""
+            digest = hashlib.sha256(err.encode("utf-8", "replace")).hexdigest()[:12]
             raise PandocError(
-                f"pandoc exited {proc.returncode}: {proc.stderr[:500]}")
+                f"pandoc exited {proc.returncode}: stderr {len(err)} chars, "
+                f"sha256 {digest}", stderr=err)
         return out.read_bytes()
 
 

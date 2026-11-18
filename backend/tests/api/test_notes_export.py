@@ -226,3 +226,26 @@ async def test_download_name_drops_controls_and_bidi(client: AsyncClient,
     r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
     cd = r.headers["content-disposition"]
     assert "filename*=UTF-8''agpj.exeb-cde-notes.zip" in cd, cd
+
+
+async def test_pandoc_failure_logs_no_note_text(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture) -> None:
+    import subprocess
+
+    secret = "PRIVATE-NOTE-TEXT-91c3"
+
+    def fail(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        # pandoc's warnings quote the input they could not convert.
+        return subprocess.CompletedProcess(
+            args, 64, "", f"Could not convert TeX math `{secret}`, rendering as TeX")
+    monkeypatch.setattr(note_pandoc.subprocess, "run", fail)
+    monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
+    nid = await _paper_note(client)
+    await _write(client, nid, [{"type": "paragraph", "content": [
+        {"type": "text", "text": secret, "styles": {}}]}])
+    caplog.set_level("INFO")
+    r = await client.get(f"/notes/{nid}/export", params={"format": "docx"})
+    assert r.status_code == 500 and r.json() == {"detail": "pandoc_failed"}
+    assert "exited 64" in caplog.text
+    assert secret not in caplog.text and secret not in r.text
