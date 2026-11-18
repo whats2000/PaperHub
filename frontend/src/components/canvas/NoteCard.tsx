@@ -21,6 +21,7 @@ import { usePresence } from "@/hooks/usePresence";
 import { CARD_EDGE, NARROW_GUTTER_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { sameLanguage } from "@/lib/language";
 import { prefersReducedMotion } from "@/lib/motion";
+import { readerTrackSliding } from "@/lib/readerTrack";
 import { truncatedTitle } from "@/lib/truncatedTitle";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
@@ -185,6 +186,9 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
   const setCardBox = useMarkNavStore((s) => s.setCardBox);
   const n = target.n;
   const place = useCallback(() => {
+    // The HTML/PDF track is sliding: a placed card stays where it is; the
+    // follow loop places it once the slide ends.
+    if (anchoredN.current !== null && readerTrackSliding()) return;
     const anchor = markAnchor(paperId, markId);
     if (!anchor) {
       if (anchoredN.current === n) return;
