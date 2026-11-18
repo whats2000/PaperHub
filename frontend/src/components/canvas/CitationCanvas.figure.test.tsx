@@ -308,6 +308,24 @@ describe("CitationCanvas — figure and region citations", () => {
     expect(track()).toContain("transition-transform");
   });
 
+  it("a sideways scroll of the reader body never sticks (half HTML, half PDF)", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openView(LATEX_PAPER, 2, [100, 250, 600, 500]));
+    await waitFor(() => expect(pdfProps.current?.bboxPage).toBe(1));
+    const body = container.querySelector<HTMLElement>("[data-reader-body]")!;
+    // What a scrollIntoView on content in the off-screen half does.
+    body.scrollLeft = 240;
+    act(() => {
+      body.dispatchEvent(new Event("scroll"));
+    });
+    expect(body.scrollLeft).toBe(0);
+    // A tab change also puts it (and the track's ancestors) back.
+    body.scrollLeft = 120;
+    await user.click(screen.getByRole("tab", { name: "HTML" }));
+    expect(body.scrollLeft).toBe(0);
+  });
+
   it("a figure that no longer exists says so", async () => {
     render(<CitationCanvas />);
     act(() => useCanvasStore.getState().openFigure(LATEX_PAPER, "fig-404"));

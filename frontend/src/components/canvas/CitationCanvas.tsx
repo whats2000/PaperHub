@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { resetHorizontalScroll } from "@/lib/scrollWithin";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -782,6 +783,13 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       : "html";
   const activePagePdf =
     effectivePaperId != null ? pagePdfByPaper[effectivePaperId] : undefined;
+  // The HTML/PDF track slides by transform inside an overflow-hidden body.
+  // Anything that scrolls that body sideways (a scrollIntoView on content in
+  // the off-screen half) leaves the reader half HTML, half PDF: keep it at 0.
+  const trackRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    resetHorizontalScroll(trackRef.current);
+  }, [readerTab, effectivePaperId]);
   // What a PDF view of `pid` highlights: a cited chunk, else a figure/region.
   const pdfTarget = (pid: number) =>
     activeChunk?.paper_content_id === pid
@@ -956,7 +964,13 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       </div>
 
       {/* Body */}
-      <div className="relative flex flex-1 flex-col overflow-hidden">
+      <div
+        data-reader-body
+        className="relative flex flex-1 flex-col overflow-hidden"
+        onScroll={(e) => {
+          if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+        }}
+      >
         {stale && (
           <div
             role="status"
@@ -979,6 +993,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         {/* HTML papers: kept mounted (hidden) for instant switching. Their
             page PDF sits beside them on a track that slides between the two. */}
         <div
+          ref={trackRef}
           data-reader-track
           hidden={activeDoc?.mode !== "html"}
           className={cn(

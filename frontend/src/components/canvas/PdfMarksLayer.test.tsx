@@ -289,6 +289,21 @@ describe("showing a mark asked for (a source chip, My marks)", () => {
     expect(document.querySelector<HTMLElement>('[data-mark="mk_1"]')!.style.boxShadow).toContain("3px");
   });
 
+  it("reveals without scrollIntoView (it would slide the HTML/PDF track sideways)", () => {
+    const spy = vi.fn();
+    Element.prototype.scrollIntoView = spy;
+    try {
+      resetStores([pdfMark({ pieces: [{ quote: "Robots", page: 0, rects: [[0.05, 0.05, 0.25, 0.07]] }] })]);
+      render(<Reader />);
+      layOut();
+      ask("mk_1");
+      expect(useTranslationStore.getState().reveal).toBeNull();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it("waits for the mark's page to render before trying the HTML view", () => {
     vi.useFakeTimers();
     // On page 2, which hasn't rendered.

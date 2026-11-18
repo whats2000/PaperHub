@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { scrollWithin } from "@/lib/scrollWithin";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -689,9 +690,7 @@ ${next.side}`;
           ? readerRef.current?.querySelector<HTMLElement>(`[data-paragraph-key="${CSS.escape(key)}"]`)
           : null;
         if (key && frag) {
-          if (typeof frag.scrollIntoView === "function") {
-            frag.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-          }
+          scrollWithin(frag, { block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
           clearHideTimer();
           pinnedKeyRef.current = key;
           setPinned(key);

@@ -19,6 +19,7 @@
  * paragraph in their language, and as a 文 marker on the paragraph's
  * Marker block otherwise.
  */
+import { scrollWithin } from "@/lib/scrollWithin";
 import {
   createContext,
   useCallback,
@@ -575,9 +576,9 @@ export function usePdfMarks({
         `[data-pdf-marks] [data-mark="${CSS.escape(reveal.markId)}"]:not([data-leaving])`,
       );
       if (el) {
-        if (typeof el.scrollIntoView === "function") {
-          el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        }
+        // Never scrollIntoView here: it would also slide the reader's
+        // overflow-hidden HTML/PDF track sideways (lib/scrollWithin).
+        scrollWithin(el, { block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
         setFlashId(reveal.markId);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlashId(null), FLASH_MS);
@@ -587,8 +588,8 @@ export function usePdfMarks({
       const page = mark?.pieces.find((p) => typeof p.page === "number" && !p.erased && !p.removed)?.page;
       if (!toPage && mark?.view === "pdf" && typeof page === "number") {
         const pageNode = pageEl(page);
-        if (pageNode && typeof pageNode.scrollIntoView === "function") {
-          pageNode.scrollIntoView({ block: "start", behavior: "auto" });
+        if (pageNode) {
+          scrollWithin(pageNode, { block: "start", behavior: "auto" });
           toPage = true;
         }
       }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { scrollWithin } from "@/lib/scrollWithin";
 import { useTranslation } from "react-i18next";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -291,9 +292,7 @@ export function PdfView({
   // Scroll the highlight into view when its overlay mounts (remounts per the
   // `key`, i.e. once per cited passage — not on resize-driven rect updates).
   const scrollHighlightIntoView = useCallback((el: HTMLDivElement | null) => {
-    if (el && typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    if (el) scrollWithin(el, { behavior: "smooth", block: "center" });
   }, []);
 
   const pdfDocument = (
