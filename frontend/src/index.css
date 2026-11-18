@@ -247,6 +247,11 @@
 .paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select {
     color: var(--note-code-fg);
 }
+/* The native option list follows the theme (some browsers draw it light
+   whatever its options' colours say). */
+.dark .paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select {
+    color-scheme: dark;
+}
 /* Its options are black on whatever the native list is: dark in the dark theme. */
 .paperhub-notes .bn-block-content[data-content-type="codeBlock"] > div > select > option {
     color: var(--popover-foreground);
