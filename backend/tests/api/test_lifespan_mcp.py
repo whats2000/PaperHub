@@ -9,7 +9,6 @@ block forever during lifespan startup because nothing is listening yet.
 from __future__ import annotations
 
 import asyncio
-import time
 from pathlib import Path
 
 import pytest
@@ -56,20 +55,28 @@ timeout_seconds = 1.0
     monkeypatch.setenv("PAPERHUB_PREWARM_MODELS", "0")
     monkeypatch.setenv("PAPERHUB_MCP_CONFIG", str(toml))
 
+    # Record every connect: the invariant is that startup makes none, not
+    # that it is fast (a wall-clock bound flaked under load).
+    from paperhub.mcp import client as mcp_client
+    connects: list[str] = []
+    real_connect = mcp_client.MCPClient.connect
+
+    async def _recording_connect(self: mcp_client.MCPClient) -> None:
+        connects.append(getattr(self, "name", "?"))
+        await real_connect(self)
+    monkeypatch.setattr(mcp_client.MCPClient, "connect", _recording_connect)
+
     app = create_app()
 
-    async def _enter_and_exit_lifespan() -> float:
-        t0 = time.monotonic()
+    async def _enter_and_exit_lifespan() -> None:
         async with app.router.lifespan_context(app):
             assert isinstance(app.state.mcp_registry, MCPRegistry)
-        return time.monotonic() - t0
+            assert connects == [], "lifespan startup connected to an MCP server"
 
-    # Lazy connect means startup never touches the dead loopback.
-    # Wrap in wait_for as a defensive hard cap.
-    elapsed = await asyncio.wait_for(_enter_and_exit_lifespan(), timeout=5.0)
-    # Eager connect with full retry budget would burn ~1.1s of sleeps;
-    # lazy connect should be well under that.
-    assert elapsed < 1.0, f"lifespan took {elapsed:.2f}s — eager connect leaked in?"
+    # Lazy connect means startup never touches the dead loopback. The
+    # wait_for is a hard cap against a real hang.
+    await asyncio.wait_for(_enter_and_exit_lifespan(), timeout=5.0)
+    assert connects == []
 
 
 async def test_lifespan_with_missing_toml_path_is_non_fatal(
