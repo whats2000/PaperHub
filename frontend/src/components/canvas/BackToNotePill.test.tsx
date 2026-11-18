@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { BackToNotePill } from "@/components/canvas/BackToNotePill";
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -195,6 +195,9 @@ describe("back to note, fix round 1", () => {
       viewport: () => VIEW,
       find: () => ({ rects: [rect(-5000, 18)], viewport: VIEW }),
     });
+    // Dropped even when the test fails: a far mark left registered would
+    // fail the tests after it.
+    onTestFinished(offPdf);
     unregister = registerMarkAnchors(3, {
       kind: "html",
       viewport: () => VIEW,
@@ -203,15 +206,18 @@ describe("back to note, fix round 1", () => {
     useCanvasStore.setState({ readerView: { paperId: 3, kind: "html" } });
     render(<BackToNotePill paperId={3} />);
     showBack();
-    // Reached in the view on screen ...
-    await new Promise((r) => setTimeout(r, 350));
+    // Reached in the view on screen: a scroll schedules the check for the
+    // next frame, which runs before ours (frames run in order).
+    await act(async () => {
+      window.dispatchEvent(new Event("scroll"));
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    });
     // ... then scrolled a screen away from it there: the pill goes.
     markTop = -1200;
     act(() => {
       window.dispatchEvent(new Event("scroll"));
     });
     await waitFor(() => expect(useMarkNavStore.getState().back).toBeNull());
-    offPdf();
   });
 
   it("goes when the reader gives up showing the mark", async () => {
