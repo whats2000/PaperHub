@@ -81,7 +81,7 @@ export function resetStores(marks: Mark[] = []): CreateMock {
   useNotesStore.setState({ caretAfter: null, byTarget: {}, quoteTarget: null });
   // The notes pane hidden, no note card: a click on a mark opens the card.
   useNotesPaneStore.setState({ open: false });
-  useMarkNavStore.setState({ card: null, hovered: null, back: null });
+  useMarkNavStore.setState({ card: null, hovered: null });
   useCanvasStore.setState({ width: CANVAS_DEFAULT_WIDTH });
   return create;
 }

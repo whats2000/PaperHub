@@ -384,7 +384,6 @@
     "partOnly": "· note {{index}} of {{count}}",
     "colorChip": "Colour: {{name}}"
   },
-  "backPill": "Back to note",
   "myMarks": {
     "button": "My marks",
     "label": "My marks",

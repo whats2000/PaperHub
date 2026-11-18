@@ -46,7 +46,6 @@ import { HighlighterControl } from "@/components/canvas/HighlighterControl";
 import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
 import { MyMarksMenu } from "@/components/canvas/MyMarksMenu";
 import { NoteCard } from "@/components/canvas/NoteCard";
-import { BackToNotePill } from "@/components/canvas/BackToNotePill";
 import { HtmlView } from "@/components/canvas/HtmlView";
 import { PdfView } from "@/components/canvas/PdfView";
 import { DeferredRemount } from "@/components/canvas/DeferredRemount";
@@ -1144,8 +1143,6 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             </DeferredRemount>
           )}
 
-        {/* "↩ back to note" after a note's source chip opened the paper. */}
-        {!standalone && <BackToNotePill paperId={effectivePaperId} />}
 
         {/* Floating translate control (HTML and PDF). */}
         {effectivePaperId != null && (

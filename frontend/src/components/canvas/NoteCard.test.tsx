@@ -173,7 +173,7 @@ beforeEach(() => {
   moved = null;
   // First: a reveal left waiting by the last test settles before the reset.
   useTranslationStore.setState({ reveal: null });
-  useMarkNavStore.setState({ card: null, hovered: null, back: null, cardBox: null });
+  useMarkNavStore.setState({ card: null, hovered: null, cardBox: null });
   useNotesPaneStore.setState({ open: false, activeTab: "reader" });
   useCanvasStore.setState({ open: true, width: CANVAS_DEFAULT_WIDTH, readerView: null, activePaperId: 3 });
 });

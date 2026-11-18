@@ -1,7 +1,7 @@
 /** What every reference from the paper shares: a bar in the mark colour,
  * paper serif in muted text, the "From the paper" tag, the translation tag
  * with Show original, the anchor-lost states and the source chip (it opens
- * the reader at the mark, with "back to note"). Its look keeps it apart from
+ * the reader at the mark). Its look keeps it apart from
  * the user's own words. In the note card only the clicked reference is
  * tinted and every other one is a Show ↗ jumper; in the notes pane the
  * reference of the mark under the pointer on the paper is tinted. */
@@ -132,16 +132,16 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
 
 function RefFooter({ blockId, props, where }: { blockId: string; props: MarkProps; where: string }) {
   const { t } = useTranslation();
-  const { noteId, paperContentId, paperTitle, card } = useNoteEditorContext();
+  const { paperContentId, paperTitle, card } = useNoteEditorContext();
   const [open, setOpen] = useState(false);
   const origId = useId();
   const label = [paperTitle, where].filter(Boolean).join(" · ") || t("notes:ref.thePaper", "The paper");
   const openLabel = t("notes:ref.openInPaper", "Open in the paper");
-  // The reader at the mark (scrolled to it, flashed), with "back to note";
+  // The reader at the mark (scrolled to it, flashed) (the tabs go back);
   // a reference whose mark is gone opens the paper.
   const openSource = (pid: number) => {
     const opened = props.markId
-      ? openMarkInReader(props.markId, { paperId: pid, back: { noteId, blockId } })
+      ? openMarkInReader(props.markId, { paperId: pid })
       : Promise.resolve(false);
     void opened.then((ok) => {
       if (!ok) useCanvasStore.getState().openPaper(pid);

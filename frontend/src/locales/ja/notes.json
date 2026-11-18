@@ -384,7 +384,6 @@
     "partOnly": "· ノート {{index}} / {{count}}",
     "colorChip": "色：{{name}}"
   },
-  "backPill": "ノートに戻る",
   "myMarks": {
     "button": "マイマーク",
     "label": "マイマーク",

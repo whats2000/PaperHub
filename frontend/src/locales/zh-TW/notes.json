@@ -384,7 +384,6 @@
     "partOnly": "· 第 {{index}} 則，共 {{count}} 則",
     "colorChip": "顏色：{{name}}"
   },
-  "backPill": "回到筆記",
   "myMarks": {
     "button": "我的標記",
     "label": "我的標記",

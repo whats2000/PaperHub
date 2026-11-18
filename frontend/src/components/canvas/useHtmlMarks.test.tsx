@@ -273,7 +273,7 @@ describe("useHtmlMarks", () => {
 
 describe("the reader and the note card", () => {
   beforeEach(() => {
-    useMarkNavStore.setState({ card: null, hovered: null, back: null });
+    useMarkNavStore.setState({ card: null, hovered: null });
     useCanvasStore.setState({ readerView: null, readerTabRequest: null });
   });
 

@@ -1,12 +1,10 @@
 /** Between the marks on the paper and the notes (Plan H5b.1): the note card a
  * click on a mark opens (the notes pane hidden), the mark the pointer is over
- * (its block tinted in the visible notes pane), the "back to note" pill a
- * source chip leaves in the reader, and the ways to the reader at a mark — a
- * source chip, a Show ↗ jumper, My marks.
+ * (its block tinted in the visible notes pane), and the ways to the reader
+ * at a mark — a source chip, a Show ↗ jumper, My marks.
  *
  * The readers register where each drawn mark is on screen
- * (`registerMarkAnchors`), so the card can point at it and the pill can tell
- * when the user has scrolled away from it. */
+ * (`registerMarkAnchors`), so the card can point at it. */
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -27,14 +25,6 @@ export interface NoteCardTarget {
   /** The note of the section shown editable; null: the one quoting the mark. */
   partId: string | null;
   /** Tells two openings apart (the card re-points and glides). */
-  n: number;
-}
-
-export interface BackToNote {
-  paperId: number;
-  markId: string;
-  noteId: number;
-  blockId: string;
   n: number;
 }
 
@@ -86,9 +76,6 @@ interface MarkNavState {
   /** The mark under the pointer while the notes pane is visible. */
   hovered: string | null;
   setHovered: (markId: string | null) => void;
-  back: BackToNote | null;
-  showBack: (back: Omit<BackToNote, "n">) => void;
-  clearBack: () => void;
 }
 
 let seq = 0;
@@ -107,9 +94,6 @@ export const useMarkNavStore = create<MarkNavState>()((set) => ({
     ),
   hovered: null,
   setHovered: (markId) => set((s) => (s.hovered === markId ? {} : { hovered: markId })),
-  back: null,
-  showBack: (back) => set({ back: { ...back, n: ++seq } }),
-  clearBack: () => set({ back: null }),
 }));
 
 // ---- Where marks are on screen ---------------------------------------------
@@ -285,8 +269,6 @@ export function hoverMark(markId: string | null): void {
 }
 
 export interface OpenInReaderOptions {
-  /** The note block it was opened from: the reader shows "back to note". */
-  back?: { noteId: number; blockId: string };
   /** The mark's paper, when its marks may not be loaded yet. */
   paperId?: number;
 }
@@ -315,7 +297,6 @@ export async function openMarkInReader(markId: string, opts: OpenInReaderOptions
   showHiddenFor(mark);
   if (mark.lang) useTranslationStore.getState().showMark(markId);
   else useTranslationStore.getState().requestReveal(paperId, markId, { fallback: true });
-  if (opts.back) useMarkNavStore.getState().showBack({ paperId, markId, ...opts.back });
   return true;
 }
 
