@@ -2,6 +2,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -354,8 +355,10 @@ export function SlidesPanel({
     [numPages, sessionId, editorMode, slidesSources, setCurrentPage],
   );
 
-  // Keyboard navigation.
-  useEffect(() => {
+  // Keyboard navigation. A layout effect: the listener that sees the new
+  // page count is in place by the time the pages show (a passive effect ran
+  // later, so an arrow right after the deck loaded clamped to page 1).
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       // Chat stays mounted (hidden) under the Ideas/Feedback pages; a hidden
