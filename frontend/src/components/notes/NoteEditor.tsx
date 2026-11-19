@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useNotesStore } from "@/store/notes";
 
+import { atomCaret } from "./atomCaret";
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
@@ -42,6 +43,7 @@ import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./n
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { partOf } from "./parts";
 import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
+import { NoteTitle } from "./NoteTitle";
 import { noteSchema, paperhubKeys } from "./schema";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
@@ -190,6 +192,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       dictionary: dictionaryFor(i18n.language),
       extensions: [
         paperhubKeys,
+        atomCaret,
         commentKeys,
         inlineMarks,
         codeFence,
@@ -504,16 +507,33 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     void loadColors();
   }, [loadColors]);
 
+  // Enter / ArrowDown in the page title: the caret goes to the start of the
+  // first block (a new line before it when that block takes no text).
+  const enterFirstBlock = useCallback(() => {
+    const first = editor.document[0];
+    const takesText = first && Array.isArray(first.content);
+    const line = takesText
+      ? first
+      : first
+        ? editor.insertBlocks([{ type: "paragraph" }] as never, first, "before")[0]
+        : undefined;
+    if (!line) return;
+    editor.setTextCursorPosition(line, "start");
+    editor.focus();
+  }, [editor]);
+
+  const defaultTitle = useNotesStore((s) => s.notes[noteId]?.defaultTitle);
   const cardMarkId = card?.markId ?? null;
   const onJump = card?.onJump;
   const ctx = useMemo(
     () => ({
       noteId,
       paperContentId,
-      paperTitle: paperContentId !== null ? note.title : null,
+      // The paper's own title (the note's page title may be renamed).
+      paperTitle: paperContentId !== null ? defaultTitle || note.title : null,
       card: cardMarkId !== null && onJump ? { markId: cardMarkId, onJump } : null,
     }),
-    [noteId, paperContentId, note.title, cardMarkId, onJump],
+    [noteId, paperContentId, note.title, defaultTitle, cardMarkId, onJump],
   );
 
   return (
@@ -548,6 +568,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
             </p>
           </div>
         </div>
+        {variant === "pane" && <NoteTitle noteId={noteId} onExitDown={enterFirstBlock} />}
         {variant === "pane" && onOpenGuide && <EditorTip onOpenGuide={onOpenGuide} />}
         <UnsavedDrafts noteId={noteId} />
         <BlockNoteView

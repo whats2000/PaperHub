@@ -1408,3 +1408,148 @@ describe("Add note from the reader", () => {
     expect(ids).toHaveLength(4);
   });
 });
+
+describe("the page title", () => {
+  it("shows the note's title, the default title as placeholder when empty, and saves an edit", async () => {
+    seed([mine]);
+    useNotesStore.setState((s) => ({ notes: { 7: { ...s.notes[7]!, defaultTitle: "Attention Paper" } } }));
+    const patched: unknown[] = [];
+    server.use(
+      http.patch(`${API_BASE_URL}/notes/7`, async ({ request }) => {
+        const body = (await request.json()) as { title: string };
+        patched.push(body);
+        const n = useNotesStore.getState().notes[7]!;
+        return HttpResponse.json({
+          note: { ...n.note, title: body.title },
+          blocks: [],
+          shared_by: 1,
+          default_title: "Attention Paper",
+          suggestions: [],
+          comments: [],
+        });
+      }),
+    );
+    mount();
+    const title = await screen.findByTestId("note-title");
+    expect((title as HTMLTextAreaElement).value).toBe("Attention");
+    fireEvent.change(title, { target: { value: "" } });
+    expect(title.getAttribute("placeholder")).toBe("Attention Paper");
+    fireEvent.change(title, { target: { value: "My reading" } });
+    fireEvent.blur(title);
+    await waitFor(() => expect(patched).toEqual([{ title: "My reading" }]));
+    expect(useNotesStore.getState().notes[7]!.note.title).toBe("My reading");
+  });
+
+  it("says Untitled when there is no default title either", async () => {
+    seed([mine]);
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, note: { ...s.notes[7]!.note, title: "" }, defaultTitle: "" } },
+    }));
+    mount();
+    expect((await screen.findByTestId("note-title")).getAttribute("placeholder")).toBe("Untitled");
+  });
+
+  it("Enter in the title puts the caret at the start of the first block", async () => {
+    seed([mine]);
+    mount();
+    const title = await screen.findByTestId("note-title");
+    title.focus();
+    fireEvent.keyDown(title, { key: "Enter" });
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { state: { selection: { $from: { parent: { textContent: string }; parentOffset: number } } } };
+    };
+    const { $from } = pm.editor.state.selection;
+    expect($from.parent.textContent).toBe("Mine");
+    expect($from.parentOffset).toBe(0);
+  });
+
+  it("Enter in the title opens a line before a reference at the top of the note", async () => {
+    seed([quote]);
+    mount();
+    const title = await screen.findByTestId("note-title");
+    fireEvent.keyDown(title, { key: "Enter" });
+    const types = [...document.querySelectorAll(".bn-block-content")].map((e) => e.getAttribute("data-content-type"));
+    expect(types).toEqual(["paragraph", "paperQuote"]);
+  });
+});
+
+describe("the insertion caret beside a block", () => {
+  type PMView = {
+    state: { selection: { $from: { parent: { type: { name: string }; textContent: string } } } };
+    someProp: (name: string, f: (fn: (...a: unknown[]) => boolean) => boolean) => boolean | undefined;
+  };
+  const view = () => (document.querySelector(".ProseMirror") as HTMLElement & { editor: { view: PMView } }).editor.view;
+  const key = (init: KeyboardEventInit) =>
+    act(() => {
+      const v = view();
+      v.someProp("handleKeyDown", (f) => f(v, new KeyboardEvent("keydown", init)));
+    });
+  const content = (id: string) =>
+    document.querySelector(`.bn-block-outer[data-id="${id}"] .bn-block-content`) as HTMLElement;
+  const caretOf = (id: string) =>
+    document.querySelector(`.bn-block-outer[data-id="${id}"] [data-atom-caret]`)?.getAttribute("data-atom-caret") ??
+    null;
+  const clickSide = (id: string, side: "left" | "right", target?: HTMLElement) => {
+    const el = content(id);
+    el.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 40, right: 200, bottom: 40 }) as DOMRect;
+    act(() => {
+      fireEvent.click(target ?? el, { clientX: side === "left" ? 10 : 190 });
+    });
+  };
+  const order = () =>
+    [...document.querySelectorAll(".bn-block-content")].map((e) => [
+      e.getAttribute("data-content-type"),
+      e.textContent ?? "",
+    ]);
+
+  it("left half + Enter adds a line above the reference at the very top of the note", async () => {
+    seed([quote, mine]);
+    mount();
+    await waitFor(() => expect(content("q1")).not.toBeNull());
+    clickSide("q1", "left");
+    expect(caretOf("q1")).toBe("before");
+    key({ key: "Enter" });
+    const o = order();
+    expect(o[0]).toEqual(["paragraph", ""]);
+    expect(o[1]![0]).toBe("paperQuote");
+    expect(view().state.selection.$from.parent.type.name).toBe("paragraph");
+    expect(caretOf("q1")).toBeNull();
+  });
+
+  it("right half + a typed character adds a line below the last block with that character", async () => {
+    seed([mine, quote]);
+    mount();
+    await waitFor(() => expect(content("q1")).not.toBeNull());
+    clickSide("q1", "right");
+    expect(caretOf("q1")).toBe("after");
+    key({ key: "x" });
+    const o = order();
+    expect(o).toHaveLength(3);
+    expect(o[2]).toEqual(["paragraph", "x"]);
+    expect(view().state.selection.$from.parent.textContent).toBe("x");
+  });
+
+  it("works on a divider; arrows switch side and Escape hides it", async () => {
+    const d1 = blk("d1", { type: "divider" });
+    seed([mine, d1]);
+    mount();
+    await waitFor(() => expect(content("d1")).not.toBeNull());
+    clickSide("d1", "right");
+    expect(caretOf("d1")).toBe("after");
+    key({ key: "ArrowLeft" });
+    expect(caretOf("d1")).toBe("before");
+    key({ key: "Enter" });
+    expect(order().map((r) => r[0])).toEqual(["paragraph", "paragraph", "divider"]);
+    clickSide("d1", "left");
+    key({ key: "Escape" });
+    expect(caretOf("d1")).toBeNull();
+  });
+
+  it("a click on a button inside the reference does not set the caret", async () => {
+    seed([quote, mine]);
+    mount();
+    await waitFor(() => expect(content("q1")?.querySelector("button")).toBeTruthy());
+    clickSide("q1", "left", content("q1").querySelector("button")!);
+    expect(caretOf("q1")).toBeNull();
+  });
+});

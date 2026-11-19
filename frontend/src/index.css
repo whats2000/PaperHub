@@ -388,6 +388,47 @@
 .paperhub-notes .bn-block-outer {
     transition: margin 0.2s, opacity 200ms ease-out;
 }
+/* The insertion caret beside a block that takes no text (atomCaret.ts):
+   a text caret's line at the block's left or right edge, blinking like one. */
+.paperhub-notes [data-atom-caret] {
+  position: relative;
+}
+.paperhub-notes [data-atom-caret].ProseMirror-selectednode,
+.paperhub-notes [data-atom-caret] .ProseMirror-selectednode,
+.paperhub-notes [data-atom-caret] > .bn-block-content {
+  outline: none;
+}
+.paperhub-notes [data-atom-caret]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 1.5px;
+  height: 1.4em;
+  transform: translateY(-50%);
+  background: var(--bn-colors-editor-text, currentColor);
+  pointer-events: none;
+  animation: paperhub-caret-blink 1.06s steps(1, end) infinite;
+}
+.paperhub-notes [data-atom-caret="before"]::after {
+  left: -3px;
+}
+.paperhub-notes [data-atom-caret="after"]::after {
+  right: -3px;
+}
+@keyframes paperhub-caret-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .paperhub-notes [data-atom-caret]::after {
+    animation: none;
+  }
+}
+
 /* "Open in notes" lands on a block: a short neutral ring (yellow is for citations). */
 .paperhub-notes .bn-block-outer[data-flash] > .bn-block > .bn-block-content {
     border-radius: 4px;
