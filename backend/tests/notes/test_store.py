@@ -186,3 +186,9 @@ async def test_apply_schema_fills_section_text(conn):
     assert await _fts(conn, "limitations") == ["b_s"]
     await apply_schema(conn)
     assert await _fts(conn, "limitations") == ["b_s"]
+
+
+def test_block_text_reads_inline_math_latex():
+    runs = [{"type": "text", "text": "see ", "styles": {}},
+            {"type": "inlineMath", "props": {"latex": "x^2"}}]
+    assert block_text("paragraph", {}, runs) == "see x^2"

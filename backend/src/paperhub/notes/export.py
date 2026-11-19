@@ -447,6 +447,11 @@ class _Writer:
                 pid = props.get("paperId")
                 key = self.cite(pid if isinstance(pid, int) else None)
                 _append(out, f"{label} [{key}]" if key else label)
+            elif kind == "inlineMath":
+                latex = " ".join(str((run.get("props") or {}).get("latex") or "").split())
+                if latex:
+                    # Held, like a code span: the text escaping must not touch it.
+                    _append(out, self._hold(f"${_math(latex).rstrip()}$"))
             elif isinstance(run.get("text"), str):
                 _append(out, self._styled(run))
         return "".join(out)

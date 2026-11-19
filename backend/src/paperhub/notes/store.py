@@ -35,6 +35,8 @@ def _runs_text(content: Any) -> str:
             continue
         if isinstance(run.get("text"), str):
             out.append(run["text"])
+        elif run.get("type") == "inlineMath":  # inline math: its LaTeX
+            out.append(str((run.get("props") or {}).get("latex") or ""))
         if run.get("content") is not None:  # links nest their runs
             out.append(_runs_text(run["content"]))
     return "".join(out)

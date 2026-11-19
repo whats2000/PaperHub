@@ -256,3 +256,19 @@ def test_quote_escaped_dollar_is_a_literal() -> None:
 def test_quote_without_math_is_unchanged() -> None:
     md = _quote_md("plain a_b\n1. next [x]")
     assert f"> plain a{BS}_b\n>\n> 1{BS}. next {BS}[x{BS}]" in md
+
+
+def _imath(latex: str) -> dict[str, Any]:
+    return {"type": "inlineMath", "props": {"latex": latex}}
+
+
+def test_inline_math_exports_as_dollar_math() -> None:
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _txt("energy "), _imath(r"E = mc^2"), _txt(" and $5")])], {5: _paper()})
+    assert f"energy $E = mc^2$ and {BS}$5" in md
+
+
+def test_inline_math_cannot_close_early_and_empty_is_dropped() -> None:
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _txt("a "), _imath(" x$y "), _imath("  "), _txt("b")])], {5: _paper()})
+    assert f"a $x{BS}$y$b" in md
