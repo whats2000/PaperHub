@@ -16,7 +16,13 @@ import aiosqlite
 from pydantic import ValidationError
 
 from paperhub.agents.core.citations import check_written_citations
-from paperhub.agents.core.note_xml import MARK_BLOCKS, esc, mark_xml, title_xml
+from paperhub.agents.core.note_xml import (
+    MARK_BLOCKS,
+    cite_runs_xml,
+    esc,
+    mark_xml,
+    title_xml,
+)
 from paperhub.agents.core.private_material import (
     collect_note_blocks,
     collect_note_titles,
@@ -73,7 +79,9 @@ def _level(b: Block) -> int | None:
 
 def _block_xml(b: Block, labels: dict[str, str] | None = None,
                text: str | None = None) -> str:
-    body = html.escape(_text(b) if text is None else text, quote=False)
+    cited = cite_runs_xml(b.content) if text is None else None
+    body = cited if cited is not None else html.escape(
+        _text(b) if text is None else text, quote=False)
     if b.type in MARK_BLOCKS and b.props.get("markId"):
         body = mark_xml(b.props, labels or {}, body)
     return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}" '

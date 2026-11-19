@@ -500,3 +500,16 @@ async def test_a_mark_label_read_this_turn_is_private_material(
     assert label in {i.text for i in current_private() if i.kind == "note"}
     # The outbound checkpoint's span guard now holds a query that repeats it.
     assert echoes_private(f"search for {label}")
+
+
+async def test_read_note_shows_an_inline_mark_citation(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    await _fill(migrated_db, nid, [Op(op="insert", block=BlockIn(
+        type="paragraph", content=[
+            {"type": "text", "text": "rose to <"},
+            {"type": "markCite", "props": {"markId": "mk_1", "text": "62%"}}]))])
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = _read(await _run(ctx, "read_note", note="chat"))
+    assert 'rose to &lt;<mark_cite mark="mk_1">62%</mark_cite>' in out["raw"]
