@@ -1433,7 +1433,8 @@ describe("the page title", () => {
     const title = await screen.findByTestId("note-title");
     expect((title as HTMLTextAreaElement).value).toBe("Attention");
     fireEvent.change(title, { target: { value: "" } });
-    expect(title.getAttribute("placeholder")).toBe("Attention Paper");
+    expect(title.getAttribute("aria-placeholder")).toBe("Attention Paper");
+    expect(screen.getByTestId("note-title-placeholder").textContent).toBe("Attention Paper");
     fireEvent.change(title, { target: { value: "My reading" } });
     fireEvent.blur(title);
     await waitFor(() => expect(patched).toEqual([{ title: "My reading" }]));
@@ -1446,7 +1447,32 @@ describe("the page title", () => {
       notes: { 7: { ...s.notes[7]!, note: { ...s.notes[7]!.note, title: "" }, defaultTitle: "" } },
     }));
     mount();
-    expect((await screen.findByTestId("note-title")).getAttribute("placeholder")).toBe("Untitled");
+    expect((await screen.findByTestId("note-title")).getAttribute("aria-placeholder")).toBe("Untitled");
+  });
+
+  it("a long default title stays on one line with an ellipsis; a typed title wraps and grows the field", async () => {
+    seed([mine]);
+    const long = "RoboTTT: Co-training a very long robot paper title that cannot fit on one line";
+    useNotesStore.setState((s) => ({
+      notes: { 7: { ...s.notes[7]!, note: { ...s.notes[7]!.note, title: "" }, defaultTitle: long } },
+    }));
+    mount();
+    const title = await screen.findByTestId<HTMLTextAreaElement>("note-title");
+    const ph = screen.getByTestId("note-title-placeholder");
+    expect(ph.textContent).toBe(long);
+    // One line, cut with an ellipsis (Tailwind `truncate`), out of the flow.
+    expect(ph.className).toMatch(/(^| )truncate( |$)/);
+    expect(ph.className).toMatch(/(^| )absolute( |$)/);
+    // The field: a wrapping textarea whose height follows its content.
+    expect(title.tagName).toBe("TEXTAREA");
+    expect(title.className).toMatch(/whitespace-pre-wrap/);
+    expect(title.className).not.toMatch(/(^| )(truncate|whitespace-nowrap|absolute)( |$)/);
+    Object.defineProperty(title, "scrollHeight", { configurable: true, get: () => 120 });
+    fireEvent.change(title, { target: { value: long } });
+    expect(screen.queryByTestId("note-title-placeholder")).toBeNull();
+    expect(title.style.height).toBe("120px");
+    fireEvent.keyDown(title, { key: "Enter" });
+    expect(title.value).toBe(long); // Enter never adds a line break
   });
 
   it("Enter in the title puts the caret at the start of the first block", async () => {
@@ -1551,5 +1577,72 @@ describe("the insertion caret beside a block", () => {
     await waitFor(() => expect(content("q1")?.querySelector("button")).toBeTruthy());
     clickSide("q1", "left", content("q1").querySelector("button")!);
     expect(caretOf("q1")).toBeNull();
+  });
+});
+
+describe("Delete and Backspace next to a reference", () => {
+  type PMView = {
+    state: { selection: { from: number }; doc: { content: { size: number } } };
+    dispatch: (tr: unknown) => void;
+  };
+  const pm = () =>
+    document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+  const types = () =>
+    [...document.querySelectorAll(".bn-block-content")].map((e) => e.getAttribute("data-content-type"));
+  const caretOf = (id: string) =>
+    document.querySelector(`.bn-block-outer[data-id="${id}"] [data-atom-caret]`)?.getAttribute("data-atom-caret") ??
+    null;
+  /** Puts the text caret in block `id` at its start or end, then presses `key`. */
+  const press = (id: string, at: "start" | "end", key: string) => {
+    const inline = document.querySelector(`.bn-block-outer[data-id="${id}"] .bn-inline-content`)!;
+    const el = pm();
+    act(() => {
+      el.focus();
+      const view = el.editor.view as unknown as { posAtDOM: (n: Node, o: number) => number };
+      const pos = view.posAtDOM(inline, at === "start" ? 0 : inline.childNodes.length);
+      el.editor.commands.setTextSelection(pos);
+    });
+    act(() => {
+      fireEvent.keyDown(el, { key });
+    });
+  };
+  const empty = blk("e1", { content: [] });
+
+  it("Delete in an empty line above a reference removes the line, keeps the reference (left caret)", async () => {
+    seed([empty, quote]);
+    mount();
+    await waitFor(() => expect(types()).toEqual(["paragraph", "paperQuote"]));
+    press("e1", "start", "Delete");
+    expect(types()).toEqual(["paperQuote"]);
+    expect(caretOf("q1")).toBe("before");
+  });
+
+  it("Backspace in an empty line below a reference removes the line, keeps the reference (right caret)", async () => {
+    seed([quote, empty]);
+    mount();
+    await waitFor(() => expect(types()).toEqual(["paperQuote", "paragraph"]));
+    press("e1", "start", "Backspace");
+    expect(types()).toEqual(["paperQuote"]);
+    expect(caretOf("q1")).toBe("after");
+  });
+
+  it("Delete at the end of a line with text puts the left caret on the next reference", async () => {
+    seed([mine, quote]);
+    mount();
+    await waitFor(() => expect(types()).toEqual(["paragraph", "paperQuote"]));
+    press("p1", "end", "Delete");
+    expect(types()).toEqual(["paragraph", "paperQuote"]);
+    expect(caretOf("q1")).toBe("before");
+  });
+
+  it("Backspace at the start of a line with text puts the right caret on the divider above", async () => {
+    seed([blk("d1", { type: "divider" }), mine]);
+    mount();
+    await waitFor(() => expect(types()).toEqual(["divider", "paragraph"]));
+    press("p1", "start", "Backspace");
+    expect(types()).toEqual(["divider", "paragraph"]);
+    expect(caretOf("d1")).toBe("after");
   });
 });

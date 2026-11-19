@@ -60,46 +60,74 @@ export function NoteTitle({ noteId, onExitDown }: Props) {
     [save],
   );
 
-  // The field grows with a long title instead of scrolling inside itself.
+  // A typed title wraps and the field grows with it (pushing the note
+  // down), on typing and when the pane's width changes. Empty, it is one line.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fit();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [draft]);
 
+  const empty = draft === "";
   return (
-    <textarea
-      ref={ref}
-      rows={1}
-      data-testid="note-title"
-      aria-label={t("title.label", "Note title")}
-      placeholder={placeholder}
-      value={draft}
-      spellCheck={false}
-      onFocus={() => setEditing(true)}
-      onBlur={() => {
-        setEditing(false);
-        save(draft);
-      }}
-      onChange={(e) => {
-        // A title is one line: a pasted line break becomes a space.
-        const value = e.target.value.replace(/[\r\n]+/g, " ");
-        setDraft(value);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => save(value), TITLE_SAVE_DELAY_MS);
-      }}
-      onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
-        const el = e.currentTarget;
-        const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
-        if (e.key === "Enter" || (e.key === "ArrowDown" && atEnd)) {
-          e.preventDefault();
+    <div className="relative">
+      {/* The default title: one line, cut with an ellipsis, never growing the
+          field (a textarea's own placeholder would wrap). */}
+      {empty && (
+        <div
+          aria-hidden
+          data-testid="note-title-placeholder"
+          className="pointer-events-none absolute inset-x-0 top-0 truncate px-[54px] pt-4 pb-2 text-[1.75rem] leading-tight font-bold text-muted-foreground/50"
+        >
+          {placeholder}
+        </div>
+      )}
+      <textarea
+        ref={ref}
+        rows={1}
+        data-testid="note-title"
+        aria-label={t("title.label", "Note title")}
+        aria-placeholder={placeholder}
+        value={draft}
+        spellCheck={false}
+        onFocus={() => setEditing(true)}
+        onBlur={() => {
+          setEditing(false);
           save(draft);
-          onExitDown();
-        }
-      }}
-      className="block w-full resize-none overflow-hidden bg-transparent px-[54px] pt-4 pb-2 text-[1.75rem] leading-tight font-bold text-foreground outline-none placeholder:text-muted-foreground/50"
-    />
+        }}
+        onChange={(e) => {
+          // A title is one line of text: a pasted line break becomes a space.
+          const value = e.target.value.replace(/[\r\n]+/g, " ");
+          setDraft(value);
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => save(value), TITLE_SAVE_DELAY_MS);
+        }}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          const el = e.currentTarget;
+          const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+          if (e.key === "Enter" || (e.key === "ArrowDown" && atEnd)) {
+            e.preventDefault();
+            save(draft);
+            onExitDown();
+          }
+        }}
+        className="relative block w-full resize-none overflow-hidden bg-transparent px-[54px] pt-4 pb-2 text-[1.75rem] leading-tight font-bold break-words whitespace-pre-wrap text-foreground outline-none"
+      />
+    </div>
   );
 }
