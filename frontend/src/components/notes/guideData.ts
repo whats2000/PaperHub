@@ -53,7 +53,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     title: "Anywhere",
     rows: [
       { id: "slash", keys: ["/"], right: "Every block, incl. Quote from the paper" },
-      { id: "at", keys: ["@"], right: "Link a paper, section or idea" },
+      { id: "at", keys: ["@"], right: "Link a paper or section" },
       { id: "select", plainLeft: "Select text", right: "Toolbar: bold … hide, link, comment" },
       { id: "hover", plainLeft: "Hover a block", right: "+ add · ⋮⋮ drag or menu" },
     ],

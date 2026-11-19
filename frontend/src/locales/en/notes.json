@@ -174,7 +174,7 @@
       "equation": "Block equation (a space works too)",
       "codeBlock": "Code block (a space works too)",
       "slash": "Every block, incl. Quote from the paper",
-      "at": "Link a paper, section or idea",
+      "at": "Link a paper or section",
       "select": "Toolbar: bold … hide, link, comment",
       "hover": "+ add · ⋮⋮ drag or menu",
       "tab": "Nest under the line above",
