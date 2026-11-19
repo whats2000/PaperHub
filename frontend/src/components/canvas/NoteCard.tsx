@@ -11,7 +11,7 @@
  * outside or the close button closes it: it shrinks back toward the mark. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Quote, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -367,6 +367,25 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
     [current, markId, onJump],
   );
 
+  // "Insert as inline citation": at the note's last caret when it is in this
+  // section (its note shown), else on a new line at the end of the shown note.
+  const insertCite = () => {
+    if (noteId === undefined || !current) return;
+    const notes = useNotesStore.getState();
+    const last = notes.lastCaret[noteId] ?? null;
+    const holder = last ? section?.parts.find((p) => p.blocks.some((b) => b.id === last)) : undefined;
+    if (holder && holder.id !== current.id) showPart(holder.id);
+    notes.setCiteRequest({
+      noteId,
+      markId,
+      paperId,
+      in: "card",
+      blockId: holder ? last : null,
+      offset: holder ? (notes.lastCaretOffset[noteId] ?? null) : null,
+      fallbackAfter: current.blocks[current.blocks.length - 1]?.id ?? null,
+    });
+  };
+
   if (!placement) return null;
   const side = placement.side;
   const inReader = side === "below" || side === "above";
@@ -576,6 +595,17 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
       </div>
       <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-2.5 py-1.5 text-[11.5px] text-muted-foreground">
         <span className="min-w-0 truncate">{t("noteCard.footer", "Edit right here · saved automatically")}</span>
+        <button
+          type="button"
+          disabled={noteId === undefined || !current}
+          aria-label={t("noteCard.citeInline", "Insert as inline citation")}
+          title={t("noteCard.citeInlineHint", "Cite this passage inside your text, with your own short words")}
+          onClick={insertCite}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+        >
+          <Quote className="size-3" aria-hidden />
+          {t("noteCard.citeInlineShort", "Cite inline")}
+        </button>
         <button
           type="button"
           disabled={noteId === undefined}
