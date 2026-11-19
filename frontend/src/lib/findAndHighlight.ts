@@ -1,3 +1,5 @@
+import { scrollWithin } from "@/lib/scrollWithin";
+
 export const HIGHLIGHT_CLASS = "ph-cite-hl";
 /** Added with HIGHLIGHT_CLASS on a cited figure: a background tint can't show
  *  through an image, so the figure is outlined instead. */
@@ -30,9 +32,9 @@ function ensureHighlightStyle(doc: Document): void {
 // spans we injected (vs class-only highlights from the text/section fallbacks).
 const WRAP_ATTR = "data-ph-cite";
 
-// One in-flight glide per document, so a new citation cancels the previous one
+// One in-flight glide per scroller, so a new citation cancels the previous one
 // instead of two rAF loops fighting over scrollTop.
-const activeGlide = new WeakMap<Document, number>();
+const activeGlide = new WeakMap<Element, number>();
 
 /**
  * Smoothly scroll `el` to the vertical center, tracking it as the layout settles.
@@ -51,35 +53,58 @@ const activeGlide = new WeakMap<Document, number>();
  * safety cap. `behavior` is accepted for call-site compatibility. Falls back to
  * a single `scrollIntoView` under jsdom / detached documents (no window).
  */
+export interface StableScrollOptions {
+  /** The element whose scrollTop moves (default: the document's scroller).
+   *  Only scrollTop ever changes — never scrollLeft (lib/scrollWithin). */
+  scroller?: Element | null;
+  /** Jump straight each frame instead of easing (prefers-reduced-motion),
+   *  still re-checking until the target holds still. */
+  reduced?: boolean;
+  /** Runs at the start of every frame, before measuring (e.g. to lay out an
+   *  overlay whose boxes the target is drawn from). */
+  onFrame?: () => void;
+}
+
 export function scrollIntoViewStable(
   el: Element,
   _behavior: ScrollBehavior = "auto",
+  opts: StableScrollOptions = {},
 ): void {
-  if (typeof el.scrollIntoView !== "function") return;
   const doc = el.ownerDocument;
   const win = doc?.defaultView;
-  const scroller = doc?.scrollingElement;
+  const { scroller: given, reduced = false, onFrame } = opts;
+  const scroller = given ?? doc?.scrollingElement;
+  const isRoot = scroller != null && (scroller === doc?.scrollingElement || scroller === doc?.documentElement);
   if (!win?.requestAnimationFrame || !scroller) {
-    el.scrollIntoView({ block: "center" });
+    // With a scroller named, never scrollIntoView: it also scrolls clipping
+    // ancestors sideways (lib/scrollWithin).
+    if ("scroller" in opts) scrollWithin(el, { block: "center" });
+    else if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center" });
     return;
   }
-  const prev = activeGlide.get(doc);
+  const prev = activeGlide.get(scroller);
   if (prev != null) win.cancelAnimationFrame(prev);
 
   let frames = 0;
+  let still = 0;
   const tick = (): void => {
+    onFrame?.();
     const rect = el.getBoundingClientRect();
+    const box = isRoot ? { top: 0, height: win.innerHeight } : scroller.getBoundingClientRect();
     // Distance from the target's center to the viewport's center (>0 ⇒ below).
-    const delta = rect.top + rect.height / 2 - win.innerHeight / 2;
+    const delta = rect.top + rect.height / 2 - (box.top + box.height / 2);
     frames += 1;
-    if (Math.abs(delta) <= 1 || frames > 90) {
-      activeGlide.delete(doc);
+    still = Math.abs(delta) <= 1 ? still + 1 : 0;
+    // Eased: done once centered. Reduced: done once it held for a few frames
+    // (a late layout shift after the jump is still corrected).
+    if (still >= (reduced ? 3 : 1) || frames > 90) {
+      activeGlide.delete(scroller);
       return; // centered, or safety cap (~1.5s) so a never-settling page can't loop
     }
-    scroller.scrollTop += delta * 0.2; // ease-out: close 20% of the gap per frame
-    activeGlide.set(doc, win.requestAnimationFrame(tick));
+    if (still === 0) scroller.scrollTop += reduced ? delta : delta * 0.2; // ease-out: 20% of the gap per frame
+    activeGlide.set(scroller, win.requestAnimationFrame(tick));
   };
-  activeGlide.set(doc, win.requestAnimationFrame(tick));
+  activeGlide.set(scroller, win.requestAnimationFrame(tick));
 }
 
 function scheduleClear(doc: Document, fn: () => void): void {
