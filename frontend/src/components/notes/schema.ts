@@ -11,7 +11,9 @@ import {
   defaultInlineContentSpecs,
   defaultStyleSpecs,
 } from "@blocknote/core";
+import type { EditorView } from "@tiptap/pm/view";
 
+import { atomCaretKey, setAtomCaret } from "./atomCaret";
 import { calloutBlock } from "./blocks/CalloutBlock";
 import { codeBlockWithCopy } from "./blocks/CodeBlock";
 import { dividerBlock } from "./blocks/DividerBlock";
@@ -57,6 +59,33 @@ export const noteSchema = BlockNoteSchema.create({
   styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle, comment: commentStyle },
 });
 
+interface MovableEditor {
+  moveBlocksUp: () => void;
+  moveBlocksDown: () => void;
+  _tiptapEditor: { view: EditorView };
+}
+
+/** Alt+↑ / Alt+↓: the caret's block (or the selected blocks) one place up or
+ * down (BlockNote's own move). A reference held by the atom caret moves with
+ * the caret still beside it. */
+function moveBlocks(editor: MovableEditor, dir: "up" | "down"): boolean {
+  const view = editor._tiptapEditor.view;
+  const caret = atomCaretKey.getState(view.state);
+  const id = caret ? view.state.doc.resolve(caret.pos).parent.attrs.id : null;
+  if (dir === "up") editor.moveBlocksUp();
+  else editor.moveBlocksDown();
+  if (caret && typeof id === "string") {
+    let pos = -1;
+    view.state.doc.descendants((node, p) => {
+      if (pos >= 0) return false;
+      if (node.type.name === "blockContainer" && node.attrs.id === id) pos = p + 1;
+      return pos < 0;
+    });
+    if (pos >= 0) setAtomCaret(view, pos, caret.side);
+  }
+  return true;
+}
+
 const LIST_TYPES = new Set(["bulletListItem", "numberedListItem", "checkListItem"]);
 
 /** The Notion keys BlockNote lacks: `$$ ` starts an equation, and Enter on an
@@ -68,6 +97,8 @@ export const paperhubKeys = createExtension({
   key: "paperhubKeys",
   inputRules: [{ find: /^\$\$\s$/, replace: () => ({ type: "math", props: {} }) }],
   keyboardShortcuts: {
+    "Alt-ArrowUp": ({ editor }) => moveBlocks(editor as never, "up"),
+    "Alt-ArrowDown": ({ editor }) => moveBlocks(editor as never, "down"),
     Enter: ({ editor }) => {
       if (!editor.prosemirrorState.selection.empty) return false;
       const { block } = editor.getTextCursorPosition();

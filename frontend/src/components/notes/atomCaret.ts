@@ -205,6 +205,8 @@ function onKey(view: EditorView, event: KeyboardEvent): boolean {
   if (event.defaultPrevented) return false;
   const caret = atomCaretKey.getState(view.state);
   if (!caret || !caretAt(view.state, caret.pos)) return guardNeighbour(view, event);
+  // Alt+↑ / Alt+↓ move the block (the notes keymap).
+  if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return false;
   switch (event.key) {
     case "Enter":
       if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;

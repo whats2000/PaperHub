@@ -184,6 +184,7 @@
       "enter": "Split the line here",
       "backspace": "Join with the line above",
       "arrows": "Move between blocks, incl. references",
+      "altMove": "Move the block (or the selected blocks) up or down",
       "clickRef": "New line below it",
       "bius": "Bold, italic, underline",
       "ctrlE": "Inline code",

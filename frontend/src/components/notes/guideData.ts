@@ -75,6 +75,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "enter", keys: ["Enter"], right: "Split the line here" },
       { id: "backspace", keys: ["Backspace"], suffix: "atStart", right: "Join with the line above" },
       { id: "arrows", keys: ["↑", "↓"], right: "Move between blocks, incl. references" },
+      { id: "altMove", keys: ["Alt+↑", "Alt+↓"], right: "Move the block (or the selected blocks) up or down" },
       { id: "clickRef", plainLeft: "Click a reference, heading or divider, then Enter", right: "New line below it" },
     ],
   },
