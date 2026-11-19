@@ -340,6 +340,55 @@ describe("attachHtmlMarks in a live document", () => {
     await vi.waitFor(() => expect(rects(doc, "m1")[0]!.style.top).toBe("44px"));
   });
 
+
+  it("flash glides to the mark's live position once the reader track has stopped sliding", () => {
+    vi.useFakeTimers();
+    const doc = frameDoc(PAPER);
+    const win = doc.defaultView!;
+    Object.defineProperty(win, "innerHeight", { value: 600, configurable: true });
+    let queue: FrameRequestCallback[] = [];
+    vi.spyOn(win, "requestAnimationFrame").mockImplementation((cb) => {
+      queue.push(cb);
+      return queue.length;
+    });
+    vi.spyOn(win, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const frames = () => {
+      for (let n = 0; queue.length && n < 300; n += 1) {
+        const q = queue;
+        queue = [];
+        q.forEach((cb) => cb(0));
+      }
+    };
+    // The reader's HTML/PDF track is mid-slide.
+    let state = "running";
+    const trackEl = document.createElement("div");
+    trackEl.setAttribute("data-reader-track", "");
+    (trackEl as unknown as { getAnimations: () => { playState: string }[] }).getAnimations = () => [{ playState: state }];
+    document.body.appendChild(trackEl);
+
+    const handle = attachHtmlMarks(doc, opts());
+    frames();
+    const sc = doc.scrollingElement ?? doc.documentElement;
+    sc.scrollTop = 0;
+    const el = rects(doc, "m1")[0]!;
+    // Its paragraph is far down; a lazy placeholder above it resolves mid-glide.
+    let docTop = 2000;
+    let calls = 0;
+    el.getBoundingClientRect = () => {
+      calls += 1;
+      if (calls === 4) docTop = 2600;
+      return new DOMRect(0, docTop - sc.scrollTop, 30, 16);
+    };
+    expect(handle.flash("m1")).toBe(true);
+    vi.advanceTimersByTime(300);
+    frames();
+    expect(sc.scrollTop).toBe(0); // still sliding: no scroll yet
+    state = "finished";
+    vi.advanceTimersByTime(300);
+    frames();
+    expect(Math.abs(docTop - sc.scrollTop + 8 - 300)).toBeLessThanOrEqual(1);
+    trackEl.remove();
+  });
   it("takes a click on a mark over a link: the link and the lightbox stay put", () => {
     const doc = frameDoc(
       '<p id="p1"><span id="phchunk-1"></span>See <a href="#fig1">the agent pose</a> here.</p>',

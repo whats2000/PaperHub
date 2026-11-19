@@ -19,7 +19,8 @@
  * paragraph in their language, and as a 文 marker on the paragraph's
  * Marker block otherwise.
  */
-import { scrollWithin } from "@/lib/scrollWithin";
+import { scrollWithin, verticalScroller } from "@/lib/scrollWithin";
+import { scrollIntoViewStable } from "@/lib/findAndHighlight";
 import {
   createContext,
   useCallback,
@@ -577,7 +578,9 @@ export function usePdfMarks({
       if (el) {
         // Never scrollIntoView here: it would also slide the reader's
         // overflow-hidden HTML/PDF track sideways (lib/scrollWithin).
-        scrollWithin(el, { block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+        // Glide, re-measured each frame: page heights still estimated when
+        // the jump started resolve mid-scroll (lib/findAndHighlight).
+        scrollIntoViewStable(el, "smooth", { scroller: verticalScroller(el), reduced: prefersReducedMotion() });
         setFlashId(reveal.markId);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlashId(null), FLASH_MS);

@@ -25,6 +25,8 @@
  * the marks.
  */
 import { prefersReducedMotion } from "@/lib/motion";
+import { readerTrackSliding } from "@/lib/readerTrack";
+import { scrollIntoViewStable } from "@/lib/findAndHighlight";
 import { sameLanguage } from "@/lib/language";
 import { buildTextIndex, findPiece, rangeAt, type ChunkMap, type TextIndex } from "@/lib/marks/anchor";
 import { TR_LANG_ATTR } from "@/lib/htmlTranslation";
@@ -265,8 +267,10 @@ export interface HtmlMarksOptions {
 
 export interface HtmlMarksHandle {
   update: (next: Partial<HtmlMarksOptions>) => void;
-  /** Rings a mark for a moment and scrolls it into view; false if not drawn. */
-  flash: (markId: string) => boolean;
+  /** Rings a mark for a moment and glides it to the centre of the view
+   *  (pass `scroll: false` to only ring it, e.g. a click on it); false if
+   *  not drawn. */
+  flash: (markId: string, scroll?: boolean) => boolean;
   /** How a mark is drawn now: its words (`text`), a 文 marker, or not. */
   shownAs: (markId: string) => "text" | "marker" | null;
   /** Why a mark on a translation shows as its 文 marker: translation off
@@ -900,7 +904,7 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       if (themeChanged) theme();
       sync();
     },
-    flash: (markId) => {
+    flash: (markId, scroll = true) => {
       const d = drawn.get(markId);
       const els = d?.els.length
         ? d.els
@@ -910,16 +914,22 @@ export function attachHtmlMarks(doc: Document, initial: HtmlMarksOptions): HtmlM
       if (!d || !els.length) return false;
       for (const el of els) el.setAttribute("data-flash", "");
       later(() => els.forEach((el) => el.removeAttribute("data-flash")), FLASH_MS);
-      const box = d.boxes[0] ?? d.markerBox ?? [...icons.values()].find((i) => i.marks.includes(markId))?.box;
-      if (box && win) {
-        const top = layer.getBoundingClientRect().top + box.top;
-        if (top < 0 || top + box.height > win.innerHeight) {
-          win.scrollTo({
-            top: win.scrollY + top - win.innerHeight / 3,
-            behavior: prefersReducedMotion() ? "auto" : "smooth",
-          });
-        }
-      }
+      // Glide to the LIVE drawn element, re-measured each frame (lazy
+      // `content-visibility` blocks, math and images shift it as they
+      // render) — the citation jump's technique. Started after the reader
+      // settled: a macrotask, then once its HTML/PDF track stops sliding.
+      const target = els[0]!;
+      let waits = 0;
+      const start = () => {
+        if (detached || !target.isConnected) return;
+        if (readerTrackSliding() && waits++ < 40) return later(start, 50);
+        scrollIntoViewStable(target, "smooth", {
+          scroller: doc.scrollingElement ?? doc.documentElement,
+          reduced: prefersReducedMotion(),
+          onFrame: layout,
+        });
+      };
+      if (scroll) later(start, 0);
       return true;
     },
     rects: (markId) => {

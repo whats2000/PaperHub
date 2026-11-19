@@ -266,7 +266,7 @@ export function useHtmlMarks({
           void useMarksStore.getState().erase(markId, piece);
           return;
         }
-        handleRef.current?.flash(markId);
+        handleRef.current?.flash(markId, false);
         if (pid !== null) activateMark(pid, markId);
       },
       // A mark on a translation not on screen: translation turns on to show
