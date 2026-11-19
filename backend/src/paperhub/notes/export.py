@@ -60,6 +60,29 @@ class ExportPaper:
     source_dir: Path | None = None
 
 
+@dataclass(frozen=True)
+class MarkCite:
+    """What an inline citation of a reading mark points at (a live mark)."""
+    paper_id: int
+    quote: str
+    section: str | None = None
+    page: int | None = None  # 0-based
+
+
+# The default alias of an inline citation: the quote's first characters.
+CITE_DEFAULT_CHARS = 24
+
+
+def cite_default_text(quote: str) -> str:
+    """An inline citation's text when the user gave none: the quote's first
+    ``CITE_DEFAULT_CHARS`` characters (whitespace collapsed), then "…".
+    The editor's ``citeDefaultText`` reads the same."""
+    text = " ".join(quote.split())
+    if len(text) <= CITE_DEFAULT_CHARS:
+        return text
+    return text[:CITE_DEFAULT_CHARS].rstrip() + "…"
+
+
 # --- user text -------------------------------------------------------------
 
 # Characters that carry no user meaning but can steer a Markdown parser or
@@ -368,8 +391,12 @@ _HELD = re.compile(r"\ue000[0-9a-f]{16}:\d+\ue001")
 class _Writer:
     def __init__(self, note: Note, papers: Mapping[int, ExportPaper],
                  chunk_papers: Mapping[int, int],
-                 mark_papers: Mapping[str, int]) -> None:
+                 mark_papers: Mapping[str, int],
+                 mark_cites: Mapping[str, MarkCite] | None = None) -> None:
         self.note = note
+        self.mark_cites = mark_cites or {}
+        # Inline citations' footnotes, in order: ``[^n]`` is the n-th.
+        self.footnotes: list[str] = []
         self.papers = papers
         self.chunk_papers = chunk_papers
         self.mark_papers = mark_papers
@@ -447,6 +474,8 @@ class _Writer:
                 pid = props.get("paperId")
                 key = self.cite(pid if isinstance(pid, int) else None)
                 _append(out, f"{label} [{key}]" if key else label)
+            elif kind == "markCite":
+                _append(out, self.mark_cite(run.get("props") or {}))
             elif kind == "inlineMath":
                 latex = " ".join(str((run.get("props") or {}).get("latex") or "").split())
                 if latex:
@@ -455,6 +484,28 @@ class _Writer:
             elif isinstance(run.get("text"), str):
                 _append(out, self._styled(run))
         return "".join(out)
+
+    def mark_cite(self, props: dict[str, Any]) -> str:
+        """An inline citation of a mark: its alias and a footnote with the
+        quote, the paper and where in it. A deleted mark's citation is its
+        alias only."""
+        cite = self.mark_cites.get(str(props.get("markId") or ""))
+        alias = str(props.get("text") or "").strip()
+        if cite is None:
+            return _escape(alias)
+        alias = alias or cite_default_text(cite.quote)
+        where: list[str] = []
+        paper = self.papers.get(cite.paper_id)
+        if paper is not None and paper.title.strip():
+            where.append(_escape(_one_line(paper.title)))
+        if cite.section and cite.section.strip():
+            where.append(_escape(section_label(_one_line(cite.section))))
+        if cite.page is not None:
+            where.append(f"p. {cite.page + 1}")
+        quote = _escape(" ".join(cite.quote.split()))
+        note = f'"{quote}"' + (" — " + ", ".join(where) if where else "")
+        self.footnotes.append(note)
+        return _escape(alias) + self._hold(f"[^{len(self.footnotes)}]")
 
     def _styled(self, run: dict[str, Any]) -> str:
         styles = run.get("styles") or {}
@@ -737,12 +788,14 @@ def note_to_markdown(
     note: Note, blocks: list[Block], papers: Mapping[int, ExportPaper], *,
     chunk_papers: Mapping[int, int] | None = None,
     mark_papers: Mapping[str, int] | None = None,
+    mark_cites: Mapping[str, MarkCite] | None = None,
 ) -> tuple[str, dict[str, bytes], str]:
     """``(markdown, image files by relative path, BibTeX)`` of a note.
     ``blocks`` in document order; ``chunk_papers`` maps a cited chunk id to
     its paper, ``mark_papers`` a reference block's mark id to its paper."""
     note, blocks, papers = _clean_inputs(note, blocks, papers)
-    w = _Writer(note, papers, chunk_papers or {}, mark_papers or {})
+    w = _Writer(note, papers, chunk_papers or {}, mark_papers or {},
+                mark_cites)
     offset = 2 if any(b.type == "section" for b in blocks) else 1
     indent: dict[str, str] = {}
     types = {b.id: b.type for b in blocks}
@@ -763,6 +816,9 @@ def note_to_markdown(
         tight = marker is not None and (marker == prev_marker or bool(pad))
         out += ("\n" if tight else "\n\n") + body
         prev_marker = marker
+    # Inline citations' footnotes close the note (pandoc: Word footnotes).
+    for i, text in enumerate(w.footnotes, 1):
+        out += f"\n\n[^{i}]: {text}"
     bib = "\n\n".join(_bib_entry(w.keys[pid], w.papers[pid]) for pid in w.cited)
     return out.rstrip() + "\n", w.images, (bib + "\n" if bib else "")
 
@@ -771,11 +827,16 @@ def note_to_markdown(
 
 async def export_sources(
     conn: aiosqlite.Connection, note: Note, blocks: list[Block],
-) -> tuple[dict[int, ExportPaper], dict[int, int], dict[str, int]]:
+) -> tuple[dict[int, ExportPaper], dict[int, int], dict[str, int],
+           dict[str, MarkCite]]:
     """The papers a note's export may cite (its own paper, the papers of
     its reference blocks, mentioned and cited ones), the paper of each chunk
-    it cites and the paper of each reference block's mark."""
+    it cites, the paper of each reference block's mark and what each inline
+    citation's live mark quotes."""
     pids, chunk_ids = _cited(blocks)
+    cite_ids = {str((r.get("props") or {}).get("markId") or "")
+                for b in blocks for r in _runs(b.content)
+                if r.get("type") == "markCite"} - {""}
     mark_ids: set[str] = set()
     for b in blocks:
         if b.type not in _REF_TYPES:
@@ -793,7 +854,24 @@ async def export_sources(
             tuple(mark_ids),
         ) as cur:
             mark_papers = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
+    mark_cites: dict[str, MarkCite] = {}
+    if cite_ids:
+        marks = ",".join("?" * len(cite_ids))
+        async with conn.execute(
+            "SELECT id, paper_content_id, pieces_json, section_key "
+            f"FROM note_marks WHERE id IN ({marks}) "  # noqa: S608
+            "AND deleted_at IS NULL",
+            tuple(cite_ids),
+        ) as cur:
+            for r in await cur.fetchall():
+                live = live_pieces(_json(r[2], []))
+                page = live[0].get("page") if live else None
+                mark_cites[str(r[0])] = MarkCite(
+                    paper_id=int(r[1]), quote=joined_quote(live),
+                    section=r[3] or None,
+                    page=page if isinstance(page, int) else None)
     pids |= set(mark_papers.values())
+    pids |= {c.paper_id for c in mark_cites.values()}
     chunk_papers: dict[int, int] = {}
     if chunk_ids:
         marks = ",".join("?" * len(chunk_ids))
@@ -820,7 +898,7 @@ async def export_sources(
                     authors=[str(a) for a in authors if str(a).strip()],
                     year=int(r[3]) if r[3] else None, arxiv_id=r[4] or None,
                     source_dir=Path(r[5]) if r[5] else None)
-    return papers, chunk_papers, mark_papers
+    return papers, chunk_papers, mark_papers, mark_cites
 
 
 # Bidi marks, overrides and isolates: in a file name they only reorder

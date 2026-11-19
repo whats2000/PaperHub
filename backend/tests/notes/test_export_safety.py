@@ -151,9 +151,33 @@ async def test_export_sources_loads_the_mark_paper(
         "pieces_json, created_at) VALUES ('mk_1', 7, 'q1', 'text', 'pdf', '[]', 'now')")
     await conn.commit()
     q = _blk("q1", "paperQuote", props={"markId": "mk_1", "quote": "x"})
-    papers, chunk_papers, mark_papers = await export_sources(conn, CHAT, [q])
+    papers, chunk_papers, mark_papers, cites = await export_sources(conn, CHAT, [q])
     assert mark_papers == {"mk_1": 7}
     assert papers[7].title == "Deep Residual Learning" and chunk_papers == {}
+    assert cites == {}
+
+
+async def test_export_sources_loads_inline_citations_of_live_marks(
+        conn: aiosqlite.Connection) -> None:
+    await conn.execute(
+        "INSERT INTO paper_content (id, content_key, kind, sha256, title, "
+        "authors_json, year, source_path, source_dir_path, html_path) VALUES "
+        "(7, 'k7', 'pdf_upload', 'abc', 'Deep Residual Learning', "
+        "'[\"Kaiming He\"]', 2016, 's', 'd', 'h')")
+    for mid, deleted in (("mk_1", None), ("mk_2", "then")):
+        await conn.execute(
+            "INSERT INTO note_marks (id, paper_content_id, block_id, kind, view, "
+            "pieces_json, section_key, created_at, deleted_at) VALUES "
+            "(?, 7, ?, 'text', 'pdf', ?, '4 Results', 'now', ?)",
+            (mid, f"q_{mid}", '[{"quote": "rose to 62%", "page": 3}]', deleted))
+    await conn.commit()
+    p = _blk("p1", "paragraph", content=[
+        {"type": "markCite", "props": {"markId": "mk_1", "text": "62%"}},
+        {"type": "markCite", "props": {"markId": "mk_2", "text": "x"}}])
+    papers, _c, _m, cites = await export_sources(conn, CHAT, [p])
+    assert set(cites) == {"mk_1"}  # a deleted mark's citation has no source
+    assert cites["mk_1"].quote == "rose to 62%" and cites["mk_1"].page == 3
+    assert cites["mk_1"].section == "4 Results" and 7 in papers
 
 
 def test_line_breaks_kept_and_line_starts_escaped() -> None:

@@ -199,11 +199,12 @@ async def export_note(note_id: int,
         try:
             # Never an empty heading or file name: title, else default.
             note = await named(conn, note)
-            papers, chunk_papers, mark_papers = await export_sources(
+            papers, chunk_papers, mark_papers, mark_cites = await export_sources(
                 conn, note, blocks)
             md, images, bib = await asyncio.to_thread(functools.partial(
                 note_to_markdown, note, blocks, papers,
-                chunk_papers=chunk_papers, mark_papers=mark_papers))
+                chunk_papers=chunk_papers, mark_papers=mark_papers,
+                mark_cites=mark_cites))
             name = slug(note.title) + "-notes"
             full_name = display_name(note.title) + "-notes"
             if format == "md":

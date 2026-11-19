@@ -272,3 +272,52 @@ def test_inline_math_cannot_close_early_and_empty_is_dropped() -> None:
     md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
         _txt("a "), _imath(" x$y "), _imath("  "), _txt("b")])], {5: _paper()})
     assert f"a $x{BS}$y$b" in md
+
+
+# --- inline citations of a mark (markCite) ----------------------------------
+
+def _cite(mark: str, text: str = "") -> dict[str, Any]:
+    return {"type": "markCite", "props": {"markId": mark, "text": text}}
+
+
+def test_mark_cite_exports_alias_with_a_footnote() -> None:
+    from paperhub.notes.export import MarkCite
+    cites = {"mk_a": MarkCite(paper_id=5, quote="accuracy rose to 62% on the hard split",
+                              section="4 Results", page=3)}
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _txt("we saw "), _cite("mk_a", "62%"), _txt(" overall")])], {5: _paper()},
+        mark_cites=cites)
+    assert "we saw 62%[^1] overall" in md
+    assert md.rstrip().endswith(
+        '[^1]: "accuracy rose to 62% on the hard split" — '
+        "Attention Is All You Need, §4, p. 4")
+
+
+def test_mark_cite_default_alias_is_the_quote_start() -> None:
+    from paperhub.notes.export import MarkCite, cite_default_text
+    quote = "An attention function maps a query and a set of pairs"
+    assert cite_default_text(quote) == "An attention function ma…"
+    assert cite_default_text("  short   one ") == "short one"
+    cites = {"mk_a": MarkCite(paper_id=5, quote=quote, section=None, page=None)}
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _cite("mk_a")])], {5: _paper()}, mark_cites=cites)
+    assert "An attention function ma…[^1]" in md
+
+
+def test_mark_cite_of_a_deleted_mark_is_its_alias_only() -> None:
+    md, _i, _b = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _txt("see "), _cite("mk_gone", "62%")])], {5: _paper()})
+    assert "see 62%" in md
+    assert "[^" not in md
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_mark_cite_is_a_word_footnote() -> None:
+    from paperhub.notes.export import MarkCite
+    cites = {"mk_a": MarkCite(paper_id=5, quote="the quoted words", section=None, page=None)}
+    md, images, bib = note_to_markdown(NOTE, [_blk("p1", "paragraph", content=[
+        _txt("x "), _cite("mk_a", "62%")])], {5: _paper()}, mark_cites=cites)
+    docx = markdown_to_docx(md, {**images, "references.bib": bib.encode()})
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        notes = z.read("word/footnotes.xml").decode("utf-8")
+    assert "the quoted words" in notes
