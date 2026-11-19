@@ -68,6 +68,9 @@
 #                                             label aliases into one cache key
 # 18. paperhub-migrate-idea-notes            Plan H5b.1: each idea's ideas.note
 #                                             becomes an idea note (column kept)
+# 19. paperhub-clear-auto-note-titles        Plan H5b.1: a note title auto-filled
+#                                             from its paper / chat / idea is
+#                                             cleared (the default shows instead)
 # Steps 6-7 need the Marker service (`docker compose up -d marker`) for PDF
 # papers; they are sequential and skip papers that already have the output.
 #
@@ -121,27 +124,28 @@ function Invoke-Step([string]$label, [string[]]$cmd) {
     }
 }
 
-Invoke-Step "0/18 schema" (@("paperhub-apply-schema") + $dry)
-Invoke-Step "1/18 mark styles" (@("paperhub-migrate-mark-styles") + $dry)
+Invoke-Step "0/19 schema" (@("paperhub-apply-schema") + $dry)
+Invoke-Step "1/19 mark styles" (@("paperhub-migrate-mark-styles") + $dry)
 if (-not $SkipRechunk) {
-    Invoke-Step "2/18 re-chunk" (@("paperhub-reingest") + $dry)
+    Invoke-Step "2/19 re-chunk" (@("paperhub-reingest") + $dry)
 }
-Invoke-Step "3/18 figure/table index" (@("paperhub-repair-layout") + $dry)
-Invoke-Step "4/18 section names" (@("paperhub-repair-section-names") + $dry)
-Invoke-Step "5/18 PDF titles" (@("paperhub-repair-titles") + $dry)
-Invoke-Step "6/18 missing assets" (@("paperhub-backfill-assets") + $dry)
-Invoke-Step "7/18 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
-Invoke-Step "8/18 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
-Invoke-Step "9/18 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
-if (-not $DryRun) { Invoke-Step "10/18 Citation Canvas HTML" @("paperhub-rerender-html") }
-Invoke-Step "11/18 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
-if (-not $DryRun) { Invoke-Step "12/18 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
-if (-not $DryRun) { Invoke-Step "13/18 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
-Invoke-Step "14/18 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
-Invoke-Step "15/18 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
-Invoke-Step "16/18 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
-Invoke-Step "17/18 translation cache repair" (@("paperhub-repair-translations") + $dry)
-Invoke-Step "18/18 idea notes into the notes store" (@("paperhub-migrate-idea-notes") + $dry)
+Invoke-Step "3/19 figure/table index" (@("paperhub-repair-layout") + $dry)
+Invoke-Step "4/19 section names" (@("paperhub-repair-section-names") + $dry)
+Invoke-Step "5/19 PDF titles" (@("paperhub-repair-titles") + $dry)
+Invoke-Step "6/19 missing assets" (@("paperhub-backfill-assets") + $dry)
+Invoke-Step "7/19 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
+Invoke-Step "8/19 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
+Invoke-Step "9/19 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
+if (-not $DryRun) { Invoke-Step "10/19 Citation Canvas HTML" @("paperhub-rerender-html") }
+Invoke-Step "11/19 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
+if (-not $DryRun) { Invoke-Step "12/19 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
+if (-not $DryRun) { Invoke-Step "13/19 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
+Invoke-Step "14/19 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
+Invoke-Step "15/19 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
+Invoke-Step "16/19 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
+Invoke-Step "17/19 translation cache repair" (@("paperhub-repair-translations") + $dry)
+Invoke-Step "18/19 idea notes into the notes store" (@("paperhub-migrate-idea-notes") + $dry)
+Invoke-Step "19/19 auto-filled note titles" (@("paperhub-clear-auto-note-titles") + $dry)
 
 if ($DryRun) { Write-Host "Done (dry run, nothing changed)." }
 else { Write-Host "Done. DB backup at $dbBak (remove it when you've verified the result)." }
