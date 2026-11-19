@@ -3,7 +3,6 @@
   "saveRefused": "Couldn't save that change. Showing the saved version.",
   "retrying": "Not saved — retrying",
   "conflict": "Updated from another view",
-  "sectionNotEmpty": "This section still has notes under it. Delete them first, then the heading.",
   "insertAppended": "A new line could not go where you put it, so it was saved at the end of the note.",
   "insertNotSaved": "A new line could not be saved. It stays here, marked Not saved; edit it to try again.",
   "draftsKept": "New lines that could not be saved stay here, marked Not saved.",

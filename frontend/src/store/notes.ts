@@ -601,15 +601,7 @@ export const useNotesStore = create<NotesStore>()(
           return rebuilt.ops;
         };
 
-        const sectionKept = rejected.some((r) => r.reason === "invalid" && r.current?.type === "section");
-        toast(
-          sectionKept
-            ? i18n.t(
-                "notes:sectionNotEmpty",
-                "This section still has notes under it. Delete them first, then the heading.",
-              )
-            : i18n.t("notes:conflict", "Updated from another view"),
-        );
+        toast(i18n.t("notes:conflict", "Updated from another view"));
 
         // Where blocks sit (an order change by another view, a move, a
         // block gone) is only known to the server: reload the note, the

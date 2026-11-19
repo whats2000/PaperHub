@@ -484,11 +484,6 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         ctx.reject(row.id, "invalid")
         return
     live_desc: list[_Row] = []
-    if (op.op == "delete" and row.type == "section" and ctx.actor == "user"
-            and await _section_has_blocks(ctx, row)):
-        # A paper section's notes hang off its heading: delete them first.
-        ctx.reject(row.id, "invalid", row)
-        return
     if op.op == "delete":
         live_desc = [d for d in await ctx.descendants(row.id)
                      if d.deleted_at is None]

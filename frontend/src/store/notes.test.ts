@@ -800,7 +800,8 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().notes[7]?.blocks[1]?.parent_id).toBe("a");
   });
 
-  it("says why a section with notes under it came back", async () => {
+  it("deletes a section heading with notes under it, with no toast", async () => {
+    // [user, 2026-11-19] Any heading may go; the notes under it stay.
     const sec: NoteBlock = {
       ...block("s", "1 Intro"),
       type: "section",
@@ -808,22 +809,20 @@ describe("useNotesStore", () => {
       content: null,
       section_key: "1 Intro",
     };
+    let sent: unknown = null;
     server.use(
       http.get(`${API_BASE_URL}/notes/target`, () => HttpResponse.json({ note, blocks: [sec, block("a", "A")] })),
-      http.get(`${API_BASE_URL}/notes/7`, () =>
-        HttpResponse.json({ note: { ...note, revision: 5 }, blocks: [sec, block("a", "A")], suggestions: [], comments: [] }),
-      ),
-      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
-        HttpResponse.json(result(5, [], [{ block_id: "s", reason: "invalid", current: sec }])),
-      ),
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(result(5, ["s"]));
+      }),
     );
     await useNotesStore.getState().loadTarget("paper", 3);
     useNotesStore.getState().applyLocal(7, [{ op: "delete", block_id: "s" }]);
     await useNotesStore.getState().flush(7);
-    expect(toastFn).toHaveBeenCalledWith(
-      "This section still has notes under it. Delete them first, then the heading.",
-    );
-    await waitFor(() => expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["s", "a"]));
+    expect(sent).toMatchObject({ ops: [{ op: "delete", block_id: "s" }] });
+    expect(toastFn).not.toHaveBeenCalled();
+    expect(useNotesStore.getState().notes[7]?.blocks.map((b) => b.id)).toEqual(["a"]);
   });
 
   it("re-applies queued edits on top of a reload", async () => {
