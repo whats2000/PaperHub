@@ -87,6 +87,14 @@ def test_markdown_has_sections_quotes_and_sources() -> None:
     assert "@misc{vaswani2017attention," in bib
 
 
+def test_note_without_sections_has_no_section_headings() -> None:
+    blocks = [_quote("q1", "An attention function."),
+              _blk("h1", "heading", props={"level": 1}, content=[_txt("My take")])]
+    md, _images, _bib = note_to_markdown(NOTE, blocks, {5: _paper()})
+    assert "\n## My take\n" in md  # no +2 section offset
+    assert "## 3 Model" not in md
+
+
 def test_joined_quote_reads_in_reading_order_and_translation_is_labelled() -> None:
     pieces = [
         {"quote": "second", "page": 3, "rects": [[0.1, 0.5, 0.2, 0.6]], "stroke": 1},

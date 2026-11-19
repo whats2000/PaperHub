@@ -38,8 +38,6 @@ from paperhub.notes.ops import (
     _restore_in_tx,
 )
 from paperhub.notes.papers import (
-    destination,
-    ensure_section,
     paper_note,
     parts_of_section,
     tx,
@@ -335,13 +333,14 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
         if m.join_to is not None:
             return await _join(conn, m)
         note = await paper_note(conn, m.paper_content_id)
+        # [user, 2026-11-19] No section heading is added: the block goes
+        # right after the user's last caret block in this note (the
+        # frontend's ``hint_block_id``), else at the end of the note.
         after: str | None = None
-        part_index, part_count = 0, 1
-        if m.section_key:
-            sec = await ensure_section(conn, note.id, m.paper_content_id,
-                                       m.section_key)
-            after, part_index, part_count = await destination(
-                conn, note.id, sec, m.hint_block_id)
+        if m.hint_block_id is not None and any(
+                b.id == m.hint_block_id
+                for b in await list_blocks(conn, note.id)):
+            after = m.hint_block_id
         rec: dict[str, Any] = {
             "id": _mark_id(), "paper_content_id": m.paper_content_id,
             "block_id": new_block_id(), "kind": m.kind, "style": m.style,
@@ -352,9 +351,7 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
             "deleted_at": None,
         }
         await _insert_mark(conn, note.id, rec, after, "Add mark")
-        return rec, SavedTo(note_id=note.id, paper_title=note.title,
-                            section=m.section_key, part_index=part_index,
-                            part_count=part_count)
+        return rec, await _saved_to(conn, rec)
 
 
 async def _section_block(conn: aiosqlite.Connection, note_id: int,

@@ -47,8 +47,8 @@ async def test_create_mark_builds_quote_block(conn):
     assert saved.paper_title == "A Paper" and saved.section == "Method"
     assert (saved.part_index, saved.part_count) == (0, 1)
     blocks = await list_blocks(conn, saved.note_id)
-    assert [b.type for b in blocks] == ["section", "paperQuote"]
-    b = blocks[1]
+    assert [b.type for b in blocks] == ["paperQuote"]  # no heading
+    b = blocks[0]
     assert b.id == m["block_id"] and b.text == "hello world"
     assert b.props["markId"] == m["id"] and b.props["color"] == "green"
     assert b.props["source"] == {"section": "Method"}
@@ -75,8 +75,8 @@ async def test_split_last_piece(conn):
     new = await split_last_piece(conn, m["id"])
     assert [p["quote"] for p in new["pieces"]] == ["two"]
     blocks = await list_blocks(conn, saved.note_id)
-    assert [b.id for b in blocks[1:]] == [m["block_id"], new["block_id"]]
-    assert [b.text for b in blocks[1:]] == ["one", "two"]
+    assert [b.id for b in blocks] == [m["block_id"], new["block_id"]]
+    assert [b.text for b in blocks] == ["one", "two"]
     assert len(await list_marks(conn, 1)) == 2
 
 
@@ -91,10 +91,10 @@ async def test_delete_and_restore_mark_keeps_user_text(conn):
     await delete_mark(conn, m["id"])
     assert await list_marks(conn, 1) == []
     texts = [b.text for b in await list_blocks(conn, note.id)]
-    assert texts == ["Method", "my thought"]  # the section heading, then the block
+    assert texts == ["my thought"]  # no heading was added
     await restore_mark(conn, m["id"])
     texts = [b.text for b in await list_blocks(conn, note.id)]
-    assert texts == ["Method", "quoted", "my thought"]
+    assert texts == ["quoted", "my thought"]
     assert len(await list_marks(conn, 1)) == 1
 
 
@@ -104,17 +104,17 @@ async def test_erase_piece_keeps_rest(conn):
     out = await erase_piece(conn, m["id"], 0)
     assert out["pieces"][0]["erased"] is True
     blocks = await list_blocks(conn, saved.note_id)
-    assert blocks[1].text == "two"
+    assert blocks[0].text == "two"
     back = await restore_piece(conn, m["id"], 0)
     assert "erased" not in back["pieces"][0]
-    assert (await list_blocks(conn, saved.note_id))[1].text == "one\ntwo"  # one save: a paragraph break
+    assert (await list_blocks(conn, saved.note_id))[0].text == "one\ntwo"  # one save: a paragraph break
     # erasing every piece removes the mark; restoring one brings it back
     await erase_piece(conn, m["id"], 0)
     await erase_piece(conn, m["id"], 1)
     assert await list_marks(conn, 1) == []
     await restore_piece(conn, m["id"], 1)
     assert (await list_marks(conn, 1))[0]["id"] == m["id"]
-    assert (await list_blocks(conn, saved.note_id))[1].text == "two"
+    assert (await list_blocks(conn, saved.note_id))[0].text == "two"
 
 
 async def test_colors_seeded_and_renamed(conn):
@@ -175,20 +175,20 @@ async def test_editor_undo_reinserting_a_deleted_mark_block_revives_the_mark(con
     await _paper(conn)
     m, saved = await create_mark(conn, _in([_piece("hello")]))
     note = await get_note(conn, saved.note_id)
-    [sec, blk] = await list_blocks(conn, note.id)
+    [blk] = await list_blocks(conn, note.id)
     res = await apply_ops(conn, note.id, base_revision=note.revision,
                           actor="user",
                           ops=[Op(op="delete", block_id=blk.id)])
     assert await list_marks(conn, 1) == []
     res = await apply_ops(
         conn, note.id, base_revision=res.revision, actor="user",
-        ops=[Op(op="insert", block_id=blk.id, after=sec.id,
+        ops=[Op(op="insert", block_id=blk.id, after=None,
                 block=BlockIn(type=blk.type, props=blk.props,
                               content=blk.content))])
     assert res.applied == [blk.id] and not res.renamed
     [back] = await list_marks(conn, 1)
     assert back["id"] == m["id"] and back["block_id"] == blk.id
-    assert [b.id for b in await list_blocks(conn, note.id)] == [sec.id, blk.id]
+    assert [b.id for b in await list_blocks(conn, note.id)] == [blk.id]
 
 
 async def test_failed_mark_insert_leaves_no_orphan_block(conn, monkeypatch):
@@ -237,7 +237,7 @@ async def test_restore_piece_does_not_revive_user_deleted_mark(conn):
     assert await list_marks(conn, 1) == []
     await restore_mark(conn, m["id"])  # block props are synced on restore
     blocks = await list_blocks(conn, saved.note_id)
-    assert blocks[1].text == "one\ntwo"  # one save: a paragraph break
+    assert blocks[0].text == "one\ntwo"  # one save: a paragraph break
 
 
 async def _sets(conn):
@@ -432,3 +432,69 @@ def test_joined_quote_matches_the_frontend_on_the_shared_cases():
                         / "__fixtures__" / "joined_quote" / "cases.json").read_text(encoding="utf-8"))
     for case in cases:
         assert joined_quote(case["pieces"]) == case["quote"], case["name"]
+
+
+
+# --- [user, 2026-11-19] marks add no headings; they land at the caret ----
+
+async def _para_after(conn, note_id, after, text):
+    note = await get_note(conn, note_id)
+    res = await apply_ops(conn, note_id, base_revision=note.revision,
+                          actor="user", ops=[Op(op="insert", after=after,
+                          block=BlockIn(type="paragraph", content=text))])
+    return res.applied[0]
+
+
+async def test_mark_on_a_note_without_headings_adds_no_section(conn):
+    await _paper(conn)
+    m, saved = await create_mark(conn, _in([_piece("hello")]))
+    blocks = await list_blocks(conn, saved.note_id)
+    assert [b.type for b in blocks] == ["paperQuote"]
+    assert saved.section == "Method"
+    [lm] = await list_marks(conn, 1)
+    assert lm["part_label"] == "Method"
+
+
+async def test_mark_lands_right_after_the_caret_block_in_a_row(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    y = await _para_after(conn, note.id, x, "y")
+    m1, _ = await create_mark(conn, _in([_piece("one")], hint_block_id=x))
+    m2, _ = await create_mark(conn, _in([_piece("two")],
+                                        hint_block_id=m1["block_id"]))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [x, m1["block_id"], m2["block_id"], y]
+
+
+async def test_no_caret_or_deleted_caret_block_appends_at_the_end(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    y = await _para_after(conn, note.id, x, "y")
+    m1, _ = await create_mark(conn, _in([_piece("one")]))
+    n = await get_note(conn, note.id)
+    await apply_ops(conn, note.id, base_revision=n.revision, actor="user",
+                    ops=[Op(op="delete", block_id=x)])
+    m2, _ = await create_mark(conn, _in([_piece("two")], hint_block_id=x))
+    m3, _ = await create_mark(conn, _in([_piece("three")],
+                                        hint_block_id="b_unknown"))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [y, m1["block_id"], m2["block_id"], m3["block_id"]]
+
+
+async def test_a_heading_does_not_decide_placement(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    res = await apply_ops(conn, note.id, base_revision=note.revision,
+                          actor="user", ops=[
+                              Op(op="insert", block=BlockIn(
+                                  type="section", props={"title": "Method"},
+                                  section_key="Method")),
+                              Op(op="insert", block=BlockIn(
+                                  type="paragraph", content="tail"))])
+    sec, tail = res.applied
+    p = await _para_after(conn, note.id, None, "other")
+    m, _ = await create_mark(conn, _in([_piece("two")], hint_block_id=sec))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [sec, m["block_id"], tail, p]
