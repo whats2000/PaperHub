@@ -156,7 +156,8 @@
       "selectPaper": "Select text",
       "highlighter": "Highlighter",
       "box": "Box",
-      "clickMark": "Click a mark"
+      "clickMark": "Click a mark",
+      "inlineCite": "Cite inline (note card)"
     },
     "rows": {
       "bold": "bold",
@@ -202,7 +203,8 @@
       "clickMark": "Opens its note",
       "focusStops": "stops",
       "inlineMath": "Inline equation (LaTeX); click it to edit",
-      "mathDone": "In an equation: done (Shift+Enter: new line)"
+      "mathDone": "In an equation: done (Shift+Enter: new line)",
+      "inlineCite": "Your words cite the mark; hover it, then ✎ to change them"
     }
   },
   "code": {
@@ -291,7 +293,13 @@
     "noteTitle": "Open the cited line of your notes",
     "figTitle": "Open the cited figure",
     "viewTitle": "Open the cited page region",
-    "unsourcedTitle": "No checked source: {{reason}}"
+    "unsourcedTitle": "No checked source: {{reason}}",
+    "text": "Citation text",
+    "keys": "Enter: done · Esc · empty: the quote's start",
+    "openNamed": "Open the cited passage: {{text}}",
+    "edit": "Edit the citation text",
+    "markGone": "Deleted source",
+    "markGoneTitle": "Its marked passage was deleted (Undo brings it back)"
   },
   "marks": {
     "popover": "Mark the selection",
@@ -384,7 +392,10 @@
     "offScreen": "The mark is off screen",
     "trTurnOn": "Turn on translation",
     "partOnly": "· note {{index}} of {{count}}",
-    "colorChip": "Colour: {{name}}"
+    "colorChip": "Colour: {{name}}",
+    "citeInline": "Insert as inline citation",
+    "citeInlineHint": "Cite this passage inside your text, with your own short words",
+    "citeInlineShort": "Cite inline"
   },
   "myMarks": {
     "button": "My marks",

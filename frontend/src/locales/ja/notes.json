@@ -156,7 +156,8 @@
       "selectPaper": "文字を選択",
       "highlighter": "蛍光ペン",
       "box": "ボックス",
-      "clickMark": "マークをクリック"
+      "clickMark": "マークをクリック",
+      "inlineCite": "インライン引用（ノートカード）"
     },
     "rows": {
       "bold": "太字",
@@ -202,7 +203,8 @@
       "clickMark": "そのノートを開く",
       "focusStops": "で解除",
       "inlineMath": "インライン数式（LaTeX）。クリックで編集",
-      "mathDone": "数式内：完了（Shift+Enter で改行）"
+      "mathDone": "数式内：完了（Shift+Enter で改行）",
+      "inlineCite": "自分の言葉でマークを引用。ホバーして ✎ で変更"
     }
   },
   "code": {
@@ -291,7 +293,13 @@
     "noteTitle": "引用されたノートの行を開く",
     "figTitle": "引用された図を開く",
     "viewTitle": "引用されたページ領域を開く",
-    "unsourcedTitle": "確認済みの出典がありません：{{reason}}"
+    "unsourcedTitle": "確認済みの出典がありません：{{reason}}",
+    "text": "引用テキスト",
+    "keys": "Enter：完了 · Esc · 空欄：引用の冒頭",
+    "openNamed": "引用箇所を開く：{{text}}",
+    "edit": "引用テキストを編集",
+    "markGone": "削除された出典",
+    "markGoneTitle": "マークした箇所は削除されました（元に戻すで復活）"
   },
   "marks": {
     "popover": "選択箇所に印をつける",
@@ -384,7 +392,10 @@
     "offScreen": "マークは画面外です",
     "trTurnOn": "翻訳をオンにする",
     "partOnly": "· ノート {{index}} / {{count}}",
-    "colorChip": "色：{{name}}"
+    "colorChip": "色：{{name}}",
+    "citeInline": "インライン引用として挿入",
+    "citeInlineHint": "この箇所を自分の短い言葉で本文中に引用",
+    "citeInlineShort": "インライン引用"
   },
   "myMarks": {
     "button": "マイマーク",

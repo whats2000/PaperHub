@@ -156,7 +156,8 @@
       "selectPaper": "選取文字",
       "highlighter": "螢光筆",
       "box": "框選",
-      "clickMark": "點選標記"
+      "clickMark": "點選標記",
+      "inlineCite": "行內引用（筆記卡片）"
     },
     "rows": {
       "bold": "粗體",
@@ -202,7 +203,8 @@
       "clickMark": "開啟它的筆記",
       "focusStops": "結束",
       "inlineMath": "行內公式（LaTeX），點一下即可編輯",
-      "mathDone": "在公式中：完成（Shift+Enter 換行）"
+      "mathDone": "在公式中：完成（Shift+Enter 換行）",
+      "inlineCite": "用你的文字引用標記；滑過後點 ✎ 修改"
     }
   },
   "code": {
@@ -291,7 +293,13 @@
     "noteTitle": "開啟引用的筆記行",
     "figTitle": "開啟引用的圖",
     "viewTitle": "開啟引用的頁面區域",
-    "unsourcedTitle": "沒有經過確認的來源：{{reason}}"
+    "unsourcedTitle": "沒有經過確認的來源：{{reason}}",
+    "text": "引用文字",
+    "keys": "Enter：完成 · Esc · 留空：引文開頭",
+    "openNamed": "開啟引用的段落：{{text}}",
+    "edit": "編輯引用文字",
+    "markGone": "來源已刪除",
+    "markGoneTitle": "它標記的段落已刪除（復原可找回）"
   },
   "marks": {
     "popover": "標記選取的文字",
@@ -384,7 +392,10 @@
     "offScreen": "標記不在畫面上",
     "trTurnOn": "開啟翻譯",
     "partOnly": "· 第 {{index}} 則，共 {{count}} 則",
-    "colorChip": "顏色：{{name}}"
+    "colorChip": "顏色：{{name}}",
+    "citeInline": "插入為行內引用",
+    "citeInlineHint": "在你的文字中用自己的簡短說法引用這段",
+    "citeInlineShort": "行內引用"
   },
   "myMarks": {
     "button": "我的標記",

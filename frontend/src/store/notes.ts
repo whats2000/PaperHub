@@ -93,6 +93,18 @@ export interface CaretTarget extends QuoteTarget {
   in?: "pane" | "card";
 }
 
+export interface CiteRequest {
+  noteId: number;
+  markId: string;
+  paperId: number;
+  in: "pane" | "card";
+  /** The block the citation goes into (null: a new line), and where. */
+  blockId: string | null;
+  offset: number | null;
+  /** A new line goes after this block (null: the note's end). */
+  fallbackAfter: string | null;
+}
+
 interface NotesStore {
   notes: Record<number, NoteState>;
   /** `${kind}:${id}` -> note id. */
@@ -134,7 +146,14 @@ interface NotesStore {
   /** The block the caret was last in, per note (the notes pane or the note
    * card), kept after the editor closes: a new mark goes right after it. */
   lastCaret: Record<number, string>;
-  setLastCaret: (noteId: number, blockId: string) => void;
+  /** Where in that block's text the caret was (unknown: absent). */
+  lastCaretOffset: Record<number, number>;
+  setLastCaret: (noteId: number, blockId: string, offset?: number | null) => void;
+  /** "Insert as inline citation" (the note card): the editor of `in` puts
+   * an inline citation of the mark at the note's last caret, then clears
+   * the request. */
+  citeRequest: CiteRequest | null;
+  setCiteRequest: (req: CiteRequest | null) => void;
   /** "Add note" on a reader selection: once the editor shows this block it
    * puts the caret on a line after it, then clears the request (dropped
    * after CARET_GIVE_UP_MS if the block never shows). */
@@ -967,9 +986,21 @@ export const useNotesStore = create<NotesStore>()(
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
         lastCaret: {},
-        setLastCaret: (noteId, blockId) => {
+        lastCaretOffset: {},
+        setLastCaret: (noteId, blockId, offset) => {
           if (get().lastCaret[noteId] !== blockId) set((s) => ({ lastCaret: { ...s.lastCaret, [noteId]: blockId } }));
+          const cur = get().lastCaretOffset[noteId];
+          if (typeof offset === "number" ? cur !== offset : cur !== undefined) {
+            set((s) => {
+              const next = { ...s.lastCaretOffset };
+              if (typeof offset === "number") next[noteId] = offset;
+              else delete next[noteId];
+              return { lastCaretOffset: next };
+            });
+          }
         },
+        citeRequest: null,
+        setCiteRequest: (req) => set({ citeRequest: req }),
         caretAfter: null,
         setCaretAfter: (target) => {
           set({ caretAfter: target });

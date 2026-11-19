@@ -110,6 +110,11 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "highlighter", plainLeft: "Highlighter", right: "Drag over words, or click a figure" },
       { id: "box", plainLeft: "Box", right: "Drag over a figure or equation" },
       { id: "clickMark", plainLeft: "Click a mark", right: "Opens its note" },
+      {
+        id: "inlineCite",
+        plainLeft: "Cite inline (note card)",
+        right: "Your words cite the mark; hover it, then ✎ to change them",
+      },
     ],
   },
 ];

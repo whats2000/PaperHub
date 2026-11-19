@@ -20,6 +20,7 @@ import { dividerBlock } from "./blocks/DividerBlock";
 import { commentStyle } from "./blocks/CommentStyle";
 import { hiddenStyle } from "./blocks/HiddenStyle";
 import { inlineMath } from "./blocks/InlineMath";
+import { markCite } from "./blocks/MarkCite";
 import { mathBlock } from "./blocks/MathBlock";
 import { mentionInline } from "./blocks/MentionChip";
 import { paperEquationBlock } from "./blocks/PaperEquationBlock";
@@ -55,7 +56,7 @@ export const noteSchema = BlockNoteSchema.create({
     paperEquation: paperEquationBlock(),
     paperRegion: paperRegionBlock(),
   },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline, inlineMath },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline, inlineMath, markCite },
   styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle, comment: commentStyle },
 });
 
@@ -71,7 +72,7 @@ interface MovableEditor {
 function moveBlocks(editor: MovableEditor, dir: "up" | "down"): boolean {
   const view = editor._tiptapEditor.view;
   const caret = atomCaretKey.getState(view.state);
-  const id = caret ? view.state.doc.resolve(caret.pos).parent.attrs.id : null;
+  const id: unknown = caret ? view.state.doc.resolve(caret.pos).parent.attrs.id : null;
   if (dir === "up") editor.moveBlocksUp();
   else editor.moveBlocksDown();
   if (caret && typeof id === "string") {

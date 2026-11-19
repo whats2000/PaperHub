@@ -32,6 +32,7 @@ import { useNotesStore } from "@/store/notes";
 
 import { atomCaret } from "./atomCaret";
 import { insertInlineMath } from "./blocks/InlineMath";
+import { insertMarkCite } from "./blocks/MarkCite";
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
@@ -368,6 +369,15 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     editor.focus();
   }, [caretAfter, editor, reload, variant, setCaretAfter]);
 
+  // "Insert as inline citation" (the note card): at the note's last caret,
+  // its text field open.
+  const citeRequest = useNotesStore((s) => (s.citeRequest?.noteId === noteId ? s.citeRequest : null));
+  useEffect(() => {
+    if (!citeRequest || citeRequest.in !== variant) return;
+    useNotesStore.getState().setCiteRequest(null);
+    insertMarkCite(editor, citeRequest);
+  }, [citeRequest, editor, variant]);
+
   // The part decorations read the store; redraw them when it changes.
   useEffect(() => {
     try {
@@ -386,7 +396,10 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     }
     onBlockFocus?.(blockId);
     // A new mark goes right after the block the caret was last in.
-    useNotesStore.getState().setLastCaret(noteId, blockId);
+    // (and an inline citation at the caret's place in its text).
+    const { $from } = editor._tiptapEditor.view.state.selection;
+    const inText = $from.parent.isTextblock && $from.node($from.depth - 1)?.type.name === "blockContainer";
+    useNotesStore.getState().setLastCaret(noteId, blockId, inText ? $from.parentOffset : null);
     // The caret's part is the one you're in (a click on a faded part moves
     // Focus there). Parts are read from the editor, ahead of the sync.
     const flat: EditorBlock[] = [];
