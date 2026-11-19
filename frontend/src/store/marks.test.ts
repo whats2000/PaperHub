@@ -87,6 +87,7 @@ beforeEach(() => {
     byTarget: { "paper:3": 7 },
     quoteTarget: null,
     activePart: {},
+    lastCaret: {},
   });
   server.use(
     http.get(`${API_BASE_URL}/notes/7`, () => {
@@ -159,15 +160,39 @@ describe("useMarksStore.remove", () => {
 });
 
 describe("markHint", () => {
-  it("prefers the quote target, then the end of the divider part the caret is in", () => {
+  it("is the quote target first, then the note's last caret block, else null (end of note)", () => {
+    // [user, 2026-11-19] Never placed the caret: the server appends.
     expect(markHint(3)).toBeNull();
-    // A section heading is where Follow points too: no hint.
-    useNotesStore.setState({ activePart: { 7: "s2" } });
-    expect(markHint(3)).toBeNull();
+    // Headings and parts no longer decide placement.
     useNotesStore.setState({ activePart: { 7: "d1" } });
-    expect(markHint(3)).toBe("p2");
-    useNotesStore.setState({ quoteTarget: { noteId: 7, blockId: "p1" } });
+    expect(markHint(3)).toBeNull();
+    useNotesStore.getState().setLastCaret(7, "p1");
     expect(markHint(3)).toBe("p1");
+    useNotesStore.setState({ quoteTarget: { noteId: 7, blockId: "p2" } });
+    expect(markHint(3)).toBe("p2");
+  });
+
+  it("drops a caret block that was deleted since", () => {
+    useNotesStore.getState().setLastCaret(7, "gone");
+    expect(markHint(3)).toBeNull();
+  });
+
+  it("moves the last caret onto each new mark so marks in a row stay in order", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () =>
+        HttpResponse.json({
+          mark: { ...MARK, block_id: "b_new" },
+          block: null,
+          saved_to: { note_id: 7, paper_title: "x", section: null, part_index: 0, part_count: 1 },
+        }),
+      ),
+    );
+    useNotesStore.getState().setLastCaret(7, "p1");
+    await useMarksStore.getState().create({
+      paper_content_id: 3, kind: "text", style: "highlight", color: "green", view: "html",
+      pieces: MARK.pieces, section_key: null, hint_block_id: "p1",
+    });
+    expect(useNotesStore.getState().lastCaret[7]).toBe("b_new");
   });
 });
 

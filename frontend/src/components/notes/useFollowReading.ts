@@ -1,7 +1,8 @@
 /** Follow: the note scrolls to the section the reader is at.
  *
  * While Follow is on, each new section the reader reports for this note's
- * paper scrolls the note's section heading to the top and makes its first
+ * paper scrolls the note's section heading (no heading: the section's first
+ * block) to the top and makes its first
  * part the active one (unless Focus is on: Focus moves only on a click).
  * With Follow off the note stays where the user left it; turning Follow back
  * on catches up with the reader.
@@ -13,7 +14,7 @@ import { useCanvasStore } from "@/store/canvas";
 import { useNotesStore } from "@/store/notes";
 
 import { sectionLabel } from "./blocks/markProps";
-import { sectionForHeading } from "./parts";
+import { partOf, sectionForHeading } from "./parts";
 
 export interface FollowReadingArgs {
   noteId: number | null;
@@ -42,7 +43,9 @@ export function useFollowReading({ noteId, paperId, root }: FollowReadingArgs): 
     const el = root.querySelector(`.bn-block-outer[data-id="${CSS.escape(sectionId)}"]`);
     el?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
     const store = useNotesStore.getState();
-    if (!store.focusOn && store.activePart[noteId] !== sectionId) store.setActivePart(noteId, sectionId);
+    // No heading: the section's first block, in the part it leads.
+    const part = partOf(store.notes[noteId]?.blocks ?? [], sectionId)?.id ?? sectionId;
+    if (!store.focusOn && store.activePart[noteId] !== part) store.setActivePart(noteId, part);
     // Keyed by the section id: an edit to the note never moves it.
   }, [followOn, noteId, sectionId, root]);
 

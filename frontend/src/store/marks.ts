@@ -281,21 +281,21 @@ function refreshNote(noteId: number | undefined): void {
   if (notes.notes[noteId]) void notes.loadNote(noteId).catch(() => undefined);
 }
 
-/** Where in the paper's note a new mark should go: the block "Quote from
- * the paper" marked, else the end of the note the caret is in (a part a
- * divider starts). Null lets the server put it at the end of its section. */
+/** Where in the paper's note a new mark should go: right after the block
+ * "Quote from the paper" marked, else right after the block the caret was
+ * last in (pane or card). Null (never placed, or that block is gone) lets
+ * the server append it at the end of the note. [user, 2026-11-19] */
 export function markHint(paperId: number): string | null {
   const n = useNotesStore.getState();
   const noteId = n.byTarget[`paper:${paperId}`];
   if (noteId === undefined) return null;
   if (n.quoteTarget?.noteId === noteId) return n.quoteTarget.blockId;
-  const active = n.activePart[noteId];
+  const last = n.lastCaret[noteId];
+  if (!last) return null;
   const blocks = n.notes[noteId]?.blocks;
-  // A section heading is also where Follow points; only a divider says
-  // which note of the section the user is in.
-  if (!active || !blocks || blocks.find((b) => b.id === active)?.type !== "divider") return null;
-  const part = partsOfNote(blocks).find((p) => p.id === active);
-  return part?.blocks[part.blocks.length - 1]?.id ?? null;
+  // A loaded note shows whether the block is still there; else the server checks.
+  if (blocks && !blocks.some((b) => b.id === last)) return null;
+  return last;
 }
 
 /** Focus: the marks quoted in the focused note of this paper's note (null
@@ -821,6 +821,8 @@ export const useMarksStore = create<MarksState>()(
           }
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);
+          // The next mark goes after this one: marks in a row stay in order.
+          if (!body.join_to && mark.block_id) notes.setLastCaret(saved.note_id, mark.block_id);
           refreshNote(saved.note_id);
           return res;
         },

@@ -126,6 +126,10 @@ interface NotesStore {
   keepFolds: (noteId: number, dividerIds: ReadonlySet<string>) => void;
   quoteTarget: QuoteTarget | null;
   setQuoteTarget: (target: QuoteTarget | null) => void;
+  /** The block the caret was last in, per note (the notes pane or the note
+   * card), kept after the editor closes: a new mark goes right after it. */
+  lastCaret: Record<number, string>;
+  setLastCaret: (noteId: number, blockId: string) => void;
   /** "Add note" on a reader selection: once the editor shows this block it
    * puts the caret on a line after it, then clears the request (dropped
    * after CARET_GIVE_UP_MS if the block never shows). */
@@ -709,6 +713,10 @@ export const useNotesStore = create<NotesStore>()(
               s.quoteTarget?.noteId === noteId && ids.has(s.quoteTarget.blockId)
                 ? { noteId, blockId: ids.get(s.quoteTarget.blockId)! }
                 : s.quoteTarget,
+            lastCaret:
+              s.lastCaret[noteId] !== undefined && ids.has(s.lastCaret[noteId])
+                ? { ...s.lastCaret, [noteId]: ids.get(s.lastCaret[noteId])! }
+                : s.lastCaret,
             renames: {
               ...s.renames,
               [noteId]: { seq: (s.renames[noteId]?.seq ?? 0) + 1, pairs: [...ids] },
@@ -922,6 +930,10 @@ export const useNotesStore = create<NotesStore>()(
         },
         quoteTarget: null,
         setQuoteTarget: (target) => set({ quoteTarget: target }),
+        lastCaret: {},
+        setLastCaret: (noteId, blockId) => {
+          if (get().lastCaret[noteId] !== blockId) set((s) => ({ lastCaret: { ...s.lastCaret, [noteId]: blockId } }));
+        },
         caretAfter: null,
         setCaretAfter: (target) => {
           set({ caretAfter: target });

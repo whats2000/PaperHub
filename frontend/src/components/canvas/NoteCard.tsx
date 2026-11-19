@@ -93,7 +93,8 @@ function sectionNotes(blocks: NoteBlock[], blockId: string): SectionNotes | null
   const parts = all.slice(start, end);
   const head = parts[0]?.blocks[0];
   return {
-    sectionKey: head?.type === "section" ? (head.section_key ?? null) : null,
+    // A heading's key, or (no heading) the section its marks quote.
+    sectionKey: head?.type === "section" ? (head.section_key ?? null) : (parts[0]?.sectionKey ?? null),
     parts,
     index: at - start,
   };

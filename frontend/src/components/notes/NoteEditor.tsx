@@ -379,6 +379,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       return; // no caret (e.g. the editor lost focus)
     }
     onBlockFocus?.(blockId);
+    // A new mark goes right after the block the caret was last in.
+    useNotesStore.getState().setLastCaret(noteId, blockId);
     // The caret's part is the one you're in (a click on a faded part moves
     // Focus there). Parts are read from the editor, ahead of the sync.
     const flat: EditorBlock[] = [];

@@ -192,6 +192,26 @@ async function openCard(markId = "mk_1") {
 const outer = (blockId: string) => document.querySelector<HTMLElement>(`.bn-block-outer[data-id="${blockId}"]`);
 
 describe("the note card", () => {
+  it("in a note without section headings, shows the blocks of the mark's section", async () => {
+    // [user, 2026-11-19] Marking adds no headings.
+    seed();
+    const intro = blk("qi", {
+      type: "paperQuote", section_key: null,
+      props: { markId: "mk_i", color: "green", kind: "text", style: "highlight", quote: "intro words",
+        pieces: [{ quote: "intro words", page: 1 }], source: { page: 1, section: "1 Introduction" } },
+      text: "intro words",
+    });
+    const bare = [intro, para("pi", "Intro thoughts"), ref("q1", "mk_1", "attention is all you need"), para("p2", "My thoughts")];
+    useNotesStore.setState((s) => ({ notes: { 7: { ...s.notes[7]!, blocks: bare } } }));
+    await openCard();
+    expect(screen.getByTestId("note-card-title")).toHaveTextContent("Attention Is All You Need› §2");
+    await waitFor(() => expect(outer("p2")).not.toBeNull());
+    expect(outer("q1")?.getAttribute("data-card-hidden")).not.toBe("true");
+    expect(outer("p2")?.getAttribute("data-card-hidden")).not.toBe("true");
+    expect(outer("qi")?.getAttribute("data-card-hidden")).toBe("true");
+    expect(outer("pi")?.getAttribute("data-card-hidden")).toBe("true");
+  });
+
   it("names the paper, the section and which note of it, in the gutter left of the reader", async () => {
     seed();
     const card = await openCard();

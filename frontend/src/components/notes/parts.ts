@@ -5,6 +5,11 @@
  * document order; only `divider` blocks split them, the heading belongs to the
  * first part and a sub-heading stays inside its part. A part is named by the
  * block it follows: its section heading, or the divider above it.
+ *
+ * [user, 2026-11-19] Marking adds no headings. Before a note's first section
+ * heading, a mark block whose section (`props.source.section`) differs from
+ * the mark above it starts a part named by that mark; the lines under a mark
+ * stay in its part. With headings, the parts are exactly as before.
  */
 import { useNotesStore } from "@/store/notes";
 import type { NoteBlock } from "@/types/notes";
@@ -24,6 +29,25 @@ export interface Part<B extends PartBlock = PartBlock> {
   /** The part's blocks (the section heading is in its first part; dividers
    * are in none). */
   blocks: B[];
+  /** The paper section the part belongs to: its heading's, or (no heading)
+   * its marks'; null when unknown. */
+  sectionKey?: string | null;
+}
+
+/** The paper section a mark block quotes (null for any other block). */
+export function markSectionOf(b: PartBlock): string | null {
+  if (typeof b.props?.markId !== "string" || !b.props.markId) return null;
+  // A stored block holds an object; an editor block the JSON string.
+  let src = b.props.source as { section?: unknown } | string | undefined;
+  if (typeof src === "string") {
+    try {
+      src = JSON.parse(src) as { section?: unknown };
+    } catch {
+      src = undefined;
+    }
+  }
+  if (typeof src !== "object" || src === null) return null;
+  return typeof src?.section === "string" && src.section ? src.section : null;
 }
 
 /** The id of the lines before a note's first section heading. */
@@ -53,14 +77,45 @@ export function partsOfSection<B extends PartBlock>(blocks: B[], sectionId: stri
 /** Every part of a note, in order: the lines before its first section (when
  * there are any; dividers split them too), then each section's parts. */
 export function partsOfNote<B extends PartBlock>(blocks: B[]): Part<B>[] {
-  const head = splitRun(blocks, 0, { id: START_PART, dividerId: null, blocks: [] });
+  const head = splitHeadless(blocks);
   const out = head.parts.filter((p) => p.id !== START_PART || p.blocks.length > 0);
   for (let i = head.end; i < blocks.length; ) {
-    const run = splitRun(blocks, i + 1, { id: blocks[i]!.id, dividerId: null, blocks: [blocks[i]!] });
+    const sec = blocks[i] as B & { section_key?: string | null };
+    const run = splitRun(blocks, i + 1, { id: sec.id, dividerId: null, blocks: [sec] });
+    for (const p of run.parts) p.sectionKey = sec.section_key ?? null;
     out.push(...run.parts);
     i = run.end;
   }
   return out;
+}
+
+/** The parts before the first section heading: dividers split them, and so
+ * does a mark of another section than the mark above it. */
+function splitHeadless<B extends PartBlock>(blocks: B[]): { parts: Part<B>[]; end: number } {
+  const parts: Part<B>[] = [{ id: START_PART, dividerId: null, blocks: [], sectionKey: null }];
+  let owner: string | null = null;
+  let i = 0;
+  for (; i < blocks.length; i++) {
+    const b = blocks[i]!;
+    if (b.type === "section") break;
+    const cur = parts[parts.length - 1]!;
+    if (b.type === "divider") {
+      parts.push({ id: b.id, dividerId: b.id, blocks: [], sectionKey: owner });
+      continue;
+    }
+    const sec = markSectionOf(b);
+    if (sec !== null && sec !== owner) {
+      owner = sec;
+      if (cur.blocks.length) parts.push({ id: b.id, dividerId: null, blocks: [b], sectionKey: sec });
+      else {
+        cur.blocks.push(b);
+        cur.sectionKey = sec;
+      }
+      continue;
+    }
+    cur.blocks.push(b);
+  }
+  return { parts, end: i };
 }
 
 /** The part holding `blockId` (a divider leads the part below it). */
@@ -167,13 +222,17 @@ export function sectionForHeading<B extends PartBlock & { section_key?: string |
 function sectionForOne<B extends PartBlock & { section_key?: string | null }>(blocks: B[], heading: string): B | null {
   const target = norm(heading);
   if (!target) return null;
+  const match = (list: { b: B; key: string }[]) =>
+    list.find((s) => s.key === target)?.b ??
+    list.find((s) => s.key.includes(target) || target.includes(s.key))?.b ??
+    null;
   const sections = blocks
     .filter((b) => b.type === "section")
     .map((b) => ({ b, key: norm(b.section_key ?? (typeof b.props?.title === "string" ? b.props.title : "")) }))
     .filter((s) => s.key);
-  return (
-    sections.find((s) => s.key === target)?.b ??
-    sections.find((s) => s.key.includes(target) || target.includes(s.key))?.b ??
-    null
-  );
+  // No heading for it: the first block of a part of that section.
+  const runs = partsOfNote(blocks)
+    .filter((p) => p.dividerId === null && p.blocks[0]?.type !== "section" && p.sectionKey && p.blocks.length)
+    .map((p) => ({ b: p.blocks[0]!, key: norm(p.sectionKey!) }));
+  return match(sections) ?? match(runs);
 }

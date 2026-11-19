@@ -167,3 +167,39 @@ describe("sectionForHeading (Follow)", () => {
     expect(sectionForHeading(NOTE, "Data", ["9 Appendix"])).toBeNull();
   });
 });
+
+// [user, 2026-11-19] Marks add no headings: a note without them groups each
+// run of one section's marks (and the lines under them) as a part.
+describe("a note without section headings", () => {
+  const mq = (id: string, section: string) =>
+    blk(id, "paperQuote", { props: { markId: `mk_${id}`, source: { section } } });
+  const intro = blk("t0", "paragraph");
+  const a = mq("a", "1 Introduction");
+  const mine = blk("m", "paragraph");
+  const b = mq("b", "1 Introduction");
+  const c = mq("c", "2 Method");
+  const dv = blk("dv", "divider");
+  const e = mq("e", "2 Method");
+  const BARE = [intro, a, mine, b, c, dv, e];
+
+  it("splits parts where the marked section changes, keeping lines under a mark with it", () => {
+    expect(partsOfNote(BARE).map((p) => [p.id, p.blocks.map((x) => x.id)])).toEqual([
+      ["start", ["t0"]],
+      ["a", ["a", "m", "b"]],
+      ["c", ["c"]],
+      ["dv", ["e"]],
+    ]);
+    expect(partsOfNote(BARE)[1]!.sectionKey).toBe("1 Introduction");
+    expect(activePartFor("m", BARE)).toBe("a");
+  });
+
+  it("Follow finds the first block of the section when there is no heading", () => {
+    expect(sectionForHeading(BARE, "2 Method")?.id).toBe("c");
+    expect(sectionForHeading(BARE, "Introduction")?.id).toBe("a");
+    expect(sectionForHeading(BARE, "9 Appendix")).toBeNull();
+  });
+
+  it("keeps parts as before once the note has headings", () => {
+    expect(partsOfNote([s1, a, c]).map((p) => p.id)).toEqual(["s1"]);
+  });
+});
