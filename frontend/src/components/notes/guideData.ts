@@ -90,6 +90,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "shiftEnter", keys: ["Shift+Enter"], right: "Line break" },
       { id: "ctrlEnter", keys: ["Ctrl+Enter"], right: "Leave a code block" },
       { id: "mathDone", keys: ["Enter", "Esc"], right: "In an equation: done (Shift+Enter: new line)" },
+      { id: "find", keys: ["Ctrl+F"], right: "Find in the note (Enter: next, Shift+Enter: previous)" },
     ],
   },
   {

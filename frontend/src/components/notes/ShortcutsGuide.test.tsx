@@ -32,6 +32,8 @@ describe("ShortcutsGuide", () => {
     }
     expect(screen.getByText("**bold**")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Shift+M")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl+F")).toBeInTheDocument();
+    expect(screen.getByText("Find in the note (Enter: next, Shift+Enter: previous)")).toBeInTheDocument();
     expect(screen.getByText("Alt+↑")).toBeInTheDocument();
     expect(screen.getByText("Move the block (or the selected blocks) up or down")).toBeInTheDocument();
   });
