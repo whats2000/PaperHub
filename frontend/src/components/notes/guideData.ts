@@ -31,6 +31,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "strike", keys: ["~~strike~~"], right: "strike", sample: "strike" },
       { id: "code", keys: ["`code`"], right: "code", sample: "code" },
       { id: "hidden", keys: ["||hidden||"], right: "hidden", sample: "hidden" },
+      { id: "inlineMath", keys: ["$x^2$"], right: "Inline equation (LaTeX); click it to edit" },
     ],
   },
   {
@@ -43,7 +44,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "todo", keys: ["[]"], suffix: "plusSpace", right: "☐ To-do" },
       { id: "quote", keys: ['"'], suffix: "plusSpace", right: "Quote" },
       { id: "divider", keys: ["---"], right: "Divider: starts a new note" },
-      { id: "equation", keys: ["$$"], suffix: "plusSpace", right: "Equation (LaTeX)" },
+      { id: "equation", keys: ["$$"], suffix: "plusEnter", right: "Block equation (a space works too)" },
       { id: "codeBlock", keys: ["```python"], suffix: "plusEnter", right: "Code block (a space works too)" },
     ],
   },
@@ -87,6 +88,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "ctrlShiftM", keys: ["Ctrl+Shift+M"], right: "Comment" },
       { id: "shiftEnter", keys: ["Shift+Enter"], right: "Line break" },
       { id: "ctrlEnter", keys: ["Ctrl+Enter"], right: "Leave a code block" },
+      { id: "mathDone", keys: ["Enter", "Esc"], right: "In an equation: done (Shift+Enter: new line)" },
     ],
   },
   {

@@ -10,3 +10,8 @@ export function displayLatex(latex: string): string {
 export function renderDisplayMath(latex: string): string {
   return latex ? katex.renderToString(displayLatex(latex), { displayMode: true, throwOnError: false }) : "";
 }
+
+/** A note's inline equation as KaTeX HTML ("" for no LaTeX). */
+export function renderInlineMath(latex: string): string {
+  return latex ? katex.renderToString(displayLatex(latex), { displayMode: false, throwOnError: false }) : "";
+}

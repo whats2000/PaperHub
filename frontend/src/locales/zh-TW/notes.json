@@ -38,19 +38,25 @@
   "math": {
     "edit": "點擊以編輯 LaTeX",
     "empty": "空白公式",
-    "latex": "LaTeX"
+    "latex": "LaTeX",
+    "emptyInline": "空白公式",
+    "keys": "Enter：完成 · Shift+Enter：換行 · Esc"
   },
   "slash": {
     "groupBasic": "基本區塊",
     "groupPaperHub": "PaperHub",
     "callout": "提示框",
     "calloutHint": "醒目的底色方框",
-    "equation": "公式",
-    "equationHint": "LaTeX，輸入時即時呈現 · $$",
+    "equation": "區塊公式",
+    "equationHint": "獨立一行的 LaTeX · $$ + Enter",
     "quotePaper": "引用論文",
     "quotePaperHint": "在閱讀器中選取文字，它會放到這裡。",
     "link": "連結論文或章節",
-    "linkHint": "等同輸入 @。"
+    "linkHint": "等同輸入 @。",
+    "inlineEquation": "行內公式",
+    "inlineEquationHint": "句子中的 LaTeX · $x$",
+    "turnIntoEquation": "區塊公式 · 轉換",
+    "turnIntoEquationHint": "這一行的文字變成 LaTeX"
   },
   "mention": {
     "sections": "這篇論文的章節",
@@ -165,7 +171,7 @@
       "todo": "☐ 待辦事項",
       "quote": "引用",
       "divider": "分隔線：開始一則新筆記",
-      "equation": "公式（LaTeX）",
+      "equation": "區塊公式（空白鍵也可以）",
       "codeBlock": "程式碼區塊（空白鍵也可以）",
       "slash": "所有區塊，包含論文引用",
       "at": "連結論文、章節或點子",
@@ -193,7 +199,9 @@
       "highlighter": "拖過文字，或點一張圖",
       "box": "拖過圖或公式",
       "clickMark": "開啟它的筆記",
-      "focusStops": "結束"
+      "focusStops": "結束",
+      "inlineMath": "行內公式（LaTeX），點一下即可編輯",
+      "mathDone": "在公式中：完成（Shift+Enter 換行）"
     }
   },
   "code": {

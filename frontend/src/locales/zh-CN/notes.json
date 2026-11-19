@@ -38,19 +38,25 @@
   "math": {
     "edit": "点击以编辑 LaTeX",
     "empty": "空白公式",
-    "latex": "LaTeX"
+    "latex": "LaTeX",
+    "emptyInline": "空白公式",
+    "keys": "Enter：完成 · Shift+Enter：换行 · Esc"
   },
   "slash": {
     "groupBasic": "基本块",
     "groupPaperHub": "PaperHub",
     "callout": "提示框",
     "calloutHint": "醒目的底色方框",
-    "equation": "公式",
-    "equationHint": "LaTeX，输入时即时呈现 · $$",
+    "equation": "块公式",
+    "equationHint": "独占一行的 LaTeX · $$ + Enter",
     "quotePaper": "引用论文",
     "quotePaperHint": "在阅读器中选择文字，它会放到这里。",
     "link": "链接论文或章节",
-    "linkHint": "等同输入 @。"
+    "linkHint": "等同输入 @。",
+    "inlineEquation": "行内公式",
+    "inlineEquationHint": "句子中的 LaTeX · $x$",
+    "turnIntoEquation": "块公式 · 转换",
+    "turnIntoEquationHint": "这一行的文字变成 LaTeX"
   },
   "mention": {
     "sections": "这篇论文的章节",
@@ -165,7 +171,7 @@
       "todo": "☐ 待办事项",
       "quote": "引用",
       "divider": "分隔线：开始一条新笔记",
-      "equation": "公式（LaTeX）",
+      "equation": "块公式（空格也可以）",
       "codeBlock": "代码块（空格也可以）",
       "slash": "所有区块，包括论文引用",
       "at": "链接论文、章节或想法",
@@ -193,7 +199,9 @@
       "highlighter": "拖过文字，或点一张图",
       "box": "拖过图或公式",
       "clickMark": "打开它的笔记",
-      "focusStops": "结束"
+      "focusStops": "结束",
+      "inlineMath": "行内公式（LaTeX），点一下即可编辑",
+      "mathDone": "在公式中：完成（Shift+Enter 换行）"
     }
   },
   "code": {

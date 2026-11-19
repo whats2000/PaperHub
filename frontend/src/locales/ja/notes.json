@@ -38,19 +38,25 @@
   "math": {
     "edit": "クリックして LaTeX を編集",
     "empty": "空の数式",
-    "latex": "LaTeX"
+    "latex": "LaTeX",
+    "emptyInline": "空の数式",
+    "keys": "Enter：完了 · Shift+Enter：改行 · Esc"
   },
   "slash": {
     "groupBasic": "基本ブロック",
     "groupPaperHub": "PaperHub",
     "callout": "コールアウト",
     "calloutHint": "目立つ色付きの枠",
-    "equation": "数式",
-    "equationHint": "LaTeX、入力しながら表示 · $$",
+    "equation": "ブロック数式",
+    "equationHint": "独立した行の LaTeX · $$ + Enter",
     "quotePaper": "論文から引用",
     "quotePaperHint": "リーダーで文字を選択すると、ここに入ります。",
     "link": "論文やセクションへのリンク",
-    "linkHint": "@ を入力するのと同じです。"
+    "linkHint": "@ を入力するのと同じです。",
+    "inlineEquation": "インライン数式",
+    "inlineEquationHint": "文中の LaTeX · $x$",
+    "turnIntoEquation": "ブロック数式 · 変換",
+    "turnIntoEquationHint": "この行のテキストが LaTeX になる"
   },
   "mention": {
     "sections": "この論文のセクション",
@@ -165,7 +171,7 @@
       "todo": "☐ ToDo",
       "quote": "引用",
       "divider": "区切り線：新しいノートを始める",
-      "equation": "数式（LaTeX）",
+      "equation": "ブロック数式（スペースでも可）",
       "codeBlock": "コードブロック（スペースでも可）",
       "slash": "すべてのブロック（論文からの引用を含む）",
       "at": "論文・セクション・アイデアをリンク",
@@ -193,7 +199,9 @@
       "highlighter": "単語をなぞる、または図をクリック",
       "box": "図や数式をドラッグで囲む",
       "clickMark": "そのノートを開く",
-      "focusStops": "で解除"
+      "focusStops": "で解除",
+      "inlineMath": "インライン数式（LaTeX）。クリックで編集",
+      "mathDone": "数式内：完了（Shift+Enter で改行）"
     }
   },
   "code": {

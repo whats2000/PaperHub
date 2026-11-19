@@ -17,6 +17,7 @@ import { codeBlockWithCopy } from "./blocks/CodeBlock";
 import { dividerBlock } from "./blocks/DividerBlock";
 import { commentStyle } from "./blocks/CommentStyle";
 import { hiddenStyle } from "./blocks/HiddenStyle";
+import { inlineMath } from "./blocks/InlineMath";
 import { mathBlock } from "./blocks/MathBlock";
 import { mentionInline } from "./blocks/MentionChip";
 import { paperEquationBlock } from "./blocks/PaperEquationBlock";
@@ -52,7 +53,7 @@ export const noteSchema = BlockNoteSchema.create({
     paperEquation: paperEquationBlock(),
     paperRegion: paperRegionBlock(),
   },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline, inlineMath },
   styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle, comment: commentStyle },
 });
 

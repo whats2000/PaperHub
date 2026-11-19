@@ -38,19 +38,25 @@
   "math": {
     "edit": "Click to edit the LaTeX",
     "empty": "Empty equation",
-    "latex": "LaTeX"
+    "latex": "LaTeX",
+    "emptyInline": "Empty math",
+    "keys": "Enter: done · Shift+Enter: new line · Esc"
   },
   "slash": {
     "groupBasic": "Basic blocks",
     "groupPaperHub": "PaperHub",
     "callout": "Callout",
     "calloutHint": "A tinted box that stands out",
-    "equation": "Equation",
-    "equationHint": "LaTeX, rendered as you type · $$",
+    "equation": "Block equation",
+    "equationHint": "LaTeX on its own line · $$ + Enter",
     "quotePaper": "Quote from the paper",
     "quotePaperHint": "Select text in the reader; it lands here.",
     "link": "Link a paper or section",
-    "linkHint": "Same as typing @."
+    "linkHint": "Same as typing @.",
+    "inlineEquation": "Inline equation",
+    "inlineEquationHint": "LaTeX inside the sentence · $x$",
+    "turnIntoEquation": "Block equation · Turn into",
+    "turnIntoEquationHint": "This line's text becomes the LaTeX"
   },
   "mention": {
     "sections": "Sections of this paper",
@@ -165,7 +171,7 @@
       "todo": "☐ To-do",
       "quote": "Quote",
       "divider": "Divider: starts a new note",
-      "equation": "Equation (LaTeX)",
+      "equation": "Block equation (a space works too)",
       "codeBlock": "Code block (a space works too)",
       "slash": "Every block, incl. Quote from the paper",
       "at": "Link a paper, section or idea",
@@ -193,7 +199,9 @@
       "highlighter": "Drag over words, or click a figure",
       "box": "Drag over a figure or equation",
       "clickMark": "Opens its note",
-      "focusStops": "stops"
+      "focusStops": "stops",
+      "inlineMath": "Inline equation (LaTeX); click it to edit",
+      "mathDone": "In an equation: done (Shift+Enter: new line)"
     }
   },
   "code": {

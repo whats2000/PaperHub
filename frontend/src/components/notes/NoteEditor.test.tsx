@@ -848,7 +848,7 @@ describe("dividers, Focus and folding", () => {
   const d2 = blk("d2", { type: "divider" });
   const q2 = blk("q2", { ...quote, id: "q2", props: { ...quote.props, markId: "mk_2" } });
   const p3 = blk("p3", { content: [{ type: "text", text: "Third", styles: {} }], text: "Third" });
-  it("typing $$ at a line start puts the caret in the new equation's LaTeX", () => {
+  it.each([["space", " "], ["Enter", "Enter"]])("typing $$ + %s at a line start puts the caret in the new equation's LaTeX", (_key, last) => {
     seed([blk("p0", { content: [] })]);
     mount();
     type View = {
@@ -863,11 +863,13 @@ describe("dividers, Focus and folding", () => {
     act(() => {
       pm.focus();
       pm.editor.commands.setTextSelection(3);
-      for (const ch of "$$ ") {
+      for (const ch of "$$") {
         const { from, to } = view.state.selection;
         const handled = view.someProp("handleTextInput", (f) => f(view, from, to, ch, () => view.state.tr));
         if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
       }
+      if (last === " ") view.someProp("handleTextInput", (f) => f(view, view.state.selection.from, view.state.selection.to, " ", () => view.state.tr));
+      else fireEvent.keyDown(pm, { key: "Enter" });
     });
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "LaTeX" }));
   });
@@ -1268,7 +1270,7 @@ describe("dividers, Focus and folding", () => {
     await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual([]));
   });
 
-  it("the slash menu shows Callout and Equation in BlockNote's one Basic blocks group", async () => {
+  it("the slash menu shows Callout and the equations in BlockNote's one Basic blocks group", async () => {
     seed([section, blk("p0", { content: [] })]);
     const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(rect);
@@ -1296,7 +1298,37 @@ describe("dividers, Focus and folding", () => {
       .map((e) => e.textContent ?? "");
     const at = (title: string) => titles.findIndex((x) => x.startsWith(title));
     expect(at("Callout")).toBe(at("Divider") + 1);
-    expect(at("Equation")).toBe(at("Callout") + 1);
+    expect(at("Block equation")).toBe(at("Callout") + 1);
+    expect(at("Inline equation")).toBe(at("Block equation") + 1);
+    // An empty line has nothing to turn into an equation.
+    expect(at("Block equation · Turn into")).toBe(-1);
+  });
+
+  it("the slash menu offers turning a line's text into a block equation, found by /eq", async () => {
+    seed([blk("p0", { content: [{ type: "text", text: "x^2", styles: {} }], text: "x^2" })]);
+    const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(rect);
+    if (!("getBoundingClientRect" in Range.prototype)) {
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: rect });
+      Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+    }
+    mount();
+    await screen.findByTestId("note-editor");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean; focus: () => boolean } };
+    };
+    const view = pm.editor.view;
+    act(() => {
+      pm.editor.commands.focus();
+      pm.editor.commands.setTextSelection(view.state.doc.content.size - 3);
+      for (const ch of " /eq") {
+        const { from, to } = view.state.selection;
+        const handled = view.someProp("handleTextInput", (f) => f(view, from, to, ch, () => view.state.tr));
+        if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
+      }
+    });
+    await screen.findByText("Block equation · Turn into");
+    expect(screen.getByText("Inline equation")).toBeInTheDocument();
   });
 
   it("Esc that closes the slash menu leaves Focus on; a bare Esc in the note ends it", async () => {

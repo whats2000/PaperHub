@@ -31,6 +31,7 @@ import { useCanvasStore } from "@/store/canvas";
 import { useNotesStore } from "@/store/notes";
 
 import { atomCaret } from "./atomCaret";
+import { insertInlineMath } from "./blocks/InlineMath";
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
@@ -44,6 +45,7 @@ import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { partOf } from "./parts";
 import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
 import { NoteTitle } from "./NoteTitle";
+import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
@@ -192,6 +194,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       dictionary: dictionaryFor(i18n.language),
       extensions: [
         paperhubKeys,
+        mathInput,
         atomCaret,
         commentKeys,
         inlineMarks,
@@ -417,14 +420,35 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "callout" } as never),
         },
         {
-          title: t("notes:slash.equation", "Equation"),
-          subtext: t("notes:slash.equationHint", "LaTeX, rendered as you type · $$"),
-          aliases: ["equation", "math", "latex", "$$"],
+          title: t("notes:slash.equation", "Block equation"),
+          subtext: t("notes:slash.equationHint", "LaTeX on its own line · $$ + Enter"),
+          aliases: [...MATH_ALIASES, "block", "$$"],
           group: basicGroup,
           icon: <Sigma className="size-[18px]" />,
           onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "math" } as never),
         },
+        {
+          title: t("notes:slash.inlineEquation", "Inline equation"),
+          subtext: t("notes:slash.inlineEquationHint", "LaTeX inside the sentence · $x$"),
+          aliases: [...MATH_ALIASES, "inline", "$"],
+          group: basicGroup,
+          icon: <Sigma className="size-[18px]" />,
+          onItemClick: () => insertInlineMath(editor),
+        },
       ];
+      // Notion's "Turn into": the line's text (without the "/query" being
+      // typed) becomes the equation's LaTeX.
+      const lineText = slashLineText(editor, query);
+      if (lineText.trim()) {
+        basicItems.push({
+          title: t("notes:slash.turnIntoEquation", "Block equation · Turn into"),
+          subtext: t("notes:slash.turnIntoEquationHint", "This line's text becomes the LaTeX"),
+          aliases: [...MATH_ALIASES, "turn", "convert"],
+          group: basicGroup,
+          icon: <Sigma className="size-[18px]" />,
+          onItemClick: () => turnIntoEquation(editor),
+        });
+      }
       const items: DefaultReactSuggestionItem[] = [
         ...defaults.slice(0, basicEnd),
         ...basicItems,
