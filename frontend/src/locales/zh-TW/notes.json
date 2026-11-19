@@ -1,5 +1,6 @@
 {
   "loading": "正在載入筆記…",
+  "find": { "label": "在筆記中尋找", "placeholder": "在筆記中尋找", "count": "{{current}} / {{total}}", "prev": "上一個符合項", "next": "下一個符合項", "close": "關閉尋找" },
   "title": { "label": "筆記標題", "untitled": "未命名", "saveFailed": "無法儲存標題。" },
   "saveRefused": "無法儲存這項變更，已顯示已儲存的版本。",
   "retrying": "尚未儲存，正在重試",
@@ -204,6 +205,7 @@
       "focusStops": "結束",
       "inlineMath": "行內公式（LaTeX），點一下即可編輯",
       "mathDone": "在公式中：完成（Shift+Enter 換行）",
+      "find": "在筆記中尋找（Enter：下一個，Shift+Enter：上一個）",
       "inlineCite": "用你的文字引用標記；滑過後點 ✎ 修改"
     }
   },

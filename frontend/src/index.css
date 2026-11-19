@@ -388,6 +388,16 @@
 .paperhub-notes .bn-block-outer {
     transition: margin 0.2s, opacity 200ms ease-out;
 }
+/* Find in the note (noteFind.ts): every match a neutral grey, the current one
+   stronger. Never yellow: yellow means a citation. */
+.paperhub-notes .ph-find {
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.paperhub-notes .ph-find-current {
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+  outline: 1px solid color-mix(in oklab, var(--foreground) 45%, transparent);
+}
 /* The insertion caret beside a block that takes no text (atomCaret.ts):
    a text caret's line at the block's left or right edge, blinking like one. */
 .paperhub-notes [data-atom-caret] {

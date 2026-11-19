@@ -1,5 +1,6 @@
 {
   "loading": "Loading the note…",
+  "find": { "label": "Find in the note", "placeholder": "Find in the note", "count": "{{current}} / {{total}}", "prev": "Previous match", "next": "Next match", "close": "Close find" },
   "title": { "label": "Note title", "untitled": "Untitled", "saveFailed": "Couldn't save the title." },
   "saveRefused": "Couldn't save that change. Showing the saved version.",
   "retrying": "Not saved — retrying",
@@ -204,6 +205,7 @@
       "focusStops": "stops",
       "inlineMath": "Inline equation (LaTeX); click it to edit",
       "mathDone": "In an equation: done (Shift+Enter: new line)",
+      "find": "Find in the note (Enter: next, Shift+Enter: previous)",
       "inlineCite": "Your words cite the mark; hover it, then ✎ to change them"
     }
   },

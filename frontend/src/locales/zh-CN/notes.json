@@ -1,5 +1,6 @@
 {
   "loading": "正在加载笔记…",
+  "find": { "label": "在笔记中查找", "placeholder": "在笔记中查找", "count": "{{current}} / {{total}}", "prev": "上一个匹配项", "next": "下一个匹配项", "close": "关闭查找" },
   "title": { "label": "笔记标题", "untitled": "未命名", "saveFailed": "无法保存标题。" },
   "saveRefused": "无法保存这项更改，已显示已保存的版本。",
   "retrying": "尚未保存，正在重试",
@@ -204,6 +205,7 @@
       "focusStops": "结束",
       "inlineMath": "行内公式（LaTeX），点一下即可编辑",
       "mathDone": "在公式中：完成（Shift+Enter 换行）",
+      "find": "在笔记中查找（Enter：下一个，Shift+Enter：上一个）",
       "inlineCite": "用你的文字引用标记；悬停后点 ✎ 修改"
     }
   },

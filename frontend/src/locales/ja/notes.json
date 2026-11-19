@@ -1,5 +1,6 @@
 {
   "loading": "ノートを読み込んでいます…",
+  "find": { "label": "ノート内を検索", "placeholder": "ノート内を検索", "count": "{{current}} / {{total}}", "prev": "前の一致", "next": "次の一致", "close": "検索を閉じる" },
   "title": { "label": "ノートのタイトル", "untitled": "無題", "saveFailed": "タイトルを保存できませんでした。" },
   "saveRefused": "この変更を保存できませんでした。保存済みの版を表示しています。",
   "retrying": "未保存 — 再試行しています",
@@ -204,6 +205,7 @@
       "focusStops": "で解除",
       "inlineMath": "インライン数式（LaTeX）。クリックで編集",
       "mathDone": "数式内：完了（Shift+Enter で改行）",
+      "find": "ノート内を検索（Enter：次へ、Shift+Enter：前へ）",
       "inlineCite": "自分の言葉でマークを引用。ホバーして ✎ で変更"
     }
   },

@@ -19,7 +19,7 @@ import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
 import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -43,6 +43,8 @@ import { LostCommentBadges } from "./LostCommentBadges";
 import { commentKeys, useNoteComments, type ReanchorHint } from "./noteComments";
 import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./noteSuggestions";
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
+import { noteFind } from "./noteFind";
+import { NoteFindBar } from "./NoteFindBar";
 import { partOf } from "./parts";
 import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
 import { NoteTitle } from "./NoteTitle";
@@ -209,6 +211,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         })),
         lostCommentBadges(lostBadges.badgeView),
         citationChips(),
+        noteFind(),
       ],
     },
     [noteId],
@@ -559,6 +562,22 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     editor.focus();
   }, [editor]);
 
+  // Find in the note: Ctrl+F (Cmd+F on a Mac) anywhere inside this editor.
+  // `findOpen` false with the bar still mounted is its exit slide.
+  const [findMounted, setFindMounted] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findSeq, setFindSeq] = useState(0);
+  const onFindKey = useCallback((e: KeyboardEvent) => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    if (e.key.toLowerCase() !== "f" || e.altKey || e.shiftKey || !(mac ? e.metaKey : e.ctrlKey)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setFindMounted(true);
+    setFindOpen(true);
+    setFindSeq((n) => n + 1);
+  }, []);
+  const onFindGone = useCallback(() => setFindMounted(false), []);
+
   const defaultTitle = useNotesStore((s) => s.notes[noteId]?.defaultTitle);
   const cardMarkId = card?.markId ?? null;
   const onJump = card?.onJump;
@@ -579,6 +598,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         data-testid="note-editor"
         data-variant={variant}
         onClick={comments.onEditorClick}
+        onKeyDownCapture={onFindKey}
         onClickCapture={(e) => {
           // A paper link made from selected words opens the paper, like its chip.
           const a = (e.target as HTMLElement).closest?.("a[href^='paperhub://']");
@@ -593,6 +613,17 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           variant === "pane" ? "h-full overflow-y-auto py-2" : "py-1 text-[13px]",
         )}
       >
+        {findMounted && (
+          <NoteFindBar
+            editor={editor}
+            noteId={noteId}
+            cardPart={cardPart}
+            focusSeq={findSeq}
+            open={findOpen}
+            onClose={() => setFindOpen(false)}
+            onGone={onFindGone}
+          />
+        )}
         <div
           aria-live="polite"
           data-state={retrying ? "open" : "closed"}
