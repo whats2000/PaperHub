@@ -113,6 +113,10 @@ const PERF_STYLE =
   "<style>" +
   "body > *:not(:has(img)) { content-visibility: auto; contain-intrinsic-size: auto 600px; }" +
   "img { max-width: 100%; height: auto; cursor: zoom-in; }" +
+  // A display equation wider than the column scrolls sideways in its own
+  // box: the lazy-layout rule above contains paint, which clipped it.
+  'mjx-container[display="true"], math[display="block"] {' +
+  " display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 2px; }" +
   "</style>";
 
 export function injectPerfStyle(html: string): string {
