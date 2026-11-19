@@ -37,6 +37,8 @@ def _runs_text(content: Any) -> str:
             out.append(run["text"])
         elif run.get("type") == "inlineMath":  # inline math: its LaTeX
             out.append(str((run.get("props") or {}).get("latex") or ""))
+        elif run.get("type") == "markCite":  # an inline citation: its alias
+            out.append(str((run.get("props") or {}).get("text") or ""))
         if run.get("content") is not None:  # links nest their runs
             out.append(_runs_text(run["content"]))
     return "".join(out)

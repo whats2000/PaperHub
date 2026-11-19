@@ -814,3 +814,15 @@ async def test_stale_resend_of_equal_content_is_still_a_noop_applied(conn):
     res = await apply_ops(conn, a.id, base_revision=0, actor="user",
                           ops=[Op(op="insert", block_id="x1", block=_para("first"))])
     assert res.applied == ["x1"] and res.rejected == [] and res.renamed == []
+
+
+def test_mark_cite_inline_needs_a_mark_id_and_text():
+    from pydantic import ValidationError
+
+    ok = BlockIn(type="paragraph", content=[
+        {"type": "markCite", "props": {"markId": "mk_1", "text": "62%"}}])
+    assert ok.content
+    for bad in ({"markId": "", "text": ""}, {"text": "x"},
+                {"markId": "mk_1", "text": 3}):
+        with pytest.raises(ValidationError):
+            BlockIn(type="paragraph", content=[{"type": "markCite", "props": bad}])

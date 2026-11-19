@@ -192,3 +192,9 @@ def test_block_text_reads_inline_math_latex():
     runs = [{"type": "text", "text": "see ", "styles": {}},
             {"type": "inlineMath", "props": {"latex": "x^2"}}]
     assert block_text("paragraph", {}, runs) == "see x^2"
+
+
+def test_block_text_reads_a_mark_cite_alias():
+    runs = [{"type": "text", "text": "rose to ", "styles": {}},
+            {"type": "markCite", "props": {"markId": "mk_1", "text": "62%"}}]
+    assert block_text("paragraph", {}, runs) == "rose to 62%"

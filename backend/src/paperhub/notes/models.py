@@ -17,6 +17,29 @@ BlockType = Literal[
 ]
 
 
+def check_inline(content: Any) -> Any:
+    """Raise ``ValueError`` for a malformed PaperHub inline node in a
+    block's runs. A ``markCite`` (an inline citation of a reading mark)
+    needs a ``markId`` and its alias ``text`` ("" = the quote's start)."""
+    if not isinstance(content, list):
+        return content
+    for run in content:
+        if not isinstance(run, dict):
+            continue
+        if run.get("type") == "markCite":
+            props = run.get("props")
+            if not isinstance(props, dict):
+                raise ValueError("markCite needs props")
+            mark = props.get("markId")
+            if not isinstance(mark, str) or not mark.strip():
+                raise ValueError("markCite needs a markId")
+            if not isinstance(props.get("text", ""), str):
+                raise ValueError("markCite text must be a string")
+        elif isinstance(run.get("content"), list):  # a link's runs
+            check_inline(run["content"])
+    return content
+
+
 class Block(BaseModel):
     id: str
     note_id: int

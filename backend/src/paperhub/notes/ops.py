@@ -22,11 +22,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import aiosqlite
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from paperhub.db.connection import write_transaction
 from paperhub.notes.mark_pieces import revive_latest
-from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType
+from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType, check_inline
 from paperhub.notes.order import key_between
 from paperhub.notes.store import (
     block_text,
@@ -48,6 +48,8 @@ class BlockIn(BaseModel):
     props: dict[str, Any] = {}
     content: list[dict[str, Any]] | str | None = None
     section_key: str | None = None
+
+    _inline = field_validator("content")(check_inline)
 
 
 class Op(BaseModel):
