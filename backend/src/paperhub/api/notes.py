@@ -16,7 +16,7 @@ from urllib.parse import quote
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from paperhub.config import load_settings
 from paperhub.db.connection import in_write_transaction, open_db, write_lock
@@ -33,9 +33,12 @@ from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import (
+    default_title,
+    effective_title,
     get_note,
     get_or_create_note,
     list_blocks,
+    set_title,
     shared_by,
 )
 
@@ -49,6 +52,9 @@ class NoteWithBlocks(BaseModel):
     blocks: list[Block]
     # How many live chats the note is linked to ("Shared by N chats").
     shared_by: int
+    # The page title shown when ``note.title`` is empty: the target's
+    # current title ("" when that is empty too; the client says "Untitled").
+    default_title: str = ""
 
 
 class NoteDetail(NoteWithBlocks):
@@ -61,6 +67,10 @@ class OpsBody(BaseModel):
     ops: list[Op]
     # One burst across its retries; a repeated key returns the first result.
     idempotency_key: str | None = None
+
+
+class TitleBody(BaseModel):
+    title: str = Field(max_length=500)
 
 
 class RestoreBody(BaseModel):
@@ -112,6 +122,7 @@ async def _detail(conn: aiosqlite.Connection, note: Note) -> NoteDetail:
     return NoteDetail(
         note=note, blocks=await list_blocks(conn, note.id),
         shared_by=await shared_by(conn, note),
+        default_title=await default_title(conn, note),
         suggestions=suggestions,
         comments=await note_comments.list_comments(conn, note.id))
 
@@ -186,6 +197,9 @@ async def export_note(note_id: int,
             raise HTTPException(404, f"note {note_id} not found")
         blocks = await list_blocks(conn, note_id)
         try:
+            # Never an empty heading or file name: title, else default.
+            note = note.model_copy(
+                update={"title": await effective_title(conn, note)})
             papers, chunk_papers, mark_papers = await export_sources(
                 conn, note, blocks)
             md, images, bib = await asyncio.to_thread(functools.partial(
@@ -245,6 +259,16 @@ async def block_place(block_id: str = Path(max_length=64)) -> BlockPlace:
 async def note_detail(note_id: int) -> NoteDetail:
     async with open_db(load_settings().db_path) as conn:
         note = await get_note(conn, note_id)
+        if note is None:
+            raise HTTPException(404, f"note {note_id} not found")
+        return await _detail(conn, note)
+
+
+@router.patch("/{note_id}", response_model=NoteDetail)
+async def rename_note(note_id: int, body: TitleBody) -> NoteDetail:
+    """Set the note's page title ("" falls back to ``default_title``)."""
+    async with open_db(load_settings().db_path) as conn:
+        note = await set_title(conn, note_id, body.title)
         if note is None:
             raise HTTPException(404, f"note {note_id} not found")
         return await _detail(conn, note)

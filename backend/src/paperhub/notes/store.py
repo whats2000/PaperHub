@@ -86,6 +86,47 @@ async def shared_by(conn: aiosqlite.Connection, note: Note) -> int:
     return int(row[0]) if row else 0
 
 
+_DEFAULT_TITLE_SQL = {
+    "paper": "SELECT title FROM paper_content WHERE id = ?",
+    "session": "SELECT title FROM chat_sessions WHERE id = ?",
+    "idea": "SELECT title FROM ideas WHERE id = ?",
+}
+
+UNTITLED = "Untitled"
+
+
+async def default_title(conn: aiosqlite.Connection, note: Note) -> str:
+    """The title a note shows when its own is empty: its target's current
+    title (paper / chat / idea), or "" when that is empty or gone."""
+    sql = _DEFAULT_TITLE_SQL.get(note.target_kind)
+    if sql is None or not note.target_id.isdigit():
+        return ""
+    async with conn.execute(sql, (int(note.target_id),)) as cur:
+        row = await cur.fetchone()
+    return " ".join(str(row[0] or "").split()) if row else ""
+
+
+async def effective_title(conn: aiosqlite.Connection, note: Note) -> str:
+    """The note's title, else its default, else "Untitled" (never empty)."""
+    return (note.title.strip() or await default_title(conn, note)
+            or UNTITLED)
+
+
+async def set_title(conn: aiosqlite.Connection, note_id: int,
+                    title: str) -> Note | None:
+    """Rename a note (the page title). The block revision is untouched: a
+    title is not a block, so pending block ops keep their base revision."""
+    async with write_lock(conn):
+        cur = await conn.execute(
+            "UPDATE notes SET title = ?, updated_at = ? WHERE id = ?",
+            (" ".join(title.split()), _now(), note_id))
+        if not in_write_transaction():
+            await conn.commit()
+    if cur.rowcount == 0:
+        return None
+    return await get_note(conn, note_id)
+
+
 async def get_note(conn: aiosqlite.Connection, note_id: int) -> Note | None:
     async with conn.execute(
         f"SELECT {_NOTE_COLS} FROM notes WHERE id = ?", (note_id,)

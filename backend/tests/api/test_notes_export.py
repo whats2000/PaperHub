@@ -249,3 +249,24 @@ async def test_pandoc_failure_logs_no_note_text(
     assert r.status_code == 500 and r.json() == {"detail": "pandoc_failed"}
     assert "exited 64" in caplog.text
     assert secret not in caplog.text and secret not in r.text
+
+
+async def test_export_uses_the_default_title_when_the_title_is_empty(
+        client: AsyncClient, tmp_path: Path) -> None:
+    nid = await _paper_note(client)
+    await client.patch(f"/notes/{nid}", json={"title": "My Reading"})
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    assert 'filename="my-reading-notes.zip"' in r.headers["content-disposition"]
+    assert _zip(r.content)["note.md"].decode().startswith("# My Reading")
+    await client.patch(f"/notes/{nid}", json={"title": ""})
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    assert ('filename="attention-is-all-you-need-notes.zip"'
+            in r.headers["content-disposition"])
+    assert _zip(r.content)["note.md"].decode().startswith(
+        "# Attention Is All You Need")
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute("UPDATE paper_content SET title = '' WHERE id = 1")
+        await conn.commit()
+    r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
+    assert 'filename="untitled-notes.zip"' in r.headers["content-disposition"]
+    assert _zip(r.content)["note.md"].decode().startswith("# Untitled")

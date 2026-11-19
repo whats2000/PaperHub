@@ -249,3 +249,33 @@ async def test_shared_by_for_an_idea_note_and_a_paper_in_no_chat(
     # A paper in the library but in no chat.
     lone = (await client.get("/notes/target", params={"kind": "paper", "id": 2})).json()
     assert lone["shared_by"] == 0
+
+
+async def test_note_title_patch_and_default_title(client: AsyncClient) -> None:
+    """The page title is editable; the target's title is the default."""
+    nid = await _session_note(client)
+    d = (await client.get(f"/notes/{nid}")).json()
+    assert d["default_title"] == "Chat"
+    r = await client.patch(f"/notes/{nid}", json={"title": "  My page  "})
+    assert r.status_code == 200, r.text
+    assert r.json()["note"]["title"] == "My page"
+    assert r.json()["default_title"] == "Chat"
+    assert (await client.get(f"/notes/{nid}")).json()["note"]["title"] == "My page"
+    r = await client.patch(f"/notes/{nid}", json={"title": ""})
+    assert r.json()["note"]["title"] == ""
+    assert (await client.patch("/notes/999", json={"title": "x"})).status_code == 404
+    assert (await client.patch(
+        f"/notes/{nid}", json={"title": "x" * 501})).status_code == 422
+
+
+async def test_default_title_follows_the_target_and_falls_back(
+        client: AsyncClient, tmp_path: Path) -> None:
+    nid = await _session_note(client)
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute("UPDATE chat_sessions SET title = 'Renamed' WHERE id = 1")
+        await conn.commit()
+    assert (await client.get(f"/notes/{nid}")).json()["default_title"] == "Renamed"
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute("UPDATE chat_sessions SET title = '' WHERE id = 1")
+        await conn.commit()
+    assert (await client.get(f"/notes/{nid}")).json()["default_title"] == ""
