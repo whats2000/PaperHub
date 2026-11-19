@@ -42,7 +42,7 @@ async def _add(conn, note_id, type, after, bid, text="t"):
 async def test_section_heading_created_in_paper_order(conn):
     await _paper(conn)
     note = await paper_note(conn, 1)
-    assert note.title == "A Paper"
+    assert note.title == ""  # a placeholder default, never stored
     m = await ensure_section(conn, note.id, 1, "Method")
     r = await ensure_section(conn, note.id, 1, "Results")
     i = await ensure_section(conn, note.id, 1, "Intro")
@@ -116,3 +116,17 @@ async def test_section_key_persisted_by_ops_and_history(conn):
     assert "x" in res.applied
     b = {b.id: b for b in await list_blocks(conn, note.id)}
     assert b["x"].section_key == "Intro"
+
+
+async def test_agent_scope_names_a_note_by_its_display_title(conn):
+    from paperhub.notes.scope import note_ref
+    from paperhub.notes.store import display_title, set_title
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    assert await display_title(conn, note) == "A Paper"
+    assert (await note_ref(conn, "paper:1", 0)).title == "A Paper"
+    await set_title(conn, note.id, "Mine")
+    assert (await note_ref(conn, "paper:1", 0)).title == "Mine"
+    await set_title(conn, note.id, "")
+    await conn.execute("UPDATE paper_content SET title = '' WHERE id = 1")
+    assert (await note_ref(conn, "paper:1", 0)).title == "Untitled"

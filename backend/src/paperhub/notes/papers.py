@@ -22,7 +22,7 @@ async def paper_note(conn: aiosqlite.Connection, paper_content_id: int) -> Note:
         raise LookupError(f"paper_content {paper_content_id} not found")
     return await get_or_create_note(
         conn, target_kind="paper", target_id=str(paper_content_id),
-        title=str(row[0]))
+        title="")
 
 
 async def _section_order(conn: aiosqlite.Connection,

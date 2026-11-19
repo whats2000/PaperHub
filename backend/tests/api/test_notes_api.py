@@ -43,9 +43,12 @@ async def test_target_endpoint_creates_once(client: AsyncClient) -> None:
     a = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
     b = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
     assert a["note"]["id"] == b["note"]["id"]
-    assert a["note"]["title"] == "Chat" and a["blocks"] == []
+    # The stored title is the user's only; the target's title is the default.
+    assert a["note"]["title"] == "" and a["default_title"] == "Chat"
+    assert a["blocks"] == []
     p = (await client.get("/notes/target", params={"kind": "paper", "id": 1})).json()
-    assert p["note"]["title"] == "A Paper" and p["note"]["id"] != a["note"]["id"]
+    assert p["note"]["title"] == "" and p["default_title"] == "A Paper"
+    assert p["note"]["id"] != a["note"]["id"]
     assert (await client.get(
         "/notes/target", params={"kind": "session", "id": 99})).status_code == 404
     assert (await client.get(

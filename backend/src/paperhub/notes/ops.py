@@ -28,7 +28,13 @@ from paperhub.db.connection import write_transaction
 from paperhub.notes.mark_pieces import revive_latest
 from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType
 from paperhub.notes.order import key_between
-from paperhub.notes.store import block_text, bump_revision, get_note, new_block_id
+from paperhub.notes.store import (
+    block_text,
+    bump_revision,
+    display_title,
+    get_note,
+    new_block_id,
+)
 
 Actor = Literal["user", "agent", "import", "system"]
 RejectReason = Literal["changed_since_base", "missing", "invalid"]
@@ -1034,5 +1040,6 @@ async def change_set_detail(conn: aiosqlite.Connection,
             "reapplied_by": cs["outcome"].get("reapplied_by"),
             "head": {"id": chain[-1], "status": head["status"]},
             "note": {"target_kind": note.target_kind,
-                     "target_id": note.target_id, "title": note.title},
+                     "target_id": note.target_id,
+                     "title": await display_title(conn, note)},
             "changes": changes}

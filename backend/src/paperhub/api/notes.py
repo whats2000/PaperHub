@@ -34,10 +34,10 @@ from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import (
     default_title,
-    effective_title,
     get_note,
     get_or_create_note,
     list_blocks,
+    named,
     set_title,
     shared_by,
 )
@@ -140,9 +140,9 @@ async def note_for_target(
             except LookupError as exc:
                 raise HTTPException(404, str(exc)) from exc
         else:
-            title = await _title_for(conn, kind, id)
+            await _title_for(conn, kind, id)  # 404 for a missing target
             note = await get_or_create_note(
-                conn, target_kind=kind, target_id=str(id), title=title,
+                conn, target_kind=kind, target_id=str(id), title="",
                 session_id=id if kind == "session" else None)
         return await _detail(conn, note)
 
@@ -198,8 +198,7 @@ async def export_note(note_id: int,
         blocks = await list_blocks(conn, note_id)
         try:
             # Never an empty heading or file name: title, else default.
-            note = note.model_copy(
-                update={"title": await effective_title(conn, note)})
+            note = await named(conn, note)
             papers, chunk_papers, mark_papers = await export_sources(
                 conn, note, blocks)
             md, images, bib = await asyncio.to_thread(functools.partial(

@@ -42,7 +42,7 @@ from paperhub.notes.papers import (
     parts_of_section,
     tx,
 )
-from paperhub.notes.store import get_note, list_blocks, new_block_id
+from paperhub.notes.store import display_title, get_note, list_blocks, new_block_id
 
 BLOCK_TYPE: dict[str, Any] = {
     "text": "paperQuote", "figure": "paperFigure",
@@ -373,7 +373,7 @@ async def _saved_to(conn: aiosqlite.Connection, m: dict[str, Any]) -> SavedTo:
         count = len(parts)
         index = next((i for i, p in enumerate(parts)
                       if any(b.id == m["block_id"] for b in p)), 0)
-    return SavedTo(note_id=note.id, paper_title=note.title,
+    return SavedTo(note_id=note.id, paper_title=await display_title(conn, note),
                    section=m["section_key"], part_index=index,
                    part_count=count)
 

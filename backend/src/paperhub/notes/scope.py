@@ -9,7 +9,7 @@ import aiosqlite
 
 from paperhub.notes.models import Note
 from paperhub.notes.papers import paper_note
-from paperhub.notes.store import get_note, get_or_create_note
+from paperhub.notes.store import get_note, get_or_create_note, named
 
 _NOTE_COLS = "id, target_kind, target_id, title, revision, updated_at, deleted_at"
 
@@ -37,7 +37,7 @@ async def _chat_note(conn: aiosqlite.Connection, session_id: int) -> Note:
         raise LookupError(f"chat {session_id} not found")
     return await get_or_create_note(
         conn, target_kind="session", target_id=str(session_id),
-        title=str(row[0]), session_id=session_id)
+        title="", session_id=session_id)
 
 
 async def _idea_note(conn: aiosqlite.Connection, idea_id: int) -> Note:
@@ -46,7 +46,7 @@ async def _idea_note(conn: aiosqlite.Connection, idea_id: int) -> Note:
     if row is None:
         raise LookupError(f"idea {idea_id} not found")
     return await get_or_create_note(
-        conn, target_kind="idea", target_id=str(idea_id), title=str(row[0]))
+        conn, target_kind="idea", target_id=str(idea_id), title="")
 
 
 async def notes_in_scope(
@@ -62,7 +62,7 @@ async def notes_in_scope(
             "WHERE owner_id = 1 AND deleted_at IS NULL "
             "ORDER BY updated_at DESC, id DESC"
         ) as cur:
-            return [_row(r) for r in await cur.fetchall()]
+            return [await named(conn, _row(r)) for r in await cur.fetchall()]
     notes = [await _chat_note(conn, session_id)]
     if paper_ids is None:
         async with conn.execute(
@@ -78,7 +78,8 @@ async def notes_in_scope(
         idea = await cur.fetchone()
     if idea is not None:
         notes.append(await _idea_note(conn, int(idea[0])))
-    return [n for n in notes if n.deleted_at is None]
+    # Notes are named by their display title (the user's, else the default).
+    return [await named(conn, n) for n in notes if n.deleted_at is None]
 
 
 async def note_ref(conn: aiosqlite.Connection, ref: str, session_id: int) -> Note:
@@ -106,4 +107,4 @@ async def note_ref(conn: aiosqlite.Connection, ref: str, session_id: int) -> Not
             "or 'note:<id>' (list_notes shows the refs).")
     if note.deleted_at is not None:
         raise LookupError(f"{ref} was deleted")
-    return note
+    return await named(conn, note)

@@ -112,7 +112,7 @@ async def set_idea_note_text(
         if "\n\n".join(new) == (await idea_note_text_or_none(conn, idea_id) or ""):
             return
         note = await get_or_create_note(
-            conn, target_kind="idea", target_id=str(idea_id), title=str(row[0]))
+            conn, target_kind="idea", target_id=str(idea_id), title="")
         if note.deleted_at is not None:
             await conn.execute(
                 "UPDATE notes SET deleted_at = NULL WHERE id = ?", (note.id,))

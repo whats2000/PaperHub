@@ -103,11 +103,18 @@ async def default_title(conn: aiosqlite.Connection, note: Note) -> str:
         return ""
     async with conn.execute(sql, (int(note.target_id),)) as cur:
         row = await cur.fetchone()
-    return " ".join(str(row[0] or "").split()) if row else ""
+    return str(row[0] or "").strip() if row else ""
 
 
-async def effective_title(conn: aiosqlite.Connection, note: Note) -> str:
-    """The note's title, else its default, else "Untitled" (never empty)."""
+async def named(conn: aiosqlite.Connection, note: Note) -> Note:
+    """``note`` with ``title`` set to its display title (for readers that
+    name it; never stored back)."""
+    return note.model_copy(update={"title": await display_title(conn, note)})
+
+
+async def display_title(conn: aiosqlite.Connection, note: Note) -> str:
+    """The note's name everywhere it is named (export, lists, the agent):
+    the user's title, else the default title, else "Untitled"."""
     return (note.title.strip() or await default_title(conn, note)
             or UNTITLED)
 
