@@ -1,5 +1,6 @@
 {
   "loading": "Loading the note…",
+  "title": { "label": "Note title", "untitled": "Untitled", "saveFailed": "Couldn't save the title." },
   "saveRefused": "Couldn't save that change. Showing the saved version.",
   "retrying": "Not saved — retrying",
   "conflict": "Updated from another view",

@@ -27,6 +27,7 @@ import {
   postNoteOps,
   replyToNoteComment,
   resolveSuggestion as postSuggestionDecision,
+  patchNoteTitle,
   setNoteCommentStatus,
 } from "@/lib/api";
 import i18n from "@/lib/i18n";
@@ -58,6 +59,8 @@ export interface NoteState {
   revision: number;
   /** How many live chats the note is linked to (unknown until loaded). */
   sharedBy?: number;
+  /** The title shown when the note's own is empty (the target's title). */
+  defaultTitle?: string;
 }
 
 /** An edit one editor made: the blocks it changed (another editor shows them). */
@@ -108,6 +111,8 @@ interface NotesStore {
   drafts: Record<number, Record<string, NoteOp>>;
   loadTarget: (kind: NoteTargetKind, id: number) => Promise<number>;
   loadNote: (noteId: number) => Promise<void>;
+  /** Sets the page title (shown at once, saved to the server). */
+  renameNote: (noteId: number, title: string) => Promise<void>;
   applyLocal: (noteId: number, ops: NoteOp[], origin?: string) => void;
   flush: (noteId: number) => Promise<void>;
   onConflict: (noteId: number, rejected: RejectedOp[]) => Promise<void>;
@@ -554,6 +559,7 @@ export const useNotesStore = create<NotesStore>()(
                 suggestions: d.suggestions,
                 comments: d.comments,
                 sharedBy: d.shared_by,
+                defaultTitle: d.default_title ?? cur?.defaultTitle,
                 // Unsaved edits were made on the older base: keep it, so a
                 // block changed meanwhile still comes back as a conflict.
                 revision: unsaved && cur ? Math.min(cur.revision, d.note.revision) : d.note.revision,
@@ -828,6 +834,7 @@ export const useNotesStore = create<NotesStore>()(
                   suggestions: d.suggestions ?? prev?.suggestions ?? [],
                   comments: d.comments ?? prev?.comments ?? [],
                   sharedBy: d.shared_by,
+                  defaultTitle: d.default_title ?? prev?.defaultTitle,
                   revision:
                     unsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
                 },
@@ -837,6 +844,35 @@ export const useNotesStore = create<NotesStore>()(
             };
           });
           return d.note.id;
+        },
+
+        renameNote: async (noteId, title) => {
+          const setTitle = (value: string, defaultTitle?: string) =>
+            set((s) => {
+              const cur = s.notes[noteId];
+              if (!cur) return {};
+              return {
+                notes: {
+                  ...s.notes,
+                  [noteId]: {
+                    ...cur,
+                    note: { ...cur.note, title: value },
+                    defaultTitle: defaultTitle ?? cur.defaultTitle,
+                  },
+                },
+              };
+            });
+          const before = get().notes[noteId]?.note.title;
+          setTitle(title);
+          try {
+            const d = await patchNoteTitle(noteId, title);
+            // A newer rename may have been typed meanwhile: keep it.
+            if (get().notes[noteId]?.note.title === title) setTitle(d.note.title, d.default_title);
+          } catch (err) {
+            if (before !== undefined && get().notes[noteId]?.note.title === title) setTitle(before);
+            toast.error(i18n.t("notes:title.saveFailed", "Couldn't save the title."));
+            throw err;
+          }
         },
 
         loadNote: async (noteId) => {

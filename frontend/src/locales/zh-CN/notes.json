@@ -1,5 +1,6 @@
 {
   "loading": "正在加载笔记…",
+  "title": { "label": "笔记标题", "untitled": "未命名", "saveFailed": "无法保存标题。" },
   "saveRefused": "无法保存这项更改，已显示已保存的版本。",
   "retrying": "尚未保存，正在重试",
   "conflict": "已按另一个视图的内容更新",

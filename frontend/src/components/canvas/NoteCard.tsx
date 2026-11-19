@@ -374,7 +374,8 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
   const origin =
     side === "below" ? `${arrowAt}px top` : side === "above" ? `${arrowAt}px bottom` : `right ${arrowAt}px`;
 
-  const paperTitle = note?.note.title ?? "";
+  // The paper's own title (the note's page title is the user's).
+  const paperTitle = note?.defaultTitle || note?.note.title || "";
   const count = section?.parts.length ?? 0;
   // A section named like the paper (a PDF's one section) is not said twice.
   const sameAsTitle = !!section?.sectionKey && sameName(section.sectionKey, paperTitle);

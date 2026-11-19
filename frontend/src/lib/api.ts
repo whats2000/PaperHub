@@ -1280,6 +1280,14 @@ export async function getNote(noteId: number): Promise<NoteDetail> {
   return apiFetch<NoteDetail>(`/notes/${noteId}`);
 }
 
+/** Sets the note's page title ("" falls back to its default title). */
+export async function patchNoteTitle(noteId: number, title: string): Promise<NoteDetail> {
+  return apiFetch<NoteDetail>(`/notes/${noteId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
 /** The note a block is in, and that note's target (404 once the block is gone). */
 export async function getNoteBlockPlace(
   blockId: string,

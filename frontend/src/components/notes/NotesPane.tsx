@@ -71,7 +71,8 @@ export function NotesPane({ onClose }: Props) {
   );
   const paperNoteTitle = useNotesStore((s) => {
     const id = paperId === null ? undefined : s.byTarget[`paper:${paperId}`];
-    return id === undefined ? undefined : s.notes[id]?.note.title;
+    // The paper's own title, not the note's (renamable) page title.
+    return id === undefined ? undefined : s.notes[id]?.defaultTitle || s.notes[id]?.note.title;
   });
   const paperTitle =
     paperId === null ? null : (refTitle ?? paperNoteTitle ?? t("pane.paper", "Paper"));

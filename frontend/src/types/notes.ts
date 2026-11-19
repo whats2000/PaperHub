@@ -81,6 +81,9 @@ export interface NoteWithBlocks {
   blocks: NoteBlock[];
   /** How many live chats the note is linked to ("Shared by N chats"). */
   shared_by: number;
+  /** The page title shown when `note.title` is empty: the target's current
+   *  title ("" when that is empty too; the editor then says "Untitled"). */
+  default_title?: string;
 }
 
 export interface NoteDetail extends NoteWithBlocks {
