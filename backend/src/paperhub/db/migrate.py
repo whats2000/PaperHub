@@ -823,6 +823,14 @@ async def apply_schema(conn: aiosqlite.Connection) -> None:
         "WHERE idempotency_key IS NOT NULL")
     await conn.commit()
 
+    # Plan H5b: the hash of a suggestion's block when it was made, so an
+    # accept after the user changed the block shows it again (additive).
+    async with conn.execute("PRAGMA table_info(note_suggestions)") as cur:
+        if "base_hash" not in {row[1] for row in await cur.fetchall()}:
+            await conn.execute(
+                "ALTER TABLE note_suggestions ADD COLUMN base_hash TEXT")
+            await conn.commit()
+
     # Plan H5b.1: first-contact revision on note_agent_reads (additive).
     async with conn.execute("PRAGMA table_info(note_agent_reads)") as cur:
         if "first_revision" not in {row[1] for row in await cur.fetchall()}:

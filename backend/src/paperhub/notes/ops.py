@@ -16,15 +16,24 @@ Rules:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 import aiosqlite
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from paperhub.db.connection import write_transaction
+from paperhub.notes.inline_merge import (
+    MARK_BLOCK_TYPES,
+    cite_ids,
+    cite_quotes,
+    is_rich,
+    merge_props,
+    preserve_runs,
+)
 from paperhub.notes.mark_pieces import revive_latest
 from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType, check_inline
 from paperhub.notes.order import key_between
@@ -37,10 +46,8 @@ from paperhub.notes.store import (
 )
 
 Actor = Literal["user", "agent", "import", "system"]
-RejectReason = Literal["changed_since_base", "missing", "invalid"]
-# Blocks that own a ``note_marks`` row (the mark follows the block).
-MARK_BLOCK_TYPES = frozenset(
-    {"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
+RejectReason = Literal["changed_since_base", "missing", "invalid", "stale",
+                       "depends_on_failed"]
 
 
 class BlockIn(BaseModel):
@@ -50,6 +57,19 @@ class BlockIn(BaseModel):
     section_key: str | None = None
 
     _inline = field_validator("content")(check_inline)
+
+    @model_validator(mode="after")
+    def _math_from_string(self) -> BlockIn:
+        """A math block written as a string: the string is its LaTeX
+        (surrounding ``$$`` dropped), so the block is never empty."""
+        if self.type == "math" and isinstance(self.content, str):
+            latex = self.content.strip()
+            if latex.startswith("$$") and latex.endswith("$$") and len(latex) >= 4:
+                latex = latex[2:-2].strip()
+            if latex and not self.props.get("latex"):
+                self.props = {**self.props, "latex": latex}
+            self.content = None
+        return self
 
 
 class Op(BaseModel):
@@ -80,6 +100,9 @@ class ApplyResult(BaseModel):
     # block pasted from another note keeps its id): {from, to}, the id the
     # client sent and the one the block got. The client re-keys the block.
     renamed: list[dict[str, str]] = []
+    # Plain-string updates laid over rich runs: {block_id, kept, dropped},
+    # the inline nodes (citations, formulas, mentions) kept or dropped.
+    inline: list[dict[str, Any]] = []
 
 
 def _now() -> str:
@@ -145,6 +168,7 @@ class _Ctx:
     def __init__(
         self, conn: aiosqlite.Connection, note_id: int, *, rev: int,
         actor: Actor, run_id: int | None, change_set_id: str,
+        merge: bool = False,
     ) -> None:
         self.conn = conn
         self.note_id = note_id
@@ -159,13 +183,22 @@ class _Ctx:
         self.reparented: list[dict[str, str | None]] = []
         self.withdrawn: list[str] = []
         self.renamed: dict[str, str] = {}
+        # An update merges over the stored block (agent edits, accepts).
+        self.merge = merge or actor == "agent"
+        self.inline: list[dict[str, Any]] = []
+        # Ids of inserts that failed: an op naming one fails with them.
+        self.failed: set[str] = set()
+        self.op_index: int | None = None
 
     def reject(self, block_id: str | None, reason: RejectReason,
                current: _Row | None = None) -> None:
-        self.rejected.append({
+        entry: dict[str, Any] = {
             "block_id": block_id or "", "reason": reason,
             "current": current.block() if current else None,
-        })
+        }
+        if self.op_index is not None:
+            entry["op"] = self.op_index
+        self.rejected.append(entry)
 
     def result(self) -> ApplyResult:
         return ApplyResult(
@@ -173,7 +206,7 @@ class _Ctx:
             change_set_id=self.change_set_id, applied=self.applied,
             suggested=self.suggested, rejected=self.rejected,
             reparented=self.reparented, withdrawn=self.withdrawn,
-            renamed=self.renamed_list(),
+            renamed=self.renamed_list(), inline=self.inline,
         )
 
     def renamed_list(self) -> list[dict[str, str]]:
@@ -401,12 +434,39 @@ async def _suggest(ctx: _Ctx, row: _Row, op: Op) -> None:
     proposed = op.block.model_dump() if op.block is not None else None
     await ctx.conn.execute(
         "INSERT INTO note_suggestions (id, note_id, block_id, change_set_id, "
-        "kind, proposed_json, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'open', ?)",
+        "kind, proposed_json, status, created_at, base_hash) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)",
         (sid, ctx.note_id, row.id, ctx.change_set_id, kind,
-         json.dumps(proposed) if proposed is not None else None, ctx.now),
+         json.dumps(proposed) if proposed is not None else None, ctx.now,
+         block_hash(row.props, row.text)),
     )
     ctx.suggested.append({"block_id": row.id, "suggestion_id": sid})
+
+
+def block_hash(props: dict[str, Any], text: str) -> str:
+    """What a suggestion was made against: the block's props and text."""
+    raw = json.dumps({"props": props, "text": text}, sort_keys=True,
+                     ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _merged(ctx: _Ctx, row: _Row, blk: BlockIn) -> BlockIn:
+    """An update's block laid over the stored one: props merge (a mark
+    block keeps its identity, type and content), and a plain string over
+    rich runs keeps the runs its text did not change."""
+    props = merge_props(row.type, row.props, blk.props)
+    if row.type in MARK_BLOCK_TYPES:
+        return blk.model_copy(update={"type": row.type, "props": props,
+                                      "content": row.content})
+    content = blk.content
+    if (isinstance(content, str) and isinstance(row.content, list)
+            and is_rich(row.content) and blk.type not in ("math", "codeBlock")):
+        quotes = await cite_quotes(ctx.conn, cite_ids(row.content))
+        runs, report = preserve_runs(row.content, content, quotes)
+        if report["kept"] or report["dropped"]:
+            ctx.inline.append({"block_id": row.id, **report})
+        return blk.model_copy(update={"props": props, "content": runs})
+    return blk.model_copy(update={"props": props})
 
 
 async def _section_has_blocks(ctx: _Ctx, section: _Row) -> bool:
@@ -511,10 +571,11 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     before = row.state()
     if op.op == "update":
         assert op.block is not None
-        after = {**before, "type": op.block.type, "props": op.block.props,
-                 "content": op.block.content}
-        if op.block.section_key is not None:
-            after["section_key"] = op.block.section_key
+        blk = await _merged(ctx, row, op.block) if ctx.merge else op.block
+        after = {**before, "type": blk.type, "props": blk.props,
+                 "content": blk.content}
+        if blk.section_key is not None:
+            after["section_key"] = blk.section_key
         if ctx.actor == "user":
             after["author"] = "user"
         await ctx.write_state(row.id, after)
@@ -563,6 +624,7 @@ def _outcome(ctx: _Ctx) -> str:
         "withdrawn": ctx.withdrawn, "renamed": ctx.renamed_list(),
         "rejected": [{"block_id": r["block_id"], "reason": r["reason"]}
                      for r in ctx.rejected],
+        **({"inline": ctx.inline} if ctx.inline else {}),
     })
 
 
@@ -580,7 +642,7 @@ async def _record_change_set(ctx: _Ctx, *, base_revision: int,
 async def _apply_in_tx(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None, summary: str,
-    scaffold: frozenset[str] = frozenset(),
+    scaffold: frozenset[str] = frozenset(), merge: bool = False,
 ) -> ApplyResult:
     note = await get_note(conn, note_id)
     if note is not None and base_revision > note.revision:
@@ -590,11 +652,26 @@ async def _apply_in_tx(
     await conn.execute("SAVEPOINT apply_ops")
     ctx = await _begin(conn, note_id, actor=actor, run_id=run_id,
                        summary=summary)
+    ctx.merge = ctx.merge or merge
     recorded: list[dict[str, Any]] = []
-    for op in ops:
+    for index, op in enumerate(ops):
         before_applied = len(ctx.applied)
+        before_rejected = len(ctx.rejected)
         op = ctx.follow(op)
-        await _apply_one(ctx, op, base_revision)
+        ctx.op_index = index
+        refs = [op.parent_id, op.after, op.before, op.under_heading]
+        if op.op != "insert":
+            refs.append(op.block_id)
+        hung = next((r for r in refs if r is not None and r in ctx.failed), None)
+        if hung is not None:
+            # It names a block an earlier op of this call failed to make.
+            ctx.reject(op.block_id or hung, "depends_on_failed")
+        else:
+            await _apply_one(ctx, op, base_revision)
+        ctx.op_index = None
+        if (op.op == "insert" and op.block_id is not None
+                and len(ctx.rejected) > before_rejected):
+            ctx.failed.add(op.block_id)
         stored = op.model_dump()
         if op.op == "insert" and len(ctx.applied) > before_applied:
             stored["block_id"] = ctx.applied[-1]  # the id the block got
@@ -920,12 +997,13 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
     async with write_transaction(conn):
         async with conn.execute(
             "SELECT note_id, block_id, change_set_id, kind, proposed_json, "
-            "status FROM note_suggestions WHERE id = ?", (suggestion_id,),
+            "status, base_hash FROM note_suggestions WHERE id = ?",
+            (suggestion_id,),
         ) as cur:
             r = await cur.fetchone()
         if r is None:
             raise LookupError(f"suggestion {suggestion_id} not found")
-        note_id, block_id, cs_id, kind, proposed, status = r
+        note_id, block_id, cs_id, kind, proposed, status, base_hash = r
         if status != "open":
             raise ValueError(f"suggestion {suggestion_id} is {status}")
         note = await get_note(conn, note_id)
@@ -946,6 +1024,15 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
                 rejected=[{"block_id": block_id, "reason": "missing",
                            "current": None}],
                 withdrawn=[suggestion_id])
+        if accept and base_hash is not None:
+            stale = await _stale(conn, suggestion_id, note_id, block_id,
+                                 base_hash)
+            if stale is not None:
+                return ApplyResult(
+                    note_id=note_id, revision=note.revision,
+                    change_set_id=None, applied=[], suggested=[],
+                    rejected=[{"block_id": block_id, "reason": "stale",
+                               "current": stale}])
         if accept:
             op = Op(op="update" if kind == "update" else "delete",
                     block_id=block_id,
@@ -953,7 +1040,8 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
                     if proposed else None)
             result = await _apply_in_tx(
                 conn, note_id, base_revision=note.revision, ops=[op],
-                actor="user", run_id=None, summary="Accept suggestion")
+                actor="user", run_id=None, summary="Accept suggestion",
+                merge=True)
             new_status = ("accepted" if block_id in result.applied
                           else "withdrawn")
             if new_status == "withdrawn":
@@ -967,6 +1055,28 @@ async def resolve_suggestion(conn: aiosqlite.Connection, suggestion_id: str,
             "UPDATE note_suggestions SET status = ? WHERE id = ?",
             (new_status, suggestion_id))
         return result
+
+
+async def _stale(conn: aiosqlite.Connection, suggestion_id: str, note_id: int,
+                 block_id: str, base_hash: str) -> Block | None:
+    """The block as it is now when its props or text changed since the
+    suggestion was made, else None. A stale suggestion is re-based on the
+    current block (it stays open and is shown against the current text),
+    so the user's next Accept applies it: the action is idempotent."""
+    async with conn.execute(
+        f"SELECT {_COLS} FROM note_blocks WHERE id = ? AND note_id = ?",  # noqa: S608
+        (block_id, note_id),
+    ) as cur:
+        r = await cur.fetchone()
+    assert r is not None
+    row = _row(r)
+    now = block_hash(row.props, row.text)
+    if now == base_hash:
+        return None
+    await conn.execute(
+        "UPDATE note_suggestions SET base_hash = ? WHERE id = ?",
+        (now, suggestion_id))
+    return row.block()
 
 
 _STRUCTURAL = frozenset({"section", "divider"})

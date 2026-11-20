@@ -553,7 +553,9 @@ CREATE TABLE IF NOT EXISTS note_suggestions (
     kind TEXT NOT NULL CHECK (kind IN ('update', 'delete')),
     proposed_json TEXT,
     status TEXT NOT NULL CHECK (status IN ('open', 'accepted', 'rejected', 'withdrawn')),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    -- hash of the block's props + text when suggested (stale accept check)
+    base_hash TEXT
 );
 -- The chat's agent's contact with each note (any read, search or write):
 -- the revision at first and at last contact (H5b.1). first_revision is
