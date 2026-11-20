@@ -14,7 +14,7 @@
 
 - **Protection never disables a capability** (SRS §III-10.5 Boundary): a safe way plus a risky way the user can switch on, off by default in deployment, with a plain warning of what leaves the device.
 - **Dev behaviour is unchanged.** With `PAPERHUB_PROFILE` unset (dev), every new setting defaults to today's behaviour: review off, public web search on, allowlist `*`, private-upload default off, no locks.
-- **Deployment profile** = `PAPERHUB_PROFILE=deployment`, set in `docker-compose.yml` for `backend`. Defaults there: review on, unsure = ask, public web search off, allowlist `export.arxiv.org, arxiv.org, api.semanticscholar.org` + the trusted search host, private-upload default on, answer review (H5d) not touched.
+- **Deployment profile** = `PAPERHUB_PROFILE=deployment`, set in `docker-compose.yml` for `backend`. Defaults there: review on, unsure = ask, public web search off, allowlist `export.arxiv.org, arxiv.org, api.semanticscholar.org` + the trusted search host, private-upload default on, answer review (H5e) not touched.
 - **Locks:** `PAPERHUB_LOCKED_SETTINGS` (comma-separated registry keys) makes those keys env-only: `PATCH /settings` → 403, the DB overlay ignores them, the UI shows them disabled with "Set by the deployer". Compose default locks: `PAPERHUB_OUTBOUND_REVIEW, PAPERHUB_OUTBOUND_UNSURE, PAPERHUB_OUTBOUND_ALLOWLIST, PAPERHUB_OUTBOUND_LOG_RETENTION_DAYS`.
 - **Checkpoint stages, cheapest first:** destination allowlist → exact-identifier bypass (arXiv id, DOI, S2 id) → sensitive terms (case-insensitive) → LLM review (allow / rewrite / ask / block) with private material wrapped as data → cache per (text, private-material ids) → timeout and errors follow the unsure policy (`ask` default, or `block`); **never silently allow on failure**. Unattended callers turn `ask` into `hold`.
 - **The user's own typed message is not private-derived by itself;** private material = private documents attached to the chat, chunk text read from them this turn, and the idea's problem text in an idea chat.
@@ -195,7 +195,7 @@
 **Interfaces:**
 - `send`: edited text is re-checked against the sensitive terms only (a hit → 422 `{"detail":"sensitive_term","term":…}`); marks the row `sent`, appends an `asked_sent` log row (actor `user`, original = held text if edited); returns `{status: "sent", held_id}`. It does **not** perform the search — the follow-up turn does, via the agent's normal tool with an approval token (`held_id`) that makes the checkpoint return `send`, stage `user`.
 - `discard`: marks `discarded`, appends `asked_discarded`.
-- Unattended held rows (no session) are sent by `send` directly through their caller's registered resend function (`held.register_resender(caller, fn)`); H5a registers none, so they return `{status:"sent"}` after logging and the H5e trending watch registers its own.
+- Unattended held rows (no session) are sent by `send` directly through their caller's registered resend function (`held.register_resender(caller, fn)`); H5a registers none, so they return `{status:"sent"}` after logging and the H5f trending watch registers its own.
 - 409 when the row is not pending, its run was cancelled, or its session is soft-deleted.
 
 - [ ] **Step 1: Write the failing tests** — `test_send_as_shown`; `test_send_edited_rechecks_terms`; `test_discard`; `test_send_refused_after_stop_or_delete`; `test_followup_turn_runs_search_with_approved_text` (trace shows `tool:search_papers` with the approved text and an `outbound:review` step with stage `user`); `test_approval_token_single_use`.
