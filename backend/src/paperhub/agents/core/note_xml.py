@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 
+from paperhub.notes.inline_merge import node_text, read_runs
+
 
 def esc(value: object) -> str:
     """``value`` escaped for an XML attribute."""
@@ -37,28 +39,32 @@ def mark_xml(props: dict[str, object], labels: dict[str, str], body: str) -> str
     return f"<mark{attrs}>{body}</mark>"
 
 
-def cite_runs_xml(content: object) -> str | None:
+def cite_runs_xml(content: object,
+                  quotes: dict[str, str] | None = None) -> str | None:
     """A block's runs, escaped, with each inline citation of a reading mark
-    as ``<mark_cite mark="<markId>">alias</mark_cite>``; None when the block
-    holds no such citation (its plain text then reads the same)."""
+    as ``<mark_cite mark="<markId>">alias</mark_cite>`` (an empty alias reads
+    as the quote's start, from ``quotes`` by mark id); None when the block
+    holds no such citation (its plain text then reads the same). Inline
+    math reads ``$…$``, a mention its label."""
     if not isinstance(content, list) or not _has_cite(content):
         return None
+    q = quotes or {}
     out: list[str] = []
     for run in content:
         if not isinstance(run, dict):
             continue
         props = run.get("props") or {}
         if run.get("type") == "markCite":
-            alias = html.escape(str(props.get("text") or ""), quote=False)
+            alias = html.escape(node_text(run, q), quote=False)
             out.append(f'<mark_cite mark="{esc(props.get("markId") or "")}">'
                        f"{alias}</mark_cite>")
-        elif run.get("type") == "inlineMath":
-            out.append(html.escape(str(props.get("latex") or ""), quote=False))
+        elif run.get("type") in ("inlineMath", "mention"):
+            out.append(html.escape(node_text(run, q), quote=False))
         elif isinstance(run.get("text"), str):
             out.append(html.escape(run["text"], quote=False))
         if isinstance(run.get("content"), list):  # a link's runs
-            out.append(cite_runs_xml(run["content"])
-                       or html.escape(_plain(run["content"]), quote=False))
+            out.append(cite_runs_xml(run["content"], q)
+                       or html.escape(read_runs(run["content"], q), quote=False))
     return "".join(out)
 
 
@@ -68,6 +74,3 @@ def _has_cite(content: list[object]) -> bool:
         or (isinstance(r.get("content"), list) and _has_cite(r["content"])))
         for r in content)
 
-
-def _plain(content: list[object]) -> str:
-    return "".join(str(r.get("text") or "") for r in content if isinstance(r, dict))

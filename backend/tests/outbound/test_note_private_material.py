@@ -450,8 +450,15 @@ async def test_payload_counts_when_an_op_fails_validation(
 ) -> None:
     nid = await _note(migrated_db)
     begin_turn()
-    await _edit_error(_ctx(migrated_db, fake_tracer), note="chat", base_revision=0,
-                      ops=[{"op": "explode", "block": _para(_SECRET)}])
+    # A malformed op is rejected on its own (no error for the whole call);
+    # its payload still counts as the agent's private material.
+    reg = ToolRegistry()
+    register_note_tools(reg)
+    out = await reg.run(_ctx(migrated_db, fake_tracer), ToolCall(
+        id="c1", name="edit_note", arguments={
+            "note": "chat", "base_revision": 0,
+            "ops": [{"op": "explode", "block": _para(_SECRET)}]}))
+    assert json.loads(out.content)["rejected"][0]["reason"] == "invalid"
     d = await _check(migrated_db, _SECRET)
     assert _is_span(d)
     assert await _log_reason(migrated_db, d.log_id) == (

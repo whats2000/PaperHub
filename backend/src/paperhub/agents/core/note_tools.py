@@ -45,6 +45,7 @@ from paperhub.notes.agent_reads import (
     unseen_user_changes,
 )
 from paperhub.notes.comments import list_comments
+from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_text
 from paperhub.notes.marks import color_labels
 from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import BlockIn, Op, apply_ops
@@ -63,8 +64,12 @@ _SCOPE = {"type": "string", "enum": ["chat", "all"],
           "description": "chat = this chat's notes (default); all = every note."}
 
 
-def _text(b: Block) -> str:
-    return b.text or str(b.props.get("title") or "")
+def _text(b: Block, quotes: dict[str, str] | None = None) -> str:
+    """A block's text as the agent reads it: inline math ``$…$``, a math
+    block ``$$…$$``, a mention its label, an alias-less mark citation the
+    quote's start (``quotes`` by mark id)."""
+    return (read_text(b.type, b.props, b.content, quotes)
+            or str(b.props.get("title") or ""))
 
 
 def _level(b: Block) -> int | None:
@@ -78,10 +83,11 @@ def _level(b: Block) -> int | None:
 
 
 def _block_xml(b: Block, labels: dict[str, str] | None = None,
-               text: str | None = None) -> str:
-    cited = cite_runs_xml(b.content) if text is None else None
+               text: str | None = None,
+               quotes: dict[str, str] | None = None) -> str:
+    cited = cite_runs_xml(b.content, quotes) if text is None else None
     body = cited if cited is not None else html.escape(
-        _text(b) if text is None else text, quote=False)
+        _text(b, quotes) if text is None else text, quote=False)
     if b.type in MARK_BLOCKS and b.props.get("markId"):
         body = mark_xml(b.props, labels or {}, body)
     return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}" '
@@ -251,8 +257,10 @@ async def _search_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         note = by_id[note_id]
         path = paths[note_id].get(bid, [])
         collect_note_blocks(note_id, path, note.title)
-        snippet = html.escape(str(text)[:SNIPPET_CHARS], quote=False)
         hit_block = found[note_id].get(bid)
+        if hit_block is not None:
+            text = _text(hit_block)
+        snippet = html.escape(str(text)[:SNIPPET_CHARS], quote=False)
         if hit_block is not None and hit_block.type in MARK_BLOCKS \
                 and hit_block.props.get("markId"):
             snippet = mark_xml(hit_block.props, labels, snippet)
@@ -350,10 +358,14 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
                 if c["block_id"] in shown]
     remark = [_COMMENTS_NOTE] if comments else []
     labels = await color_labels(ctx.conn)
-    content = "\n".join([head, *(_block_xml(b, labels) for b in window), *remark,
+    quotes = await cite_quotes(
+        ctx.conn, set().union(*(cite_ids(b.content) for b in window)))
+    content = "\n".join([head, *(_block_xml(b, labels, quotes=quotes)
+                                 for b in window), *remark,
                          *(_comment_xml(c) for c in comments), "</note>"])
     collect_note_titles([(note.id, note.title)])
-    collect_note_blocks(note.id, [(b.id, _text(b)) for b in window], note.title)
+    collect_note_blocks(note.id, [(b.id, _text(b, quotes)) for b in window],
+                        note.title)
     _collect_labels(note.id, note.title, window, labels)
     # The user's comment text is note material too (private for the checkpoint).
     collect_note_blocks(
@@ -489,6 +501,13 @@ def _check_citations(
     return block.model_copy(update={"content": _check_runs(block.content, check)})
 
 
+def _hint(exc: ValidationError) -> str:
+    """A validation error, one clause per field."""
+    return "; ".join(
+        f"{'.'.join(str(x) for x in e['loc']) or 'op'}: {e['msg']}"
+        for e in exc.errors())[:300]
+
+
 def _invalid(label: str | None, hint: str) -> dict[str, Any]:
     return {"block_id": label, "reason": "invalid", "current": None,
             "hint": hint}
@@ -516,14 +535,15 @@ def _collect_raw(note_id: int, note_title: str, raw_ops: Any) -> None:
         for index, op in enumerate(raw_ops)], note_title)
 
 
-def _collect_headings(note: Note, ops: list[Op], known: set[str]) -> None:
+def _collect_headings(note: Note, ops: list[tuple[int, Op]],
+                      known: set[str]) -> None:
     """Add the section names the model typed in ``under_heading`` (block
     ids of the note are not text), for the exits where no change set
     landed: the names never reached the note but are in the agent's
     context."""
     collect_note_blocks(note.id, [
         (f"op-{index}-heading", op.under_heading)
-        for index, op in enumerate(ops)
+        for index, op in ops
         if op.under_heading and op.under_heading not in known], note.title)
 
 
@@ -575,21 +595,37 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     except (ValueError, LookupError) as exc:
         _collect_raw(0, "", raw_ops)
         return error_outcome(str(exc))
-    try:
-        ops = [Op.model_validate(o) for o in raw_ops]
-    except ValidationError as exc:
-        _collect_raw(note.id, note.title, raw_ops)
-        return error_outcome(str(exc))
+    # Each op is checked on its own: a malformed op is reported with its
+    # index and the others still apply.
+    rejected: list[dict[str, Any]] = []
+    ops: list[tuple[int, Op]] = []
+    failed: set[str] = set()  # ids of inserts that failed
+    invalid_raw: list[Any] = []
+    for index, raw in enumerate(raw_ops):
+        try:
+            ops.append((index, Op.model_validate(raw)))
+        except ValidationError as exc:
+            fields: dict[str, Any] = raw if isinstance(raw, dict) else {}
+            label = next((str(fields[k]) for k in (
+                "block_id", "after", "before", "under_heading")
+                if isinstance(fields.get(k), str)), None)
+            rejected.append({**_invalid(label, _hint(exc)), "op": index})
+            if fields.get("op") == "insert" and isinstance(
+                    fields.get("block_id"), str):
+                failed.add(fields["block_id"])
+            invalid_raw.append(raw)
+            collect_note_blocks(note.id, [(f"op-{index}", " ".join(_strings(
+                fields.get("block") if fields else raw)))], note.title)
     blocks = await list_blocks(ctx.conn, note.id)
     known = {b.id for b in blocks}
     if base > note.revision:
-        await _collect_written(ctx.conn, note, list(enumerate(ops)), [], [], known)
+        await _collect_written(ctx.conn, note, ops, [], [], known)
         _collect_headings(note, ops, known)
         return error_outcome(
             f"base_revision {base} is ahead of the note (revision "
             f"{note.revision}); read the note again.")
-    rejected: list[dict[str, Any]] = []
     valid: list[Op] = []
+    valid_index: list[int | None] = []  # the agent's op index of each
     # (agent op index, op) of the ops that go to the change set / are
     # rejected here, for _collect_written.
     sent: list[tuple[int, Op]] = []
@@ -603,13 +639,28 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     # (and always on a paper note, which writes under a section) an insert
     # names its place.
     anywhere = not blocks and note.target_kind != "paper"
-    for index, op in enumerate(ops):
+    for index, op in ops:
         label = op.block_id or op.after or op.before or op.under_heading
+        refs = [op.parent_id, op.after, op.before, op.under_heading]
+        if op.op != "insert":
+            refs.append(op.block_id)
+        hung = next((r for r in refs if r is not None and r in failed), None)
+        if hung is not None:
+            rejected.append({"block_id": label, "reason": "depends_on_failed",
+                             "current": None, "op": index,
+                             "hint": f"{hung} was not made: an earlier op failed"})
+            refused.append((index, op))
+            if op.op == "insert" and op.block_id:
+                failed.add(op.block_id)
+            continue
         if (op.op == "insert" and not anywhere
                 and not (op.after or op.before or op.under_heading)):
-            rejected.append(_invalid(
-                label, "an insert must name after, before or under_heading"))
+            rejected.append({**_invalid(
+                label, "an insert must name after, before or under_heading"),
+                "op": index})
             refused.append((index, op))
+            if op.block_id:
+                failed.add(op.block_id)
             continue
         if op.under_heading is not None:
             bid, name, is_new = await _resolve_heading(
@@ -617,11 +668,13 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             if is_new and name is not None:
                 bid = new_sections.setdefault(name, new_block_id())
             if bid is None:
-                rejected.append(_invalid(
+                rejected.append({**_invalid(
                     op.under_heading,
                     "under_heading must be a heading or section block id "
-                    "(or a section name of a paper note)"))
+                    "(or a section name of a paper note)"), "op": index})
                 refused.append((index, op))
+                if op.op == "insert" and op.block_id:
+                    failed.add(op.block_id)
                 continue
             op = op.model_copy(update={"under_heading": bid})
             section = section or name
@@ -631,15 +684,20 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             op = op.model_copy(update={"block": _check_citations(
                 op.block, ctx.evidence, removed_cites, snapped_cites)})
         valid.append(op)
+        valid_index.append(index)
         sent.append((index, op))
     if new_sections:
         order = await _section_order(ctx.conn, int(note.target_id))
-        valid = [*_section_ops(new_sections, order, blocks), *valid]
+        made = _section_ops(new_sections, order, blocks)
+        valid = [*made, *valid]
+        valid_index = [*([None] * len(made)), *valid_index]
     record: dict[str, Any] = {
         "tool": "notes:edit", "note": ref_of(note, ctx.session_id),
         "note_id": note.id, "base_revision": base, "revision": note.revision,
-        "ops": [o.model_dump(exclude_none=True) for o in ops],
+        "ops": [o.model_dump(exclude_none=True) for _, o in ops],
         "applied": [], "suggested": [], "withdrawn": [], "rejected": []}
+    if invalid_raw:
+        record["invalid_ops"] = invalid_raw
     revision = note.revision
     shown: list[Block] = []
     if valid:
@@ -657,8 +715,14 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             revision=revision, change_set_id=res.change_set_id,
             applied=res.applied, suggested=res.suggested,
             withdrawn=res.withdrawn)
-        rejected += [{**r, "current": _current(r.get("current"))}
-                     for r in res.rejected]
+        if res.inline:
+            record["inline"] = res.inline
+        for r in res.rejected:
+            entry = {**r, "current": _current(r.get("current"))}
+            pos = entry.pop("op", None)
+            if isinstance(pos, int) and valid_index[pos] is not None:
+                entry["op"] = valid_index[pos]
+            rejected.append(entry)
         # The blocks it wrote are seen as written; the user's later edits
         # to them (or to blocks it never saw) are changes to show it.
         await record_contact(ctx.conn, ctx.session_id, {note.id: revision})
@@ -672,6 +736,10 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     result: dict[str, Any] = {
         "revision": revision, "applied": record["applied"],
         "suggested": record["suggested"], "rejected": rejected}
+    if record.get("inline"):
+        # Inline citations / formulas / mentions a plain-text update kept
+        # (their text unchanged) or dropped (their text changed).
+        result["inline"] = record["inline"]
     if placed:
         # Whether this op's section heading was made by this change set (the
         # first op naming a new section), so the answer can say so.
