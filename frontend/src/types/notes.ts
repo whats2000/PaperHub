@@ -207,6 +207,26 @@ export interface Mark {
   deleted_at: string | null;
   note_id?: number;
   part_label?: string;
+  /** In the note as an inline citation: the block holding it (null: a
+   * reference block, or in no form). */
+  cite_block_id?: string | null;
+  /** What its reference block holds (Turn into reference block). */
+  block_props?: Record<string, unknown>;
+}
+
+/** Where an inline citation goes: a block and an offset in its text (null:
+ * its end); no block: a new paragraph at the note's end. */
+export interface CiteAt {
+  block_id: string | null;
+  offset: number | null;
+}
+
+/** A short mark landed as an inline citation: its block, the offset just
+ * after the chip, and whether that paragraph was made for it. */
+export interface CitePlaced {
+  block_id: string;
+  offset: number;
+  new_block: boolean;
 }
 
 /** `POST /marks/{id}/split`: the new mark, and the original as it now is. */
@@ -224,6 +244,9 @@ export interface MarkIn {
   section_key: string | null;
   hint_block_id?: string | null;
   join_to?: string | null;
+  /** A short text mark lands here as an inline citation (the server checks
+   * the length too). */
+  cite_at?: CiteAt | null;
 }
 
 export interface SavedTo {
@@ -238,6 +261,7 @@ export interface MarkCreated {
   mark: Mark;
   block: NoteBlock | null;
   saved_to: SavedTo;
+  cite?: CitePlaced | null;
 }
 
 export interface MarkColorInfo {

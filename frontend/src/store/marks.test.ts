@@ -1001,3 +1001,89 @@ describe("the mark undo / redo history", () => {
 function ctrl(key: string, extra: KeyboardEventInit = {}): void {
   document.body.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, ...extra }));
 }
+
+describe("a short mark as an inline citation [user, 2026-11-21]", () => {
+  const CHIP: Mark = { ...MARK, id: "mk_c", block_id: "b_c", note_id: 7 };
+  const placed = { block_id: "p1", offset: 4, new_block: false };
+  let calls: string[] = [];
+  beforeEach(() => {
+    calls = [];
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () =>
+        HttpResponse.json({
+          mark: CHIP,
+          block: null,
+          saved_to: { note_id: 7, paper_title: "", section: null, part_index: 0, part_count: 1 },
+          cite: placed,
+        } satisfies MarkCreated),
+      ),
+      http.delete(`${API_BASE_URL}/marks/mk_c`, ({ request }) => {
+        calls.push(`delete ${new URL(request.url).search}`);
+        return HttpResponse.json({ revision: 1, applied: [], rejected: [] });
+      }),
+      http.post(`${API_BASE_URL}/marks/mk_c/restore`, async ({ request }) => {
+        calls.push(`restore ${await request.text()}`);
+        return HttpResponse.json({ revision: 1, applied: [], rejected: [] });
+      }),
+    );
+  });
+  const body = {
+    paper_content_id: 3, kind: "text", style: "highlight", color: "green", view: "html",
+    pieces: [{ quote: "62%" }], section_key: null, cite_at: { block_id: "p1", offset: 3 },
+  } as never;
+
+  it("puts the note's last caret just after the chip", async () => {
+    await useMarksStore.getState().create(body);
+    expect(useNotesStore.getState().lastCaret[7]).toBe("p1");
+    expect(useNotesStore.getState().lastCaretOffset[7]).toBe(4);
+  });
+
+  it("undo removes the chip and redo puts it back where it was", async () => {
+    await useMarksStore.getState().create(body);
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["delete ?remove_cite=true"]));
+    expect(useMarksStore.getState().marksByPaper[3]).toEqual([]);
+    ctrl("y");
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(JSON.parse(calls[1]!.slice("restore ".length))).toEqual({ cite_at: { block_id: "p1", offset: 3 } });
+  });
+
+  it("undo of a chip in a paragraph made for it drops that paragraph too", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/marks`, () =>
+        HttpResponse.json({
+          mark: CHIP,
+          block: null,
+          saved_to: { note_id: 7, paper_title: "", section: null, part_index: 0, part_count: 1 },
+          cite: { block_id: "p9", offset: 1, new_block: true },
+        } satisfies MarkCreated),
+      ),
+    );
+    await useMarksStore.getState().create(body);
+    ctrl("z");
+    await waitFor(() => expect(calls).toEqual(["delete ?remove_cite=true&drop_block=p9"]));
+  });
+
+  it("a reference block turned into a chip in the editor keeps its mark", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, () =>
+        HttpResponse.json({ note_id: 7, revision: 5, applied: ["b_c", "p1"], rejected: [], suggested: [], reparented: [], change_set_id: "cs" }),
+      ),
+      http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([CHIP])),
+    );
+    useMarksStore.setState({ marksByPaper: { 3: [CHIP] } });
+    const notes = useNotesStore.getState();
+    notes.applyLocal(7, [
+      { op: "delete", block_id: "b_c" },
+      {
+        op: "update",
+        block_id: "p1",
+        block: { type: "paragraph", props: {}, content: [{ type: "markCite", props: { markId: "mk_c", text: "", paperId: 3 } }] },
+      } as never,
+    ]);
+    await notes.flush(7);
+    await waitFor(() => expect(calls).toEqual(["restore "]));
+    expect(useMarksStore.getState().marksByPaper[3]!.map((m) => m.id)).toEqual(["mk_c"]);
+    expect(toastFn).not.toHaveBeenCalled();
+  });
+});

@@ -91,6 +91,12 @@ export interface QuoteTarget {
 
 export interface CaretTarget extends QuoteTarget {
   in?: "pane" | "card";
+  /** Set: the caret goes at this offset in the block's text (right after
+   * a new inline citation) instead of on a new line after it. */
+  offset?: number;
+  /** With `offset`: the inline citation it follows, waited for (the note
+   * reload brings it in). */
+  markId?: string;
 }
 
 export interface CiteRequest {

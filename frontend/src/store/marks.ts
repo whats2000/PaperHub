@@ -26,10 +26,12 @@ import {
 } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
+import { citeBlockOf } from "@/lib/marks/cites";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { DEFAULT_PALETTE } from "@/lib/marks/palette";
 import { onMarkBlocksChanged, useNotesStore } from "@/store/notes";
 import type {
+  CiteAt,
   Mark,
   MarkColor,
   MarkColorInfo,
@@ -57,8 +59,9 @@ function isStale(err: unknown): boolean {
 export type MarkAction =
   /** Marks deleted (one, or a note edit's several). */
   | { kind: "delete"; marks: [paperId: number, mark: Mark][] }
-  /** A new mark. */
-  | { kind: "create"; paperId: number; mark: Mark }
+  /** A new mark (`cite`: it landed as an inline citation at that offset,
+   * `newBlock`: in a paragraph made for it). */
+  | { kind: "create"; paperId: number; mark: Mark; cite?: { blockId: string; offset: number; newBlock: boolean } }
   /** A highlighter stroke joined to an existing mark: its new pieces. */
   | { kind: "join"; paperId: number; markId: string; indexes: number[] }
   /** One piece erased (`deleted`: that left the mark empty, so it went). */
@@ -298,6 +301,21 @@ export function markHint(paperId: number): string | null {
   return last;
 }
 
+/** Where a short mark's inline citation goes: the note's last caret block
+ * and offset (unknown offset: the block's end), else a new paragraph at
+ * the note's end. Null when "Quote from the paper" asked for a reference
+ * block. [user, 2026-11-21] */
+export function inlineCiteAt(paperId: number): CiteAt | null {
+  const n = useNotesStore.getState();
+  const noteId = n.byTarget[`paper:${paperId}`];
+  if (noteId === undefined) return { block_id: null, offset: null };
+  if (n.quoteTarget?.noteId === noteId) return null;
+  const last = n.lastCaret[noteId];
+  const blocks = n.notes[noteId]?.blocks;
+  if (!last || (blocks && !blocks.some((b) => b.id === last))) return { block_id: null, offset: null };
+  return { block_id: last, offset: n.lastCaretOffset[noteId] ?? null };
+}
+
 /** Focus: the marks quoted in the focused note of this paper's note (null
  * when Focus is off), so the others fade on the paper. */
 export function useMarkFocusIds(paperId: number | null): ReadonlySet<string> | null {
@@ -468,11 +486,12 @@ export const useMarksStore = create<MarksState>()(
         }, { onTimeout: failed, paperId }).catch(() => undefined);
       };
 
-      /** A deleted mark and its block back (no toast: it shows). */
-      const restoreStep = (paperId: number, mark: Mark) =>
+      /** A deleted mark and its block back (no toast: it shows); `citeAt`:
+       * its inline citation back there. */
+      const restoreStep = (paperId: number, mark: Mark, citeAt?: CiteAt) =>
         historyStep(paperId, async (signal) => {
           try {
-            await restoreMark(mark.id, signal);
+            await (citeAt ? restoreMark(mark.id, signal, citeAt) : restoreMark(mark.id, signal));
           } catch (err) {
             // Already back (the editor's undo, another tab): the server's copy.
             if (signal.aborted || !isStale(err)) throw err;
@@ -482,12 +501,13 @@ export const useMarksStore = create<MarksState>()(
           refreshNote(mark.note_id);
         });
 
-      /** A mark and its block deleted again, with no notice. */
-      const deleteStep = (paperId: number, mark: Mark) =>
+      /** A mark and its block deleted again, with no notice; `cite`: its
+       * inline citation taken out too. */
+      const deleteStep = (paperId: number, mark: Mark, cite?: { dropBlock: string | null }) =>
         historyStep(paperId, async (signal) => {
           put(paperId, (list) => list.filter((m) => m.id !== mark.id));
           try {
-            await deleteMark(mark.id, signal);
+            await (cite ? deleteMark(mark.id, signal, cite) : deleteMark(mark.id, signal));
           } finally {
             refreshNote(mark.note_id);
           }
@@ -524,10 +544,13 @@ export const useMarksStore = create<MarksState>()(
               else deleteStep(pid, m);
             }
             return;
-          case "create":
-            if (undo) deleteStep(action.paperId, action.mark);
-            else restoreStep(action.paperId, action.mark);
+          case "create": {
+            // A short mark's chip goes with the undo and comes back with the redo.
+            const cite = action.cite;
+            if (undo) deleteStep(action.paperId, action.mark, cite && { dropBlock: cite.newBlock ? cite.blockId : null });
+            else restoreStep(action.paperId, action.mark, cite && { block_id: cite.blockId, offset: cite.offset });
             return;
+          }
           case "join":
             // Undo takes the stroke's pieces off again (newest first).
             for (const i of undo ? [...action.indexes].reverse() : action.indexes) {
@@ -546,11 +569,16 @@ export const useMarksStore = create<MarksState>()(
       onMarkBlocksChanged((noteId, change) => {
         const papers = new Set<number>();
         const gone: [number, Mark][] = [];
+        const blocks = useNotesStore.getState().notes[noteId]?.blocks ?? [];
         for (const [pid, list] of Object.entries(get().marksByPaper)) {
           for (const m of list) {
             if (m.note_id !== noteId) continue;
             papers.add(Number(pid));
-            if (change?.deleted.includes(m.block_id)) gone.push([Number(pid), m]);
+            if (!change?.deleted.includes(m.block_id)) continue;
+            // Its block turned into an inline citation: the same mark in its
+            // other form. The server deleted it with the block; it comes back.
+            if (citeBlockOf(blocks, m.id) !== null) restoreStep(Number(pid), m);
+            else gone.push([Number(pid), m]);
           }
         }
         for (const [key, id] of Object.entries(useNotesStore.getState().byTarget)) {
@@ -799,6 +827,12 @@ export const useMarksStore = create<MarksState>()(
 
         create: async (body, opts) => {
           let res: MarkCreated;
+          // An inline citation goes into a paragraph the user may be typing
+          // in: their edits are saved first, so neither overwrites the other.
+          const citeNote = body.cite_at ? useNotesStore.getState().byTarget[`paper:${body.paper_content_id}`] : undefined;
+          if (citeNote !== undefined && useNotesStore.getState().notes[citeNote]) {
+            await useNotesStore.getState().flush(citeNote).catch(() => undefined);
+          }
           try {
             res = await createMark(body, opts?.signal);
           } catch (err) {
@@ -817,12 +851,17 @@ export const useMarksStore = create<MarksState>()(
             const added = before ? live.filter((i) => i >= before.pieces.length) : live.slice(-1);
             if (added.length) record({ kind: "join", paperId: body.paper_content_id, markId: mark.id, indexes: added }, opts?.group);
           } else {
-            record({ kind: "create", paperId: body.paper_content_id, mark }, opts?.group);
+            const cite = res.cite
+              ? { blockId: res.cite.block_id, offset: res.cite.offset - 1, newBlock: res.cite.new_block }
+              : undefined;
+            record({ kind: "create", paperId: body.paper_content_id, mark, ...(cite ? { cite } : {}) }, opts?.group);
           }
           const notes = useNotesStore.getState();
           if (body.hint_block_id && notes.quoteTarget?.blockId === body.hint_block_id) notes.setQuoteTarget(null);
-          // The next mark goes after this one: marks in a row stay in order.
-          if (!body.join_to && mark.block_id) notes.setLastCaret(saved.note_id, mark.block_id);
+          // The next mark goes after this one: marks in a row stay in order
+          // (after an inline citation: right after the chip).
+          if (res.cite) notes.setLastCaret(saved.note_id, res.cite.block_id, res.cite.offset);
+          else if (!body.join_to && mark.block_id) notes.setLastCaret(saved.note_id, mark.block_id);
           refreshNote(saved.note_id);
           return res;
         },

@@ -11,7 +11,16 @@ import { ApiError } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { joinTarget } from "@/lib/marks/pieces";
 import { notesPaneVisible, useMarkNavStore } from "@/store/markNav";
-import { groupMarkActions, markHint, queueMarkOp, type MarkActionGroup, useMarksStore } from "@/store/marks";
+import { isShortQuote } from "@/components/notes/blocks/markCiteText";
+import { noteBlockOfMark } from "@/lib/marks/cites";
+import {
+  groupMarkActions,
+  inlineCiteAt,
+  markHint,
+  queueMarkOp,
+  type MarkActionGroup,
+  useMarksStore,
+} from "@/store/marks";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { useNotesStore } from "@/store/notes";
 import type { Mark, MarkColor, MarkCreated, MarkIn, MarkKind, MarkPiece, MarkStyle } from "@/types/notes";
@@ -81,7 +90,13 @@ function saveMissing(
     for (const [i, group] of groups.entries()) {
       const k = groupKey(group);
       if (done.has(k)) continue;
-      const full: MarkIn = { ...body, pieces: group.pieces, section_key: group.section, ...translationOf(group) };
+      const full: MarkIn = {
+        ...body,
+        pieces: group.pieces,
+        section_key: group.section,
+        ...translationOf(group),
+        ...citeOf(body, group),
+      };
       const res = opts.save
         ? await opts.save(full, markGroup)
         : await create(full, { silent: opts.silent, group: markGroup });
@@ -92,10 +107,25 @@ function saveMissing(
   });
 }
 
+/** A new text mark whose quote is short goes into the note as an inline
+ * citation at the remembered caret [user, 2026-11-21]; a longer one, a
+ * figure, an equation or a box is a reference block. Read when the mark is
+ * saved, so marks in a row follow the caret from one chip to the next. */
+function citeOf(body: Omit<MarkIn, "pieces" | "section_key">, group: MarkGroup): Pick<MarkIn, "cite_at"> {
+  if (body.kind !== "text" || body.join_to) return {};
+  const quote = group.pieces.map((p) => (typeof p.quote === "string" ? p.quote : "")).join(" ");
+  if (!isShortQuote(quote)) return {};
+  const at = inlineCiteAt(body.paper_content_id);
+  return at ? { cite_at: at } : {};
+}
+
 /** Opens a mark's block in the notes pane (until the note card). */
 export function openMarkInNotes(paperId: number, mark: Mark | undefined): void {
   if (!mark || mark.note_id === undefined) return;
-  useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: mark.block_id });
+  const blocks = useNotesStore.getState().notes[mark.note_id]?.blocks;
+  useNotesPaneStore
+    .getState()
+    .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: noteBlockOfMark(blocks, mark) });
 }
 
 export function useMarkSave(paperId: number | null): {
@@ -148,7 +178,11 @@ export function useMarkSave(paperId: number | null): {
  * on a new line under it, the reader staying; with the pane hidden the note
  * card opens beside the mark, the caret under its quote [user, 2026-11-19]. */
 export function openAfterMark(paperId: number, saved: MarkCreated): void {
-  const target = { noteId: saved.saved_to.note_id, blockId: saved.mark.block_id };
+  // An inline citation: the caret right after the chip, its text field
+  // closed; the pane scrolls to it, the card shows the part holding it.
+  const target = saved.cite
+    ? { noteId: saved.saved_to.note_id, blockId: saved.cite.block_id, offset: saved.cite.offset, markId: saved.mark.id }
+    : { noteId: saved.saved_to.note_id, blockId: saved.mark.block_id };
   if (notesPaneVisible()) {
     useNotesStore.getState().setCaretAfter(target);
     useNotesPaneStore.getState().openAt({ kind: "paper", id: paperId, ...target });

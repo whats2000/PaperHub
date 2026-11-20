@@ -10,9 +10,11 @@ import { toast } from "sonner";
 import { create } from "zustand";
 
 import i18n from "@/lib/i18n";
+import { noteBlockOfMark } from "@/lib/marks/cites";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useMarksStore } from "@/store/marks";
+import { useNotesStore } from "@/store/notes";
 import { rightPanelLayout, useNotesPaneStore } from "@/store/notesPane";
 import { useSlidesStore } from "@/store/slides";
 import { useTranslationStore } from "@/store/translation";
@@ -183,9 +185,10 @@ export function activateMark(paperId: number, markId: string): void {
   }
   const open = (mark: Mark | null) => {
     if (mark?.note_id === undefined) return false;
+    const blocks = useNotesStore.getState().notes[mark.note_id]?.blocks;
     useNotesPaneStore
       .getState()
-      .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: mark.block_id });
+      .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: noteBlockOfMark(blocks, mark) });
     return true;
   };
   if (open(findMark(markId))) return;

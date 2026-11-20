@@ -62,6 +62,7 @@ import type {
 import type {
   ApplyResult,
   ChangeSetStatus,
+  CiteAt,
   Mark,
   MarkColor,
   MarkColorInfo,
@@ -1375,12 +1376,29 @@ export async function listMarks(paperContentId: number, signal?: AbortSignal): P
   return apiFetch<Mark[]>(`/marks?paper_content_id=${paperContentId}`, { signal });
 }
 
-export async function deleteMark(markId: string, signal?: AbortSignal): Promise<ApplyResult> {
-  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}`, { method: "DELETE", signal });
+/** `cite`: Undo of a short mark's creation also takes its inline citation
+ * out (`dropBlock`: the paragraph made for it, when left empty). */
+export async function deleteMark(
+  markId: string,
+  signal?: AbortSignal,
+  cite?: { dropBlock: string | null },
+): Promise<ApplyResult> {
+  const q = new URLSearchParams();
+  if (cite) {
+    q.set("remove_cite", "true");
+    if (cite.dropBlock) q.set("drop_block", cite.dropBlock);
+  }
+  const qs = q.size ? `?${q.toString()}` : "";
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}${qs}`, { method: "DELETE", signal });
 }
 
-export async function restoreMark(markId: string, signal?: AbortSignal): Promise<ApplyResult> {
-  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}/restore`, { method: "POST", signal });
+/** `citeAt`: Redo of a short mark's creation puts its inline citation back there. */
+export async function restoreMark(markId: string, signal?: AbortSignal, citeAt?: CiteAt): Promise<ApplyResult> {
+  return apiFetch<ApplyResult>(`/marks/${encodeURIComponent(markId)}/restore`, {
+    method: "POST",
+    signal,
+    ...(citeAt ? { body: JSON.stringify({ cite_at: citeAt }) } : {}),
+  });
 }
 
 export async function erasePiece(markId: string, index: number, signal?: AbortSignal): Promise<Mark> {
