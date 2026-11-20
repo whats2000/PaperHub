@@ -308,6 +308,15 @@ async def _note_with_mark(conn: aiosqlite.Connection, pcid: int, section: str) -
     return str(m["id"])
 
 
+async def _section_heading(conn: aiosqlite.Connection, pcid: int, section: str) -> None:
+    """A heading keyed to ``section``: marking no longer adds one, but notes
+    written before that, and the agent's ``ensure_section``, still do."""
+    from paperhub.notes.papers import ensure_section, paper_note
+
+    note = await paper_note(conn, pcid)
+    await ensure_section(conn, note.id, pcid, section)
+
+
 @pytest.mark.asyncio
 async def test_section_rename_moves_note_heading(
     conn: aiosqlite.Connection, tmp_path: Path,
@@ -317,6 +326,7 @@ async def test_section_rename_moves_note_heading(
 
     pcid, _ = await _seed_latex_paper(conn, tmp_path)
     mark_id = await _note_with_mark(conn, pcid, "\\algo{")
+    await _section_heading(conn, pcid, "\\algo{")
     await _reingest_one(pcid, conn=conn, dry_run=False)
 
     note = await paper_note(conn, pcid)
@@ -344,6 +354,7 @@ async def test_dropped_section_heading_marked_lost(
 
     pcid, _ = await _seed_latex_paper(conn, tmp_path)
     await _note_with_mark(conn, pcid, "\\algo{")
+    await _section_heading(conn, pcid, "\\algo{")
     async with conn.execute("SELECT id FROM chunks WHERE section = '\\algo{'") as cur:
         ids = [int(r[0]) for r in await cur.fetchall()]
     await apply_section_renames(conn, pcid, {i: None for i in ids})
