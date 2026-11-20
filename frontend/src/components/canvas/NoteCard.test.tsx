@@ -18,6 +18,8 @@ import { useNotesPaneStore } from "@/store/notesPane";
 import { clearPendingNoteOps, pendingNoteOps, useNotesStore } from "@/store/notes";
 import { useTranslationStore } from "@/store/translation";
 import type { Mark, NoteBlock } from "@/types/notes";
+import { undo } from "@tiptap/pm/history";
+import type { EditorView } from "@tiptap/pm/view";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -707,11 +709,15 @@ describe("two editors on one note, fix round 2", () => {
   });
 });
 
-describe("inline citations from the note card", () => {
+describe("inline citations: a form of the same mark [user, 2026-11-21]", () => {
   const QUOTE = "attention is all you need, said the paper";
   const DEFAULT = "attention is all you nee…";
+  const props1 = {
+    markId: "mk_1", color: "green", kind: "text", style: "highlight", quote: QUOTE,
+    pieces: [{ quote: QUOTE, page: 1 }], source: { page: 1, section: "2 Method" },
+  };
   const marks = () => [
-    mark("mk_1", "q1", { pieces: [{ quote: QUOTE, page: 1 }] }),
+    mark("mk_1", "q1", { pieces: [{ quote: QUOTE, page: 1 }], block_props: props1 }),
     mark("mk_2", "q2"),
     mark("mk_3", "q3"),
   ];
@@ -721,63 +727,35 @@ describe("inline citations from the note card", () => {
     pendingNoteOps(7)
       .flatMap((o) => (Array.isArray(o.block?.content) ? o.block.content : []))
       .find((r) => (r as { type?: string }).type === "markCite") as { props: Record<string, unknown> } | undefined;
-
-  /** Opens the card and inserts, the note's remembered caret being the one
-   * set before (opening the card moves it onto the clicked reference, so
-   * it is put back, as the user's click into the note would). */
-  async function insert() {
-    const { lastCaret, lastCaretOffset } = useNotesStore.getState();
-    const card = await openCard();
-    await waitFor(() => expect(outer("p2")).not.toBeNull());
-    act(() => {
-      useNotesStore.setState({ lastCaret, lastCaretOffset });
+  const cited = () =>
+    blk("p4", {
+      content: [
+        { type: "text", text: "rose to ", styles: {} },
+        { type: "markCite", props: { markId: "mk_1", text: "", paperId: 3 } },
+      ],
+      text: "rose to",
     });
-    fireEvent.click(within(card).getByRole("button", { name: "Insert as inline citation" }));
-    await waitFor(() => expect(chip()).not.toBeNull());
-    return card;
+  /** The note in the pane: `blocks`, the editor's undo reachable. */
+  async function pane(blocks: NoteBlock[]) {
+    seed(marks());
+    useNotesStore.setState((s) => ({ notes: { 7: { ...s.notes[7]!, blocks } } }));
+    render(<NoteEditor noteId={7} variant="pane" />);
+    await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
   }
+  const pm = () =>
+    (document.querySelector(".ProseMirror") as unknown as { editor: { view: EditorView } }).editor.view;
+  const editorUndo = () => act(() => void undo(pm().state, pm().dispatch));
+  const ids = () => [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
 
-  it("goes in at the note's last caret, its text field open with the default selected; typing replaces it", async () => {
+  it("the note card has no Cite inline button any more", async () => {
     seed(marks());
-    useNotesStore.setState({ lastCaret: { 7: "p2" }, lastCaretOffset: { 7: 2 } });
-    await insert();
-    expect(outer("p2")!.textContent).toMatch(/^My.*thoughts/);
-    expect(outer("p2")!.querySelector("[data-mark-cite]")).not.toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(field()));
-    expect(field().value).toBe(DEFAULT);
-    expect([field().selectionStart, field().selectionEnd]).toEqual([0, DEFAULT.length]);
-    fireEvent.change(field(), { target: { value: "62%" } });
-    fireEvent.keyDown(field(), { key: "Enter" });
-    await waitFor(() => expect(chip()!.textContent).toBe("62%"));
-    await waitFor(() => expect(sentCite()?.props).toMatchObject({ markId: "mk_1", text: "62%" }));
-  });
-
-  it("left empty, shows the quote's start (stored as no text)", async () => {
-    seed(marks());
-    useNotesStore.setState({ lastCaret: { 7: "p2" }, lastCaretOffset: {} });
-    await insert();
-    await waitFor(() => expect(document.activeElement).toBe(field()));
-    fireEvent.change(field(), { target: { value: "" } });
-    fireEvent.keyDown(field(), { key: "Escape" });
-    await waitFor(() => expect(chip()!.textContent).toBe(DEFAULT));
-    // At the end of the caret's block (no offset known).
-    expect(outer("p2")!.textContent).toMatch(/^My thoughts/);
-    await waitFor(() => expect(sentCite()?.props).toMatchObject({ markId: "mk_1", text: "" }));
-  });
-
-  it("with no caret in the shown note, goes on a new line at its end", async () => {
-    seed(marks());
-    useNotesStore.setState({ lastCaret: {}, lastCaretOffset: {} });
-    await insert();
-    const line = chip()!.closest(".bn-block-outer");
-    expect(line?.previousElementSibling?.getAttribute("data-id")).toBe("p2");
+    const card = await openCard();
+    expect(within(card).queryByRole("button", { name: /^(cite inline|insert as inline citation)$/i })).toBeNull();
   });
 
   it("opens the reader at its mark on a click, and previews the quote on hover (the pencil edits)", async () => {
-    seed(marks());
-    useNotesStore.setState({ lastCaret: { 7: "p2" }, lastCaretOffset: {} });
-    await insert();
-    fireEvent.keyDown(field(), { key: "Enter" });
+    await pane([...BLOCKS, cited()]);
+    await waitFor(() => expect(chip()!.textContent).toBe(DEFAULT));
     act(() => {
       useCanvasStore.setState({ requestedPaperId: null });
     });
@@ -788,6 +766,63 @@ describe("inline citations from the note card", () => {
     expect(preview.textContent).toContain(QUOTE);
     fireEvent.click(within(preview).getByRole("button", { name: "Edit the citation text" }));
     await waitFor(() => expect(document.activeElement).toBe(field()));
+    fireEvent.change(field(), { target: { value: "62%" } });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(chip()!.textContent).toBe("62%"));
+    await waitFor(() => expect(sentCite()?.props).toMatchObject({ markId: "mk_1", text: "62%" }));
+  });
+
+  it("hover a chip: Turn into reference block puts the mark's block after its paragraph, one undo", async () => {
+    const blocks = BLOCKS.filter((b) => b.id !== "q1");
+    await pane([...blocks, cited(), para("p5", "after")]);
+    await waitFor(() => expect(chip()).not.toBeNull());
+    fireEvent.mouseEnter(chip()!);
+    const preview = await screen.findByTestId("mark-cite-preview-mk_1");
+    fireEvent.click(within(preview).getByRole("button", { name: "Turn into reference block" }));
+    await waitFor(() => expect(chip()).toBeNull());
+    const order = ids();
+    expect(order.slice(order.indexOf("p4"), order.indexOf("p4") + 3)).toEqual(["p4", "q1", "p5"]);
+    // The same mark: its own block id and mark id, no mark made or deleted.
+    expect(screen.getByTestId("paper-ref-q1")).toBeInTheDocument();
+    expect(deleteMark).not.toHaveBeenCalled();
+    editorUndo();
+    await waitFor(() => expect(chip()).not.toBeNull());
+    expect(ids()).not.toContain("q1");
+  });
+
+  it("hover a reference block: Turn into inline citation appends the chip to the text block above, one undo", async () => {
+    // p2 ("My thoughts") right before the mark's block.
+    await pane([para("p1", "First"), para("p2", "My thoughts"), ref("q1", "mk_1", QUOTE), para("p3", "Later")]);
+    const order = ids();
+    expect(order[order.indexOf("q1") - 1]).toBe("p2");
+    fireEvent.click(within(screen.getByTestId("paper-ref-q1")).getByRole("button", { name: "Turn into inline citation" }));
+    await waitFor(() => expect(chip()).not.toBeNull());
+    expect(ids()).not.toContain("q1");
+    expect(outer("p2")!.textContent).toMatch(/^My thoughts /);
+    expect(outer("p2")!.querySelector('[data-mark-cite="mk_1"]')).not.toBeNull();
+    expect(restoreMark).not.toHaveBeenCalled();
+    editorUndo();
+    await waitFor(() => expect(screen.getByTestId("paper-ref-q1")).toBeInTheDocument());
+    expect(chip()).toBeNull();
+  });
+
+  it("with no text block above, Turn into inline citation makes a paragraph holding just the chip", async () => {
+    await pane([ref("q1", "mk_1", QUOTE), para("p2", "My thoughts")]);
+    fireEvent.click(within(screen.getByTestId("paper-ref-q1")).getByRole("button", { name: "Turn into inline citation" }));
+    await waitFor(() => expect(chip()).not.toBeNull());
+    const line = chip()!.closest<HTMLElement>(".bn-block-outer")!;
+    expect(line.textContent).toBe(DEFAULT);
+    expect(ids()).toEqual([line.getAttribute("data-id"), "p2"]);
+  });
+
+  it("a figure's reference block offers no inline form", async () => {
+    const fig = blk("f1", {
+      type: "paperQuote",
+      props: { ...props1, markId: "mk_2", kind: "figure" },
+      text: "fig",
+    });
+    await pane([para("p2", "My thoughts"), fig]);
+    expect(within(screen.getByTestId("paper-ref-f1")).queryByRole("button", { name: "Turn into inline citation" })).toBeNull();
   });
 
   it("shows its mark deleted as a dashed chip (its text kept), and comes back with Undo of the delete", async () => {

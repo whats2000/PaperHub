@@ -451,6 +451,17 @@
 @media (prefers-reduced-motion: reduce) {
     .paperhub-notes .bn-block-outer > .bn-block > .bn-block-content { transition: none; }
 }
+/* A mark turned into an inline citation: the chip it became flashes the same ring. */
+.paperhub-notes [data-mark-cite] > [data-mark-cite-chip] {
+    transition: box-shadow 1s ease-out, background-color 150ms, color 150ms;
+}
+.paperhub-notes [data-mark-cite][data-flash] > [data-mark-cite-chip] {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 35%, transparent);
+    transition: box-shadow 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+    .paperhub-notes [data-mark-cite] > [data-mark-cite-chip] { transition: none; }
+}
 .paperhub-notes .bn-block-outer[data-fade="true"] {
     opacity: 0.45;
     cursor: pointer;

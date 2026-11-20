@@ -16,6 +16,9 @@
   },
   "ref": {
     "fromPaper": "出自论文",
+    "toCite": "转换成行内引用",
+    "toCiteShort": "行内引用",
+    "toCiteHint": "改为在上一行末尾以行内引用呈现",
     "figure": "论文中的图",
     "equation": "论文中的公式",
     "region": "论文中的区域",
@@ -158,7 +161,7 @@
       "highlighter": "荧光笔",
       "box": "框选",
       "clickMark": "点击标记",
-      "inlineCite": "行内引用（笔记卡片）"
+      "inlineCite": "标记一小段"
     },
     "rows": {
       "bold": "粗体",
@@ -206,7 +209,7 @@
       "inlineMath": "行内公式（LaTeX），点一下即可编辑",
       "mathDone": "在公式中：完成（Shift+Enter 换行）",
       "find": "在笔记中查找（Enter：下一个，Shift+Enter：上一个）",
-      "inlineCite": "用你的文字引用标记；悬停后点 ✎ 修改"
+      "inlineCite": "以行内引用插在光标处；悬停引用可切换形式"
     }
   },
   "code": {
@@ -301,7 +304,9 @@
     "openNamed": "打开引用的段落：{{text}}",
     "edit": "编辑引用文字",
     "markGone": "来源已删除",
-    "markGoneTitle": "它标记的段落已删除（撤销可恢复）"
+    "markGoneTitle": "它标记的段落已删除（撤销可恢复）",
+    "toBlock": "转换成引用区块",
+    "toBlockShort": "引用区块"
   },
   "marks": {
     "popover": "标记选中的文字",
@@ -394,10 +399,7 @@
     "offScreen": "标记不在屏幕上",
     "trTurnOn": "开启翻译",
     "partOnly": "· 第 {{index}} 条，共 {{count}} 条",
-    "colorChip": "颜色：{{name}}",
-    "citeInline": "插入为行内引用",
-    "citeInlineHint": "在你的文字中用自己的简短说法引用这段",
-    "citeInlineShort": "行内引用"
+    "colorChip": "颜色：{{name}}"
   },
   "myMarks": {
     "button": "我的标记",

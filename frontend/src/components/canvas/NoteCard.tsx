@@ -11,7 +11,7 @@
  * outside or the close button closes it: it shrinks back toward the mark. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Quote, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Languages, NotebookPen, PanelRightOpen, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -20,6 +20,7 @@ import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
 import { CARD_EDGE, NOTE_MIN_SIDE_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { sameLanguage } from "@/lib/language";
+import { noteBlockOfMark } from "@/lib/marks/cites";
 import { prefersReducedMotion } from "@/lib/motion";
 import { readerTrackSliding } from "@/lib/readerTrack";
 import { truncatedTitle } from "@/lib/truncatedTitle";
@@ -168,7 +169,8 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
   }, [open, marksLoaded, mark, closeCard]);
 
   const section = useMemo(
-    () => (note && mark ? sectionNotes(note.blocks, mark.block_id) : null),
+    // A mark in its note as an inline citation: the part holding the chip.
+    () => (note && mark ? sectionNotes(note.blocks, noteBlockOfMark(note.blocks, mark)) : null),
     [note, mark],
   );
   const current = section ? (section.parts.find((p) => p.id === target.partId) ?? section.parts[section.index]) : null;
@@ -366,25 +368,6 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
     () => (current ? { partId: current.id, markId, onJump } : undefined),
     [current, markId, onJump],
   );
-
-  // "Insert as inline citation": at the note's last caret when it is in this
-  // section (its note shown), else on a new line at the end of the shown note.
-  const insertCite = () => {
-    if (noteId === undefined || !current) return;
-    const notes = useNotesStore.getState();
-    const last = notes.lastCaret[noteId] ?? null;
-    const holder = last ? section?.parts.find((p) => p.blocks.some((b) => b.id === last)) : undefined;
-    if (holder && holder.id !== current.id) showPart(holder.id);
-    notes.setCiteRequest({
-      noteId,
-      markId,
-      paperId,
-      in: "card",
-      blockId: holder ? last : null,
-      offset: holder ? (notes.lastCaretOffset[noteId] ?? null) : null,
-      fallbackAfter: current.blocks[current.blocks.length - 1]?.id ?? null,
-    });
-  };
 
   if (!placement) return null;
   const side = placement.side;
@@ -597,23 +580,17 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
         <span className="min-w-0 truncate">{t("noteCard.footer", "Edit right here · saved automatically")}</span>
         <button
           type="button"
-          disabled={noteId === undefined || !current}
-          aria-label={t("noteCard.citeInline", "Insert as inline citation")}
-          title={t("noteCard.citeInlineHint", "Cite this passage inside your text, with your own short words")}
-          onClick={insertCite}
-          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-        >
-          <Quote className="size-3" aria-hidden />
-          {t("noteCard.citeInlineShort", "Cite inline")}
-        </button>
-        <button
-          type="button"
           disabled={noteId === undefined}
           onClick={() => {
             if (noteId === undefined) return;
             useNotesPaneStore
               .getState()
-              .openAt({ kind: "paper", id: paperId, noteId, blockId: mark?.block_id ?? null });
+              .openAt({
+                kind: "paper",
+                id: paperId,
+                noteId,
+                blockId: mark ? noteBlockOfMark(note?.blocks, mark) : null,
+              });
             closeCard();
           }}
           className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-foreground transition-colors hover:bg-accent disabled:opacity-50"

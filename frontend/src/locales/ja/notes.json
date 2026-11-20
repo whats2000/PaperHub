@@ -16,6 +16,9 @@
   },
   "ref": {
     "fromPaper": "論文より",
+    "toCite": "インライン引用に変換",
+    "toCiteShort": "インライン引用",
+    "toCiteHint": "代わりに上の行の末尾でインライン引用にする",
     "figure": "論文の図",
     "equation": "論文の数式",
     "region": "論文の領域",
@@ -158,7 +161,7 @@
       "highlighter": "蛍光ペン",
       "box": "ボックス",
       "clickMark": "マークをクリック",
-      "inlineCite": "インライン引用（ノートカード）"
+      "inlineCite": "短い箇所をマーク"
     },
     "rows": {
       "bold": "太字",
@@ -206,7 +209,7 @@
       "inlineMath": "インライン数式（LaTeX）。クリックで編集",
       "mathDone": "数式内：完了（Shift+Enter で改行）",
       "find": "ノート内を検索（Enter：次へ、Shift+Enter：前へ）",
-      "inlineCite": "自分の言葉でマークを引用。ホバーして ✎ で変更"
+      "inlineCite": "カーソル位置にインライン引用として入る。引用にホバーで形式を切替"
     }
   },
   "code": {
@@ -301,7 +304,9 @@
     "openNamed": "引用箇所を開く：{{text}}",
     "edit": "引用テキストを編集",
     "markGone": "削除された出典",
-    "markGoneTitle": "マークした箇所は削除されました（元に戻すで復活）"
+    "markGoneTitle": "マークした箇所は削除されました（元に戻すで復活）",
+    "toBlock": "引用ブロックに変換",
+    "toBlockShort": "引用ブロック"
   },
   "marks": {
     "popover": "選択箇所に印をつける",
@@ -394,10 +399,7 @@
     "offScreen": "マークは画面外です",
     "trTurnOn": "翻訳をオンにする",
     "partOnly": "· ノート {{index}} / {{count}}",
-    "colorChip": "色：{{name}}",
-    "citeInline": "インライン引用として挿入",
-    "citeInlineHint": "この箇所を自分の短い言葉で本文中に引用",
-    "citeInlineShort": "インライン引用"
+    "colorChip": "色：{{name}}"
   },
   "myMarks": {
     "button": "マイマーク",

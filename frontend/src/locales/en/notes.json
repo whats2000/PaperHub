@@ -16,6 +16,9 @@
   },
   "ref": {
     "fromPaper": "From the paper",
+    "toCite": "Turn into inline citation",
+    "toCiteShort": "Inline citation",
+    "toCiteHint": "Cite it at the end of the line above instead",
     "figure": "Figure from the paper",
     "equation": "Equation from the paper",
     "region": "Region of the paper",
@@ -158,7 +161,7 @@
       "highlighter": "Highlighter",
       "box": "Box",
       "clickMark": "Click a mark",
-      "inlineCite": "Cite inline (note card)"
+      "inlineCite": "Mark a short passage"
     },
     "rows": {
       "bold": "bold",
@@ -206,7 +209,7 @@
       "inlineMath": "Inline equation (LaTeX); click it to edit",
       "mathDone": "In an equation: done (Shift+Enter: new line)",
       "find": "Find in the note (Enter: next, Shift+Enter: previous)",
-      "inlineCite": "Your words cite the mark; hover it, then ✎ to change them"
+      "inlineCite": "It lands inline at the caret; hover a citation to switch form"
     }
   },
   "code": {
@@ -301,7 +304,9 @@
     "openNamed": "Open the cited passage: {{text}}",
     "edit": "Edit the citation text",
     "markGone": "Deleted source",
-    "markGoneTitle": "Its marked passage was deleted (Undo brings it back)"
+    "markGoneTitle": "Its marked passage was deleted (Undo brings it back)",
+    "toBlock": "Turn into reference block",
+    "toBlockShort": "Reference block"
   },
   "marks": {
     "popover": "Mark the selection",
@@ -394,10 +399,7 @@
     "offScreen": "The mark is off screen",
     "trTurnOn": "Turn on translation",
     "partOnly": "· note {{index}} of {{count}}",
-    "colorChip": "Colour: {{name}}",
-    "citeInline": "Insert as inline citation",
-    "citeInlineHint": "Cite this passage inside your text, with your own short words",
-    "citeInlineShort": "Cite inline"
+    "colorChip": "Colour: {{name}}"
   },
   "myMarks": {
     "button": "My marks",

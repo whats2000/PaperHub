@@ -16,6 +16,9 @@ export interface NoteEditorContextValue {
   /** In the note card: the mark clicked (only its reference is tinted) and
    * where another reference's Show ↗ goes. */
   card?: { markId: string; onJump: (markId: string) => void } | null;
+  /** Turn a text mark's reference block into an inline citation (absent:
+   * not a paper note's editor). */
+  turnIntoCite?: (blockId: string, markId: string) => void;
 }
 
 export const NoteEditorContext = createContext<NoteEditorContextValue>({

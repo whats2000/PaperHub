@@ -15,6 +15,7 @@ import {
   type DefaultReactSuggestionItem,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
+import { TextSelection } from "@tiptap/pm/state";
 import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
 import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
@@ -24,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { listLibrary } from "@/lib/api";
+import { runsCite } from "@/lib/marks/cites";
 import { prefersReducedMotion } from "@/lib/motion";
 import { propText } from "@/lib/notes/ops";
 import { cn } from "@/lib/utils";
@@ -32,7 +34,8 @@ import { useNotesStore } from "@/store/notes";
 
 import { atomCaret } from "./atomCaret";
 import { insertInlineMath } from "./blocks/InlineMath";
-import { insertMarkCite } from "./blocks/MarkCite";
+import { textRange } from "./blocks/MarkCite";
+import { turnBlockIntoCite } from "./blocks/citeForms";
 import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
@@ -362,7 +365,19 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     if (!caretAfter || (caretAfter.in ?? "pane") !== variant) return;
     const block = editor.getBlock(caretAfter.blockId);
     if (!block) return;
+    // Right after a new inline citation: once the reload has brought it in.
+    if (caretAfter.markId && !runsCite(block.content, caretAfter.markId)) return;
     setCaretAfter(null);
+    if (caretAfter.offset !== undefined) {
+      // Right after a new inline citation, in its paragraph.
+      const view = editor._tiptapEditor.view;
+      const range = textRange(view, block.id);
+      if (!range) return;
+      const at = range.start + Math.max(0, Math.min(caretAfter.offset, range.size));
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)).scrollIntoView());
+      editor.focus();
+      return;
+    }
     const next = editor.getNextBlock(block);
     const emptyLine =
       next?.type === "paragraph" && Array.isArray(next.content) && next.content.length === 0 ? next : null;
@@ -371,15 +386,6 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     editor.setTextCursorPosition(line, "start");
     editor.focus();
   }, [caretAfter, editor, reload, variant, setCaretAfter]);
-
-  // "Insert as inline citation" (the note card): at the note's last caret,
-  // its text field open.
-  const citeRequest = useNotesStore((s) => (s.citeRequest?.noteId === noteId ? s.citeRequest : null));
-  useEffect(() => {
-    if (!citeRequest || citeRequest.in !== variant) return;
-    useNotesStore.getState().setCiteRequest(null);
-    insertMarkCite(editor, citeRequest);
-  }, [citeRequest, editor, variant]);
 
   // The part decorations read the store; redraw them when it changes.
   useEffect(() => {
@@ -588,8 +594,14 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       // The paper's own title (the note's page title may be renamed).
       paperTitle: paperContentId !== null ? defaultTitle || note.title : null,
       card: cardMarkId !== null && onJump ? { markId: cardMarkId, onJump } : null,
+      // A reference block's hover: Turn into inline citation.
+      turnIntoCite:
+        paperContentId !== null
+          ? (blockId: string, markId: string) =>
+              void turnBlockIntoCite(editor, blockId, markId, paperContentId)
+          : undefined,
     }),
-    [noteId, paperContentId, note.title, defaultTitle, cardMarkId, onJump],
+    [noteId, paperContentId, note.title, defaultTitle, cardMarkId, onJump, editor],
   );
 
   return (

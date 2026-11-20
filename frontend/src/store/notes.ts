@@ -99,18 +99,6 @@ export interface CaretTarget extends QuoteTarget {
   markId?: string;
 }
 
-export interface CiteRequest {
-  noteId: number;
-  markId: string;
-  paperId: number;
-  in: "pane" | "card";
-  /** The block the citation goes into (null: a new line), and where. */
-  blockId: string | null;
-  offset: number | null;
-  /** A new line goes after this block (null: the note's end). */
-  fallbackAfter: string | null;
-}
-
 interface NotesStore {
   notes: Record<number, NoteState>;
   /** `${kind}:${id}` -> note id. */
@@ -155,11 +143,6 @@ interface NotesStore {
   /** Where in that block's text the caret was (unknown: absent). */
   lastCaretOffset: Record<number, number>;
   setLastCaret: (noteId: number, blockId: string, offset?: number | null) => void;
-  /** "Insert as inline citation" (the note card): the editor of `in` puts
-   * an inline citation of the mark at the note's last caret, then clears
-   * the request. */
-  citeRequest: CiteRequest | null;
-  setCiteRequest: (req: CiteRequest | null) => void;
   /** "Add note" on a reader selection: once the editor shows this block it
    * puts the caret on a line after it, then clears the request (dropped
    * after CARET_GIVE_UP_MS if the block never shows). */
@@ -1005,8 +988,6 @@ export const useNotesStore = create<NotesStore>()(
             });
           }
         },
-        citeRequest: null,
-        setCiteRequest: (req) => set({ citeRequest: req }),
         caretAfter: null,
         setCaretAfter: (target) => {
           set({ caretAfter: target });

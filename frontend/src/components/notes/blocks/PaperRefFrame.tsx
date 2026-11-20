@@ -7,7 +7,7 @@
  * reference of the mark under the pointer on the paper is tinted. */
 import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowUpRight, FileText, Languages, Unlink } from "lucide-react";
+import { ArrowUpRight, FileText, Languages, Quote, Unlink } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { truncatedTitle } from "@/lib/truncatedTitle";
@@ -41,7 +41,7 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
   const colorName = useColorName(props.color);
   const src = markSource(props);
   const pieces = markPieces(props);
-  const { card, paperTitle } = useNoteEditorContext();
+  const { card, paperTitle, turnIntoCite } = useNoteEditorContext();
   const where = whereLabel(src, t, paperTitle);
   const tag = [label, colorName, where].filter(Boolean).join(" · ");
   const bar = props.color ? `var(--hl-${props.color})` : "var(--muted-foreground)";
@@ -58,7 +58,7 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
       data-target={target ? "true" : undefined}
       contentEditable={false}
       className={cn(
-        "w-full rounded-r-md border-l-[3px] border-(--mc) py-0.5 pr-2 pl-2.5 transition-colors duration-200 ease-out motion-reduce:transition-none",
+        "group/ref w-full rounded-r-md border-l-[3px] border-(--mc) py-0.5 pr-2 pl-2.5 transition-colors duration-200 ease-out motion-reduce:transition-none",
         target && "bg-[color-mix(in_srgb,var(--mc)_16%,transparent)]",
       )}
       style={{ ["--mc" as string]: bar }}
@@ -81,10 +81,24 @@ export function PaperRefFrame({ blockId, props, icon, label, tagExtra, children 
           </span>
         )}
         {tagExtra}
+        <span className="ml-auto" />
+        {/* [user, 2026-11-21] Hover: the other form of the same mark. */}
+        {turnIntoCite && props.kind === "text" && props.markId && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 rounded px-1 text-muted-foreground opacity-0 transition-[opacity,color,background-color] duration-150 group-hover/ref:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 motion-reduce:transition-none"
+            title={t("notes:ref.toCiteHint", "Cite it at the end of the line above instead")}
+            aria-label={t("notes:ref.toCite", "Turn into inline citation")}
+            onClick={() => turnIntoCite(blockId, props.markId)}
+          >
+            <Quote className="size-3" aria-hidden />
+            {t("notes:ref.toCiteShort", "Inline citation")}
+          </button>
+        )}
         {jumper && (
           <button
             type="button"
-            className="ml-auto inline-flex items-center gap-0.5 rounded px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="inline-flex items-center gap-0.5 rounded px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             title={t("notes:noteCard.showHint", "Show this passage in the paper")}
             aria-label={t("notes:noteCard.showNamed", "Show this passage in the paper: {{where}}", { where: tag })}
             onClick={() => jumper.onJump(props.markId)}

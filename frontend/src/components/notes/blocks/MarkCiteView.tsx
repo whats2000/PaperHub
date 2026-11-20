@@ -2,11 +2,12 @@
  * quote's start) in citation yellow, with a tiny quote glyph. Hovering it
  * previews the quote and where it is; a click opens the reader at the mark
  * (as a reference block's source chip does); the pencil in the preview
- * edits its text. Its mark deleted: a dashed, muted chip (Undo of the
+ * edits its text and Turn into reference block switches the mark's form
+ * [user, 2026-11-21]. Its mark deleted: a dashed, muted chip (Undo of the
  * delete brings it back as it was). */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Quote } from "lucide-react";
+import { Pencil, Quote, TextQuote } from "lucide-react";
 import "katex/dist/katex.min.css";
 
 import { Popover, PopoverContent } from "@/components/ui/popover";
@@ -28,20 +29,19 @@ export function MarkCiteView({
   markId,
   text,
   paperId: ownPaper,
-  autoEdit = false,
   onCommit,
   onLeave,
-  onMounted,
+  onTurnIntoBlock,
 }: {
   markId: string;
   text: string;
   /** The mark's paper (0: the note's paper). */
   paperId: number;
-  autoEdit?: boolean;
   /** Editing ended with this text ("" = the default). */
   onCommit: (text: string) => void;
   onLeave?: (side: "before" | "after") => void;
-  onMounted?: () => void;
+  /** Turn into reference block (the mark's paper). */
+  onTurnIntoBlock?: (paperId: number | null) => void;
 }) {
   const { t } = useTranslation();
   const ctx = useNoteEditorContext();
@@ -59,13 +59,9 @@ export function MarkCiteView({
   const fallback = citeDefaultText(quote);
   const shown = text || fallback || (missing ? t("notes:cite.markGone", "Deleted source") : "…");
 
-  const [editing, setEditing] = useState(autoEdit);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(shown);
   const field = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    onMounted?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   // A new chip's default arrives with the mark: the draft follows until typed in.
   const typed = useRef(false);
   useEffect(() => {
@@ -201,6 +197,21 @@ export function MarkCiteView({
             <span className="min-w-0 flex-1 truncate">
               {missing ? t("notes:cite.markGone", "Deleted source") : place || t("notes:ref.thePaper", "The paper")}
             </span>
+            {onTurnIntoBlock && mark?.block_props && (
+              <button
+                type="button"
+                aria-label={t("notes:cite.toBlock", "Turn into reference block")}
+                title={t("notes:cite.toBlock", "Turn into reference block")}
+                className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => {
+                  setPreview(false);
+                  onTurnIntoBlock(paperId);
+                }}
+              >
+                <TextQuote className="size-3" aria-hidden />
+                {t("notes:cite.toBlockShort", "Reference block")}
+              </button>
+            )}
             <button
               type="button"
               aria-label={t("notes:cite.edit", "Edit the citation text")}
