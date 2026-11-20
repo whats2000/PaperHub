@@ -1299,7 +1299,8 @@ Issue #51 is the design of record [user]; this section adds what the design revi
 
 Users report that `[chunk:N]` citations help little — they want the exact sentence [user, 2026-11-21] — and the agent today writes answers in Markdown with bracket markers but notes through a separate block / op shape that loses data (the H5b.1 audit bullet above). H5f makes **one format** for both, built before the evidence table (#52), which uses it.
 
-- **Goals**: (1) one format the agent writes for a chat answer and for a note edit; (2) a citation shows the exact words it rests on; (3) read → edit → write of any note is lossless; (4) the format guide reaches the model only when needed.
+- **Goals**: (1) one format the agent writes for a chat answer and for a note edit; (2) a citation shows the exact words it rests on; (3) read → edit → write of any note is lossless; (4) the format guide reaches the model only when needed; (5) **a conversation is itself a note** [user, 2026-11-21] — the product reason one format matters: what the user learned in a chat can be kept, edited and exported with nothing lost.
+- **Conversations as notes** [user, 2026-11-21]: any answer, or a whole conversation, exports through the **same note exporter** (Markdown / `.docx`: quote citations as footnotes with paper, section and page; math kept as math; tables as tables) — no separate chat exporter. **Save answer to note** / **Save conversation as note** move the content over unchanged; each user turn becomes a callout-like **"You asked"** block [call].
 - **Non-goals**: statistics or charts in answers / tables (later [user]); the agent choosing text colour (colours are the user's mark meanings [call]); changing the paper side of marks.
 - **Anti-goals**: a format the deployed model writes unreliably; two formats to maintain (Markdown for chat, blocks for notes).
 
