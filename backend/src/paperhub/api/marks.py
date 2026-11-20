@@ -13,7 +13,14 @@ from pydantic import BaseModel
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.notes import marks as marks_store
-from paperhub.notes.marks import MarkConflict, MarkIn, MarkInputError, SavedTo
+from paperhub.notes.marks import (
+    CiteAt,
+    MarkConflict,
+    MarkIn,
+    MarkInputError,
+    SavedTo,
+    block_props,
+)
 from paperhub.notes.ops import ApplyResult
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import list_blocks
@@ -25,6 +32,18 @@ class MarkCreated(BaseModel):
     mark: dict[str, Any]
     block: dict[str, Any] | None
     saved_to: SavedTo
+    # A short mark landed as an inline citation: its block, the offset
+    # just after the chip, and whether that paragraph was made for it.
+    cite: dict[str, Any] | None = None
+
+
+class RestoreIn(BaseModel):
+    cite_at: CiteAt | None = None
+
+
+def _out(m: dict[str, Any]) -> dict[str, Any]:
+    """A mark as the client gets it: with its reference block's props."""
+    return {**m, "block_props": block_props(m)}
 
 
 class ColorPatch(BaseModel):
@@ -63,12 +82,14 @@ async def _db() -> AsyncIterator[aiosqlite.Connection]:
 async def create_mark(body: MarkIn) -> MarkCreated:
     async with _db() as conn:
         mark, saved = await marks_store.create_mark(conn, body)
+        cite = mark.pop("cite", None)
         note = await paper_note(conn, mark["paper_content_id"])
         block = next((b for b in await list_blocks(conn, note.id)
                       if b.id == mark["block_id"]), None)
+        mark["cite_block_id"] = cite["block_id"] if cite else None
         return MarkCreated(
-            mark=mark, block=block.model_dump() if block else None,
-            saved_to=saved)
+            mark=_out(mark), block=block.model_dump() if block else None,
+            saved_to=saved, cite=cite)
 
 
 @router.get("/colors")
@@ -114,27 +135,35 @@ async def list_marks(paper_content_id: int) -> list[dict[str, Any]]:
 
 
 @router.delete("/{mark_id}", response_model=ApplyResult)
-async def delete_mark(mark_id: str) -> ApplyResult:
+async def delete_mark(mark_id: str, remove_cite: bool = False,
+                      drop_block: str | None = None) -> ApplyResult:
+    """``remove_cite`` (Undo of a short mark's creation) also takes its
+    inline citation out; ``drop_block`` the paragraph made for it."""
     async with _db() as conn:
-        return await marks_store.delete_mark(conn, mark_id)
+        return await marks_store.delete_mark(
+            conn, mark_id, remove_cite=remove_cite, drop_block=drop_block)
 
 
 @router.post("/{mark_id}/restore", response_model=ApplyResult)
-async def restore_mark(mark_id: str) -> ApplyResult:
+async def restore_mark(mark_id: str, body: RestoreIn | None = None,
+                       ) -> ApplyResult:
+    """``cite_at`` (Redo of a short mark's creation) puts its inline
+    citation back there."""
     async with _db() as conn:
-        return await marks_store.restore_mark(conn, mark_id)
+        return await marks_store.restore_mark(
+            conn, mark_id, body.cite_at if body else None)
 
 
 @router.delete("/{mark_id}/pieces/{index}")
 async def erase_piece(mark_id: str, index: int) -> dict[str, Any]:
     async with _db() as conn:
-        return await marks_store.erase_piece(conn, mark_id, index)
+        return _out(await marks_store.erase_piece(conn, mark_id, index))
 
 
 @router.post("/{mark_id}/pieces/{index}/restore")
 async def restore_piece(mark_id: str, index: int) -> dict[str, Any]:
     async with _db() as conn:
-        return await marks_store.restore_piece(conn, mark_id, index)
+        return _out(await marks_store.restore_piece(conn, mark_id, index))
 
 
 @router.post("/{mark_id}/split")
@@ -143,4 +172,5 @@ async def split_mark(mark_id: str) -> dict[str, Any]:
     (its moved piece flagged ``removed``)."""
     async with _db() as conn:
         new = await marks_store.split_last_piece(conn, mark_id)
-        return {**new, "original": await marks_store.get_mark(conn, mark_id)}
+        return {**_out(new),
+                "original": _out(await marks_store.get_mark(conn, mark_id))}

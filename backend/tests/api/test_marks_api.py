@@ -143,3 +143,30 @@ async def test_unexpected_store_error_is_a_500(
         base_url="http://test",
     ) as c:
         assert (await c.post("/marks", json=_body())).status_code == 500
+
+
+async def test_short_mark_lands_as_an_inline_citation_and_undo_redo(
+        client: AsyncClient) -> None:
+    """[user, 2026-11-21] A short quote: an inline citation at the caret;
+    Undo of its creation removes the chip, Redo puts it back."""
+    r = await client.post("/marks", json=_body(
+        pieces=[_piece("62%")], cite_at={"block_id": None, "offset": None}))
+    assert r.status_code == 200, r.text
+    out = r.json()
+    mark, cite = out["mark"], out["cite"]
+    assert out["block"] is None and cite["new_block"] is True
+    assert mark["cite_block_id"] == cite["block_id"]
+    assert mark["block_props"]["markId"] == mark["id"]
+    r = await client.delete(f"/marks/{mark['id']}", params={
+        "remove_cite": "true", "drop_block": cite["block_id"]})
+    assert r.status_code == 200, r.text
+    assert (await client.get("/marks", params={"paper_content_id": 1})
+            ).json() == []
+    r = await client.post(f"/marks/{mark['id']}/restore", json={
+        "cite_at": {"block_id": cite["block_id"], "offset": 0}})
+    assert r.status_code == 200, r.text
+    [back] = (await client.get("/marks", params={"paper_content_id": 1})).json()
+    assert back["cite_block_id"] == cite["block_id"]
+    # A plain restore (no body) still works.
+    await client.delete(f"/marks/{mark['id']}")
+    assert (await client.post(f"/marks/{mark['id']}/restore")).status_code == 200

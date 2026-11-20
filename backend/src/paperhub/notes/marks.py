@@ -23,6 +23,16 @@ from pydantic import BaseModel
 
 from paperhub.db.connection import in_write_transaction, write_lock
 from paperhub.notes.dehyphen import settle_pieces
+from paperhub.notes.inline_cite import (
+    TEXT_BLOCK_TYPES,
+    cite_run,
+    has_cite,
+    insert_cite,
+    is_short_quote,
+)
+from paperhub.notes.inline_cite import (
+    remove_cite as cut_cite,
+)
 from paperhub.notes.mark_colors import (
     BUILTIN,
     clean_name,
@@ -30,6 +40,7 @@ from paperhub.notes.mark_colors import (
     dark_variant,
 )
 from paperhub.notes.mark_pieces import erased, live_pieces, revive_latest, unerased
+from paperhub.notes.models import Block
 from paperhub.notes.ops import (
     ApplyResult,
     BlockIn,
@@ -69,6 +80,14 @@ class MarkConflict(RuntimeError):
     """The mark's block could not be changed (e.g. the user edited it)."""
 
 
+class CiteAt(BaseModel):
+    """Where an inline citation goes: a block and an offset in its text
+    (None: the end); no block (or not a text block): a new paragraph,
+    after that block or at the note's end."""
+    block_id: str | None = None
+    offset: int | None = None
+
+
 class MarkIn(BaseModel):
     paper_content_id: int
     kind: str
@@ -81,6 +100,9 @@ class MarkIn(BaseModel):
     section_key: str | None
     hint_block_id: str | None = None
     join_to: str | None = None
+    # A new text mark with a short quote lands here as an inline citation
+    # instead of a reference block [user, 2026-11-21].
+    cite_at: CiteAt | None = None
 
 
 class SavedTo(BaseModel):
@@ -288,8 +310,90 @@ async def _apply(conn: aiosqlite.Connection, note_id: int, op: Op,
     return res
 
 
+def _note_block_id(blocks: list[Block], m: dict[str, Any]) -> str | None:
+    """Where the mark is in its note: its reference block, else the first
+    block holding an inline citation of it (None: neither)."""
+    if any(b.id == m["block_id"] for b in blocks):
+        return str(m["block_id"])
+    return _cite_block_id(blocks, m)
+
+
+def _cite_block_id(blocks: list[Block], m: dict[str, Any]) -> str | None:
+    """The block holding the mark's inline citation, when the mark is in
+    that form (its own reference block not in the note)."""
+    if any(b.id == m["block_id"] for b in blocks):
+        return None
+    return next((b.id for b in blocks if has_cite(b.content, m["id"])), None)
+
+
+async def _has_block(conn: aiosqlite.Connection, m: dict[str, Any]) -> bool:
+    """Whether the mark's reference block is in its note (else the mark is
+    an inline citation there, or nowhere)."""
+    return any(b.id == m["block_id"]
+               for b in await list_blocks(conn, await _note_id(conn, m)))
+
+
+async def _place_cite(conn: aiosqlite.Connection, note_id: int,
+                      m: dict[str, Any], at: CiteAt,
+                      ) -> tuple[dict[str, Any], ApplyResult]:
+    """Put an inline citation of ``m`` at ``at``: into that text block at
+    the offset (None: its end); else in a new paragraph after that block,
+    or at the note's end (the new paragraph takes ``at.block_id`` when that
+    block is not live: a redo brings back the paragraph it was in)."""
+    run = cite_run(m["id"], m["paper_content_id"])
+    blocks = await list_blocks(conn, note_id)
+    target = next((b for b in blocks if b.id == at.block_id), None)
+    if (target is not None and target.type in TEXT_BLOCK_TYPES
+            and (target.content is None or isinstance(target.content, list))):
+        content, after = insert_cite(
+            target.content if isinstance(target.content, list) else [],
+            at.offset, run)
+        res = await _apply(conn, note_id, Op(
+            op="update", block_id=target.id, block=BlockIn(
+                type=target.type, props=target.props, content=content,
+                section_key=target.section_key)), "Cite mark", target.id)
+        return {"block_id": target.id, "offset": after,
+                "new_block": False}, res
+    new_id = (at.block_id if at.block_id is not None and target is None
+              else new_block_id())
+    lead = target.id if target is not None else (
+        blocks[-1].id if blocks else None)
+    res = await _apply(conn, note_id, Op(
+        op="insert", block_id=new_id, after=lead,
+        block=BlockIn(type="paragraph", content=[run])), "Cite mark", new_id)
+    return {"block_id": new_id, "offset": 1, "new_block": True}, res
+
+
+async def _drop_cite(conn: aiosqlite.Connection, note_id: int,
+                     m: dict[str, Any], drop_block: str | None,
+                     ) -> ApplyResult | None:
+    """Take the mark's inline citations out of the note (Undo of its
+    creation); ``drop_block``, the paragraph made for it, goes too when
+    nothing else is left in it."""
+    res: ApplyResult | None = None
+    for b in await list_blocks(conn, note_id):
+        if not has_cite(b.content, m["id"]):
+            continue
+        content, _ = cut_cite(b.content if isinstance(b.content, list)
+                              else [], m["id"])
+        empty = all(r.get("type") == "text" and not str(r.get("text", "")).strip()
+                    for r in content)
+        if b.id == drop_block and empty:
+            res = await _apply(conn, note_id, Op(op="delete", block_id=b.id),
+                               "Uncite mark", b.id)
+        else:
+            res = await _apply(conn, note_id, Op(
+                op="update", block_id=b.id, block=BlockIn(
+                    type=b.type, props=b.props, content=content,
+                    section_key=b.section_key)), "Uncite mark", b.id)
+    return res
+
+
 async def _update_block(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
-    """Push the mark's current pieces into its block's props."""
+    """Push the mark's current pieces into its block's props (an inline
+    citation reads the mark itself: nothing to push)."""
+    if not await _has_block(conn, m):
+        return
     await _apply(
         conn, await _note_id(conn, m),
         Op(op="update", block_id=m["block_id"],
@@ -312,6 +416,10 @@ async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
            block=BlockIn(type=BLOCK_TYPE[rec["kind"]],
                          props=block_props(rec))),
         summary, rec["block_id"])
+    await _insert_row(conn, rec)
+
+
+async def _insert_row(conn: aiosqlite.Connection, rec: dict[str, Any]) -> None:
     await write_row(conn, _INSERT, (
         rec["id"], rec["paper_content_id"], rec["block_id"], rec["kind"],
         rec["color"], rec["view"], json.dumps(rec["pieces"]), rec["lang"],
@@ -350,6 +458,13 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
             "status": "ok", "created_at": datetime.now(UTC).isoformat(),
             "deleted_at": None,
         }
+        if (m.cite_at is not None and m.kind == "text"
+                and is_short_quote(joined_quote(live_pieces(rec["pieces"])))):
+            # A short quote: an inline citation at the caret, its own
+            # block id kept for a later Turn into reference block.
+            cite, _ = await _place_cite(conn, note.id, rec, m.cite_at)
+            await _insert_row(conn, rec)
+            return {**rec, "cite": cite}, await _saved_to(conn, rec)
         await _insert_mark(conn, note.id, rec, after, "Add mark")
         return rec, await _saved_to(conn, rec)
 
@@ -369,10 +484,12 @@ async def _saved_to(conn: aiosqlite.Connection, m: dict[str, Any]) -> SavedTo:
     index, count = 0, 1
     sec_id = await _section_block(conn, note.id, m["section_key"])
     if sec_id is not None:
-        parts = parts_of_section(await list_blocks(conn, note.id), sec_id)
+        blocks = await list_blocks(conn, note.id)
+        at = _note_block_id(blocks, m)
+        parts = parts_of_section(blocks, sec_id)
         count = len(parts)
         index = next((i for i, p in enumerate(parts)
-                      if any(b.id == m["block_id"] for b in p)), 0)
+                      if any(b.id == at for b in p)), 0)
     return SavedTo(note_id=note.id, paper_title=await display_title(conn, note),
                    section=m["section_key"], part_index=index,
                    part_count=count)
@@ -415,23 +532,39 @@ async def list_marks(conn: aiosqlite.Connection,
         m = mark_from_row(r)
         label = m["section_key"] or ""
         sec_id = sections.get(m["section_key"])
+        at = _note_block_id(blocks, m)
         if sec_id is not None:
             parts = parts_of_section(blocks, sec_id)
             if len(parts) > 1:
                 i = next((i for i, p in enumerate(parts)
-                          if any(b.id == m["block_id"] for b in p)), 0)
+                          if any(b.id == at for b in p)), 0)
                 label = f"{label} · {i + 1}"
         m["note_id"] = note.id
         m["part_label"] = label
+        # In the note as an inline citation: the block that holds it.
+        m["cite_block_id"] = _cite_block_id(blocks, m)
+        # What its reference block holds (Turn into reference block).
+        m["block_props"] = block_props(m)
         out.append(m)
     return out
 
 
-async def _delete(conn: aiosqlite.Connection, m: dict[str, Any],
+async def _delete(conn: aiosqlite.Connection, m: dict[str, Any], *,
+                  remove_cite: bool = False, drop_block: str | None = None,
                   ) -> ApplyResult:
-    res = await _apply(conn, await _note_id(conn, m),
-                       Op(op="delete", block_id=m["block_id"]),
-                       "Delete mark", m["block_id"])
+    """Delete the mark and its reference block. A mark in the note as an
+    inline citation leaves the chip (dashed: the user's words stay), unless
+    ``remove_cite`` (Undo of its creation) takes it out."""
+    note_id = await _note_id(conn, m)
+    res: ApplyResult | None
+    if await _has_block(conn, m):
+        res = await _apply(conn, note_id,
+                           Op(op="delete", block_id=m["block_id"]),
+                           "Delete mark", m["block_id"])
+    else:
+        res = (await _drop_cite(conn, note_id, m, drop_block)
+               if remove_cite else None)
+        res = res or await _unchanged(conn, m)
     await write_row(conn, "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
                  (datetime.now(UTC).isoformat(), m["id"]))
     m["deleted_at"] = "now"
@@ -439,7 +572,7 @@ async def _delete(conn: aiosqlite.Connection, m: dict[str, Any],
 
 
 async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
-                   ) -> ApplyResult:
+                   cite_at: CiteAt | None = None) -> ApplyResult:
     # A mark whose last piece was erased comes back with that piece.
     pieces = revive_latest(m["pieces"])
     if pieces is None:
@@ -447,12 +580,24 @@ async def _restore(conn: aiosqlite.Connection, m: dict[str, Any],
     if pieces is not m["pieces"]:
         m["pieces"] = pieces
         await save_pieces(conn, m)
-    res = await _restore_in_tx(conn, await _note_id(conn, m),
-                               [m["block_id"]], actor="user")
-    if m["block_id"] not in res.applied:
-        raise MarkConflict(
-            f"block {m['block_id']} was not restored: "
-            f"{res.rejected or 'rejected'}")
+    note_id = await _note_id(conn, m)
+    every = await list_blocks(conn, note_id, include_deleted=True)
+    live = await list_blocks(conn, note_id)
+    res: ApplyResult
+    if cite_at is not None:
+        # Redo of a short mark's creation: its chip back where it was.
+        _, res = await _place_cite(conn, note_id, m, cite_at)
+    elif (any(has_cite(b.content, m["id"]) for b in live)
+          or not any(b.id == m["block_id"] for b in every)):
+        # An inline citation (or in no form at all): no block comes back.
+        res = await _unchanged(conn, m)
+    else:
+        res = await _restore_in_tx(conn, note_id, [m["block_id"]],
+                                   actor="user")
+        if m["block_id"] not in res.applied:
+            raise MarkConflict(
+                f"block {m['block_id']} was not restored: "
+                f"{res.rejected or 'rejected'}")
     await write_row(conn, "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
                  (m["id"],))
     m["deleted_at"] = None
@@ -470,8 +615,12 @@ async def _unchanged(conn: aiosqlite.Connection,
                        suggested=[], rejected=[])
 
 
-async def delete_mark(conn: aiosqlite.Connection, mark_id: str) -> ApplyResult:
+async def delete_mark(conn: aiosqlite.Connection, mark_id: str, *,
+                      remove_cite: bool = False,
+                      drop_block: str | None = None) -> ApplyResult:
     """Soft-delete the mark and its block; the user's other blocks stay.
+    ``remove_cite`` (Undo of a short mark's creation) also takes its inline
+    citation out, and ``drop_block`` the paragraph made for it.
 
     A mark already deleted (its block deleted in the note first) is a quiet
     success: the reader's Delete may cross the editor's on the way."""
@@ -479,18 +628,21 @@ async def delete_mark(conn: aiosqlite.Connection, mark_id: str) -> ApplyResult:
         m = await _get(conn, mark_id)
         if m["deleted_at"] is not None:
             return await _unchanged(conn, m)
-        return await _delete(conn, m)
+        return await _delete(conn, m, remove_cite=remove_cite,
+                             drop_block=drop_block)
 
 
 async def restore_mark(conn: aiosqlite.Connection, mark_id: str,
-                       ) -> ApplyResult:
+                       cite_at: CiteAt | None = None) -> ApplyResult:
     """Bring the mark and its block back; one already live (the editor's
-    undo got there first) is a quiet success."""
+    undo got there first) is a quiet success. A mark in the note as an
+    inline citation comes back without a block; ``cite_at`` (Redo of a
+    short mark's creation) puts its chip back there."""
     async with tx(conn):
         m = await _get(conn, mark_id)
         if m["deleted_at"] is None:
             return await _unchanged(conn, m)
-        return await _restore(conn, m)
+        return await _restore(conn, m, cite_at)
 
 
 async def erase_piece(conn: aiosqlite.Connection, mark_id: str,
@@ -556,8 +708,11 @@ async def split_last_piece(conn: aiosqlite.Connection, mark_id: str,
                "pieces": [piece], "status": "ok",
                "created_at": datetime.now(UTC).isoformat(),
                "deleted_at": None}
-        await _insert_mark(conn, await _note_id(conn, m), rec, m["block_id"],
-                           "Split mark")
+        # Right after the original: its block, else the paragraph holding
+        # its inline citation, else the note's end.
+        note_id = await _note_id(conn, m)
+        after = _note_block_id(await list_blocks(conn, note_id), m)
+        await _insert_mark(conn, note_id, rec, after, "Split mark")
         return await _get(conn, rec["id"])
 
 
