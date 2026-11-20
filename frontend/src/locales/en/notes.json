@@ -289,7 +289,8 @@
     "reject": "Reject",
     "deleteLine": "Suggested removing this line",
     "failed": "Couldn't apply that. Try again.",
-    "gone": "That suggestion no longer applies."
+    "gone": "That suggestion no longer applies.",
+    "refreshed": "Your text changed since this was suggested. It now shows against the current text."
   },
   "cite": {
     "gone": "That line is no longer in your notes.",

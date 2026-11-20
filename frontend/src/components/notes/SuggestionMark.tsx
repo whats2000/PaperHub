@@ -20,8 +20,9 @@ export interface SuggestionMarkProps {
   /** The proposal, shown here when the block has no text to mark it in. */
   detached: string | null;
   /** Posts the decision and shows the saved note, calling `exit` (the
-   * change animating out) in between. Rejects when the decision failed. */
-  onDecide: (accept: boolean, exit: () => Promise<void>) => Promise<void>;
+   * change animating out) in between. Rejects when the decision failed;
+   * resolves "kept" when the suggestion stays open (shown again). */
+  onDecide: (accept: boolean, exit: () => Promise<void>) => Promise<void | "kept">;
 }
 
 /** The marks of this suggestion in the text fade with the bar. */
@@ -46,13 +47,17 @@ export function SuggestionMark({ suggestionId, deletes, detached, onDecide }: Su
         markLeaving(suggestionId, true);
         setTimeout(done, prefersReducedMotion() ? 0 : SUGGESTION_EXIT_MS);
       });
-    try {
-      await onDecide(accept, exit);
-    } catch {
-      // Still on screen (the decision failed): show it again.
+    const again = () => {
       setBusy(null);
       setLeaving(false);
       markLeaving(suggestionId, false);
+    };
+    try {
+      // Kept open (its text changed meanwhile): usable again.
+      if ((await onDecide(accept, exit)) === "kept") again();
+    } catch {
+      // Still on screen (the decision failed): show it again.
+      again();
     }
   };
 

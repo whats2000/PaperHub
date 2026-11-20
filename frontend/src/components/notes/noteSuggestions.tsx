@@ -42,6 +42,12 @@ export function proposedText(s: NoteSuggestion): string {
   return blockText(type, (p.props as Record<string, unknown> | undefined) ?? {}, p.content);
 }
 
+/** Whether an accept came back `stale`: the block changed since the
+ * suggestion was made, so nothing was applied and it stays open. */
+export function isStale(res: ApplyResult, blockId: string): boolean {
+  return res.rejected.some((r) => r.block_id === blockId && r.reason === "stale");
+}
+
 /** A textblock's text with the document position of each character
  * (anything that is not text, e.g. a mention chip, is one placeholder). */
 function textWithPositions(content: PMNode, start: number): { text: string; at: number[] } {
@@ -222,7 +228,7 @@ export function useNoteSuggestions(
     }
   }, [editor, suggestions]);
 
-  const decide = async (s: NoteSuggestion, accept: boolean, exit: () => Promise<void>) => {
+  const decide = async (s: NoteSuggestion, accept: boolean, exit: () => Promise<void>): Promise<void | "kept"> => {
     // Where each open thread on the block sits now, read at the click.
     const hints: ReanchorHint[] = accept
       ? (useNotesStore.getState().notes[noteId]?.comments ?? [])
@@ -232,12 +238,20 @@ export function useNoteSuggestions(
     // Handed to the editor only once the server took the decision, right
     // before the saved note is shown.
     const settle = async (res: ApplyResult) => {
+      // Stale: it stays on screen and is redrawn against the current text.
+      if (isStale(res, s.block_id)) return;
       // A withdrawn accept (the block was gone) rewrote nothing.
       if (hints.length && res.applied.includes(s.block_id)) pendingReanchorRef.current = hints;
       await exit();
     };
     try {
       const res = await resolveSuggestion(noteId, s.id, accept, settle);
+      if (accept && isStale(res, s.block_id)) {
+        // Not an error: the user's words changed since; the reloaded note
+        // shows the suggestion against them, and Accept works again.
+        toast(t("notes:suggestion.refreshed", "Your text changed since this was suggested. It now shows against the current text."));
+        return "kept";
+      }
       if (accept && !res.applied.includes(s.block_id)) {
         toast(t("notes:suggestion.gone", "That suggestion no longer applies."));
       }

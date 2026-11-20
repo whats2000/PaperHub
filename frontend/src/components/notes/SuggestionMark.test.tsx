@@ -190,6 +190,40 @@ describe("a suggestion in the editor", () => {
     expect(pm().querySelector(".note-sug-ins")).toBeNull();
   });
 
+  it("a stale Accept (the text changed since) shows the suggestion again against the current text", async () => {
+    seed([para("p1", [run("latency drops up to 83%")])], [suggestion("p1", "latency drops 89%")]);
+    const now = para("p1", [run("latency drops by up to 83%")], 5);
+    server.use(
+      http.post(`${API_BASE_URL}/notes/suggestions/sg_1`, async ({ request }) => {
+        decided.push(await request.json());
+        return HttpResponse.json({
+          ...result(4, []),
+          change_set_id: null,
+          rejected: [{ block_id: "p1", reason: "stale", current: now }],
+        });
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, () =>
+        HttpResponse.json({
+          note,
+          blocks: [now],
+          suggestions: [suggestion("p1", "latency drops 89%")],
+          comments: [],
+          shared_by: 1,
+        }),
+      ),
+    );
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(decided).toEqual([{ accept: true }]));
+    await waitFor(() => expect(pm()).toHaveTextContent(/latency drops by up to 83/));
+    // Still open, diffed against the current words, and the bar usable again.
+    await waitFor(() => expect(pm().querySelector(".note-sug-del")).toHaveTextContent(/by up to/));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled());
+    expect(screen.getByTestId("suggestion-mark")).not.toHaveAttribute("data-closed");
+    const { error } = (await import("sonner")).toast as unknown as { error: ReturnType<typeof vi.fn> };
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it("Reject calls the API and leaves the user's text", async () => {
     seed([para("p1", [run("latency drops up to 83%")])], [suggestion("p1", "latency drops 89%, 88% and 83%")]);
     serve(para("p1", [run("latency drops up to 83%")]));

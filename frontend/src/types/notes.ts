@@ -118,7 +118,10 @@ export interface NoteOpsBody {
 
 export interface RejectedOp {
   block_id: string;
-  reason: "changed_since_base" | "missing" | "invalid";
+  /** `stale`: an accepted suggestion whose block changed since it was made
+   * (it stays open, shown against the current text). `depends_on_failed`:
+   * an op naming a block an earlier op of the call failed to make. */
+  reason: "changed_since_base" | "missing" | "invalid" | "stale" | "depends_on_failed";
   current: NoteBlock | null;
 }
 
