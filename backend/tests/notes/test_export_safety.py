@@ -422,3 +422,42 @@ def test_no_bare_link_through_mentions_dropped_citations_or_marks(
 def test_download_name_drops_direction_marks() -> None:
     name = note_export.display_name("a\u200fb.exe\u200e x\u061c")
     assert not set(name) & {"\u200e", "\u200f", "\u061c"}, repr(name)
+
+
+# --- distribution pandoc (no embedded data files) ----------------------------
+
+def test_note_text_is_read_only_by_a_sandboxed_run(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A distro pandoc's sandboxed docx writer cannot read its own data
+    dir (exit 97), so the writer runs unsandboxed: the note's Markdown must
+    then only ever reach pandoc through a ``--sandbox`` run, and the docx
+    run reads the AST that run wrote."""
+    from paperhub.notes import pandoc as note_pandoc
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, cwd: Path, **_kw: Any) -> Any:
+        calls.append(args)
+        out = args[args.index("--output") + 1]
+        (cwd / out).write_bytes(
+            b'{"pandoc-api-version":[1,23],"meta":{},"blocks":[]}'
+            if out.endswith(".json") else b"x")
+        return type("P", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(note_pandoc.subprocess, "run", fake_run)
+    markdown_to_docx("# T\n", {"references.bib": b"@misc{a, title={A}}"})
+    reads_md = [a for a in calls if "note.md" in a]
+    assert reads_md and all("--sandbox" in a for a in reads_md)
+    docx = [a for a in calls if "docx" in a]
+    assert len(docx) == 1
+    assert docx[0][1:4] == ["note.json", "--from", "json"]
+
+
+@needs_pandoc
+def test_unsandboxed_writer_fetches_no_image_url() -> None:
+    with _Listener() as srv:
+        md = (f"# T\n\n![u](http://127.0.0.1:{srv.port}/x.png)\n\n"
+              f"![u2](<http://127.0.0.1:{srv.port}/y.png>)\n\nText.\n")
+        docx = markdown_to_docx(md, {})
+    assert srv.hits == []
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        assert not [n for n in z.namelist() if n.startswith("word/media/")]

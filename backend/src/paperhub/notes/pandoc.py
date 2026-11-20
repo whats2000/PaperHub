@@ -8,23 +8,29 @@ Note text is untrusted input to pandoc. What holds:
   text can set no metadata (no ``csl:``, ``bibliography:``, ``references:``)
   and citeproc reads only the ``references.bib`` named on the command line;
   no raw HTML / TeX / attribute output.
-- pandoc runs with ``--sandbox``: its reader and writer read no file and no
-  URL beyond the command line. The exporter's own images reach the .docx
-  through a Lua filter that puts exactly the given resources into pandoc's
-  media bag (the filter is not sandboxed, and reads only those files, saved
-  under index names, never a name from the note); any other image
-  reference stays unfetched.
+- The note is read in a first pandoc run with ``--sandbox`` (no file and no
+  URL beyond the command line), writing pandoc's JSON AST. The .docx is
+  written from that AST in a second run without ``--sandbox``: a
+  distribution pandoc (Debian/Ubuntu, built without embedded data files)
+  builds its default ``reference.docx`` from its data directory, which the
+  sandboxed writer cannot read ("Could not find data file", exit 97).
+- Between the runs the AST is rewritten here (``_own_images_only``): an
+  image naming one of the given resources points at that resource's copy,
+  saved under an index name (never a name from the note); every other
+  image becomes its alt text. So the writer reads exactly the given
+  resources, and no image path or URL in the note is ever read.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 PANDOC_TIMEOUT_S = 60
 BIB_NAME = "references.bib"
@@ -44,10 +50,6 @@ _READER = (
     # Typography and heading anchors: neither sets metadata or paths.
     "+smart+auto_identifiers")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
-_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-         ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
-         ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
-         ".pdf": "application/pdf", ".emf": "image/emf"}
 
 PandocStatus = Literal["ok", "pandoc_missing", "pandoc_too_old"]
 
@@ -115,34 +117,34 @@ def _safe(name: str) -> str:
     return name
 
 
-def _media_filter(items: list[tuple[str, str]]) -> str:
-    """A Lua filter adding each ``(media name, file)`` to the media bag, so
-    the sandboxed writer embeds exactly these, and prefixing every heading
-    id with ``h-``. Files are pandoc-cwd relative; names and files are
-    checked by ``_safe``."""
-    rows = ", ".join(
-        f'{{"{name}", "{file}", "{_MIME.get(Path(name).suffix.lower(), "")}"}}'
-        for name, file in items)
-    return (
-        f"local items = {{{rows}}}\n"
-        # A heading's anchor gets a prefix no citeproc id has (``refs``,
-        # ``ref-<key>``), so a heading titled "refs" never shares the
-        # bibliography's bookmark. Filters run before --citeproc.
-        "function Header(h)\n"
-        "  if h.identifier ~= '' then h.identifier = 'h-' .. h.identifier end\n"
-        "  return h\n"
-        "end\n"
-        "function Pandoc(doc)\n"
-        "  for _, it in ipairs(items) do\n"
-        "    local f = io.open(it[2], 'rb')\n"
-        "    if f then\n"
-        "      local mime = it[3] ~= '' and it[3] or nil\n"
-        "      pandoc.mediabag.insert(it[1], mime, f:read('a'))\n"
-        "      f:close()\n"
-        "    end\n"
-        "  end\n"
-        "  return doc\n"
-        "end\n")
+def _own_images_only(node: Any, files: dict[str, str]) -> Any:
+    """``node`` (pandoc JSON AST) with each image naming a key of ``files``
+    pointed at that file, every other image replaced by its alt text, and
+    every heading id prefixed with ``h-``: the prefix no citeproc id has
+    (``refs``, ``ref-<key>``), so a heading titled "refs" never shares the
+    bibliography's bookmark."""
+    if isinstance(node, list):
+        out: list[Any] = []
+        for item in node:
+            if isinstance(item, dict) and item.get("t") == "Image":
+                attr, alt, (src, title) = item["c"]
+                if src not in files:
+                    out.extend(_own_images_only(alt, files))
+                    continue
+                item = {"t": "Image", "c": [attr, _own_images_only(alt, files),
+                                            [files[src], title]]}
+                out.append(item)
+                continue
+            out.append(_own_images_only(item, files))
+        return out
+    if isinstance(node, dict):
+        if node.get("t") == "Header":
+            level, (ident, classes, kvs), inlines = node["c"]
+            return {"t": "Header", "c": [
+                level, ["h-" + ident if ident else ident, classes, kvs],
+                _own_images_only(inlines, files)]}
+        return {k: _own_images_only(v, files) for k, v in node.items()}
+    return node
 
 
 def markdown_to_docx(md: str, resources: dict[str, bytes]) -> bytes:
@@ -158,42 +160,53 @@ def markdown_to_docx(md: str, resources: dict[str, bytes]) -> bytes:
     with workdir as tmp:
         root = Path(tmp)
         # Each image is saved under its index, never its own name (a name
-        # like CON or AUX is a device on Windows); the filter maps it back.
-        items = [(n, f"res/{i:04d}{_ext(n)}") for i, n in enumerate(images, 1)]
+        # like CON or AUX is a device on Windows); the AST is pointed at it.
+        files = {n: f"res/{i:04d}{_ext(n)}" for i, n in enumerate(images, 1)}
         bib = resources.get(BIB_NAME, b"")
         try:
             (root / "res").mkdir()
-            for name, file in items:
+            for name, file in files.items():
                 (root / file).write_bytes(resources[name])
             if bib.strip():
                 (root / BIB_NAME).write_bytes(bib)
             (root / "note.md").write_text(md, encoding="utf-8")
-            (root / "media.lua").write_text(_media_filter(items), encoding="utf-8")
         except OSError as exc:
             raise PandocError(f"could not stage the export: {exc!r}") from exc
-        args = ["pandoc", "note.md", "--sandbox", "--from", _READER,
-                "--to", "docx", "--output", "note.docx",
-                "--lua-filter", "media.lua"]
+        # The untrusted note is parsed sandboxed; the writer gets the AST.
+        ast = _run(root, ["pandoc", "note.md", "--sandbox", "--from", _READER,
+                          "--to", "json", "--output", "note.json"], "note.json")
+        try:
+            doc = _own_images_only(json.loads(ast), files)
+            (root / "note.json").write_text(json.dumps(doc), encoding="utf-8")
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            raise PandocError(f"could not rewrite the AST: {exc!r}") from exc
+        args = ["pandoc", "note.json", "--from", "json",
+                "--to", "docx", "--output", "note.docx"]
         if bib.strip():
             args += ["--citeproc", "--bibliography", BIB_NAME]
-        try:
-            proc = subprocess.run(
-                args, cwd=root, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=PANDOC_TIMEOUT_S, check=False)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-            raise PandocError(f"pandoc did not run: {exc!r}") from exc
-        out = root / "note.docx"
-        if proc.returncode != 0 or not out.is_file():
-            # pandoc's messages quote the input (note text), so the error
-            # names only the exit code and the stderr's length and hash;
-            # the text itself stays on the exception, never in a log line.
-            err = proc.stderr or ""
-            digest = hashlib.sha256(err.encode("utf-8", "replace")).hexdigest()[:12]
-            raise PandocError(
-                f"pandoc exited {proc.returncode}: stderr {len(err)} chars, "
-                f"sha256 {digest}", stderr=err)
-        return out.read_bytes()
+        return _run(root, args, "note.docx")
+
+
+def _run(root: Path, args: list[str], output: str) -> bytes:
+    """Run pandoc in ``root`` and return ``output``'s bytes."""
+    try:
+        proc = subprocess.run(
+            args, cwd=root, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=PANDOC_TIMEOUT_S, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        raise PandocError(f"pandoc did not run: {exc!r}") from exc
+    out = root / output
+    if proc.returncode != 0 or not out.is_file():
+        # pandoc's messages quote the input (note text), so the error
+        # names only the exit code and the stderr's length and hash;
+        # the text itself stays on the exception, never in a log line.
+        err = proc.stderr or ""
+        digest = hashlib.sha256(err.encode("utf-8", "replace")).hexdigest()[:12]
+        raise PandocError(
+            f"pandoc exited {proc.returncode}: stderr {len(err)} chars, "
+            f"sha256 {digest}", stderr=err)
+    return out.read_bytes()
 
 
 def _ext(name: str) -> str:
