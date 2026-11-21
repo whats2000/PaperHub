@@ -1013,3 +1013,66 @@ async def test_resolve_history_db_fallback_uses_the_client_filter(
         await conn.commit()
         assert await _resolve_history(conn, 1, []) == [
             {"role": "user", "content": "q1"}, {"role": "user", "content": "q2"}]
+
+
+# ---------------------------------------------------------------------------
+# H5b.1 Task 14: a chat whose note has content is listed
+# ---------------------------------------------------------------------------
+
+
+async def _note_with(db: Path, session_id: int, *texts: str, title: str = "") -> None:
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    from paperhub.notes.store import get_or_create_note
+    async with aiosqlite.connect(db) as conn:
+        note = await get_or_create_note(
+            conn, target_kind="session", target_id=str(session_id), title=title,
+            session_id=session_id)
+        if texts:
+            await apply_ops(conn, note.id, base_revision=0, actor="user", ops=[
+                Op(op="insert", block=BlockIn(
+                    type="paragraph", content=[{"type": "text", "text": t}]))
+                for t in texts])
+
+
+async def test_list_sessions_lists_a_chat_whose_note_has_content(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    db = tmp_path / "paperhub.db"
+    ids = [(await sessions_client.post("/sessions")).json()["session_id"]
+           for _ in range(5)]
+    await _note_with(db, ids[0], "", "Gate idea\nsecond line", "more")
+    await _note_with(db, ids[1])  # an empty note: still hidden
+    await _note_with(db, ids[2], "text", title="My page")
+    await _note_with(db, ids[3], "note text")
+    await _note_with(db, ids[4], "note text")
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("UPDATE chat_sessions SET title = 'Named' WHERE id = ?",
+                           (ids[3],))
+        await conn.commit()
+        await conn.execute("INSERT INTO messages (session_id, role, content) "
+                           "VALUES (?, 'user', 'hello')", (ids[4],))
+        await conn.execute("UPDATE chat_sessions SET title = 'From message' "
+                           "WHERE id = ?", (ids[4],))
+        await conn.commit()
+    got = {s["id"]: s for s in (await sessions_client.get("/sessions")).json()}
+    assert ids[1] not in got
+    assert got[ids[0]]["title"] == "Gate idea"  # the note's first line
+    assert got[ids[0]]["message_count"] == 0
+    assert got[ids[2]]["title"] == "My page"  # the note's own title
+    assert got[ids[3]]["title"] == "Named"  # the user's name wins
+    assert got[ids[4]]["title"] == "From message"
+
+
+async def test_delete_of_a_chat_with_only_a_note_is_undoable(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    db = tmp_path / "paperhub.db"
+    sid = (await sessions_client.post("/sessions")).json()["session_id"]
+    await _note_with(db, sid, "keep me")
+    assert (await sessions_client.delete(f"/sessions/{sid}")).status_code == 204
+    async with aiosqlite.connect(db) as conn, conn.execute(
+            "SELECT deleted_at FROM chat_sessions WHERE id = ?", (sid,)) as cur:
+        row = await cur.fetchone()
+    assert row is not None and row[0] is not None  # soft, not hard
+    assert (await sessions_client.post(f"/sessions/{sid}/restore")).status_code == 204
+    assert sid in [s["id"] for s in (await sessions_client.get("/sessions")).json()]

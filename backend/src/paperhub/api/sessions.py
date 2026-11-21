@@ -22,6 +22,7 @@ from paperhub.feedback.review import maybe_review_fork
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import AgentSummary, SearchCandidateModel
+from paperhub.notes.store import NOTE_HAS_CONTENT_SQL, note_first_line
 from paperhub.outbound import held
 
 router = APIRouter()
@@ -325,24 +326,36 @@ async def list_sessions() -> list[SessionSummary]:
                    -- a session belongs to at most one idea in practice.
                    (SELECT MIN(i.idea_id) FROM idea_sessions i
                     WHERE i.session_id = s.id) AS idea_id,
-                   s.auto_approve, s.allow_searches
+                   s.auto_approve, s.allow_searches,
+                   (SELECT n.id FROM notes n WHERE n.target_kind = 'session'
+                    AND n.target_id = CAST(s.id AS TEXT)
+                    AND n.deleted_at IS NULL AND {NOTE_HAS_CONTENT_SQL})
+                    AS note_id
             FROM chat_sessions s
             LEFT JOIN messages m ON m.session_id = s.id
             WHERE s.deleted_at IS NULL AND s.internal = 0
             GROUP BY s.id
-            -- "Meaningful" = has messages OR a non-default title. A named chat
-            -- carries intent even with no persisted messages yet; only the
-            -- untouched 'New chat' empties are hidden as clutter.
+            -- "Meaningful" = has messages, a non-default title, or a note
+            -- with content (H5b.1). A named chat carries intent even with no
+            -- persisted messages yet; only the untouched 'New chat' empties
+            -- are hidden as clutter.
             HAVING message_count > 0 OR s.title <> 'New chat'
+                OR note_id IS NOT NULL
             ORDER BY updated_at DESC, s.id DESC
-            """,
+            """.replace("{NOTE_HAS_CONTENT_SQL}", NOTE_HAS_CONTENT_SQL),
         ) as cur,
     ):
-        rows = await cur.fetchall()
+        rows = list(await cur.fetchall())
+        # A note-only chat is named by its note until the user names it or
+        # sends a message.
+        titles: dict[int, str] = {}
+        for r in rows:
+            if int(r[4]) == 0 and str(r[1]) == "New chat" and r[9] is not None:
+                titles[int(r[0])] = await note_first_line(conn, int(r[9])) or str(r[1])
     return [
         SessionSummary(
             id=int(r[0]),
-            title=str(r[1]),
+            title=titles.get(int(r[0]), str(r[1])),
             created_at=str(r[2]),
             updated_at=str(r[3]),
             message_count=int(r[4]),
@@ -651,7 +664,15 @@ async def delete_session(session_id: int) -> None:
         ) as cur:
             row = await cur.fetchone()
         has_messages = row is not None and int(row[0]) > 0
-        meaningful = has_messages or title != "New chat"
+        # A chat whose note has content is listed (H5b.1): deleting it is
+        # undoable like any listed chat (a hard delete would take the note).
+        async with conn.execute(
+            "SELECT 1 FROM notes n WHERE n.target_kind = 'session' "
+            "AND n.target_id = ? AND n.deleted_at IS NULL AND "
+            f"{NOTE_HAS_CONTENT_SQL}", (str(session_id),),
+        ) as cur:
+            has_note = await cur.fetchone() is not None
+        meaningful = has_messages or title != "New chat" or has_note
 
         if meaningful:
             await conn.execute(
