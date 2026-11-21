@@ -105,3 +105,30 @@ async def test_backend_accepts_and_returns_a_toc_block(client: AsyncClient) -> N
     assert r.status_code == 200, r.text
     got = (await client.get(f"/notes/{nid}")).json()["blocks"]
     assert [b["type"] for b in got] == ["toc"]
+
+
+@pytest.mark.asyncio
+async def test_outline_endpoint_and_export_toc_list_the_same_entries(
+    client: AsyncClient,
+) -> None:
+    nid = (await client.post("/notes/target",
+                             params={"kind": "session", "id": 1})).json()["note"]["id"]
+    ops = [
+        {"op": "insert", "block_id": "h1",
+         "block": {"type": "heading", "props": {"level": 1}, "content": "Intro"}},
+        {"op": "insert", "block_id": "h2",
+         "block": {"type": "heading", "props": {"level": 2}, "content": "   "}},
+        {"op": "insert", "block_id": "s1",
+         "block": {"type": "section", "props": {"title": ""},
+                   "section_key": "2 Method"}},
+        {"op": "insert", "block_id": "h3",
+         "block": {"type": "heading", "props": {"level": 3}, "content": "Deep"}},
+        {"op": "insert", "block_id": "t", "block": {"type": "toc"}},
+    ]
+    r = await client.post(f"/notes/{nid}/ops", json={"base_revision": 0, "ops": ops})
+    assert r.status_code == 200, r.text
+    outline = (await client.get(f"/notes/{nid}/outline")).json()
+    blocks = [Block(**b) for b in (await client.get(f"/notes/{nid}")).json()["blocks"]]
+    md = note_to_markdown(NOTE, blocks, {})[0]
+    listed = re.findall(r"- \[(.*?)\]\(#", md)
+    assert [o["text"] for o in outline] == listed == ["Intro", "2 Method", "Deep"]

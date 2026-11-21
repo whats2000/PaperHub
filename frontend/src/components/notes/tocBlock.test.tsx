@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ATOM_CARET_TYPES } from "@/components/notes/atomCaret";
+import { ATOM_CARET_TYPES, atomCaret, setAtomCaret } from "@/components/notes/atomCaret";
 import { TocView } from "@/components/notes/blocks/TocView";
 import { noteSchema } from "@/components/notes/schema";
-import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
+import { cleanupEditors, makeEditor, press } from "@/components/notes/testEditor";
 import { revealBlock } from "@/lib/notes/reveal";
 
 vi.mock("@/lib/notes/reveal", () => ({
@@ -57,5 +57,42 @@ describe("toc block", () => {
     });
     expect(screen.getByRole("button", { name: "Set up" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Setup" })).toBeNull();
+  });
+
+  it("takes no typing: a key at its caret opens a line beside it, and it can be removed", () => {
+    const editor = makeEditor([atomCaret], [
+      { id: "a", type: "paragraph", content: "one" },
+      { id: "toc1", type: "toc" },
+    ]);
+    const view = editor._tiptapEditor.view;
+    let pos = -1;
+    view.state.doc.descendants((node, p) => {
+      if (node.type.name === "toc") pos = p;
+    });
+    setAtomCaret(view, pos, "after");
+    press(editor, { key: "x" });
+    const types = editor.document.map((b) => b.type);
+    expect(types.slice(0, 3)).toEqual(["paragraph", "toc", "paragraph"]);
+    const toc = editor.document[1]!;
+    expect(toc.content).toBeUndefined();
+    expect((editor.document[2]!.content as { text: string }[])[0]!.text).toBe("x");
+    editor.removeBlocks(["toc1"]);
+    expect(editor.document.some((b) => b.type === "toc")).toBe(false);
+  });
+
+  it("animates entries: a removed one closes before it leaves", async () => {
+    const editor = makeEditor([], [
+      { id: "h", type: "heading", props: { level: 1 }, content: "Gone soon" },
+      { id: "p", type: "paragraph", content: "x" },
+    ]);
+    render(<TocView editor={editor as never} />);
+    const row = screen.getByRole("button", { name: "Gone soon" }).closest("li")!;
+    expect(row.getAttribute("data-state")).toBe("open");
+    act(() => {
+      editor.removeBlocks(["h"]);
+    });
+    expect(screen.getByRole("button", { name: "Gone soon" }).closest("li")!.getAttribute("data-state")).toBe("out");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Gone soon" })).toBeNull());
+    expect(screen.getByText("Headings you add appear here.")).toBeInTheDocument();
   });
 });

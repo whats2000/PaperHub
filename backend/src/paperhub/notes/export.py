@@ -947,7 +947,9 @@ def pandoc_slug(text: str) -> str:
     """The id pandoc (``auto_identifiers``) gives a heading: everything but
     letters, digits, ``_ - .`` and spaces dropped, spaces to hyphens, lower
     case, everything before the first letter removed, else ``section``.
-    (A repeat gets ``-1``, ``-2`` in ``_toc``.)"""
+    (A repeat gets ``-1``, ``-2`` in ``_toc``.) The links match pandoc (the
+    ``.docx`` path); a GFM viewer may not resolve some of them (it keeps
+    leading digits and may treat non-ASCII differently)."""
     s = "-".join(_SLUG_DROP.sub("", text).lower().split())
     first = next((i for i, ch in enumerate(s) if ch.isalpha()), len(s))
     return s[first:] or "section"

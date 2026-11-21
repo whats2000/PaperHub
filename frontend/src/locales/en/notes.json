@@ -233,6 +233,7 @@
       "equation": "Block equation (a space works too)",
       "codeBlock": "Code block (a space works too)",
       "slash": "Every block, incl. Quote from the paper",
+      "toc": "Table of contents: a live list of the headings",
       "at": "Link a paper or section",
       "link": "Link a note or paper",
       "linkThisHeading": "Link a heading of this note (after a name: that note's)",

@@ -41,7 +41,7 @@ export function noteOutline(blocks: EditorBlockLike[]): OutlineEntry[] {
   const walk = (list: EditorBlockLike[]) => {
     for (const b of list) {
       if (b.type === "section") {
-        const text = str(b.props?.title).trim();
+        const text = (str(b.props?.title).trim() || str(b.props?.sectionKey).trim());
         if (text) out.push({ blockId: b.id, text, level: 1 });
       } else if (b.type === "heading") {
         const raw = b.props?.level;

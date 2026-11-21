@@ -53,6 +53,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     title: "Anywhere",
     rows: [
       { id: "slash", keys: ["/"], right: "Every block, incl. Quote from the paper" },
+      { id: "toc", keys: ["/toc"], right: "Table of contents: a live list of the headings" },
       { id: "at", keys: ["@"], right: "Link a paper or section" },
       { id: "link", keys: ["[["], right: "Link a note or paper" },
       { id: "linkThisHeading", keys: ["[[#"], right: "Link a heading of this note (after a name: that note's)" },

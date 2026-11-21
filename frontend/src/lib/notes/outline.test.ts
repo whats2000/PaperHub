@@ -27,6 +27,14 @@ describe("noteOutline", () => {
     ]);
   });
 
+  it("names a section by its key when its title is blank", () => {
+    const blocks: EditorBlockLike[] = [
+      { id: "s", type: "section", props: { title: " ", sectionKey: "3 Results" }, children: [] },
+      { id: "t", type: "section", props: { title: "", sectionKey: "" }, children: [] },
+    ];
+    expect(noteOutline(blocks)).toEqual([{ blockId: "s", text: "3 Results", level: 1 }]);
+  });
+
   it("skips headings above level 3, empty headings and other blocks", () => {
     const blocks: EditorBlockLike[] = [
       h("a", 4, "Too deep"),

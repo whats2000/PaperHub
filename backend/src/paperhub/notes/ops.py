@@ -1107,7 +1107,7 @@ async def _stale(conn: aiosqlite.Connection, suggestion_id: str, note_id: int,
     return row.block()
 
 
-_STRUCTURAL = frozenset({"section", "divider"})
+_STRUCTURAL = frozenset({"section", "divider", "toc"})
 
 
 def _state_text(state: dict[str, Any] | None) -> str:
@@ -1123,7 +1123,8 @@ async def change_set_detail(conn: aiosqlite.Connection,
 
     ``head`` is the set live now: Apply again makes a new set, so the chain
     of ``reapplied_by`` is followed to its end. ``changes`` lists what the
-    set did (blocks added, updated, deleted; sections and dividers left
+    set did (blocks added, updated, deleted; sections, dividers and tables
+    of contents left
     out) and its suggestions with the block's text now and the proposal,
     one per block, from whichever set of the chain holds it now.
     """

@@ -371,12 +371,16 @@ async def note_outline(note_id: int) -> list[OutlineItem]:
             raise HTTPException(404, f"note {note_id} not found")
         out: list[OutlineItem] = []
         for b in await list_blocks(conn, note_id):
-            if b.type == "heading":
+            # An unnamed entry is no link target: left out, as in the
+            # in-note table of contents and its export.
+            if b.type == "heading" and b.text.strip():
                 out.append(OutlineItem(block_id=b.id, type="heading",
                                        text=b.text, level=_level(b.props)))
             elif b.type == "section":
-                out.append(OutlineItem(block_id=b.id, type="section",
-                                       text=b.text, level=1))
+                name = (b.text or b.section_key or "").strip()
+                if name:
+                    out.append(OutlineItem(block_id=b.id, type="section",
+                                           text=name, level=1))
         return out
 
 
