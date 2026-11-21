@@ -211,6 +211,7 @@
       "fold": "⌄ on a divider",
       "trash": "Trash on a block",
       "tocRail": "Lines at the right edge",
+      "tableStyle": "⋯ › Table style",
       "selectPaper": "Select text",
       "highlighter": "Highlighter",
       "box": "Box",
@@ -262,6 +263,7 @@
       "fold": "Fold the note below it",
       "trash": "Delete, with Undo",
       "tocRail": "Table of contents: hover to open, click to jump",
+      "tableStyle": "Three-line (paper style) or grid, for every table",
       "selectPaper": "Pick a style and a colour: it goes to the note",
       "highlighter": "Drag over words, or click a figure",
       "box": "Drag over a figure or equation",
@@ -315,7 +317,12 @@
     "exportPandocTooOld": "Word export needs pandoc 2.15 or newer: update it with winget upgrade pandoc",
     "exportFailed": "Couldn't export the note",
     "shortcuts": "Shortcuts",
-    "showToc": "Show table of contents"
+    "showToc": "Show table of contents",
+    "tableStyle": "Table style",
+    "tableThreeLine": "Three-line",
+    "tableThreeLineHint": "Paper style",
+    "tableGrid": "Grid",
+    "tableGridHint": "Every cell lined"
   },
   "card": {
     "added_one": "Added {{count}} note",

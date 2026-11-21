@@ -27,6 +27,7 @@ import {
   getPaperInfo,
   listMarkColors,
   postNoteOps,
+  type NoteTableStyle,
   replyToNoteComment,
   resolveSuggestion as postSuggestionDecision,
   patchNoteTitle,
@@ -50,6 +51,10 @@ import type {
 } from "@/types/notes";
 
 export const FLUSH_DELAY_MS = 600;
+
+/** Three-line (booktabs: rules above and under the header and at the end)
+ * or grid (every cell border). */
+export type TableStyle = NoteTableStyle;
 /** Waits before each retry of a burst the server could not take. */
 export const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000] as const;
 
@@ -146,6 +151,10 @@ interface NotesStore {
   /** The floating table of contents at the notes pane's right edge. */
   tocOn: boolean;
   setTocOn: (on: boolean) => void;
+  /** How every table is drawn, in the editor and the Word export: the
+   * viewer's preference, not note content (the Markdown never changes). */
+  tableStyle: TableStyle;
+  setTableStyle: (style: TableStyle) => void;
   /** Folded divider ids per note. */
   folded: Record<number, string[]>;
   toggleFold: (noteId: number, dividerId: string) => void;
@@ -1319,6 +1328,8 @@ export const useNotesStore = create<NotesStore>()(
         setFollowOn: (on) => set({ followOn: on }),
         tocOn: true,
         setTocOn: (on) => set({ tocOn: on }),
+        tableStyle: "threeLine",
+        setTableStyle: (style) => set({ tableStyle: style }),
         folded: {},
         toggleFold: (noteId, dividerId) =>
           set((s) => {
@@ -1441,7 +1452,19 @@ export const useNotesStore = create<NotesStore>()(
     {
       name: "paperhub-notes-v1",
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ focusOn: s.focusOn, followOn: s.followOn, tocOn: s.tocOn, folded: s.folded }),
+      partialize: (s) => ({
+        focusOn: s.focusOn,
+        followOn: s.followOn,
+        tocOn: s.tocOn,
+        tableStyle: s.tableStyle,
+        folded: s.folded,
+      }),
+      // A saved table style this build does not know is ignored (the default stays).
+      merge: (saved, current) => {
+        const s = (saved ?? {}) as Partial<NotesStore>;
+        const ok = s.tableStyle === "threeLine" || s.tableStyle === "grid";
+        return { ...current, ...s, tableStyle: ok ? s.tableStyle! : current.tableStyle };
+      },
     },
   ),
 );

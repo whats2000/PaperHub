@@ -1,5 +1,6 @@
 /** Export of the note shown: which formats work here (Word needs pandoc 2.15+
- * on the server) and the download itself, saved under the server's file name. */
+ * on the server) and the download itself, saved under the server's file name.
+ * Word draws the tables in the viewer's table style (three-line or grid). */
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import {
   type DocxUnavailableReason,
   type NoteExportFormat,
 } from "@/lib/api";
+import { useNotesStore } from "@/store/notes";
 
 function save(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -55,7 +57,9 @@ export function useNoteExport(noteId: number | null) {
     async (format: NoteExportFormat) => {
       if (noteId === null) return;
       try {
-        const { blob, filename } = await exportNote(noteId, format);
+        // The tables come out in the style the viewer reads them in.
+        const { tableStyle } = useNotesStore.getState();
+        const { blob, filename } = await exportNote(noteId, format, tableStyle);
         save(blob, filename);
       } catch (err) {
         const reason = reasonOf(err);

@@ -1575,6 +1575,9 @@ export async function locateText(
 
 export type NoteExportFormat = "md" | "docx";
 
+/** How a note's tables are drawn: three-line (paper style) or grid. */
+export type NoteTableStyle = "threeLine" | "grid";
+
 /** Why Word export is unavailable: no pandoc, or one without `--sandbox`. */
 export type DocxUnavailableReason = "pandoc_missing" | "pandoc_too_old";
 
@@ -1603,12 +1606,15 @@ export function exportFileName(disposition: string, fallback: string): string {
   return /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallback;
 }
 
-/** A note exported as a Markdown zip or a .docx, with the server's file name. */
+/** A note exported as a Markdown zip or a .docx, with the server's file name.
+ * `tableStyle` draws Word's tables three-line or grid (Markdown: unchanged). */
 export async function exportNote(
   noteId: number,
   format: NoteExportFormat,
+  tableStyle: NoteTableStyle = "threeLine",
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${API_BASE_URL}/notes/${noteId}/export?format=${format}`);
+  const query = new URLSearchParams({ format, table_style: tableStyle });
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}/export?${query}`);
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
   const filename = exportFileName(
     res.headers.get("content-disposition") ?? "",

@@ -114,6 +114,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "fold", plainLeft: "⌄ on a divider", right: "Fold the note below it" },
       { id: "trash", plainLeft: "Trash on a block", right: "Delete, with Undo" },
       { id: "tocRail", plainLeft: "Lines at the right edge", right: "Table of contents: hover to open, click to jump" },
+      { id: "tableStyle", plainLeft: "⋯ › Table style", right: "Three-line (paper style) or grid, for every table" },
     ],
   },
   {

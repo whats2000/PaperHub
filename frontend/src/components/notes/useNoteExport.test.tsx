@@ -5,17 +5,21 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { useNoteExport } from "@/components/notes/useNoteExport";
 import { exportFileName } from "@/lib/api";
+import { useNotesStore } from "@/store/notes";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 const BASE = "http://localhost:8000";
 let caps: Record<string, unknown> = { md: true, docx: true, docx_reason: null };
+let requested: URLSearchParams[] = [];
 
 const server = setupServer(
   http.get(`${BASE}/notes/export/capabilities`, () => HttpResponse.json(caps)),
   http.get(`${BASE}/notes/7/export`, ({ request }) => {
-    const format = new URL(request.url).searchParams.get("format");
+    const params = new URL(request.url).searchParams;
+    requested.push(params);
+    const format = params.get("format");
     return new HttpResponse(new Blob(["zip"]), {
       headers: {
         "Content-Type": format === "md" ? "application/zip" : "application/octet-stream",
@@ -38,6 +42,8 @@ let clicked: string[];
 const revoke = vi.fn();
 beforeEach(() => {
   caps = { md: true, docx: true, docx_reason: null };
+  requested = [];
+  useNotesStore.setState({ tableStyle: "threeLine" });
   clicked = [];
   URL.createObjectURL = vi.fn(() => "blob:x");
   revoke.mockReset();
@@ -75,6 +81,19 @@ describe("useNoteExport", () => {
     expect(revoke).not.toHaveBeenCalled();
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:x"));
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("asks for the tables in the viewer's table style", async () => {
+    const { result } = renderHook(() => useNoteExport(7));
+    await act(() => result.current.onExport("docx"));
+    act(() => {
+      useNotesStore.setState({ tableStyle: "grid" });
+    });
+    await act(() => result.current.onExport("docx"));
+    expect(requested.map((p) => [p.get("format"), p.get("table_style")])).toEqual([
+      ["docx", "threeLine"],
+      ["docx", "grid"],
+    ]);
   });
 
   it("takes Word's reason from the capabilities", async () => {

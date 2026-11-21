@@ -138,6 +138,41 @@ describe("NotesToolbar", () => {
     expect(useNotesStore.getState().tocOn).toBe(true);
   });
 
+  it("tables are three-line by default; the ⋯ menu's Table style switches to grid (remembered)", async () => {
+    localStorage.removeItem("paperhub-notes-v1");
+    useNotesStore.setState({ tableStyle: useNotesStore.getInitialState().tableStyle });
+    expect(useNotesStore.getState().tableStyle).toBe("threeLine");
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    const group = within(menu).getByRole("group", { name: "Table style" });
+    const three = within(group).getByRole("menuitemradio", { name: /Three-line/ });
+    const grid = within(group).getByRole("menuitemradio", { name: /Grid/ });
+    expect(three).toHaveAttribute("aria-checked", "true");
+    expect(grid).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(grid);
+    expect(useNotesStore.getState().tableStyle).toBe("grid");
+    await waitFor(() => expect(grid).toHaveAttribute("aria-checked", "true"));
+    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { tableStyle?: string } };
+    expect(saved.state.tableStyle).toBe("grid");
+    // A reload keeps it: the store rehydrates the saved choice.
+    act(() => {
+      useNotesStore.setState({ tableStyle: "threeLine" }, false);
+    });
+    localStorage.setItem("paperhub-notes-v1", JSON.stringify(saved));
+    await act(() => useNotesStore.persist.rehydrate());
+    expect(useNotesStore.getState().tableStyle).toBe("grid");
+    fireEvent.click(three);
+    expect(useNotesStore.getState().tableStyle).toBe("threeLine");
+    // A saved style this build does not know is ignored.
+    act(() => {
+      useNotesStore.setState({ tableStyle: "grid" });
+    });
+    localStorage.setItem("paperhub-notes-v1", JSON.stringify({ state: { tableStyle: "dotted" }, version: 0 }));
+    await act(() => useNotesStore.persist.rehydrate());
+    expect(useNotesStore.getState().tableStyle).toBe("grid");
+  });
+
   it("the ⋯ menu shows the note's details, Export (coming soon until wired) and Shortcuts", async () => {
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "More" }));

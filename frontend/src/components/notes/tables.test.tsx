@@ -289,6 +289,21 @@ describe("tables in the note editor", () => {
     expect(rows[1]!.querySelectorAll("th")).toHaveLength(0);
   });
 
+  it("the editor root carries the table style, and follows a switch", () => {
+    seed([seededTable]);
+    useNotesStore.setState({ tableStyle: "threeLine" });
+    mountEditor();
+    const root = screen.getByTestId("note-editor");
+    expect(root).toHaveAttribute("data-table-style", "threeLine");
+    act(() => {
+      useNotesStore.setState({ tableStyle: "grid" });
+    });
+    expect(root).toHaveAttribute("data-table-style", "grid");
+    act(() => {
+      useNotesStore.setState({ tableStyle: "threeLine" });
+    });
+  });
+
   it("the column handle menu offers insert, alignment and delete, and no colour", async () => {
     seed([seededTable]);
     const pm = mountEditor();

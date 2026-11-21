@@ -211,6 +211,7 @@
       "fold": "分隔线上的 ⌄",
       "trash": "区块上的垃圾桶",
       "tocRail": "右缘的短线",
+      "tableStyle": "⋯ › 表格样式",
       "selectPaper": "选中文字",
       "highlighter": "荧光笔",
       "box": "框选",
@@ -262,6 +263,7 @@
       "fold": "折叠其下的笔记",
       "trash": "删除，可撤销",
       "tocRail": "目录：鼠标移上去展开，点击跳转",
+      "tableStyle": "三线表（论文样式）或网格，应用于所有表格",
       "selectPaper": "选样式和颜色，即存入笔记",
       "highlighter": "拖过文字，或点一张图",
       "box": "拖过图或公式",
@@ -315,7 +317,12 @@
     "exportPandocTooOld": "导出 Word 需要 pandoc 2.15 及以上版本：请用 winget upgrade pandoc 更新",
     "exportFailed": "无法导出这份笔记",
     "shortcuts": "快捷键",
-    "showToc": "显示目录"
+    "showToc": "显示目录",
+    "tableStyle": "表格样式",
+    "tableThreeLine": "三线表",
+    "tableThreeLineHint": "论文样式",
+    "tableGrid": "网格",
+    "tableGridHint": "每格都有边框"
   },
   "card": {
     "added_one": "新增了 {{count}} 条笔记",

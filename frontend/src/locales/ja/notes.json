@@ -211,6 +211,7 @@
       "fold": "区切り線の ⌄",
       "trash": "ブロックのごみ箱",
       "tocRail": "右端の短い線",
+      "tableStyle": "⋯ › 表のスタイル",
       "selectPaper": "文字を選択",
       "highlighter": "蛍光ペン",
       "box": "ボックス",
@@ -262,6 +263,7 @@
       "fold": "その下のノートを折りたたむ",
       "trash": "削除（元に戻せる）",
       "tocRail": "目次：ホバーで開き、クリックで移動",
+      "tableStyle": "三線表（論文スタイル）または格子。すべての表に適用",
       "selectPaper": "スタイルと色を選ぶとノートに入ります",
       "highlighter": "単語をなぞる、または図をクリック",
       "box": "図や数式をドラッグで囲む",
@@ -315,7 +317,12 @@
     "exportPandocTooOld": "Word の書き出しには pandoc 2.15 以降が必要です：winget upgrade pandoc で更新してください",
     "exportFailed": "ノートを書き出せませんでした",
     "shortcuts": "ショートカット",
-    "showToc": "目次を表示"
+    "showToc": "目次を表示",
+    "tableStyle": "表のスタイル",
+    "tableThreeLine": "三線表",
+    "tableThreeLineHint": "論文スタイル",
+    "tableGrid": "格子",
+    "tableGridHint": "すべてのセルに罫線"
   },
   "card": {
     "added_one": "ノートを {{count}} 件追加しました",

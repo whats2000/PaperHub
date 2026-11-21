@@ -844,16 +844,24 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().notes[7]?.blocks[0]?.text).toBe("Not sent yet");
   });
 
-  it("keeps Focus, Follow, the table of contents and folded parts across reloads (persisted)", () => {
+  it("keeps Focus, Follow, the table of contents, the table style and folded parts across reloads (persisted)", () => {
     const s = useNotesStore.getState();
     expect(s.tocOn).toBe(true);
+    expect(s.tableStyle).toBe("threeLine");
     s.setFocusOn(true);
     s.setFollowOn(false);
     s.setTocOn(false);
+    s.setTableStyle("grid");
     s.toggleFold(7, "d1");
     const raw = localStorage.getItem("paperhub-notes-v1") ?? "{}";
     const saved = JSON.parse(raw) as { state: Record<string, unknown> };
-    expect(saved.state).toEqual({ focusOn: true, followOn: false, tocOn: false, folded: { "7": ["d1"] } });
+    expect(saved.state).toEqual({
+      focusOn: true,
+      followOn: false,
+      tocOn: false,
+      tableStyle: "grid",
+      folded: { "7": ["d1"] },
+    });
     useNotesStore.getState().toggleFold(7, "d1");
     expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
