@@ -63,8 +63,11 @@
     "turnIntoEquation": "ブロック数式 · 変換",
     "turnIntoEquationHint": "この行のテキストが LaTeX になる",
     "table": "表",
-    "tableHint": "3 × 3、1 行目は見出し · 表を貼り付けても作れます"
+    "tableHint": "3 × 3、1 行目は見出し · 表を貼り付けても作れます",
+    "toc": "目次",
+    "tocHint": "このノートの見出しを一覧にします。クリックで移動"
   },
+  "toc": { "title": "目次", "empty": "見出しを追加するとここに表示されます。" },
   "table": {
     "rowOptions": "行のオプション",
     "columnOptions": "列のオプション",

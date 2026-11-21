@@ -19,7 +19,8 @@ export type NoteBlockType =
   | "paperFigure"
   | "paperEquation"
   | "paperRegion"
-  | "table";
+  | "table"
+  | "toc";
 
 /** A table cell: plain text, inline runs, or a `tableCell` node (only
  * `textAlignment` may differ from the defaults, 1:1 with Markdown). */

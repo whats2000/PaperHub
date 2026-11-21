@@ -63,8 +63,11 @@
     "turnIntoEquation": "Block equation · Turn into",
     "turnIntoEquationHint": "This line's text becomes the LaTeX",
     "table": "Table",
-    "tableHint": "3 × 3, first row a header · paste one to bring it in"
+    "tableHint": "3 × 3, first row a header · paste one to bring it in",
+    "toc": "Table of contents",
+    "tocHint": "Lists the headings of this note; click to jump"
   },
+  "toc": { "title": "Table of contents", "empty": "Headings you add appear here." },
   "table": {
     "rowOptions": "Row options",
     "columnOptions": "Column options",

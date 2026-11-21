@@ -25,6 +25,7 @@ import {
   Hash,
   Heading,
   Lightbulb,
+  ListTree,
   MessageSquare,
   NotebookPen,
   SearchX,
@@ -503,6 +504,14 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           group: basicGroup,
           icon: <Sigma className="size-[18px]" />,
           onItemClick: () => insertInlineMath(editor),
+        },
+        {
+          title: t("notes:slash.toc", "Table of contents"),
+          subtext: t("notes:slash.tocHint", "Lists the headings of this note; click to jump"),
+          aliases: ["toc", "contents", "outline", "table of contents", "目錄", "目录", "目次"],
+          group: basicGroup,
+          icon: <ListTree className="size-[18px]" />,
+          onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "toc" } as never),
         },
       ];
       // Notion's "Turn into": the line's text (without the "/query" being

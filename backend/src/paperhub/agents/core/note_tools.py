@@ -95,6 +95,9 @@ def _table_xml(content: dict[str, Any], quotes: dict[str, str] | None) -> str:
 def _block_xml(b: Block, labels: dict[str, str] | None = None,
                text: str | None = None,
                quotes: dict[str, str] | None = None) -> str:
+    if b.type == "toc":  # a live list of the headings: nothing to read
+        return (f'<note_block id="{esc(b.id)}" type="toc" '
+                f'author="{esc(b.author)}"/>')
     cited: str | None = None
     if text is None and b.type == "table" and isinstance(b.content, dict):
         cited = _table_xml(b.content, quotes)

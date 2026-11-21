@@ -38,7 +38,7 @@ import aiosqlite
 from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import joined_quote
 from paperhub.notes.models import Block, Note, table_aligns, table_rows
-from paperhub.notes.run_text import link_text
+from paperhub.notes.run_text import link_text, read_runs
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.translation.language import canonical_language
@@ -940,6 +940,52 @@ def _paper_media(w: _Writer, b: Block) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+_SLUG_DROP = re.compile(r"[^\w\-.\s]")
+
+
+def pandoc_slug(text: str) -> str:
+    """The id pandoc (``auto_identifiers``) gives a heading: everything but
+    letters, digits, ``_ - .`` and spaces dropped, spaces to hyphens, lower
+    case, everything before the first letter removed, else ``section``.
+    (A repeat gets ``-1``, ``-2`` in ``_toc``.)"""
+    s = "-".join(_SLUG_DROP.sub("", text).lower().split())
+    first = next((i for i, ch in enumerate(s) if ch.isalpha()), len(s))
+    return s[first:] or "section"
+
+
+def _toc(blocks: list[Block], title: str) -> str:
+    """A ``toc`` block: the note's headings 1-3 and sections (level 1) as a
+    nested list, each linked to the id pandoc gives that heading. The
+    note's own title heading takes its id first."""
+    seen: dict[str, int] = {}
+
+    def unique(slug: str) -> str:
+        n = seen.get(slug)
+        seen[slug] = (n or 0) + 1
+        return slug if n is None else f"{slug}-{n}"
+
+    unique(pandoc_slug(title))
+    lines: list[str] = []
+    depth = -1
+    for b in blocks:
+        if b.type == "section":
+            text = str(b.props.get("title") or b.section_key or "")
+            level = 1
+        elif b.type == "heading":
+            lv = b.props.get("level")
+            text = read_runs(b.content)
+            level = lv if isinstance(lv, int) else 1
+        else:
+            continue
+        text = _one_line(_user_text(text))
+        if not text or not 1 <= level <= 3:
+            continue
+        slug = unique(pandoc_slug(text))
+        depth = min(level - 1, depth + 1)
+        lines.append(f"{'  ' * depth}- [{_escape(text)}](#{slug})")
+    return "\n".join(lines)
+
+
 def note_to_markdown(
     note: Note, blocks: list[Block], papers: Mapping[int, ExportPaper], *,
     chunk_papers: Mapping[int, int] | None = None,
@@ -963,7 +1009,10 @@ def note_to_markdown(
         if parent in indent:
             pad = indent[parent] + ("    " if types.get(parent) in _LIST else "")
         indent[b.id] = pad
-        body = w.release(_block(w, b, offset))
+        if b.type == "toc":
+            body = _toc(blocks, _one_line(note.title))
+        else:
+            body = w.release(_block(w, b, offset))
         if not body.strip():
             continue
         marker = _LIST_MARKER.get(b.type)

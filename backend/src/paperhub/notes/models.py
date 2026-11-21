@@ -14,7 +14,7 @@ BlockType = Literal[
     "paragraph", "heading", "bulletListItem", "numberedListItem",
     "checkListItem", "quote", "callout", "codeBlock", "math", "divider",
     "section", "paperQuote", "paperFigure", "paperEquation", "paperRegion",
-    "table",
+    "table", "toc",
 ]
 
 

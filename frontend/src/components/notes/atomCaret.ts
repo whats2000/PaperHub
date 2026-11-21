@@ -26,6 +26,7 @@ export const ATOM_CARET_TYPES: ReadonlySet<string> = new Set([
   "paperRegion",
   "divider",
   "section",
+  "toc",
 ]);
 
 export type CaretSide = "before" | "after";

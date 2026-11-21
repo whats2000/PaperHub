@@ -63,8 +63,11 @@
     "turnIntoEquation": "區塊公式 · 轉換",
     "turnIntoEquationHint": "這一行的文字變成 LaTeX",
     "table": "表格",
-    "tableHint": "3 × 3，第一列為標題列 · 也可直接貼上表格"
+    "tableHint": "3 × 3，第一列為標題列 · 也可直接貼上表格",
+    "toc": "目錄",
+    "tocHint": "列出這則筆記的標題，點一下即可跳到"
   },
+  "toc": { "title": "目錄", "empty": "新增標題後會顯示在這裡。" },
   "table": {
     "rowOptions": "列選項",
     "columnOptions": "欄選項",

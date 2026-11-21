@@ -63,8 +63,11 @@
     "turnIntoEquation": "块公式 · 转换",
     "turnIntoEquationHint": "这一行的文字变成 LaTeX",
     "table": "表格",
-    "tableHint": "3 × 3，第一行为标题行 · 也可直接粘贴表格"
+    "tableHint": "3 × 3，第一行为标题行 · 也可直接粘贴表格",
+    "toc": "目录",
+    "tocHint": "列出这条笔记的标题，点一下即可跳转"
   },
+  "toc": { "title": "目录", "empty": "添加标题后会显示在这里。" },
   "table": {
     "rowOptions": "行选项",
     "columnOptions": "列选项",

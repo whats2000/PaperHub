@@ -30,6 +30,7 @@ import { paperFigureBlock } from "./blocks/PaperFigureBlock";
 import { paperQuoteBlock } from "./blocks/PaperQuoteBlock";
 import { paperRegionBlock } from "./blocks/PaperRegionBlock";
 import { sectionBlock } from "./blocks/SectionBlock";
+import { tocBlock } from "./blocks/TocBlock";
 
 const {
   paragraph,
@@ -57,6 +58,7 @@ export const noteSchema = BlockNoteSchema.create({
     callout: calloutBlock(),
     math: mathBlock(),
     section: sectionBlock(),
+    toc: tocBlock(),
     paperQuote: paperQuoteBlock(),
     paperFigure: paperFigureBlock(),
     paperEquation: paperEquationBlock(),
