@@ -129,11 +129,25 @@ async def _target_exists(conn: aiosqlite.Connection, note: Note) -> bool:
 # Block types that hold something with no text of their own.
 _CONTENT_TYPES = ("paperFigure", "paperRegion", "paperEquation")
 
-# A note "has content" (SQL over ``notes n``): the user's title, or a live
+# A note "has content" (SQL over ``notes n``): the user's own title (not
+# the target's), or a live
 # block with text (or a figure / region / equation). Shared by ``[[`` search,
 # the sidebar's chat list and ``paperhub-clean-empty-chats``.
+# A title equal to the target's own (auto-filled before
+# ``paperhub-clear-auto-note-titles``) is not the user's: it does not count.
+_TARGET_TITLE_SQL = (
+    "COALESCE(CASE n.target_kind "
+    "WHEN 'session' THEN (SELECT TRIM(t.title) FROM chat_sessions t "
+    "WHERE CAST(t.id AS TEXT) = n.target_id) "
+    "WHEN 'paper' THEN (SELECT TRIM(t.title) FROM paper_content t "
+    "WHERE CAST(t.id AS TEXT) = n.target_id) "
+    "WHEN 'idea' THEN (SELECT TRIM(t.title) FROM ideas t "
+    "WHERE CAST(t.id AS TEXT) = n.target_id) END, '')"
+)
+
 NOTE_HAS_CONTENT_SQL = (
-    "(TRIM(n.title) <> '' OR EXISTS (SELECT 1 FROM note_blocks b "
+    "((TRIM(n.title) <> '' AND TRIM(n.title) <> " + _TARGET_TITLE_SQL + ") "
+    "OR EXISTS (SELECT 1 FROM note_blocks b "
     "WHERE b.note_id = n.id AND b.deleted_at IS NULL AND (TRIM(b.text) <> '' "
     f"OR b.type IN ({', '.join(repr(t) for t in _CONTENT_TYPES)}))))"
 )
@@ -234,8 +248,9 @@ async def note_first_line(conn: aiosqlite.Connection, note_id: int) -> str:
     note = await get_note(conn, note_id)
     if note is None:
         return ""
-    if note.title.strip():
-        return " ".join(note.title.split())
+    own = " ".join(note.title.split())
+    if own and own != " ".join((await default_title(conn, note)).split()):
+        return own
     for b in await list_blocks(conn, note_id):
         for line in b.text.splitlines():
             if line.strip():

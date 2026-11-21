@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -98,7 +99,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
-    rows = asyncio.run(clean_empty_chats(load_settings().db_path, dry_run=args.dry_run))
+    # Each removal is logged (stderr), next to the printed list.
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        rows = asyncio.run(clean_empty_chats(load_settings().db_path, dry_run=args.dry_run))
+    finally:
+        logger.removeHandler(handler)
     for r in rows:
         note = r["note_id"] if r["note_id"] is not None else "-"
         print(f"session {r['session_id']:>5} note {note!s:>5} {r['status']}")

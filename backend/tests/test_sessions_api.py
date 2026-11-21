@@ -1076,3 +1076,42 @@ async def test_delete_of_a_chat_with_only_a_note_is_undoable(
     assert row is not None and row[0] is not None  # soft, not hard
     assert (await sessions_client.post(f"/sessions/{sid}/restore")).status_code == 204
     assert sid in [s["id"] for s in (await sessions_client.get("/sessions")).json()]
+
+
+async def test_a_chat_whose_note_title_is_the_chat_title_stays_hidden(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A ghost's note titled "New chat" (auto-filled from the chat) is empty."""
+    db = tmp_path / "paperhub.db"
+    sid = (await sessions_client.post("/sessions")).json()["session_id"]
+    await _note_with(db, sid, title="New chat")
+    assert sid not in [s["id"] for s in (await sessions_client.get("/sessions")).json()]
+
+
+async def test_list_sessions_lists_a_chat_whose_empty_note_is_linked(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A [[ link to an empty chat note opens: the chat is listed (as [[
+    search lists the note); an unlinked one stays hidden."""
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    from paperhub.notes.store import get_or_create_note
+    db = tmp_path / "paperhub.db"
+    linked, plain, holder = [
+        (await sessions_client.post("/sessions")).json()["session_id"] for _ in range(3)]
+    async with aiosqlite.connect(db) as conn:
+        target = await get_or_create_note(
+            conn, target_kind="session", target_id=str(linked), title="",
+            session_id=linked)
+        await get_or_create_note(conn, target_kind="session", target_id=str(plain),
+                                 title="", session_id=plain)
+        note = await get_or_create_note(
+            conn, target_kind="session", target_id=str(holder), title="",
+            session_id=holder)
+        await apply_ops(conn, note.id, base_revision=0, actor="user", ops=[
+            Op(op="insert", block=BlockIn(type="paragraph", content=[
+                {"type": "text", "text": "see "},
+                {"type": "noteLink", "props": {"targetKind": "note",
+                                               "targetId": target.id,
+                                               "label": "", "name": "x"}}]))])
+    ids = [s["id"] for s in (await sessions_client.get("/sessions")).json()]
+    assert linked in ids and holder in ids and plain not in ids

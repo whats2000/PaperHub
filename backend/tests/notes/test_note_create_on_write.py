@@ -133,3 +133,13 @@ async def test_search_lists_a_note_with_only_a_title(
     assert (await client.get("/notes/search")).json() == []
     await client.patch(f"/notes/{nid}", json={"title": "Named page"})
     assert [h["note_id"] for h in (await client.get("/notes/search")).json()] == [nid]
+
+
+async def test_a_title_copied_from_the_target_is_not_content(
+    client: AsyncClient,
+) -> None:
+    """A note title auto-filled with its target's title (before
+    paperhub-clear-auto-note-titles) does not make the note non-empty."""
+    nid = await _create(client, "paper", 1)
+    await client.patch(f"/notes/{nid}", json={"title": "A Paper"})
+    assert (await client.get("/notes/search")).json() == []

@@ -42,7 +42,11 @@ async def _seed(db: Path) -> None:
             "INSERT INTO chat_sessions (id) VALUES (6);"   # its note is linked
             "INSERT INTO chat_sessions (id, title) VALUES (7, 'Renamed');"
             "INSERT INTO chat_sessions (id, internal) VALUES (8, 1);"  # internal
-            "INSERT INTO chat_sessions (id, deleted_at) VALUES (9, '2026-11-01');")
+            "INSERT INTO chat_sessions (id, deleted_at) VALUES (9, '2026-11-01');"
+            # 10 qualifies: its note's title is the chat's own (auto-filled).
+            "INSERT INTO chat_sessions (id) VALUES (10);"
+            "INSERT INTO notes (id, target_kind, target_id, session_id, title, "
+            "created_at, updated_at) VALUES (20, 'session', '10', 10, 'New chat', 'x', 'x');")
         for nid, sid in [(12, 2), (15, 5), (16, 6), (13, 3)]:
             await conn.execute(
                 "INSERT INTO notes (id, target_kind, target_id, session_id, "
@@ -78,7 +82,7 @@ async def test_dry_run_lists_exactly_the_ghost_chats(tmp_path: Path) -> None:
     await _seed(db)
     rows = await clean_empty_chats(db, dry_run=True)
     assert [(r["session_id"], r["note_id"], r["status"]) for r in rows] == [
-        (1, None, "would_delete"), (2, 12, "would_delete")]
+        (1, None, "would_delete"), (2, 12, "would_delete"), (10, 20, "would_delete")]
     assert await _deleted(db) == ({9}, set())
 
 
@@ -90,8 +94,8 @@ async def test_run_soft_deletes_and_logs_them_once(
     with caplog.at_level(logging.INFO, logger="paperhub.cli.clean_empty_chats"):
         rows = await clean_empty_chats(db, dry_run=False)
     assert [(r["session_id"], r["status"]) for r in rows] == [
-        (1, "deleted"), (2, "deleted")]
-    assert await _deleted(db) == ({1, 2, 9}, {12})
+        (1, "deleted"), (2, "deleted"), (10, "deleted")]
+    assert await _deleted(db) == ({1, 2, 9, 10}, {12, 20})
     assert "session=1" in caplog.text and "session=2 note=12" in caplog.text
     # The note goes down with its chat: Undo (restore) brings both back.
     async with aiosqlite.connect(db) as conn, conn.execute(
@@ -99,7 +103,7 @@ async def test_run_soft_deletes_and_logs_them_once(
             "JOIN notes n ON n.target_id = CAST(s.id AS TEXT) WHERE s.id = 2") as cur:
         assert (await cur.fetchone()) == (1,)
     assert await clean_empty_chats(db, dry_run=False) == []
-    assert await _deleted(db) == ({1, 2, 9}, {12})
+    assert await _deleted(db) == ({1, 2, 9, 10}, {12, 20})
 
 
 async def test_main_prints_each_chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -110,5 +114,16 @@ async def test_main_prints_each_chat(tmp_path: Path, monkeypatch: pytest.MonkeyP
     import asyncio
     assert await asyncio.to_thread(main, ["--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "would_delete" in out and "summary: would_delete=2" in out
+    assert "would_delete" in out and "summary: would_delete=3" in out
     assert await _deleted(tmp_path / "paperhub.db") == ({9}, set())
+
+
+async def test_main_logs_each_removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                      capsys: pytest.CaptureFixture[str]) -> None:
+    import asyncio
+    monkeypatch.setenv("PAPERHUB_WORKSPACE", str(tmp_path))
+    await _seed(tmp_path / "paperhub.db")
+    assert await asyncio.to_thread(main, []) == 0
+    captured = capsys.readouterr()
+    assert "summary: deleted=3" in captured.out
+    assert "soft-deleted session=2 note=12" in captured.err

@@ -22,7 +22,7 @@ from paperhub.feedback.review import maybe_review_fork
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import AgentSummary, SearchCandidateModel
-from paperhub.notes.store import NOTE_HAS_CONTENT_SQL, note_first_line
+from paperhub.notes.store import NOTE_HAS_CONTENT_SQL, linked_note_ids, note_first_line
 from paperhub.outbound import held
 
 router = APIRouter()
@@ -303,6 +303,11 @@ async def create_session() -> CreateSessionResponse:
     return CreateSessionResponse(session_id=session_id)
 
 
+def _bare(r: Any) -> bool:
+    """A no-message 'New chat' whose note is empty (listed only if linked)."""
+    return int(r[4]) == 0 and str(r[1]) == "New chat" and r[9] is None
+
+
 @router.get("/sessions", response_model=list[SessionSummary])
 async def list_sessions() -> list[SessionSummary]:
     """List chat sessions that have at least one message, most-recently-active
@@ -330,22 +335,31 @@ async def list_sessions() -> list[SessionSummary]:
                    (SELECT n.id FROM notes n WHERE n.target_kind = 'session'
                     AND n.target_id = CAST(s.id AS TEXT)
                     AND n.deleted_at IS NULL AND {NOTE_HAS_CONTENT_SQL})
-                    AS note_id
+                    AS note_id,
+                   (SELECT n.id FROM notes n WHERE n.target_kind = 'session'
+                    AND n.target_id = CAST(s.id AS TEXT)
+                    AND n.deleted_at IS NULL) AS any_note_id
             FROM chat_sessions s
             LEFT JOIN messages m ON m.session_id = s.id
             WHERE s.deleted_at IS NULL AND s.internal = 0
             GROUP BY s.id
             -- "Meaningful" = has messages, a non-default title, or a note
-            -- with content (H5b.1). A named chat carries intent even with no
-            -- persisted messages yet; only the untouched 'New chat' empties
-            -- are hidden as clutter.
+            -- with content (H5b.1), or a note some [[ link points at (kept
+            -- below). A named chat carries intent even with no persisted
+            -- messages yet; only the untouched 'New chat' empties are
+            -- hidden as clutter.
             HAVING message_count > 0 OR s.title <> 'New chat'
-                OR note_id IS NOT NULL
+                OR note_id IS NOT NULL OR any_note_id IS NOT NULL
             ORDER BY updated_at DESC, s.id DESC
             """.replace("{NOTE_HAS_CONTENT_SQL}", NOTE_HAS_CONTENT_SQL),
         ) as cur,
     ):
         rows = list(await cur.fetchall())
+        # A chat with an empty note is listed only when a [[ link points at
+        # its note (so the link opens it), as [[ search lists that note.
+        if any(_bare(r) for r in rows):
+            linked = await linked_note_ids(conn)
+            rows = [r for r in rows if not _bare(r) or int(r[10]) in linked]
         # A note-only chat is named by its note until the user names it or
         # sends a message.
         titles: dict[int, str] = {}
@@ -672,6 +686,14 @@ async def delete_session(session_id: int) -> None:
             f"{NOTE_HAS_CONTENT_SQL}", (str(session_id),),
         ) as cur:
             has_note = await cur.fetchone() is not None
+        if not has_note:
+            # An empty note a [[ link points at is kept too (undoable).
+            async with conn.execute(
+                "SELECT id FROM notes WHERE target_kind = 'session' "
+                "AND target_id = ? AND deleted_at IS NULL", (str(session_id),),
+            ) as cur:
+                nrow = await cur.fetchone()
+            has_note = nrow is not None and int(nrow[0]) in await linked_note_ids(conn)
         meaningful = has_messages or title != "New chat" or has_note
 
         if meaningful:
