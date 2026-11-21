@@ -217,6 +217,19 @@
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + gates for touched files.
 - [ ] **Step 5: Commit** `feat(notes): table captions and notes`.
 
+### Task 14: Nothing is created by looking (user-reported ghost chats)
+
+**Files:**
+- Modify: `frontend/src/components/notes/NotesPane.tsx` (drop the display-time `ensureBackendSession`; an unsaved chat / a target with no note renders an empty editor), `frontend/src/store/notes.ts` (`loadTarget` handles "no note yet"; the first save creates the chat via `ensureBackendSession` when needed, then the note, then posts the ops — one path also used by marks and the note card), `frontend/src/lib/api.ts`, `lib/notes/openNoteLink.ts` + `NoteLinkView.tsx` (gone vs unreachable wording + Retry), `frontend/src/index.css` / pane (`overflow-x: clip` on the notes scroll area), four `notes.json`
+- Modify: `backend/src/paperhub/api/notes.py` (`GET /notes/target` no longer creates: returns `{note: null}` or 404 per existing client contract — pick one and update callers; new `POST /notes/target` creates idempotently), `backend/src/paperhub/notes/store.py` (`list_live_notes` excludes empty notes and notes of chats the sidebar hides, unless a `noteLink` points at them), `backend/src/paperhub/api/sessions.py` (list a chat whose note has content; title = note's first line while the chat title is still "New chat" and it has no messages), every backend caller of `get_or_create_note` reviewed (marks, agent `edit_note`, idea notes keep creating on write)
+- Create: `backend/src/paperhub/cli/clean_empty_chats.py` (`paperhub-clean-empty-chats [--dry-run]`, entry point in `pyproject.toml`), step in `backend/scripts/reingest_all_papers.ps1`
+- Test: `backend/tests/notes/test_note_create_on_write.py`, `backend/tests/test_clean_empty_chats.py`, `backend/tests/api/test_sessions_list.py` (or the existing sessions test module), `frontend/src/components/notes/NotesPane.test.tsx` (or ChatPage.notes.test.tsx), `noteLink.test.tsx`
+
+- [ ] **Step 1: Failing tests**: opening the notes pane on a new chat makes no `POST /sessions` and no note; typing the first character creates the chat + note and saves it; `GET /notes/target` on a paper with no note creates nothing; marks and agent edits still create the note; `[[` search omits an empty note and the note of a hidden empty chat, but lists an empty note that a `noteLink` targets; `GET /sessions` lists a no-message chat whose note has text, titled by its first line; clicking a gone link says deleted, an unreachable one says can't open + Retry (no error toast); the notes scroll area has `overflow-x: clip`; the cleanup CLI dry-run lists exactly the qualifying chats (fixtures: one qualifying, one with a message, one with a paper, one with note text, one linked, one renamed) and a real run soft-deletes only that one and logs it; running twice changes nothing.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + ruff / mypy / typecheck / lint / parity.
+- [ ] **Step 5: Commit** in focused commits (backend create-on-write + search; sessions list; cleanup CLI + script; frontend).
+- [ ] **Step 6: Live workspace (controller, with user approval):** back up `paperhub.db`, run `paperhub-clean-empty-chats --dry-run` on the live workspace and show the user the list; run for real only after the user confirms.
+
 ## Phase 4 — Verification
 
 ### Task 11: Full gates and live check on a workspace copy
