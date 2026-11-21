@@ -1,18 +1,15 @@
 /** Following a `[[` link (and a `[note:B]` chip): a paper opens in the
- * reader; a paper's note opens with its paper and its note; a chat's note
- * switches to that chat with its note open; an idea's note opens the idea
- * on the Ideas page. A link to a heading then glides to it and flashes it.
- *
- * The reader has no "go to section" request of its own (it jumps to a
- * section only as a citation's fallback), so a link to a paper section
- * opens the paper. */
-import { getIdeationGraph, getNote, listIdeationProblems } from "@/lib/api";
+ * reader (at its section, for a section link); a paper's note opens with
+ * its paper and its note; a chat's note switches to that chat with its note
+ * open; an idea's note opens the idea on the Ideas page. A link to a
+ * heading then glides to it and flashes it. */
+import { getIdeationGraph, getSectionRange, listIdeationProblems, listSessions } from "@/lib/api";
 import { revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useIdeationStore, type IdeationScope } from "@/store/ideation";
 import { useNavStore } from "@/store/nav";
-import { linkTargetKey, useNotesStore } from "@/store/notes";
+import { linkTargetKey, noteTargetInfo, useNotesStore, type LinkTargetInfo } from "@/store/notes";
 import { useNotesPaneStore } from "@/store/notesPane";
 import type { NoteTargetKind } from "@/types/notes";
 
@@ -35,45 +32,73 @@ export interface NotePlace {
   blockId: string | null;
 }
 
-/** Follows a link; false when its target could not be opened. */
-export async function openNoteLink(link: NoteLinkTarget): Promise<boolean> {
-  if (link.targetKind === "paper") {
-    useNavStore.getState().setPage("chat");
-    useCanvasStore.getState().openPaper(link.targetId);
-    return true;
-  }
-  const noteId = link.targetId;
-  let kind: NoteTargetKind;
-  let id: number;
-  const live = useNotesStore.getState().notes[noteId]?.note;
-  const cached = useNotesStore.getState().linkTargets[linkTargetKey("note", noteId)];
-  if (live && !live.deleted_at) {
-    kind = live.target_kind;
-    id = Number(live.target_id);
-  } else if (cached?.status === "ok" && cached.noteKind && cached.targetId !== undefined) {
-    kind = cached.noteKind;
-    id = cached.targetId;
-  } else {
-    try {
-      const d = await getNote(noteId);
-      if (d.note.deleted_at) return false;
-      kind = d.note.target_kind;
-      id = Number(d.note.target_id);
-    } catch {
-      return false;
-    }
-  }
-  return openNotePlace({ kind, id, noteId, blockId: link.blockId || null });
+/** `gone`: the target was deleted; `unreachable`: it could not be found or
+ * opened (its chat or idea missing, the lookup failed). */
+export type OpenOutcome = "opened" | "gone" | "unreachable";
+
+/** A lookup older than this is checked again before a click follows it. */
+export const LINK_RECHECK_MS = 60_000;
+
+/** The target as known now, a stale lookup checked again. */
+async function freshTarget(kind: "note" | "paper", id: number): Promise<LinkTargetInfo | undefined> {
+  const live = kind === "note" ? useNotesStore.getState().notes[id] : undefined;
+  if (live) return noteTargetInfo(live);
+  await useNotesStore.getState().resolveLinkTarget(kind, id, { maxAgeMs: LINK_RECHECK_MS });
+  return useNotesStore.getState().linkTargets[linkTargetKey(kind, id)];
 }
 
-/** Shows a note (and one of its blocks) where it lives. */
+/** Follows a link. */
+export async function openNoteLink(link: NoteLinkTarget): Promise<OpenOutcome> {
+  const info = await freshTarget(link.targetKind, link.targetId);
+  if (info?.status === "dead") return "gone";
+  if (link.targetKind === "paper") {
+    await openPaperAt(link.targetId, link.sectionKey);
+    return "opened";
+  }
+  if (info?.status !== "ok" || !info.noteKind || info.targetId === undefined) return "unreachable";
+  if (link.blockId && !(info.blocks ?? []).some((b) => b.id === link.blockId)) return "gone";
+  const place = { kind: info.noteKind, id: info.targetId, noteId: link.targetId, blockId: link.blockId || null };
+  return (await openNotePlace(place)) ? "opened" : "unreachable";
+}
+
+/** Opens a paper in the reader, at one of its sections (as a citation of
+ * the section's chunks); the paper alone when the section is not found. */
+export async function openPaperAt(paperId: number, sectionKey: string): Promise<void> {
+  useNavStore.getState().setPage("chat");
+  if (sectionKey) {
+    try {
+      const r = await getSectionRange(paperId, sectionKey);
+      useCanvasStore.getState().openCitation(r.first_chunk_id, r.last_chunk_id);
+      return;
+    } catch {
+      /* the paper alone */
+    }
+  }
+  useCanvasStore.getState().openPaper(paperId);
+}
+
+/** The local chat of a backend session, the chat list synced once if needed. */
+async function chatOf(backendId: number): Promise<number | null> {
+  const find = () => useChatStore.getState().sessions.find((s) => s.backend_session_id === backendId)?.id ?? null;
+  const found = find();
+  if (found !== null) return found;
+  try {
+    useChatStore.getState().reconcileBackendSessions(await listSessions());
+  } catch {
+    return null;
+  }
+  return find();
+}
+
+/** Shows a note (and one of its blocks) where it lives; false when that
+ * place (its chat, its idea) is not there. */
 export async function openNotePlace(place: NotePlace): Promise<boolean> {
   if (place.kind === "idea") return openIdeaNote(place);
   if (place.kind === "session") {
-    const chat = useChatStore.getState().sessions.find((s) => s.backend_session_id === place.id);
-    if (!chat) return false;
+    const chat = await chatOf(place.id);
+    if (chat === null) return false;
     // The pane shows only the chat on screen's note: switch chats first.
-    if (useChatStore.getState().activeSessionId !== chat.id) useChatStore.getState().selectSession(chat.id);
+    if (useChatStore.getState().activeSessionId !== chat) useChatStore.getState().selectSession(chat);
     else useNavStore.getState().setPage("chat");
   } else {
     useNavStore.getState().setPage("chat");
@@ -120,9 +145,9 @@ function graphHolds(ideaId: number, ms = 5000): Promise<boolean> {
 
 /** The Ideas page with the idea selected, the block revealed in its note. */
 async function openIdeaNote(place: NotePlace): Promise<boolean> {
-  useNavStore.getState().setPage("ideas");
   const scope = await scopeOfIdea(place.id);
   if (scope === null) return false;
+  useNavStore.getState().setPage("ideas");
   const ideation = useIdeationStore.getState();
   if (scope !== ideation.scope) ideation.setScope(scope);
   // The scope on screen without the idea (not loaded yet, or older): reload it.

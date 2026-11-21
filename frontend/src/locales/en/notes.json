@@ -95,6 +95,7 @@
     "noteGone": "This note was deleted",
     "headingGone": "This heading was deleted",
     "paperGone": "This paper is no longer in your library",
+    "unreachable": "Couldn't open that link: where it points is not there.",
     "kind": {
       "paper": "Paper",
       "paperNote": "Paper note",

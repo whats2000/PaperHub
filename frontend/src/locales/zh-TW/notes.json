@@ -95,6 +95,7 @@
     "noteGone": "這則筆記已刪除",
     "headingGone": "這個標題已刪除",
     "paperGone": "這篇論文已不在你的文獻庫中",
+    "unreachable": "無法開啟這個連結：它指向的地方已不存在。",
     "kind": {
       "paper": "論文",
       "paperNote": "論文筆記",

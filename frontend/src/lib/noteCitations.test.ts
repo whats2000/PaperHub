@@ -34,6 +34,19 @@ describe("openNoteBlock (a [note:B] chip in the chat)", () => {
     expect(s.request).toMatchObject({ kind: "paper", id: 47, noteId: 2, blockId: id });
   });
 
+  it("says so, neutrally, when the line's chat is not there", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/blocks/b_chat`, () =>
+        HttpResponse.json({ note_id: 3, target_kind: "session", target_id: "404" }),
+      ),
+      http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json([])),
+    );
+    await openNoteBlock("b_chat");
+    expect(useNotesPaneStore.getState().request).toBeNull();
+    expect(toastFn).toHaveBeenCalledWith("Couldn't open that link: where it points is not there.");
+    expect(errorFn).not.toHaveBeenCalled();
+  });
+
   it("says so when the line is gone", async () => {
     server.use(http.get(`${API_BASE_URL}/notes/blocks/b_gone`, () => new HttpResponse(null, { status: 404 })));
     await openNoteBlock("b_gone");

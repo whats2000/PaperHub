@@ -21,9 +21,9 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import {
   ApiError,
   createNoteComment,
-  getDocumentInfo,
   getNote,
   getNoteForTarget,
+  getPaperInfo,
   listMarkColors,
   postNoteOps,
   replyToNoteComment,
@@ -165,8 +165,9 @@ interface NotesStore {
 
   /** `[[` link targets looked up this session, by `linkTargetKey`. */
   linkTargets: Record<string, LinkTargetInfo>;
-  /** Looks a link's target up once a session (again after a failure). */
-  resolveLinkTarget: (kind: "note" | "paper", id: number) => Promise<void>;
+  /** Looks a link's target up once a session (again after a failure, or
+   * when the last lookup is older than `maxAgeMs`). */
+  resolveLinkTarget: (kind: "note" | "paper", id: number, opts?: { maxAgeMs?: number }) => Promise<void>;
 
   /** Accepts or rejects one of the agent's suggestions (edits queued
    * before it are sent first), then shows the saved note — after `exit`
@@ -184,13 +185,27 @@ interface NotesStore {
  * (or never there); `failed`: the lookup failed, nothing is known. */
 export interface LinkTargetInfo {
   status: "ok" | "dead" | "failed";
+  /** When it was looked up (ms since the epoch; a loaded note: now). */
+  checkedAt?: number;
   /** A note's target kind and id. */
   noteKind?: NoteTargetKind;
   targetId?: number;
-  /** A note's display title ("" when it has none). */
+  /** A note's display title, a paper's title ("" when it has none). */
   name?: string;
   /** A note's blocks, in document order. */
   blocks?: { id: string; type: string; text: string }[];
+}
+
+/** A loaded note as a link target. */
+export function noteTargetInfo(state: NoteState): LinkTargetInfo {
+  return {
+    status: state.note.deleted_at ? "dead" : "ok",
+    checkedAt: Date.now(),
+    noteKind: state.note.target_kind,
+    targetId: Number(state.note.target_id),
+    name: state.note.title || state.defaultTitle || "",
+    blocks: state.blocks,
+  };
 }
 
 /** The `linkTargets` key of a link's target. */
@@ -252,21 +267,23 @@ const isGone = (err: unknown) => err instanceof ApiError && err.status === 404;
 /** A link target as the server has it: never rejects. */
 async function lookUpLinkTarget(kind: "note" | "paper", id: number): Promise<LinkTargetInfo> {
   try {
+    const checkedAt = Date.now();
     if (kind === "paper") {
-      await getDocumentInfo(id);
-      return { status: "ok" };
+      const p = await getPaperInfo(id);
+      return { status: "ok", checkedAt, name: p.title };
     }
     const d = await getNote(id);
-    if (d.note.deleted_at) return { status: "dead" };
+    if (d.note.deleted_at) return { status: "dead", checkedAt };
     return {
       status: "ok",
+      checkedAt,
       noteKind: d.note.target_kind,
       targetId: Number(d.note.target_id),
       name: d.note.title || d.default_title || "",
       blocks: d.blocks.map((b) => ({ id: b.id, type: b.type, text: b.text })),
     };
   } catch (err) {
-    return { status: isGone(err) ? "dead" : "failed" };
+    return { status: isGone(err) ? "dead" : "failed", checkedAt: Date.now() };
   }
 }
 
@@ -1087,10 +1104,12 @@ export const useNotesStore = create<NotesStore>()(
         },
 
         linkTargets: {},
-        resolveLinkTarget: (kind, id) => {
+        resolveLinkTarget: (kind, id, opts) => {
           const key = linkTargetKey(kind, id);
           const known = get().linkTargets[key];
-          if (known && known.status !== "failed") return Promise.resolve();
+          const stale =
+            opts?.maxAgeMs !== undefined && Date.now() - (known?.checkedAt ?? 0) > opts.maxAgeMs;
+          if (known && known.status !== "failed" && !stale) return Promise.resolve();
           const inflight = linkRequests.get(key);
           if (inflight) return inflight;
           const req: Promise<void> = lookUpLinkTarget(kind, id)

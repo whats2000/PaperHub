@@ -2,17 +2,19 @@
  * name (+ " › heading"), or the user's display text, underlined in the text
  * colour (yellow is for citations). A click follows the link; hovering it
  * previews where it goes and the first lines there, with Open and Edit
- * display text. A target since deleted: grey and struck through, the
+ * display text; keyboard focus opens it too (Tab moves into it, Enter
+ * follows the link). A target since deleted: grey and struck through, the
  * preview says so, a click does nothing (no error toast). */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { toast } from "sonner";
 import { ArrowUpRight, FileText, Lightbulb, MessageSquare, NotebookPen, Pencil } from "lucide-react";
 
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { openNoteLink } from "@/lib/notes/openNoteLink";
 import { cn } from "@/lib/utils";
-import { linkTargetKey, useNotesStore, type LinkTargetInfo } from "@/store/notes";
+import { linkTargetKey, noteTargetInfo, useNotesStore, type LinkTargetInfo } from "@/store/notes";
 import type { NoteTargetKind } from "@/types/notes";
 
 import { sectionLabel } from "./markProps";
@@ -41,14 +43,7 @@ function useTarget(kind: "note" | "paper", id: number): LinkTargetInfo | undefin
   useEffect(() => {
     if (!live && id > 0) void resolve(kind, id);
   }, [live, kind, id, resolve]);
-  if (!live) return cached;
-  return {
-    status: live.note.deleted_at ? "dead" : "ok",
-    noteKind: live.note.target_kind,
-    targetId: Number(live.note.target_id),
-    name: live.note.title || live.defaultTitle || "",
-    blocks: live.blocks,
-  };
+  return live ? noteTargetInfo(live) : cached;
 }
 
 function KindIcon({ kind, noteKind, className }: { kind: "note" | "paper"; noteKind?: NoteTargetKind; className?: string }) {
@@ -83,11 +78,15 @@ export function NoteLinkView({
   const headingGone = isNote && !!blockId && info?.status === "ok" && !heading;
   const dead = info?.status === "dead" || headingGone;
 
-  // The target's name now (a note's: its title › the heading), else the saved one.
+  // The target's name now (its title › the heading or section), else the saved one.
   const current =
-    isNote && info?.status === "ok" && !dead
-      ? [info.name || t("notes:link.untitled", "Untitled"), heading?.text].filter(Boolean).join(" › ")
-      : name;
+    info?.status !== "ok" || dead
+      ? name
+      : isNote
+        ? [info.name || t("notes:link.untitled", "Untitled"), heading?.text].filter(Boolean).join(" › ")
+        : info.name
+          ? [info.name, sectionKey].filter(Boolean).join(" › ")
+          : name;
   const shown = label || current || "…";
 
   // ---- edit the display text ---------------------------------------------
@@ -110,7 +109,7 @@ export function NoteLinkView({
   };
   const startEdit = () => {
     setPreview(false);
-    setDraft(shown);
+    setDraft(label || current || "");
     setEditing(true);
   };
 
@@ -128,7 +127,20 @@ export function NoteLinkView({
   const open = () => {
     if (dead || targetId <= 0) return;
     setPreview(false);
-    void openNoteLink(link);
+    void openNoteLink(link).then((outcome) => {
+      // Deleted meanwhile: the chip turns grey (the lookup was refreshed).
+      if (outcome === "unreachable") toast(t("notes:link.unreachable", "Couldn't open that link: where it points is not there."));
+    });
+  };
+
+  // ---- keyboard: focus shows the preview, Tab moves into it --------------
+  const previewBox = useRef<HTMLDivElement>(null);
+  // Escape in the preview hands focus back without reopening it.
+  const quietFocus = useRef(false);
+  const focusOut = (e: React.FocusEvent) => {
+    const to = e.relatedTarget as Node | null;
+    if (to && (chip.current?.contains(to) || previewBox.current?.contains(to))) return;
+    hover(false);
   };
 
   // The first lines where the link lands (below the heading, for one).
@@ -182,13 +194,13 @@ export function NoteLinkView({
       <span
         ref={chip}
         role="link"
-        tabIndex={-1}
+        tabIndex={editing ? -1 : 0}
         data-note-link-chip=""
         data-dead={dead ? "true" : undefined}
         aria-disabled={dead || undefined}
         aria-label={dead ? `${shown} (${goneText})` : t("notes:link.openNamed", "Open {{name}}", { name: shown })}
         className={cn(
-          "inline-flex items-baseline gap-0.5 rounded-sm px-px align-baseline underline underline-offset-2 transition-colors duration-150 motion-reduce:transition-none",
+          "inline-flex items-baseline gap-0.5 rounded-sm px-px align-baseline underline underline-offset-2 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
           dead
             ? "text-muted-foreground line-through decoration-muted-foreground/60"
             : "cursor-pointer text-foreground decoration-foreground/40 hover:bg-accent hover:decoration-foreground",
@@ -202,6 +214,31 @@ export function NoteLinkView({
         onClick={() => {
           if (!editing) open();
         }}
+        onFocus={() => {
+          clearTimeout(timer.current);
+          if (quietFocus.current) quietFocus.current = false;
+          else if (!editing) setPreview(true);
+        }}
+        onBlur={focusOut}
+        onKeyDown={(e) => {
+          if (editing) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.stopPropagation();
+            open();
+          } else if (e.key === "Tab" && !e.shiftKey && preview) {
+            // The preview is in a portal: Tab steps into its buttons.
+            const first = previewBox.current?.querySelector<HTMLElement>("button");
+            if (first) {
+              e.preventDefault();
+              e.stopPropagation();
+              first.focus();
+            }
+          } else if (e.key === "Escape" && preview) {
+            e.stopPropagation();
+            setPreview(false);
+          }
+        }}
       >
         <KindIcon kind={targetKind} noteKind={info?.noteKind} className="size-[0.85em] shrink-0 self-center opacity-70" />
         <span>{shown}</span>
@@ -214,8 +251,18 @@ export function NoteLinkView({
           finalFocus={false}
           className="w-80 max-w-[90vw] p-2.5 text-xs motion-reduce:animate-none"
           data-testid="note-link-preview"
+          ref={previewBox}
           onMouseEnter={() => hover(true)}
           onMouseLeave={() => hover(false)}
+          onFocus={() => clearTimeout(timer.current)}
+          onBlur={focusOut}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.stopPropagation();
+            setPreview(false);
+            quietFocus.current = true;
+            chip.current?.focus();
+          }}
         >
           <div className="mb-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
             <KindIcon kind={targetKind} noteKind={info?.noteKind} className="size-3 shrink-0" />

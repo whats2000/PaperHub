@@ -95,6 +95,7 @@
     "noteGone": "このノートは削除されました",
     "headingGone": "この見出しは削除されました",
     "paperGone": "この論文はライブラリにありません",
+    "unreachable": "このリンクを開けません：リンク先が見つかりません。",
     "kind": {
       "paper": "論文",
       "paperNote": "論文ノート",

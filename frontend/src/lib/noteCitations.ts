@@ -10,7 +10,14 @@ import { openNotePlace } from "@/lib/notes/openNoteLink";
 export async function openNoteBlock(blockId: string): Promise<void> {
   try {
     const place = await getNoteBlockPlace(blockId);
-    await openNotePlace({ kind: place.target_kind, id: Number(place.target_id), noteId: place.note_id, blockId });
+    const opened = await openNotePlace({
+      kind: place.target_kind,
+      id: Number(place.target_id),
+      noteId: place.note_id,
+      blockId,
+    });
+    // Its chat or idea is not there: say so (it is not a failure to retry).
+    if (!opened) toast(i18n.t("notes:link.unreachable", "Couldn't open that link: where it points is not there."));
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       toast(i18n.t("notes:cite.gone", "That line is no longer in your notes."));

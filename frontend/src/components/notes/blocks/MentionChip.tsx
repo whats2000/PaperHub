@@ -1,9 +1,10 @@
 import { createReactInlineContentSpec } from "@blocknote/react";
 import { AtSign } from "lucide-react";
 
-import { useCanvasStore } from "@/store/canvas";
+import { openPaperAt } from "@/lib/notes/openNoteLink";
 
-/** An `@` link to a paper or one of its sections; clicking opens the paper. */
+/** An `@` link to a paper or one of its sections; clicking opens the paper
+ * in the reader, at the section for a section link. */
 export const mentionInline = createReactInlineContentSpec(
   {
     type: "mention",
@@ -17,14 +18,14 @@ export const mentionInline = createReactInlineContentSpec(
   },
   {
     render: ({ inlineContent }) => {
-      const { paperId, label } = inlineContent.props;
+      const { kind, paperId, sectionKey, label } = inlineContent.props;
       return (
         <button
           type="button"
           contentEditable={false}
           className="mx-px inline-flex items-center gap-0.5 rounded-md bg-muted px-1 align-baseline text-[0.95em] text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:bg-accent"
           onClick={() => {
-            if (paperId > 0) useCanvasStore.getState().openPaper(paperId);
+            if (paperId > 0) void openPaperAt(paperId, kind === "section" ? sectionKey : "");
           }}
         >
           <AtSign className="size-3 text-muted-foreground" aria-hidden />

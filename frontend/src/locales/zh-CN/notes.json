@@ -95,6 +95,7 @@
     "noteGone": "这条笔记已删除",
     "headingGone": "这个标题已删除",
     "paperGone": "这篇论文已不在你的文献库中",
+    "unreachable": "无法打开这个链接：它指向的地方已不存在。",
     "kind": {
       "paper": "论文",
       "paperNote": "论文笔记",

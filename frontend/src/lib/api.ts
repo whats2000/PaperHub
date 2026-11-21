@@ -598,6 +598,22 @@ export async function getPaperSections(
   return apiFetch<string[]>(`/papers/content/${paperContentId}/sections`);
 }
 
+/** A library paper's current title (404 once it is gone from the library). */
+export async function getPaperInfo(paperContentId: number): Promise<{ id: number; title: string }> {
+  return apiFetch<{ id: number; title: string }>(`/papers/content/${paperContentId}/info`);
+}
+
+/** The first and last chunk of a paper section (named as `getPaperSections`
+ *  lists them); 404 for an unknown section. */
+export async function getSectionRange(
+  paperContentId: number,
+  section: string,
+): Promise<{ first_chunk_id: number; last_chunk_id: number }> {
+  return apiFetch<{ first_chunk_id: number; last_chunk_id: number }>(
+    `/papers/content/${paperContentId}/section-range?section=${encodeURIComponent(section)}`,
+  );
+}
+
 /** Set a slide's grounding from the structured Sources editor — deterministic,
  *  NO recompile (the `% cite:` marker is a LaTeX comment). Returns the resolved
  *  source sections (with chunk_ids). */

@@ -89,6 +89,15 @@ function note12(status = 200) {
   );
 }
 
+const paperInfo = (id: number, title: string) =>
+  http.get(`${API_BASE_URL}/papers/content/${id}/info`, () => HttpResponse.json({ id, title }));
+const sectionRange = (id: number, section: string, first: number, last: number) =>
+  http.get(`${API_BASE_URL}/papers/content/${id}/section-range`, ({ request }) =>
+    new URL(request.url).searchParams.get("section") === section
+      ? HttpResponse.json({ first_chunk_id: first, last_chunk_id: last })
+      : new HttpResponse(null, { status: 404 }),
+  );
+
 function mount() {
   act(() => {
     render(<NoteEditor noteId={7} variant="pane" />);
@@ -205,14 +214,79 @@ describe("a [[ link chip", () => {
     expect(preview.textContent).toContain("This heading was deleted");
   });
 
-  it("clicking a paper link opens the paper in the reader", async () => {
-    server.use(http.get(`${API_BASE_URL}/papers/content/5/document`, () => HttpResponse.json({ mode: "html" })));
+  it("a paper link follows the paper's current title and opens the paper in the reader", async () => {
+    server.use(paperInfo(5, "Attention Is All You Need"));
     seed([link({ targetKind: "paper", targetId: 5, name: "Attention" })]);
     useCanvasStore.setState({ requestedPaperId: null });
     mount();
-    await waitFor(() => expect(chip()?.textContent).toBe("Attention"));
+    await waitFor(() => expect(chip()?.textContent).toBe("Attention Is All You Need"));
     fireEvent.click(chip()!);
     await waitFor(() => expect(useCanvasStore.getState().requestedPaperId).toBe(5));
+  });
+
+  it("a paper section link opens the reader at that section", async () => {
+    server.use(paperInfo(5, "Attention"), sectionRange(5, "2 Method", 403, 405));
+    seed([link({ targetKind: "paper", targetId: 5, sectionKey: "2 Method", name: "Attention › 2 Method" })]);
+    useCanvasStore.setState({ requestedChunkId: null, requestedEndChunkId: null });
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("Attention › 2 Method"));
+    fireEvent.click(chip()!);
+    await waitFor(() => expect(useCanvasStore.getState().requestedChunkId).toBe(403));
+    expect(useCanvasStore.getState().requestedEndChunkId).toBe(405);
+  });
+
+  it("an @ section mention opens the reader at that section too", async () => {
+    server.use(sectionRange(5, "2 Method", 403, 405));
+    seed([{ type: "mention", props: { kind: "section", paperId: 5, sectionKey: "2 Method", label: "§2 Method" } }]);
+    useCanvasStore.setState({ requestedChunkId: null, requestedEndChunkId: null });
+    mount();
+    const mention = await screen.findByRole("button", { name: "§2 Method" });
+    fireEvent.click(mention);
+    await waitFor(() => expect(useCanvasStore.getState().requestedChunkId).toBe(403));
+    expect(useCanvasStore.getState().requestedEndChunkId).toBe(405);
+  });
+
+  it("a click checks an old lookup again: a note deleted since shows dead and opens nothing", async () => {
+    note12(404);
+    seed([link()]);
+    useNotesStore.setState({
+      linkTargets: {
+        "note:12": { status: "ok", checkedAt: Date.now() - 61_000, noteKind: "paper", targetId: 47, name: "RoboTTT", blocks: [] },
+      },
+    });
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("RoboTTT"));
+    fireEvent.click(chip()!);
+    await waitFor(() => expect(chip()).toHaveAttribute("data-dead", "true"));
+    expect(useNotesPaneStore.getState().request).toBeNull();
+    expect(toastFn).not.toHaveBeenCalled();
+  });
+
+  it("Edit display text starts empty, never from the placeholder", async () => {
+    server.use(http.get(`${API_BASE_URL}/notes/12`, () => new Promise(() => undefined)));
+    seed([link({ name: "" })]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("…"));
+    const preview = await hoverPreview();
+    fireEvent.click(within(preview).getByRole("button", { name: "Edit display text" }));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Display text" }).value).toBe("");
+  });
+
+  it("is reachable by keyboard: focus shows the preview, Tab moves into it, Enter follows the link", async () => {
+    note12();
+    seed([link({ blockId: "h1" })]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("RoboTTT › 閘控"));
+    expect(chip()).toHaveAttribute("tabindex", "0");
+    act(() => chip()!.focus());
+    const preview = await screen.findByTestId("note-link-preview");
+    fireEvent.keyDown(chip()!, { key: "Tab" });
+    expect(document.activeElement).toBe(within(preview).getByRole("button", { name: "Open" }));
+    act(() => chip()!.focus());
+    fireEvent.keyDown(chip()!, { key: "Enter" });
+    await waitFor(() =>
+      expect(useNotesPaneStore.getState().request).toMatchObject({ kind: "paper", id: 47, noteId: 12, blockId: "h1" }),
+    );
   });
 
   it("clicking a link to a heading of a paper's note opens that note at the heading", async () => {
@@ -238,7 +312,7 @@ describe("following a link to another place", () => {
         shared_by: 0,
         suggestions: [],
         comments: [],
-        blocks: [],
+        blocks: [blk("b9", { note_id: id, type: "heading", text: "H" })],
       }),
     );
 
@@ -246,7 +320,7 @@ describe("following a link to another place", () => {
     server.use(noteOf(20, "session", "43"));
     const chat = (id: number, backend: number) => ({ id, title: `c${id}`, messages: [], backend_session_id: backend });
     useChatStore.setState({ sessions: [chat(1, 42), chat(2, 43)], activeSessionId: 1 });
-    await expect(openNoteLink({ targetKind: "note", targetId: 20, blockId: "b9", sectionKey: "" })).resolves.toBe(true);
+    await expect(openNoteLink({ targetKind: "note", targetId: 20, blockId: "b9", sectionKey: "" })).resolves.toBe("opened");
     expect(useChatStore.getState().activeSessionId).toBe(2);
     expect(useNotesPaneStore.getState().request).toMatchObject({ kind: "session", id: 43, noteId: 20, blockId: "b9" });
   });
@@ -263,15 +337,61 @@ describe("following a link to another place", () => {
     );
     useIdeationStore.setState({ scope: 5, graph: graph([]) as never, problems: [{ id: 5 }] as never, selected: null });
     useNavStore.setState({ page: "chat" });
-    await expect(openNoteLink({ targetKind: "note", targetId: 30, blockId: "", sectionKey: "" })).resolves.toBe(true);
+    await expect(openNoteLink({ targetKind: "note", targetId: 30, blockId: "", sectionKey: "" })).resolves.toBe("opened");
     expect(useNavStore.getState().page).toBe("ideas");
     expect(useIdeationStore.getState().scope).toBe("explore");
     expect(useIdeationStore.getState().selected).toEqual({ kind: "idea", id: 9 });
   });
 
+  it("a chat missing from the list is synced once, then reported, without leaving the page", async () => {
+    server.use(noteOf(21, "session", "77"), http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json([])));
+    useChatStore.setState({ sessions: [], activeSessionId: null });
+    useNavStore.setState({ page: "ideas" });
+    await expect(openNoteLink({ targetKind: "note", targetId: 21, blockId: "", sectionKey: "" })).resolves.toBe(
+      "unreachable",
+    );
+    expect(useNavStore.getState().page).toBe("ideas");
+    expect(useNotesPaneStore.getState().request).toBeNull();
+  });
+
+  it("a chat that arrives with the sync opens", async () => {
+    const summary = { id: 78, title: "Later", created_at: "", updated_at: "", message_count: 0 };
+    server.use(noteOf(22, "session", "78"), http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json([summary])));
+    useChatStore.setState({ sessions: [], activeSessionId: null });
+    await expect(openNoteLink({ targetKind: "note", targetId: 22, blockId: "", sectionKey: "" })).resolves.toBe("opened");
+    expect(useNotesPaneStore.getState().request).toMatchObject({ kind: "session", id: 78, noteId: 22 });
+  });
+
+  it("an idea in no scope leaves the page as it is", async () => {
+    server.use(
+      noteOf(32, "idea", "99"),
+      http.get(`${API_BASE_URL}/ideation/graph`, () =>
+        HttpResponse.json({ documents: [], domains: [], citations: [], ideas: [], problem: null, library_count: 0, private_count: 0 }),
+      ),
+      http.get(`${API_BASE_URL}/ideation/problems`, () => HttpResponse.json([])),
+    );
+    useIdeationStore.setState({ scope: "explore", graph: null, problems: [] as never });
+    useNavStore.setState({ page: "chat" });
+    await expect(openNoteLink({ targetKind: "note", targetId: 32, blockId: "", sectionKey: "" })).resolves.toBe(
+      "unreachable",
+    );
+    expect(useNavStore.getState().page).toBe("chat");
+  });
+
+  it("clicking a chip whose place is gone says so, neutrally", async () => {
+    server.use(noteOf(21, "session", "77"), http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json([])));
+    useChatStore.setState({ sessions: [], activeSessionId: null });
+    seed([link({ targetId: 21, name: "Chat note" })]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("N"));
+    fireEvent.click(chip()!);
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Couldn't open that link: where it points is not there."));
+    expect(errorFn).not.toHaveBeenCalled();
+  });
+
   it("a deleted note opens nothing", async () => {
     server.use(http.get(`${API_BASE_URL}/notes/31`, () => new HttpResponse(null, { status: 404 })));
-    await expect(openNoteLink({ targetKind: "note", targetId: 31, blockId: "", sectionKey: "" })).resolves.toBe(false);
+    await expect(openNoteLink({ targetKind: "note", targetId: 31, blockId: "", sectionKey: "" })).resolves.toBe("gone");
     expect(useNotesPaneStore.getState().request).toBeNull();
   });
 });
