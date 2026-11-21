@@ -52,7 +52,14 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
-import { insertNoteLink, linkItems, opensLinkPicker, reopenLinkPicker, type LinkItem } from "./linkPicker";
+import {
+  completeLinkQuery,
+  insertNoteLink,
+  linkItems,
+  opensLinkPicker,
+  reopenLinkPicker,
+  type LinkItem,
+} from "./linkPicker";
 import { NoteFormattingBar } from "./FormattingBar";
 import { lostCommentBadges, useBadgeRefresh, useLostCommentBadges } from "./commentBadges";
 import { LostCommentBadges } from "./LostCommentBadges";
@@ -628,7 +635,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           group: groups[r.group],
           icon: <Icon className="size-[18px]" />,
           onItemClick: () =>
-            r.complete !== undefined ? reopenLinkPicker(editor, r.complete) : insertNoteLink(editor, r.props),
+            r.complete !== undefined ? completeLinkQuery(editor, r) : insertNoteLink(editor, r.props),
         };
       });
     },

@@ -2,7 +2,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { linkItems, parseLinkQuery } from "@/components/notes/linkPicker";
+import { linkItems, parseLinkQuery, rememberCompletion } from "@/components/notes/linkPicker";
 import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
 import { API_BASE_URL } from "@/lib/api";
 import { useNotesStore } from "@/store/notes";
@@ -213,8 +213,8 @@ describe("linkItems", () => {
     // The whole text's target links as it is; one matching the text before
     // # completes the query to its title + # (its headings come next).
     expect(items.map((i) => [i.title, i.props.targetId, i.complete])).toEqual([
-      ["C# notes", 20, undefined],
       ["C stuff", 21, "C stuff#notes"],
+      ["C# notes", 20, undefined],
     ]);
   });
 
@@ -228,6 +228,52 @@ describe("linkItems", () => {
     );
     const items = await linkItems(editor(), 7, "Robo#閘|see");
     expect(items.map((i) => [i.title, i.complete])).toEqual([["RoboTTT", "RoboTTT#閘|see"]]);
+  });
+
+  it("a heading holding # is found by splitting at an earlier #", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        return HttpResponse.json("lang".includes(q.toLowerCase()) ? [hit(40, "session", "Lang")] : []);
+      }),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/notes/40/outline`, () =>
+        HttpResponse.json([
+          { block_id: "b1", type: "heading", text: "C# basics", level: 2 },
+          { block_id: "b2", type: "heading", text: "Go", level: 2 },
+        ]),
+      ),
+    );
+    const items = await linkItems(editor(), 7, "Lang#C# b");
+    expect(items.map((i) => [i.title, i.props.blockId, i.props.name])).toEqual([["C# basics", "b1", "Lang › C# basics"]]);
+  });
+
+  it("a target both searches return still offers completion first", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, () => HttpResponse.json([hit(12, "paper", "RoboTTT")])),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+    );
+    const items = await linkItems(editor(), 7, "Robo#");
+    expect(items.map((i) => [i.title, i.complete])).toEqual([["RoboTTT", "RoboTTT#"]]);
+  });
+
+  it("completing an untitled note shows its outline (by identity, not title)", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) =>
+        HttpResponse.json(new URL(request.url).searchParams.get("q") === "Unt" ? [hit(30, "session", "")] : []),
+      ),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/notes/30/outline`, () =>
+        HttpResponse.json([{ block_id: "u1", type: "heading", text: "Plan", level: 2 }]),
+      ),
+    );
+    const [row] = await linkItems(editor(), 7, "Unt#", "Untitled");
+    expect(row!.complete).toBe("Untitled#");
+    rememberCompletion(row!);
+    const items = await linkItems(editor(), 7, row!.complete!, "Untitled");
+    expect(items.map((i) => [i.title, i.props.targetId, i.props.blockId, i.props.name])).toEqual([
+      ["Plan", 30, "u1", "Untitled › Plan"],
+    ]);
   });
 
   it("a title holding # is read up to the last #", () => {

@@ -190,32 +190,71 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
       }));
   }
 
-  // name#word: the outline of the note titled exactly `name` and the
-  // sections of the paper titled so. With neither, the # may be part of a
-  // title (`C# notes`): list the targets holding the whole text instead.
+  // name#word: the note titled exactly `name` (its outline) and the paper
+  // titled so (its sections). A heading may hold # too (`Lang#C# basics`):
+  // the splits are tried from the last # back, the first exact title wins.
+  const text = q.replace(/^\[+/, "").split("|")[0]!.trim();
+  for (const at of hashes(text)) {
+    const found = await exactTarget(text.slice(0, at).trim(), untitled);
+    if (found) return outlineRows(found, text.slice(at + 1).trim(), label);
+  }
+  // No exact title. As in Obsidian, the targets holding the text before #
+  // come first: picking one completes the query to `<title>#` and shows
+  // its headings. Targets holding the whole text (a title with a #) link
+  // as they are.
+  const [partial, asIs] = await Promise.all([targets(name, label, untitled), targets(text, label, untitled)]);
+  const key = (i: LinkItem) => `${i.props.targetKind}:${i.props.targetId}`;
+  const offered = new Set(partial.map(key));
+  const tail = heading + (label ? `|${label}` : "");
+  return [
+    ...partial.map((i) => ({ ...i, complete: `${i.props.name}#${tail}` })),
+    ...asIs.filter((i) => !offered.has(key(i))),
+  ];
+}
+
+/** Positions of the #s that may end a title in `text`, last first (at most 3). */
+function hashes(text: string): number[] {
+  const out: number[] = [];
+  for (let i = text.length - 1; i > 0 && out.length < 3; i--) if (text[i] === "#") out.push(i);
+  return out;
+}
+
+interface Target {
+  note?: { id: number; title: string };
+  paper?: { id: number; title: string };
+}
+
+/** Targets reached by picking a completion row, by their shown name: an
+ * untitled note completes to "Untitled#", which no title search finds. */
+const completed = new Map<string, NoteLinkProps>();
+
+/** Remembers a completion row's target, so its `<name>#` finds it again. */
+export function rememberCompletion(item: LinkItem): void {
+  completed.set(fold(item.props.name), item.props);
+}
+
+/** The note and the paper titled exactly `name` (case-folded), if any. */
+async function exactTarget(name: string, untitled: string): Promise<Target | null> {
+  if (!name) return null;
+  const known = completed.get(fold(name));
+  if (known) {
+    const t = { id: known.targetId, title: known.name };
+    return known.targetKind === "note" ? { note: t } : { paper: t };
+  }
   const [notes, papers] = await Promise.all([
     quietly(() => searchNotes(name, LIMIT)),
     quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
   ]);
-  const note = exact(notes, name);
-  const paper = exact(papers, name);
-  if (!note && !paper) {
-    // No exact title. The whole text may be a title holding # (it links as
-    // it is); the text before # may be part of one (as in Obsidian, picking
-    // it completes the query to `<title>#` and shows its headings).
-    const whole = q.replace(/^\[+/, "").split("|")[0]!.trim();
-    const [asIs, partial] = await Promise.all([targets(whole, label, untitled), targets(name, label, untitled)]);
-    const key = (i: LinkItem) => `${i.props.targetKind}:${i.props.targetId}`;
-    const have = new Set(asIs.map(key));
-    const tail = heading + (label ? `|${label}` : "");
-    return [
-      ...asIs,
-      ...partial.filter((i) => !have.has(key(i))).map((i) => ({ ...i, complete: `${i.props.name}#${tail}` })),
-    ];
-  }
+  const note = exact(notes.map((n) => ({ id: n.note_id, title: n.title || untitled })), name);
+  const paper = exact(papers.map((p) => ({ id: p.paper_content_id, title: p.title || untitled })), name);
+  return note || paper ? { note, paper } : null;
+}
+
+/** A target's headings / sections holding `heading`, as link rows. */
+async function outlineRows({ note, paper }: Target, heading: string, label: string): Promise<LinkItem[]> {
   const [outline, sections] = await Promise.all([
-    note ? quietly(() => getNoteOutline(note.note_id)) : Promise.resolve([]),
-    paper ? quietly(() => getPaperSections(paper.paper_content_id)) : Promise.resolve([]),
+    note ? quietly(() => getNoteOutline(note.id)) : Promise.resolve([]),
+    paper ? quietly(() => getPaperSections(paper.id)) : Promise.resolve([]),
   ]);
   return [
     ...outline
@@ -225,13 +264,7 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
         icon: o.type,
         title: o.text,
         subtext: note!.title,
-        props: props({
-          targetKind: "note",
-          targetId: note!.note_id,
-          blockId: o.block_id,
-          name: note!.title + SEP + o.text,
-          label,
-        }),
+        props: props({ targetKind: "note", targetId: note!.id, blockId: o.block_id, name: note!.title + SEP + o.text, label }),
       })),
     ...sections
       .filter((s) => has(s, heading))
@@ -240,15 +273,16 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
         icon: "section",
         title: s,
         subtext: paper!.title,
-        props: props({
-          targetKind: "paper",
-          targetId: paper!.paper_content_id,
-          sectionKey: s,
-          name: paper!.title + SEP + s,
-          label,
-        }),
+        props: props({ targetKind: "paper", targetId: paper!.id, sectionKey: s, name: paper!.title + SEP + s, label }),
       })),
   ];
+}
+
+/** Picks a completion row: its target is remembered and the menu opens
+ * again on `<name>#…`. */
+export function completeLinkQuery(editor: Ed, item: LinkItem): void {
+  rememberCompletion(item);
+  reopenLinkPicker(editor, item.complete ?? "");
 }
 
 /** Opens the `[[` menu again at the caret with `query` typed after it
