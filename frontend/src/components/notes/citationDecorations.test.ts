@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { citationChips, citeTitle, findCites } from "@/components/notes/citationDecorations";
 import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
+
+afterEach(() => cleanupEditors());
 
 describe("findCites", () => {
   it("finds every marker shape edit_note validates, with its range", () => {
@@ -40,6 +42,5 @@ describe("citation chips in table cells", () => {
     const chip = editor.domElement!.querySelector<HTMLElement>("td .ph-cite");
     expect(chip?.dataset.cite).toBe("chunk");
     expect(chip?.textContent).toBe("[chunk:12]");
-    cleanupEditors();
   });
 });

@@ -117,6 +117,7 @@ afterAll(() => server.close());
 afterEach(() => {
   clearPendingNoteOps();
   server.resetHandlers();
+  cleanupEditors();
 });
 beforeEach(() => {
   useNotesStore.setState({ colorNames: {}, retrying: {}, drafts: {}, folded: {}, focusOn: false, activePart: {} });
@@ -318,6 +319,5 @@ describe("findMatches in a table", () => {
     ]);
     const hits = findMatches(editor.prosemirrorState.doc, "needle");
     expect(hits.map((h) => h.blockId)).toEqual(["p", "t"]);
-    cleanupEditors();
   });
 });

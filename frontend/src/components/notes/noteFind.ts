@@ -12,7 +12,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
-import { blockIdInDoc } from "./blocks/citeForms";
+import { blockIdInDoc } from "./blockId";
 import { citeDefaultText } from "./blocks/markCiteText";
 
 export interface FindMatch {
