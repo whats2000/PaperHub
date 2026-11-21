@@ -395,6 +395,14 @@ def _code_span(code: str) -> str:
 # A held code span's placeholder: private-use delimiters (which
 # ``_user_text`` drops from every user string, so note text can never hold
 # one) around a per-export random nonce and the span's index.
+# A pipe in math: ``\|`` or ``|``; a ``\\`` is matched first and kept.
+_MATH_BAR = re.compile(r"\\\\|\\\||\|")
+
+
+def _math_bar(m: re.Match[str]) -> str:
+    return {"\\\\": "\\\\", "\\|": "\\Vert "}.get(m[0], "\\vert ")
+
+
 _HELD = re.compile(r"\ue000[0-9a-f]{16}:\d+\ue001")
 
 
@@ -490,6 +498,13 @@ class _Writer:
                 latex = " ".join(str((run.get("props") or {}).get("latex") or "").split())
                 if latex:
                     # Held, like a code span: the text escaping must not touch it.
+                    # A backtick would pair with another one in the line and
+                    # open a code span across it: LaTeX reads it as a
+                    # left quote anyway.
+                    latex = latex.replace("`", "‘")
+                    # A viewer's linkify would make a URL here a link that
+                    # runs on into the text after the math.
+                    latex = latex.replace("://", ":{}//").replace("www.", "www{}.")
                     _append(out, self._hold(f"${_math(latex).rstrip()}$"))
             elif isinstance(run.get("text"), str):
                 _append(out, self._styled(run))
@@ -616,6 +631,28 @@ class _Writer:
         self._held[token] = span
         return token
 
+    def escape_held_pipes(self, text: str) -> None:
+        """Make the held spans in one table cell safe for a row: a pipe in
+        a code span is ``\\|``, in math ``\\vert`` / ``\\Vert`` (a table
+        reader splits cells on it first), and a line break folds to a
+        space. A code span with a backslash before a pipe cannot be
+        written in a GFM table, so it becomes escaped plain text."""
+        for token in _HELD.findall(text):
+            span = self._held.get(token, "")
+            if span.startswith("`"):
+                inner = span.strip("`")
+                if "|" not in inner:
+                    continue
+                if "\\|" in inner:
+                    if inner[:1] == inner[-1:] == " ":
+                        inner = inner[1:-1]
+                    self._held[token] = _escape(" ".join(inner.split()))
+                else:
+                    self._held[token] = span.replace("|", "\\|")
+            elif span.startswith("$"):
+                span = re.sub(r"\s*\n\s*", " ", span)
+                self._held[token] = _MATH_BAR.sub(_math_bar, span)
+
     def release(self, text: str) -> str:
         """``text`` with its held code spans put back, each at the one place
         its token was written. Only this export's own tokens are replaced,
@@ -671,15 +708,12 @@ def _table(w: _Writer, b: Block) -> str:
     if not rows:
         return ""
     width = max(len(r) for r in rows)
+    # Alignment is read from row 0, also when headerRows is 0.
     aligns = (table_aligns(content) + [""] * width)[:width]
 
     def cell(runs: list[dict[str, Any]]) -> str:
         text = " ".join(w.inline(runs).split("\n"))
-        # A code span keeps its pipes: a table row reads them as cells.
-        for token in _HELD.findall(text):
-            span = w._held.get(token, "")
-            if span.startswith("`"):
-                w._held[token] = span.replace("|", "\\|")
+        w.escape_held_pipes(text)
         return text.strip()
 
     def line(cells: list[str]) -> str:

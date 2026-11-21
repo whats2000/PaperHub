@@ -94,3 +94,50 @@ def test_docx_has_a_two_row_table() -> None:
     assert xml.count("<w:tbl>") == 1
     assert len(re.findall(r"<w:tr[ >]", xml)) == 2
     assert "ORR" in xml
+
+
+def _cells(md: str) -> list[list[str]]:
+    """The rows of the first table, as markdown-it-py (tables on) parses it."""
+    from markdown_it import MarkdownIt
+    toks = MarkdownIt("commonmark").enable("table").parse(md)
+    rows: list[list[str]] = []
+    for t in toks:
+        if t.type == "tr_open":
+            rows.append([])
+        elif t.type == "inline" and rows:
+            rows[-1].append(t.content)
+    return rows
+
+
+def _math(latex: str) -> dict[str, Any]:
+    return {"type": "inlineMath", "props": {"latex": latex}}
+
+
+def test_math_pipes_keep_the_row_in_two_cells() -> None:
+    md = _md(_table([["h", "h2"], [[_math("|x|")], [_math(r"\|v\| + a|b")]]]))
+    rows = _cells(md)
+    assert [len(r) for r in rows] == [2, 2]
+    assert rows[1][0] == r"$\vert x\vert $"
+    assert rows[1][1] == r"$\Vert v\Vert  + a\vert b$"
+
+
+def test_multiline_math_stays_in_its_row() -> None:
+    md = _md(_table([["h", "h2"], [[_math("a\n\nb")], "z"]]))
+    assert [len(r) for r in _cells(md)] == [2, 2]
+
+
+def test_code_span_with_backslash_pipe_reads_back() -> None:
+    md = _md(_table([["h", "h2"], [[_txt(r"a\|b", code=True)], "z"]]))
+    rows = _cells(md)
+    assert [len(r) for r in rows] == [2, 2]
+    # Escaped plain text (a GFM code span cannot hold backslash + pipe):
+    # it renders as a\|b.
+    assert rows[1][0] == "a\\\\|b"
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_docx_keeps_two_columns_with_math_pipes() -> None:
+    md = _md(_table([["h", "h2"], [[_math("|x|")], "z"]]))
+    with zipfile.ZipFile(io.BytesIO(markdown_to_docx(md, {}))) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert len(re.findall(r"<w:gridCol", xml)) == 2

@@ -37,7 +37,7 @@ needs_pandoc = pytest.mark.skipif(shutil.which("pandoc") is None,
 PANDOC_READERS = (_READER, "gfm+tex_math_dollars", "commonmark_x")
 # The exporter's own constructs in the fixture note.
 HEADINGS = 3            # the note title, a section, a heading block
-LINKS = 1               # the one link run
+LINKS = 2               # the link run, and the one in a table cell
 CODE_BLOCKS = 1         # the one code block
 OWN_IMAGES = {"images/0001.png", "images/0002.png"}  # figure + equation
 SECRET = "LOCAL-SECRET-7d1f"
@@ -99,7 +99,7 @@ FIELDS = (
     "bullet", "numbered", "check", "quote", "callout", "code_block", "language",
     "math", "pq_quote", "pq_lang", "pq_orig", "pq_section", "fig_caption",
     "eq_caption", "eq_latex", "region_caption", "paper_title", "author",
-    "arxiv")
+    "arxiv", "table_head", "table_cell", "table_math", "table_code")
 
 
 def _fixture(v: dict[str, str], tag: str = "") -> tuple[list[Block], ExportPaper]:
@@ -127,6 +127,14 @@ def _fixture(v: dict[str, str], tag: str = "") -> tuple[list[Block], ExportPaper
         _blk(f"k{tag}", "codeBlock", props={"language": f["language"]},
              content=[_txt(f["code_block"])]),
         _blk(f"m{tag}", "math", props={"latex": f["math"]}),
+        _blk(f"tb{tag}", "table", content={
+            "type": "tableContent", "columnWidths": [None, None],
+            "headerRows": 1, "rows": [
+                {"cells": [[_txt(f["table_head"], bold=True)], f["table_head"]]},
+                {"cells": [runs, [_txt(f["table_cell"]),
+                                  {"type": "inlineMath",
+                                   "props": {"latex": f["table_math"]}},
+                                  _txt(f["table_code"], code=True)]]}]}),
         _blk(f"pq{tag}", "paperQuote", props={
             "paperContentId": 5, "quote": "q", "lang": f["pq_lang"],
             "orig": f["pq_orig"],
@@ -180,11 +188,13 @@ def _flat(tokens: list[Token]) -> Iterator[Token]:
 # Blocks the exporter writes itself, which note text must never add to
 # (bounded by a plain "x" note).
 MD_BLOCKS = ("blockquote_open", "bullet_list_open", "ordered_list_open", "hr",
-             "table_open")
+             "table_open", "tr_open", "th_open", "td_open")
 PANDOC_BLOCKS = ("BlockQuote", "BulletList", "OrderedList", "HorizontalRule",
                  "Table", "DefinitionList", "LineBlock", "Div", "Note", "Span")
 # linkify on, as in VS Code's preview: a bare domain would count as a link.
-_LINKIFY = MarkdownIt("commonmark", {"linkify": True}).enable("linkify")
+# The table rule is on (GFM has it): without it a pipe-table break would
+# go undetected.
+_LINKIFY = MarkdownIt("commonmark", {"linkify": True}).enable(["linkify", "table"])
 
 
 def _md_kinds(md: str) -> list[str]:
@@ -196,11 +206,16 @@ def _outside_math(tokens: list[Token]) -> Iterator[Token]:
     math-unaware viewer may make a bare URL in LaTeX clickable, which
     neither fetches nor adds structure, and escaping it would break the
     LaTeX (``\\label{eq.a}``)."""
+    prev = ""
     for t in tokens:
         yield t
+        was, prev = prev, t.type
         if not t.children:
             continue
-        in_math = t.type == "inline" and t.content.startswith("$$")
+        # A ``$$…$$`` paragraph, or a table cell holding inline ``$…$``.
+        in_math = t.type == "inline" and (
+            t.content.startswith("$$")
+            or (was in ("td_open", "th_open") and "$" in t.content))
         skip = False
         for c in t.children:
             if in_math and c.type == "link_open" and c.markup == "linkify":
