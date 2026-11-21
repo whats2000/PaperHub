@@ -28,7 +28,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
-    css: false,
+    // CSS is not processed, except a stylesheet a test reads as text (?raw).
+    css: { include: [/\.css\?raw$/] },
     // Many jsdom workers in parallel (often beside the dev servers) push a few
     // multi-step tests past the 5 s default; a real hang still fails.
     testTimeout: 15_000,

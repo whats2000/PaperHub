@@ -498,6 +498,8 @@
     background: var(--sticky-bg);
 }
 .note-card-sticky {
+    /* The table rules mix against the note's own tint (see Table style). */
+    --note-table-surface: var(--sticky-bg);
     border-radius: 2px;
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 18px rgb(0 0 0 / 0.12);
 }
@@ -604,10 +606,15 @@
    the table or the pointer is over it, the cells show faint lines for
    editing. Grid keeps every border and the header tint (the rules above).
    The colours are opaque: a translucent one paints twice where borders
-   meet, darkening the joints. Never yellow: yellow means a citation. */
+   meet, darkening the joints. They are mixed with the surface the table
+   sits on (--note-table-surface: the pane's card colour, the sticky note's
+   tint, else the page background). Never yellow: yellow means a citation. */
+.notes-pane {
+    --note-table-surface: var(--card);
+}
 .paperhub-notes[data-table-style="threeLine"] {
-    --note-table-rule: color-mix(in oklab, var(--foreground) 72%, var(--background));
-    --note-table-faint: color-mix(in oklab, var(--border) 70%, var(--background));
+    --note-table-rule: color-mix(in oklab, var(--foreground) 72%, var(--note-table-surface, var(--background)));
+    --note-table-faint: color-mix(in oklab, var(--border) 70%, var(--note-table-surface, var(--background)));
 }
 .paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] table {
     border-top: 2px solid var(--note-table-rule);

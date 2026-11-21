@@ -6,6 +6,8 @@ import { editorHasBlockWithType } from "@blocknote/core";
 import type { EditorView } from "@tiptap/pm/view";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
+import notesPaneSource from "@/components/notes/NotesPane.tsx?raw";
+import indexCss from "@/index.css?raw";
 import { API_BASE_URL } from "@/lib/api";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/notes";
@@ -302,6 +304,20 @@ describe("tables in the note editor", () => {
     act(() => {
       useNotesStore.setState({ tableStyle: "threeLine" });
     });
+  });
+
+  it("three-line rules are mixed against the surface the table sits on", () => {
+    // Opaque rules (a translucent one darkens the joints), mixed with the
+    // surface each editor sits on: the pane (card), the sticky note card,
+    // else the page background.
+    const decl = (name: string) => new RegExp(`${name}:\\s*color-mix\\(([^;]*)\\);`).exec(indexCss)?.[1] ?? "";
+    for (const v of ["--note-table-rule", "--note-table-faint"]) {
+      expect(decl(v)).toContain("var(--note-table-surface, var(--background))");
+      expect(decl(v)).not.toContain("transparent");
+    }
+    expect(indexCss).toMatch(/\.notes-pane\s*\{[^}]*--note-table-surface:\s*var\(--card\)/);
+    expect(indexCss).toMatch(/\.note-card-sticky\s*\{[^}]*--note-table-surface:\s*var\(--sticky-bg\)/);
+    expect(notesPaneSource).toMatch(/className="[^"]*\bnotes-pane\b[^"]*bg-card/);
   });
 
   it("the column handle menu offers insert, alignment and delete, and no colour", async () => {

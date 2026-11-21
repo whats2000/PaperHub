@@ -175,7 +175,7 @@ export function NotesPane({ onClose }: Props) {
   return (
     <section
       aria-label={t("pane.label", "Notes")}
-      className="@container flex h-full min-w-0 flex-col bg-card"
+      className="notes-pane @container flex h-full min-w-0 flex-col bg-card"
     >
       <NotesTabs
         active={tab}
