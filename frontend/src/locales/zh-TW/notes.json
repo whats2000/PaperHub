@@ -102,6 +102,12 @@
       "chatNote": "對話筆記",
       "ideaNote": "點子筆記",
       "note": "筆記"
+    },
+    "picker": {
+      "notes": "筆記",
+      "papers": "論文",
+      "headings": "標題",
+      "sections": "論文章節"
     }
   },
   "draft": {
@@ -220,6 +226,10 @@
       "codeBlock": "程式碼區塊（空白鍵也可以）",
       "slash": "所有區塊，包含論文引用",
       "at": "連結論文或章節",
+      "link": "連結筆記或論文",
+      "linkThisHeading": "連結這則筆記的標題（接在名稱後：那則筆記的）",
+      "linkAnyHeading": "連結任何筆記中的標題",
+      "linkLabel": "在 [[ 連結中：後面接顯示文字",
       "select": "工具列：粗體…隱藏、連結、留言",
       "hover": "+ 新增 · ⋮⋮ 拖曳或選單",
       "tab": "縮排到上一行底下",

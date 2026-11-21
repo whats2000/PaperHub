@@ -14,7 +14,7 @@ import { useIdeationStore } from "@/store/ideation";
 import { useNavStore } from "@/store/nav";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { clearPendingNoteOps, pendingNoteOps, resetLinkTargets, useNotesStore } from "@/store/notes";
-import type { NoteBlock } from "@/types/notes";
+import type { NoteBlock, NoteOpsBody } from "@/types/notes";
 
 const { toastFn, errorFn } = vi.hoisted(() => ({ toastFn: vi.fn(), errorFn: vi.fn() }));
 vi.mock("sonner", () => ({ toast: Object.assign(toastFn, { error: errorFn, success: vi.fn() }) }));
@@ -413,5 +413,183 @@ describe("find in a note with links", () => {
     expect(findMatches(doc, "this").map((m) => m.kind)).toEqual(["node"]);
     expect(findMatches(doc, "atten").map((m) => m.kind)).toEqual(["node"]);
     expect(findMatches(doc, "X")).toEqual([]);
+  });
+});
+
+describe("the [[ picker", () => {
+  const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+  type PMView = {
+    state: { selection: { from: number; to: number }; tr: { insertText: (t: string, f: number, to: number) => unknown }; doc: { content: { size: number } } };
+    someProp: (name: string, f: (fn: (...a: unknown[]) => boolean) => boolean) => boolean;
+    dispatch: (tr: unknown) => void;
+  };
+  const view = () =>
+    (document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: PMView; commands: { setTextSelection: (pos: number) => boolean; focus: () => boolean } };
+    }).editor;
+  const typeIn = (text: string) =>
+    act(() => {
+      const v = view().view;
+      for (const ch of text) {
+        const { from, to } = v.state.selection;
+        const handled = v.someProp("handleTextInput", (f) => f(v, from, to, ch, () => v.state.tr));
+        if (!handled) v.dispatch(v.state.tr.insertText(ch, from, to));
+      }
+    });
+  const lineText = () => document.querySelector('[data-id="p1"] .bn-inline-content')?.textContent ?? "";
+  const menuItems = () =>
+    [...document.querySelectorAll(".bn-suggestion-menu-item")].filter(
+      (e) => !e.parentElement?.closest(".bn-suggestion-menu-item"),
+    );
+
+  // On a line inside the editor: the menu listens in the capture phase.
+  const pressInMenu = (key: string) =>
+    fireEvent.keyDown(document.querySelector(".ProseMirror .bn-inline-content")!, { key });
+
+  async function openAtEnd() {
+    posted.length = 0;
+    server.use(opsHandler());
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(rect);
+    if (!("getBoundingClientRect" in Range.prototype)) {
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: rect });
+      Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+    }
+    seed([]);
+    mount();
+    await screen.findByTestId("note-editor");
+    act(() => {
+      view().commands.focus();
+      view().commands.setTextSelection(view().view.state.doc.content.size - 3);
+    });
+    // tiptap focuses the DOM a frame later; that focus would close a menu
+    // opened before it (a person is already in the line when typing).
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".ProseMirror")));
+  }
+
+  const searchHandlers = () => [
+    http.get(`${API_BASE_URL}/notes/search`, () =>
+      HttpResponse.json([
+        { note_id: 12, kind: "paper", target_id: 47, title: "RoboTTT" },
+        { note_id: 13, kind: "session", target_id: 43, title: "Robot chat" },
+        { note_id: 14, kind: "idea", target_id: 9, title: "Robot idea" },
+      ]),
+    ),
+    http.get(`${API_BASE_URL}/papers/library`, () =>
+      HttpResponse.json([{ paper_content_id: 5, arxiv_id: null, title: "Robots at scale", abstract: null, year: 2025, is_private: false }]),
+    ),
+  ];
+
+  const posted: NoteOpsBody[] = [];
+  const opsHandler = () =>
+    http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+      const body = (await request.json()) as NoteOpsBody;
+      posted.push(body);
+      return HttpResponse.json({
+        note_id: 7,
+        revision: 5 + posted.length,
+        change_set_id: `cs_${posted.length}`,
+        applied: body.ops.map((o) => o.block_id),
+        suggested: [],
+        rejected: [],
+        reparented: [],
+      });
+    });
+  const allOps = () => [...posted.flatMap((b) => b.ops), ...pendingNoteOps(7)];
+  const sentLink = () =>
+    allOps()
+      .flatMap((o) => (Array.isArray(o.block?.content) ? o.block.content : []))
+      .filter((r) => (r as { type?: string }).type === "noteLink") as { props: Record<string, unknown> }[];
+  const sentText = () =>
+    allOps()
+      .flatMap((o) => (Array.isArray(o.block?.content) ? o.block.content : []))
+      .map((r) => (r as { text?: string }).text ?? "")
+      .join("");
+
+  it("[[ opens a menu of notes (an icon per kind) and papers, with no create item", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[");
+    await screen.findByText("Robot idea");
+    expect(screen.getByText("Notes")).toBeInTheDocument();
+    expect(screen.getByText("Papers")).toBeInTheDocument();
+    const icon = (title: string) =>
+      menuItems().find((e) => e.textContent?.includes(title))!.querySelector("svg")!.getAttribute("class");
+    expect(icon("RoboTTT")).toMatch(/notebook-pen/);
+    expect(icon("Robot chat")).toMatch(/message-square/);
+    expect(icon("Robot idea")).toMatch(/lightbulb/);
+    expect(icon("Robots at scale")).toMatch(/file-text/);
+    expect(menuItems().map((e) => e.textContent)).not.toContainEqual(expect.stringMatching(/create|new note/i));
+  });
+
+  it("Enter inserts a link with a trailing space, and |text sets its label", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[robo|見此");
+    await screen.findByText("Robot idea");
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    expect(sentLink()[0]!.props).toEqual({
+      targetKind: "note",
+      targetId: 12,
+      blockId: "",
+      sectionKey: "",
+      label: "見此",
+      name: "RoboTTT",
+    });
+    expect(sentText()).not.toContain("[[");
+    const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
+    const at = content.findIndex((r) => r.type === "noteLink");
+    expect(content[at + 1]).toMatchObject({ type: "text", text: " " });
+  });
+
+  it("[[name# lists that note's outline and links the heading", async () => {
+    server.use(
+      ...searchHandlers(),
+      http.get(`${API_BASE_URL}/notes/12/outline`, () =>
+        HttpResponse.json([{ block_id: "h1", type: "heading", text: "閘控", level: 2 }]),
+      ),
+      http.get(`${API_BASE_URL}/papers/content/5/sections`, () => HttpResponse.json(["2 Method"])),
+    );
+    await openAtEnd();
+    typeIn("[[RoboTTT#");
+    await screen.findByText("閘控");
+    expect(screen.getByText("Headings")).toBeInTheDocument();
+    // The best paper match's sections come too.
+    expect(screen.getByText("2 Method")).toBeInTheDocument();
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    expect(sentLink()[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });
+  });
+
+  it("a paper note and its paper of the same title are two rows", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, () =>
+        HttpResponse.json([{ note_id: 12, kind: "paper", target_id: 5, title: "Attention" }]),
+      ),
+      http.get(`${API_BASE_URL}/papers/library`, () =>
+        HttpResponse.json([{ paper_content_id: 5, arxiv_id: null, title: "Attention", abstract: null, year: 2017, is_private: false }]),
+      ),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await openAtEnd();
+    typeIn("[[att");
+    await waitFor(() => expect(menuItems()).toHaveLength(2));
+    expect(errors.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+    errors.mockRestore();
+    pressInMenu("ArrowDown");
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    expect(sentLink()[0]!.props).toMatchObject({ targetKind: "paper", targetId: 5, name: "Attention" });
+  });
+
+  it("Escape closes the menu and leaves what was typed", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[robo");
+    await screen.findByText("Robot idea");
+    fireEvent.keyDown(document.querySelector(".ProseMirror")!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("Robot idea")).toBeNull());
+    expect(lineText()).toBe("see [[robo");
+    expect(sentLink()).toHaveLength(0);
   });
 });

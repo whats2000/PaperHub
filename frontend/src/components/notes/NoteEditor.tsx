@@ -18,7 +18,18 @@ import { BlockNoteView } from "@blocknote/shadcn";
 import { TextSelection } from "@tiptap/pm/state";
 import "@blocknote/shadcn/style.css";
 import { syntaxHighlighter } from "@blocknote/code-block";
-import { AtSign, CloudOff, FileText, Hash, Lightbulb, Sigma, TextQuote } from "lucide-react";
+import {
+  AtSign,
+  CloudOff,
+  FileText,
+  Hash,
+  Heading,
+  Lightbulb,
+  MessageSquare,
+  NotebookPen,
+  Sigma,
+  TextQuote,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -40,6 +51,7 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
+import { insertNoteLink, linkItems, type LinkItem } from "./linkPicker";
 import { NoteFormattingBar } from "./FormattingBar";
 import { lostCommentBadges, useBadgeRefresh, useLostCommentBadges } from "./commentBadges";
 import { LostCommentBadges } from "./LostCommentBadges";
@@ -66,6 +78,15 @@ import {
   treeIds,
   type EditorBlock,
 } from "./sync";
+
+const LINK_ICONS = {
+  paperNote: NotebookPen,
+  chatNote: MessageSquare,
+  ideaNote: Lightbulb,
+  paper: FileText,
+  heading: Heading,
+  section: Hash,
+} as const;
 
 export interface NoteEditorProps {
   noteId: number;
@@ -569,6 +590,36 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
     [editor, noteId, paperContentId, t],
   );
 
+  // The [[ picker: notes, papers, headings and sections (see linkPicker).
+  const pickerItems = useCallback(
+    async (query: string): Promise<DefaultReactSuggestionItem[]> => {
+      const groups: Record<LinkItem["group"], string> = {
+        notes: t("notes:link.picker.notes", "Notes"),
+        papers: t("notes:link.picker.papers", "Papers"),
+        headings: t("notes:link.picker.headings", "Headings"),
+        sections: t("notes:link.picker.sections", "Paper sections"),
+      };
+      const rows = await linkItems(editor, noteId, query);
+      // BlockNote keys a menu row by its title, and a paper note shares its
+      // paper's title: an invisible zero-width space keeps the keys apart.
+      const seen = new Map<string, number>();
+      return rows.map((r) => {
+        const Icon = LINK_ICONS[r.icon];
+        const shown = r.title || t("notes:link.untitled", "Untitled");
+        const n = seen.get(shown) ?? 0;
+        seen.set(shown, n + 1);
+        return {
+          title: shown + "​".repeat(n),
+          subtext: r.subtext,
+          group: groups[r.group],
+          icon: <Icon className="size-[18px]" />,
+          onItemClick: () => insertNoteLink(editor, r.props),
+        };
+      });
+    },
+    [editor, noteId, t],
+  );
+
   const loadColors = useNotesStore((s) => s.loadColors);
   useEffect(() => {
     void loadColors();
@@ -690,6 +741,9 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
             shouldOpen={(state) => !state.selection.$from.parent.type.isInGroup("tableContent")}
           />
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
+          {/* BlockNote opens a two-character trigger itself: the second [ after
+              a [ opens it; a pick replaces "[[query", Esc leaves it as typed. */}
+          <SuggestionMenuController triggerCharacter="[[" getItems={pickerItems} />
         </BlockNoteView>
         {comments.popover}
         {suggestionBars}

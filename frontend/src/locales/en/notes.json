@@ -102,6 +102,12 @@
       "chatNote": "Chat note",
       "ideaNote": "Idea note",
       "note": "Note"
+    },
+    "picker": {
+      "notes": "Notes",
+      "papers": "Papers",
+      "headings": "Headings",
+      "sections": "Paper sections"
     }
   },
   "draft": {
@@ -220,6 +226,10 @@
       "codeBlock": "Code block (a space works too)",
       "slash": "Every block, incl. Quote from the paper",
       "at": "Link a paper or section",
+      "link": "Link a note or paper",
+      "linkThisHeading": "Link a heading of this note (after a name: that note's)",
+      "linkAnyHeading": "Link a heading in any note",
+      "linkLabel": "In a [[ link: the display text follows",
       "select": "Toolbar: bold … hide, link, comment",
       "hover": "+ add · ⋮⋮ drag or menu",
       "tab": "Nest under the line above",

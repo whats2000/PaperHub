@@ -54,6 +54,10 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     rows: [
       { id: "slash", keys: ["/"], right: "Every block, incl. Quote from the paper" },
       { id: "at", keys: ["@"], right: "Link a paper or section" },
+      { id: "link", keys: ["[["], right: "Link a note or paper" },
+      { id: "linkThisHeading", keys: ["[[#"], right: "Link a heading of this note (after a name: that note's)" },
+      { id: "linkAnyHeading", keys: ["[[##"], right: "Link a heading in any note" },
+      { id: "linkLabel", keys: ["|"], right: "In a [[ link: the display text follows" },
       { id: "select", plainLeft: "Select text", right: "Toolbar: bold … hide, link, comment" },
       { id: "hover", plainLeft: "Hover a block", right: "+ add · ⋮⋮ drag or menu" },
       {

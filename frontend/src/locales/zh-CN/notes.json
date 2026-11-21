@@ -102,6 +102,12 @@
       "chatNote": "对话笔记",
       "ideaNote": "想法笔记",
       "note": "笔记"
+    },
+    "picker": {
+      "notes": "笔记",
+      "papers": "论文",
+      "headings": "标题",
+      "sections": "论文章节"
     }
   },
   "draft": {
@@ -220,6 +226,10 @@
       "codeBlock": "代码块（空格也可以）",
       "slash": "所有区块，包括论文引用",
       "at": "链接论文或章节",
+      "link": "链接笔记或论文",
+      "linkThisHeading": "链接这则笔记的标题（接在名称后：那则笔记的）",
+      "linkAnyHeading": "链接任何笔记中的标题",
+      "linkLabel": "在 [[ 链接中：后面接显示文字",
       "select": "工具栏：粗体…隐藏、链接、评论",
       "hover": "+ 添加 · ⋮⋮ 拖动或菜单",
       "tab": "缩进到上一行下面",
