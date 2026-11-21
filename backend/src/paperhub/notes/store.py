@@ -126,22 +126,98 @@ async def _target_exists(conn: aiosqlite.Connection, note: Note) -> bool:
         return await cur.fetchone() is not None
 
 
+# Block types that hold something with no text of their own.
+_CONTENT_TYPES = ("paperFigure", "paperRegion", "paperEquation")
+
+# A note "has content" (SQL over ``notes n``): the user's title, or a live
+# block with text (or a figure / region / equation). Shared by ``[[`` search,
+# the sidebar's chat list and ``paperhub-clean-empty-chats``.
+NOTE_HAS_CONTENT_SQL = (
+    "(TRIM(n.title) <> '' OR EXISTS (SELECT 1 FROM note_blocks b "
+    "WHERE b.note_id = n.id AND b.deleted_at IS NULL AND (TRIM(b.text) <> '' "
+    f"OR b.type IN ({', '.join(repr(t) for t in _CONTENT_TYPES)}))))"
+)
+
+# A chat note whose chat the sidebar does not list (gone, deleted, internal).
+_HIDDEN_CHAT_SQL = (
+    "(n.target_kind = 'session' AND NOT EXISTS (SELECT 1 FROM chat_sessions s "
+    "WHERE CAST(s.id AS TEXT) = n.target_id AND s.deleted_at IS NULL "
+    "AND s.internal = 0))"
+)
+
+
+def _link_targets(node: Any, out: set[int]) -> None:
+    if isinstance(node, list):
+        for item in node:
+            _link_targets(item, out)
+    elif isinstance(node, dict):
+        if node.get("type") == "noteLink":
+            props = node.get("props") or {}
+            tid = props.get("targetId") if isinstance(props, dict) else None
+            if (props.get("targetKind") == "note" and isinstance(tid, int)
+                    and not isinstance(tid, bool)):
+                out.add(tid)
+        for value in node.values():
+            if isinstance(value, (list, dict)):
+                _link_targets(value, out)
+
+
+async def linked_note_ids(conn: aiosqlite.Connection) -> set[int]:
+    """Ids of the notes some live ``[[`` link (in a live block of a live
+    note, a table cell included) points at."""
+    async with conn.execute(
+        "SELECT b.payload_json FROM note_blocks b JOIN notes n ON n.id = b.note_id "
+        "WHERE b.deleted_at IS NULL AND n.deleted_at IS NULL "
+        "AND b.payload_json LIKE '%noteLink%'"
+    ) as cur:
+        rows = await cur.fetchall()
+    out: set[int] = set()
+    for (payload,) in rows:
+        try:
+            _link_targets(json.loads(payload), out)
+        except ValueError:
+            continue
+    return out
+
+
+async def find_note(conn: aiosqlite.Connection, *, target_kind: str,
+                    target_id: str) -> Note | None:
+    """The target's note when it has one (soft-deleted too), else None:
+    looking never creates one."""
+    async with conn.execute(
+        f"SELECT {_NOTE_COLS} FROM notes "
+        "WHERE owner_id = 1 AND target_kind = ? AND target_id = ?",
+        (target_kind, target_id),
+    ) as cur:
+        row = await cur.fetchone()
+    return _note(row) if row else None
+
+
 async def list_live_notes(
     conn: aiosqlite.Connection, query: str = "", *, limit: int | None = None,
 ) -> list[tuple[Note, str]]:
     """Live notes of the owner as ``(note, display title)``, most recently
-    updated first, whose title contains ``query`` (case-insensitive). A note
-    whose target is gone and that has no title of its own is an orphan and
-    left out."""
+    updated first, whose title contains ``query`` (case-insensitive).
+
+    Left out: an orphan (target gone, no title of its own), an empty note
+    (no title, no live block with text) and the note of a chat the sidebar
+    does not list -- unless some live ``[[`` link points at the note."""
     needle = query.strip().casefold()
     async with conn.execute(
-        f"SELECT {_NOTE_COLS} FROM notes WHERE owner_id = 1 "
-        "AND deleted_at IS NULL ORDER BY updated_at DESC, id DESC"
+        f"SELECT {_NOTE_COLS}, {NOTE_HAS_CONTENT_SQL}, {_HIDDEN_CHAT_SQL} "  # noqa: S608
+        "FROM notes n WHERE owner_id = 1 AND deleted_at IS NULL "
+        "ORDER BY updated_at DESC, id DESC"
     ) as cur:
         rows = await cur.fetchall()
+    linked: set[int] | None = None
     out: list[tuple[Note, str]] = []
     for row in rows:
         note = _note(row)
+        if not row[7] or row[8]:
+            if linked is None:
+                linked = await linked_note_ids(conn)
+            if note.id not in linked:
+                continue
         if not note.title.strip() and not await _target_exists(conn, note):
             continue
         title = await display_title(conn, note)
@@ -150,6 +226,21 @@ async def list_live_notes(
             if limit is not None and len(out) >= limit:
                 break
     return out
+
+
+async def note_first_line(conn: aiosqlite.Connection, note_id: int) -> str:
+    """What a note-only chat is called in the sidebar: the note's own
+    title, else the first line of its first block with text ("" if none)."""
+    note = await get_note(conn, note_id)
+    if note is None:
+        return ""
+    if note.title.strip():
+        return " ".join(note.title.split())
+    for b in await list_blocks(conn, note_id):
+        for line in b.text.splitlines():
+            if line.strip():
+                return " ".join(line.split())[:200]
+    return ""
 
 
 async def named(conn: aiosqlite.Connection, note: Note) -> Note:

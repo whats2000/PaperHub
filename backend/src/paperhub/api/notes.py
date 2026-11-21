@@ -34,6 +34,7 @@ from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import (
     default_title,
+    find_note,
     get_note,
     get_or_create_note,
     list_blocks,
@@ -128,20 +129,60 @@ async def _detail(conn: aiosqlite.Connection, note: Note) -> NoteDetail:
         comments=await note_comments.list_comments(conn, note.id))
 
 
-@router.get("/target", response_model=NoteDetail)
+class NoNoteYet(BaseModel):
+    """A target with no note yet: nothing is created by looking (the first
+    write creates it, ``POST /notes/target``)."""
+    note: None = None
+    blocks: list[Block] = []
+    shared_by: int
+    default_title: str = ""
+    suggestions: list[dict[str, Any]] = []
+    comments: list[dict[str, Any]] = []
+
+
+async def _check_target(conn: aiosqlite.Connection, kind: str, target: int) -> None:
+    """404 for a missing paper / chat / idea."""
+    if kind == "paper":
+        async with conn.execute(
+            "SELECT 1 FROM paper_content WHERE id = ?", (target,)
+        ) as cur:
+            if await cur.fetchone() is None:
+                raise HTTPException(404, f"paper_content {target} not found")
+    else:
+        await _title_for(conn, kind, target)
+
+
+@router.get("/target", response_model=NoteDetail | NoNoteYet)
 async def note_for_target(
     kind: Literal["paper", "session", "idea"], id: int = Query(),
-) -> NoteDetail:
-    """The note of a paper / chat / idea, created on first use, as
-    ``GET /notes/{id}`` shows it (open suggestions and comments too)."""
+) -> NoteDetail | NoNoteYet:
+    """The note of a paper / chat / idea as ``GET /notes/{id}`` shows it
+    (open suggestions and comments too), or ``note: null`` when it has
+    none yet. Never creates one."""
     async with open_db(load_settings().db_path) as conn:
+        await _check_target(conn, kind, id)
+        note = await find_note(conn, target_kind=kind, target_id=str(id))
+        if note is not None:
+            return await _detail(conn, note)
+        # What the note would show: the target's title and chats.
+        probe = Note(id=0, target_kind=kind, target_id=str(id), title="",
+                     revision=0, updated_at="", deleted_at=None)
+        return NoNoteYet(shared_by=await shared_by(conn, probe),
+                         default_title=await default_title(conn, probe))
+
+
+@router.post("/target", response_model=NoteDetail)
+async def create_note_for_target(
+    kind: Literal["paper", "session", "idea"], id: int = Query(),
+) -> NoteDetail:
+    """The target's note, created now if it has none (the first write of
+    the notes pane / the note card). Idempotent: a second call returns the
+    same note."""
+    async with open_db(load_settings().db_path) as conn:
+        await _check_target(conn, kind, id)
         if kind == "paper":
-            try:
-                note = await paper_note(conn, id)
-            except LookupError as exc:
-                raise HTTPException(404, str(exc)) from exc
+            note = await paper_note(conn, id)
         else:
-            await _title_for(conn, kind, id)  # 404 for a missing target
             note = await get_or_create_note(
                 conn, target_kind=kind, target_id=str(id), title="",
                 session_id=id if kind == "session" else None)

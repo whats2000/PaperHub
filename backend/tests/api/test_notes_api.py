@@ -35,18 +35,18 @@ _INSERT = {"op": "insert", "block": {
 
 
 async def _session_note(client: AsyncClient) -> int:
-    r = await client.get("/notes/target", params={"kind": "session", "id": 1})
+    r = await client.post("/notes/target", params={"kind": "session", "id": 1})
     return int(r.json()["note"]["id"])
 
 
 async def test_target_endpoint_creates_once(client: AsyncClient) -> None:
-    a = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
-    b = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
+    a = (await client.post("/notes/target", params={"kind": "session", "id": 1})).json()
+    b = (await client.post("/notes/target", params={"kind": "session", "id": 1})).json()
     assert a["note"]["id"] == b["note"]["id"]
     # The stored title is the user's only; the target's title is the default.
     assert a["note"]["title"] == "" and a["default_title"] == "Chat"
     assert a["blocks"] == []
-    p = (await client.get("/notes/target", params={"kind": "paper", "id": 1})).json()
+    p = (await client.post("/notes/target", params={"kind": "paper", "id": 1})).json()
     assert p["note"]["title"] == "" and p["default_title"] == "A Paper"
     assert p["note"]["id"] != a["note"]["id"]
     assert (await client.get(
@@ -67,7 +67,7 @@ async def test_target_endpoint_carries_open_suggestions_and_comments(
         res = await apply_ops(conn, nid, base_revision=1, actor="agent", ops=[
             Op(op="update", block_id=bid, block=BlockIn(
                 type="paragraph", content=[{"type": "text", "text": "new"}]))])
-    got = (await client.get("/notes/target",
+    got = (await client.post("/notes/target",
                             params={"kind": "session", "id": 1})).json()
     assert [s["id"] for s in got["suggestions"]] == [
         res.suggested[0]["suggestion_id"]]
@@ -221,12 +221,12 @@ async def test_shared_by_counts_the_live_chats_the_note_is_linked_to(
             "(1, 1), (2, 1), (3, 1), (4, 1);")
         await conn.commit()
     # A paper's note: every live, listed chat that attaches the paper.
-    paper = (await client.get("/notes/target", params={"kind": "paper", "id": 1})).json()
+    paper = (await client.post("/notes/target", params={"kind": "paper", "id": 1})).json()
     assert paper["shared_by"] == 2
     detail = (await client.get(f"/notes/{paper['note']['id']}")).json()
     assert detail["shared_by"] == 2
     # A chat's note: that chat only.
-    chat = (await client.get("/notes/target", params={"kind": "session", "id": 1})).json()
+    chat = (await client.post("/notes/target", params={"kind": "session", "id": 1})).json()
     assert chat["shared_by"] == 1
     assert (await client.get(f"/notes/{chat['note']['id']}")).json()["shared_by"] == 1
 
@@ -246,11 +246,11 @@ async def test_shared_by_for_an_idea_note_and_a_paper_in_no_chat(
             "INSERT INTO idea_sessions (idea_id, session_id) VALUES (5, 1), (5, 2), (5, 3);")
         await conn.commit()
     # An idea's note: its live idea chats.
-    idea = (await client.get("/notes/target", params={"kind": "idea", "id": 5})).json()
+    idea = (await client.post("/notes/target", params={"kind": "idea", "id": 5})).json()
     assert idea["shared_by"] == 2
     assert (await client.get(f"/notes/{idea['note']['id']}")).json()["shared_by"] == 2
     # A paper in the library but in no chat.
-    lone = (await client.get("/notes/target", params={"kind": "paper", "id": 2})).json()
+    lone = (await client.post("/notes/target", params={"kind": "paper", "id": 2})).json()
     assert lone["shared_by"] == 0
 
 

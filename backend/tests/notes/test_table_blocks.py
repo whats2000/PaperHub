@@ -43,7 +43,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 async def _note(client: AsyncClient) -> int:
-    r = await client.get("/notes/target", params={"kind": "session", "id": 1})
+    r = await client.post("/notes/target", params={"kind": "session", "id": 1})
     return int(r.json()["note"]["id"])
 
 

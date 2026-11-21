@@ -33,7 +33,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 async def test_block_lookup_names_the_note_and_its_target(
     client: AsyncClient, tmp_path: Path,
 ) -> None:
-    nid = (await client.get("/notes/target", params={"kind": "session", "id": 1})
+    nid = (await client.post("/notes/target", params={"kind": "session", "id": 1})
            ).json()["note"]["id"]
     async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
         await apply_ops(conn, nid, base_revision=0, actor="user", ops=[

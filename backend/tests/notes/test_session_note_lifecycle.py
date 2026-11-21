@@ -35,7 +35,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 async def test_session_note_lifecycle(client: AsyncClient, tmp_path: Path) -> None:
-    nid = (await client.get("/notes/target", params={"kind": "session", "id": 1})
+    nid = (await client.post("/notes/target", params={"kind": "session", "id": 1})
            ).json()["note"]["id"]
     db = tmp_path / "paperhub.db"
 
@@ -145,7 +145,7 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
 async def test_restore_keeps_an_independently_deleted_note(
     client: AsyncClient, tmp_path: Path,
 ) -> None:
-    nid = (await client.get("/notes/target", params={"kind": "session", "id": 1})
+    nid = (await client.post("/notes/target", params={"kind": "session", "id": 1})
            ).json()["note"]["id"]
     db = tmp_path / "paperhub.db"
     async with aiosqlite.connect(db) as conn:

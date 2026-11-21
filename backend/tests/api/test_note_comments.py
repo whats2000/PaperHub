@@ -24,7 +24,7 @@ async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         await conn.commit()
     async with AsyncClient(transport=ASGITransport(app=create_app()),
                            base_url="http://test") as c:
-        r = await c.get("/notes/target", params={"kind": "session", "id": 1})
+        r = await c.post("/notes/target", params={"kind": "session", "id": 1})
         nid = int(r.json()["note"]["id"])
         res = await c.post(f"/notes/{nid}/ops", json={"base_revision": 0, "ops": [
             {"op": "insert", "block": {"type": "paragraph", "content": [

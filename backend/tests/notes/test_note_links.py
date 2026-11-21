@@ -168,9 +168,9 @@ def _h(text, level=1):
 
 
 async def _seed(tmp_path: Path, client: AsyncClient):
-    nid1 = (await client.get("/notes/target", params={"kind": "session", "id": 1})
+    nid1 = (await client.post("/notes/target", params={"kind": "session", "id": 1})
             ).json()["note"]["id"]
-    nid2 = (await client.get("/notes/target", params={"kind": "session", "id": 2})
+    nid2 = (await client.post("/notes/target", params={"kind": "session", "id": 2})
             ).json()["note"]["id"]
     async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
         r = await apply_ops(conn, nid1, base_revision=0, actor="user", ops=[

@@ -39,7 +39,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 async def _paper_note(client: AsyncClient) -> int:
-    r = await client.get("/notes/target", params={"kind": "paper", "id": 1})
+    r = await client.post("/notes/target", params={"kind": "paper", "id": 1})
     return int(r.json()["note"]["id"])
 
 
@@ -122,7 +122,7 @@ async def test_download_name_keeps_a_cjk_title(client: AsyncClient,
     async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
         await conn.execute("INSERT INTO chat_sessions (id, title) VALUES (5, '注意力 筆記')")
         await conn.commit()
-    nid = (await client.get("/notes/target", params={"kind": "session", "id": 5})
+    nid = (await client.post("/notes/target", params={"kind": "session", "id": 5})
            ).json()["note"]["id"]
     r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
     cd = r.headers["content-disposition"]
@@ -221,7 +221,7 @@ async def test_download_name_drops_controls_and_bidi(client: AsyncClient,
     async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
         await conn.execute("INSERT INTO chat_sessions (id, title) VALUES (6, ?)", (title,))
         await conn.commit()
-    nid = (await client.get("/notes/target", params={"kind": "session", "id": 6})
+    nid = (await client.post("/notes/target", params={"kind": "session", "id": 6})
            ).json()["note"]["id"]
     r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
     cd = r.headers["content-disposition"]

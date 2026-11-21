@@ -602,3 +602,23 @@ async def test_no_empty_section_when_every_insert_under_it_is_rejected(
     assert secs == ["Introduction"]
     after = await get_note(migrated_db, note.id)
     assert after is not None and after.revision == n.revision
+
+
+async def test_edit_creates_the_chat_note_on_first_write(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """Nothing is created by looking: the chat's note is made by the
+    agent's first edit (Task 14)."""
+    async with migrated_db.execute(
+            "SELECT COUNT(*) FROM notes WHERE target_kind = 'session'") as cur:
+        assert (await cur.fetchone())[0] == 0  # type: ignore[index]
+    out = await _edit(_ctx(migrated_db, fake_tracer), note="chat",
+                      base_revision=0, ops=[_ins("first words")])
+    assert not out.record.get("error"), out.content
+    async with migrated_db.execute(
+            "SELECT id FROM notes WHERE target_kind = 'session' "
+            "AND target_id = '1'") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert [b.text for b in await list_blocks(migrated_db, int(row[0]))] == [
+        "first words"]
