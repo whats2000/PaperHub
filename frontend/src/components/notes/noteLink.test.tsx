@@ -598,6 +598,47 @@ describe("the [[ picker", () => {
     expect(sentLink()[0]!.props).toMatchObject({ targetKind: "paper", targetId: 5, name: "Attention" });
   });
 
+  it("[[Robo# lists RoboTTT; picking it shows its outline; a heading then links", async () => {
+    const like = (q: string, title: string) => title.toLowerCase().includes(q.toLowerCase());
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        const all = [{ note_id: 12, kind: "paper", target_id: 47, title: "RoboTTT" }];
+        return HttpResponse.json(all.filter((n) => like(q, n.title)));
+      }),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/notes/12/outline`, () =>
+        HttpResponse.json([{ block_id: "h1", type: "heading", text: "閘控", level: 2 }]),
+      ),
+    );
+    await openAtEnd();
+    typeIn("[[Robo#");
+    await screen.findByText("RoboTTT");
+    pressInMenu("Enter");
+    await screen.findByText("閘控");
+    expect(lineText()).toBe("see [[RoboTTT#");
+    expect(sentLink()).toHaveLength(0);
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    expect(sentLink()[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });
+    const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
+    expect(content[0]!.text).toBe("see ");
+  });
+
+  it("nothing matching shows a muted hint row, which links nothing", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+    );
+    await openAtEnd();
+    typeIn("[[zzzzzz");
+    await screen.findByText("No matching notes or papers");
+    pressInMenu("Enter");
+    await screen.findByText("No matching notes or papers");
+    expect(lineText()).toBe("see [[zzzzzz");
+    expect(sentLink()).toHaveLength(0);
+  });
+
   it("Escape closes the menu and leaves what was typed", async () => {
     server.use(...searchHandlers());
     await openAtEnd();

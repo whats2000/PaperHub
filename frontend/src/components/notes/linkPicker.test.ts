@@ -210,7 +210,28 @@ describe("linkItems", () => {
     );
     const items = await linkItems(editor(), 7, "C# notes");
     expect(asked).toContain("C# notes");
-    expect(items.map((i) => [i.group, i.title, i.props.targetId, i.props.blockId])).toEqual([["notes", "C# notes", 20, ""]]);
+    // The whole text's target links as it is; one matching the text before
+    // # completes the query to its title + # (its headings come next).
+    expect(items.map((i) => [i.title, i.props.targetId, i.complete])).toEqual([
+      ["C# notes", 20, undefined],
+      ["C stuff", 21, "C stuff#notes"],
+    ]);
+  });
+
+  it("name# with a partial name lists the targets to complete, keeping the label", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        return HttpResponse.json("robottt".includes(q.toLowerCase()) ? [hit(12, "paper", "RoboTTT")] : []);
+      }),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+    );
+    const items = await linkItems(editor(), 7, "Robo#閘|see");
+    expect(items.map((i) => [i.title, i.complete])).toEqual([["RoboTTT", "RoboTTT#閘|see"]]);
+  });
+
+  it("a title holding # is read up to the last #", () => {
+    expect(parseLinkQuery("C# notes#動")).toMatchObject({ mode: "noteHeadings", name: "C# notes", heading: "動" });
   });
 
   it("a search that fails leaves the other list", async () => {

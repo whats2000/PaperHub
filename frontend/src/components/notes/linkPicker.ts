@@ -6,6 +6,7 @@
  * `|text` the display text.
  */
 import type { BlockNoteEditor } from "@blocknote/core";
+import { SuggestionMenu } from "@blocknote/core/extensions";
 
 import {
   getNoteOutline,
@@ -35,7 +36,8 @@ export function parseLinkQuery(q: string): LinkQuery {
   const rest = bar < 0 ? typed : typed.slice(0, bar);
   if (rest.startsWith("##")) return { mode: "allHeadings", name: "", heading: rest.slice(2).trim(), label };
   if (rest.startsWith("#")) return { mode: "thisNote", name: "", heading: rest.slice(1).trim(), label };
-  const hash = rest.indexOf("#");
+  // Up to the last #: a title may hold one (`C# notes#動`).
+  const hash = rest.lastIndexOf("#");
   if (hash >= 0) {
     return { mode: "noteHeadings", name: rest.slice(0, hash).trim(), heading: rest.slice(hash + 1).trim(), label };
   }
@@ -68,6 +70,9 @@ export interface LinkItem {
   title: string;
   subtext?: string;
   props: NoteLinkProps;
+  /** Picking the row completes the query to this (`<title>#…`) instead of
+   * linking: the menu stays open on that target's headings. */
+  complete?: string;
 }
 
 const LIMIT = 8;
@@ -194,7 +199,20 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
   ]);
   const note = exact(notes, name);
   const paper = exact(papers, name);
-  if (!note && !paper) return targets(q.replace(/^\[+/, "").split("|")[0]!.trim(), label, untitled);
+  if (!note && !paper) {
+    // No exact title. The whole text may be a title holding # (it links as
+    // it is); the text before # may be part of one (as in Obsidian, picking
+    // it completes the query to `<title>#` and shows its headings).
+    const whole = q.replace(/^\[+/, "").split("|")[0]!.trim();
+    const [asIs, partial] = await Promise.all([targets(whole, label, untitled), targets(name, label, untitled)]);
+    const key = (i: LinkItem) => `${i.props.targetKind}:${i.props.targetId}`;
+    const have = new Set(asIs.map(key));
+    const tail = heading + (label ? `|${label}` : "");
+    return [
+      ...asIs,
+      ...partial.filter((i) => !have.has(key(i))).map((i) => ({ ...i, complete: `${i.props.name}#${tail}` })),
+    ];
+  }
   const [outline, sections] = await Promise.all([
     note ? quietly(() => getNoteOutline(note.note_id)) : Promise.resolve([]),
     paper ? quietly(() => getPaperSections(paper.paper_content_id)) : Promise.resolve([]),
@@ -231,6 +249,13 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
         }),
       })),
   ];
+}
+
+/** Opens the `[[` menu again at the caret with `query` typed after it
+ * (a pick has just removed `[[query` and closed the menu). */
+export function reopenLinkPicker(editor: Ed, query: string): void {
+  editor.getExtension(SuggestionMenu)?.openSuggestionMenu("[[", { deleteTriggerCharacter: true });
+  editor.transact((tr) => tr.insertText(query));
 }
 
 /** Puts a link chip at the caret, then a space (as the `@` menu does). */

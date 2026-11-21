@@ -107,7 +107,9 @@
       "notes": "筆記",
       "papers": "論文",
       "headings": "標題",
-      "sections": "論文章節"
+      "sections": "論文章節",
+      "none": "沒有符合的筆記或論文",
+      "noneHint": "輸入部分標題；# 看它的標題，## 看所有筆記的標題"
     }
   },
   "draft": {

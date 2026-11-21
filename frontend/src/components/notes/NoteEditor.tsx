@@ -27,6 +27,7 @@ import {
   Lightbulb,
   MessageSquare,
   NotebookPen,
+  SearchX,
   Sigma,
   TextQuote,
 } from "lucide-react";
@@ -51,7 +52,7 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
-import { insertNoteLink, linkItems, opensLinkPicker, type LinkItem } from "./linkPicker";
+import { insertNoteLink, linkItems, opensLinkPicker, reopenLinkPicker, type LinkItem } from "./linkPicker";
 import { NoteFormattingBar } from "./FormattingBar";
 import { lostCommentBadges, useBadgeRefresh, useLostCommentBadges } from "./commentBadges";
 import { LostCommentBadges } from "./LostCommentBadges";
@@ -603,6 +604,18 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       const rows = await linkItems(editor, noteId, query, untitled);
       // BlockNote keys a menu row by its title, and a paper note shares its
       // paper's title: an invisible zero-width space keeps the keys apart.
+      if (!rows.length) {
+        // A muted row instead of an empty menu; picking it changes nothing.
+        return [
+          {
+            title: t("notes:link.picker.none", "No matching notes or papers"),
+            subtext: t("notes:link.picker.noneHint", "Type part of a title; # for its headings, ## for any note's"),
+            size: "small",
+            icon: <SearchX className="size-[18px]" />,
+            onItemClick: () => reopenLinkPicker(editor, query),
+          },
+        ];
+      }
       const seen = new Map<string, number>();
       return rows.map((r) => {
         const Icon = LINK_ICONS[r.icon];
@@ -614,7 +627,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           subtext: r.subtext,
           group: groups[r.group],
           icon: <Icon className="size-[18px]" />,
-          onItemClick: () => insertNoteLink(editor, r.props),
+          onItemClick: () =>
+            r.complete !== undefined ? reopenLinkPicker(editor, r.complete) : insertNoteLink(editor, r.props),
         };
       });
     },

@@ -107,7 +107,9 @@
       "notes": "Notes",
       "papers": "Papers",
       "headings": "Headings",
-      "sections": "Paper sections"
+      "sections": "Paper sections",
+      "none": "No matching notes or papers",
+      "noneHint": "Type part of a title; # for its headings, ## for any note's"
     }
   },
   "draft": {

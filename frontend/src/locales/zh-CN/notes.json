@@ -107,7 +107,9 @@
       "notes": "笔记",
       "papers": "论文",
       "headings": "标题",
-      "sections": "论文章节"
+      "sections": "论文章节",
+      "none": "没有符合的笔记或论文",
+      "noneHint": "输入部分标题；# 看它的标题，## 看所有笔记的标题"
     }
   },
   "draft": {
