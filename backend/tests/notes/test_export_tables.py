@@ -193,3 +193,82 @@ def test_docx_keeps_two_columns_with_math_pipes() -> None:
     with zipfile.ZipFile(io.BytesIO(markdown_to_docx(md, {}))) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     assert len(re.findall(r"<w:gridCol", xml)) == 2
+
+
+# Table style (three-line / grid): the .docx draws every table in the
+# viewer's style; the Markdown is the same plain pipe table either way.
+
+def _docx_tables(style: str | None) -> str:
+    md = _md(_table([["指標", "值"], ["ORR", "62%"], ["PFS", "8.1"]]))
+    kw = {} if style is None else {"table_style": style}
+    with zipfile.ZipFile(io.BytesIO(markdown_to_docx(md, {}, **kw))) as z:
+        return z.read("word/document.xml").decode("utf-8")
+
+
+def _border(xml: str, side: str) -> str | None:
+    m = re.search(rf'<w:{side} w:val="(\w+)"', xml)
+    return m[1] if m else None
+
+
+def _rows(xml: str) -> list[str]:
+    return re.findall(r"<w:tr[ >].*?</w:tr>", xml, re.S)
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+@pytest.mark.parametrize("style", [None, "threeLine"])
+def test_three_line_docx_table(style: str | None) -> None:
+    xml = _docx_tables(style)
+    tbl = re.search(r"<w:tblBorders>(.*?)</w:tblBorders>", xml, re.S)
+    assert tbl, "the table states its own borders"
+    b = tbl[1]
+    # A thick rule above and at the end; no vertical, no inner horizontal.
+    assert _border(b, "top") == "single" and _border(b, "bottom") == "single"
+    for side in ("left", "right", "insideH", "insideV"):
+        assert _border(b, side) == "nil", side
+    rows = _rows(xml)
+    assert len(rows) == 3
+    # A thin rule under the header row only; the body rows draw none.
+    head = re.findall(r"<w:tcBorders>(.*?)</w:tcBorders>", rows[0], re.S)
+    assert len(head) == 2 and all(_border(h, "bottom") == "single" for h in head)
+    top_sz = int(re.search(r'<w:top w:val="single" w:sz="(\d+)"', b)[1])  # type: ignore[index]
+    mid_sz = int(re.search(r'<w:bottom w:val="single" w:sz="(\d+)"', head[0])[1])  # type: ignore[index]
+    assert top_sz > mid_sz
+    for row in rows[1:]:
+        assert "<w:tcBorders>" not in row
+    assert "<w:shd " not in xml  # no header tint
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_grid_docx_table() -> None:
+    xml = _docx_tables("grid")
+    tbl = re.search(r"<w:tblBorders>(.*?)</w:tblBorders>", xml, re.S)
+    assert tbl
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        assert _border(tbl[1], side) == "single", side
+    rows = _rows(xml)
+    # The header row is tinted; the body is not.
+    assert rows[0].count("<w:shd ") == 2
+    assert all("<w:shd " not in r for r in rows[1:])
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_styled_docx_keeps_schema_order_and_text() -> None:
+    for style in ("threeLine", "grid"):
+        xml = _docx_tables(style)
+        assert "ORR" in xml and "指標" in xml
+        tblpr = re.search(r"<w:tblPr>(.*?)</w:tblPr>", xml, re.S)[1]  # type: ignore[index]
+        names = re.findall(r"<w:(\w+)", tblpr)
+        top = [n for n in names if n in ("tblStyle", "tblW", "jc", "tblBorders", "tblLook")]
+        assert top == ["tblStyle", "tblW", "jc", "tblBorders", "tblLook"], top
+
+
+def test_style_tables_rejects_an_unknown_style() -> None:
+    from paperhub.notes.pandoc import PandocError, style_docx_tables
+    with pytest.raises(PandocError):
+        style_docx_tables(b"", "dotted")  # type: ignore[arg-type]
+
+
+def test_markdown_is_the_same_in_either_style() -> None:
+    # The style is the viewer's, not the note's: no switch in note_to_markdown.
+    import inspect
+    assert "table_style" not in inspect.signature(note_to_markdown).parameters

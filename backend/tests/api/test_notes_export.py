@@ -270,3 +270,31 @@ async def test_export_uses_the_default_title_when_the_title_is_empty(
     r = await client.get(f"/notes/{nid}/export", params={"format": "md"})
     assert 'filename="untitled-notes.zip"' in r.headers["content-disposition"]
     assert _zip(r.content)["note.md"].decode().startswith("# Untitled")
+
+
+async def test_export_table_style_unknown_is_422(client: AsyncClient) -> None:
+    nid = await _paper_note(client)
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "md", "table_style": "dotted"})
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize(("given", "want"), [(None, "threeLine"),
+                                             ("threeLine", "threeLine"),
+                                             ("grid", "grid")])
+async def test_export_passes_the_table_style_to_word(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
+        given: str | None, want: str) -> None:
+    seen: list[str] = []
+
+    def fake(md: str, resources: dict[str, bytes], *,
+             table_style: str = "threeLine") -> bytes:
+        seen.append(table_style)
+        return b"docx"
+    monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
+    monkeypatch.setattr(note_pandoc, "markdown_to_docx", fake)
+    nid = await _paper_note(client)
+    params = {"format": "docx"} | ({"table_style": given} if given else {})
+    r = await client.get(f"/notes/{nid}/export", params=params)
+    assert r.status_code == 200 and r.content == b"docx"
+    assert seen == [want]

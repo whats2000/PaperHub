@@ -224,11 +224,15 @@ async def _record_export(conn: aiosqlite.Connection, note_id: int, fmt: str,
 
 
 @router.get("/{note_id}/export")
-async def export_note(note_id: int,
-                      format: Literal["md", "docx"] = Query()) -> Response:
+async def export_note(
+        note_id: int,
+        format: Literal["md", "docx"] = Query(),
+        table_style: note_pandoc.TableStyle = "threeLine") -> Response:
     """The note as a Markdown zip (``note.md``, ``images/``,
     ``references.bib``) or a ``.docx``; 409 ``pandoc_missing`` for Word
-    without pandoc. Each export is recorded in ``note_exports``."""
+    without pandoc. ``table_style`` (the viewer's) draws the Word tables
+    three-line or grid; the Markdown is a plain pipe table either way.
+    Each export is recorded in ``note_exports``."""
     if format == "docx":
         status = note_pandoc.pandoc_status()
         if status != "ok":
@@ -253,9 +257,10 @@ async def export_note(note_id: int,
                 body = _zip(md, images, bib)
                 media, ext = "application/zip", "zip"
             else:
-                body = await asyncio.to_thread(
+                body = await asyncio.to_thread(functools.partial(
                     note_pandoc.markdown_to_docx, md,
-                    {**images, note_pandoc.BIB_NAME: bib.encode("utf-8")})
+                    {**images, note_pandoc.BIB_NAME: bib.encode("utf-8")},
+                    table_style=table_style))
                 media, ext = _DOCX_TYPE, "docx"
         except note_pandoc.PandocError as exc:
             logger.warning("note %s: Word export failed: %s", note_id, exc)

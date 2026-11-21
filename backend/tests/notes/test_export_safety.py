@@ -438,9 +438,12 @@ def test_note_text_is_read_only_by_a_sandboxed_run(
     def fake_run(args: list[str], *, cwd: Path, **_kw: Any) -> Any:
         calls.append(args)
         out = args[args.index("--output") + 1]
+        docx = io.BytesIO()
+        with zipfile.ZipFile(docx, "w") as z:
+            z.writestr("word/document.xml", "<w:document/>")
         (cwd / out).write_bytes(
             b'{"pandoc-api-version":[1,23],"meta":{},"blocks":[]}'
-            if out.endswith(".json") else b"x")
+            if out.endswith(".json") else docx.getvalue())
         return type("P", (), {"returncode": 0, "stderr": ""})()
 
     monkeypatch.setattr(note_pandoc.subprocess, "run", fake_run)
