@@ -58,6 +58,16 @@ def cite_runs_xml(content: object,
             alias = html.escape(node_text(run, q), quote=False)
             out.append(f'<mark_cite mark="{esc(props.get("markId") or "")}">'
                        f"{alias}</mark_cite>")
+        elif run.get("type") == "noteLink":
+            attrs = (f'kind="{esc(props.get("targetKind") or "")}" '
+                     f'id="{esc(props.get("targetId") or "")}"')
+            if props.get("blockId"):
+                attrs += f' block="{esc(props["blockId"])}"'
+            if props.get("sectionKey"):
+                attrs += f' section="{esc(props["sectionKey"])}"'
+            out.append(f"<note_link {attrs}>"
+                       f"{html.escape(node_text(run, q), quote=False)}"
+                       "</note_link>")
         elif run.get("type") in ("inlineMath", "mention"):
             out.append(html.escape(node_text(run, q), quote=False))
         elif isinstance(run.get("text"), str):
@@ -70,7 +80,7 @@ def cite_runs_xml(content: object,
 
 def _has_cite(content: list[object]) -> bool:
     return any(isinstance(r, dict) and (
-        r.get("type") == "markCite"
+        r.get("type") in ("markCite", "noteLink")
         or (isinstance(r.get("content"), list) and _has_cite(r["content"])))
         for r in content)
 

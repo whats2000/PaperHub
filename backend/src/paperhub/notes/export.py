@@ -38,6 +38,7 @@ import aiosqlite
 from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import joined_quote
 from paperhub.notes.models import Block, Note, table_aligns, table_rows
+from paperhub.notes.run_text import link_text
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.translation.language import canonical_language
@@ -561,6 +562,8 @@ class _Writer:
                 _append(out, f"{label} [{key}]" if key else label)
             elif kind == "markCite":
                 _append(out, self.mark_cite(run.get("props") or {}))
+            elif kind == "noteLink":
+                _append(out, _escape(link_text(run.get("props") or {})))
             elif kind == "inlineMath":
                 latex = " ".join(str((run.get("props") or {}).get("latex") or "").split())
                 if latex:

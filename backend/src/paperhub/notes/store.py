@@ -12,6 +12,7 @@ import aiosqlite
 
 from paperhub.db.connection import in_write_transaction, write_lock
 from paperhub.notes.models import Block, Note, table_rows
+from paperhub.notes.run_text import link_text
 
 _ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
 
@@ -41,6 +42,8 @@ def _runs_text(content: Any) -> str:
             out.append(str((run.get("props") or {}).get("latex") or ""))
         elif run.get("type") == "markCite":  # an inline citation: its alias
             out.append(str((run.get("props") or {}).get("text") or ""))
+        elif run.get("type") == "noteLink":  # a [[ link: label, else name
+            out.append(link_text(run.get("props") or {}))
         if run.get("content") is not None:  # links nest their runs
             out.append(_runs_text(run["content"]))
     return "".join(out)

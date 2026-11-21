@@ -1,12 +1,12 @@
 """How a block's inline runs read as text (the agent's reading): inline
-math ``$…$``, a mention its label, a mark citation its alias or the quote's
+math ``$…$``, a mention its label, a note link its label or target name, a mark citation its alias or the quote's
 start. Shared by ``inline_merge`` (the per-run merge) and ``gfm_table``
 (a table's cells)."""
 from __future__ import annotations
 
 from typing import Any
 
-INLINE_NODES = frozenset({"markCite", "inlineMath", "mention"})
+INLINE_NODES = frozenset({"markCite", "inlineMath", "mention", "noteLink"})
 
 
 def cite_default_text(quote: str) -> str:
@@ -14,6 +14,12 @@ def cite_default_text(quote: str) -> str:
     ``cite_default_text``; imported late, export imports the op engine)."""
     from paperhub.notes.export import cite_default_text as _default
     return _default(quote)
+
+
+def link_text(props: dict[str, Any]) -> str:
+    """A ``noteLink``'s text: its label, else the target's name at insert
+    time (so nothing needs a lookup)."""
+    return str(props.get("label") or props.get("name") or "")
 
 
 def node_text(run: dict[str, Any], quotes: dict[str, str]) -> str:
@@ -27,6 +33,8 @@ def node_text(run: dict[str, Any], quotes: dict[str, str]) -> str:
         return f"${props.get('latex') or ''}$"
     if kind == "mention":
         return str(props.get("label") or "")
+    if kind == "noteLink":  # a [[ link: its label, else the target's name
+        return link_text(props)
     return ""
 
 

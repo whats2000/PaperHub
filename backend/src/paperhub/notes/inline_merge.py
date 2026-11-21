@@ -33,7 +33,8 @@ MARK_BLOCK_TYPES = frozenset(
 # mark's identity and is kept from the stored block.
 MARK_EDITABLE_PROPS = frozenset({"color", "style"})
 
-_CITE_TAG = re.compile(r'<mark_cite mark="[^"]*">(.*?)</mark_cite>', re.S)
+_CITE_TAG = re.compile(
+    r'<(mark_cite|note_link)\b[^>]*>(.*?)</\1>', re.S)
 
 
 def merge_props(block_type: str, old: dict[str, Any],
@@ -125,9 +126,9 @@ def is_rich(content: Any) -> bool:
 def unwrap_cite_tags(text: str) -> str:
     """The agent's string with any ``<mark_cite>`` tags it echoed back from a
     read replaced by their text (the read escaped the text around them)."""
-    if "<mark_cite" not in text:
+    if "<mark_cite" not in text and "<note_link" not in text:
         return text
-    return html.unescape(_CITE_TAG.sub(lambda m: m.group(1), text))
+    return html.unescape(_CITE_TAG.sub(lambda m: m.group(2), text))
 
 
 @dataclass

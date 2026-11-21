@@ -33,7 +33,10 @@ from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import (
+    _NOTE_COLS,
+    _note,
     default_title,
+    display_title,
     get_note,
     get_or_create_note,
     list_blocks,
@@ -253,6 +256,104 @@ async def block_place(block_id: str = Path(max_length=64)) -> BlockPlace:
     if row is None:
         raise HTTPException(404, f"block {block_id} not found")
     return BlockPlace(note_id=row[0], target_kind=row[1], target_id=str(row[2]))
+
+
+class NoteHit(BaseModel):
+    note_id: int
+    kind: str
+    target_id: int
+    title: str
+
+
+class HeadingHit(BaseModel):
+    note_id: int
+    note_title: str
+    block_id: str
+    text: str
+    level: int
+
+
+class OutlineItem(BaseModel):
+    block_id: str
+    type: Literal["heading", "section"]
+    text: str
+    level: int
+
+
+def _level(props: dict[str, Any]) -> int:
+    lv = props.get("level")
+    return lv if isinstance(lv, int) and not isinstance(lv, bool) and lv > 0 else 1
+
+
+async def _live_notes(conn: aiosqlite.Connection) -> list[Note]:
+    """Live notes, most recently updated first."""
+    async with conn.execute(
+        f"SELECT {_NOTE_COLS} FROM notes WHERE deleted_at IS NULL "
+        "ORDER BY updated_at DESC, id DESC"
+    ) as cur:
+        rows = await cur.fetchall()
+    return [_note(r) for r in rows]
+
+
+@router.get("/search", response_model=list[NoteHit])
+async def search_notes(q: str = "", limit: int = Query(20, ge=1, le=100)
+                       ) -> list[NoteHit]:
+    """Live notes whose display title contains ``q`` (a ``[[`` link's note
+    target picker)."""
+    needle = q.strip().casefold()
+    out: list[NoteHit] = []
+    async with open_db(load_settings().db_path) as conn:
+        for note in await _live_notes(conn):
+            title = await display_title(conn, note)
+            if needle in title.casefold():
+                out.append(NoteHit(
+                    note_id=note.id, kind=note.target_kind,
+                    target_id=int(note.target_id) if note.target_id.isdigit() else 0,
+                    title=title))
+                if len(out) >= limit:
+                    break
+    return out
+
+
+@router.get("/headings/search", response_model=list[HeadingHit])
+async def search_headings(q: str = "", limit: int = Query(20, ge=1, le=100)
+                          ) -> list[HeadingHit]:
+    """Live headings whose text contains ``q``, in live notes (a ``[[``
+    link to a heading)."""
+    needle = q.strip().casefold()
+    out: list[HeadingHit] = []
+    async with open_db(load_settings().db_path) as conn:
+        for note in await _live_notes(conn):
+            note_title = await display_title(conn, note)
+            for b in await list_blocks(conn, note.id):
+                if b.type != "heading" or needle not in b.text.casefold():
+                    continue
+                out.append(HeadingHit(
+                    note_id=note.id, note_title=note_title, block_id=b.id,
+                    text=b.text, level=_level(b.props)))
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+@router.get("/{note_id}/outline", response_model=list[OutlineItem])
+async def note_outline(note_id: int) -> list[OutlineItem]:
+    """A live note's headings and paper sections in document order
+    (children of a toggle heading included): the in-note TOC and the
+    heading picker of a ``[[`` link."""
+    async with open_db(load_settings().db_path) as conn:
+        note = await get_note(conn, note_id)
+        if note is None or note.deleted_at is not None:
+            raise HTTPException(404, f"note {note_id} not found")
+        out: list[OutlineItem] = []
+        for b in await list_blocks(conn, note_id):
+            if b.type == "heading":
+                out.append(OutlineItem(block_id=b.id, type="heading",
+                                       text=b.text, level=_level(b.props)))
+            elif b.type == "section":
+                out.append(OutlineItem(block_id=b.id, type="section",
+                                       text=b.text, level=1))
+        return out
 
 
 @router.get("/{note_id}", response_model=NoteDetail)

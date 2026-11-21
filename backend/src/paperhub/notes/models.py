@@ -36,9 +36,25 @@ def check_inline(content: Any) -> Any:
                 raise ValueError("markCite needs a markId")
             if not isinstance(props.get("text", ""), str):
                 raise ValueError("markCite text must be a string")
+        elif run.get("type") == "noteLink":
+            _check_note_link(run.get("props"))
         elif isinstance(run.get("content"), list):  # a link's runs
             check_inline(run["content"])
     return content
+
+
+def _check_note_link(props: Any) -> None:
+    """A ``[[`` link: a note or a paper, optionally a block / paper section."""
+    if not isinstance(props, dict):
+        raise ValueError("noteLink needs props")
+    if props.get("targetKind") not in ("note", "paper"):
+        raise ValueError("noteLink targetKind must be 'note' or 'paper'")
+    tid = props.get("targetId")
+    if isinstance(tid, bool) or not isinstance(tid, int) or tid <= 0:
+        raise ValueError("noteLink needs a positive integer targetId")
+    for key in ("blockId", "sectionKey", "label", "name"):
+        if not isinstance(props.get(key, ""), str):
+            raise ValueError(f"noteLink {key} must be a string")
 
 
 # A cell is 1:1 with a Markdown table cell: only its alignment may differ.
