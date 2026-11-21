@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TOC_RAIL_CLOSE_MS, TocRail } from "@/components/notes/TocRail";
+import { TOC_PIN_SETTLE_MS, TOC_RAIL_CLOSE_MS, TocRail } from "@/components/notes/TocRail";
 import { revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { useNotesStore } from "@/store/notes";
 import type { NoteBlock } from "@/types/notes";
@@ -174,6 +175,112 @@ describe("TocRail", () => {
     act(() => useNotesStore.getState().setTocOn(false));
     expect(screen.getByTestId("toc-rail")).toHaveAttribute("data-state", "closed");
     await vi.waitFor(() => expect(screen.queryByTestId("toc-rail")).toBeNull());
+  });
+
+  it("Esc in the list closes it and leaves focus on the rail, closed", async () => {
+    const user = userEvent.setup();
+    render(<TocRail noteId={7} root={root} />);
+    const rail = screen.getByRole("button", { name: "Table of contents" });
+    await user.tab();
+    expect(rail).toHaveFocus();
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "1 Introduction" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(rail).toHaveFocus();
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "closed");
+    expect(rail).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a tap or a click while hovering leaves the list open", async () => {
+    const user = userEvent.setup();
+    render(<TocRail noteId={7} root={root} />);
+    const rail = screen.getByRole("button", { name: "Table of contents" });
+    await user.click(rail); // hover + focus + click, like a tap
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
+    await user.click(rail);
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
+  });
+
+  it("the rail button controls the list", () => {
+    render(<TocRail noteId={7} root={root} />);
+    const rail = screen.getByRole("button", { name: "Table of contents" });
+    const id = rail.getAttribute("aria-controls");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)).toBe(screen.getByTestId("toc-rail-list"));
+  });
+
+  it("fades in on first show", async () => {
+    render(<TocRail noteId={7} root={root} />);
+    expect(screen.getByTestId("toc-rail")).toHaveAttribute("data-state", "closed");
+    await vi.waitFor(() => expect(screen.getByTestId("toc-rail")).toHaveAttribute("data-state", "open"));
+  });
+
+  it("a clicked entry stays current through its reveal, then the first user scroll releases it", async () => {
+    render(<TocRail noteId={7} root={root} />);
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 350); // centred by the reveal: below the 90 px line
+    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.scroll(root); // the reveal's own smooth scroll
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-current", "location");
+    await new Promise((r) => setTimeout(r, TOC_PIN_SETTLE_MS + 50));
+    fireEvent.scroll(root); // the user scrolls a little; Details is still on screen
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup" })).toHaveAttribute("aria-current", "location"),
+    );
+  });
+
+  it("re-reads the current entry when a part folds and when the pane resizes", async () => {
+    let onResize: (() => void) | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          onResize = cb;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 400);
+    render(<TocRail noteId={7} root={root} />);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    // Folding the part above pulls Details up past the line.
+    placeAt(root, "h3", 150);
+    act(() => {
+      useNotesStore.setState({ folded: { 7: ["d1"] } });
+    });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Details", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    // A narrower pane wraps the text: Details drops below it again.
+    placeAt(root, "h3", 400);
+    act(() => onResize?.());
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("lists a heading nested under another block in document order", () => {
+    seed([
+      heading("a", "Alpha", 1),
+      heading("c", "Gamma", 1),
+      // Child of "a" but listed after "c" in the store.
+      { ...heading("b", "Beta", 2), parent_id: "a" },
+    ]);
+    render(<TocRail noteId={7} root={root} />);
+    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
+    const names = screen.getAllByRole("button").filter((b) => b.closest("nav")).map((b) => b.textContent);
+    expect(names).toEqual(["Alpha", "Beta", "Gamma"]);
   });
 
   it("is off when the toolbar toggle turns it off", () => {

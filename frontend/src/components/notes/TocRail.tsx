@@ -1,12 +1,12 @@
 /** The floating table of contents (as in Notion): with two or more headings
  * or sections, a slim rail at the notes pane's right edge, one short line
  * per entry (shorter by level), over the content so it takes no width.
- * Hovering (or focusing) it slides the full list out over the note, leaving
- * retracts it after a moment; a click glides to the entry and flashes it,
+ * Hovering, focusing or tapping it slides the full list out over the note;
+ * leaving (or Esc) retracts it; a click glides to the entry and flashes it,
  * opening a folded part. Scrolling the pane highlights the entry being read:
  * the spy only reads the scroll position, so Follow reading's own scrolling
  * just moves the highlight. Off by the notes ⋯ menu (remembered). */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { storedNoteOutline, type OutlineEntry } from "@/lib/notes/outline";
@@ -23,6 +23,8 @@ export const TOC_RAIL_CLOSE_MS = 180;
 const RAIL_EXIT_MS = 200;
 /** An entry is current once its heading reaches this far below the pane's top. */
 export const TOC_SPY_OFFSET_PX = 90;
+/** A clicked entry stays current until its reveal has been still this long. */
+export const TOC_PIN_SETTLE_MS = 250;
 
 const LINE_WIDTH: Record<1 | 2 | 3, number> = { 1: 16, 2: 11, 3: 7 };
 
@@ -43,26 +45,29 @@ function useOutline(noteId: number | null): OutlineEntry[] {
   return kept;
 }
 
+interface Pin {
+  id: string;
+  /** The reveal's scroll has been still for TOC_PIN_SETTLE_MS. */
+  settled: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 /** The entry being read: the last one whose heading is at or above the pane's
- * top + 90 px. A clicked entry stays current while it is on screen (a reveal
- * centres it, below that line). */
-function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active: boolean) {
+ * top + 90 px. A clicked entry is current at once and stays so through its
+ * reveal (which centres it, below that line); the first scroll after the
+ * reveal settles (the user's, or Follow reading's) goes back to the rule.
+ * Folding a part and resizing the pane re-read it too. */
+function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active: boolean, foldKey: string) {
   const [current, setCurrent] = useState<string | null>(null);
-  const pinned = useRef<string | null>(null);
+  const pin = useRef<Pin | null>(null);
 
   const compute = useCallback(() => {
     if (!root) return;
-    const box = root.getBoundingClientRect();
-    if (pinned.current) {
-      const el = blockEl(root, pinned.current);
-      const r = el?.getBoundingClientRect();
-      if (r && r.bottom > box.top && r.top < box.bottom) {
-        setCurrent(pinned.current);
-        return;
-      }
-      pinned.current = null;
+    if (pin.current) {
+      setCurrent(pin.current.id);
+      return;
     }
-    const line = box.top + TOC_SPY_OFFSET_PX;
+    const line = root.getBoundingClientRect().top + TOC_SPY_OFFSET_PX;
     let found: string | null = null;
     for (const e of outline) {
       const el = blockEl(root, e.blockId);
@@ -74,41 +79,76 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
     setCurrent(found);
   }, [root, outline]);
 
+  const settleLater = useCallback(() => {
+    const p = pin.current;
+    if (!p) return;
+    if (p.timer) clearTimeout(p.timer);
+    p.timer = setTimeout(() => {
+      p.timer = null;
+      p.settled = true;
+    }, TOC_PIN_SETTLE_MS);
+  }, []);
+
   useEffect(() => {
     if (!root || !active) return;
     let frame = 0;
-    const onScroll = () => {
+    const later = () => {
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         compute();
       });
     };
+    const onScroll = () => {
+      const p = pin.current;
+      if (p && !p.settled) settleLater(); // still the reveal's own scroll
+      else if (p) pin.current = null;
+      later();
+    };
     compute();
     root.addEventListener("scroll", onScroll, { passive: true });
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(later);
+      ro.observe(root);
+      if (root.firstElementChild) ro.observe(root.firstElementChild);
+    }
     return () => {
       root.removeEventListener("scroll", onScroll);
+      ro?.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [root, active, compute]);
+    // `foldKey`: a part folded or opened moves the headings below it.
+  }, [root, active, compute, settleLater, foldKey]);
 
-  const pin = (blockId: string) => {
-    pinned.current = blockId;
+  useEffect(
+    () => () => {
+      if (pin.current?.timer) clearTimeout(pin.current.timer);
+    },
+    [],
+  );
+
+  const pinTo = (blockId: string) => {
+    if (pin.current?.timer) clearTimeout(pin.current.timer);
+    pin.current = { id: blockId, settled: false, timer: null };
+    settleLater();
     setCurrent(blockId);
   };
-  return { current, pin };
+  return { current, pin: pinTo };
 }
 
 export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLElement | null }) {
   const { t } = useTranslation();
+  const listId = useId();
   const tocOn = useNotesStore((s) => s.tocOn);
+  const foldKey = useNotesStore((s) => (noteId === null ? "" : (s.folded[noteId] ?? []).join(",")));
   const outline = useOutline(noteId);
   const rows = useTocRows(outline);
   const visible = tocOn && noteId !== null && outline.length >= 2;
 
-  // The rail fades in, and out before it unmounts.
+  // The rail fades in (on first show too), and out before it unmounts.
   const [mounted, setMounted] = useState(visible);
-  const [shown, setShown] = useState(visible);
+  const [shown, setShown] = useState(false);
   if (visible && !mounted) setMounted(true);
   if (!visible && shown) setShown(false);
   useEffect(() => {
@@ -122,6 +162,8 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
 
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Esc hands focus back to the rail: that focus must not reopen the list.
+  const quietFocus = useRef(false);
   const cancelClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = null;
@@ -140,7 +182,7 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
   useEffect(() => cancelClose, []);
   if (!visible && open) setOpen(false);
 
-  const { current, pin } = useScrollSpy(root, outline, mounted);
+  const { current, pin } = useScrollSpy(root, outline, mounted, foldKey);
   const railRef = useRef<HTMLButtonElement>(null);
 
   const go = (blockId: string) => {
@@ -159,7 +201,10 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       className="absolute top-2 right-1 z-20 transition-opacity duration-200 ease-out data-[state=closed]:opacity-0 motion-reduce:transition-none"
       onMouseEnter={show}
       onMouseLeave={hideSoon}
-      onFocus={show}
+      onFocus={() => {
+        if (quietFocus.current) quietFocus.current = false;
+        else show();
+      }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) hideSoon();
       }}
@@ -168,18 +213,23 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
           e.stopPropagation();
           cancelClose();
           setOpen(false);
-          railRef.current?.focus();
+          if (document.activeElement !== railRef.current) {
+            quietFocus.current = true;
+            railRef.current?.focus();
+          }
         }
       }}
     >
-      {/* A control over the note: half-seen when idle, solid on hover. */}
+      {/* A control over the note: half-seen when idle, solid on hover. A
+          click (or tap) only opens; Esc and leaving close. */}
       <button
         ref={railRef}
         type="button"
         aria-label={label}
         aria-expanded={open}
+        aria-controls={listId}
         title={label}
-        onClick={() => (open ? setOpen(false) : show())}
+        onClick={show}
         className="flex max-h-[50vh] flex-col items-end gap-[7px] overflow-hidden rounded-md px-1.5 py-2 opacity-60 transition-opacity duration-150 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none"
       >
         {rows.map((r) => (
@@ -198,6 +248,7 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       </button>
       {/* Content being read: opaque, slides in from the rail, back out to it. */}
       <nav
+        id={listId}
         data-testid="toc-rail-list"
         data-state={open ? "open" : "closed"}
         aria-label={label}
