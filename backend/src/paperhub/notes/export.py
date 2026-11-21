@@ -395,12 +395,38 @@ def _code_span(code: str) -> str:
 # A held code span's placeholder: private-use delimiters (which
 # ``_user_text`` drops from every user string, so note text can never hold
 # one) around a per-export random nonce and the span's index.
-# A pipe in math: ``\|`` or ``|``; a ``\\`` is matched first and kept.
-_MATH_BAR = re.compile(r"\\\\|\\\||\|")
+# A pipe in math: ``\|`` or ``|``. A ``\\`` and a ``\text{…}`` group are
+# matched first: the first is kept, a pipe in the second is text.
+_MATH_BAR = re.compile(r"\\text\{[^{}]*\}|\\\\|\\\||\|")
 
 
 def _math_bar(m: re.Match[str]) -> str:
-    return {"\\\\": "\\\\", "\\|": "\\Vert "}.get(m[0], "\\vert ")
+    t = m[0]
+    if t.startswith("\\text"):
+        return t.replace("|", "\\textbar{}")
+    # ``{}`` ends the command: math may not end in a space before ``$``.
+    return {"\\\\": t, "\\|": "\\Vert{}"}.get(t, "\\vert{}")
+
+
+# A URL argument of ``\href`` / ``\url``: left as written.
+_MATH_URL = re.compile(r"\\(?:href|url)\{[^{}]*\}")
+
+
+def _unlink(latex: str) -> str:
+    """``latex`` with a bare URL / ``www.`` broken by an empty group, so a
+    viewer's linkify cannot make it a link; ``\\href`` / ``\\url``
+    arguments stay as written."""
+    out: list[str] = []
+    pos = 0
+    for m in _MATH_URL.finditer(latex):
+        out.append(_unlink_plain(latex[pos:m.start()]) + m[0])
+        pos = m.end()
+    out.append(_unlink_plain(latex[pos:]))
+    return "".join(out)
+
+
+def _unlink_plain(s: str) -> str:
+    return s.replace("://", ":/{}/").replace("www.", "www{}.")
 
 
 _HELD = re.compile(r"\ue000[0-9a-f]{16}:\d+\ue001")
@@ -504,7 +530,7 @@ class _Writer:
                     latex = latex.replace("`", "‘")
                     # A viewer's linkify would make a URL here a link that
                     # runs on into the text after the math.
-                    latex = latex.replace("://", ":{}//").replace("www.", "www{}.")
+                    latex = _unlink(latex)
                     _append(out, self._hold(f"${_math(latex).rstrip()}$"))
             elif isinstance(run.get("text"), str):
                 _append(out, self._styled(run))
@@ -633,7 +659,7 @@ class _Writer:
 
     def escape_held_pipes(self, text: str) -> None:
         """Make the held spans in one table cell safe for a row: a pipe in
-        a code span is ``\\|``, in math ``\\vert`` / ``\\Vert`` (a table
+        a code span is ``\\|``, in math ``\\vert{}`` / ``\\Vert{}`` (a table
         reader splits cells on it first), and a line break folds to a
         space. A code span with a backslash before a pipe cannot be
         written in a GFM table, so it becomes escaped plain text."""
@@ -644,9 +670,11 @@ class _Writer:
                 if "|" not in inner:
                     continue
                 if "\\|" in inner:
+                    # Only the span's own padding goes: the core has no
+                    # edge whitespace, and interior spaces stay as typed.
                     if inner[:1] == inner[-1:] == " ":
                         inner = inner[1:-1]
-                    self._held[token] = _escape(" ".join(inner.split()))
+                    self._held[token] = _escape(inner)
                 else:
                     self._held[token] = span.replace("|", "\\|")
             elif span.startswith("$"):

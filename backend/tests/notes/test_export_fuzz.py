@@ -202,25 +202,28 @@ def _md_kinds(md: str) -> list[str]:
 
 
 def _outside_math(tokens: list[Token]) -> Iterator[Token]:
-    """Every token, less the linkify links inside a ``$$…$$`` paragraph: a
-    math-unaware viewer may make a bare URL in LaTeX clickable, which
-    neither fetches nor adds structure, and escaping it would break the
-    LaTeX (``\\label{eq.a}``)."""
+    """Every token, less the linkify links inside math: a math-unaware
+    viewer may make a bare domain in LaTeX clickable, which neither
+    fetches nor adds structure, and escaping it would break the LaTeX
+    (``\\label{eq.a}``). Math is a ``$$…$$`` paragraph, or a ``$…$`` region
+    of a table cell (the link's text must lie in or run into that region,
+    so a link leaking from the cell's own text is still counted)."""
     prev = ""
     for t in tokens:
         yield t
         was, prev = prev, t.type
         if not t.children:
             continue
-        # A ``$$…$$`` paragraph, or a table cell holding inline ``$…$``.
-        in_math = t.type == "inline" and (
-            t.content.startswith("$$")
-            or (was in ("td_open", "th_open") and "$" in t.content))
+        display = t.type == "inline" and t.content.startswith("$$")
+        regions = re.findall(r"\$[^$]*\$", t.content) if was in ("td_open", "th_open") else []
         skip = False
-        for c in t.children:
-            if in_math and c.type == "link_open" and c.markup == "linkify":
-                skip = True
-                continue
+        kids = t.children
+        for i, c in enumerate(kids):
+            if c.type == "link_open" and c.markup == "linkify":
+                text = kids[i + 1].content if i + 1 < len(kids) else ""
+                if display or any(text in r or r in text for r in regions):
+                    skip = True
+                    continue
             if skip:
                 skip = c.type != "link_close"
                 continue

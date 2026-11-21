@@ -117,8 +117,34 @@ def test_math_pipes_keep_the_row_in_two_cells() -> None:
     md = _md(_table([["h", "h2"], [[_math("|x|")], [_math(r"\|v\| + a|b")]]]))
     rows = _cells(md)
     assert [len(r) for r in rows] == [2, 2]
-    assert rows[1][0] == r"$\vert x\vert $"
-    assert rows[1][1] == r"$\Vert v\Vert  + a\vert b$"
+    assert rows[1][0] == r"$\vert{}x\vert{}$"
+    assert rows[1][1] == r"$\Vert{}v\Vert{} + a\vert{}b$"
+
+
+def test_math_pipes_in_text_and_urls() -> None:
+    md = _md(_table([["h", "h2"], [
+        [_math(r"\text{a|b} |x|")], [_math(r"\href{http://a.b/c}{u} http://x.y")]]]))
+    rows = _cells(md)
+    assert [len(r) for r in rows] == [2, 2]
+    assert rows[1][0] == r"$\text{a\textbar{}b} \vert{}x\vert{}$"
+    assert rows[1][1] == r"$\href{http://a.b/c}{u} http:/{}/x.y$"
+
+
+def test_code_span_with_backslash_pipe_keeps_its_spaces() -> None:
+    md = _md(_table([["h", "h2"], [[_txt(r" a  \|b ", code=True)], "z"]]))
+    assert "| a  \\\\\\|b | z |" in md
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_pandoc_reads_cell_math_with_pipes_as_math() -> None:
+    import subprocess
+
+    from paperhub.notes.pandoc import _READER
+    md = _md(_table([["h", "h2"], [[_math("|x|")], [_math(r"\|v\|")]]]))
+    out = subprocess.run(["pandoc", "--from", _READER, "--to", "native"],
+                         input=md, capture_output=True, text=True,
+                         encoding="utf-8", check=True).stdout
+    assert out.count("Math InlineMath") == 2
 
 
 def test_multiline_math_stays_in_its_row() -> None:
