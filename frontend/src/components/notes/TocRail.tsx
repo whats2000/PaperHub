@@ -23,8 +23,9 @@ export const TOC_RAIL_CLOSE_MS = 180;
 const RAIL_EXIT_MS = 200;
 /** An entry is current once its heading reaches this far below the pane's top. */
 export const TOC_SPY_OFFSET_PX = 90;
-/** A clicked entry stays current until its reveal has been still this long. */
-export const TOC_PIN_SETTLE_MS = 250;
+/** A clicked entry stays current until its reveal has scrolled and then been
+ * still this long. */
+export const TOC_PIN_SETTLE_MS = 150;
 
 const LINE_WIDTH: Record<1 | 2 | 3, number> = { 1: 16, 2: 11, 3: 7 };
 
@@ -47,16 +48,20 @@ function useOutline(noteId: number | null): OutlineEntry[] {
 
 interface Pin {
   id: string;
-  /** The reveal's scroll has been still for TOC_PIN_SETTLE_MS. */
+  /** The reveal has found its block and started scrolling to it. */
+  armed: boolean;
+  /** Since then the pane has been still for TOC_PIN_SETTLE_MS. */
   settled: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
 /** The entry being read: the last one whose heading is at or above the pane's
  * top + 90 px. A clicked entry is current at once and stays so through its
- * reveal (which centres it, below that line); the first scroll after the
- * reveal settles (the user's, or Follow reading's) goes back to the rule.
- * Folding a part and resizing the pane re-read it too. */
+ * reveal (which centres it, below that line), however long the reveal waits
+ * for its block: the settle window opens when the reveal scrolls, and the
+ * first scroll after it settles (the user's, or Follow reading's) goes back
+ * to the rule. A fold (once the note has redrawn) and a resize of the note
+ * re-read it too. */
 function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active: boolean, foldKey: string) {
   const [current, setCurrent] = useState<string | null>(null);
   const pin = useRef<Pin | null>(null);
@@ -101,25 +106,48 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
     };
     const onScroll = () => {
       const p = pin.current;
-      if (p && !p.settled) settleLater(); // still the reveal's own scroll
-      else if (p) pin.current = null;
+      if (p && !p.settled) {
+        // Still the reveal: waiting for its block, or its own scroll.
+        if (p.armed) settleLater();
+      } else if (p) pin.current = null;
       later();
     };
     compute();
     root.addEventListener("scroll", onScroll, { passive: true });
+    // The note content resizing (a narrower pane wraps it) moves the
+    // headings; the rail's own zero-height layer is left out. The content
+    // element is replaced on a note switch, so new children are watched too.
     let ro: ResizeObserver | null = null;
+    let mo: MutationObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(later);
-      ro.observe(root);
-      if (root.firstElementChild) ro.observe(root.firstElementChild);
+      const resize = new ResizeObserver(later);
+      ro = resize;
+      resize.observe(root);
+      const watch = (el: Element) => {
+        if (!el.hasAttribute("data-toc-layer")) resize.observe(el);
+      };
+      Array.from(root.children).forEach(watch);
+      mo = new MutationObserver((records) => {
+        for (const r of records) r.addedNodes.forEach((n) => n instanceof Element && watch(n));
+      });
+      mo.observe(root, { childList: true });
     }
     return () => {
       root.removeEventListener("scroll", onScroll);
       ro?.disconnect();
+      mo?.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-    // `foldKey`: a part folded or opened moves the headings below it.
-  }, [root, active, compute, settleLater, foldKey]);
+  }, [root, active, compute, settleLater]);
+
+  // A part folded or opened moves the headings below it, but only once the
+  // note has redrawn its parts (its own effect, after this commit): measure
+  // on the next frame.
+  useEffect(() => {
+    if (!root || !active) return;
+    const frame = requestAnimationFrame(compute);
+    return () => cancelAnimationFrame(frame);
+  }, [root, active, compute, foldKey]);
 
   useEffect(
     () => () => {
@@ -130,11 +158,16 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
 
   const pinTo = (blockId: string) => {
     if (pin.current?.timer) clearTimeout(pin.current.timer);
-    pin.current = { id: blockId, settled: false, timer: null };
-    settleLater();
+    pin.current = { id: blockId, armed: false, settled: false, timer: null };
     setCurrent(blockId);
   };
-  return { current, pin: pinTo };
+  /** The reveal of `blockId` is under way (or gave up): its scroll settles. */
+  const arm = (blockId: string) => {
+    if (pin.current?.id !== blockId) return;
+    pin.current.armed = true;
+    settleLater();
+  };
+  return { current, pin: pinTo, arm };
 }
 
 export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLElement | null }) {
@@ -182,13 +215,13 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
   useEffect(() => cancelClose, []);
   if (!visible && open) setOpen(false);
 
-  const { current, pin } = useScrollSpy(root, outline, mounted, foldKey);
+  const { current, pin, arm } = useScrollSpy(root, outline, mounted, foldKey);
   const railRef = useRef<HTMLButtonElement>(null);
 
   const go = (blockId: string) => {
     if (!root || noteId === null) return;
     pin(blockId);
-    void revealBlock(root, blockId, { unfold: unfoldInNote(noteId) });
+    void revealBlock(root, blockId, { unfold: unfoldInNote(noteId) }).then(() => arm(blockId));
   };
 
   if (!mounted) return null;

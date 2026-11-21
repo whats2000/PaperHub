@@ -77,6 +77,18 @@ describe("storedNoteOutline", () => {
     expect(storedNoteOutline(blocks).map((e) => e.text)).toEqual(["Alpha", "Beta", "Gamma"]);
   });
 
+  it("keeps siblings in the store array's order (the document order; there is no order_key here)", () => {
+    const h = (id: string, text: string, parent_id: string | null) => ({
+      id,
+      parent_id,
+      type: "heading",
+      props: { level: 2 },
+      content: text,
+    });
+    const blocks = [h("z", "First", null), h("m", "Child one", "z"), h("a", "Child two", "z"), h("b", "Last", null)];
+    expect(storedNoteOutline(blocks).map((e) => e.text)).toEqual(["First", "Child one", "Child two", "Last"]);
+  });
+
   it("keeps a block whose parent is missing, after the tree", () => {
     const blocks = [
       { id: "x", parent_id: "gone", type: "heading", props: { level: 1 }, content: "Orphan" },

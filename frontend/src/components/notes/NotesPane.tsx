@@ -205,7 +205,7 @@ export function NotesPane({ onClose }: Props) {
       >
         {/* The table of contents floats at the pane's right edge: a
             zero-height sticky layer, so it stays put and takes no width. */}
-        <div className="sticky top-0 z-20 h-0">
+        <div data-toc-layer className="sticky top-0 z-20 h-0">
           <TocRail noteId={noteId} root={panel} />
         </div>
         {noteId !== null ? (

@@ -233,19 +233,7 @@ describe("TocRail", () => {
     );
   });
 
-  it("re-reads the current entry when a part folds and when the pane resizes", async () => {
-    let onResize: (() => void) | null = null;
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(cb: () => void) {
-          onResize = cb;
-        }
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    );
+  it("re-reads the current entry after a fold has redrawn the note (a frame later)", async () => {
     placeAt(root, "s1", 40);
     placeAt(root, "h2", 185);
     placeAt(root, "h3", 400);
@@ -253,21 +241,104 @@ describe("TocRail", () => {
     await vi.waitFor(() =>
       expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
     );
-    // Folding the part above pulls Details up past the line.
-    placeAt(root, "h3", 150);
+    // As in the app: the store folds first; the note hides the part only
+    // once its decorations redraw, so the layout moves after that commit.
+    const unsub = useNotesStore.subscribe((s, prev) => {
+      if (s.folded !== prev.folded) requestAnimationFrame(() => placeAt(root, "h3", 150));
+    });
     act(() => {
       useNotesStore.setState({ folded: { 7: ["d1"] } });
     });
+    unsub();
     await vi.waitFor(() =>
       expect(screen.getByRole("button", { name: "Details", hidden: true })).toHaveAttribute("aria-current", "location"),
     );
-    // A narrower pane wraps the text: Details drops below it again.
-    placeAt(root, "h3", 400);
-    act(() => onResize?.());
+  });
+
+  it("re-reads the current entry when the note content resizes", async () => {
+    const observed = new Set<Element>();
+    let onResize: (() => void) | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          onResize = cb;
+        }
+        observe(el: Element) {
+          observed.add(el);
+        }
+        unobserve(el: Element) {
+          observed.delete(el);
+        }
+        disconnect() {
+          observed.clear();
+        }
+      },
+    );
+    // The pane as NotesPane builds it: the zero-height rail layer first,
+    // then the note content.
+    const pane = document.createElement("div");
+    const layer = document.createElement("div");
+    layer.setAttribute("data-toc-layer", "");
+    const content = document.createElement("div");
+    pane.append(layer, content);
+    for (const id of ["s1", "p1", "h2", "h3"]) {
+      const el = document.createElement("div");
+      el.className = "bn-block-outer";
+      el.setAttribute("data-id", id);
+      content.appendChild(el);
+    }
+    document.body.appendChild(pane);
+    pane.getBoundingClientRect = () => ({ ...rect(100), bottom: 600, height: 500 });
+    placeAt(pane, "s1", 40);
+    placeAt(pane, "h2", 150);
+    placeAt(pane, "h3", 160);
+    render(<TocRail noteId={7} root={pane} />);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Details", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    // A narrower pane wraps the text: Details drops below the line. Only
+    // the content changes size (the rail layer has no height).
+    placeAt(pane, "h3", 400);
+    expect(observed.has(content)).toBe(true);
+    act(() => {
+      if (observed.has(content)) onResize?.();
+    });
     await vi.waitFor(() =>
       expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
     );
+    document.body.removeChild(pane);
     vi.unstubAllGlobals();
+  });
+
+  it("a slow reveal keeps the clicked entry current through its first scroll", async () => {
+    let finish: (ok: boolean) => void = () => {};
+    vi.mocked(revealBlock).mockImplementationOnce(
+      () =>
+        new Promise<boolean>((r) => {
+          finish = r;
+        }),
+    );
+    render(<TocRail noteId={7} root={root} />);
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 350);
+    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    // The part is still unfolding: nothing scrolls for a while.
+    await new Promise((r) => setTimeout(r, TOC_PIN_SETTLE_MS + 100));
+    await act(async () => {
+      finish(true);
+      await Promise.resolve();
+    });
+    fireEvent.scroll(root); // the reveal's own (first) scroll
+    await new Promise((r) => setTimeout(r, 40));
+    expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-current", "location");
+    await new Promise((r) => setTimeout(r, TOC_PIN_SETTLE_MS + 50));
+    fireEvent.scroll(root); // now the user
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup" })).toHaveAttribute("aria-current", "location"),
+    );
   });
 
   it("lists a heading nested under another block in document order", () => {
