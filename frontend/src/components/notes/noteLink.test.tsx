@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetLinkPicker } from "@/components/notes/linkPicker";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { findMatches } from "@/components/notes/noteFind";
 import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
@@ -113,6 +114,7 @@ const hoverPreview = async () => {
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
+  resetLinkPicker();
   clearPendingNoteOps();
   server.resetHandlers();
   toastFn.mockReset();

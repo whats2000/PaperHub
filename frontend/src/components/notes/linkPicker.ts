@@ -131,12 +131,48 @@ const props = (over: Partial<NoteLinkProps> & Pick<NoteLinkProps, "targetKind" |
   ...over,
 });
 
+/** Title searches of the open menu: each keystroke asks again for the
+ * same titles (every # split), so a title is asked once. Cleared when the
+ * menu opens afresh (an empty query) and after a while; a failure is not
+ * kept. */
+const SEARCH_TTL_MS = 30_000;
+const noteSearches = new Map<string, { at: number; hits: Promise<NoteSearchHit[]> }>();
+const paperSearches = new Map<string, { at: number; hits: Promise<LibraryItem[]> }>();
+
+function cachedSearch<T>(
+  map: Map<string, { at: number; hits: Promise<T[]> }>,
+  name: string,
+  run: () => Promise<T[]>,
+): Promise<T[]> {
+  const known = map.get(name);
+  if (known && Date.now() - known.at < SEARCH_TTL_MS) return known.hits;
+  const hits = run().catch(() => {
+    map.delete(name);
+    return [] as T[];
+  });
+  map.set(name, { at: Date.now(), hits });
+  return hits;
+}
+
+const findNotes = (name: string) => cachedSearch(noteSearches, name, () => searchNotes(name, LIMIT));
+const findPapers = (name: string) =>
+  cachedSearch(paperSearches, name, () => listLibrary(0, name || undefined, LIMIT));
+
+/** The target of the completion row just picked, kept while the query
+ * stays on `<its name>#…`: an untitled note completes to "Untitled#",
+ * which no title search finds. */
+let pending: { prefix: string; props: NoteLinkProps } | null = null;
+
+/** Forgets the menu's searches and any picked completion (tests). */
+export function resetLinkPicker(): void {
+  noteSearches.clear();
+  paperSearches.clear();
+  pending = null;
+}
+
 /** Notes and library papers whose title contains `name`. */
 async function targets(name: string, label: string, untitled: string): Promise<LinkItem[]> {
-  const [notes, papers] = await Promise.all([
-    quietly(() => searchNotes(name, LIMIT)),
-    quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
-  ]);
+  const [notes, papers] = await Promise.all([findNotes(name), findPapers(name)]);
   return [
     ...notes.map<LinkItem>((n) => ({
       group: "notes",
@@ -160,6 +196,13 @@ async function targets(name: string, label: string, untitled: string): Promise<L
  * (H5b.2). */
 export async function linkItems(editor: Ed, noteId: number, q: string, untitled = "Untitled"): Promise<LinkItem[]> {
   const { mode, name, heading, label } = parseLinkQuery(q);
+  const text = q.replace(/^\[+/, "").split("|")[0]!.trim();
+  if (!text) {
+    // The menu opened afresh: its earlier searches and picks are done with.
+    noteSearches.clear();
+    paperSearches.clear();
+  }
+  if (pending && !fold(text).startsWith(pending.prefix)) pending = null;
 
   if (mode === "targets") return targets(name, label, untitled);
 
@@ -193,23 +236,25 @@ export async function linkItems(editor: Ed, noteId: number, q: string, untitled 
   // name#word: the note titled exactly `name` (its outline) and the paper
   // titled so (its sections). A heading may hold # too (`Lang#C# basics`):
   // the splits are tried from the last # back, the first exact title wins.
-  const text = q.replace(/^\[+/, "").split("|")[0]!.trim();
-  for (const at of hashes(text)) {
-    const found = await exactTarget(text.slice(0, at).trim(), untitled);
-    if (found) return outlineRows(found, text.slice(at + 1).trim(), label);
-  }
-  // No exact title. As in Obsidian, the targets holding the text before #
-  // come first: picking one completes the query to `<title>#` and shows
-  // its headings. Targets holding the whole text (a title with a #) link
-  // as they are.
+  const splits = hashes(text);
+  const found = await Promise.all(splits.map((at) => exactTarget(text.slice(0, at).trim(), untitled)));
+  const hit = found.findIndex((t) => t !== null);
+  if (hit >= 0) return outlineRows(found[hit]!, text.slice(splits[hit]! + 1).trim(), label);
+  // No exact title before a #. A target titled exactly the whole text (a
+  // title holding #, `C# notes`) links as it is, first. Then, as in
+  // Obsidian, the targets holding the text before #: picking one completes
+  // the query to `<title>#` and shows its headings. Last, the other targets
+  // holding the whole text.
   const [partial, asIs] = await Promise.all([targets(name, label, untitled), targets(text, label, untitled)]);
   const key = (i: LinkItem) => `${i.props.targetKind}:${i.props.targetId}`;
-  const offered = new Set(partial.map(key));
+  const whole = asIs.filter((i) => fold(i.title) === fold(text));
+  const offered = new Set(whole.map(key));
   const tail = heading + (label ? `|${label}` : "");
-  return [
-    ...partial.map((i) => ({ ...i, complete: `${i.props.name}#${tail}` })),
-    ...asIs.filter((i) => !offered.has(key(i))),
-  ];
+  const completions = partial
+    .filter((i) => !offered.has(key(i)))
+    .map((i) => ({ ...i, complete: `${i.props.name}#${tail}` }));
+  completions.forEach((i) => offered.add(key(i)));
+  return [...whole, ...completions, ...asIs.filter((i) => !offered.has(key(i)))];
 }
 
 /** Positions of the #s that may end a title in `text`, last first (at most 3). */
@@ -224,30 +269,24 @@ interface Target {
   paper?: { id: number; title: string };
 }
 
-/** Targets reached by picking a completion row, by their shown name: an
- * untitled note completes to "Untitled#", which no title search finds. */
-const completed = new Map<string, NoteLinkProps>();
-
-/** Remembers a completion row's target, so its `<name>#` finds it again. */
+/** Keeps a picked completion row's target for the query it completes to. */
 export function rememberCompletion(item: LinkItem): void {
-  completed.set(fold(item.props.name), item.props);
+  pending = { prefix: fold(item.props.name) + "#", props: item.props };
 }
 
-/** The note and the paper titled exactly `name` (case-folded), if any. */
+/** The note and the paper titled exactly `name` (case-folded), if any; a
+ * search that finds none falls back to the completion just picked. */
 async function exactTarget(name: string, untitled: string): Promise<Target | null> {
   if (!name) return null;
-  const known = completed.get(fold(name));
-  if (known) {
-    const t = { id: known.targetId, title: known.name };
-    return known.targetKind === "note" ? { note: t } : { paper: t };
-  }
-  const [notes, papers] = await Promise.all([
-    quietly(() => searchNotes(name, LIMIT)),
-    quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
-  ]);
+  const [notes, papers] = await Promise.all([findNotes(name), findPapers(name)]);
   const note = exact(notes.map((n) => ({ id: n.note_id, title: n.title || untitled })), name);
   const paper = exact(papers.map((p) => ({ id: p.paper_content_id, title: p.title || untitled })), name);
-  return note || paper ? { note, paper } : null;
+  if (note || paper) return { note, paper };
+  if (pending?.prefix === fold(name) + "#") {
+    const t = { id: pending.props.targetId, title: pending.props.name };
+    return pending.props.targetKind === "note" ? { note: t } : { paper: t };
+  }
+  return null;
 }
 
 /** A target's headings / sections holding `heading`, as link rows. */

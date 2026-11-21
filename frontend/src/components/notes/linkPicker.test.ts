@@ -2,7 +2,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { linkItems, parseLinkQuery, rememberCompletion } from "@/components/notes/linkPicker";
+import { linkItems, parseLinkQuery, rememberCompletion, resetLinkPicker } from "@/components/notes/linkPicker";
 import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
 import { API_BASE_URL } from "@/lib/api";
 import { useNotesStore } from "@/store/notes";
@@ -11,6 +11,7 @@ const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
+  resetLinkPicker();
   server.resetHandlers();
   cleanupEditors();
 });
@@ -210,11 +211,11 @@ describe("linkItems", () => {
     );
     const items = await linkItems(editor(), 7, "C# notes");
     expect(asked).toContain("C# notes");
-    // The whole text's target links as it is; one matching the text before
-    // # completes the query to its title + # (its headings come next).
+    // The whole text's exact target links as it is, first; one matching the
+    // text before # completes the query to its title + #.
     expect(items.map((i) => [i.title, i.props.targetId, i.complete])).toEqual([
-      ["C stuff", 21, "C stuff#notes"],
       ["C# notes", 20, undefined],
+      ["C stuff", 21, "C stuff#notes"],
     ]);
   });
 
@@ -255,6 +256,78 @@ describe("linkItems", () => {
     );
     const items = await linkItems(editor(), 7, "Robo#");
     expect(items.map((i) => [i.title, i.complete])).toEqual([["RoboTTT", "RoboTTT#"]]);
+  });
+
+  /** /notes/search and /papers/library as the server answers: titles containing q. */
+  function library(notes: ReturnType<typeof hit>[], papers: ReturnType<typeof paper>[] = []) {
+    const asked: string[] = [];
+    const like = (q: string, t: string) => t.toLowerCase().includes(q.toLowerCase());
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        asked.push(q);
+        return HttpResponse.json(notes.filter((n) => like(q, n.title)));
+      }),
+      http.get(`${API_BASE_URL}/papers/library`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        return HttpResponse.json(papers.filter((p) => like(q, p.title)));
+      }),
+    );
+    return asked;
+  }
+
+  it("a title holding # typed whole links as it is, first", async () => {
+    library([hit(20, "session", "C# notes"), hit(21, "session", "C stuff")]);
+    const items = await linkItems(editor(), 7, "C# notes");
+    expect(items.map((i) => [i.title, i.props.targetId, i.complete])).toEqual([
+      ["C# notes", 20, undefined],
+      ["C stuff", 21, "C stuff#notes"],
+    ]);
+  });
+
+  it("a remembered completion never hides a real exact title", async () => {
+    library([hit(30, "session", ""), hit(31, "session", "Untitled")]);
+    server.use(
+      http.get(`${API_BASE_URL}/notes/31/outline`, () =>
+        HttpResponse.json([{ block_id: "r1", type: "heading", text: "Real", level: 2 }]),
+      ),
+    );
+    rememberCompletion({
+      group: "notes",
+      icon: "chatNote",
+      title: "Untitled",
+      complete: "Untitled#",
+      props: { targetKind: "note", targetId: 30, blockId: "", sectionKey: "", label: "", name: "Untitled" },
+    });
+    const items = await linkItems(editor(), 7, "Untitled#", "Untitled");
+    expect(items.map((i) => [i.props.targetId, i.props.blockId])).toEqual([[31, "r1"]]);
+  });
+
+  it("a remembered completion is dropped once the query leaves it", async () => {
+    library([]);
+    server.use(
+      http.get(`${API_BASE_URL}/notes/30/outline`, () =>
+        HttpResponse.json([{ block_id: "u1", type: "heading", text: "Plan", level: 2 }]),
+      ),
+    );
+    rememberCompletion({
+      group: "notes",
+      icon: "chatNote",
+      title: "Untitled",
+      complete: "Untitled#",
+      props: { targetKind: "note", targetId: 30, blockId: "", sectionKey: "", label: "", name: "Untitled" },
+    });
+    expect((await linkItems(editor(), 7, "Untitled#Pl", "Untitled")).map((i) => i.title)).toEqual(["Plan"]);
+    await linkItems(editor(), 7, "", "Untitled");
+    expect(await linkItems(editor(), 7, "Untitled#", "Untitled")).toEqual([]);
+  });
+
+  it("each title is searched once while typing", async () => {
+    const asked = library([hit(40, "session", "Lang")]);
+    server.use(http.get(`${API_BASE_URL}/notes/40/outline`, () => HttpResponse.json([])));
+    await linkItems(editor(), 7, "Lang#C# b");
+    await linkItems(editor(), 7, "Lang#C# ba");
+    expect(asked.filter((q) => q === "Lang")).toHaveLength(1);
   });
 
   it("completing an untitled note shows its outline (by identity, not title)", async () => {
