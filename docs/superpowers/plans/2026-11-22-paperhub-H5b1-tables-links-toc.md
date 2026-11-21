@@ -195,16 +195,27 @@
 - [ ] **Step 4: Run** + typecheck + lint + parity → PASS.
 - [ ] **Step 5: Commit** `feat(notes): floating table of contents`.
 
-### Task 12: Table display style (three-line / grid)
+### Task 12: Table style setting (three-line / grid)
 
 **Files:**
-- Modify: `frontend/src/components/notes/schema.ts` (table spec propSchema `{tableStyle: {default: "threeLine", values: ["threeLine","grid"]}}` — only this prop; no colours), `NoteTableHandles.tsx` (⋯ menu: Style: Three-line / Grid, checked state), `frontend/src/index.css` (three-line and grid rules; faint editing lines on `:focus-within` / `:hover`; reduced motion for any transition), four `notes.json`, `guideData.ts`
-- Modify: `backend/src/paperhub/notes/ops.py` / `models.py` (a table block's props allow `tableStyle` ∈ {threeLine, grid}, reject others), `backend/src/paperhub/notes/export.py` + `pandoc.py` (docx: three-line = top/mid/bottom borders only, grid = all borders; Markdown unchanged)
-- Test: `frontend/src/components/notes/tables.test.tsx`, `backend/tests/notes/test_table_blocks.py`, `backend/tests/notes/test_export_tables.py`
+- Modify: `frontend/src/store/notes.ts` (`tableStyle: "threeLine" | "grid"`, default `"threeLine"`, persisted in `partialize` beside `focusOn` / `followOn`), `NotesToolbar.tsx` (⋯ menu: "Table style" with Three-line / Grid radio items), `NoteEditor.tsx` (editor root carries `data-table-style`), `frontend/src/index.css` (three-line and grid rules; faint editing lines on `:focus-within` / `:hover`; any transition off under reduced motion), `useNoteExport.ts` (pass the style to export), four `notes.json`, `guideData.ts`
+- Modify: `backend/src/paperhub/api/notes.py` (export accepts `table_style=threeLine|grid`, default threeLine), `notes/export.py` / `notes/pandoc.py` (docx table borders by style; Markdown unchanged)
+- Test: `frontend/src/components/notes/NotesToolbar.test.tsx`, `tables.test.tsx`, `useNoteExport.test.tsx`, `backend/tests/notes/test_export_tables.py`
 
-- [ ] **Step 1: Failing tests**: a new table has `tableStyle: "threeLine"`; the ⋯ menu switches it and the table root carries `data-table-style`; an old table with no prop renders three-line; backend accepts both values, rejects `"fancy"`; docx of a three-line table has no vertical / inner horizontal borders and has top, header-bottom and bottom borders; grid docx has all borders.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** (docx borders by post-processing the pandoc docx table XML or a reference style — pick the smaller change and document it). **Step 4: Run** → PASS + typecheck / lint / parity / ruff / mypy.
+- [ ] **Step 1: Failing tests**: default style is three-line; the ⋯ menu switches it, it persists across a store rehydrate, the editor root carries `data-table-style`; export requests carry `table_style`; backend rejects an unknown style (422); a three-line docx table has top, header-bottom and bottom borders and no vertical / inner horizontal borders; a grid docx table has all borders.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** (docx borders: post-process the table XML pandoc writes, or a reference-docx table style — pick the smaller change, keep the two-run sandbox flow, document it). **Step 4: Run** → PASS + typecheck / lint / parity / ruff / mypy.
 - [ ] **Step 5: Commit** `feat(notes): three-line and grid table styles`.
+
+### Task 13: Table caption and notes
+
+**Files:**
+- Modify: `frontend/src/components/notes/schema.ts` (table spec propSchema `caption: ""`, `notes: ""` — no other props), `NoteTableHandles.tsx` (table ⋯ menu: Add / Remove caption, Add / Remove notes), a new `TableCaption.tsx` rendering "Table N." + editable caption above and editable notes below (inline `$…$` via KaTeX like `inlineMath`), `noteFind.ts` (caption / notes searchable), `lib/notes/ops.ts` (`blockText` includes them), four `notes.json`, `guideData.ts`
+- Modify: backend `notes/models.py` / `ops.py` (table props `caption`, `notes`: strings, ≤ 2,000 chars; others still rejected), `notes/store.py` (block text includes caption first and notes last), `agents/core/note_tools.py` (`<note_block … type="table" caption="…">` + notes after the GFM body; agent `update` keeps them via the prop merge), `notes/export.py` + `pandoc.py` (`+table_captions`; Markdown `Table: <caption>` line + notes paragraph; docx caption + notes paragraph)
+- Test: `tables.test.tsx`, `NoteFind.test.tsx`, `backend/tests/notes/test_table_blocks.py`, `test_export_tables.py`, `backend/tests/agents_core/test_note_tools_tables.py`
+
+- [ ] **Step 1: Failing tests**: Add caption shows an editable line "Table 1." above the table with the caret in it; a second captioned table above it renumbers both; emptying the caption removes it and the menu says Add again; notes render below in muted text and take `$p<0.05$` as math; Ctrl+F finds caption and notes text; backend stores / validates the props and FTS finds caption words; `read_note` shows `caption="…"` and the notes; Markdown export writes `Table: …` and the notes paragraph; docx has a table caption and the notes paragraph.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + gates for touched files.
+- [ ] **Step 5: Commit** `feat(notes): table captions and notes`.
 
 ## Phase 4 — Verification
 
