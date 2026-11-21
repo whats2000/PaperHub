@@ -118,6 +118,40 @@ async def default_title(conn: aiosqlite.Connection, note: Note) -> str:
     return str(row[0] or "").strip() if row else ""
 
 
+async def _target_exists(conn: aiosqlite.Connection, note: Note) -> bool:
+    sql = _DEFAULT_TITLE_SQL.get(note.target_kind)
+    if sql is None or not note.target_id.isdigit():
+        return False
+    async with conn.execute(sql, (int(note.target_id),)) as cur:
+        return await cur.fetchone() is not None
+
+
+async def list_live_notes(
+    conn: aiosqlite.Connection, query: str = "", *, limit: int | None = None,
+) -> list[tuple[Note, str]]:
+    """Live notes of the owner as ``(note, display title)``, most recently
+    updated first, whose title contains ``query`` (case-insensitive). A note
+    whose target is gone and that has no title of its own is an orphan and
+    left out."""
+    needle = query.strip().casefold()
+    async with conn.execute(
+        f"SELECT {_NOTE_COLS} FROM notes WHERE owner_id = 1 "
+        "AND deleted_at IS NULL ORDER BY updated_at DESC, id DESC"
+    ) as cur:
+        rows = await cur.fetchall()
+    out: list[tuple[Note, str]] = []
+    for row in rows:
+        note = _note(row)
+        if not note.title.strip() and not await _target_exists(conn, note):
+            continue
+        title = await display_title(conn, note)
+        if needle in title.casefold():
+            out.append((note, title))
+            if limit is not None and len(out) >= limit:
+                break
+    return out
+
+
 async def named(conn: aiosqlite.Connection, note: Note) -> Note:
     """``note`` with ``title`` set to its display title (for readers that
     name it; never stored back)."""

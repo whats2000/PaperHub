@@ -1,6 +1,6 @@
 """How a block's inline runs read as text (the agent's reading): inline
-math ``$…$``, a mention its label, a note link its label or target name, a mark citation its alias or the quote's
-start. Shared by ``inline_merge`` (the per-run merge) and ``gfm_table``
+math ``$…$``, a mention or note link its label (a note link without one its
+target's name), a mark citation its alias or the quote's start. Shared by ``inline_merge`` (the per-run merge) and ``gfm_table``
 (a table's cells)."""
 from __future__ import annotations
 

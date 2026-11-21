@@ -33,13 +33,11 @@ from paperhub.notes.models import Block, Note
 from paperhub.notes.ops import ApplyResult, Op
 from paperhub.notes.papers import paper_note
 from paperhub.notes.store import (
-    _NOTE_COLS,
-    _note,
     default_title,
-    display_title,
     get_note,
     get_or_create_note,
     list_blocks,
+    list_live_notes,
     named,
     set_title,
     shared_by,
@@ -285,34 +283,16 @@ def _level(props: dict[str, Any]) -> int:
     return lv if isinstance(lv, int) and not isinstance(lv, bool) and lv > 0 else 1
 
 
-async def _live_notes(conn: aiosqlite.Connection) -> list[Note]:
-    """Live notes, most recently updated first."""
-    async with conn.execute(
-        f"SELECT {_NOTE_COLS} FROM notes WHERE deleted_at IS NULL "
-        "ORDER BY updated_at DESC, id DESC"
-    ) as cur:
-        rows = await cur.fetchall()
-    return [_note(r) for r in rows]
-
-
 @router.get("/search", response_model=list[NoteHit])
 async def search_notes(q: str = "", limit: int = Query(20, ge=1, le=100)
                        ) -> list[NoteHit]:
     """Live notes whose display title contains ``q`` (a ``[[`` link's note
     target picker)."""
-    needle = q.strip().casefold()
-    out: list[NoteHit] = []
     async with open_db(load_settings().db_path) as conn:
-        for note in await _live_notes(conn):
-            title = await display_title(conn, note)
-            if needle in title.casefold():
-                out.append(NoteHit(
-                    note_id=note.id, kind=note.target_kind,
-                    target_id=int(note.target_id) if note.target_id.isdigit() else 0,
-                    title=title))
-                if len(out) >= limit:
-                    break
-    return out
+        hits = await list_live_notes(conn, q, limit=limit)
+    return [NoteHit(note_id=n.id, kind=n.target_kind,
+                    target_id=int(n.target_id) if n.target_id.isdigit() else 0,
+                    title=title) for n, title in hits]
 
 
 @router.get("/headings/search", response_model=list[HeadingHit])
@@ -323,8 +303,7 @@ async def search_headings(q: str = "", limit: int = Query(20, ge=1, le=100)
     needle = q.strip().casefold()
     out: list[HeadingHit] = []
     async with open_db(load_settings().db_path) as conn:
-        for note in await _live_notes(conn):
-            note_title = await display_title(conn, note)
+        for note, note_title in await list_live_notes(conn):
             for b in await list_blocks(conn, note.id):
                 if b.type != "heading" or needle not in b.text.casefold():
                     continue
@@ -343,7 +322,11 @@ async def note_outline(note_id: int) -> list[OutlineItem]:
     heading picker of a ``[[`` link."""
     async with open_db(load_settings().db_path) as conn:
         note = await get_note(conn, note_id)
-        if note is None or note.deleted_at is not None:
+        async with conn.execute(
+            "SELECT 1 FROM notes WHERE id = ? AND owner_id = 1", (note_id,)
+        ) as cur:
+            owned = await cur.fetchone() is not None
+        if note is None or note.deleted_at is not None or not owned:
             raise HTTPException(404, f"note {note_id} not found")
         out: list[OutlineItem] = []
         for b in await list_blocks(conn, note_id):

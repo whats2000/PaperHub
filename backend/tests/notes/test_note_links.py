@@ -241,3 +241,39 @@ async def test_outline_follows_document_order_with_nested_children(
         {"block_id": "b_c", "type": "heading", "text": "Nested gate", "level": 3},
         {"block_id": "b_h4", "type": "heading", "text": "Later", "level": 1}]
     assert (await client.get("/notes/9999/outline")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deleted_heading_block_is_absent_from_outline_and_search(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    nid1, _ = await _seed(tmp_path, client)
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        async with conn.execute("SELECT revision FROM notes WHERE id = ?",
+                                (nid1,)) as cur:
+            rev = (await cur.fetchone())[0]
+        await apply_ops(conn, nid1, base_revision=rev, actor="user",
+                        ops=[Op(op="delete", block_id="b_h1")])
+    outline = (await client.get(f"/notes/{nid1}/outline")).json()
+    assert "b_h1" not in [o["block_id"] for o in outline]
+    heads = (await client.get("/notes/headings/search", params={"q": "overview"})).json()
+    assert heads == []
+
+
+@pytest.mark.asyncio
+async def test_orphan_note_is_not_a_search_hit(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    await _seed(tmp_path, client)
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        await conn.execute(
+            "INSERT INTO notes (target_kind, target_id, title, created_at, "
+            "updated_at) VALUES ('paper', '999', '', 'x', 'x')")
+        await conn.execute(
+            "INSERT INTO notes (target_kind, target_id, title, created_at, "
+            "updated_at) VALUES ('paper', '998', 'Kept title', 'x', 'x')")
+        await conn.commit()
+    titles = [h["title"] for h in (await client.get("/notes/search")).json()]
+    assert "Untitled" not in titles
+    assert "Kept title" in titles
+    assert len(titles) == 3
