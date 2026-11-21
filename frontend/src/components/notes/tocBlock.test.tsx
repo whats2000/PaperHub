@@ -91,8 +91,10 @@ describe("toc block", () => {
     act(() => {
       editor.removeBlocks(["h"]);
     });
-    expect(screen.getByRole("button", { name: "Gone soon" }).closest("li")!.getAttribute("data-state")).toBe("out");
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Gone soon" })).toBeNull());
+    const leaving = screen.getByRole("button", { name: "Gone soon", hidden: true }).closest("li")!;
+    expect(leaving.getAttribute("data-state")).toBe("out");
+    expect(leaving.getAttribute("aria-hidden")).toBe("true");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Gone soon", hidden: true })).toBeNull());
     expect(screen.getByText("Headings you add appear here.")).toBeInTheDocument();
   });
 });

@@ -123,6 +123,9 @@ async def test_outline_endpoint_and_export_toc_list_the_same_entries(
                    "section_key": "2 Method"}},
         {"op": "insert", "block_id": "h3",
          "block": {"type": "heading", "props": {"level": 3}, "content": "Deep"}},
+        {"op": "insert", "block_id": "h4",
+         "block": {"type": "heading", "props": {"level": 4},
+                   "content": "Too deep"}},
         {"op": "insert", "block_id": "t", "block": {"type": "toc"}},
     ]
     r = await client.post(f"/notes/{nid}/ops", json={"base_revision": 0, "ops": ops})

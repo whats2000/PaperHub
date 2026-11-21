@@ -282,3 +282,20 @@ async def test_default_title_follows_the_target_and_falls_back(
         await conn.execute("UPDATE chat_sessions SET title = '' WHERE id = 1")
         await conn.commit()
     assert (await client.get(f"/notes/{nid}")).json()["default_title"] == ""
+
+
+async def test_change_set_detail_leaves_out_structural_blocks(
+        client: AsyncClient, tmp_path: Path) -> None:
+    """A toc, a section and a divider are not listed as changes; the
+    paragraph is."""
+    nid = await _session_note(client)
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        res = await apply_ops(conn, nid, base_revision=0, actor="agent", ops=[
+            Op(op="insert", block=BlockIn(type="toc", props={})),
+            Op(op="insert", block=BlockIn(type="section",
+                                          props={"title": "Method"})),
+            Op(op="insert", block=BlockIn(type="divider", props={})),
+            Op(op="insert", block=BlockIn(
+                type="paragraph", content=[{"type": "text", "text": "kept"}]))])
+    got = (await client.get(f"/notes/change-sets/{res.change_set_id}")).json()
+    assert [(c["kind"], c["text"]) for c in got["changes"]] == [("added", "kept")]

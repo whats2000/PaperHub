@@ -49,6 +49,7 @@ export function TocView({ editor }: { editor: TocEditor }) {
             <li
               key={e.blockId}
               data-state={e.state}
+              aria-hidden={e.state === "out" ? true : undefined}
               className="grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none"
               style={{
                 gridTemplateRows: e.state === "open" ? "1fr" : "0fr",
