@@ -230,6 +230,15 @@
 - [ ] **Step 5: Commit** in focused commits (backend create-on-write + search; sessions list; cleanup CLI + script; frontend).
 - [ ] **Step 6: Live workspace (controller, with user approval):** back up `paperhub.db`, run `paperhub-clean-empty-chats --dry-run` on the live workspace and show the user the list; run for real only after the user confirms.
 
+### Task 15: "This chat" notes tab only when it has content
+
+**Files:** `frontend/src/components/notes/NotesPane.tsx`, `NotesTabs.tsx` (+ tests); i18n only if a string changes.
+Spec: SRS "Projects, notes and the Research page" → "Two kinds of note" (H5b.1 step). The chat tab shows only when the active chat's note exists with content (blocks with text, or a user title); a paper in the reader then shows its note alone; with no paper and no chat note the pane shows the paper-less empty state it shows today. The agent may still write a chat note (it then appears, and the change card names where). Tab appear / disappear animates (existing tab motion).
+
+- [ ] **Step 1: Failing tests**: empty chat note → no chat tab; after the first block is written → tab appears; agent `notes_changed` for the chat note → tab appears; switching chats re-evaluates.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + typecheck / lint.
+- [ ] **Step 5: Commit** `fix(notes): show the chat notes tab only when it has content`.
+
 ## Phase 4 — Verification
 
 ### Task 11: Full gates and live check on a workspace copy
