@@ -1267,12 +1267,17 @@ export const useNotesStore = create<NotesStore>()(
             try {
               noteId = await materialize(ph);
             } catch (err) {
-              if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-                // It can never be saved (the paper or chat is gone): the
-                // words stay on screen; the next edit tries again.
+              // Only the network or the server's own trouble is retried;
+              // anything else (the paper or chat gone, a local chat no
+              // longer here) never will be. The words stay on screen and
+              // the next edit tries again; a plain notice, not an error.
+              const transient =
+                err instanceof TypeError ||
+                (err instanceof ApiError && (err.status >= 500 || err.status === 408 || err.status === 429));
+              if (!transient) {
                 attempts.delete(ph);
                 setRetrying(ph, false);
-                toast.error(i18n.t("notes:createFailed", "Couldn't save this note."));
+                toast(i18n.t("notes:createFailed", "Couldn't save this note."));
                 return;
               }
               const n = (attempts.get(ph) ?? 0) + 1;

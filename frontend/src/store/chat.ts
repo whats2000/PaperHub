@@ -261,6 +261,14 @@ function patchMessageByRunId(
   });
 }
 
+/** `ensureBackendSession` requests in flight, by local chat id. */
+const backendSessionRequests = new Map<number, Promise<number>>();
+/** Local chats put on the server by this page, not yet listed by it (a
+ * note-only chat until its note lands): never pruned meanwhile. */
+const justCreated = new Map<number, number>();
+/** How long a just-created chat is kept while the server does not list it. */
+export const JUST_CREATED_GRACE_MS = 60_000;
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -881,9 +889,19 @@ export const useChatStore = create<ChatState>()(
         const session = get().sessions.find((s) => s.id === sessionId);
         if (!session) throw new Error(`session ${sessionId} not found`);
         if (session.backend_session_id !== null) return session.backend_session_id;
-        const backendId = await createBackendSession();
-        get().patchSessionBackendId(sessionId, backendId);
-        return backendId;
+        // One server chat per local chat: callers at once (the note's first
+        // write, an attach, a send) share the request in flight.
+        const inFlight = backendSessionRequests.get(sessionId);
+        if (inFlight) return inFlight;
+        const req = createBackendSession()
+          .then((backendId) => {
+            justCreated.set(backendId, Date.now());
+            get().patchSessionBackendId(sessionId, backendId);
+            return backendId;
+          })
+          .finally(() => backendSessionRequests.delete(sessionId));
+        backendSessionRequests.set(sessionId, req);
+        return req;
       },
 
       reconcileBackendSessions: (summaries) =>
@@ -902,12 +920,19 @@ export const useChatStore = create<ChatState>()(
           //   elsewhere). That cached copy is exactly the "deleted in A but
           //   still in B" ghost; strict mirror removes it.
           const byBackendId = new Map(summaries.map((x) => [x.id, x]));
+          // A chat this page just put on the server may not be listed yet
+          // (a note-only chat until its note's first save lands): kept.
+          const now = Date.now();
+          for (const [id, at] of justCreated) {
+            if (byBackendId.has(id) || now - at > JUST_CREATED_GRACE_MS) justCreated.delete(id);
+          }
 
           const kept = s.sessions
             .filter(
               (sess) =>
                 sess.backend_session_id === null ||
-                byBackendId.has(sess.backend_session_id),
+                byBackendId.has(sess.backend_session_id) ||
+                justCreated.has(sess.backend_session_id),
             )
             .map((sess) => {
               // Backend owns the title (derived from the first message).

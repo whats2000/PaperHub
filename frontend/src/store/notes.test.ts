@@ -1026,3 +1026,41 @@ describe("nothing is created by looking (Task 14)", () => {
     expect(st.notes[7]!.blocks.map((b) => b.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("a first write that can never be saved (Task 14)", () => {
+  const ins = {
+    op: "insert" as const,
+    block_id: "p1",
+    block: { type: "paragraph" as const, props: {}, content: [{ type: "text", text: "x", styles: {} }] },
+  };
+
+  it("a target gone (4xx) says so plainly, keeps the words and does not retry", async () => {
+    let tries = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, () =>
+        HttpResponse.json({ note: null, blocks: [], shared_by: 0, suggestions: [], comments: [] }),
+      ),
+      http.post(`${API_BASE_URL}/notes/target`, () => {
+        tries += 1;
+        return new HttpResponse("gone", { status: 404 });
+      }),
+    );
+    const ph = await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(ph, [ins], "pane");
+    await useNotesStore.getState().flush(ph);
+    expect(tries).toBe(1);
+    expect(toastFn).toHaveBeenCalledWith("Couldn't save this note.");
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    expect(useNotesStore.getState().retrying[ph] ?? false).toBe(false);
+    expect(useNotesStore.getState().notes[ph]!.blocks.map((b) => b.text)).toEqual(["x"]);
+  });
+
+  it("a local chat no longer there is permanent too (no retry loop)", async () => {
+    setNoteSessionCreator(() => Promise.reject(new Error("session 5 not found")));
+    const ph = useNotesStore.getState().openChatDraft(5);
+    useNotesStore.getState().applyLocal(ph, [ins], "pane");
+    await useNotesStore.getState().flush(ph);
+    expect(toastFn).toHaveBeenCalledWith("Couldn't save this note.");
+    expect(useNotesStore.getState().retrying[ph] ?? false).toBe(false);
+  });
+});
