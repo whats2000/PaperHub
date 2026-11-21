@@ -115,8 +115,9 @@ async def test_list_notes_scope_chat(
     chat = _load(await _run(ctx, "list_notes"))
     assert {n["ref"] for n in chat["notes"]} == {"chat", f"paper:{pid}"}
     alln = _load(await _run(ctx, "list_notes", scope="all"))
-    assert {n["ref"] for n in alln["notes"]} == {
-        "chat", f"paper:{pid}", f"paper:{other}"}
+    # Every stored note; listing the chat's scope created none (paper:pid
+    # has no note yet: nothing is created by looking).
+    assert {n["ref"] for n in alln["notes"]} == {"chat", f"paper:{other}"}
 
 
 async def test_outline_and_changed_flag(

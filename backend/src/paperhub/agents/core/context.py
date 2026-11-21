@@ -23,7 +23,7 @@ from paperhub.agents.core.private_material import collect_note_titles
 from paperhub.agents.idea_context import build_idea_context
 from paperhub.agents.memory_recall import active_memories
 from paperhub.notes.agent_reads import contacts, unseen_user_changes
-from paperhub.notes.scope import notes_in_scope, ref_of
+from paperhub.notes.scope import is_unsaved, notes_in_scope, ref_of
 
 AGENT_KEEP_TURNS = 12
 SUMMARY_QUESTION_CHARS = 160
@@ -101,7 +101,7 @@ async def render_notes(
     notes = notes[:NOTES_INDEX_MAX]
     if not notes:
         return None, None
-    collect_note_titles([(n.id, n.title) for n in notes])
+    collect_note_titles([(n.id, n.title) for n in notes if not is_unsaved(n)])
     counts: dict[int, int] = {}
     marks = ",".join("?" for _ in notes)
     async with conn.execute(

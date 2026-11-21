@@ -52,7 +52,7 @@ from paperhub.notes.models import Block, Note, table_rows
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.run_text import read_runs
-from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
+from paperhub.notes.scope import is_unsaved, note_ref, notes_in_scope, ref_of
 from paperhub.notes.store import block_text, list_blocks, new_block_id
 
 PAGE_BLOCKS = 40
@@ -187,8 +187,9 @@ async def _list_notes(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     for n in notes:
         blocks = await list_blocks(ctx.conn, n.id)
         heads, outline_cut = _outline(blocks)
-        collect_note_titles([(n.id, n.title)])
-        collect_note_blocks(n.id, [(i, t) for i, t, _ in heads], n.title)
+        if not is_unsaved(n):  # a note not created yet holds nothing private
+            collect_note_titles([(n.id, n.title)])
+            collect_note_blocks(n.id, [(i, t) for i, t, _ in heads], n.title)
         rows.append({
             "ref": ref_of(n, ctx.session_id), "title": title_xml(n.title),
             "target": f"{n.target_kind}:{n.target_id}", "revision": n.revision,
@@ -377,18 +378,21 @@ async def _read_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     content = "\n".join([head, *(_block_xml(b, labels, quotes=quotes)
                                  for b in window), *remark,
                          *(_comment_xml(c) for c in comments), "</note>"])
-    collect_note_titles([(note.id, note.title)])
-    collect_note_blocks(note.id, [(b.id, _text(b, quotes)) for b in window],
-                        note.title)
-    _collect_labels(note.id, note.title, window, labels)
-    # The user's comment text is note material too (private for the checkpoint).
-    collect_note_blocks(
-        note.id,
-        [(c["id"], " ".join([c["quote"], *(i["text"] for i in c["items"])]))
-         for c in comments], note.title, part="comment")
-    await record_contact(ctx.conn, ctx.session_id, {note.id: note.revision})
-    await record_blocks(ctx.conn, ctx.session_id, note.id,
-                        [b.id for b in window], note.revision)
+    # A note not created yet: nothing private to collect, no read to record.
+    if not is_unsaved(note):
+        collect_note_titles([(note.id, note.title)])
+        collect_note_blocks(note.id, [(b.id, _text(b, quotes)) for b in window],
+                            note.title)
+        _collect_labels(note.id, note.title, window, labels)
+        # The user's comment text is note material too (private for the
+        # checkpoint).
+        collect_note_blocks(
+            note.id,
+            [(c["id"], " ".join([c["quote"], *(i["text"] for i in c["items"])]))
+             for c in comments], note.title, part="comment")
+        await record_contact(ctx.conn, ctx.session_id, {note.id: note.revision})
+        await record_blocks(ctx.conn, ctx.session_id, note.id,
+                            [b.id for b in window], note.revision)
     return ToolOutcome(
         content=content,
         record={"tool": "notes:read", "note": ref, "note_id": note.id,
@@ -666,7 +670,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         _collect_raw(0, "", raw_ops)
         return error_outcome("ops must be a non-empty list.")
     try:
-        note = await note_ref(ctx.conn, str(args["note"]), ctx.session_id)
+        # The first write creates a note not made yet (nothing else does).
+        note = await note_ref(ctx.conn, str(args["note"]), ctx.session_id,
+                              create=True)
     except (ValueError, LookupError) as exc:
         _collect_raw(0, "", raw_ops)
         return error_outcome(str(exc))
