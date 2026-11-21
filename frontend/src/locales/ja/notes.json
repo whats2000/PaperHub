@@ -210,6 +210,7 @@
       "focus": "フォーカス",
       "fold": "区切り線の ⌄",
       "trash": "ブロックのごみ箱",
+      "tocRail": "右端の短い線",
       "selectPaper": "文字を選択",
       "highlighter": "蛍光ペン",
       "box": "ボックス",
@@ -260,6 +261,7 @@
       "focus": "ほかのノートとそのマークを薄くする",
       "fold": "その下のノートを折りたたむ",
       "trash": "削除（元に戻せる）",
+      "tocRail": "目次：ホバーで開き、クリックで移動",
       "selectPaper": "スタイルと色を選ぶとノートに入ります",
       "highlighter": "単語をなぞる、または図をクリック",
       "box": "図や数式をドラッグで囲む",
@@ -312,7 +314,8 @@
     "exportNoPandoc": "Word の書き出しには pandoc が必要です：winget install pandoc でインストールしてください",
     "exportPandocTooOld": "Word の書き出しには pandoc 2.15 以降が必要です：winget upgrade pandoc で更新してください",
     "exportFailed": "ノートを書き出せませんでした",
-    "shortcuts": "ショートカット"
+    "shortcuts": "ショートカット",
+    "showToc": "目次を表示"
   },
   "card": {
     "added_one": "ノートを {{count}} 件追加しました",

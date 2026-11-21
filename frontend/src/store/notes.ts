@@ -143,6 +143,9 @@ interface NotesStore {
   setFocusOn: (on: boolean) => void;
   followOn: boolean;
   setFollowOn: (on: boolean) => void;
+  /** The floating table of contents at the notes pane's right edge. */
+  tocOn: boolean;
+  setTocOn: (on: boolean) => void;
   /** Folded divider ids per note. */
   folded: Record<number, string[]>;
   toggleFold: (noteId: number, dividerId: string) => void;
@@ -1314,6 +1317,8 @@ export const useNotesStore = create<NotesStore>()(
         setFocusOn: (on) => set({ focusOn: on }),
         followOn: true,
         setFollowOn: (on) => set({ followOn: on }),
+        tocOn: true,
+        setTocOn: (on) => set({ tocOn: on }),
         folded: {},
         toggleFold: (noteId, dividerId) =>
           set((s) => {
@@ -1436,7 +1441,7 @@ export const useNotesStore = create<NotesStore>()(
     {
       name: "paperhub-notes-v1",
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ focusOn: s.focusOn, followOn: s.followOn, folded: s.folded }),
+      partialize: (s) => ({ focusOn: s.focusOn, followOn: s.followOn, tocOn: s.tocOn, folded: s.folded }),
     },
   ),
 );

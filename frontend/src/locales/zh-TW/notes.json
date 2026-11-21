@@ -210,6 +210,7 @@
       "focus": "專注",
       "fold": "分隔線上的 ⌄",
       "trash": "區塊上的垃圾桶",
+      "tocRail": "右緣的短線",
       "selectPaper": "選取文字",
       "highlighter": "螢光筆",
       "box": "框選",
@@ -260,6 +261,7 @@
       "focus": "淡化其他筆記與其標記",
       "fold": "收合其下的筆記",
       "trash": "刪除，可復原",
+      "tocRail": "目錄：游標移上去展開，點一下跳過去",
       "selectPaper": "選樣式和顏色，就會存進筆記",
       "highlighter": "拖過文字，或點一張圖",
       "box": "拖過圖或公式",
@@ -312,7 +314,8 @@
     "exportNoPandoc": "匯出 Word 需要 pandoc：請用 winget install pandoc 安裝",
     "exportPandocTooOld": "匯出 Word 需要 pandoc 2.15 以上版本：請用 winget upgrade pandoc 更新",
     "exportFailed": "無法匯出這份筆記",
-    "shortcuts": "快速鍵"
+    "shortcuts": "快速鍵",
+    "showToc": "顯示目錄"
   },
   "card": {
     "added_one": "新增了 {{count}} 則筆記",

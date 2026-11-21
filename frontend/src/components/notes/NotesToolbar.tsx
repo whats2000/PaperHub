@@ -1,9 +1,9 @@
 /** The notes toolbar, one line under the tabs. Left: Follow ("Following §2" /
  * "Follow reading"). Right: Focus (its label hides in a narrow pane) and the
  * ⋯ menu with the rarely needed items: the note's details, Export as Markdown
- * or Word, and Shortcuts (the guide grows from the ⋯ button). */
+ * or Word, Show table of contents, and Shortcuts (the guide grows from the ⋯ button). */
 import { Menu } from "@base-ui/react/menu";
-import { Ellipsis, FileDown, FileText, Keyboard, Loader2, LocateFixed, ScanEye } from "lucide-react";
+import { Check, Ellipsis, FileDown, FileText, Keyboard, Loader2, LocateFixed, ScanEye, TableOfContents } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -84,6 +84,8 @@ export function NotesToolbar({
   const setFollowOn = useNotesStore((s) => s.setFollowOn);
   const focusOn = useNotesStore((s) => s.focusOn);
   const setFocusOn = useNotesStore((s) => s.setFocusOn);
+  const tocOn = useNotesStore((s) => s.tocOn);
+  const setTocOn = useNotesStore((s) => s.setTocOn);
   const revision = useNotesStore((s) =>
     noteId === null ? null : (s.notes[noteId]?.note.revision ?? null),
   );
@@ -263,6 +265,21 @@ export function NotesToolbar({
                   onClick={runExport && (() => runExport("docx"))}
                 />
                 <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
+                <Menu.CheckboxItem
+                  className={ITEM}
+                  checked={tocOn}
+                  onCheckedChange={setTocOn}
+                  closeOnClick={false}
+                >
+                  <TableOfContents className="size-3 shrink-0" aria-hidden />
+                  {t("notes:toolbar.showToc", "Show table of contents")}
+                  <Menu.CheckboxItemIndicator
+                    keepMounted
+                    className="ml-auto pl-2.5 transition-opacity duration-150 ease-out data-[unchecked]:opacity-0 motion-reduce:transition-none"
+                  >
+                    <Check className="size-3" aria-hidden />
+                  </Menu.CheckboxItemIndicator>
+                </Menu.CheckboxItem>
                 <Menu.Item className={ITEM} onClick={() => onGuideOpenChange(true)}>
                   <Keyboard className="size-3 shrink-0" aria-hidden />
                   {t("notes:toolbar.shortcuts", "Shortcuts")}

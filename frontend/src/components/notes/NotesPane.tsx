@@ -14,6 +14,7 @@ import { NoteEditor } from "./NoteEditor";
 import { notePanelId, noteTabId } from "./noteTabIds";
 import { NotesTabs, type NoteTab } from "./NotesTabs";
 import { NotesToolbar } from "./NotesToolbar";
+import { TocRail } from "./TocRail";
 import { useFollowReading } from "./useFollowReading";
 import { useNoteExport } from "./useNoteExport";
 
@@ -202,6 +203,11 @@ export function NotesPane({ onClose }: Props) {
         aria-labelledby={noteTabId(idBase, tab)}
         className="relative min-h-0 flex-1 overflow-x-clip overflow-y-auto"
       >
+        {/* The table of contents floats at the pane's right edge: a
+            zero-height sticky layer, so it stays put and takes no width. */}
+        <div className="sticky top-0 z-20 h-0">
+          <TocRail noteId={noteId} root={panel} />
+        </div>
         {noteId !== null ? (
           <div
             key={storeKey ?? ""}

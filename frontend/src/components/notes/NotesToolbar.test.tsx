@@ -122,6 +122,22 @@ describe("NotesToolbar", () => {
     expect(useNotesStore.getState().focusOn).toBe(false);
   });
 
+  it("the ⋯ menu's Show table of contents turns the rail off and on (remembered)", async () => {
+    useNotesStore.setState({ tocOn: true });
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = await screen.findByRole("menu");
+    const item = within(menu).getByRole("menuitemcheckbox", { name: "Show table of contents" });
+    expect(item).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(item);
+    expect(useNotesStore.getState().tocOn).toBe(false);
+    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { tocOn?: boolean } };
+    expect(saved.state.tocOn).toBe(false);
+    await waitFor(() => expect(item).toHaveAttribute("aria-checked", "false"));
+    fireEvent.click(item);
+    expect(useNotesStore.getState().tocOn).toBe(true);
+  });
+
   it("the ⋯ menu shows the note's details, Export (coming soon until wired) and Shortcuts", async () => {
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "More" }));

@@ -210,6 +210,7 @@
       "focus": "专注",
       "fold": "分隔线上的 ⌄",
       "trash": "区块上的垃圾桶",
+      "tocRail": "右缘的短线",
       "selectPaper": "选中文字",
       "highlighter": "荧光笔",
       "box": "框选",
@@ -260,6 +261,7 @@
       "focus": "淡化其他笔记及其标记",
       "fold": "折叠其下的笔记",
       "trash": "删除，可撤销",
+      "tocRail": "目录：鼠标移上去展开，点击跳转",
       "selectPaper": "选样式和颜色，即存入笔记",
       "highlighter": "拖过文字，或点一张图",
       "box": "拖过图或公式",
@@ -312,7 +314,8 @@
     "exportNoPandoc": "导出 Word 需要 pandoc：请用 winget install pandoc 安装",
     "exportPandocTooOld": "导出 Word 需要 pandoc 2.15 及以上版本：请用 winget upgrade pandoc 更新",
     "exportFailed": "无法导出这份笔记",
-    "shortcuts": "快捷键"
+    "shortcuts": "快捷键",
+    "showToc": "显示目录"
   },
   "card": {
     "added_one": "新增了 {{count}} 条笔记",

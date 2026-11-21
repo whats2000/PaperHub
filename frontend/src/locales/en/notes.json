@@ -210,6 +210,7 @@
       "focus": "Focus",
       "fold": "⌄ on a divider",
       "trash": "Trash on a block",
+      "tocRail": "Lines at the right edge",
       "selectPaper": "Select text",
       "highlighter": "Highlighter",
       "box": "Box",
@@ -260,6 +261,7 @@
       "focus": "Fade the other notes and their marks",
       "fold": "Fold the note below it",
       "trash": "Delete, with Undo",
+      "tocRail": "Table of contents: hover to open, click to jump",
       "selectPaper": "Pick a style and a colour: it goes to the note",
       "highlighter": "Drag over words, or click a figure",
       "box": "Drag over a figure or equation",
@@ -312,7 +314,8 @@
     "exportNoPandoc": "Word export needs pandoc: install it with winget install pandoc",
     "exportPandocTooOld": "Word export needs pandoc 2.15 or newer: update it with winget upgrade pandoc",
     "exportFailed": "Couldn't export the note",
-    "shortcuts": "Shortcuts"
+    "shortcuts": "Shortcuts",
+    "showToc": "Show table of contents"
   },
   "card": {
     "added_one": "Added {{count}} note",
