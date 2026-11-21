@@ -234,7 +234,8 @@ def test_three_line_docx_table(style: str | None) -> None:
     mid_sz = int(re.search(r'<w:bottom w:val="single" w:sz="(\d+)"', head[0])[1])  # type: ignore[index]
     assert top_sz > mid_sz
     for row in rows[1:]:
-        assert "<w:tcBorders>" not in row
+        assert "<w:tcBorders>" not in row and "<w:b " not in row
+    assert rows[0].count("<w:b />") == 2  # the header bold, as in the editor
     assert "<w:shd " not in xml  # no header tint
 
 
@@ -272,3 +273,124 @@ def test_markdown_is_the_same_in_either_style() -> None:
     # The style is the viewer's, not the note's: no switch in note_to_markdown.
     import inspect
     assert "table_style" not in inspect.signature(note_to_markdown).parameters
+
+
+# style_docx_tables on hand-built documents (no pandoc needed).
+
+_W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+
+def _row(cells: list[str], header: bool = False, rpr: str = "") -> str:
+    trpr = '<w:trPr><w:tblHeader w:val="true" /></w:trPr>' if header else ""
+    tcs = "".join(f"<w:tc><w:tcPr /><w:p><w:r>{rpr}<w:t>{c}</w:t></w:r></w:p></w:tc>"
+                  for c in cells)
+    return f"<w:tr>{trpr}{tcs}</w:tr>"
+
+
+def _tbl_xml(rows: str, tblpr: str = '<w:tblStyle w:val="Table" />') -> str:
+    return f"<w:tbl><w:tblPr>{tblpr}</w:tblPr><w:tblGrid /> {rows}</w:tbl>"
+
+
+def _docx_of(body: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml",
+                   f'<?xml version="1.0"?><w:document {_W}><w:body>{body}'
+                   "</w:body></w:document>")
+        z.writestr("word/styles.xml", "<w:styles/>")
+    return buf.getvalue()
+
+
+def _doc_xml(docx: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        return z.read("word/document.xml").decode("utf-8")
+
+
+def test_style_two_tables_in_one_document() -> None:
+    from paperhub.notes.pandoc import style_docx_tables
+    t = _tbl_xml(_row(["h1", "h2"], header=True) + _row(["a", "b"]))
+    out = _doc_xml(style_docx_tables(_docx_of(t + "<w:p />" + t), "threeLine"))
+    tables = re.findall(r"<w:tbl>.*?</w:tbl>", out, re.S)
+    assert len(tables) == 2
+    for tbl in tables:
+        assert tbl.count("<w:tblBorders>") == 1
+        assert _rows(tbl)[0].count("<w:tcBorders>") == 2
+
+
+def test_style_keeps_other_parts_and_order() -> None:
+    from paperhub.notes.pandoc import style_docx_tables
+    src = _docx_of(_tbl_xml(_row(["h"], header=True) + _row(["a"])))
+    out = style_docx_tables(src, "grid")
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        assert z.namelist() == ["[Content_Types].xml", "word/document.xml",
+                                "word/styles.xml"]
+        assert z.read("word/styles.xml") == b"<w:styles/>"
+
+
+def test_style_document_without_a_table_is_unchanged() -> None:
+    from paperhub.notes.pandoc import style_docx_tables
+    src = _docx_of("<w:p><w:r><w:t>no table</w:t></w:r></w:p>")
+    assert style_docx_tables(src, "threeLine") == src
+    assert style_docx_tables(src, "grid") == src
+
+
+def test_style_non_zip_is_a_pandoc_error() -> None:
+    from paperhub.notes.pandoc import PandocError, style_docx_tables
+    with pytest.raises(PandocError):
+        style_docx_tables(b"not a zip", "threeLine")
+
+
+@pytest.mark.parametrize("style", ["threeLine", "grid"])
+def test_header_text_is_bold(style: str) -> None:
+    from paperhub.notes.pandoc import style_docx_tables
+    t = _tbl_xml(_row(["h1", "h2"], header=True)
+                 + _row(["a", "b"]))
+    out = _doc_xml(style_docx_tables(_docx_of(t), style))  # type: ignore[arg-type]
+    head, body = _rows(out)
+    assert head.count("<w:b />") == 2
+    assert "<w:b " not in body
+
+
+def test_header_bold_keeps_run_property_order() -> None:
+    from paperhub.notes.pandoc import style_docx_tables
+    # A code run (rStyle) and an already bold run: b after rStyle, once.
+    t = _tbl_xml(
+        "<w:tr><w:trPr><w:tblHeader w:val=\"true\" /></w:trPr>"
+        "<w:tc><w:tcPr /><w:p><w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\" />"
+        "</w:rPr><w:t>x</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:tcPr /><w:p><w:r><w:rPr><w:b /><w:i /></w:rPr><w:t>y</w:t>"
+        "</w:r></w:p></w:tc></w:tr>" + _row(["a", "b"]))
+    head = _rows(_doc_xml(style_docx_tables(_docx_of(t), "threeLine")))[0]
+    assert '<w:rPr><w:rStyle w:val="VerbatimChar" /><w:b /></w:rPr>' in head
+    assert "<w:rPr><w:b /><w:i /></w:rPr>" in head
+
+
+def test_first_row_is_the_header_without_tblheader() -> None:
+    """pandoc 2.15-2.19 may not mark the header row: the first row is it
+    (every exported pipe table has one)."""
+    from paperhub.notes.pandoc import style_docx_tables
+    t = _tbl_xml(_row(["h1", "h2"]) + _row(["a", "b"]))
+    head, body = _rows(_doc_xml(style_docx_tables(_docx_of(t), "threeLine")))
+    assert head.count("<w:tcBorders>") == 2 and head.count("<w:b />") == 2
+    assert "<w:tcBorders>" not in body and "<w:b " not in body
+
+
+def test_unparsed_properties_still_get_one_child_of_a_name() -> None:
+    """The fallback (properties this cannot parse into children) replaces
+    an existing child of the same name instead of adding a second."""
+    from paperhub.notes.pandoc import _TBLPR_ORDER, _with_child
+    inner = ('<w:tblStyle w:val="Table" />text?<w:tblBorders><w:top w:val="dotted" />'
+             "</w:tblBorders>")
+    out = _with_child(inner, "<w:tblBorders><w:top w:val=\"single\" /></w:tblBorders>",
+                      _TBLPR_ORDER)
+    assert out.count("<w:tblBorders>") == 1
+    assert 'w:val="single"' in out and "dotted" not in out
+    shd = _with_child('<w:shd w:fill="000000" />junk', '<w:shd w:fill="F2F2F2" />', _TBLPR_ORDER)
+    assert shd.count("<w:shd ") == 1 and "F2F2F2" in shd
+
+
+def test_malformed_properties_are_a_pandoc_error() -> None:
+    from paperhub.notes.pandoc import PandocError, _props
+    with pytest.raises(PandocError):
+        _props("no element here", "tblPr", "<w:x />", ("x",))

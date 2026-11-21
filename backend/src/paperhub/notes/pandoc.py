@@ -214,6 +214,13 @@ _TBLPR_ORDER = ("tblStyle", "tblpPr", "tblOverlap", "bidiVisual",
 _TCPR_ORDER = ("cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge",
                "tcBorders", "shd", "noWrap", "tcMar", "textDirection",
                "tcFitText", "vAlign", "hideMark")
+# CT_RPr: the header's bold goes after a run's style and fonts.
+_RPR_ORDER = ("rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps",
+              "strike", "dstrike", "outline", "shadow", "emboss", "imprint",
+              "noProof", "snapToGrid", "vanish", "webHidden", "color",
+              "spacing", "w", "kern", "position", "sz", "szCs", "highlight",
+              "u", "effect", "bdr", "shd", "fitText", "vertAlign", "rtl", "cs",
+              "em", "lang", "eastAsianLayout", "specVanish", "oMath")
 _CHILD = re.compile(r"<w:(\w+)\b[^>]*?/>|<w:(\w+)\b[^>]*>.*?</w:\2>", re.S)
 
 
@@ -246,8 +253,10 @@ def _with_child(inner: str, child: str, order: tuple[str, ...]) -> str:
     name = re.match(r"<w:(\w+)", child)[1]  # type: ignore[index]
     parts = [(m[1] or m[2], m[0]) for m in _CHILD.finditer(inner)]
     if "".join(p for _, p in parts) != re.sub(r">\s+<", "><", inner.strip()):
-        # Something this does not parse: add the child at the end.
-        return inner + child
+        # Something this does not parse: the child goes at the end, in
+        # place of any of its name (never two tblBorders / shd).
+        same = rf"<w:{name}(?=[\s/>])[^>]*?/>|<w:{name}(?=[\s/>])[^>]*>.*?</w:{name}>"
+        return re.sub(same, "", inner, flags=re.S) + child
     parts = [p for p in parts if p[0] != name] + [(name, child)]
     rank = {n: i for i, n in enumerate(order)}
     parts.sort(key=lambda p: rank.get(p[0], len(order)))
@@ -259,7 +268,8 @@ def _props(xml: str, tag: str, child: str, order: tuple[str, ...]) -> str:
     leading ``<w:{tag}>``, added when there is none."""
     m = re.match(rf"(<w:\w+[^>]*>)(<w:{tag}\s*/>|<w:{tag}>(.*?)</w:{tag}>)?",
                  xml, re.S)
-    assert m
+    if m is None:
+        raise PandocError(f"no element to give a <w:{tag}>")
     inner = m[3] or ""
     return (f"{m[1]}<w:{tag}>{_with_child(inner, child, order)}</w:{tag}>"
             + xml[m.end():])
@@ -267,37 +277,55 @@ def _props(xml: str, tag: str, child: str, order: tuple[str, ...]) -> str:
 
 def _style_table(tbl: str, style: TableStyle) -> str:
     tbl = _props(tbl, "tblPr", _table_borders(style), _TBLPR_ORDER)
-    # The header: pandoc marks it as the first row, repeated on each page.
-    row = re.search(r"<w:tr[ >].*?</w:tr>", tbl, re.S)
-    if row is None or "<w:tblHeader" not in row[0]:
+    # The header: the row pandoc marks (repeated on each page), else the
+    # first row: pandoc before 2.20 may not mark it, and every exported
+    # pipe table has a header row (an empty one when the note's has none).
+    rows = list(re.finditer(r"<w:tr[ >].*?</w:tr>", tbl, re.S))
+    if not rows:
         return tbl
+    row = next((r for r in rows if "<w:tblHeader" in r[0]), rows[0])
     cell = _header_cell(style)
     head = re.sub(r"<w:tc>.*?</w:tc>",
                   lambda c: _props(c[0], "tcPr", cell, _TCPR_ORDER),
                   row[0], flags=re.S)
+    # Its text is bold, as in the editor.
+    head = re.sub(r"<w:r>.*?</w:r>",
+                  lambda r: _props(r[0], "rPr", "<w:b />", _RPR_ORDER),
+                  head, flags=re.S)
     return tbl[:row.start()] + head + tbl[row.end():]
 
 
 def style_docx_tables(docx: bytes, style: TableStyle) -> bytes:
     """``docx`` (pandoc's) with every table drawn in ``style``: three-line
     (a heavy rule above the header, a light one under it, a heavy one at
-    the end; no other lines) or grid (every border, the header tinted).
+    the end; no other lines) or grid (every border, the header tinted);
+    the header's text is bold in both.
     pandoc writes the XML, so note text in it is always escaped: no tag
     matched here can come from the note."""
     if style not in TABLE_STYLES:
         raise PandocError(f"unknown table style {style!r}")
     try:
         src = zipfile.ZipFile(io.BytesIO(docx))
-        xml = src.read("word/document.xml").decode("utf-8")
-    except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as exc:
+    except zipfile.BadZipFile as exc:
         raise PandocError(f"could not read the .docx: {exc!r}") from exc
-    if "<w:tbl>" not in xml:
-        return docx
-    # pandoc's cells hold paragraphs only, never a nested table.
-    xml = re.sub(r"<w:tbl>.*?</w:tbl>", lambda t: _style_table(t[0], style),
-                 xml, flags=re.S)
+    with src:
+        try:
+            xml = src.read("word/document.xml").decode("utf-8")
+        except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as exc:
+            raise PandocError(f"could not read the .docx: {exc!r}") from exc
+        if "<w:tbl>" not in xml:
+            return docx
+        # pandoc's cells hold paragraphs only, never a nested table.
+        xml = re.sub(r"<w:tbl>.*?</w:tbl>",
+                     lambda t: _style_table(t[0], style), xml, flags=re.S)
+        return _with_document(src, xml)
+
+
+def _with_document(src: zipfile.ZipFile, xml: str) -> bytes:
+    """``src`` with ``word/document.xml`` replaced by ``xml``, every other
+    part (and the parts' order and compression) as it was."""
     out = io.BytesIO()
-    with src, zipfile.ZipFile(out, "w") as dst:
+    with zipfile.ZipFile(out, "w") as dst:
         for info in src.infolist():
             data = (xml.encode("utf-8") if info.filename == "word/document.xml"
                     else src.read(info))
